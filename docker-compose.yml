@@ -568,6 +568,11 @@ services:
       # cert, or NODE_EXTRA_CA_CERTS for a real internal CA.
       NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-1}
       INSTANCE_ENV: ${INSTANCE_ENV:-production}
+      # RBAC (docs/rbac/rbac-design-aggregator.md). `off` loads nothing; `log`
+      # decides and logs would-denies; `enforce` returns 403. Decisions come
+      # from the `opa` service below.
+      RBAC_MODE: ${RBAC_MODE:-off}
+      OPA_URL: ${OPA_URL:-http://opa:8181}
     # No host port mapping — exposed only via nginx at /backend/.
     # See `extra_hosts` rationale on the web service: api hits Keycloak via
     # the public URL for both admin REST + JWKS, so we short-circuit DNS to
@@ -595,6 +600,24 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+
+  # ── OPA (RBAC decisions) ──────────────────────────────────────────────────
+  # Serves POST /v1/data/rbac/decision from policy/rbac/*.rego. Only queried
+  # when the api runs with RBAC_MODE=log|enforce. Deployments run it as a
+  # sidecar in the api pod (bluedots-automation).
+  opa:
+    image: openpolicyagent/opa:1.21.1
+    container_name: aggregator-opa
+    restart: unless-stopped
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=error", "--ignore=*_test.rego", "--ignore=vectors.json", "/policy"]
+    volumes:
+      - ./policy/rbac:/policy:ro
+    healthcheck:
+      test: ["CMD", "/opa", "eval", "--fail", "--data", "/policy", "--ignore", "*_test.rego", "--ignore", "vectors.json", "data.rbac.not_grantable"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   # ── Bulk-upload + cron worker ────────────────────────────────────────────
   # BullMQ consumer for: bulk-file-process, bulk-row-process, bulk-finalise,

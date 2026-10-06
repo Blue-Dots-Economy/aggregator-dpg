@@ -1,0 +1,87 @@
+# Access control defaults (docs/rbac/rbac-permissions-and-roles.md).
+#
+# Loaded once at API boot and validated: an unknown capability or a broken
+# reference stops the API from starting. A network or brand overrides this
+# file by placing its own rbac.yaml in config/<network>/ or
+# config/<network>/<brand>/ (the most specific file wins; no merging).
+#
+# Capabilities are fixed in code (packages/rbac/src/interface.ts); this file
+# only groups them.
+
+version: 1
+
+# What each account type may do, before the organisation's set caps it.
+roles:
+  admin:
+    - profiles.view
+    - profiles.export
+    - profiles.onboard
+    - profiles.verify
+    - profiles.retire
+    - profiles.move
+    - campaigns.run
+    - orgs.onboard
+    - orgs.block
+    - org.manage
+    - contact.unmask
+    - agreement.manage
+    - network.administer
+  # Existing instances: today's coordinators can export lists. To keep that,
+  # add `profiles.export` here in the instance's own rbac.yaml.
+  coordinator:
+    - profiles.view
+    - profiles.onboard
+    - profiles.verify
+    - campaigns.run
+
+# Capabilities an Admin may grant to one user, with the longest validity.
+grants:
+  pii_access:
+    capabilities:
+      - profiles.view_pii
+    max_days: 90
+
+# Named PermissionSets an organisation can hold.
+permission_sets:
+  network:
+    - profiles.view
+    - profiles.export
+    - profiles.view_pii
+    - profiles.onboard
+    - profiles.verify
+    - profiles.retire
+    - profiles.move
+    - profiles.act_on_behalf
+    - campaigns.run
+    - orgs.onboard
+    - orgs.block
+    - org.manage
+    - contact.unmask
+    - agreement.manage
+    - network.administer
+  super_aggregator:
+    - profiles.view
+    - profiles.export
+    - profiles.view_pii
+    - profiles.onboard
+    - profiles.verify
+    - profiles.retire
+    - profiles.move
+    - campaigns.run
+    - orgs.onboard
+    - org.manage
+    - contact.unmask
+  aggregator:
+    - profiles.view
+    - profiles.export
+    - profiles.view_pii
+    - profiles.onboard
+    - profiles.retire
+    - campaigns.run
+    - org.manage
+    - contact.unmask
+
+# The set an organisation holds when it has no override of its own.
+org_type_defaults:
+  network_facilitator: network
+  aggregator: aggregator

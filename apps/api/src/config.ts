@@ -384,6 +384,21 @@ const ConfigSchema = z.object({
    * each newly-approved aggregator as a signalstack org.
    */
   SIGNALSTACK_ACTING_ORG_ID: z.string().optional(),
+  // ─── RBAC (docs/rbac/rbac-design-aggregator.md) ─────────────────────────
+  /**
+   * `off`: no access checks run (nothing is loaded at boot). `log`: every
+   * check runs and a would-deny is logged, but the request continues.
+   * `enforce`: a deny returns 403. Flip per instance after a clean log window.
+   */
+  RBAC_MODE: z.enum(['off', 'log', 'enforce']).default('off'),
+  /** Base URL of the OPA sidecar. */
+  OPA_URL: z.string().default('http://localhost:8181'),
+  /** Per-attempt timeout for an OPA decision. */
+  OPA_TIMEOUT_MS: z.coerce.number().int().positive().default(500),
+  /** Retries after the first OPA attempt, for transient failures. */
+  OPA_RETRIES: z.coerce.number().int().min(0).max(3).default(1),
+  /** Base backoff between OPA retries; doubles per retry. */
+  OPA_BACKOFF_MS: z.coerce.number().int().positive().default(50),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

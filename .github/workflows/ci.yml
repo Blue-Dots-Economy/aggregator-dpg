@@ -79,6 +79,15 @@ jobs:
       - name: Dep-cruiser — check interface boundaries
         run: pnpm dep-check
 
+      # RBAC policy (policy/rbac): compile in strict mode, then run the Rego
+      # tests, including the shared vectors that packages/rbac also runs
+      # against its TypeScript mirror. Same image as the compose `opa` service.
+      - name: RBAC policy — opa check + opa test
+        run: |
+          OPA=openpolicyagent/opa:1.21.1@sha256:d3a9a6bd4fbcb0f4403294b0d0b239b07be163ac118a46df7d50045b52e52053
+          docker run --rm -v "$PWD/policy:/policy:ro" "$OPA" check --strict /policy/rbac
+          docker run --rm -v "$PWD/policy:/policy:ro" "$OPA" test -v /policy/rbac
+
       # Two independent guards, for two different failure modes:
       #   `if:`               — no token at all. GitHub withholds repo secrets from
       #                         Dependabot-raised (and fork) pull_request runs, so an
