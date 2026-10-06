@@ -282,23 +282,11 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
       geo.status === 'ok' ? geo.value : null,
     );
     if (!push.success) {
-      // `push.message` already includes the upstream's own error text when
-      // signalstack returned a JSON body (e.g.
-      // `signalstack onboard returned 400: INVALID_ITEM_STATE: …`). Surface
-      // it directly so operators see the actual rejection reason in
-      // errors.csv instead of a generic status-code string.
-      // The per-user profile cap (signals #349) is a user/data condition, not a
-      // system fault — categorise it distinctly so errors.csv reads clearly.
-      const category: ErrorCategory = push.ownedElsewhere
-        ? 'owned_elsewhere'
-        : push.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED'
-          ? 'limit_reached'
-          : 'system_error';
-      outcome = {
-        outcome: 'failed',
-        category,
-        reasons: [`signalstack [${push.code}]: ${push.message}`],
-      };
+      // Classified by Signals' own error code: a row Signals rejected for its
+      // data is the operator's to fix and reads like a local schema failure;
+      // only a genuine platform fault is `system_error`.
+      const category = categoriseSignalsRejection(push);
+      outcome = { outcome: 'failed', category, reasons: signalsRejectionReasons(push, category) };
     }
   } else {
     log.error({
@@ -387,7 +375,80 @@ async function commit(
  * Returns void; status is observable via structured logs.
  */
 type SignalStackPushResult =
-  { success: true } | { success: false; code: string; message: string; ownedElsewhere?: boolean };
+  | { success: true }
+  | {
+      success: false;
+      code: string;
+      message: string;
+      /**
+       * Signals' own bare sentence (e.g. `Location 23.81, 90.41 is outside the
+       * allowed region (IN).`), without the transport/status prefixes `message`
+       * carries. Present only when Signals returned a JSON error body.
+       */
+      signalsMessage?: string;
+      /** Signals' own error code (e.g. `INVALID_ITEM_STATE`), when it sent one. */
+      upstreamCode?: string;
+      /** Signals' per-field messages (`fields` on INVALID_ITEM_STATE), when it sent them. */
+      signalsFields?: Record<string, string>;
+      ownedElsewhere?: boolean;
+    };
+
+/**
+ * Signals rejections caused by the ROW — the operator fixes the CSV and
+ * re-uploads. Anything not listed here (auth, an unserved domain, a 5xx, a
+ * timeout) is the platform's problem and stays `system_error`. Keyed on Signals'
+ * own error code, so a new data error Signals adds is one line here.
+ */
+const SIGNALS_REJECTION_CATEGORY: Readonly<Record<string, ErrorCategory>> = {
+  INVALID_ITEM_STATE: 'validation',
+  FST_ERR_VALIDATION: 'validation',
+  MISSING_IDENTIFIER: 'validation',
+  AGE_REQUIRED: 'validation',
+  USER_LEVEL_INCOMPLETE: 'validation',
+  CONSENT_DECLINED: 'validation',
+  LOCATION_OUTSIDE_COUNTRY: 'validation',
+  // The person already exists in a way this row cannot override: registered in
+  // the other domain (single-domain lock) or an identity clash.
+  DOMAIN_LOCKED: 'duplicate',
+  USER_ALREADY_EXISTS: 'duplicate',
+  IDENTITY_CONFLICT: 'duplicate',
+  PROFILE_LIMIT_REACHED: 'limit_reached',
+};
+
+/**
+ * Category for a failed push. `owned_elsewhere` comes from a 2xx and is flagged
+ * on the result; everything else is looked up by Signals' code, falling back to
+ * the writer's own codes for callers (and older Signals) that send none.
+ */
+function categoriseSignalsRejection(
+  push: Extract<SignalStackPushResult, { success: false }>,
+): ErrorCategory {
+  if (push.ownedElsewhere) return 'owned_elsewhere';
+  const byUpstream = push.upstreamCode ? SIGNALS_REJECTION_CATEGORY[push.upstreamCode] : undefined;
+  if (byUpstream) return byUpstream;
+  if (push.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED') return 'limit_reached';
+  if (push.code === 'SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY') return 'validation';
+  return 'system_error';
+}
+
+/**
+ * errors.csv reasons for a failed push. A row-caused rejection reads like a
+ * local schema failure — one `field: message` line per field when Signals sent
+ * them, else Signals' bare sentence — because that is what the operator fixes
+ * the CSV from. A system error keeps the code + full upstream text, which is
+ * what someone debugging the platform needs.
+ */
+function signalsRejectionReasons(
+  push: Extract<SignalStackPushResult, { success: false }>,
+  category: ErrorCategory,
+): string[] {
+  if (category === 'system_error') return [`signalstack [${push.code}]: ${push.message}`];
+  if (push.signalsFields) {
+    const lines = Object.entries(push.signalsFields).map(([field, msg]) => `${field}: ${msg}`);
+    if (lines.length > 0) return lines;
+  }
+  return [push.signalsMessage ?? push.message];
+}
 
 /**
  * Derives the participant's age and consent record from a bulk row.
@@ -560,10 +621,21 @@ export async function pushToSignalStack(
       error: result.error.message,
       code: result.error.code,
     });
+    const details = (result.error.details ?? {}) as {
+      signalsMessage?: unknown;
+      upstreamCode?: unknown;
+      signalsFields?: unknown;
+    };
+    const { signalsMessage, upstreamCode, signalsFields } = details;
     return {
       success: false,
       code: result.error.code,
       message: result.error.message,
+      ...(typeof signalsMessage === 'string' && signalsMessage ? { signalsMessage } : {}),
+      ...(typeof upstreamCode === 'string' && upstreamCode ? { upstreamCode } : {}),
+      ...(signalsFields && typeof signalsFields === 'object'
+        ? { signalsFields: signalsFields as Record<string, string> }
+        : {}),
     };
   }
   // A 2xx with `owned_elsewhere` means signals recognised the person under a
