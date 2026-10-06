@@ -73,24 +73,24 @@ users (                                          -- was aggregators (renamed, id
   status             registration_status,        -- the coordinator's registration (M2)
   rejected_at        timestamptz,
   invite_id          uuid REFERENCES registration_invites(jti) ON DELETE SET NULL,  -- was invite_email (M3)
-  tenant_slug        text,                       -- was org_slug; immutable; public-link URL segment
-  tenant_name        text,                       -- was name; NULL = the org's name (M4)
+  signalstack_org_slug        text,                       -- was org_slug; immutable; public-link URL segment
+  signalstack_org_name        text,                       -- was name; NULL = the org's name (M4)
   signalstack_org_id text,
   agg_for            text[],                     -- was type (design doc: Coordinator.agg_for)
   profile            jsonb,                      -- instance-specific registration fields (0018 rule: no field that has a column)
   legacy_org_details jsonb,                     -- coordinator values its org did not adopt (§4.2; review A20)
   profile_ref        text,
   CHECK (CASE user_type
-           WHEN 'coordinator' THEN org_id IS NOT NULL AND status IS NOT NULL AND tenant_slug IS NOT NULL
+           WHEN 'coordinator' THEN org_id IS NOT NULL AND status IS NOT NULL AND signalstack_org_slug IS NOT NULL
                                    AND agg_for IS NOT NULL AND profile IS NOT NULL
            ELSE org_id IS NULL AND status IS NULL AND rejected_at IS NULL AND invite_id IS NULL
-                AND tenant_slug IS NULL AND tenant_name IS NULL AND signalstack_org_id IS NULL
+                AND signalstack_org_slug IS NULL AND signalstack_org_name IS NULL AND signalstack_org_id IS NULL
                 AND legacy_org_details IS NULL
                 AND agg_for IS NULL AND profile IS NULL AND profile_ref IS NULL
          END)
 )
 UNIQUE (contact_id, user_type)                   -- one account per person per role
-UNIQUE (tenant_slug)                             -- was aggregators_org_slug_unique
+UNIQUE (signalstack_org_slug)                             -- was aggregators_org_slug_unique
 INDEX  (org_id)
 
 organisations (                                  -- was aggregator_orgs (renamed, ids kept)
@@ -122,7 +122,7 @@ consent_record (                                 -- was aggregator_consent_recor
 --                + org_id (FK organisations ON DELETE RESTRICT; the org at write time)
 ```
 
-**Why the coordinator keeps `tenant_slug` / `tenant_name`.** They are the identity of the coordinator's **Signals organisation** (`external_id` = user id, `slug`, `name`), and `tenant_slug` is the `[org]` segment of every public registration-link URL. Moving them would rename Signals orgs and break published links. The **organisation's** own `slug` and `name` are separate: today they are the parent org's.
+**Why the coordinator keeps `signalstack_org_slug` / `signalstack_org_name`.** They are the identity of the coordinator's **Signals organisation** (`external_id` = user id, `slug`, `name`), and `signalstack_org_slug` is the `[org]` segment of every public registration-link URL. Moving them would rename Signals orgs and break published links. The **organisation's** own `slug` and `name` are separate: today they are the parent org's.
 
 **Future: one user in several orgs.** Today an account belongs to at most one org (`users.org_id` for coordinators; `org_owner` for admins). When a user may belong to several orgs, `users.org_id` becomes a membership table (`user_orgs (user_id, org_id, role, status)`), and the coordinator's per-org tenant columns move onto that membership row. The schema keeps this additive:
 
@@ -132,13 +132,23 @@ consent_record (                                 -- was aggregator_consent_recor
 
 **Identity provider independence.** The app talks to the IAM only through the `IdpAdminAdapter` port (`services/idp-admin/interface.ts`), and the database stores only `provider + subject`. The Keycloak attribute `aggregator_id` (= `users.id`) is the provider-side link; another provider needs an equivalent claim, or a lookup by `user_identities`.
 
-**Naming rule (review A23).** `org_id` always means `organisations.id`; a Signals tenant id is always `signalstack_org_id`; a tenant's public slug is always `tenant_slug` (`onboarding.org_slug` is renamed too). `user_type` / `org_type` are the only type columns.
+**Naming rule (review A23; option C chosen 2026-10-07).**
+
+- `org_id` always means `organisations.id`.
+- **A coordinator's own Signals organisation**, the separate space in Signals that holds that coordinator's participants, uploads, links and campaigns (called the "Signals tenant" elsewhere in these docs), is always described by `signalstack_org_*` columns on the coordinator's `users` row:
+  - `signalstack_org_id`: the id Signals returns;
+  - `signalstack_org_slug`: was `org_slug`; the Signals slug, and the `[org]` segment of public registration-link URLs;
+  - `signalstack_org_name`: was `name`; NULL means "use the linked org's name".
+- `onboarding.org_slug` is renamed `signalstack_org_slug` too.
+- These are **not** the coordinator's organisation (`organisations.slug` / `name`), and **not** the person (`contact.name`).
+- `user_type` / `org_type` are the only type columns.
+- API response fields (`org_slug`, `org_name`) are unchanged.
 
 **One relation, one home (review M1–M5, A15, `plan-review-2026-10-06.md`):**
 
 - A coordinator's org is `users.org_id`; an admin's orgs are `organisations.org_owner`. There is no FK cycle, so inserts need no deferred constraints.
 - **Registration state** lives on the coordinator user and on the org, each for its own registration. An admin account has none; it can log in when its Keycloak user is enabled.
-- **The tenant name** is stored only when it differs from the org's name. Signals and `org_name` read `coalesce(tenant_name, org.name)`.
+- **The tenant name** is stored only when it differs from the org's name. Signals and `org_name` read `coalesce(signalstack_org_name, org.name)`.
 - **The invite** is referenced (`invite_id`), not copied.
 - **Login identities are provider-neutral and belong to the account:** `user_identities (user_id, provider, subject)`. They are **not** on `contact` (a person's data) and have **no** Keycloak-specific column, so another IAM provider is a new `provider` value, and an account can hold more than one login.
 
@@ -149,9 +159,9 @@ consent_record (                                 -- was aggregator_consent_recor
 | Column                                                                 | Goes to                                                                                                                                                                                        | Phase |
 | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
 | `id`, `contact_id`, `status`, `rejected_at`, audit columns             | stay (`users`); `status` uses the renamed enum `registration_status`                                                                                                                           | 2 / 4 |
-| `org_slug`                                                             | `users.tenant_slug` (immutable rule moves with it)                                                                                                                                             | 2     |
+| `org_slug`                                                             | `users.signalstack_org_slug` (immutable rule moves with it)                                                                                                                                    | 2     |
 | `invite_email`                                                         | `users.invite_id`: the consumed invite with that email for that org. When none matches (a deleted invite), the email is kept in `users.profile.legacy_invite_email` and `invite_id` stays NULL | 4     |
-| `name`                                                                 | `users.tenant_name`, set to NULL where it equals the linked org's name (M4)                                                                                                                    | 2 / 3 |
+| `name`                                                                 | `users.signalstack_org_name`, set to NULL where it equals the linked org's name (M4)                                                                                                           | 2 / 3 |
 | `signalstack_org_id`, `profile`, `profile_ref`                         | stay                                                                                                                                                                                           | 2     |
 | `parent_org_id`                                                        | `users.org_id` (NULL → the Default org)                                                                                                                                                        | 3     |
 | `url`, `locations`, `contact_extra.company`, `contact_extra.gstNumber` | **`organisations.url` / `locations` / `legal_name` / `gst_number`** by the adoption rule (§4.1); values not adopted are kept in `users.legacy_org_details` (§4.2)                              | 3     |
@@ -198,7 +208,7 @@ There is no archive (G18), so a coordinator value that was **not** adopted is ke
 | Field                                                      | Rendered from                                                                                                                                                                                                                   |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `url`, `locations`, `contact.company`, `contact.gstNumber` | **The linked org** (`users.org_id`). **When the org's field is empty**, fall back to the coordinator's `legacy_org_details`, so a flat coordinator in the Default org still sees what it registered until real org data exists. |
-| `org_name`, `org_slug`                                     | `coalesce(users.tenant_name, org.name)` / `users.tenant_slug`: the Signals tenant identity, byte-identical for every existing row.                                                                                              |
+| `org_name`, `org_slug`                                     | `coalesce(users.signalstack_org_name, org.name)` / `users.signalstack_org_slug`: the Signals tenant identity, byte-identical for every existing row.                                                                            |
 | `contact.name`, `email`, `phone`, `alternatePhone`         | `contact` + `users.alternate_phone`.                                                                                                                                                                                            |
 
 **Visible effect:** a coordinator whose own value differed from an org value that exists now sees the **org's** value. That is the intended change (direction 5). The fallback keeps everyone else byte-identical.
