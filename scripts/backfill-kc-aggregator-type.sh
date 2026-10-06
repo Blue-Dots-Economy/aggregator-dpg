@@ -73,7 +73,8 @@ PG_CONTAINER="${PG_CONTAINER:-aggregator-postgres}"
 PG_USER="${PG_USER:-${POSTGRES_USER:-aggregator}}"
 PG_DB="${PG_DB:-${POSTGRES_DB:-aggregator}}"
 
-SQL="SELECT id, type::text FROM aggregators WHERE type IS NOT NULL AND type IN ('seeker','provider');"
+# Coordinators are `users` rows since migration 0027 (was `aggregators`).
+SQL="SELECT id, type::text FROM users WHERE user_type = 'coordinator' AND type IS NOT NULL AND type IN ('seeker','provider');"
 
 # ─── Read aggregators from Postgres ─────────────────────────────────────────
 if [[ -n "${DATABASE_URL:-}" ]]; then

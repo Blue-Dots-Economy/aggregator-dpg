@@ -19,10 +19,10 @@ Add each check name exactly as listed below (copy-paste — GitHub matches by ex
 
 ## Advisory checks (not required)
 
-| Check name                 | What it reports                                                                                                                                                 |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SonarCloud Code Analysis` | Coverage + code-quality gate, posted by SonarCloud                                                                                                              |
-| `db-integration`           | Real-Postgres integration suites (`*.integration.test.ts`) on `postgres:16`, run twice: on the full migration set and on the expand-phase schema (through 0025) |
+| Check name                 | What it reports                                                                                                                                                                                                                                                                   |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SonarCloud Code Analysis` | Coverage + code-quality gate, posted by SonarCloud                                                                                                                                                                                                                                |
+| `db-integration`           | Real-Postgres integration suites (`*.integration.test.ts`) on `postgres:16`, run on the full migration set (the expand-phase run through 0025 was retired with migration 0027: the user & org release train applies 0023–0027 in one transaction, so no instance can sit at 0025) |
 
 `db-integration` starts **advisory** while it proves stable. Promote it to required
 once it has run green on a few PRs: it is the only check that executes the SQL
