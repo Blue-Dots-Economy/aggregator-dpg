@@ -7,8 +7,9 @@ describe('aggregator_orgs schema', () => {
     expect(aggregatorOrgs.slug.name).toBe('slug');
     expect(aggregatorOrgs.displayName.name).toBe('display_name');
     expect(aggregatorOrgs.state.name).toBe('state');
-    expect(aggregatorOrgs.contactId.name).toBe('contact_id');
-    expect(aggregatorOrgs.ownerKcSub.name).toBe('owner_kc_sub');
+    expect(aggregatorOrgs.ownerUserId.name).toBe('owner_user_id');
+    expect('contactId' in aggregatorOrgs).toBe(false);
+    expect('ownerKcSub' in aggregatorOrgs).toBe(false);
     expect(aggregatorOrgs.kcGroupId.name).toBe('kc_group_id');
     expect(aggregatorOrgs.status.name).toBe('status');
     expect(aggregatorOrgs.createdAt.name).toBe('created_at');

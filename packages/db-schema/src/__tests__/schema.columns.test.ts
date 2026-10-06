@@ -32,7 +32,7 @@ describe('aggregators columns', () => {
     expect(aggregators.id.hasDefault).toBe(true);
     expect(aggregators.id.columnType).toBe('PgUUID');
 
-    expect(aggregators.orgSlug.name).toBe('org_slug');
+    expect(aggregators.orgSlug.name).toBe('signalstack_org_slug');
     expect(aggregators.orgSlug.notNull).toBe(true);
     expect(aggregators.orgSlug.isUnique).toBe(true);
 
@@ -40,7 +40,7 @@ describe('aggregators columns', () => {
     expect(aggregators.actorType.notNull).toBe(true);
     expect(aggregators.actorType.columnType).toBe('PgEnumColumn');
 
-    expect(aggregators.name.name).toBe('name');
+    expect(aggregators.name.name).toBe('signalstack_org_name');
     expect(aggregators.name.notNull).toBe(true);
 
     // `type` is nullable — enforced via a CHECK constraint in the migration,
@@ -97,9 +97,9 @@ describe('aggregators columns', () => {
 });
 
 describe('aggregator_orgs remaining columns (not covered by aggregator-orgs.schema.test.ts)', () => {
-  it('contact_id FK column (0025)', () => {
-    expect(aggregatorOrgs.contactId.name).toBe('contact_id');
-    expect(aggregatorOrgs.contactId.notNull).toBe(true);
+  it('owner_user_id FK column (0027) — the owner is an admin account, not a contact copy', () => {
+    expect(aggregatorOrgs.ownerUserId.name).toBe('owner_user_id');
+    expect(aggregatorOrgs.ownerUserId.notNull).toBe(true);
   });
 
   it('id is a defaulted primary key', () => {
@@ -112,7 +112,7 @@ describe('aggregator_orgs remaining columns (not covered by aggregator-orgs.sche
 describe('bulk_uploads columns', () => {
   it('lifecycle + counters', () => {
     expect(bulkUploads.id.primary).toBe(true);
-    expect(bulkUploads.aggregatorId.name).toBe('aggregator_id');
+    expect(bulkUploads.aggregatorId.name).toBe('user_id');
     expect(bulkUploads.aggregatorId.notNull).toBe(true);
 
     expect(bulkUploads.participantType.name).toBe('participant_type');
@@ -145,7 +145,7 @@ describe('bulk_uploads columns', () => {
 
 describe('registration_links remaining columns', () => {
   it('domain/context/status/expiry/audit columns', () => {
-    expect(registrationLinks.aggregatorId.name).toBe('aggregator_id');
+    expect(registrationLinks.aggregatorId.name).toBe('user_id');
     expect(registrationLinks.aggregatorId.notNull).toBe(true);
 
     expect(registrationLinks.slug.name).toBe('slug');
@@ -178,7 +178,7 @@ describe('link_submissions columns', () => {
     expect(linkSubmissions.linkId.name).toBe('link_id');
     expect(linkSubmissions.linkId.notNull).toBe(true);
 
-    expect(linkSubmissions.aggregatorId.name).toBe('aggregator_id');
+    expect(linkSubmissions.aggregatorId.name).toBe('user_id');
     expect(linkSubmissions.aggregatorId.notNull).toBe(true);
 
     expect(linkSubmissions.metadataSnapshot.name).toBe('metadata_snapshot');
@@ -238,7 +238,7 @@ describe('aggregator_consent_record columns', () => {
 
 describe('onboarding columns', () => {
   it('period window + rollup counters', () => {
-    expect(onboarding.aggregatorId.name).toBe('aggregator_id');
+    expect(onboarding.aggregatorId.name).toBe('user_id');
     expect(onboarding.aggregatorId.notNull).toBe(true);
 
     expect(onboarding.orgSlug.name).toBe('org_slug');

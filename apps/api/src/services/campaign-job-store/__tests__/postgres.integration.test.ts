@@ -46,6 +46,7 @@ suite('PostgresCampaignJobStore (integration)', () => {
     const rows = await getDb()
       .insert(aggregators)
       .values({
+        userType: 'coordinator',
         orgSlug: `cjs-test-${suffix}`,
         actorType: 'aggregator',
         name: 'Campaign Job Store Test',

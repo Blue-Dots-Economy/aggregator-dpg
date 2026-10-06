@@ -21,6 +21,8 @@ const NON_TERMINAL = new Set(['pending', 'active']);
 
 export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
   protected readonly byId = new Map<string, AggregatorOrg>();
+  /** Owner admin-account id per owner contact (one account per person, 0027). */
+  protected readonly adminByContact = new Map<string, string>();
 
   create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
     const slugTaken = [...this.byId.values()].some(
@@ -43,12 +45,18 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       return Promise.resolve(err('DB_UNAVAILABLE', 'TypeError'));
     }
     const now = new Date();
+    let ownerUserId = this.adminByContact.get(id);
+    if (!ownerUserId) {
+      ownerUserId = randomUUID();
+      this.adminByContact.set(id, ownerUserId);
+    }
     const row: AggregatorOrg = {
       id: randomUUID(),
       slug: input.slug,
       displayName: input.displayName,
       state: input.state ?? null,
       contactId: id,
+      ownerUserId,
       ownerEmail: input.ownerEmail.toLowerCase(),
       ownerPhone: input.ownerPhone ?? null,
       ownerName: input.ownerName?.trim() ? input.ownerName : null,
@@ -80,15 +88,21 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
     const target = email.toLowerCase();
     return Promise.resolve({
       ok: true,
-      value: [...this.byId.values()].find((o) => o.ownerEmail === target) ?? null,
+      value: pickOwned((o) => o.ownerEmail === target, this.byId),
     });
   }
 
   findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
     return Promise.resolve({
       ok: true,
-      value: [...this.byId.values()].find((o) => o.ownerPhone === phone) ?? null,
+      value: pickOwned((o) => o.ownerPhone === phone, this.byId),
     });
+  }
+
+  ownerIsShared(id: string): Promise<OrgStoreResult<boolean>> {
+    const owner = this.byId.get(id)?.ownerUserId;
+    const shared = [...this.byId.values()].some((o) => o.id !== id && o.ownerUserId === owner);
+    return Promise.resolve({ ok: true, value: owner !== undefined && shared });
   }
 
   listActive(): Promise<OrgStoreResult<AggregatorOrg[]>> {
@@ -154,6 +168,21 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
     this.byId.set(id, updated);
     return Promise.resolve({ ok: true, value: updated });
   }
+}
+
+/**
+ * The org an owner match resolves to, as in Postgres: live first, then newest.
+ */
+function pickOwned(
+  match: (o: AggregatorOrg) => boolean,
+  byId: Map<string, AggregatorOrg>,
+): AggregatorOrg | null {
+  const live = (o: AggregatorOrg) => (NON_TERMINAL.has(o.status) ? 0 : 1);
+  return (
+    [...byId.values()]
+      .filter(match)
+      .sort((a, b) => live(a) - live(b) || b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null
+  );
 }
 
 function err<T>(code: OrgStoreError['code'], message: string): OrgStoreResult<T> {

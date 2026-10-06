@@ -5,20 +5,29 @@
  * of record (spec §5.1). Driver-level errors are normalised to the abstract
  * `OrgStoreError` codes so callers never see raw pg error fields.
  *
- * The owner's email / phone / name live in the `contact` table, referenced by
- * `aggregator_orgs.contact_id` (migrations 0025/0026). The owner's contact is
- * written in the same transaction as the org row (`db/contact-writes.ts`), and
- * every write re-reads the joined row inside that transaction, because
- * `RETURNING` cannot include the joined contact. Keycloak keeps its own copy of
- * the owner's login identifiers.
+ * The owner is an `admin` account in `users` (`aggregator_orgs.owner_user_id`,
+ * migration 0027); its email / phone / name live in `contact` and its IdP login
+ * in `user_identities`. The owner's contact and account are written in the
+ * same transaction as the org row (`db/contact-writes.ts`,
+ * `db/account-writes.ts`), and every write re-reads the joined row inside that
+ * transaction, because `RETURNING` cannot include the joined owner. Deleting an
+ * org releases the owner's account in the database (`aggregator_orgs_owner_ad`)
+ * once it owns no other org.
  */
 
-import { and, eq, lt, sql, type SQL } from 'drizzle-orm';
-import { aggregatorOrgs, contact } from '../../db/schema.js';
+import { and, asc, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
+import { aggregatorOrgs, contact, userIdentities, users } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
 import { logger } from '../../logger.js';
 import { linkContact, type DbExecutor } from '../../db/contact-writes.js';
+import {
+  IdentityMismatchError,
+  IdentityTakenError,
+  linkAdminAccount,
+  linkIdentity,
+} from '../../db/account-writes.js';
+import { IDP_PROVIDER } from '../idp-admin/provider.js';
 import {
   AggregatorOrgStoreBase,
   type AggregatorOrg,
@@ -32,20 +41,22 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   async create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
     try {
       const created = await getDb().transaction(async (tx) => {
-        // The owner's contact and the org row are written atomically.
+        // The owner's contact, the owner's admin account and the org row are
+        // written atomically.
         const contactId = await linkContact(tx, {
           email: input.ownerEmail,
           phone: input.ownerPhone ?? null,
           name: input.ownerName ?? null,
         });
+        const ownerUserId = await linkAdminAccount(tx, contactId);
+        if (input.ownerKcSub) await linkIdentity(tx, ownerUserId, IDP_PROVIDER, input.ownerKcSub);
         const [row] = await tx
           .insert(aggregatorOrgs)
           .values({
             slug: input.slug,
             displayName: input.displayName,
             state: input.state ?? null,
-            contactId,
-            ownerKcSub: input.ownerKcSub ?? null,
+            ownerUserId,
             kcGroupId: input.kcGroupId ?? null,
             profile: input.profile ?? {},
             profileRef: input.profileRef ?? null,
@@ -71,26 +82,28 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
 
   async findByOwnerEmail(email: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
     const e = email.trim().toLowerCase();
-    // `contact_id = (subselect)` keeps the lookup on contact_email_unique +
-    // aggregator_orgs_contact_id_idx.
-    return this.findOne(
-      eq(
-        aggregatorOrgs.contactId,
-        sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.email} = ${e})`,
-      ),
-    );
+    // The owner's admin account by its contact's email (contact_email_unique),
+    // then its orgs. One owner may own several orgs (a rejected one and a new
+    // one), so the pick is deterministic: live first, then newest.
+    return this.findOne(eq(contact.email, e), true);
   }
 
   async findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
-    // Every org row holds its owner's phone through `contact_phone_unique`, so
-    // the lookup matches the constraint exactly (a half-created org is deleted
-    // by the create route, never left behind).
-    return this.findOne(
-      eq(
-        aggregatorOrgs.contactId,
-        sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.phone} = ${phone})`,
-      ),
-    );
+    // Same shape as findByOwnerEmail, keyed on contact_phone_unique.
+    return this.findOne(eq(contact.phone, phone), true);
+  }
+
+  async ownerIsShared(id: string): Promise<OrgStoreResult<boolean>> {
+    try {
+      const rows = await getDb().execute<{ shared: boolean }>(sql`
+        SELECT EXISTS (
+          SELECT 1 FROM ${aggregatorOrgs} other
+           WHERE other.owner_user_id = (SELECT owner_user_id FROM ${aggregatorOrgs} WHERE id = ${id})
+             AND other.id <> ${id}) AS shared`);
+      return { ok: true, value: Boolean(rows.rows[0]?.shared) };
+    } catch (e) {
+      return mapDbError('orgStore.ownerIsShared', e);
+    }
   }
 
   async listActive(): Promise<OrgStoreResult<AggregatorOrg[]>> {
@@ -115,14 +128,19 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   }
 
   async update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<AggregatorOrg>> {
+    // The owner's IdP login lives on the owner's account, not the org row.
+    const { ownerKcSub, ...columns } = patch;
     try {
       const updated = await getDb().transaction(async (tx) => {
         const rows = await tx
           .update(aggregatorOrgs)
-          .set({ ...patch, updatedAt: new Date() })
+          .set({ ...columns, updatedAt: new Date() })
           .where(eq(aggregatorOrgs.id, id))
-          .returning({ id: aggregatorOrgs.id });
-        if (rows.length === 0) return null;
+          .returning({ id: aggregatorOrgs.id, ownerUserId: aggregatorOrgs.ownerUserId });
+        const [row] = rows;
+        if (!row) return null;
+        // A null subject never unlinks: a recorded login is only ever added.
+        if (ownerKcSub) await linkIdentity(tx, row.ownerUserId, IDP_PROVIDER, ownerKcSub);
         return this.readIn(tx, id);
       });
       if (!updated) return errResult('NOT_FOUND', id);
@@ -172,16 +190,22 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   }
 
   /**
-   * `aggregator_orgs` JOIN `contact` — the one read shape every query uses.
-   * An inner join: `contact_id` is NOT NULL (0026) and RESTRICT-protected.
+   * `aggregator_orgs` JOIN the owner's admin account JOIN its `contact`, LEFT
+   * JOIN its IdP login — the one read shape every query uses. The inner joins
+   * hold: `owner_user_id` is NOT NULL and RESTRICT-protected (0027).
    *
    * @param db - Executor (the pool, or the caller's transaction).
    */
   private selectJoined(db: DbExecutor = getDb()) {
     return db
-      .select({ o: aggregatorOrgs, c: contact })
+      .select({ o: aggregatorOrgs, c: contact, ownerKcSub: userIdentities.subject })
       .from(aggregatorOrgs)
-      .innerJoin(contact, eq(contact.id, aggregatorOrgs.contactId));
+      .innerJoin(users, eq(users.id, aggregatorOrgs.ownerUserId))
+      .innerJoin(contact, eq(contact.id, users.contactId))
+      .leftJoin(
+        userIdentities,
+        and(eq(userIdentities.userId, users.id), eq(userIdentities.provider, IDP_PROVIDER)),
+      );
   }
 
   /** Reads one joined row through `db` (used inside write transactions). */
@@ -190,9 +214,31 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     return row ? toDomain(row) : null;
   }
 
-  private async findOne(predicate: SQL): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  /**
+   * Reads at most one org.
+   *
+   * @param predicate - The filter.
+   * @param byOwner - When true the filter matches an OWNER (who may own several
+   *   orgs): restrict to admin owners and order live-first, then newest.
+   */
+  private async findOne(
+    predicate: SQL,
+    byOwner = false,
+  ): Promise<OrgStoreResult<AggregatorOrg | null>> {
     try {
-      const [row] = await this.selectJoined().where(predicate).limit(1);
+      const q = this.selectJoined().where(
+        byOwner ? and(predicate, eq(users.userType, 'admin')) : predicate,
+      );
+      const [row] = await (byOwner
+        ? q
+            .orderBy(
+              asc(
+                sql`CASE WHEN ${aggregatorOrgs.status} IN ('pending','active') THEN 0 ELSE 1 END`,
+              ),
+              desc(aggregatorOrgs.createdAt),
+            )
+            .limit(1)
+        : q.limit(1));
       return { ok: true, value: row ? toDomain(row) : null };
     } catch (e) {
       return mapDbError('orgStore.findOne', e);
@@ -203,6 +249,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
 type JoinedRow = {
   o: typeof aggregatorOrgs.$inferSelect;
   c: typeof contact.$inferSelect;
+  ownerKcSub: string | null;
 };
 
 function toDomain(row: JoinedRow): AggregatorOrg {
@@ -212,11 +259,12 @@ function toDomain(row: JoinedRow): AggregatorOrg {
     slug: o.slug,
     displayName: o.displayName,
     state: o.state,
-    contactId: o.contactId,
+    contactId: c.id,
+    ownerUserId: o.ownerUserId,
     ownerEmail: c.email,
     ownerPhone: c.phone,
     ownerName: c.name,
-    ownerKcSub: o.ownerKcSub,
+    ownerKcSub: row.ownerKcSub,
     kcGroupId: o.kcGroupId,
     profile: o.profile ?? {},
     profileRef: o.profileRef,
@@ -236,6 +284,11 @@ function toDomain(row: JoinedRow): AggregatorOrg {
  * @returns The failure result.
  */
 function mapDbError(op: string, e: unknown): OrgStoreResult<never> {
+  if (e instanceof IdentityTakenError || e instanceof IdentityMismatchError) {
+    // The owner's IdP login conflicts with a recorded one: never overwritten.
+    logger.warn({ operation: op, status: 'failure', error: 'identity_conflict', reason: e.name });
+    return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'owner login conflict' } };
+  }
   const code = pgErrorCode(e);
   const constraint = pgConstraint(e) ?? '';
   const error = classifyWriteError(e, code, constraint);

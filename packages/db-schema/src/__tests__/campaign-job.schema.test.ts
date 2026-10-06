@@ -58,7 +58,7 @@ describe('campaign_job columns', () => {
     expect(campaignJob.id.hasDefault).toBe(true);
     expect(campaignJob.id.columnType).toBe('PgUUID');
 
-    expect(campaignJob.aggregatorId.name).toBe('aggregator_id');
+    expect(campaignJob.aggregatorId.name).toBe('user_id');
     expect(campaignJob.aggregatorId.notNull).toBe(true);
 
     expect(campaignJob.signalstackOrgId.name).toBe('signalstack_org_id');

@@ -135,3 +135,53 @@ describe('InMemoryAggregatorOrgStore contact rules', () => {
     for (const r of results) expect(r.ok || r.error.code).toBe('NOT_FOUND');
   });
 });
+
+describe('InMemoryAggregatorOrgStore owners (0027)', () => {
+  it('gives one owner person one account across orgs, and reports sharing', async () => {
+    const store = new InMemoryAggregatorOrgStore();
+    const a = await store.create({
+      slug: 'a',
+      displayName: 'A',
+      ownerEmail: 'o@x.org',
+      ownerPhone: '+919000000001',
+    });
+    const b = await store.create({
+      slug: 'b',
+      displayName: 'B',
+      ownerEmail: 'o@x.org',
+      ownerPhone: '+919000000001',
+    });
+    const c = await store.create({
+      slug: 'c',
+      displayName: 'C',
+      ownerEmail: 'c@x.org',
+      ownerPhone: '+919000000002',
+    });
+    if (!a.ok || !b.ok || !c.ok) throw new Error('seed');
+    expect(a.value.ownerUserId).toBe(b.value.ownerUserId);
+    expect(c.value.ownerUserId).not.toBe(a.value.ownerUserId);
+    expect(await store.ownerIsShared(a.value.id)).toEqual({ ok: true, value: true });
+    expect(await store.ownerIsShared(c.value.id)).toEqual({ ok: true, value: false });
+  });
+
+  it('resolves an owner lookup to the live org first, then the newest', async () => {
+    const store = new InMemoryAggregatorOrgStore();
+    const old = await store.create({
+      slug: 'old',
+      displayName: 'Old',
+      ownerEmail: 'o@x.org',
+      ownerPhone: '+919000000001',
+    });
+    if (!old.ok) throw new Error('seed');
+    await store.reject(old.value.id);
+    const fresh = await store.create({
+      slug: 'new',
+      displayName: 'New',
+      ownerEmail: 'o@x.org',
+      ownerPhone: '+919000000001',
+    });
+    if (!fresh.ok) throw new Error('seed');
+    const found = await store.findByOwnerEmail('O@X.org');
+    expect(found.ok && found.value?.id).toBe(fresh.value.id);
+  });
+});

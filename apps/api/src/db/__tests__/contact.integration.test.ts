@@ -81,10 +81,10 @@ suite('contact (migration 0025) — integration', () => {
         WHERE table_schema = 'public' AND table_name = 'aggregators' AND column_name = 'contact'`,
     );
     legacy = r.rows[0].n > 0;
-    // The store tests run the current store code; it reads and writes only
-    // `contact` / `contact_id` / `contact_extra`, which exist in every schema
-    // state from 0025 on, so they run in both states.
-    headSchema = true;
+    // The store tests run the current store code, which targets `users`
+    // (migration 0027): they run only once that table exists.
+    const head = await pool.query(`SELECT to_regclass('public.users')::text AS t`);
+    headSchema = Boolean(head.rows[0].t);
   });
 
   afterAll(async () => {
@@ -489,7 +489,7 @@ suite('contact (migration 0025) — integration', () => {
         // What Postgres would have stored (and returned) for this object.
         const asJsonb = await pool.query('SELECT $1::jsonb AS j', [JSON.stringify(input)]);
         expect(JSON.stringify(created.value.contact)).toBe(JSON.stringify(asJsonb.rows[0].j));
-        const raw = await pool.query('SELECT contact_id FROM aggregators WHERE id = $1', [
+        const raw = await pool.query('SELECT contact_id FROM users WHERE id = $1', [
           created.value.id,
         ]);
         expect(raw.rows[0].contact_id).toBe(contactId(email, input.phone));
@@ -607,12 +607,12 @@ suite('contact (migration 0025) — integration', () => {
         await c.query('BEGIN');
         await c.query('SET LOCAL enable_seqscan = off');
         const plan = await c.query(
-          `EXPLAIN SELECT a.id FROM aggregators a LEFT JOIN contact c ON c.id = a.contact_id
+          `EXPLAIN SELECT a.id FROM users a LEFT JOIN contact c ON c.id = a.contact_id
             WHERE a.contact_id = (SELECT id FROM contact WHERE phone = $1)`,
           ['+910000000000'],
         );
         const text = plan.rows.map((r: Record<string, string>) => Object.values(r)[0]).join('\n');
-        expect(text).not.toMatch(/Seq Scan on aggregators/);
+        expect(text).not.toMatch(/Seq Scan on users/);
         expect(text).toMatch(/contact_phone_unique/);
       } finally {
         await c.query('ROLLBACK');
@@ -713,13 +713,14 @@ suite('contact (migration 0025) — integration', () => {
   describe('migration 0026 (legacy columns dropped)', () => {
     it('removed the legacy columns and sync triggers, kept GC and made contact_id NOT NULL', async (ctx) => {
       if (legacy) ctx.skip();
+      // After 0027 the only contact reference is users.contact_id (org owners
+      // are admin accounts); the legacy columns stay gone.
       const cols = await pool.query(
         `SELECT table_name, column_name, is_nullable FROM information_schema.columns
-          WHERE table_schema = 'public' AND table_name IN ('aggregators', 'aggregator_orgs')
+          WHERE table_schema = 'public' AND table_name IN ('users', 'aggregator_orgs')
             AND column_name IN ('contact', 'contact_phone', 'contact_email', 'owner_email', 'owner_phone', 'contact_id')`,
       );
       expect(cols.rows.map((r: { column_name: string }) => r.column_name).sort()).toEqual([
-        'contact_id',
         'contact_id',
       ]);
       expect(cols.rows.every((r: { is_nullable: string }) => r.is_nullable === 'NO')).toBe(true);
@@ -727,18 +728,18 @@ suite('contact (migration 0025) — integration', () => {
         `SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE '%contact%' ORDER BY 1`,
       );
       expect(trig.rows.map((r: { tgname: string }) => r.tgname)).toEqual([
-        'aggregator_orgs_contact_ad',
-        'aggregators_contact_ad',
         'contact_set_updated_at',
+        'users_contact_ad',
       ]);
     });
 
-    it('is idempotent: re-applying 0026 is a no-op', async (ctx) => {
+    it('is idempotent: re-applying 0027 (the current head) is a no-op', async (ctx) => {
       if (legacy) ctx.skip();
+      const sql0027 = await readFile(path.join(MIGRATIONS_DIR, '0027_users.sql'), 'utf8');
       const c = await pool.connect();
       try {
         await c.query('BEGIN');
-        await c.query(sql0026);
+        await c.query(sql0027);
         await c.query('COMMIT');
       } finally {
         c.release();

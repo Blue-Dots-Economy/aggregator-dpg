@@ -96,7 +96,7 @@ vi.mock('../db.js', () => ({
       createdAt: 'createdAt',
       rolledUpAt: 'rolledUpAt',
     },
-    aggregators: { id: 'id', orgSlug: 'orgSlug' },
+    users: { id: 'id', orgSlug: 'orgSlug' },
     onboarding: {
       aggregatorId: 'aggregatorId',
       linkId: 'linkId',

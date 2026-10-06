@@ -11,6 +11,8 @@
 import { KeycloakIdpAdmin } from './keycloak.js';
 import type { IdpAdminAdapter } from './interface.js';
 
+export { IDP_PROVIDER } from './provider.js';
+
 let instance: IdpAdminAdapter | null = null;
 
 /**

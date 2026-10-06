@@ -23,6 +23,8 @@ import { getTableConfig } from 'drizzle-orm/pg-core';
 import {
   contact,
   aggregators,
+  users,
+  userIdentities,
   aggregatorOrgs,
   bulkUploads,
   registrationLinks,
@@ -42,23 +44,22 @@ describe('aggregators: indexes + foreign key', () => {
   const cfg = getTableConfig(aggregators);
 
   it('table name is snake_case', () => {
-    expect(cfg.name).toBe('aggregators');
+    expect(cfg.name).toBe('users');
   });
 
   it('has the two filter indexes and the contact_id index (uniqueness lives on contact)', () => {
     const byName = Object.fromEntries(cfg.indexes.map((i) => [i.config.name, i]));
 
-    expect(byName['aggregators_status_idx'].config.unique).toBe(false);
-    expect(byName['aggregators_status_idx'].config.columns.map(colName)).toEqual(['status']);
+    expect(byName['users_status_idx'].config.unique).toBe(false);
+    expect(byName['users_status_idx'].config.columns.map(colName)).toEqual(['status']);
 
-    expect(byName['aggregators_actor_type_idx'].config.unique).toBe(false);
-    expect(byName['aggregators_actor_type_idx'].config.columns.map(colName)).toEqual([
-      'actor_type',
-    ]);
+    expect(byName['users_actor_type_idx'].config.unique).toBe(false);
+    expect(byName['users_actor_type_idx'].config.columns.map(colName)).toEqual(['actor_type']);
 
-    expect(byName['aggregators_contact_id_unique'].config.unique).toBe(true);
-    expect(byName['aggregators_contact_id_unique'].config.columns.map(colName)).toEqual([
+    expect(byName['users_contact_type_unique'].config.unique).toBe(true);
+    expect(byName['users_contact_type_unique'].config.columns.map(colName)).toEqual([
       'contact_id',
+      'user_type',
     ]);
 
     expect(cfg.indexes).toHaveLength(3);
@@ -90,14 +91,14 @@ describe('aggregator_orgs: indexes (not covered by aggregator-orgs.schema.test.t
     expect(cfg.name).toBe('aggregator_orgs');
   });
 
-  it('has plain filter indexes on status and contact_id', () => {
+  it('has plain filter indexes on status and owner_user_id', () => {
     const byName = Object.fromEntries(cfg.indexes.map((i) => [i.config.name, i]));
 
     expect(byName['aggregator_orgs_status_idx'].config.unique).toBe(false);
     expect(byName['aggregator_orgs_status_idx'].config.columns.map(colName)).toEqual(['status']);
 
-    expect(byName['aggregator_orgs_contact_id_idx'].config.columns.map(colName)).toEqual([
-      'contact_id',
+    expect(byName['aggregator_orgs_owner_user_idx'].config.columns.map(colName)).toEqual([
+      'owner_user_id',
     ]);
   });
 
@@ -137,8 +138,8 @@ describe('bulk_uploads: indexes + foreign key', () => {
       'status',
       'last_progress_at',
     ]);
-    expect(byName['bulk_uploads_aggregator_status_idx'].config.columns.map(colName)).toEqual([
-      'aggregator_id',
+    expect(byName['bulk_uploads_user_status_idx'].config.columns.map(colName)).toEqual([
+      'user_id',
       'status',
     ]);
     expect(cfg.indexes).toHaveLength(2);
@@ -162,19 +163,15 @@ describe('registration_links: indexes + foreign key', () => {
   });
 
   it('slug uniqueness is scoped per aggregator (two aggregators may share a slug)', () => {
-    const idx = cfg.indexes.find(
-      (i) => i.config.name === 'registration_links_aggregator_slug_unique',
-    );
+    const idx = cfg.indexes.find((i) => i.config.name === 'registration_links_user_slug_unique');
     expect(idx?.config.unique).toBe(true);
-    expect(idx?.config.columns.map(colName)).toEqual(['aggregator_id', 'slug']);
+    expect(idx?.config.columns.map(colName)).toEqual(['user_id', 'slug']);
   });
 
   it('has a non-unique status filter index', () => {
-    const idx = cfg.indexes.find(
-      (i) => i.config.name === 'registration_links_aggregator_status_idx',
-    );
+    const idx = cfg.indexes.find((i) => i.config.name === 'registration_links_user_status_idx');
     expect(idx?.config.unique).toBe(false);
-    expect(idx?.config.columns.map(colName)).toEqual(['aggregator_id', 'status']);
+    expect(idx?.config.columns.map(colName)).toEqual(['user_id', 'status']);
     expect(cfg.indexes).toHaveLength(2);
   });
 
@@ -202,8 +199,8 @@ describe('link_submissions: indexes + foreign keys', () => {
       'created_at',
     ]);
     expect(byName['link_submissions_link_idx'].config.columns.map(colName)).toEqual(['link_id']);
-    expect(byName['link_submissions_aggregator_created_idx'].config.columns.map(colName)).toEqual([
-      'aggregator_id',
+    expect(byName['link_submissions_user_created_idx'].config.columns.map(colName)).toEqual([
+      'user_id',
       'created_at',
     ]);
     expect(cfg.indexes).toHaveLength(3);
@@ -261,14 +258,14 @@ describe('onboarding: indexes + foreign keys', () => {
   it('link rows are unique per (aggregator, link, period_start), scoped to source=link', () => {
     const idx = cfg.indexes.find((i) => i.config.name === 'onboarding_link_rollup_unique');
     expect(idx?.config.unique).toBe(true);
-    expect(idx?.config.columns.map(colName)).toEqual(['aggregator_id', 'link_id', 'period_start']);
+    expect(idx?.config.columns.map(colName)).toEqual(['user_id', 'link_id', 'period_start']);
     expect(idx?.config.where).toBeDefined();
   });
 
   it('has the non-unique aggregator-source-period and batch lookup indexes', () => {
     const byName = Object.fromEntries(cfg.indexes.map((i) => [i.config.name, i]));
-    expect(byName['onboarding_aggregator_source_idx'].config.columns.map(colName)).toEqual([
-      'aggregator_id',
+    expect(byName['onboarding_user_source_idx'].config.columns.map(colName)).toEqual([
+      'user_id',
       'source',
       'period_start',
     ]);
@@ -321,12 +318,25 @@ describe('contact: indexes (migration 0025)', () => {
   });
 });
 
-describe('aggregator_orgs: contact_id FK (migration 0025)', () => {
-  it('points at contact.id — RESTRICT on delete, CASCADE on update', () => {
+describe('aggregator_orgs: owner_user_id FK (migration 0027)', () => {
+  it('points at users.id — RESTRICT on delete', () => {
     const cfg = getTableConfig(aggregatorOrgs);
-    const fk = cfg.foreignKeys.find((f) => f.reference().columns[0] === aggregatorOrgs.contactId)!;
-    expect(fk.reference().foreignTable).toBe(contact);
+    const fk = cfg.foreignKeys.find(
+      (f) => f.reference().columns[0] === aggregatorOrgs.ownerUserId,
+    )!;
+    expect(fk.reference().foreignTable).toBe(users);
     expect(fk.onDelete).toBe('restrict');
-    expect(fk.onUpdate).toBe('cascade');
+  });
+});
+
+describe('user_identities (migration 0027)', () => {
+  it('is keyed by (user_id, provider) and unique per (provider, subject)', () => {
+    const cfg = getTableConfig(userIdentities);
+    expect(cfg.name).toBe('user_identities');
+    expect(cfg.primaryKeys[0]?.columns.map(colName)).toEqual(['user_id', 'provider']);
+    expect(cfg.uniqueConstraints[0]?.columns.map(colName)).toEqual(['provider', 'subject']);
+    const fk = cfg.foreignKeys[0]!;
+    expect(fk.reference().foreignTable).toBe(users);
+    expect(fk.onDelete).toBe('cascade');
   });
 });

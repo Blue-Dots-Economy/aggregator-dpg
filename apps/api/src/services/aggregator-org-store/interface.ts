@@ -19,6 +19,8 @@ export interface AggregatorOrg {
    * hash: never log it.
    */
   contactId: string;
+  /** The owner's admin account (`users.id`, migration 0027). */
+  ownerUserId: string;
   /** Owner email, lowercased — from the linked contact. */
   ownerEmail: string;
   /** Owner phone (canonical) — from the linked contact. */
@@ -120,6 +122,14 @@ export abstract class AggregatorOrgStoreBase {
    * @returns `ok` with `void`; `NOT_FOUND` is treated as success (idempotent).
    */
   abstract deleteById(id: string): Promise<OrgStoreResult<void>>;
+  /**
+   * Whether the org's owner also owns another org. Decides whether deleting
+   * this org may delete the owner's IdP user (prune): a shared owner keeps it.
+   *
+   * @param id - Org UUID.
+   * @returns `true` inside `ok` when the owner owns another org.
+   */
+  abstract ownerIsShared(id: string): Promise<OrgStoreResult<boolean>>;
   /**
    * Atomic compare-and-set pending→active. Returns the updated row, or `null`
    * inside `ok` when the row was not `pending` (the single-use guard lost the

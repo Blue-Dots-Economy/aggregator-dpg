@@ -38,6 +38,9 @@ import {
   pgEnum,
   uniqueIndex,
   index,
+  primaryKey,
+  unique,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import type {
   BecknContact,
@@ -48,6 +51,12 @@ import type {
 export type { BecknContact, BecknLocation, ConsentRecord };
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
+
+/**
+ * Account role (migration 0027). `coordinator` = a coordinator account (the
+ * former `aggregators` row); `admin` = an org owner's account (identity only).
+ */
+export const userTypeEnum = pgEnum('user_type', ['admin', 'coordinator']);
 
 export const aggregatorActorTypeEnum = pgEnum('aggregator_actor_type', [
   'aggregator',
@@ -211,16 +220,30 @@ export const contact = pgTable(
   ],
 );
 
-// ─── aggregators ─────────────────────────────────────────────────────────────
+// ─── users ───────────────────────────────────────────────────────────────────
+// One row per account (migration 0027; was `aggregators`, ids kept). A
+// `coordinator` row carries the coordinator's registration and its own Signals
+// organisation (`signalstack_org_*`); an `admin` row (an org owner) is identity
+// only — every coordinator-only column is NULL (`users_role_shape_chk`).
+//
+// The TypeScript types below describe COORDINATOR rows: the aggregator store
+// reads them with `user_type = 'coordinator'`, and admin rows are written only
+// by `db/account-writes.ts` and read through narrow column selects. Property
+// names keep their pre-0027 spelling (`orgSlug`, `name`) until the Phase 4
+// naming commit.
 
-export const aggregators = pgTable(
-  'aggregators',
+export const users = pgTable(
+  'users',
   {
     // Identity
     id: uuid('id').primaryKey().defaultRandom(),
-    orgSlug: text('org_slug').notNull().unique(),
+    /** Account role (0027). */
+    userType: userTypeEnum('user_type').notNull(),
+    /** The coordinator's Signals org slug (was `org_slug`): also the `[org]` segment of public links. Immutable. */
+    orgSlug: text('signalstack_org_slug').notNull().unique('users_signalstack_org_slug_unique'),
     actorType: aggregatorActorTypeEnum('actor_type').notNull(),
-    name: text('name').notNull(),
+    /** The coordinator's Signals org name (was `name`). */
+    name: text('signalstack_org_name').notNull(),
     // `type` is NULL when actor_type='aggregator' (enforced by CHECK).
     // Stored as text since 0011 — the network config decides which
     // domain ids are valid for the active deployment.
@@ -290,6 +313,7 @@ export const aggregators = pgTable(
     parentOrgId: uuid('parent_org_id').references(
       (): typeof aggregatorOrgs.id => aggregatorOrgs.id,
     ),
+    // (`parent_org_id` FK is named users_parent_org_id_aggregator_orgs_id_fk since 0027.)
 
     // The email a coordinator was INVITED at (#701), when they registered via an
     // invite. May differ from `contact_email` (they can register with their own
@@ -307,11 +331,40 @@ export const aggregators = pgTable(
     // Phone/email uniqueness now lives on `contact` (contact_email_unique,
     // contact_phone_unique) — one person per email and per phone across roles.
     // Approval queue + tenant-classification filters.
-    statusIdx: index('aggregators_status_idx').on(table.status),
-    actorTypeIdx: index('aggregators_actor_type_idx').on(table.actorType),
-    // One coordinator row per person (replaces the legacy per-row email/phone
-    // unique indexes once they are dropped).
-    contactIdUnique: uniqueIndex('aggregators_contact_id_unique').on(table.contactId),
+    statusIdx: index('users_status_idx').on(table.status),
+    actorTypeIdx: index('users_actor_type_idx').on(table.actorType),
+    // One account per person per role (0027; was one coordinator row per person).
+    contactTypeUnique: uniqueIndex('users_contact_type_unique').on(table.contactId, table.userType),
+  }),
+);
+
+/**
+ * @deprecated Phase 2 alias for {@link users}; removed by the Phase 4 naming
+ * commit. New code should import `users`.
+ */
+export const aggregators = users;
+
+// ─── user_identities ─────────────────────────────────────────────────────────
+// Provider-neutral login identities on the ACCOUNT (0027): one login per
+// provider per account, one account per external login. `provider` is
+// 'keycloak' today; another IAM is a new provider value, never a new column.
+
+export const userIdentities = pgTable(
+  'user_identities',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    subject: text('subject').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ name: 'user_identities_pkey', columns: [table.userId, table.provider] }),
+    providerSubjectUnique: unique('user_identities_provider_subject_unique').on(
+      table.provider,
+      table.subject,
+    ),
   }),
 );
 
@@ -328,15 +381,12 @@ export const aggregatorOrgs = pgTable(
     slug: text('slug').notNull(),
     displayName: text('display_name').notNull(),
     state: text('state'),
-    // The org owner's contact (migration 0025; NOT NULL since 0026).
-    contactId: text('contact_id')
+    // The owner's account (0027): an `admin` row of `users`. The owner's
+    // contact and login identity are reached through it; the org row's own
+    // contact_id / owner_kc_sub copies were dropped by 0027.
+    ownerUserId: uuid('owner_user_id')
       .notNull()
-      .references(() => contact.id, {
-        onDelete: 'restrict',
-        onUpdate: 'cascade',
-      }),
-    // The legacy owner_email / owner_phone columns were dropped by 0026.
-    ownerKcSub: text('owner_kc_sub'),
+      .references((): AnyPgColumn => users.id, { onDelete: 'restrict' }),
     kcGroupId: text('kc_group_id'),
     // Schema-driven registration payload (0018) — see the note on
     // `aggregators.profile`. `state` above stays authoritative for the state
@@ -357,7 +407,7 @@ export const aggregatorOrgs = pgTable(
   (table) => ({
     // Active-org dropdown + owner lookup are plain SQL (spec A2/A5).
     statusIdx: index('aggregator_orgs_status_idx').on(table.status),
-    contactIdIdx: index('aggregator_orgs_contact_id_idx').on(table.contactId),
+    ownerUserIdx: index('aggregator_orgs_owner_user_idx').on(table.ownerUserId),
     // Slug uniqueness only over non-terminal rows: a rejected/retired org
     // never blocks a later slug (spec A9). Partial unique index.
     slugActiveUnique: uniqueIndex('aggregator_orgs_slug_active_unique')
@@ -417,9 +467,9 @@ export const bulkUploads = pgTable(
   'bulk_uploads',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('aggregator_id')
+    aggregatorId: uuid('user_id')
       .notNull()
-      .references(() => aggregators.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'cascade' }),
     // Stored as text since 0011 — accepts any domain id declared by the
     // active signalstack network. Application layer validates against
     // `getNetworkConfig().domainIds`.
@@ -446,10 +496,7 @@ export const bulkUploads = pgTable(
       table.lastProgressAt,
     ),
     // Per-aggregator concurrent cap + tenant isolation queries.
-    aggregatorStatusIdx: index('bulk_uploads_aggregator_status_idx').on(
-      table.aggregatorId,
-      table.status,
-    ),
+    aggregatorStatusIdx: index('bulk_uploads_user_status_idx').on(table.aggregatorId, table.status),
   }),
 );
 
@@ -459,9 +506,9 @@ export const registrationLinks = pgTable(
   'registration_links',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('aggregator_id')
+    aggregatorId: uuid('user_id')
       .notNull()
-      .references(() => aggregators.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'cascade' }),
     slug: text('slug').notNull(),
     domain: text('domain').notNull(),
     context: jsonb('context').$type<Record<string, unknown>>().notNull().default({}),
@@ -479,11 +526,11 @@ export const registrationLinks = pgTable(
   (table) => ({
     // Per-aggregator slug uniqueness — two aggregators may pick the same
     // human-readable slug since the public URL is `/<org_slug>/<slug>`.
-    aggregatorSlugUnique: uniqueIndex('registration_links_aggregator_slug_unique').on(
+    aggregatorSlugUnique: uniqueIndex('registration_links_user_slug_unique').on(
       table.aggregatorId,
       table.slug,
     ),
-    aggregatorStatusIdx: index('registration_links_aggregator_status_idx').on(
+    aggregatorStatusIdx: index('registration_links_user_status_idx').on(
       table.aggregatorId,
       table.status,
     ),
@@ -499,9 +546,9 @@ export const linkSubmissions = pgTable(
     linkId: uuid('link_id')
       .notNull()
       .references(() => registrationLinks.id, { onDelete: 'cascade' }),
-    aggregatorId: uuid('aggregator_id')
+    aggregatorId: uuid('user_id')
       .notNull()
-      .references(() => aggregators.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'cascade' }),
     metadataSnapshot: jsonb('metadata_snapshot')
       .$type<Record<string, unknown>>()
       .notNull()
@@ -518,7 +565,7 @@ export const linkSubmissions = pgTable(
       table.createdAt,
     ),
     linkIdx: index('link_submissions_link_idx').on(table.linkId),
-    aggregatorCreatedIdx: index('link_submissions_aggregator_created_idx').on(
+    aggregatorCreatedIdx: index('link_submissions_user_created_idx').on(
       table.aggregatorId,
       table.createdAt,
     ),
@@ -589,9 +636,9 @@ export const onboarding = pgTable(
   'onboarding',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('aggregator_id')
+    aggregatorId: uuid('user_id')
       .notNull()
-      .references(() => aggregators.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'cascade' }),
     orgSlug: text('org_slug').notNull(),
     source: onboardingSourceEnum('source').notNull(),
     // For source='bulk': bulk_uploads.id. For source='link': NULL.
@@ -617,7 +664,7 @@ export const onboarding = pgTable(
     linkRollupUnique: uniqueIndex('onboarding_link_rollup_unique')
       .on(table.aggregatorId, table.linkId, table.periodStart)
       .where(sql`${table.source} = 'link'`),
-    aggregatorSourceIdx: index('onboarding_aggregator_source_idx').on(
+    aggregatorSourceIdx: index('onboarding_user_source_idx').on(
       table.aggregatorId,
       table.source,
       table.periodStart,
@@ -642,9 +689,9 @@ export const campaignJob = pgTable(
   'campaign_job',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('aggregator_id')
+    aggregatorId: uuid('user_id')
       .notNull()
-      .references(() => aggregators.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'cascade' }),
     // Signalstack org id (the token's `signalstack_org_id` claim) — the tenant
     // scope every read/list/cap query filters on.
     signalstackOrgId: text('signalstack_org_id').notNull(),

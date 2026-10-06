@@ -42,6 +42,9 @@ export function buildAggregatorOrg(overrides: Partial<AggregatorOrg> = {}): Aggr
     displayName: 'Test Org',
     state: null,
     contactId: contactId(ownerEmail, ownerPhone),
+    // One admin account per owner person (0027): derived from the owner's
+    // contact, so two orgs share an owner exactly when they share the person.
+    ownerUserId: `owner-${contactId(ownerEmail, ownerPhone).slice(0, 16)}`,
     ownerEmail,
     ownerPhone,
     ownerName: null,

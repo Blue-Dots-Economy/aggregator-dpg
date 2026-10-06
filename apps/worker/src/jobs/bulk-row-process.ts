@@ -372,9 +372,9 @@ export async function pushToSignalStack(
   // so the `signalstack_org_id` claim is unreachable here — `aggregators`
   // is the only authoritative source available offline.
   const orgIdRow = await getDb()
-    .select({ signalstackOrgId: schema.aggregators.signalstackOrgId })
-    .from(schema.aggregators)
-    .where(eq(schema.aggregators.id, job.aggregatorId))
+    .select({ signalstackOrgId: schema.users.signalstackOrgId })
+    .from(schema.users)
+    .where(eq(schema.users.id, job.aggregatorId))
     .limit(1);
   const signalstackOrgId = orgIdRow[0]?.signalstackOrgId ?? null;
   if (!signalstackOrgId) {

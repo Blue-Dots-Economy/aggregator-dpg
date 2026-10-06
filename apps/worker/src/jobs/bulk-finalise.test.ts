@@ -69,7 +69,7 @@ vi.mock('../db.js', () => ({
   getDb: () => makeDb(),
   schema: {
     bulkUploads: { id: 'id', aggregatorId: 'aggregatorId' },
-    aggregators: { id: 'id', orgSlug: 'orgSlug' },
+    users: { id: 'id', orgSlug: 'orgSlug' },
     onboarding: {
       id: 'id',
       source: 'source',

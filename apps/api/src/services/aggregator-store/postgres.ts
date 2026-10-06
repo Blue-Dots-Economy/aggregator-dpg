@@ -55,6 +55,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
         const rows = await tx
           .insert(aggregators)
           .values({
+            userType: 'coordinator',
             orgSlug: input.orgSlug,
             actorType: input.actorType,
             name: input.name,
@@ -121,7 +122,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
 
   async findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>> {
     try {
-      const rows = await this.selectJoined().where(eq(aggregators.parentOrgId, orgId));
+      const rows = await this.selectJoined().where(coordinator(eq(aggregators.parentOrgId, orgId)));
       return { ok: true, value: rows.map(toDomain) };
     } catch (err: unknown) {
       return this.mapReadError('aggregatorStore.findByParentOrgId', err);
@@ -136,7 +137,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       if (filter.status) conds.push(eq(aggregators.status, filter.status));
       if (filter.actorType) conds.push(eq(aggregators.actorType, filter.actorType));
       if (filter.updatedBefore) conds.push(lt(aggregators.updatedAt, filter.updatedBefore));
-      const where = conds.length > 0 ? and(...conds) : undefined;
+      const where = coordinator(...conds);
 
       const rows = await this.selectJoined()
         .where(where)
@@ -178,7 +179,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           const [current] = await tx
             .select({ contactId: aggregators.contactId })
             .from(aggregators)
-            .where(eq(aggregators.id, id))
+            .where(coordinator(eq(aggregators.id, id)))
             .for('update');
           if (!current) return null;
           const { identity, extra } = splitBecknContact(patch.contact);
@@ -188,7 +189,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
         const rows = await tx
           .update(aggregators)
           .set(updates)
-          .where(eq(aggregators.id, id))
+          .where(coordinator(eq(aggregators.id, id)))
           .returning({ id: aggregators.id });
         return rows.length > 0 ? this.readIn(tx, id) : null;
       });
@@ -230,7 +231,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       const rows = await getDb()
         .update(aggregators)
         .set({ status: 'active', updatedBy, updatedAt: new Date() })
-        .where(and(eq(aggregators.id, id), eq(aggregators.status, 'pending')))
+        .where(coordinator(eq(aggregators.id, id), eq(aggregators.status, 'pending')))
         .returning({ id: aggregators.id });
       // No row → not pending (a concurrent approval already committed).
       if (!rows[0]) return { ok: true, value: null };
@@ -254,7 +255,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           updatedBy,
           updatedAt: new Date(),
         })
-        .where(eq(aggregators.id, id))
+        .where(coordinator(eq(aggregators.id, id)))
         .returning({ id: aggregators.id });
       if (!rows[0]) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
       const updated = await this.reread('aggregatorStore.updateSignalstackOrgId', id);
@@ -276,7 +277,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     try {
       const rows = await getDb()
         .delete(aggregators)
-        .where(eq(aggregators.id, id))
+        .where(coordinator(eq(aggregators.id, id)))
         .returning({ id: aggregators.id });
       if (rows.length === 0) {
         return { ok: false, error: { code: 'NOT_FOUND', message: id } };
@@ -290,8 +291,10 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
   // ─── Reads ────────────────────────────────────────────────────────────────
 
   /**
-   * `aggregators` JOIN `contact` — the one read shape every query uses. An
-   * inner join: `contact_id` is NOT NULL (0026) and RESTRICT-protected.
+   * `users` JOIN `contact` — the one read shape every query uses. An inner
+   * join: `contact_id` is NOT NULL and RESTRICT-protected. Every caller filters
+   * through {@link coordinator}, so an admin account never reads as an
+   * aggregator (the token's `aggregator_id` is resolved here).
    *
    * @param db - Executor (the pool, or the caller's transaction).
    */
@@ -304,14 +307,16 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
 
   /** Reads one joined row through `db` (used inside write transactions). */
   private async readIn(db: DbExecutor, id: string): Promise<Aggregator | null> {
-    const [row] = await this.selectJoined(db).where(eq(aggregators.id, id)).limit(1);
+    const [row] = await this.selectJoined(db)
+      .where(coordinator(eq(aggregators.id, id)))
+      .limit(1);
     return row ? toDomain(row) : null;
   }
 
   /** Returns the first row matching `predicate`, or `null`. */
   private async findOne(op: string, predicate: SQL): Promise<StoreResult<Aggregator | null>> {
     try {
-      const [row] = await this.selectJoined().where(predicate).limit(1);
+      const [row] = await this.selectJoined().where(coordinator(predicate)).limit(1);
       return { ok: true, value: row ? toDomain(row) : null };
     } catch (err: unknown) {
       return this.mapReadError(op, err);
@@ -366,8 +371,8 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       // unique index a later migration happens to add (#718 review); the
       // constraint name is logged below either way.
       let storeCode: StoreError['code'] = 'DUPLICATE';
-      // The same person already has a coordinator row (one row per contact).
-      if (constraint.includes('aggregators_contact_id_unique')) storeCode = 'DUPLICATE_EMAIL';
+      // The same person already has a coordinator account (one per person per role).
+      if (constraint.includes('users_contact_type_unique')) storeCode = 'DUPLICATE_EMAIL';
       else if (constraint.includes('contact_phone')) storeCode = 'DUPLICATE_PHONE';
       else if (constraint.includes('contact_email')) storeCode = 'DUPLICATE_EMAIL';
       else if (constraint.includes('slug')) storeCode = 'DUPLICATE_SLUG';
@@ -474,4 +479,18 @@ function toDomain(row: JoinedRow): Aggregator {
     inviteEmail: a.inviteEmail,
     rejectedAt: a.rejectedAt,
   };
+}
+
+/**
+ * Restricts a filter to coordinator accounts. Every read AND write of this
+ * store goes through it: `users` also holds org owners' admin accounts
+ * (migration 0027), and an admin id must never resolve as an aggregator — not
+ * on a read (the token's `aggregator_id` is looked up here) and not on a write
+ * (an admin id yields NOT_FOUND, never a CHECK violation or a deleted account).
+ *
+ * @param conds - Further conditions (undefined entries are ignored).
+ * @returns The combined condition.
+ */
+function coordinator(...conds: (SQL | undefined)[]): SQL {
+  return and(eq(aggregators.userType, 'coordinator'), ...conds)!;
 }

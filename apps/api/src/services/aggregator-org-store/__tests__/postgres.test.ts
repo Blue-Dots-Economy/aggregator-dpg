@@ -17,7 +17,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { PostgresAggregatorOrgStore } from '../postgres.js';
 import { _setDbClients } from '../../../db/client.js';
 import type { AggregatorOrg, CreateOrgInput } from '../interface.js';
-import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 
 // ─── Fake Drizzle chain ─────────────────────────────────────────────────────
 
@@ -31,7 +30,8 @@ function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
   // resolve to `{ o, c }` pairs. Tests keep returning flat rows; wrap them
   // here, deriving the joined contact from the fixture's owner fields.
   const resolve = (chain: ChainCall[]): unknown => {
-    if (chain[0]?.method === 'execute') return { rows: [{ n: 1 }] };
+    // Raw SQL: the admin-account link reads `id`; ownerIsShared reads `shared`.
+    if (chain[0]?.method === 'execute') return { rows: [{ n: 1, id: 'admin-1', shared: false }] };
     const out = resolveRaw(chain);
     if (!chain.some((c) => c.method === 'innerJoin') || !Array.isArray(out)) return out;
     return out.map((r: Record<string, unknown>) =>
@@ -39,6 +39,7 @@ function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
         ? r
         : {
             o: r,
+            ownerKcSub: (r['ownerKcSub'] as string | null) ?? null,
             c: {
               id: 'c'.repeat(64),
               email: String(r['ownerEmail']).toLowerCase(),
@@ -105,6 +106,7 @@ function makeRow(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
     displayName: 'Test Org',
     state: null,
     contactId: 'a'.repeat(64),
+    ownerUserId: 'admin-1',
     ownerEmail: 'owner@test.local',
     ownerPhone: null,
     ownerName: null,
@@ -151,12 +153,15 @@ describe('PostgresAggregatorOrgStore.create', () => {
     expect(callArgs(captured, 'values')?.[0]).toMatchObject({
       slug: 'test-org',
       displayName: 'Test Org',
-      // The lowercased email lives on the contact, keyed by its hash.
-      contactId: contactId('owner@test.local', null),
+      // The owner is an admin account (0027) linked to the owner's contact;
+      // the org row holds no contact or IdP copy of its own.
+      ownerUserId: 'admin-1',
       state: null,
-      ownerKcSub: null,
       kcGroupId: null,
     });
+    const orgValues = callArgs(captured, 'values')?.[0] as Record<string, unknown>;
+    expect(orgValues).not.toHaveProperty('contactId');
+    expect(orgValues).not.toHaveProperty('ownerKcSub');
   });
 
   it('returns DB_UNAVAILABLE when insert returns no row', async () => {

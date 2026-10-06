@@ -209,8 +209,8 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
       expect(await legacyColumnCount(pool)).toBe(0);
       const unlinked = await one<{ n: number }>(
         pool,
-        `SELECT (SELECT count(*) FROM aggregators WHERE contact_id IS NULL)
-              + (SELECT count(*) FROM aggregator_orgs WHERE contact_id IS NULL) AS n`,
+        `SELECT (SELECT count(*) FROM users WHERE contact_id IS NULL)
+              + (SELECT count(*) FROM aggregator_orgs WHERE owner_user_id IS NULL) AS n`,
       );
       expect(Number(unlinked.n)).toBe(0);
       expect((await one<{ n: number }>(pool, 'SELECT count(*)::int AS n FROM contact')).n).toBe(3);
@@ -219,7 +219,7 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
         one<{ name: string | null; email: string; phone: string; contact_extra: unknown }>(
           pool,
           `SELECT c.name, c.email, c.phone, a.contact_extra
-             FROM aggregators a JOIN contact c ON c.id = a.contact_id WHERE a.id = $1`,
+             FROM users a JOIN contact c ON c.id = a.contact_id WHERE a.id = $1`,
           [id],
         );
       expect(await coord(coordA)).toEqual({
@@ -239,7 +239,9 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
         one<{ name: string | null; email: string; phone: string }>(
           pool,
           `SELECT c.name, c.email, c.phone
-             FROM aggregator_orgs o JOIN contact c ON c.id = o.contact_id WHERE o.id = $1`,
+             FROM aggregator_orgs o
+             JOIN users u ON u.id = o.owner_user_id
+             JOIN contact c ON c.id = u.contact_id WHERE o.id = $1`,
           [id],
         );
       // Owner names were never stored locally; the backfill script fills them.
@@ -255,11 +257,23 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
       });
       const shared = await one<{ same: boolean }>(
         pool,
-        `SELECT (SELECT contact_id FROM aggregators WHERE id = $1)
-              = (SELECT contact_id FROM aggregator_orgs WHERE id = $2) AS same`,
+        `SELECT (SELECT contact_id FROM users WHERE id = $1)
+              = (SELECT u.contact_id FROM aggregator_orgs o JOIN users u ON u.id = o.owner_user_id
+                  WHERE o.id = $2) AS same`,
         [coordB, orgShared],
       );
       expect(shared.same).toBe(true);
+      // 0027: each org owner is an identity-only admin account; coordinator B
+      // and the owner of org-shared are one person in two roles.
+      const roles = await one<{ admins: number; coordinators: number; both: number }>(
+        pool,
+        `SELECT count(*) FILTER (WHERE user_type = 'admin')::int AS admins,
+                count(*) FILTER (WHERE user_type = 'coordinator')::int AS coordinators,
+                (SELECT count(*)::int FROM (SELECT contact_id FROM users GROUP BY contact_id
+                   HAVING count(*) = 2) d) AS both
+           FROM users`,
+      );
+      expect(roles).toEqual({ admins: 2, coordinators: 2, both: 1 });
     },
     TIMEOUT_MS,
   );

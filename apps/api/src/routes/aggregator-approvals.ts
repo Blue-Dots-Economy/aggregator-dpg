@@ -47,6 +47,7 @@ import { sendHtml, sendPage, missingTokenPage, verifyTokenForId } from './approv
 import { checkApprovalVerifyRate } from '../services/approval-verify-rate.js';
 import type { Aggregator } from '../services/aggregator-store/index.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
+import { recordLoginIdentity } from '../services/identity-store/record.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
 
 const DecisionBodySchema = z.object({
@@ -779,6 +780,9 @@ async function loadAggregatorAndUser(aggregatorId: string): Promise<LookupOk | L
       }),
     };
   }
+  // The DB's own link to this coordinator's IdP login (0027). Best-effort:
+  // never blocks the review.
+  await recordLoginIdentity(aggregatorId, kc.value.id, 'aggregator-approvals.recordIdentity');
   return { ok: true, aggregator: stored.value, kcUser: kc.value };
 }
 

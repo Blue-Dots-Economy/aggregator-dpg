@@ -51,12 +51,12 @@ export async function rollupLinkMetrics(_job: LinkMetricsRollupJob): Promise<Rol
       id: schema.linkSubmissions.id,
       linkId: schema.linkSubmissions.linkId,
       aggregatorId: schema.linkSubmissions.aggregatorId,
-      orgSlug: schema.aggregators.orgSlug,
+      orgSlug: schema.users.orgSlug,
       outcome: schema.linkSubmissions.outcome,
       createdAt: schema.linkSubmissions.createdAt,
     })
     .from(schema.linkSubmissions)
-    .innerJoin(schema.aggregators, eq(schema.linkSubmissions.aggregatorId, schema.aggregators.id))
+    .innerJoin(schema.users, eq(schema.linkSubmissions.aggregatorId, schema.users.id))
     .where(isNull(schema.linkSubmissions.rolledUpAt))
     .orderBy(schema.linkSubmissions.createdAt)
     .limit(BATCH_SIZE);

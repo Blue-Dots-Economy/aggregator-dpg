@@ -104,6 +104,52 @@ describe('cleanup-stale — org prune (ORG_HIERARCHY_ENABLED)', () => {
     expect(idp.getGroup(group.value.id)).toBeUndefined();
   });
 
+  it('keeps the owner KC user when the owner owns another org (0027, F11)', async () => {
+    const owner = await idp.createUser({
+      email: 'two.orgs@x.org',
+      username: 'two.orgs@x.org',
+      phone: '+912222222222',
+      enabled: true,
+    });
+    if (!owner.ok) throw new Error('seed owner');
+    const group = await idp.createGroup('org-stale2', { org_id: 'o-stale2' });
+    if (!group.ok) throw new Error('seed group');
+    // Same owner person: a stale pending org and a live, approved one.
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: 'o-stale2',
+        slug: 'stale2',
+        ownerEmail: 'two.orgs@x.org',
+        ownerKcSub: owner.value.id,
+        kcGroupId: group.value.id,
+        status: 'pending',
+        updatedAt: new Date('2020-01-01T00:00:00Z'),
+      }),
+      buildAggregatorOrg({
+        id: 'o-live2',
+        slug: 'live2',
+        displayName: 'Live Two',
+        ownerEmail: 'two.orgs@x.org',
+        ownerKcSub: owner.value.id,
+        status: 'active',
+        updatedAt: new Date(),
+      }),
+    ]);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/aggregator-registrations/cleanup-stale',
+      headers: AUTH_HEADER,
+    });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { orgsPrunedIds: string[] }).orgsPrunedIds).toEqual(['o-stale2']);
+    // The stale org and its group go; the owner's KC user stays for the live org.
+    const kept = await idp.findById(owner.value.id);
+    expect(kept.ok && kept.value?.id).toBe(owner.value.id);
+    const live = await orgStore.findById('o-live2');
+    expect(live.ok && live.value?.status).toBe('active');
+  });
+
   it('prunes a stale pending org with no owner KC user on file (ownerKcSub unset)', async () => {
     orgStore.seed([
       buildAggregatorOrg({

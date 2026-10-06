@@ -16,6 +16,8 @@
  */
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import { afterEach, describe, expect, it } from 'vitest';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
 import { PostgresAggregatorStore } from '../postgres.js';
 import { _setDbClients } from '../../../db/client.js';
 import type { Aggregator, CreateAggregatorInput } from '../interface.js';
@@ -300,7 +302,7 @@ describe('PostgresAggregatorStore.create', () => {
     const db = makeFakeDb(() => {
       throw Object.assign(new Error('dup'), {
         code: '23505',
-        constraint: 'aggregators_contact_id_unique',
+        constraint: 'users_contact_type_unique',
       });
     });
     _setDbClients(null, db as never);
@@ -549,18 +551,21 @@ describe('PostgresAggregatorStore.list', () => {
     expect(sawWhereWithFilters).toBe(true);
   });
 
-  it('passes where=undefined when no filters are set', async () => {
-    let sawUndefinedWhere = false;
+  it('still restricts to coordinator accounts when no filters are set (0027)', async () => {
+    const whereArgs: unknown[] = [];
     const db = makeFakeDb((chain) => {
-      const whereArgs = callArgs(chain, 'where');
-      if (whereArgs && whereArgs[0] === undefined) sawUndefinedWhere = true;
+      const w = callArgs(chain, 'where');
+      if (w) whereArgs.push(w[0]);
       return hasCall(chain, 'orderBy') ? [] : [{ total: 0 }];
     });
     _setDbClients(null, db as never);
     const store = new PostgresAggregatorStore();
 
     await store.list({});
-    expect(sawUndefinedWhere).toBe(true);
+    // Both the page query and the count query carry the user_type filter, so
+    // an org owner's admin account never appears in (or counts towards) a list.
+    expect(whereArgs).toHaveLength(2);
+    expect(whereArgs.every((w) => w !== undefined)).toBe(true);
   });
 
   it('defaults total to 0 when the count query returns no row', async () => {
@@ -917,5 +922,38 @@ describe('PostgresAggregatorStore contact composition', () => {
     _setDbClients(null, makeFakeDb(() => [{ a, c: linked(null, '+919000000009') }]) as never);
     const result = await new PostgresAggregatorStore().findById(a.id);
     expect(result.ok && result.value?.contact.name).toBe('');
+  });
+});
+
+describe('PostgresAggregatorStore — coordinator accounts only (0027)', () => {
+  const dialect = new PgDialect();
+  /** Renders every `.where(...)` argument the store passed, as SQL text. */
+  function wheresOf(run: (store: PostgresAggregatorStore) => Promise<unknown>) {
+    const rendered: string[] = [];
+    const db = makeFakeDb((chain) => {
+      const w = callArgs(chain, 'where')?.[0];
+      if (w) rendered.push(dialect.sqlToQuery(w as SQL).sql);
+      return [];
+    });
+    _setDbClients(null, db as never);
+    return run(new PostgresAggregatorStore()).then(() => rendered);
+  }
+
+  it.each([
+    ['findById', (s: PostgresAggregatorStore) => s.findById('id-1')],
+    ['findBySlug', (s: PostgresAggregatorStore) => s.findBySlug('slug')],
+    ['findByContactEmail', (s: PostgresAggregatorStore) => s.findByContactEmail('a@x.org')],
+    ['findByContactPhone', (s: PostgresAggregatorStore) => s.findByContactPhone('+919000000001')],
+    ['findByParentOrgId', (s: PostgresAggregatorStore) => s.findByParentOrgId('org-1')],
+    ['approveFromPending', (s: PostgresAggregatorStore) => s.approveFromPending('id-1', 't')],
+    [
+      'updateSignalstackOrgId',
+      (s: PostgresAggregatorStore) => s.updateSignalstackOrgId('id-1', 'o', 't'),
+    ],
+    ['deleteById', (s: PostgresAggregatorStore) => s.deleteById('id-1')],
+  ] as const)('%s filters on user_type = coordinator', async (_name, run) => {
+    const wheres = await wheresOf(run);
+    expect(wheres.length).toBeGreaterThan(0);
+    for (const w of wheres) expect(w).toContain('"user_type" = $');
   });
 });

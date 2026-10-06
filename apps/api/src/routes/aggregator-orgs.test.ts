@@ -598,6 +598,9 @@ describe('aggregator-orgs routes', () => {
       async findBySlug(): Promise<OrgStoreResult<AggregatorOrg | null>> {
         return { ok: true, value: null };
       }
+      async ownerIsShared(): Promise<OrgStoreResult<boolean>> {
+        return { ok: true, value: false };
+      }
       async findByOwnerEmail(): Promise<OrgStoreResult<AggregatorOrg | null>> {
         return { ok: true, value: null };
       }

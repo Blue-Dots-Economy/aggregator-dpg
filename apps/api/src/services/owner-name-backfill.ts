@@ -5,14 +5,16 @@
  * Before migration 0025 an org owner's name was never stored in the database —
  * it only reached Keycloak as first/last name — so contacts backfilled from
  * `aggregator_orgs` have `name IS NULL`. This reads the name back from Keycloak
- * via `aggregator_orgs.owner_kc_sub` and records it where the contact still has
+ * via the owner's IdP login (`user_identities` of the owner's admin account,
+ * migration 0027) and records it where the contact still has
  * none (an existing name always wins). Idempotent; safe to re-run.
  *
  * Runner: `apps/api/scripts/backfill-owner-contact-names.ts`.
  */
 
-import { and, eq, isNotNull, isNull } from 'drizzle-orm';
-import { aggregatorOrgs, contact } from '../db/schema.js';
+import { and, eq, isNull } from 'drizzle-orm';
+import { aggregatorOrgs, contact, userIdentities, users } from '../db/schema.js';
+import { IDP_PROVIDER } from './idp-admin/provider.js';
 import { getDb } from '../db/client.js';
 import { logger } from '../logger.js';
 import type { IdpAdminAdapter, IdpUser, IdpResult } from './idp-admin/interface.js';
@@ -180,15 +182,21 @@ async function findWithRetry(
  * @returns The candidates (possibly empty).
  */
 export async function listOwnerNameCandidatesFromDb(): Promise<OwnerNameCandidate[]> {
+  // Owner account → its contact (nameless) and its IdP login (required).
   const rows = await getDb()
     .select({
       orgId: aggregatorOrgs.id,
-      contactId: aggregatorOrgs.contactId,
-      ownerKcSub: aggregatorOrgs.ownerKcSub,
+      contactId: users.contactId,
+      ownerKcSub: userIdentities.subject,
     })
     .from(aggregatorOrgs)
-    .innerJoin(contact, eq(contact.id, aggregatorOrgs.contactId))
-    .where(and(isNull(contact.name), isNotNull(aggregatorOrgs.ownerKcSub)));
+    .innerJoin(users, eq(users.id, aggregatorOrgs.ownerUserId))
+    .innerJoin(contact, eq(contact.id, users.contactId))
+    .innerJoin(
+      userIdentities,
+      and(eq(userIdentities.userId, users.id), eq(userIdentities.provider, IDP_PROVIDER)),
+    )
+    .where(isNull(contact.name));
   return rows.flatMap((r) =>
     r.ownerKcSub ? [{ orgId: r.orgId, contactId: r.contactId, ownerKcSub: r.ownerKcSub }] : [],
   );
