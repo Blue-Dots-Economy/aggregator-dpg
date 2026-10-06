@@ -62,7 +62,7 @@ The pattern to follow instead: resolve the value in a **server** component and p
 
 ## The form widgets' geo layer (`lib/geo/`)
 
-**Country restriction (signals-dpg#785).** `GEO_COUNTRY` (e.g. `IN`) is passed to the Google Places provider as `includedRegionCodes`, a hard filter. Each suggestion's own `country` component is also checked as a backstop. It mirrors Signals' `VITE_GEO_COUNTRY`. Unset, blank or a non-two-letter value means no restriction. Photon is not restricted yet (signals-dpg#788). The search box only covers picked points: coordinates a registrant or a bulk `geo_location` cell supplies are checked by Signals, which rejects one outside the country with `400 LOCATION_OUTSIDE_COUNTRY` (signals-dpg#789).
+**Country restriction (signals-dpg#785).** `GEO_COUNTRY` (e.g. `IN`) is passed to the Google Places provider as `includedRegionCodes`, a hard filter. Each suggestion's own `country` component is also checked as a backstop. The Photon provider gets the same restriction (signals-dpg#788): it sends `countrycode`, re-checks each feature's `properties.countrycode` (older Photon servers ignore the param), and drops country- and state-level features. It mirrors Signals' `VITE_GEO_COUNTRY`. Unset, blank or a non-two-letter value means no restriction. The search box only covers picked points: coordinates a registrant or a bulk `geo_location` cell supplies are checked by Signals, which rejects one outside the country with `400 LOCATION_OUTSIDE_COUNTRY` (signals-dpg#789).
 
 Ported from Signals-DPG `apps/ui/src/lib/geo/` and behaviourally the same — read that copy when changing this one, and keep them in step.
 
