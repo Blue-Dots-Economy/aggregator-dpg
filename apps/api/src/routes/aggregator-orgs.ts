@@ -1,9 +1,8 @@
 /**
  * Org registration endpoints (spec §6.1 / §6 dropdown).
  *
- * Flag-gated by `ORG_HIERARCHY_ENABLED`: when the flag is OFF these routes are
- * not registered at all (Fastify returns 404), so flag-off behaviour is
- * unchanged. When ON:
+ * Always registered: the org hierarchy is always on since migration 0028.
+ * Orgs live in `organisations` (`org_type = 'aggregator'`):
  *
  *   POST /v1/orgs/create
  *     Inserts a `pending` `aggregator_orgs` row (system of record), creates the
@@ -19,7 +18,7 @@
 
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { config, orgHierarchyEnabled } from '../config.js';
+import { config } from '../config.js';
 import { coolingRetryAfter } from '../services/registration-cooling.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
@@ -35,6 +34,10 @@ import { splitName } from '../services/name.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import { checkOrgInviteResendRate } from '../services/org-invite-resend-rate.js';
 import { slugFromName } from '../services/slug.js';
+import { orgLocationsFrom, orgUrlFrom } from '../services/org-location.js';
+
+/** Attempts at a fresh random-suffixed slug when one collides. */
+const ORG_SLUG_RETRIES = 3;
 import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
@@ -146,14 +149,11 @@ const OrgListResponseSchema = z
   .passthrough();
 
 /**
- * Registers the org registration + dropdown routes. No-op (routes absent) when
- * `ORG_HIERARCHY_ENABLED` is false, so flag-off deployments behave as today.
+ * Registers the org registration + dropdown routes.
  *
  * @param app - Fastify instance to attach the routes to.
  */
 export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
-  if (!orgHierarchyEnabled()) return;
-
   app.post(
     '/v1/orgs/create',
     {
@@ -161,7 +161,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         tags: ['aggregator-orgs'],
         summary: 'Submit a new parent-org registration',
         description:
-          'Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link. Only registered when ORG_HIERARCHY_ENABLED=true.',
+          'Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link.',
         body: OrgCreateBodySchema,
         response: { 201: OrgCreatedResponseSchema, ...errorResponses(400, 401, 409, 500, 503) },
       },
@@ -397,23 +397,39 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           'org-registration schema not found — storing profile without a variant ref',
         );
       }
-      const slug = slugFromName(body.display_name);
-      const created = await orgStore.create({
-        slug,
-        displayName: body.display_name,
-        // `address.addressRegion` is the form's only State input on schemas that
-        // declare an address block; the standalone `state` field is hidden there.
-        // Prefer it so the column stays populated either way.
-        state: body.address?.addressRegion ?? body.state ?? null,
-        ownerEmail: ownerEmail,
-        ownerPhone: phoneE164,
-        ownerName: body.owner.name,
-        profile: buildOrgProfile(body),
-        // Derived from the schema file that actually resolved, not from the
-        // brand env — a missing override must not be recorded as if its
-        // variant had produced the payload. NULL means "variant unknown".
-        profileRef: orgProfileRef,
-      });
+      // The slug carries a random suffix; retry a collision like
+      // createAggregatorWithSlug does (review A11).
+      let slug = slugFromName(body.display_name);
+      const createOnce = (s: string) =>
+        orgStore.create({
+          slug: s,
+          displayName: body.display_name,
+          // `address.addressRegion` is the form's only State input on schemas that
+          // declare an address block; the standalone `state` field is hidden there.
+          // Prefer it so the column stays populated either way.
+          state: body.address?.addressRegion ?? body.state ?? null,
+          ownerEmail: ownerEmail,
+          ownerPhone: phoneE164,
+          ownerName: body.owner.name,
+          // Org details (0028); the same values also stay in `profile` /
+          // `state` until Phase 4 drops them.
+          url: orgUrlFrom(body.website),
+          locations: orgLocationsFrom(body.address, body.state, body.coordinates),
+          profile: buildOrgProfile(body),
+          // Derived from the schema file that actually resolved, not from the
+          // brand env — a missing override must not be recorded as if its
+          // variant had produced the payload. NULL means "variant unknown".
+          profileRef: orgProfileRef,
+        });
+      let created = await createOnce(slug);
+      for (
+        let attempt = 1;
+        attempt < ORG_SLUG_RETRIES && !created.ok && created.error.code === 'DUPLICATE_SLUG';
+        attempt += 1
+      ) {
+        slug = slugFromName(body.display_name);
+        created = await createOnce(slug);
+      }
       if (!created.ok) {
         if (created.error.code === 'DUPLICATE_NAME') {
           throw httpError('ORG_NAME_TAKEN', { fields: { display_name: body.display_name } });
@@ -566,7 +582,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         tags: ['aggregator-orgs'],
         summary: 'List active orgs for the coordinator-registration dropdown',
         description:
-          'Returns active orgs only (plain SQL, no Keycloak admin API). Only registered when ORG_HIERARCHY_ENABLED=true.',
+          'Returns active aggregator orgs sorted by name (plain SQL, no Keycloak admin API). The Default org is listed only while it is the only active org.',
         response: { 200: OrgListResponseSchema, ...errorResponses(401, 500, 503) },
       },
     },
@@ -585,8 +601,11 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           fields: { sub_operation: 'orgStore.listActive' },
         });
       }
+      // The Default org is selectable only while no real org is active (D3-12).
+      const hasRealOrg = page.value.some((o) => !o.isDefault);
+      const listed = hasRealOrg ? page.value.filter((o) => !o.isDefault) : page.value;
       return reply.status(200).send({
-        orgs: page.value.map((o) => ({ id: o.id, slug: o.slug, display_name: o.displayName })),
+        orgs: listed.map((o) => ({ id: o.id, slug: o.slug, display_name: o.displayName })),
       });
     },
   );

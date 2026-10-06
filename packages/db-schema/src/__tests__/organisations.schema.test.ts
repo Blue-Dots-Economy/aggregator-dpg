@@ -1,0 +1,88 @@
+import { describe, it, expect } from 'vitest';
+import { getTableConfig } from 'drizzle-orm/pg-core';
+import { aggregatorOrgs, organisations, orgTypeEnum, users } from '../schema.js';
+
+describe('organisations schema (migration 0028)', () => {
+  it('declares the org columns with snake_case SQL names', () => {
+    expect(getTableConfig(organisations).name).toBe('organisations');
+    expect(organisations.id.name).toBe('id');
+    expect(organisations.slug.name).toBe('slug');
+    expect(organisations.name.name).toBe('name');
+    expect(organisations.orgType.name).toBe('org_type');
+    expect(organisations.parentId.name).toBe('parent_id');
+    expect(organisations.state.name).toBe('state');
+    expect(organisations.orgOwner.name).toBe('org_owner');
+    expect(organisations.url.name).toBe('url');
+    expect(organisations.locations.name).toBe('locations');
+    expect(organisations.legalName.name).toBe('legal_name');
+    expect(organisations.gstNumber.name).toBe('gst_number');
+    expect(organisations.kcGroupId.name).toBe('kc_group_id');
+    expect(organisations.status.name).toBe('status');
+    expect('displayName' in organisations).toBe(false);
+    expect('ownerUserId' in organisations).toBe(false);
+  });
+
+  it('requires slug, name, org_type and owner; parent and details are optional', () => {
+    expect(organisations.slug.notNull).toBe(true);
+    expect(organisations.name.notNull).toBe(true);
+    expect(organisations.orgType.notNull).toBe(true);
+    expect(organisations.orgOwner.notNull).toBe(true);
+    expect(organisations.parentId.notNull).toBe(false);
+    expect(organisations.url.notNull).toBe(false);
+    expect(organisations.locations.notNull).toBe(true);
+    expect(organisations.locations.hasDefault).toBe(true);
+  });
+
+  it('has the two org types', () => {
+    expect(orgTypeEnum.enumValues).toEqual(['network_facilitator', 'aggregator']);
+  });
+
+  it('keeps aggregatorOrgs as an alias until the naming commit', () => {
+    expect(aggregatorOrgs).toBe(organisations);
+  });
+
+  it('owner and parent FKs are RESTRICT', () => {
+    const cfg = getTableConfig(organisations);
+    const owner = cfg.foreignKeys.find((f) => f.reference().columns[0] === organisations.orgOwner)!;
+    expect(owner.reference().foreignTable).toBe(users);
+    expect(owner.onDelete).toBe('restrict');
+    const parent = cfg.foreignKeys.find(
+      (f) => f.reference().columns[0] === organisations.parentId,
+    )!;
+    expect(parent.reference().foreignTable).toBe(organisations);
+    expect(parent.onDelete).toBe('restrict');
+  });
+
+  it('declares the live-only slug and name indexes and the single-NF index', () => {
+    const byName = Object.fromEntries(
+      getTableConfig(organisations).indexes.map((i) => [i.config.name, i]),
+    );
+    expect(byName['organisations_slug_live_unique']?.config.unique).toBe(true);
+    expect(byName['organisations_slug_live_unique']?.config.where).toBeDefined();
+    expect(byName['organisations_name_live_unique']?.config.unique).toBe(true);
+    expect(byName['organisations_single_nf']?.config.unique).toBe(true);
+    expect(byName['organisations_status_idx']).toBeDefined();
+    expect(byName['organisations_org_owner_idx']).toBeDefined();
+    expect(byName['organisations_parent_status_idx']).toBeDefined();
+  });
+});
+
+describe('users.org_id (migration 0028)', () => {
+  it('is a required FK to organisations, RESTRICT on delete', () => {
+    expect(users.orgId.name).toBe('org_id');
+    expect(users.orgId.notNull).toBe(true);
+    expect('parentOrgId' in users).toBe(false);
+    const fk = getTableConfig(users).foreignKeys.find(
+      (f) => f.reference().columns[0] === users.orgId,
+    )!;
+    expect(fk.reference().foreignTable).toBe(organisations);
+    expect(fk.onDelete).toBe('restrict');
+  });
+
+  it('moves url / locations to the org and keeps legacy_org_details', () => {
+    expect('url' in users).toBe(false);
+    expect('locations' in users).toBe(false);
+    expect(users.legacyOrgDetails.name).toBe('legacy_org_details');
+    expect(users.legacyOrgDetails.notNull).toBe(false);
+  });
+});

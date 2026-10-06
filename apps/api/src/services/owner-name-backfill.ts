@@ -4,7 +4,7 @@
  * Belongs to `@aggregator-dpg/api` (the `contact` table, migrations 0025/0026).
  * Before migration 0025 an org owner's name was never stored in the database —
  * it only reached Keycloak as first/last name — so contacts backfilled from
- * `aggregator_orgs` have `name IS NULL`. This reads the name back from Keycloak
+ * `organisations` have `name IS NULL`. This reads the name back from Keycloak
  * via the owner's IdP login (`user_identities` of the owner's admin account,
  * migration 0027) and records it where the contact still has
  * none (an existing name always wins). Idempotent; safe to re-run.
@@ -190,13 +190,15 @@ export async function listOwnerNameCandidatesFromDb(): Promise<OwnerNameCandidat
       ownerKcSub: userIdentities.subject,
     })
     .from(aggregatorOrgs)
-    .innerJoin(users, eq(users.id, aggregatorOrgs.ownerUserId))
+    .innerJoin(users, eq(users.id, aggregatorOrgs.orgOwner))
     .innerJoin(contact, eq(contact.id, users.contactId))
     .innerJoin(
       userIdentities,
       and(eq(userIdentities.userId, users.id), eq(userIdentities.provider, IDP_PROVIDER)),
     )
-    .where(isNull(contact.name));
+    // Aggregator orgs only: the network admin's root / Default orgs have no
+    // Keycloak owner to read a name from.
+    .where(and(isNull(contact.name), eq(aggregatorOrgs.orgType, 'aggregator')));
   return rows.flatMap((r) =>
     r.ownerKcSub ? [{ orgId: r.orgId, contactId: r.contactId, ownerKcSub: r.ownerKcSub }] : [],
   );

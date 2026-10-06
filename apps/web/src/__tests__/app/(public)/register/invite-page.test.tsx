@@ -50,12 +50,6 @@ describe('OwnerInvitePage (server component)', () => {
     expect(redirect).toHaveBeenCalledWith('/dashboard');
   });
 
-  it('404s when the org hierarchy flag is off', async () => {
-    isOrgHierarchyEnabled.mockReturnValue(false);
-    expect(await runAndCatch('g')).toBe('NOT_FOUND');
-    expect(notFound).toHaveBeenCalled();
-  });
-
   it('404s when no grant is present', async () => {
     expect(await runAndCatch(undefined)).toBe('NOT_FOUND');
     expect(notFound).toHaveBeenCalled();

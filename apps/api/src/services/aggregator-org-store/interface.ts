@@ -1,13 +1,22 @@
 /**
  * Aggregator-org store contract — the org system of record (spec §5.1).
  *
- * Belongs to `@aggregator-dpg/api`. The org is a thin DB row; the Keycloak
- * group is a future-authz mirror that this store does not read for scoping.
- * Status lives here so org approval uses an atomic compare-and-set single-use
- * guard (spec A3). Returns `OrgStoreResult<T>` on every boundary — never throws.
+ * Belongs to `@aggregator-dpg/api`. The org is a row of `organisations`
+ * (migration 0028); the Keycloak group is a future-authz mirror that this
+ * store does not read for scoping. Status lives here so org approval uses an
+ * atomic compare-and-set single-use guard (spec A3). Returns
+ * `OrgStoreResult<T>` on every boundary — never throws.
+ *
+ * **Scope:** every method except {@link AggregatorOrgStoreBase.findRoot} sees
+ * `aggregator` orgs only, so the network-facilitator root never reaches a
+ * caller that lists, selects or owns orgs. The owner lookups also skip the
+ * Default org, which the network admin owns.
  */
 
-import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
+import type { AggregatorStatus, BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
+
+/** Slug of the fixed Default org that holds formerly-flat coordinators (0028). */
+export const DEFAULT_ORG_SLUG = 'default';
 
 export interface AggregatorOrg {
   id: string;
@@ -47,6 +56,13 @@ export interface AggregatorOrg {
   updatedAt: Date;
   /** Write-once rejection timestamp (#726) — drives the cooling window. */
   rejectedAt: Date | null;
+  /** Whether this is the fixed Default org (slug {@link DEFAULT_ORG_SLUG}). */
+  isDefault: boolean;
+  /** Org details (0028): rendered for every coordinator of the org. */
+  url: string | null;
+  locations: BecknLocation[];
+  legalName: string | null;
+  gstNumber: string | null;
 }
 
 export interface CreateOrgInput {
@@ -61,6 +77,9 @@ export interface CreateOrgInput {
   kcGroupId?: string | null;
   profile?: Record<string, unknown>;
   profileRef?: string | null;
+  /** Org details (0028) from the registration form's website / address. */
+  url?: string | null;
+  locations?: BecknLocation[];
 }
 
 export interface UpdateOrgPatch {
@@ -103,7 +122,26 @@ export abstract class AggregatorOrgStoreBase {
    * @returns The first matching org, or `null`.
    */
   abstract findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
+  /**
+   * Lists active aggregator orgs (the registration dropdown), Default
+   * included, sorted by name (case-insensitive).
+   *
+   * @returns Active aggregator orgs, possibly empty.
+   */
   abstract listActive(): Promise<OrgStoreResult<AggregatorOrg[]>>;
+  /**
+   * The fixed Default org (0028), or `null` when absent (a database not yet
+   * migrated, or a test that did not seed it).
+   *
+   * @returns The Default org.
+   */
+  abstract findDefault(): Promise<OrgStoreResult<AggregatorOrg | null>>;
+  /**
+   * The network-facilitator root (0028) — the only method that returns it.
+   *
+   * @returns The root org, or `null` when absent.
+   */
+  abstract findRoot(): Promise<OrgStoreResult<AggregatorOrg | null>>;
   /**
    * Lists `pending` orgs, optionally only those last updated before `updatedBefore`.
    * Drives the §7 stale-pending cleanup; the age filter keeps the row cap

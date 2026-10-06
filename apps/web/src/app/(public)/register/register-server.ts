@@ -1,8 +1,8 @@
 /**
  * Server-only helpers shared by the public registration routes — the
  * coordinator page (`/register`) and the owner deep link (`/register/owner`,
- * #619). Extracted so both routes resolve the org-hierarchy flag, the org
- * schema, and the versioned consent content the same way.
+ * #619). Extracted so both routes resolve the org schema and the versioned
+ * consent content the same way.
  *
  * @module apps/web/src/app/(public)/register/register-server
  */
@@ -14,17 +14,6 @@ import { resolveAggregatorSchemaPath } from '../../../lib/aggregator-schema.serv
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { logger } from '../../../lib/logger';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
-
-/**
- * Whether the org → coordinator hierarchy is enabled for this instance. Reads
- * the same `ORG_HIERARCHY_ENABLED` env var the API reads; both registration
- * routes are `force-dynamic`, so this is evaluated per request.
- *
- * @returns True when the flag is set to `'true'`.
- */
-export function isOrgHierarchyEnabled(): boolean {
-  return (process.env.ORG_HIERARCHY_ENABLED ?? '').trim() === 'true';
-}
 
 /**
  * Loads the versioned consent document content for both `aggregator` and `org`

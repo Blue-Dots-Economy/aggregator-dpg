@@ -21,7 +21,7 @@ export function _setAggregatorOrgStore(s: AggregatorOrgStoreBase | null): void {
   instance = s;
 }
 
-export { AggregatorOrgStoreBase } from './interface.js';
+export { AggregatorOrgStoreBase, DEFAULT_ORG_SLUG } from './interface.js';
 export type {
   AggregatorOrg,
   CreateOrgInput,
@@ -31,4 +31,4 @@ export type {
 } from './interface.js';
 export { InMemoryAggregatorOrgStore } from './memory.js';
 export { PostgresAggregatorOrgStore } from './postgres.js';
-export { AggregatorOrgStoreFake, buildAggregatorOrg } from './testing.js';
+export { AggregatorOrgStoreFake, buildAggregatorOrg, buildDefaultOrg } from './testing.js';

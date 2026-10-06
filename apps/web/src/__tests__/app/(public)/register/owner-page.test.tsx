@@ -64,14 +64,6 @@ describe('OwnerRegisterPage (server component)', () => {
     expect(redirect).toHaveBeenCalledWith('/dashboard');
   });
 
-  it('404s when the org hierarchy flag is off', async () => {
-    isOrgHierarchyEnabled.mockReturnValue(false);
-    expect(await runAndCatch()).toBe('NOT_FOUND');
-    expect(notFound).toHaveBeenCalled();
-    // Must not even attempt to load the schema once the flag gate fails.
-    expect(loadOrgSchema).not.toHaveBeenCalled();
-  });
-
   it('404s when the org schema is missing (flag on)', async () => {
     loadOrgSchema.mockResolvedValue(null);
     expect(await runAndCatch()).toBe('NOT_FOUND');

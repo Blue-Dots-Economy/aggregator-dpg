@@ -45,12 +45,16 @@ suite('users (migration 0027) — integration', () => {
   const aggStore = new PostgresAggregatorStore();
   const orgStore = new PostgresAggregatorOrgStore();
   const identities = new PostgresIdentityStore();
+  /** The Default org (0028): every coordinator needs an org. */
+  let defaultOrgId = '';
 
   beforeAll(async () => {
     _setDbClients(null, null);
     getPool({ url: realUrl! });
     await migrate(getDb(), { migrationsFolder: MIGRATIONS_DIR });
     pool = new pg.Pool({ connectionString: realUrl, max: 4 });
+    const d = await pool.query(`SELECT id FROM organisations WHERE slug = 'default'`);
+    defaultOrgId = d.rows[0].id;
   });
 
   afterAll(async () => {
@@ -67,6 +71,7 @@ suite('users (migration 0027) — integration', () => {
       contact: { name: 'Coord', email: e, phone: p },
       consent: CONSENT,
       createdBy: 'it',
+      orgId: defaultOrgId,
       updatedBy: 'it',
     });
     if (!r.ok) throw new Error(`coordinator create failed: ${r.error.code}`);
@@ -91,14 +96,15 @@ suite('users (migration 0027) — integration', () => {
   it('creates an org with an identity-only admin owner (explicit NULLs satisfy the role CHECK)', async () => {
     const org = await newOrg();
     const admin = await pool.query(
-      `SELECT user_type, status, locations, profile, contact_extra, signalstack_org_slug
+      `SELECT user_type, status, org_id, legacy_org_details, profile, contact_extra, signalstack_org_slug
          FROM users WHERE id = $1`,
       [org.ownerUserId],
     );
     expect(admin.rows[0]).toEqual({
       user_type: 'admin',
       status: null,
-      locations: null,
+      org_id: null,
+      legacy_org_details: null,
       profile: null,
       contact_extra: null,
       signalstack_org_slug: null,
@@ -127,10 +133,10 @@ suite('users (migration 0027) — integration', () => {
     expect(await orgStore.ownerIsShared(a.id)).toEqual({ ok: true, value: true });
 
     // Raw delete (not the store): the database itself releases the owner.
-    await pool.query('DELETE FROM aggregator_orgs WHERE id = $1', [a.id]);
+    await pool.query('DELETE FROM organisations WHERE id = $1', [a.id]);
     expect(await count('SELECT count(*) AS n FROM users WHERE id = $1', [a.ownerUserId])).toBe(1);
 
-    await pool.query('DELETE FROM aggregator_orgs WHERE id = $1', [b.id]);
+    await pool.query('DELETE FROM organisations WHERE id = $1', [b.id]);
     expect(await count('SELECT count(*) AS n FROM users WHERE id = $1', [a.ownerUserId])).toBe(0);
     // …and the contact is collected, so the email/phone are free again.
     expect(await count('SELECT count(*) AS n FROM contact WHERE email = $1', [e])).toBe(0);

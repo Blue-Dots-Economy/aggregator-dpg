@@ -9,7 +9,7 @@
 
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { config, orgHierarchyEnabled } from '../config.js';
+import { config } from '../config.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
@@ -192,12 +192,12 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
       );
 
       // Prune stale pending orgs too (§7). Same cutoff + row/KC-user/DB-row
-      // sequence, plus the mirrored KC group. Only runs when the hierarchy is
-      // on (the table is empty otherwise).
+      // sequence, plus the mirrored KC group. The store only lists aggregator
+      // orgs, and the root and Default orgs are never pending.
       const orgStore = getAggregatorOrgStore();
       let orgsScanned = 0;
       let orgsPrunedIds: string[] = [];
-      if (orgHierarchyEnabled()) {
+      {
         const orgPage = await orgStore.listPending(cutoff);
         if (!orgPage.ok) {
           throw httpError('DB_UNAVAILABLE', {

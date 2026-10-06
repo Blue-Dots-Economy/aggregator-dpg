@@ -93,11 +93,11 @@ describe('RegisterPage (server component)', () => {
     expect(redirect).toHaveBeenCalledWith('/dashboard');
   });
 
-  it('renders RegisterView with the coordinator schema and consent content when hierarchy is off', async () => {
+  it('renders RegisterView with the coordinator schema and consent content (no hierarchy flag since 0028)', async () => {
     loadConsentConfig.mockResolvedValue(consentCfg());
     const el = await RegisterPage();
     expect(el.props.schema).toBe(coordSchema.schema);
-    expect(el.props.orgHierarchyEnabled).toBe(false);
+    expect(el.props).not.toHaveProperty('orgHierarchyEnabled');
     expect(el.props.aggregatorConsentContent).toEqual({
       terms: { version: 1, title: 'Terms', content: 'T' },
       privacy: { version: 1, title: 'Privacy', content: 'P' },
@@ -114,20 +114,7 @@ describe('RegisterPage (server component)', () => {
     );
   });
 
-  it('forwards orgHierarchyEnabled=true but never loads/passes the org schema (owner deep link handles it)', async () => {
-    process.env.ORG_HIERARCHY_ENABLED = 'true';
-    loadConsentConfig.mockResolvedValue(consentCfg());
-
-    const el = await RegisterPage();
-    // #619: owner registration moved to /register/owner — the coordinator page
-    // no longer reads or forwards the org schema.
-    expect(el.props.orgHierarchyEnabled).toBe(true);
-    expect(el.props.orgSchema).toBeUndefined();
-    expect(el.props.orgConsentContent).toBeUndefined();
-    expect(readFile).not.toHaveBeenCalled();
-  });
-
-  it('does not attempt to load the org schema when the flag is off', async () => {
+  it('never loads the org schema (the owner deep link handles it, #619)', async () => {
     loadConsentConfig.mockResolvedValue(consentCfg());
     await RegisterPage();
     expect(readFile).not.toHaveBeenCalled();

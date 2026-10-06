@@ -3,13 +3,17 @@
  *
  * Process-local Map; mirrors the Postgres adapter's external behaviour
  * (partial-slug uniqueness over non-terminal rows, atomic approve/reject
- * guard, lowercased owner email). Unit-test use only.
+ * guard, lowercased owner email, the Default org skipped by owner lookups,
+ * name-sorted active list). It holds aggregator orgs only; the
+ * network-facilitator root is a separate slot (see `AggregatorOrgStoreFake`).
+ * Unit-test use only.
  */
 
 import { randomUUID } from 'node:crypto';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import {
   AggregatorOrgStoreBase,
+  DEFAULT_ORG_SLUG,
   type AggregatorOrg,
   type CreateOrgInput,
   type OrgStoreError,
@@ -25,6 +29,8 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
   protected readonly adminByContact = new Map<string, string>();
   /** Contacts that also hold a coordinator account (see {@link markCoordinator}). */
   protected readonly coordinatorContacts = new Set<string>();
+  /** The network-facilitator root, when a test seeds one. */
+  protected root: AggregatorOrg | null = null;
 
   create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
     const slugTaken = [...this.byId.values()].some(
@@ -70,6 +76,11 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       createdAt: now,
       updatedAt: now,
       rejectedAt: null,
+      isDefault: false,
+      url: input.url ?? null,
+      locations: input.locations ?? [],
+      legalName: null,
+      gstNumber: null,
     };
     this.byId.set(row.id, row);
     return Promise.resolve({ ok: true, value: row });
@@ -90,14 +101,14 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
     const target = email.toLowerCase();
     return Promise.resolve({
       ok: true,
-      value: pickOwned((o) => o.ownerEmail === target, this.byId),
+      value: pickOwned((o) => o.ownerEmail === target && !o.isDefault, this.byId),
     });
   }
 
   findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
     return Promise.resolve({
       ok: true,
-      value: pickOwned((o) => o.ownerPhone === phone, this.byId),
+      value: pickOwned((o) => o.ownerPhone === phone && !o.isDefault, this.byId),
     });
   }
 
@@ -116,8 +127,19 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
   listActive(): Promise<OrgStoreResult<AggregatorOrg[]>> {
     const rows = [...this.byId.values()]
       .filter((o) => o.status === 'active')
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      .sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
     return Promise.resolve({ ok: true, value: rows });
+  }
+
+  findDefault(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+    return Promise.resolve({
+      ok: true,
+      value: [...this.byId.values()].find((o) => o.slug === DEFAULT_ORG_SLUG) ?? null,
+    });
+  }
+
+  findRoot(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+    return Promise.resolve({ ok: true, value: this.root });
   }
 
   listPending(updatedBefore?: Date): Promise<OrgStoreResult<AggregatorOrg[]>> {
@@ -131,6 +153,8 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
 
   deleteById(id: string): Promise<OrgStoreResult<void>> {
     const gone = this.byId.get(id);
+    // As in Postgres: the Default org is never removable here.
+    if (gone?.isDefault) return Promise.resolve({ ok: true, value: undefined });
     this.byId.delete(id);
     // Mirror aggregator_orgs_owner_ad: release the owner's account once it
     // owns no other org.

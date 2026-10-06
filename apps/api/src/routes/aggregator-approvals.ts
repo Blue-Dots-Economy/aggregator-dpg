@@ -28,7 +28,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { config, orgHierarchyEnabled } from '../config.js';
+import { config } from '../config.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { ERR } from '../errors/codes.js';
 import { formatApprovalTtl } from '../services/approval-token.js';
@@ -271,8 +271,9 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
 
       // Org-bound coordinator: the token must carry the matching `org` claim so
       // an owner's link can only decide their own org's coordinators (spec §9 /
-      // A1). Enforced whenever the record has a parent_org_id — it is a security
-      // invariant on the record, independent of the runtime flag.
+      // A1). Every coordinator has an org since 0028 (the Default org included),
+      // so a link minted before the migration for a formerly-flat coordinator
+      // carries no claim and is rejected here; the admin regenerates it.
       const parentOrgId = lookup.aggregator.parentOrgId;
       if (parentOrgId && verified.org !== parentOrgId) {
         return sendHtml(
@@ -287,9 +288,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       }
 
       // Re-validate the target org is still active before provisioning (spec
-      // §6.2): a row can be rejected/retired between submit and approval. Only
-      // when the hierarchy is enabled and the coordinator is org-bound.
-      if (orgHierarchyEnabled() && parentOrgId) {
+      // §6.2): a row can be rejected/retired between submit and approval.
+      if (parentOrgId) {
         const org = await getAggregatorOrgStore().findById(parentOrgId);
         if (!org.ok || !org.value || org.value.status !== 'active') {
           return sendHtml(
@@ -658,12 +658,29 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
 
+      // The fresh token is bound to the coordinator's CURRENT org, so the
+      // decision handler's org check passes. Only a link already bound to that
+      // org may be renewed — plus one legacy case: a link minted before 0028 for
+      // a formerly-flat coordinator carries no org claim and went to the admin
+      // list, so it may be renewed for the Default org. A link bound to another
+      // org is never upgraded.
+      const currentOrg = lookup.aggregator.parentOrgId;
+      const legacyFlatLink = verified.org === undefined && lookup.aggregator.isDefaultOrg;
+      if (currentOrg && verified.org !== currentOrg && !legacyFlatLink) {
+        return sendHtml(
+          reply,
+          400,
+          renderResultPage({
+            status: 'error',
+            title: 'Invalid link',
+            message: 'Token does not match this organisation.',
+          }),
+        );
+      }
+
       logApprovalAudit(req, { aggregatorId, action: 'renew' });
 
-      // Mint a fresh review token, preserving the original org binding (so the
-      // decision handler's parent_org_id check still passes), and land the
-      // reviewer on the review page directly.
-      const freshToken = await mintReviewToken(aggregatorId, verified.org);
+      const freshToken = await mintReviewToken(aggregatorId, currentOrg ?? verified.org);
       return sendHtml(
         reply,
         200,

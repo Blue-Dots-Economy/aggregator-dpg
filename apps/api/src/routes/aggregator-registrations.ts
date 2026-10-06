@@ -31,16 +31,16 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { RegistrationPayloadSchema } from '@aggregator-dpg/shared-primitives/aggregator';
-import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
+import type { BecknContact, BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getRegistrationValidator } from '../services/registration-validator.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
-import type { Aggregator } from '../services/aggregator-store/interface.js';
+import type { Aggregator, LegacyOrgDetails } from '../services/aggregator-store/interface.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { verifyInviteToken } from '../services/invite-token.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { sendAdminReviewEmail } from '../services/registration-notify.js';
-import { orgHierarchyEnabled } from '../config.js';
+import { defaultOrgOwnerEmail } from '../config.js';
 import { coolingRetryAfter } from '../services/registration-cooling.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
@@ -58,10 +58,10 @@ import type { ErrorCode } from '../errors/codes.js';
 
 const SLUG_RETRIES = 3;
 
-// The coordinator submit accepts an optional `org_id` when the org hierarchy
-// is enabled. `RegistrationPayloadSchema` is strict (rejects unknown keys), so
-// the route body schema must explicitly permit it; the handler validates its
-// presence/shape against the flag + the org store.
+// The coordinator submit carries the coordinator's org (`org_id`) or an invite.
+// `RegistrationPayloadSchema` is strict (rejects unknown keys), so the route
+// body schema must explicitly permit them; the handler validates them against
+// the org store.
 const CoordinatorRegistrationBodySchema = RegistrationPayloadSchema.extend({
   org_id: z.string().optional(),
   // Coordinator invite token (#700). When present it supersedes `org_id`: the
@@ -73,7 +73,8 @@ const CoordinatorRegistrationBodySchema = RegistrationPayloadSchema.extend({
  * Body keys that already own a typed column on `aggregators`, and so must never
  * be copied into `profile`.
  *
- * `org_id` is excluded too — it is stored as `parent_org_id`, not payload data.
+ * `org_id` is excluded too — it is stored as `users.org_id`, not payload data;
+ * `url` / `locations` belong to the org (0028).
  * Keeping one authoritative home per field is what stops the jsonb payload and
  * the columns drifting apart.
  */
@@ -264,14 +265,15 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           });
         }
 
-        // Org-hierarchy gate (spec §6.2). When enabled, a coordinator must select
-        // an *active* org; the link lives in `aggregators.parent_org_id`.
-        let parentOrgId: string | null = null;
+        // The coordinator's org (spec §6.2; always required since 0028): an
+        // *active* aggregator org; the link lives in `users.org_id`.
+        let parentOrgId: string;
+        let orgIsDefault = false;
         // Email the invite was addressed to (#701). A coordinator MAY register with
         // a different email than they were invited at; we keep the invited address
         // for provenance so the approving owner can see who was originally targeted.
         let inviteEmailClaim: string | null = null;
-        if (orgHierarchyEnabled()) {
+        {
           const orgStore = getAggregatorOrgStore();
           const reqInvite = (req.body as { invite?: string }).invite;
 
@@ -301,7 +303,9 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
                 fields: { sub_operation: 'orgStore.findById' },
               });
             }
-            if (org.value?.status !== 'active') {
+            // Invites are minted for real orgs only; the Default org has no owner
+            // console to invite from.
+            if (org.value?.status !== 'active' || org.value.isDefault) {
               throw httpError('TARGET_ORG_INACTIVE');
             }
             const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
@@ -331,14 +335,21 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             inviteJti = verified.jti;
             parentOrgId = verified.org;
           } else {
-            // Interim selector path: coordinator picks an active org (spec §6.2).
+            // Selector path: the coordinator picks an active org (spec §6.2).
             const reqOrgId = (req.body as { org_id?: string }).org_id;
-            if (!reqOrgId) {
-              throw httpError('SCHEMA_VALIDATION', {
-                detail: 'org_id is required when the organisation hierarchy is enabled.',
-              });
+            // For one release a body without `org_id` (an old or formerly-flat
+            // client, or a pending resubmission) is placed in the Default org
+            // with a warning; afterwards it becomes a 400 (D3-13).
+            const org = reqOrgId ? await orgStore.findById(reqOrgId) : await orgStore.findDefault();
+            if (!reqOrgId && org.ok) {
+              if (!org.value) {
+                throw httpError('SCHEMA_VALIDATION', { detail: 'org_id is required.' });
+              }
+              log.warn(
+                { status: 'skipped', sub_operation: 'registration.org_id_missing' },
+                'registration without org_id — placed in the Default org (accepted for one release)',
+              );
             }
-            const org = await orgStore.findById(reqOrgId);
             if (!org.ok) {
               throw httpError('DB_UNAVAILABLE', {
                 cause: new Error(org.error.message),
@@ -354,8 +365,54 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             if (ownerMatch.ok && ownerMatch.value) {
               throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
             }
-            parentOrgId = reqOrgId;
+            // The Default org is selectable only while it is the only active
+            // org (D3-12): otherwise its coordinators' approvals would bypass
+            // every real org's owner. The no-org_id fallback above is exempt for
+            // this release.
+            if (reqOrgId && org.value.isDefault) {
+              const active = await orgStore.listActive();
+              if (!active.ok) {
+                throw httpError('DB_UNAVAILABLE', {
+                  cause: new Error(active.error.message),
+                  fields: { sub_operation: 'orgStore.listActive' },
+                });
+              }
+              if (active.value.some((o) => !o.isDefault)) {
+                throw httpError('TARGET_ORG_INACTIVE');
+              }
+            }
+            parentOrgId = org.value.id;
+            orgIsDefault = org.value.isDefault;
           }
+        }
+
+        // A Default-org coordinator names its own organisation (the form shows
+        // the name field, as flat mode did); it must never inherit "Default".
+        if (orgIsDefault && body.name.trim().toLowerCase() === 'default') {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: 'The organisation name cannot be "Default".',
+            fields: { field: 'name' },
+          });
+        }
+
+        // Org details (0028): a real org's url / locations are its own, so the
+        // submitted ones are ignored (accepted for one release); a Default-org
+        // coordinator keeps its own as `legacy_org_details`, rendered as a
+        // fallback since the Default org has no shared value.
+        const submittedLocations = (body.locations ?? []).filter(hasLocationContent);
+        const ownOrgDetails: LegacyOrgDetails = {
+          ...(body.url?.trim() ? { url: body.url.trim() } : {}),
+          ...(submittedLocations.length > 0 ? { locations: submittedLocations } : {}),
+        };
+        if (!orgIsDefault && Object.keys(ownOrgDetails).length > 0) {
+          log.warn(
+            {
+              status: 'skipped',
+              sub_operation: 'registration.org_details_ignored',
+              fields: Object.keys(ownOrgDetails),
+            },
+            'org details on a coordinator registration are ignored (they belong to the org)',
+          );
         }
 
         // Pre-check email + phone uniqueness in both stores. The DB
@@ -470,11 +527,11 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
 
         const aggregator = await createAggregatorWithSlug(aggregatorStore, body.name, {
           type: body.type,
-          url: body.url ?? null,
           contact,
-          locations: body.locations,
           consent: serverConsent,
-          parentOrgId,
+          orgId: parentOrgId,
+          legacyOrgDetails:
+            orgIsDefault && Object.keys(ownOrgDetails).length > 0 ? ownOrgDetails : null,
           inviteEmail: inviteEmailClaim,
           profile: buildAggregatorProfile(body as unknown as Record<string, unknown>),
           profileRef: resolveProfileRef('registration.v1.json'),
@@ -687,11 +744,12 @@ async function createAggregatorWithSlug(
   name: string,
   extras: {
     type: ReturnType<typeof RegistrationPayloadSchema.parse>['type'];
-    url: string | null;
     contact: BecknContact;
-    locations: ReturnType<typeof RegistrationPayloadSchema.parse>['locations'];
     consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
-    parentOrgId: string | null;
+    /** The coordinator's org (`users.org_id`). */
+    orgId: string;
+    /** The coordinator's own org details (Default-org registrations only). */
+    legacyOrgDetails: LegacyOrgDetails | null;
     /** Invited email (#701) — provenance when registered via an invite. */
     inviteEmail: string | null;
     profile: Record<string, unknown>;
@@ -707,13 +765,12 @@ async function createAggregatorWithSlug(
       actorType: 'aggregator',
       name,
       type: extras.type,
-      url: extras.url,
       contact: extras.contact,
-      locations: extras.locations,
       consent: extras.consent,
       createdBy: 'self',
       updatedBy: 'self',
-      parentOrgId: extras.parentOrgId,
+      orgId: extras.orgId,
+      legacyOrgDetails: extras.legacyOrgDetails,
       inviteEmail: extras.inviteEmail,
       profile: extras.profile,
       profileRef: extras.profileRef,
@@ -791,13 +848,13 @@ function mapStoreCreateError(
 }
 
 /**
-/**
- * Resolves the approval-email routing for a coordinator. When the coordinator
- * belongs to an org, the approve/reject tokens carry the `org` claim and the
- * review email routes to the org owner (spec §6.2 / §9); otherwise (flat flow)
- * it returns empty extras so the email goes to the network-admin list.
+ * Resolves the approval-email routing for a coordinator. The approve/reject
+ * tokens always carry the coordinator's `org` claim (spec §6.2 / §9; the
+ * Default org included, D3-6). The review email goes to the org's owner; for
+ * the Default org, to `DEFAULT_ORG_OWNER_EMAIL` when configured, otherwise to
+ * the network-admin list (empty `recipientEmail`), as flat instances did.
  *
- * @param parentOrgId - The coordinator's parent org id, or null for flat.
+ * @param parentOrgId - The coordinator's org id (`null` only for a pre-0028 row).
  * @returns `{ org?, recipientEmail? }` extras for `sendAdminReviewEmail`.
  */
 async function resolveOwnerRouting(
@@ -805,6 +862,24 @@ async function resolveOwnerRouting(
 ): Promise<{ org?: string; recipientEmail?: string }> {
   if (!parentOrgId) return {};
   const org = await getAggregatorOrgStore().findById(parentOrgId);
+  if (org.ok && org.value?.isDefault) {
+    const owner = defaultOrgOwnerEmail();
+    return { org: parentOrgId, ...(owner ? { recipientEmail: owner } : {}) };
+  }
   const ownerEmail = org.ok && org.value ? org.value.ownerEmail : undefined;
   return { org: parentOrgId, ...(ownerEmail ? { recipientEmail: ownerEmail } : {}) };
+}
+
+/**
+ * Whether a submitted Beckn location carries anything real: a street or
+ * locality, or coordinates other than the web form's `[0,0]` placeholder.
+ *
+ * @param loc - One submitted location.
+ * @returns `true` when it is worth keeping.
+ */
+function hasLocationContent(loc: BecknLocation): boolean {
+  const a = loc.address;
+  if (a?.streetAddress?.trim() || a?.addressLocality?.trim()) return true;
+  const c = (loc.geo as { coordinates?: unknown }).coordinates;
+  return Array.isArray(c) && c.length === 2 && (c[0] !== 0 || c[1] !== 0);
 }

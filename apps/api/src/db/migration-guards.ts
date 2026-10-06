@@ -33,8 +33,8 @@ import { logger } from '../logger.js';
 
 /** Journal `when` of the first train migration (0023). */
 export const TRAIN_FIRST_WHEN = 1790600000000;
-/** Journal `when` of the last train migration shipped so far (0027). */
-export const TRAIN_LAST_WHEN = 1791200000000;
+/** Journal `when` of the last train migration shipped so far (0028). */
+export const TRAIN_LAST_WHEN = 1791300000000;
 
 /** One journal entry (the fields the guards need). */
 export interface JournalEntry {
@@ -206,11 +206,17 @@ export async function runMigrationGuards(
 }
 
 /**
- * Whether the database holds any registration data: a row in the coordinator
- * table (either name), `aggregator_orgs`, `registration_invites`, or
- * `contact` (when it exists).
+ * Whether the database holds any registration data: a coordinator (in
+ * `users` or, before 0027, `aggregators`), an org (`aggregator_orgs` before
+ * 0028; an aggregator org other than the Default org after it), or an invite.
+ *
+ * Rows that migrations or boot seed themselves never count: 0027 creates
+ * admin accounts only for existing orgs, and 0028 / `ensureRootOrganisation()`
+ * seed the network root, the Default org and their owners' accounts and
+ * contacts — so a fresh database still reads as empty after them. `contact` is
+ * not probed: every contact is referenced by one of the rows above.
  */
-async function hasRegistrationData(pool: Pool): Promise<boolean> {
+export async function hasRegistrationData(pool: Pool): Promise<boolean> {
   for (const [table, probe] of DATA_PROBES) {
     const exists = await pool.query<{ t: string | null }>('SELECT to_regclass($1)::text AS t', [
       `public.${table}`,
@@ -224,9 +230,12 @@ async function hasRegistrationData(pool: Pool): Promise<boolean> {
 
 /** Fixed probe per table (no dynamic SQL). */
 const DATA_PROBES: ReadonlyArray<readonly [string, string]> = [
-  ['users', 'SELECT 1 FROM users LIMIT 1'],
+  ['users', "SELECT 1 FROM users WHERE user_type = 'coordinator' LIMIT 1"],
   ['aggregators', 'SELECT 1 FROM aggregators LIMIT 1'],
   ['aggregator_orgs', 'SELECT 1 FROM aggregator_orgs LIMIT 1'],
+  [
+    'organisations',
+    "SELECT 1 FROM organisations WHERE org_type = 'aggregator' AND slug <> 'default' LIMIT 1",
+  ],
   ['registration_invites', 'SELECT 1 FROM registration_invites LIMIT 1'],
-  ['contact', 'SELECT 1 FROM contact LIMIT 1'],
 ];

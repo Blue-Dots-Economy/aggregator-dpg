@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { InMemoryAggregatorOrgStore } from '../memory.js';
+import { AggregatorOrgStoreFake, buildAggregatorOrg, buildDefaultOrg } from '../testing.js';
 
 describe('InMemoryAggregatorOrgStore', () => {
   it('creates and finds an org by slug and owner email', async () => {
@@ -183,5 +184,62 @@ describe('InMemoryAggregatorOrgStore owners (0027)', () => {
     if (!fresh.ok) throw new Error('seed');
     const found = await store.findByOwnerEmail('O@X.org');
     expect(found.ok && found.value?.id).toBe(fresh.value.id);
+  });
+});
+
+describe('organisations scoping (0028)', () => {
+  it('lists active orgs by name, case-insensitively, Default included', async () => {
+    const store = new AggregatorOrgStoreFake();
+    store.seed([
+      buildAggregatorOrg({ id: 'b', slug: 'b', displayName: 'beta', status: 'active' }),
+      buildDefaultOrg(),
+      buildAggregatorOrg({ id: 'a', slug: 'a', displayName: 'Alpha', status: 'active' }),
+    ]);
+    const r = await store.listActive();
+    expect(r.ok && r.value.map((o) => o.displayName)).toEqual(['Alpha', 'beta', 'Default']);
+  });
+
+  it('never resolves the Default org as an owner match', async () => {
+    const store = new AggregatorOrgStoreFake();
+    store.seed([buildDefaultOrg({ ownerEmail: 'ops@x.org', ownerPhone: '+919000000001' })]);
+    expect(await store.findByOwnerEmail('ops@x.org')).toEqual({ ok: true, value: null });
+    expect(await store.findByOwnerPhone('+919000000001')).toEqual({ ok: true, value: null });
+  });
+
+  it('finds the Default org and the seeded root', async () => {
+    const store = new AggregatorOrgStoreFake();
+    expect(await store.findRoot()).toEqual({ ok: true, value: null });
+    store.seed([buildDefaultOrg()]);
+    const root = buildAggregatorOrg({ id: 'nf', slug: 'network', status: 'active' });
+    store.seedRoot(root);
+    const d = await store.findDefault();
+    expect(d.ok && d.value?.isDefault).toBe(true);
+    expect(await store.findRoot()).toEqual({ ok: true, value: root });
+    // The root is never part of the aggregator list.
+    const list = await store.listActive();
+    expect(list.ok && list.value.map((o) => o.id)).toEqual([buildDefaultOrg().id]);
+  });
+
+  it('never deletes the Default org', async () => {
+    const store = new AggregatorOrgStoreFake();
+    store.seed([buildDefaultOrg()]);
+    await store.deleteById(buildDefaultOrg().id);
+    const d = await store.findDefault();
+    expect(d.ok && d.value).not.toBeNull();
+  });
+
+  it('carries url / locations from create', async () => {
+    const store = new AggregatorOrgStoreFake();
+    const loc = [{ geo: { type: 'Point' as const, coordinates: [1, 2] }, address: {} }];
+    const r = await store.create({
+      slug: 's-1',
+      displayName: 'S',
+      ownerEmail: 's@x.org',
+      url: 'https://s.example',
+      locations: loc,
+    });
+    expect(r.ok && r.value.url).toBe('https://s.example');
+    expect(r.ok && r.value.locations).toEqual(loc);
+    expect(r.ok && r.value.isDefault).toBe(false);
   });
 });

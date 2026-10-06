@@ -67,12 +67,6 @@ describe('CoordinatorInvitePage (server component)', () => {
     expect(redirect).toHaveBeenCalledWith('/dashboard');
   });
 
-  it('redirects to /login when the flag is off', async () => {
-    isOrgHierarchyEnabled.mockReturnValue(false);
-    expect(await runAndCatch('inv')).toBe('REDIRECT');
-    expect(redirect).toHaveBeenCalledWith('/login');
-  });
-
   it('redirects to /login when no invite token is present', async () => {
     expect(await runAndCatch(undefined)).toBe('REDIRECT');
     expect(redirect).toHaveBeenCalledWith('/login');

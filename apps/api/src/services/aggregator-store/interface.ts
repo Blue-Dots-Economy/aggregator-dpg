@@ -9,6 +9,12 @@
  * referenced by `contactId`; `contact`, `contactPhone` and `contactEmail` on
  * the record are composed from it so callers see the same Beckn shape as
  * before. Keycloak keeps its own copy of the login identifiers.
+ *
+ * Org details (migration 0028): `url`, `locations`, `contact.company` and
+ * `contact.gstNumber` are RENDERED from the coordinator's org
+ * (`organisations`), falling back per field to the coordinator's own values in
+ * `legacy_org_details` when the org's is empty. They are never written through
+ * this store's update; the org's owner edits them (Phase 5).
  */
 
 import type {
@@ -20,12 +26,24 @@ import type {
   RoleType,
 } from '@aggregator-dpg/shared-primitives/aggregator';
 
+/**
+ * A coordinator's own org-detail values that its org did not adopt (0028):
+ * a key is present only where the value differs from the org's.
+ */
+export interface LegacyOrgDetails {
+  url?: string | null;
+  locations?: BecknLocation[];
+  company?: string | null;
+  gstNumber?: string | null;
+}
+
 export interface Aggregator {
   id: string;
   orgSlug: string;
   actorType: ActorType;
   name: string;
   type: RoleType | null;
+  /** Rendered from the org, else the coordinator's own value (0028). */
   url: string | null;
   /** FK → `contact.id` (migrations 0025/0026). PII-derived hash — never log it. */
   contactId: string;
@@ -35,6 +53,7 @@ export interface Aggregator {
   contactPhone: string;
   /** The contact's email, lowercased (derived from `contact`). */
   contactEmail: string;
+  /** Rendered from the org, else the coordinator's own value (0028). */
   locations: BecknLocation[];
   consent: ConsentRecord;
   /**
@@ -61,12 +80,14 @@ export interface Aggregator {
    */
   signalstackOrgId: string | null;
   /**
-   * Parent org this coordinator belongs to (spec §5.2). FK → `aggregator_orgs.id`.
-   * The SINGLE authority for the org→coordinator link (spec A1). `null` = flat
-   * coordinator (flag off) or legacy orphan; only populated when the org
-   * hierarchy is enabled.
+   * The coordinator's org (`users.org_id`, migration 0028; was
+   * `parent_org_id`). The single authority for the org→coordinator link
+   * (spec A1). Every coordinator has one — formerly-flat coordinators belong
+   * to the Default org — so it is `null` only for a store that predates 0028.
    */
   parentOrgId: string | null;
+  /** Whether {@link parentOrgId} is the fixed Default org. */
+  isDefaultOrg: boolean;
   /**
    * Email the coordinator was invited at (#701), when registered via an invite.
    * May differ from `contact.email`; kept for provenance so the approving owner
@@ -86,14 +107,18 @@ export interface CreateAggregatorInput {
   actorType: ActorType;
   name: string;
   type: RoleType | null;
-  url?: string | null;
+  /** `contact.company` / `contact.gstNumber` are not stored (they belong to the org). */
   contact: BecknContact;
-  locations?: BecknLocation[];
   consent: ConsentRecord;
   createdBy: string;
   updatedBy: string;
-  /** Optional parent org id (spec §5.2). Defaults to null when omitted. */
-  parentOrgId?: string | null;
+  /** The coordinator's org (`users.org_id`, required since 0028). */
+  orgId: string;
+  /**
+   * The coordinator's own org-detail values. Set only for Default-org
+   * registrations, whose org has no shared value (0028).
+   */
+  legacyOrgDetails?: LegacyOrgDetails | null;
   /** Invited email (#701) — provenance when registered via an invite. */
   inviteEmail?: string | null;
   /**
@@ -111,18 +136,18 @@ export interface CreateAggregatorInput {
 
 /**
  * Patch shape for updates. `orgSlug` is intentionally absent — the DB trigger
- * `aggregators_lock_slug` rejects any attempt to mutate the slug. Identity
- * (`id`) and audit timestamps are server-managed too.
+ * `users_lock_signalstack_org_slug` rejects any attempt to mutate the slug.
+ * Identity (`id`) and audit timestamps are server-managed too. Org details
+ * (`url`, `locations`, company / GST) and the org link are not patchable here
+ * (0028).
  */
 export interface UpdateAggregatorPatch {
   name?: string;
   type?: RoleType | null;
-  url?: string | null;
+  /** `company` / `gstNumber` in it are ignored: they belong to the org. */
   contact?: BecknContact;
-  locations?: BecknLocation[];
   consent?: ConsentRecord;
   status?: AggregatorStatus;
-  parentOrgId?: string | null;
   /** Write-once rejection stamp (#726) — set only on the reject transition. */
   rejectedAt?: Date | null;
   updatedBy: string;
@@ -170,11 +195,11 @@ export abstract class AggregatorStoreBase {
   abstract findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>>;
   abstract findByContactEmail(email: string): Promise<StoreResult<Aggregator | null>>;
   /**
-   * Returns every coordinator (`aggregators` row) whose `parent_org_id`
-   * matches the given org id — the spec §10 org-view query. `parent_org_id`
-   * is the single authority for the org→coordinator link (spec A1).
+   * Returns every coordinator whose `org_id` matches the given org id — the
+   * spec §10 org-view query. `org_id` is the single authority for the
+   * org→coordinator link (spec A1).
    *
-   * @param orgId - `aggregator_orgs.id`.
+   * @param orgId - `organisations.id`.
    * @returns The org's coordinators (possibly empty); never throws.
    */
   abstract findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>>;

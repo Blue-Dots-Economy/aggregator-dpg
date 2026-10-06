@@ -11,12 +11,17 @@
  * go to `contact` in the same transaction as the row (`db/contact-writes.ts`),
  * and every write re-reads the joined row, because `RETURNING` cannot include
  * the joined contact.
+ *
+ * Org details (`url`, `locations`, company / GST) are rendered from the joined
+ * org with the `legacy_org_details` fallback (`org-details.ts`, migration 0028).
  */
 
 import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import type { AggregatorStatus, BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { logger } from '../../logger.js';
-import { users, contact } from '../../db/schema.js';
+import { users, contact, organisations } from '../../db/schema.js';
+import { DEFAULT_ORG_SLUG } from '../aggregator-org-store/interface.js';
+import { renderOrgDetails } from './org-details.js';
 import {
   changeContact,
   ContactTakenError,
@@ -60,14 +65,13 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
             actorType: input.actorType,
             name: input.name,
             type: input.type ?? null,
-            url: input.url ?? null,
             contactId,
-            contactExtra: extra,
-            locations: input.locations ?? [],
+            contactExtra: onlyAlternatePhone(extra),
             consent: input.consent,
             createdBy: input.createdBy,
             updatedBy: input.updatedBy,
-            parentOrgId: input.parentOrgId ?? null,
+            orgId: input.orgId,
+            legacyOrgDetails: input.legacyOrgDetails ?? null,
             inviteEmail: input.inviteEmail ?? null,
             profile: input.profile ?? {},
             profileRef: input.profileRef ?? null,
@@ -122,7 +126,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
 
   async findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>> {
     try {
-      const rows = await this.selectJoined().where(coordinator(eq(users.parentOrgId, orgId)));
+      const rows = await this.selectJoined().where(coordinator(eq(users.orgId, orgId)));
       return { ok: true, value: rows.map(toDomain) };
     } catch (err: unknown) {
       return this.mapReadError('aggregatorStore.findByParentOrgId', err);
@@ -163,11 +167,8 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     };
     if (patch.name !== undefined) updates['name'] = patch.name;
     if (patch.type !== undefined) updates['type'] = patch.type;
-    if (patch.url !== undefined) updates['url'] = patch.url;
-    if (patch.locations !== undefined) updates['locations'] = patch.locations;
     if (patch.consent !== undefined) updates['consent'] = patch.consent;
     if (patch.status !== undefined) updates['status'] = patch.status;
-    if (patch.parentOrgId !== undefined) updates['parentOrgId'] = patch.parentOrgId;
     if (patch.rejectedAt !== undefined) updates['rejectedAt'] = patch.rejectedAt;
 
     let updated: Aggregator | null;
@@ -184,7 +185,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           if (!current) return null;
           const { identity, extra } = splitBecknContact(patch.contact);
           updates['contactId'] = await changeContact(tx, current.contactId, identity);
-          updates['contactExtra'] = extra;
+          updates['contactExtra'] = onlyAlternatePhone(extra);
         }
         const rows = await tx
           .update(users)
@@ -291,8 +292,9 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
   // ─── Reads ────────────────────────────────────────────────────────────────
 
   /**
-   * `users` JOIN `contact` — the one read shape every query uses. An inner
-   * join: `contact_id` is NOT NULL and RESTRICT-protected. Every caller filters
+   * `users` JOIN `contact` LEFT JOIN its org — the one read shape every query
+   * uses. `contact_id` is NOT NULL and RESTRICT-protected; the org join is
+   * LEFT so a missing org can never hide a coordinator. Every caller filters
    * through {@link coordinator}, so an admin account never reads as an
    * aggregator (the token's `aggregator_id` is resolved here).
    *
@@ -300,9 +302,20 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
    */
   private selectJoined(db: DbExecutor = getDb()) {
     return db
-      .select({ a: users, c: contact })
+      .select({
+        a: users,
+        c: contact,
+        o: {
+          slug: organisations.slug,
+          url: organisations.url,
+          locations: organisations.locations,
+          legalName: organisations.legalName,
+          gstNumber: organisations.gstNumber,
+        },
+      })
       .from(users)
-      .innerJoin(contact, eq(contact.id, users.contactId));
+      .innerJoin(contact, eq(contact.id, users.contactId))
+      .leftJoin(organisations, eq(organisations.id, users.orgId));
   }
 
   /** Reads one joined row through `db` (used inside write transactions). */
@@ -426,46 +439,70 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
 type JoinedRow = {
   a: typeof users.$inferSelect;
   c: typeof contact.$inferSelect;
+  o: {
+    slug: string;
+    url: string | null;
+    locations: (typeof organisations.$inferSelect)['locations'];
+    legalName: string | null;
+    gstNumber: string | null;
+  } | null;
 };
 
 /**
  * Builds the Beckn `contact` the API has always returned, from the linked
- * `contact` row plus `contact_extra`. Keys are emitted in the order the legacy
- * jsonb column produced them (Postgres orders jsonb keys by length, then
- * bytes), so a serialised response stays byte-identical.
+ * `contact` row, the org's company / GST (rendered) and `contact_extra`. Keys
+ * are emitted in the order the legacy jsonb column produced them (Postgres
+ * orders jsonb keys by length, then bytes), so a serialised response stays
+ * byte-identical.
  */
-function composeContact(row: JoinedRow): BecknContact {
+function composeContact(
+  row: JoinedRow,
+  company: string | undefined,
+  gstNumber: string | undefined,
+): BecknContact {
   const { a, c } = row;
   const extra = a.contactExtra ?? {};
   return {
     name: c.name ?? '',
     email: c.email,
     phone: c.phone ?? '',
-    ...(extra.company !== undefined ? { company: extra.company } : {}),
-    ...(extra.gstNumber !== undefined ? { gstNumber: extra.gstNumber } : {}),
+    ...(company !== undefined ? { company } : {}),
+    ...(gstNumber !== undefined ? { gstNumber } : {}),
     ...(extra.alternatePhone !== undefined ? { alternatePhone: extra.alternatePhone } : {}),
   };
 }
 
+/**
+ * Keeps only `alternatePhone` of a contact's extras: company / GST belong to
+ * the org since 0028 and are never stored on the coordinator.
+ *
+ * @param extra - The extras split off a Beckn contact.
+ * @returns The `contact_extra` value to store.
+ */
+function onlyAlternatePhone(extra: { alternatePhone?: string }): { alternatePhone?: string } {
+  return extra.alternatePhone !== undefined ? { alternatePhone: extra.alternatePhone } : {};
+}
+
 function toDomain(row: JoinedRow): Aggregator {
-  const { a } = row;
+  const { a, o } = row;
+  const details = renderOrgDetails(o, a.legacyOrgDetails);
   // Legacy `'both'` rows are coerced to null at the boundary — the app no
   // longer treats `both` as a first-class participant focus. Backfill the
   // column to a single value before dropping the DB enum entry.
   const type = a.type === 'both' ? null : a.type;
-  const composed = composeContact(row);
+  const composed = composeContact(row, details.company, details.gstNumber);
   return {
     id: a.id,
     orgSlug: a.orgSlug,
     actorType: a.actorType,
     name: a.name,
     type,
-    url: a.url,
+    url: details.url,
     contactId: a.contactId,
     contact: composed,
     contactPhone: composed.phone,
     contactEmail: composed.email,
-    locations: a.locations,
+    locations: details.locations,
     consent: a.consent,
     profile: a.profile ?? {},
     profileRef: a.profileRef,
@@ -475,7 +512,8 @@ function toDomain(row: JoinedRow): Aggregator {
     createdAt: a.createdAt,
     updatedAt: a.updatedAt,
     signalstackOrgId: a.signalstackOrgId,
-    parentOrgId: a.parentOrgId,
+    parentOrgId: a.orgId,
+    isDefaultOrg: o?.slug === DEFAULT_ORG_SLUG,
     inviteEmail: a.inviteEmail,
     rejectedAt: a.rejectedAt,
   };

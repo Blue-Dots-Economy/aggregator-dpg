@@ -10,7 +10,12 @@
  *
  *       body.aggregator.contact    → Keycloak FIRST (mirror is authoritative
  *                                    for phone+email), then DB
- *       body.aggregator.*          → DB only (name / url / locations / consent)
+ *       body.aggregator.*          → DB only (name / consent)
+ *
+ *     Org details (`url`, `locations`, `contact.company`, `contact.gstNumber`)
+ *     belong to the coordinator's org since migration 0028: they are rendered
+ *     from it on GET, and a PATCH carrying any of them is refused with
+ *     `409 ORG_DETAILS_READ_ONLY` before anything is written.
  *
  *     `org_slug` is rejected (immutable; DB trigger enforces too).
  *
@@ -183,7 +188,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         tags: ['aggregator-profile'],
         summary: 'Update the caller aggregator profile',
         description:
-          'Partial update of the caller aggregator (name / url / contact / locations / consent). Contact phone + email are mirrored to Keycloak before the DB write.',
+          "Partial update of the caller aggregator (name / contact / consent). Contact phone + email are mirrored to Keycloak before the DB write. Org details (url, locations, contact.company, contact.gstNumber) belong to the coordinator's organisation and are refused with 409 ORG_DETAILS_READ_ONLY.",
         security: [{ bearerAuth: [] }],
         body: ProfileUpdateBodySchema,
         response: {
@@ -201,6 +206,18 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
       // (the zod validator compiler replaces `req.body` with the parse
       // output), so the typed body can be consumed directly here.
       const body = req.body as z.infer<typeof ProfileUpdateBodySchema>;
+
+      // Org details are shared by every coordinator of the org: refuse them
+      // before any write (Keycloak or DB).
+      const orgDetailFields = [
+        ...(body.aggregator.url !== undefined ? ['url'] : []),
+        ...(body.aggregator.locations !== undefined ? ['locations'] : []),
+        ...(body.aggregator.contact?.company !== undefined ? ['contact.company'] : []),
+        ...(body.aggregator.contact?.gstNumber !== undefined ? ['contact.gstNumber'] : []),
+      ];
+      if (orgDetailFields.length > 0) {
+        throw httpError('ORG_DETAILS_READ_ONLY', { fields: { fields: orgDetailFields } });
+      }
 
       const aggregatorStore = getAggregatorStore();
 
@@ -256,9 +273,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         updatedBy: auth.userId,
       };
       if (body.aggregator.name !== undefined) patch.name = body.aggregator.name;
-      if (body.aggregator.url !== undefined) patch.url = body.aggregator.url;
       if (normalisedContact !== undefined) patch.contact = normalisedContact;
-      if (body.aggregator.locations !== undefined) patch.locations = body.aggregator.locations;
       if (body.aggregator.consent !== undefined) patch.consent = body.aggregator.consent;
 
       const result = await aggregatorStore.update(auth.aggregatorId, patch);

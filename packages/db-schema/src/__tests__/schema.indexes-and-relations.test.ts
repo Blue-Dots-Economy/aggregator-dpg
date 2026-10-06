@@ -31,6 +31,8 @@ import {
   linkSubmissions,
   aggregatorConsentRecord,
   onboarding,
+  campaignJob,
+  organisations,
 } from '../schema.js';
 
 /** Extracts the SQL column name for an index-column entry that is a plain column (not a SQL expression like `lower(x)`). */
@@ -62,7 +64,7 @@ describe('aggregators: indexes + foreign key', () => {
       'user_type',
     ]);
 
-    expect(cfg.indexes).toHaveLength(3);
+    expect(cfg.indexes).toHaveLength(4);
   });
 
   it('contact_id FK points at contact.id — RESTRICT on delete, CASCADE on update (re-key)', () => {
@@ -73,54 +75,12 @@ describe('aggregators: indexes + foreign key', () => {
     expect(fk.onUpdate).toBe('cascade');
   });
 
-  it('parent_org_id FK points at aggregator_orgs.id with no cascade action', () => {
+  it('org_id FK points at organisations.id — RESTRICT on delete', () => {
     expect(cfg.foreignKeys).toHaveLength(2);
-    const fk = cfg.foreignKeys.find((f) => f.reference().columns[0] === aggregators.parentOrgId)!;
-    const ref = fk.reference();
-    expect(ref.columns[0]).toBe(aggregators.parentOrgId);
-    expect(ref.foreignTable).toBe(aggregatorOrgs);
-    expect(ref.foreignColumns[0]).toBe(aggregatorOrgs.id);
-    expect(fk.onDelete).toBe('no action');
-  });
-});
-
-describe('aggregator_orgs: indexes (not covered by aggregator-orgs.schema.test.ts)', () => {
-  const cfg = getTableConfig(aggregatorOrgs);
-
-  it('table name is snake_case', () => {
-    expect(cfg.name).toBe('aggregator_orgs');
-  });
-
-  it('has plain filter indexes on status and owner_user_id', () => {
-    const byName = Object.fromEntries(cfg.indexes.map((i) => [i.config.name, i]));
-
-    expect(byName['aggregator_orgs_status_idx'].config.unique).toBe(false);
-    expect(byName['aggregator_orgs_status_idx'].config.columns.map(colName)).toEqual(['status']);
-
-    expect(byName['aggregator_orgs_owner_user_idx'].config.columns.map(colName)).toEqual([
-      'owner_user_id',
-    ]);
-  });
-
-  it('slug uniqueness is a partial unique index scoped to non-terminal rows', () => {
-    const idx = cfg.indexes.find((i) => i.config.name === 'aggregator_orgs_slug_active_unique');
-    expect(idx).toBeDefined();
-    expect(idx?.config.unique).toBe(true);
-    expect(idx?.config.columns.map(colName)).toEqual(['slug']);
-    // Partial index: only active/pending rows block a slug reuse (spec A9).
-    expect(idx?.config.where).toBeDefined();
-  });
-
-  it('display_name uniqueness is case-insensitive and scoped to non-terminal rows', () => {
-    const idx = cfg.indexes.find(
-      (i) => i.config.name === 'aggregator_orgs_display_name_active_unique',
-    );
-    expect(idx).toBeDefined();
-    expect(idx?.config.unique).toBe(true);
-    // Indexed on `lower(display_name)` — a SQL expression, not a plain column.
-    expect(idx?.config.where).toBeDefined();
-    // status, slug-active, display-name-active, contact_id (0025)
-    expect(cfg.indexes).toHaveLength(4);
+    const fk = cfg.foreignKeys.find((f) => f.reference().columns[0] === aggregators.orgId)!;
+    expect(fk.reference().foreignTable).toBe(aggregatorOrgs);
+    expect(fk.reference().foreignColumns[0]).toBe(aggregatorOrgs.id);
+    expect(fk.onDelete).toBe('restrict');
   });
 });
 
@@ -206,8 +166,8 @@ describe('link_submissions: indexes + foreign keys', () => {
     expect(cfg.indexes).toHaveLength(3);
   });
 
-  it('two foreign keys: link + aggregator, both cascade', () => {
-    expect(cfg.foreignKeys).toHaveLength(2);
+  it('foreign keys: link + aggregator (cascade), org (restrict)', () => {
+    expect(cfg.foreignKeys).toHaveLength(3);
     const byColumn = new Map(cfg.foreignKeys.map((fk) => [fk.reference().columns[0], fk]));
 
     const linkFk = byColumn.get(linkSubmissions.linkId);
@@ -274,8 +234,8 @@ describe('onboarding: indexes + foreign keys', () => {
     expect(cfg.indexes).toHaveLength(4);
   });
 
-  it('two foreign keys: aggregator (cascade), link (set null)', () => {
-    expect(cfg.foreignKeys).toHaveLength(2);
+  it('foreign keys: aggregator (cascade), link (set null), org (restrict)', () => {
+    expect(cfg.foreignKeys).toHaveLength(3);
     const byColumn = new Map(cfg.foreignKeys.map((fk) => [fk.reference().columns[0], fk]));
 
     const aggregatorFk = byColumn.get(onboarding.aggregatorId);
@@ -318,17 +278,6 @@ describe('contact: indexes (migration 0025)', () => {
   });
 });
 
-describe('aggregator_orgs: owner_user_id FK (migration 0027)', () => {
-  it('points at users.id — RESTRICT on delete', () => {
-    const cfg = getTableConfig(aggregatorOrgs);
-    const fk = cfg.foreignKeys.find(
-      (f) => f.reference().columns[0] === aggregatorOrgs.ownerUserId,
-    )!;
-    expect(fk.reference().foreignTable).toBe(users);
-    expect(fk.onDelete).toBe('restrict');
-  });
-});
-
 describe('user_identities (migration 0027)', () => {
   it('is keyed by (user_id, provider) and unique per (provider, subject)', () => {
     const cfg = getTableConfig(userIdentities);
@@ -339,4 +288,27 @@ describe('user_identities (migration 0027)', () => {
     expect(fk.reference().foreignTable).toBe(users);
     expect(fk.onDelete).toBe('cascade');
   });
+});
+
+describe('tenant tables: org_id (migration 0028)', () => {
+  it.each([
+    ['bulk_uploads', bulkUploads],
+    ['registration_links', registrationLinks],
+    ['link_submissions', linkSubmissions],
+    ['onboarding', onboarding],
+    ['campaign_job', campaignJob],
+  ] as const)(
+    '%s.org_id is a required RESTRICT FK to organisations, optional on insert',
+    (_name, table) => {
+      expect(table.orgId.name).toBe('org_id');
+      expect(table.orgId.notNull).toBe(true);
+      // Filled by the BEFORE INSERT trigger: inserts may omit it.
+      expect(table.orgId.hasDefault).toBe(true);
+      const fk = getTableConfig(table).foreignKeys.find(
+        (f) => f.reference().columns[0] === table.orgId,
+      )!;
+      expect(fk.reference().foreignTable).toBe(organisations);
+      expect(fk.onDelete).toBe('restrict');
+    },
+  );
 });

@@ -1,6 +1,4 @@
-// Coordinator submit with the org hierarchy ON. Flag must be set before any
-// import that pulls in `config`.
-process.env.ORG_HIERARCHY_ENABLED = 'true';
+// Coordinator submit with an org (the org hierarchy is always on since 0028).
 
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
@@ -9,8 +7,10 @@ import { AggregatorStoreFake, _setAggregatorStore } from '../services/aggregator
 import {
   AggregatorOrgStoreFake,
   buildAggregatorOrg,
+  buildDefaultOrg,
   _setAggregatorOrgStore,
 } from '../services/aggregator-org-store/index.js';
+import { verifyApprovalToken } from '../services/approval-token.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _resetTokenKey } from '../services/approval-token.js';
@@ -22,7 +22,7 @@ import { _setConsentLedger } from '../services/consent-ledger/index.js';
 const SERVICE_BEARER = 'service-token';
 const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
 
-describe('coordinator submit with ORG_HIERARCHY_ENABLED', () => {
+describe('coordinator submit with an org', () => {
   let app: FastifyInstance;
   let aggregatorStore: AggregatorStoreFake;
   let orgStore: AggregatorOrgStoreFake;
@@ -164,5 +164,88 @@ describe('coordinator submit with ORG_HIERARCHY_ENABLED', () => {
     });
     expect(res.statusCode).toBe(503);
     expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  describe('the Default org (0028)', () => {
+    const DEFAULT_ID = buildDefaultOrg().id;
+    const submit = (payload: Record<string, unknown>) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/aggregator-registrations/create',
+        headers: AUTH_HEADER,
+        payload,
+      });
+    const reviewLink = () => {
+      const html = mailer.outbox.at(-1)?.html ?? '';
+      const m = /token=([A-Za-z0-9._-]+)/.exec(html);
+      return { to: mailer.outbox.at(-1)?.to, token: m?.[1] ?? '' };
+    };
+
+    it('places a body without org_id in the Default org for one release, with a warning', async () => {
+      orgStore.seed([buildDefaultOrg()]);
+      const res = await submit({ ...validBody, url: 'https://own.example' });
+      expect(res.statusCode).toBe(201);
+      const id = (res.json() as { aggregator_id: string }).aggregator_id;
+      const stored = await aggregatorStore.findById(id);
+      expect(stored.ok && stored.value?.parentOrgId).toBe(DEFAULT_ID);
+      expect(stored.ok && stored.value?.isDefaultOrg).toBe(true);
+      // The Default org has no shared value: the coordinator keeps its own.
+      expect(stored.ok && stored.value?.url).toBe('https://own.example');
+    });
+
+    it('is selectable while it is the only active org', async () => {
+      orgStore.seed([buildDefaultOrg()]);
+      const res = await submit({ ...validBody, org_id: DEFAULT_ID });
+      expect(res.statusCode).toBe(201);
+    });
+
+    it('is not selectable once a real org is active', async () => {
+      orgStore.seed([
+        buildDefaultOrg(),
+        buildAggregatorOrg({ id: 'org-1', slug: 'o', status: 'active', ownerEmail: 'o@o.org' }),
+      ]);
+      const res = await submit({ ...validBody, org_id: DEFAULT_ID });
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('TARGET_ORG_INACTIVE');
+    });
+
+    it('rejects the organisation name "Default"', async () => {
+      orgStore.seed([buildDefaultOrg()]);
+      const res = await submit({ ...validBody, name: ' default ', org_id: DEFAULT_ID });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
+    });
+
+    it('routes the review to ADMIN_EMAILS with the Default org claim when no owner is configured', async () => {
+      delete process.env.DEFAULT_ORG_OWNER_EMAIL;
+      orgStore.seed([buildDefaultOrg()]);
+      expect((await submit({ ...validBody, org_id: DEFAULT_ID })).statusCode).toBe(201);
+      const { to, token } = reviewLink();
+      expect(to).toEqual(['reviewer@bluedots.local']);
+      const v = await verifyApprovalToken(token);
+      expect(v.ok && v.org).toBe(DEFAULT_ID);
+    });
+
+    it('routes the review to DEFAULT_ORG_OWNER_EMAIL when configured', async () => {
+      process.env.DEFAULT_ORG_OWNER_EMAIL = 'default.owner@bluedots.local';
+      try {
+        orgStore.seed([buildDefaultOrg()]);
+        expect((await submit({ ...validBody, org_id: DEFAULT_ID })).statusCode).toBe(201);
+        expect(reviewLink().to).toEqual(['default.owner@bluedots.local']);
+      } finally {
+        delete process.env.DEFAULT_ORG_OWNER_EMAIL;
+      }
+    });
+
+    it("ignores url / locations for a real org (they are the org's)", async () => {
+      orgStore.seed([
+        buildAggregatorOrg({ id: 'org-1', slug: 'o', status: 'active', ownerEmail: 'o@o.org' }),
+      ]);
+      const res = await submit({ ...validBody, org_id: 'org-1', url: 'https://own.example' });
+      expect(res.statusCode).toBe(201);
+      const id = (res.json() as { aggregator_id: string }).aggregator_id;
+      const stored = await aggregatorStore.findById(id);
+      expect(stored.ok && stored.value?.url).toBeNull();
+    });
   });
 });

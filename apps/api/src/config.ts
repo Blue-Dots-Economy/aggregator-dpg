@@ -68,17 +68,6 @@ const ConfigSchema = z.object({
     .default('false')
     .transform((v) => v === 'true'),
   /**
-   * Enables the parent-org → coordinator hierarchy for this instance
-   * (spec §2). OFF (default) = today's flat registration/approval flow,
-   * unchanged: no org tab, no org dropdown, no `aggregator_orgs` rows,
-   * `aggregators.parent_org_id` stays null. Read once at startup; flipping
-   * requires a restart. Two instances of the same network can differ.
-   */
-  ORG_HIERARCHY_ENABLED: z
-    .enum(['true', 'false'])
-    .default('false')
-    .transform((v) => v === 'true'),
-  /**
    * Public origin of the API service; used to assemble admin email links.
    * Also advertised as `servers[0].url` in the OpenAPI spec (served and
    * dumped) — deployments must override this so the docs surface points
@@ -89,6 +78,18 @@ const ConfigSchema = z.object({
   PUBLIC_PORTAL_URL: z.string().default('http://localhost:3000'),
   /** Comma-separated list of admin recipient email addresses. */
   ADMIN_EMAILS: z.string().default(''),
+  /**
+   * Owner of the fixed Default org (migration 0028), optional. When set, boot
+   * creates that person's account and makes it the Default org's owner, and
+   * Default-org coordinator approvals go to it; when unset, they go to
+   * `ADMIN_EMAILS` (the flat-instance behaviour).
+   */
+  DEFAULT_ORG_OWNER_EMAIL: z
+    .string()
+    .trim()
+    .transform((v) => v.toLowerCase())
+    .pipe(z.union([z.literal(''), z.string().email()]))
+    .default(''),
   /**
    * Per-domain Signals UI login URLs, as comma-separated `domain=url` pairs:
    *
@@ -392,26 +393,34 @@ export const corsOrigins: string[] = config.CORS_ORIGINS.split(',')
   .filter(Boolean);
 
 /**
- * Whether the org→coordinator hierarchy is enabled for this instance.
+ * Whether the removed `ORG_HIERARCHY_ENABLED` variable is still set. The org
+ * hierarchy is always on since migration 0028; the variable is ignored, and
+ * boot logs one warning while it is present (one release, then the check goes).
  *
- * Read from the live environment at **call time** rather than from the frozen
- * `config` snapshot. It is consumed only on the startup path (route
- * registration inside `buildApp()`), so this still honours "read once at
- * startup" (configuration-discipline) while remaining deterministic under
- * Vitest's hoisted-import evaluation order, where a test sets the env var
- * before `buildApp()` runs but after `config` was first parsed.
- *
- * @returns `true` when `ORG_HIERARCHY_ENABLED` is the literal string `"true"`.
+ * @returns `true` when the variable is set to any value.
  */
-export function orgHierarchyEnabled(): boolean {
-  return process.env.ORG_HIERARCHY_ENABLED === 'true';
+export function legacyHierarchyFlagSet(): boolean {
+  return process.env.ORG_HIERARCHY_ENABLED !== undefined;
+}
+
+/**
+ * The configured owner of the Default org, or `null`.
+ *
+ * Read from the live environment at call time, like {@link supportEmail}, so
+ * tests can toggle it within one worker.
+ *
+ * @returns The lowercased email, or `null` when unset or blank.
+ */
+export function defaultOrgOwnerEmail(): string | null {
+  const v = process.env.DEFAULT_ORG_OWNER_EMAIL?.trim().toLowerCase();
+  return v ? v : null;
 }
 
 /**
  * Recipient address for contact-support submissions.
  *
  * Read from the live environment at **call time** rather than from the
- * frozen `config` snapshot — mirrors {@link orgHierarchyEnabled}. Unlike
+ * frozen `config` snapshot — mirrors {@link defaultOrgOwnerEmail}. Unlike
  * that flag, this one is consumed on every request (`GET /v1/support/config`
  * and `POST /v1/support` both need the current value, not just a
  * startup-time snapshot), and it must be independently toggleable across

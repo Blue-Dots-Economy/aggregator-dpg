@@ -48,9 +48,6 @@ describe('aggregators columns', () => {
     expect(aggregators.type.name).toBe('type');
     expect(aggregators.type.notNull).toBe(false);
 
-    expect(aggregators.url.name).toBe('url');
-    expect(aggregators.url.notNull).toBe(false);
-
     expect(aggregators.status.name).toBe('status');
     expect(aggregators.status.notNull).toBe(true);
     expect(aggregators.status.hasDefault).toBe(true);
@@ -85,23 +82,14 @@ describe('aggregators columns', () => {
     expect('contactEmail' in aggregators).toBe(false);
   });
 
-  it('locations + consent jsonb columns', () => {
-    expect(aggregators.locations.name).toBe('locations');
-    expect(aggregators.locations.notNull).toBe(true);
-    expect(aggregators.locations.hasDefault).toBe(true);
-
+  it('consent jsonb column', () => {
     expect(aggregators.consent.name).toBe('consent');
     expect(aggregators.consent.notNull).toBe(true);
     expect(aggregators.consent.hasDefault).toBe(false);
   });
 });
 
-describe('aggregator_orgs remaining columns (not covered by aggregator-orgs.schema.test.ts)', () => {
-  it('owner_user_id FK column (0027) — the owner is an admin account, not a contact copy', () => {
-    expect(aggregatorOrgs.ownerUserId.name).toBe('owner_user_id');
-    expect(aggregatorOrgs.ownerUserId.notNull).toBe(true);
-  });
-
+describe('organisations remaining columns (not covered by organisations.schema.test.ts)', () => {
   it('id is a defaulted primary key', () => {
     expect(aggregatorOrgs.id.name).toBe('id');
     expect(aggregatorOrgs.id.primary).toBe(true);

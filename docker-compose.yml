@@ -344,9 +344,6 @@ services:
       # deployment sets them.
       NEXT_PUBLIC_ENABLED_LANGUAGES: ${NEXT_PUBLIC_ENABLED_LANGUAGES:-}
       NEXT_PUBLIC_INVITE_MAX_RECIPIENTS: ${NEXT_PUBLIC_INVITE_MAX_RECIPIENTS:-}
-      # Gates the "Register Organisation" tab; read server-side by the register
-      # page. Must match the api's ORG_HIERARCHY_ENABLED so both agree.
-      ORG_HIERARCHY_ENABLED: ${ORG_HIERARCHY_ENABLED:-false}
       # ─── OIDC (Authorization Code + PKCE) ────────────────────────────
       # OIDC_ISSUER must resolve identically from the browser AND the web
       # container. With nginx as the sole ingress, both reach Keycloak via
@@ -466,12 +463,12 @@ services:
       AWS_REGION: ${AWS_REGION:-ap-south-1}
       SES_FROM: ${SES_FROM:-}
       SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}
-      # Org hierarchy — when true, registers the org-registration + approval
-      # routes. Must match the web app's ORG_HIERARCHY_ENABLED so both agree.
-      ORG_HIERARCHY_ENABLED: ${ORG_HIERARCHY_ENABLED:-false}
       # Approval flow
       APPROVAL_TOKEN_SECRET: ${APPROVAL_TOKEN_SECRET:?APPROVAL_TOKEN_SECRET must be set in .env (≥32 chars)}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@bluedots.local}
+      # Owner of the fixed Default org (migration 0028); optional. Unset: Default
+      # org approvals go to ADMIN_EMAILS.
+      DEFAULT_ORG_OWNER_EMAIL: ${DEFAULT_ORG_OWNER_EMAIL:-}
       # ─── Signals UI hand-off ──────────────────────────────────────────
       # Per-domain Signals UI login URLs (`domain=url` pairs). Without this
       # passed through, the feature was unreachable in the composed stack

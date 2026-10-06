@@ -393,7 +393,7 @@ export const ERR = {
     title: 'Already an organisation owner',
     detail:
       'This email or phone already belongs to an organisation owner. Request coordinator access from your organisation instead of registering again.',
-    hint: 'Coordinator submit matched an aggregator_orgs.owner_email (spec A4). Owner→coordinator graduation is deferred.',
+    hint: "Coordinator submit matched an org owner's email (the owner's admin account contact; spec A4). Owner→coordinator graduation is deferred.",
   },
   ORG_SLUG_TAKEN: {
     code: 'ORG_SLUG_TAKEN',
@@ -401,7 +401,7 @@ export const ERR = {
     title: 'Organisation name unavailable',
     detail:
       'An organisation with a matching name is already registered or pending. Try a different name.',
-    hint: 'aggregator_orgs partial-unique slug collision over non-terminal rows (spec A9).',
+    hint: 'organisations partial-unique slug collision over non-terminal rows (spec A9).',
   },
   ORG_NAME_TAKEN: {
     code: 'ORG_NAME_TAKEN',
@@ -409,7 +409,7 @@ export const ERR = {
     title: 'Organisation name unavailable',
     detail:
       'An organisation with this name is already registered or pending. Please choose a different name.',
-    hint: 'aggregator_orgs partial-unique display_name (case-insensitive) collision over non-terminal rows.',
+    hint: 'organisations partial-unique name (case-insensitive) collision over non-terminal aggregator orgs.',
   },
   REGISTRATION_COOLING: {
     code: 'REGISTRATION_COOLING',
@@ -426,6 +426,15 @@ export const ERR = {
     detail:
       'The selected organisation is not accepting coordinators. Contact the organisation owner.',
     hint: 'Coordinator submit/approval against an org whose status != active (spec §6.2 re-validate).',
+  },
+
+  ORG_DETAILS_READ_ONLY: {
+    code: 'ORG_DETAILS_READ_ONLY',
+    status: 409,
+    title: 'Organisation details are read-only here',
+    detail:
+      "url, locations, company and GST number belong to the coordinator's organisation and cannot be changed from the coordinator profile.",
+    hint: 'Profile PATCH carried an org-detail field (migration 0028); the org owner edits them. `fields.fields` lists the offending keys.',
   },
 
   // ── Coordinator invites (#700) ────────────────────────────────────────────

@@ -1,22 +1,45 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { z } from 'zod';
-import { campaignDumpServiceAccount } from '../config.js';
+import {
+  campaignDumpServiceAccount,
+  defaultOrgOwnerEmail,
+  legacyHierarchyFlagSet,
+} from '../config.js';
 
-// Mirror the boolean-flag schema fragment the config uses so we can assert
-// the parse semantics without re-importing the whole module (which reads
-// process.env at import time).
-const flag = z
-  .enum(['true', 'false'])
-  .default('false')
-  .transform((v) => v === 'true');
-
-describe('ORG_HIERARCHY_ENABLED flag semantics', () => {
-  it('defaults to false when unset', () => {
-    expect(flag.parse(undefined)).toBe(false);
+describe('legacyHierarchyFlagSet (ORG_HIERARCHY_ENABLED removed in 0028)', () => {
+  const original = process.env.ORG_HIERARCHY_ENABLED;
+  afterEach(() => {
+    if (original === undefined) delete process.env.ORG_HIERARCHY_ENABLED;
+    else process.env.ORG_HIERARCHY_ENABLED = original;
   });
-  it('is true only for the literal string "true"', () => {
-    expect(flag.parse('true')).toBe(true);
-    expect(flag.parse('false')).toBe(false);
+
+  it('is false when the variable is absent', () => {
+    delete process.env.ORG_HIERARCHY_ENABLED;
+    expect(legacyHierarchyFlagSet()).toBe(false);
+  });
+
+  it('is true for any value, so boot warns that it is ignored', () => {
+    process.env.ORG_HIERARCHY_ENABLED = 'false';
+    expect(legacyHierarchyFlagSet()).toBe(true);
+  });
+});
+
+describe('defaultOrgOwnerEmail', () => {
+  const original = process.env.DEFAULT_ORG_OWNER_EMAIL;
+  afterEach(() => {
+    if (original === undefined) delete process.env.DEFAULT_ORG_OWNER_EMAIL;
+    else process.env.DEFAULT_ORG_OWNER_EMAIL = original;
+  });
+
+  it('is null when unset or blank', () => {
+    delete process.env.DEFAULT_ORG_OWNER_EMAIL;
+    expect(defaultOrgOwnerEmail()).toBeNull();
+    process.env.DEFAULT_ORG_OWNER_EMAIL = '   ';
+    expect(defaultOrgOwnerEmail()).toBeNull();
+  });
+
+  it('trims and lowercases a configured address', () => {
+    process.env.DEFAULT_ORG_OWNER_EMAIL = '  Owner@Example.ORG ';
+    expect(defaultOrgOwnerEmail()).toBe('owner@example.org');
   });
 });
 

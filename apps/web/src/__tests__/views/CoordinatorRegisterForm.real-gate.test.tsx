@@ -114,7 +114,6 @@ function renderForm() {
         <CoordinatorRegisterForm
           schema={coordSchema}
           uiSchema={{}}
-          orgHierarchyEnabled={false}
           consentContent={consentContentFixture}
         />
       </NextIntlClientProvider>
@@ -127,6 +126,13 @@ describe('<CoordinatorRegisterForm /> with the real ConsentGate', () => {
     let calls: { url: string; body: string }[] = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
+      // The org selector's list (always on since 0028) is not a registration.
+      if (String(input).includes('/api/orgs')) {
+        return new Response(JSON.stringify({ orgs: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       calls.push({ url: String(input), body: init?.body ?? '' });
       return new Response(JSON.stringify({ aggregator_id: 'agg-enable-india' }), {
         status: 200,

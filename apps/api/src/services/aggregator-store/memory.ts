@@ -3,7 +3,10 @@
  *
  * Process-local Maps, suitable for unit tests. Mirrors the Postgres adapter's
  * external behaviour: unique slug / phone / email, conditional `actor_type ↔
- * type` invariant, immutable slug on update.
+ * type` invariant, immutable slug on update, and org details rendered from the
+ * coordinator's org with the `legacy_org_details` fallback (0028). Org details
+ * are seeded per org id (`AggregatorStoreFake.seedOrgDetails`); the Default org
+ * is {@link MEMORY_DEFAULT_ORG_ID} unless a test changes it.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -17,7 +20,12 @@ import {
   type StoreResult,
   type UpdateAggregatorPatch,
 } from './interface.js';
-import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
+import type { AggregatorStatus, BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
+import { renderOrgDetails, type OrgDetailColumns } from './org-details.js';
+import type { LegacyOrgDetails } from './interface.js';
+
+/** The Default org's id in the in-memory store (matches `buildDefaultOrg`). */
+export const MEMORY_DEFAULT_ORG_ID = '00000000-0000-0000-0000-0000000000d0';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 
 /**
@@ -37,6 +45,39 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
   protected readonly bySlug = new Map<string, string>();
   protected readonly byPhone = new Map<string, string>();
   protected readonly byEmail = new Map<string, string>();
+
+  /** Org-detail columns per org id (seeded by tests). */
+  protected readonly orgDetails = new Map<string, OrgDetailColumns>();
+  /** Each coordinator's own `legacy_org_details`. */
+  protected readonly legacy = new Map<string, LegacyOrgDetails | null>();
+  /** Which org id is the Default org. */
+  protected defaultOrgId: string = MEMORY_DEFAULT_ORG_ID;
+
+  /**
+   * Renders org details and the composed contact as Postgres does: company /
+   * GST come from the org (or the coordinator's legacy values), never from
+   * the submitted contact.
+   */
+  private render(
+    orgId: string,
+    legacy: LegacyOrgDetails | null,
+    submitted: BecknContact,
+  ): { url: string | null; locations: Aggregator['locations']; contact: BecknContact } {
+    const d = renderOrgDetails(this.orgDetails.get(orgId) ?? null, legacy);
+    const { name, email, phone, alternatePhone } = submitted;
+    return {
+      url: d.url,
+      locations: d.locations,
+      contact: {
+        name,
+        email,
+        phone,
+        ...(d.company !== undefined ? { company: d.company } : {}),
+        ...(d.gstNumber !== undefined ? { gstNumber: d.gstNumber } : {}),
+        ...(alternatePhone !== undefined ? { alternatePhone } : {}),
+      },
+    };
+  }
 
   create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
     const invariant = checkInvariant(input.actorType, input.type);
@@ -59,18 +100,21 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       return Promise.resolve(errResult('CHECK_VIOLATION', 'contactId: phone must be canonical'));
 
     const now = new Date();
+    const id = randomUUID();
+    this.legacy.set(id, input.legacyOrgDetails ?? null);
+    const rendered = this.render(input.orgId, input.legacyOrgDetails ?? null, input.contact);
     const row: Aggregator = {
-      id: randomUUID(),
+      id,
       orgSlug: input.orgSlug,
       actorType: input.actorType,
       name: input.name,
       type: input.type,
-      url: input.url ?? null,
+      url: rendered.url,
       contactId: cid,
-      contact: input.contact,
+      contact: rendered.contact,
       contactPhone: phone,
       contactEmail: email,
-      locations: input.locations ?? [],
+      locations: rendered.locations,
       consent: input.consent,
       profile: input.profile ?? {},
       profileRef: input.profileRef ?? null,
@@ -80,7 +124,8 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       createdAt: now,
       updatedAt: now,
       signalstackOrgId: null,
-      parentOrgId: input.parentOrgId ?? null,
+      parentOrgId: input.orgId,
+      isDefaultOrg: input.orgId === this.defaultOrgId,
       inviteEmail: input.inviteEmail ?? null,
       rejectedAt: null,
     };
@@ -144,7 +189,9 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     let nextEmail = existing.contactEmail;
     let nextContact = existing.contact;
     if (patch.contact) {
-      nextContact = patch.contact;
+      nextContact = existing.parentOrgId
+        ? this.render(existing.parentOrgId, this.legacy.get(id) ?? null, patch.contact).contact
+        : patch.contact;
       nextPhone = patch.contact.phone;
       nextEmail = patch.contact.email.toLowerCase();
       if (nextPhone !== existing.contactPhone && this.byPhone.has(nextPhone)) {
@@ -163,15 +210,12 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       ...existing,
       name: patch.name ?? existing.name,
       type: patch.type !== undefined ? patch.type : existing.type,
-      url: patch.url !== undefined ? patch.url : existing.url,
       contactId: nextId,
       contact: nextContact,
       contactPhone: nextPhone,
       contactEmail: nextEmail,
-      locations: patch.locations ?? existing.locations,
       consent: patch.consent ?? existing.consent,
       status: patch.status ?? existing.status,
-      parentOrgId: patch.parentOrgId !== undefined ? patch.parentOrgId : existing.parentOrgId,
       rejectedAt: patch.rejectedAt !== undefined ? patch.rejectedAt : existing.rejectedAt,
       updatedBy: patch.updatedBy,
       updatedAt: new Date(),

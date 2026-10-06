@@ -65,6 +65,8 @@ suite('contact (migration 0025) — integration', () => {
   let sql0026: string;
   let legacy = false;
   let headSchema = false;
+  /** The Default org (0028): every coordinator needs an org. */
+  let defaultOrgId = '';
 
   beforeAll(async () => {
     _setDbClients(null, null);
@@ -82,9 +84,13 @@ suite('contact (migration 0025) — integration', () => {
     );
     legacy = r.rows[0].n > 0;
     // The store tests run the current store code, which targets `users`
-    // (migration 0027): they run only once that table exists.
-    const head = await pool.query(`SELECT to_regclass('public.users')::text AS t`);
+    // (migration 0028): they run only once `organisations` exists.
+    const head = await pool.query(`SELECT to_regclass('public.organisations')::text AS t`);
     headSchema = Boolean(head.rows[0].t);
+    if (headSchema) {
+      const d = await pool.query(`SELECT id FROM organisations WHERE slug = 'default'`);
+      defaultOrgId = d.rows[0]?.id ?? '';
+    }
   });
 
   afterAll(async () => {
@@ -319,17 +325,19 @@ suite('contact (migration 0025) — integration', () => {
         contact: { name: 'Store Test', email, phone: p, gstNumber: 'GST1' },
         consent: CONSENT,
         createdBy: 'it',
+        orgId: defaultOrgId,
         updatedBy: 'it',
       });
       expect(created.ok).toBe(true);
       if (!created.ok) return;
       try {
         expect(created.value.contactId).toBe(contactId(email, p));
+        // GST belongs to the org since 0028: a submitted value is not stored,
+        // and the Default org has none to render.
         expect(created.value.contact).toEqual({
           name: 'Store Test',
           email,
           phone: p,
-          gstNumber: 'GST1',
         });
         const byEmail = await store.findByContactEmail(email.toUpperCase());
         expect(byEmail.ok && byEmail.value?.id).toBe(created.value.id);
@@ -481,13 +489,17 @@ suite('contact (migration 0025) — integration', () => {
         contact: input,
         consent: CONSENT,
         createdBy: 'it',
+        orgId: defaultOrgId,
         updatedBy: 'it',
       });
       expect(created.ok).toBe(true);
       if (!created.ok) return;
       try {
         // What Postgres would have stored (and returned) for this object.
-        const asJsonb = await pool.query('SELECT $1::jsonb AS j', [JSON.stringify(input)]);
+        // Company / GST belong to the org since 0028 (the Default org has none),
+        // so the coordinator's contact carries only the person's own keys.
+        const { gstNumber: _g, company: _c, ...own } = input;
+        const asJsonb = await pool.query('SELECT $1::jsonb AS j', [JSON.stringify(own)]);
         expect(JSON.stringify(created.value.contact)).toBe(JSON.stringify(asJsonb.rows[0].j));
         const raw = await pool.query('SELECT contact_id FROM users WHERE id = $1', [
           created.value.id,
@@ -509,6 +521,7 @@ suite('contact (migration 0025) — integration', () => {
         type: null,
         consent: CONSENT,
         createdBy: 'it',
+        orgId: defaultOrgId,
         updatedBy: 'it',
       };
       const first = await store.create({
@@ -545,6 +558,7 @@ suite('contact (migration 0025) — integration', () => {
         type: null,
         consent: CONSENT,
         createdBy: 'it',
+        orgId: defaultOrgId,
         updatedBy: 'it',
       };
       const [a, b] = await Promise.all([
@@ -576,6 +590,7 @@ suite('contact (migration 0025) — integration', () => {
         contact: { name: 'Both', email, phone: p },
         consent: CONSENT,
         createdBy: 'it',
+        orgId: defaultOrgId,
         updatedBy: 'it',
       });
       const org = await orgStore.create({
@@ -733,13 +748,13 @@ suite('contact (migration 0025) — integration', () => {
       ]);
     });
 
-    it('is idempotent: re-applying 0027 (the current head) is a no-op', async (ctx) => {
+    it('is idempotent: re-applying 0028 (the current head) is a no-op', async (ctx) => {
       if (legacy) ctx.skip();
-      const sql0027 = await readFile(path.join(MIGRATIONS_DIR, '0027_users.sql'), 'utf8');
+      const head = await readFile(path.join(MIGRATIONS_DIR, '0028_organisations.sql'), 'utf8');
       const c = await pool.connect();
       try {
         await c.query('BEGIN');
-        await c.query(sql0027);
+        await c.query(head);
         await c.query('COMMIT');
       } finally {
         c.release();
@@ -758,6 +773,7 @@ suite('contact (migration 0025) — integration', () => {
         contact: { name: 'Gc', email, phone: phone() },
         consent: CONSENT,
         createdBy: 'it',
+        orgId: defaultOrgId,
         updatedBy: 'it',
       });
       if (!created.ok) throw new Error('create failed');
@@ -793,6 +809,7 @@ suite('contact (migration 0025) — integration', () => {
         },
         consent: CONSENT,
         createdBy: 'it',
+        orgId: defaultOrgId,
         updatedBy: 'it',
       });
       if (!org.ok || !coord.ok) throw new Error('setup failed');

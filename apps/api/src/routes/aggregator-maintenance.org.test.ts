@@ -1,6 +1,4 @@
-// Stale-pending cleanup with the org hierarchy ON. Flag must be set before any
-// import that pulls in `config` (read once at import).
-process.env.ORG_HIERARCHY_ENABLED = 'true';
+// Stale-pending cleanup of orgs.
 
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
@@ -17,7 +15,7 @@ import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-tok
 const SERVICE_BEARER = 'service-token';
 const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
 
-describe('cleanup-stale — org prune (ORG_HIERARCHY_ENABLED)', () => {
+describe('cleanup-stale — org prune', () => {
   let app: FastifyInstance;
   let orgStore: AggregatorOrgStoreFake;
   let idp: IdpAdminFake;

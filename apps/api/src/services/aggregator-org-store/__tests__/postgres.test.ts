@@ -38,7 +38,17 @@ function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
       'o' in r
         ? r
         : {
-            o: r,
+            // The fixture is a domain row; the table columns follow 0028.
+            o: {
+              ...r,
+              name: r['displayName'],
+              orgOwner: r['ownerUserId'],
+              orgType: 'aggregator',
+              url: r['url'] ?? null,
+              locations: r['locations'] ?? [],
+              legalName: r['legalName'] ?? null,
+              gstNumber: r['gstNumber'] ?? null,
+            },
             ownerKcSub: (r['ownerKcSub'] as string | null) ?? null,
             c: {
               id: 'c'.repeat(64),
@@ -118,6 +128,11 @@ function makeRow(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
     createdAt,
     updatedAt: createdAt,
     rejectedAt: null,
+    isDefault: false,
+    url: null,
+    locations: [],
+    legalName: null,
+    gstNumber: null,
     ...overrides,
   };
 }
@@ -152,10 +167,12 @@ describe('PostgresAggregatorOrgStore.create', () => {
     expect(result.value.ownerEmail).toBe('owner@test.local');
     expect(callArgs(captured, 'values')?.[0]).toMatchObject({
       slug: 'test-org',
-      displayName: 'Test Org',
+      name: 'Test Org',
+      // Every new org is an aggregator under the network root (0028).
+      orgType: 'aggregator',
       // The owner is an admin account (0027) linked to the owner's contact;
       // the org row holds no contact or IdP copy of its own.
-      ownerUserId: 'admin-1',
+      orgOwner: 'admin-1',
       state: null,
       kcGroupId: null,
     });
@@ -179,7 +196,7 @@ describe('PostgresAggregatorOrgStore.create', () => {
     const db = makeFakeDb(() => {
       throw Object.assign(new Error('duplicate key'), {
         code: '23505',
-        constraint: 'aggregator_orgs_display_name_active_unique',
+        constraint: 'organisations_name_live_unique',
       });
     });
     _setDbClients(null, db as never);
@@ -195,7 +212,7 @@ describe('PostgresAggregatorOrgStore.create', () => {
     const db = makeFakeDb(() => {
       throw Object.assign(new Error('duplicate key'), {
         code: '23505',
-        constraint: 'aggregator_orgs_slug_active_unique',
+        constraint: 'organisations_slug_live_unique',
       });
     });
     _setDbClients(null, db as never);
@@ -224,7 +241,7 @@ describe('PostgresAggregatorOrgStore.create', () => {
     // mentions the unique index (Drizzle puts the query text on `.message`).
     const db = makeFakeDb(() => {
       throw Object.assign(
-        new Error('Failed query: insert ... aggregator_orgs_display_name_active_unique ...'),
+        new Error('Failed query: insert ... organisations_name_live_unique ...'),
         { cause: new Error('connection terminated') },
       );
     });
@@ -244,9 +261,9 @@ describe('PostgresAggregatorOrgStore.create', () => {
     const db = makeFakeDb(() => {
       const pgErr = Object.assign(
         new Error(
-          'duplicate key value violates unique constraint "aggregator_orgs_display_name_active_unique"',
+          'duplicate key value violates unique constraint "organisations_name_live_unique"',
         ),
-        { code: '23505', constraint: 'aggregator_orgs_display_name_active_unique' },
+        { code: '23505', constraint: 'organisations_name_live_unique' },
       );
       throw Object.assign(new Error('Failed query: insert into "aggregator_orgs" ...'), {
         cause: pgErr,
@@ -265,7 +282,7 @@ describe('PostgresAggregatorOrgStore.create', () => {
     const db = makeFakeDb(() => {
       const pgErr = Object.assign(new Error('duplicate key value ...'), {
         code: '23505',
-        constraint: 'aggregator_orgs_slug_active_unique',
+        constraint: 'organisations_slug_live_unique',
       });
       throw Object.assign(new Error('Failed query: insert into "aggregator_orgs" ...'), {
         cause: pgErr,
@@ -475,7 +492,7 @@ describe('PostgresAggregatorOrgStore.update', () => {
     if (!result.ok) return;
     expect(result.value.displayName).toBe('New Name');
     const set = callArgs(captured, 'set')?.[0] as Record<string, unknown>;
-    expect(set).toMatchObject({ displayName: 'New Name' });
+    expect(set).toMatchObject({ name: 'New Name' });
     expect(set).toHaveProperty('updatedAt');
   });
 

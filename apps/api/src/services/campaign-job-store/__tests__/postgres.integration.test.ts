@@ -15,7 +15,7 @@
  */
 import { afterAll, beforeAll, describe } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { ConsentRecord } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getDb, getPool, closeDb, _setDbClients } from '../../../db/client.js';
 import { aggregators, campaignJob } from '../../../db/schema.js';
@@ -51,6 +51,8 @@ suite('PostgresCampaignJobStore (integration)', () => {
         actorType: 'aggregator',
         name: 'Campaign Job Store Test',
         contactId,
+        // Every coordinator has an org since 0028: the Default org.
+        orgId: sql`(SELECT id FROM organisations WHERE slug = 'default')`,
         consent: {} as unknown as ConsentRecord,
         createdBy: 'integration-test',
         updatedBy: 'integration-test',

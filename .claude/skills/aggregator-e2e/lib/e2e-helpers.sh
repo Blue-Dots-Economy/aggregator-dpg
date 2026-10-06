@@ -100,9 +100,7 @@ e2e_report() {
 # ------------------------------------------------------------------ stack launch
 
 # Brings the stack up in docker-only mode with the dev overlay (mailpit + host
-# ports) and the org hierarchy on. ORG_HIERARCHY_ENABLED is passed inline because
-# compose reads `${ORG_HIERARCHY_ENABLED:-false}` for BOTH api and web — the two
-# must agree, and doing it inline leaves the developer's .env untouched.
+# ports). Organisations are always on since migration 0028 (no flag).
 stack_up() {
   if ! docker info >/dev/null 2>&1; then
     echo "Docker is not running. Start Docker Desktop, then re-run." >&2
@@ -110,7 +108,7 @@ stack_up() {
   fi
   # ALLOW_TRAIN_ON_BOOT: a dev/e2e database with data may migrate the user &
   # org release train at boot (never set it in a deployment).
-  ( cd "$REPO_ROOT" && AGGREGATOR_NETWORK="$NETWORK" ORG_HIERARCHY_ENABLED=true \
+  ( cd "$REPO_ROOT" && AGGREGATOR_NETWORK="$NETWORK" \
       ALLOW_TRAIN_ON_BOOT=true pnpm stack:up )
   return $?
 }
@@ -246,7 +244,8 @@ mail_extract_link() {
 
 # seed_active_org — prints the new org UUID.
 # The owner is an identity-only admin account in `users` (migration 0027),
-# linked to its `contact`; the org references it through owner_user_id.
+# linked to its `contact`; the org (an aggregator org under the network root,
+# migration 0028) references it through org_owner.
 seed_active_org() {
   psql_q "WITH c AS (
             INSERT INTO contact (id, email, name)
@@ -254,13 +253,15 @@ seed_active_org() {
             ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email
             RETURNING id),
           u AS (
-            INSERT INTO users (user_type, contact_id, status, locations, profile, contact_extra,
+            INSERT INTO users (user_type, contact_id, status, profile, contact_extra,
                                created_by, updated_by)
-            SELECT 'admin', c.id, NULL, NULL, NULL, NULL, 'e2e', 'e2e' FROM c
+            SELECT 'admin', c.id, NULL, NULL, NULL, 'e2e', 'e2e' FROM c
             ON CONFLICT (contact_id, user_type) DO UPDATE SET updated_by = EXCLUDED.updated_by
             RETURNING id)
-          INSERT INTO aggregator_orgs (slug, display_name, owner_user_id, status)
-          SELECT '$E2E_TAG-org', 'E2E Org $E2E_TAG', u.id, 'active' FROM u
+          INSERT INTO organisations (slug, name, org_type, parent_id, org_owner, status)
+          SELECT '$E2E_TAG-org', 'E2E Org $E2E_TAG', 'aggregator',
+                 (SELECT id FROM organisations WHERE org_type = 'network_facilitator'), u.id, 'active'
+            FROM u
           RETURNING id;" | head -1 | tr -d '[:space:]'
   return 0
 }
@@ -295,7 +296,7 @@ TS
   # network if the binary happens to be missing.
   ( cd "$REPO_ROOT/apps/api" &&
     SEED_ORG_ID="$org" SEED_EMAIL="$email" \
-    AGGREGATOR_NETWORK="$NETWORK" ORG_HIERARCHY_ENABLED=true \
+    AGGREGATOR_NETWORK="$NETWORK" \
     INSTANCE_ENV=development NODE_ENV=development \
     pnpm exec tsx --env-file=.env src/__e2e_mint_invite.ts 2>/dev/null |
     grep -E '^(JTI|TOKEN)=' )
@@ -309,10 +310,11 @@ e2e_cleanup() {
   local org_ids
   rm -f "$REPO_ROOT/apps/api/src/__e2e_mint_invite.ts"
   # Match people through `contact` (0025) and their `users` accounts (0027).
-  # Deleting an org releases its owner's admin account (aggregator_orgs_owner_ad)
+  # Coordinators go first (an org with coordinators cannot be deleted, 0028).
+  # Deleting an org releases its owner's admin account (organisations_owner_ad)
   # and the delete triggers GC the contact rows once nothing references them.
-  org_ids=$(psql_q "SELECT o.id FROM aggregator_orgs o
-                      JOIN users u ON u.id = o.owner_user_id
+  org_ids=$(psql_q "SELECT o.id FROM organisations o
+                      JOIN users u ON u.id = o.org_owner
                       JOIN contact c ON c.id = u.contact_id
                     WHERE o.slug LIKE '$E2E_TAG%' OR c.email LIKE '$E2E_TAG%';")
   psql_q "DELETE FROM users a USING contact c
@@ -321,10 +323,10 @@ e2e_cleanup() {
   psql_q "DELETE FROM users WHERE user_type = 'coordinator'
             AND signalstack_org_name LIKE 'E2E %$E2E_TAG%';" >/dev/null
   psql_q "DELETE FROM registration_invites WHERE email LIKE '$E2E_TAG%';" >/dev/null
-  psql_q "DELETE FROM aggregator_orgs o USING users u, contact c
-          WHERE u.id = o.owner_user_id AND c.id = u.contact_id
-            AND c.email LIKE '$E2E_TAG%';" >/dev/null
-  psql_q "DELETE FROM aggregator_orgs WHERE slug LIKE '$E2E_TAG%';" >/dev/null
+  psql_q "DELETE FROM organisations o USING users u, contact c
+          WHERE u.id = o.org_owner AND c.id = u.contact_id AND o.org_type = 'aggregator'
+            AND o.slug <> 'default' AND c.email LIKE '$E2E_TAG%';" >/dev/null
+  psql_q "DELETE FROM organisations WHERE slug LIKE '$E2E_TAG%';" >/dev/null
   echo "cleaned rows tagged $E2E_TAG (orgs: $(echo "$org_ids" | tr '\n' ' '))"
   echo "NOTE: Keycloak users created by the run stay in the local dev realm."
   return 0

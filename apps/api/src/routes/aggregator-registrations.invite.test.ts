@@ -1,6 +1,4 @@
-// Coordinator submit with an invite token (#700). Flag must be set before any
-// import that pulls in `config`.
-process.env.ORG_HIERARCHY_ENABLED = 'true';
+// Coordinator submit with an invite token (#700).
 
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';

@@ -1,6 +1,4 @@
-// Invite mint + grant-recovery routes (#700/#701). Flag must be set before any
-// import that pulls in `config`.
-process.env.ORG_HIERARCHY_ENABLED = 'true';
+// Invite mint + grant-recovery routes (#700/#701).
 
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
@@ -140,6 +138,23 @@ describe('invite mint routes', () => {
     const res = await mint({ grant: 'garbage', recipients: [{ email: 'a@x.org' }] });
     expect(res.statusCode).toBe(400);
     expect((res.json() as { error: { code: string } }).error.code).toBe('GRANT_INVALID');
+  });
+
+  it('rejects minting for the Default org, which has no owner console (409, 0028)', async () => {
+    orgStore.seed([
+      buildAggregatorOrg({
+        id: ORG_ID,
+        slug: 'default',
+        status: 'active',
+        isDefault: true,
+        ownerEmail: 'owner@jfc.org',
+      }),
+    ]);
+    const grant = await grantFor();
+    const res = await mint({ grant, recipients: [{ email: 'a@x.org' }] });
+    expect(res.statusCode).toBe(409);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('TARGET_ORG_INACTIVE');
+    expect(mailer.outbox).toHaveLength(0);
   });
 
   it('rejects minting for a non-active org (409)', async () => {

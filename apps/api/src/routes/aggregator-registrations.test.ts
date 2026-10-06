@@ -7,6 +7,11 @@ import {
   buildAggregator,
 } from '../services/aggregator-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
+import {
+  AggregatorOrgStoreFake,
+  _setAggregatorOrgStore,
+  buildDefaultOrg,
+} from '../services/aggregator-org-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -58,6 +63,11 @@ describe('POST /v1/aggregator-registrations/create', () => {
     _setSubmitRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
 
     _setAggregatorStore(aggregatorStore);
+    // These bodies carry no org_id: for one release they register under the
+    // Default org (0028), so the org store holds it.
+    const orgStore = new AggregatorOrgStoreFake();
+    orgStore.seed([buildDefaultOrg()]);
+    _setAggregatorOrgStore(orgStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
     _setConsentLedger(consentLedger);
@@ -75,6 +85,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     await app?.close();
     _setSubmitRateChecker(null);
     _setAggregatorStore(null);
+    _setAggregatorOrgStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
     _setConsentLedger(null);
@@ -333,13 +344,12 @@ describe('POST /v1/aggregator-registrations/create', () => {
       actorType: 'aggregator',
       name: 'TRRAIN',
       type: 'seeker',
-      url: null,
+      orgId: '00000000-0000-0000-0000-0000000000d0',
       contact: {
         name: 'Asha Kumari',
         phone: '+919876543210',
         email: 'asha@trrain.org',
       },
-      locations: [],
       consent: validBody.consent,
       createdBy: 'self',
       updatedBy: 'self',

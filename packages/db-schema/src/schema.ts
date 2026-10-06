@@ -50,6 +50,18 @@ import type {
 
 export type { BecknContact, BecknLocation, ConsentRecord };
 
+/**
+ * A coordinator's own org-detail values that its org did not adopt (0028).
+ * A key is present only where the coordinator's value differs from its org's;
+ * `null` / `[]` record an empty own value (so a revert restores it exactly).
+ */
+export interface LegacyOrgDetails {
+  url?: string | null;
+  locations?: BecknLocation[];
+  company?: string | null;
+  gstNumber?: string | null;
+}
+
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
 /**
@@ -253,7 +265,6 @@ export const users = pgTable(
     // Stored as text since 0011 — the network config decides which
     // domain ids are valid for the active deployment.
     type: text('type'),
-    url: text('url'),
 
     // The person behind this coordinator (migration 0025; NOT NULL since 0026).
     contactId: text('contact_id')
@@ -262,21 +273,22 @@ export const users = pgTable(
         onDelete: 'restrict',
         onUpdate: 'cascade',
       }),
-    // Optional Beckn contact keys (alternatePhone, company, gstNumber) — part
-    // of the API's `contact` object but not identity, so not on `contact`.
+    // Optional Beckn contact key `alternatePhone` — part of the API's
+    // `contact` object but not identity, so not on `contact`. (`company` /
+    // `gstNumber` moved to the org in 0028: `organisations.legal_name` /
+    // `gst_number`.)
     contactExtra: jsonb('contact_extra')
-      .$type<Partial<Pick<BecknContact, 'alternatePhone' | 'company' | 'gstNumber'>>>()
+      .$type<Partial<Pick<BecknContact, 'alternatePhone'>>>()
       .notNull()
       .default(sql`'{}'::jsonb`),
 
     // The legacy Beckn `contact` jsonb and its generated `contact_phone` /
     // `contact_email` columns were dropped by migration 0026.
 
-    // Beckn Location[] — optional list of geographic locations.
-    locations: jsonb('locations')
-      .$type<BecknLocation[]>()
-      .notNull()
-      .default(sql`'[]'::jsonb`),
+    // `url` and `locations` moved to the coordinator's org in 0028. The
+    // coordinator's own values that its org did not adopt are kept here and
+    // rendered when the org's field is empty (target model §4.2–4.3).
+    legacyOrgDetails: jsonb('legacy_org_details').$type<LegacyOrgDetails>(),
 
     // Onboarding consent (snapshot at signup; aggregator must accept T&C
     // before the row is created). Refreshable via PATCH.
@@ -311,14 +323,12 @@ export const users = pgTable(
     // login-time backfill) records it.
     signalstackOrgId: text('signalstack_org_id'),
 
-    // Parent org for the org→coordinator hierarchy (spec §5.2). The SINGLE
-    // authority for the link (no KC group membership for coordinators in v1).
-    // NULL = flat coordinator (flag off) or legacy orphan. Only populated when
-    // ORG_HIERARCHY_ENABLED=true. FK → aggregator_orgs.id.
-    parentOrgId: uuid('parent_org_id').references(
-      (): typeof aggregatorOrgs.id => aggregatorOrgs.id,
-    ),
-    // (`parent_org_id` FK is named users_parent_org_id_aggregator_orgs_id_fk since 0027.)
+    // The coordinator's org (0028; was `parent_org_id`). Every coordinator has
+    // one: formerly-flat coordinators belong to the fixed Default org. NULL for
+    // admin accounts (an admin's orgs are `organisations.org_owner`).
+    orgId: uuid('org_id')
+      .notNull()
+      .references((): AnyPgColumn => organisations.id, { onDelete: 'restrict' }),
 
     // The email a coordinator was INVITED at (#701), when they registered via an
     // invite. May differ from `contact_email` (they can register with their own
@@ -340,6 +350,7 @@ export const users = pgTable(
     index('users_actor_type_idx').on(table.actorType),
     // One account per person per role (0027; was one coordinator row per person).
     uniqueIndex('users_contact_type_unique').on(table.contactId, table.userType),
+    index('users_org_idx').on(table.orgId),
   ],
 );
 
@@ -370,30 +381,45 @@ export const userIdentities = pgTable(
   ],
 );
 
-// ─── aggregator_orgs ─────────────────────────────────────────────────────────
-// Thin system-of-record for a parent org (spec §5.1). The KC group is a
-// future-authz mirror; status lives here so the approval single-use guard is
-// an atomic compare-and-set (spec A3). Reuses `aggregator_status` enum
+// ─── organisations ───────────────────────────────────────────────────────────
+// Was `aggregator_orgs` (renamed in 0028, ids kept). Exactly one
+// `network_facilitator` org (the root, `parent_id` NULL); every other org is an
+// `aggregator` under it, including the fixed Default org (`slug = 'default'`)
+// that holds formerly-flat coordinators. Reuses the `aggregator_status` enum
 // (pending | active | inactive == rejected | retired).
 
-export const aggregatorOrgs = pgTable(
-  'aggregator_orgs',
+export const orgTypeEnum = pgEnum('org_type', ['network_facilitator', 'aggregator']);
+
+export const organisations = pgTable(
+  'organisations',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /** Immutable for aggregator orgs (it names the Keycloak group); the NF slug follows config. */
     slug: text('slug').notNull(),
-    displayName: text('display_name').notNull(),
+    name: text('name').notNull(),
+    /** Immutable (`organisations_lock`). */
+    orgType: orgTypeEnum('org_type').notNull(),
+    /** NULL only for the network facilitator. */
+    parentId: uuid('parent_id').references((): AnyPgColumn => organisations.id, {
+      onDelete: 'restrict',
+    }),
+    // Kept until Phase 4: `locations` holds the same value as a Beckn location.
     state: text('state'),
-    // The owner's account (0027): an `admin` row of `users`. The owner's
-    // contact and login identity are reached through it; the org row's own
-    // contact_id / owner_kc_sub copies were dropped by 0027.
-    ownerUserId: uuid('owner_user_id')
+    // The owner's account: an `admin` row of `users`, shared by every org it owns.
+    orgOwner: uuid('org_owner')
       .notNull()
       .references((): AnyPgColumn => users.id, { onDelete: 'restrict' }),
     kcGroupId: text('kc_group_id'),
-    // Schema-driven registration payload (0018) — see the note on
-    // `aggregators.profile`. `state` above stays authoritative for the state
-    // name; the rest of the address and every field added by the Aug 2026
-    // schema review live here.
+    // Org details (0028), rendered for every coordinator of the org.
+    url: text('url'),
+    locations: jsonb('locations')
+      .$type<BecknLocation[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    legalName: text('legal_name'),
+    gstNumber: text('gst_number'),
+    // Schema-driven registration payload (0018). Until Phase 4 it still holds
+    // `website` / `address` / `coordinates`, copied into `url` / `locations`.
     profile: jsonb('profile')
       .$type<Record<string, unknown>>()
       .notNull()
@@ -401,28 +427,37 @@ export const aggregatorOrgs = pgTable(
     /** Which schema variant produced `profile`, e.g. `blue_dot/org-registration.v1`. */
     profileRef: text('profile_ref'),
     status: aggregatorStatusEnum('status').notNull().default('pending'),
+    createdBy: text('created_by'),
+    updatedBy: text('updated_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-    // Write-once rejection timestamp (#726) — see the aggregators note above.
+    // Write-once rejection timestamp (#726) — see the users note above.
     rejectedAt: timestamp('rejected_at', { withTimezone: true }),
   },
-  (table) => ({
-    // Active-org dropdown + owner lookup are plain SQL (spec A2/A5).
-    statusIdx: index('aggregator_orgs_status_idx').on(table.status),
-    ownerUserIdx: index('aggregator_orgs_owner_user_idx').on(table.ownerUserId),
-    // Slug uniqueness only over non-terminal rows: a rejected/retired org
-    // never blocks a later slug (spec A9). Partial unique index.
-    slugActiveUnique: uniqueIndex('aggregator_orgs_slug_active_unique')
+  (table) => [
+    index('organisations_status_idx').on(table.status),
+    index('organisations_org_owner_idx').on(table.orgOwner),
+    index('organisations_parent_status_idx').on(table.parentId, table.status),
+    // Slug unique over non-terminal rows (a rejected/retired org never blocks a
+    // later slug). Generated slugs always carry a random suffix.
+    uniqueIndex('organisations_slug_live_unique')
       .on(table.slug)
       .where(sql`status IN ('pending','active')`),
-    // Org display name is unique (case-insensitive) over non-terminal rows —
-    // same partial-unique semantics as the slug, so a rejected/retired org
-    // never blocks reusing its name.
-    displayNameActiveUnique: uniqueIndex('aggregator_orgs_display_name_active_unique')
-      .on(sql`lower(${table.displayName})`)
-      .where(sql`status IN ('pending','active')`),
-  }),
+    // Aggregator org names are unique (case-insensitive) over non-terminal rows.
+    uniqueIndex('organisations_name_live_unique')
+      .on(sql`lower(${table.name})`)
+      .where(sql`org_type = 'aggregator' AND status IN ('pending','active')`),
+    uniqueIndex('organisations_single_nf')
+      .on(table.orgType)
+      .where(sql`org_type = 'network_facilitator'`),
+  ],
 );
+
+/**
+ * Pre-0028 name of {@link organisations}, kept for callers not yet renamed;
+ * removed by the Phase 4 naming commit. New code should import `organisations`.
+ */
+export const aggregatorOrgs = organisations;
 
 // ─── registration_invites (#700) ─────────────────────────────────────────────
 // Targeted coordinator invites. A row is required (unlike approval tokens,
@@ -436,9 +471,9 @@ export const registrationInvites = pgTable(
     jti: uuid('jti').primaryKey().defaultRandom(),
     /** Only `coordinator` in this phase; column keeps the door open for others. */
     role: text('role').notNull().default('coordinator'),
-    parentOrgId: uuid('parent_org_id')
+    orgId: uuid('org_id')
       .notNull()
-      .references(() => aggregatorOrgs.id, { onDelete: 'cascade' }),
+      .references(() => organisations.id, { onDelete: 'cascade' }),
     /** Normalised (lowercased, trimmed) — enforced against the submitted email. */
     email: text('email').notNull(),
     status: registrationInviteStatusEnum('status').notNull().default('pending'),
@@ -450,12 +485,12 @@ export const registrationInvites = pgTable(
   },
   // Array form (not the deprecated object-return extraConfig).
   (table) => [
-    index('registration_invites_parent_org_idx').on(table.parentOrgId),
+    index('registration_invites_org_idx').on(table.orgId),
     // One live invite per (org, email): a re-invite refreshes rather than
     // duplicates. Partial unique over pending rows only, so a consumed/revoked/
     // expired invite never blocks re-inviting the same address.
     uniqueIndex('registration_invites_pending_unique')
-      .on(table.parentOrgId, table.email)
+      .on(table.orgId, table.email)
       .where(sql`status = 'pending'`),
   ],
 );
@@ -472,6 +507,12 @@ export const bulkUploads = pgTable(
     aggregatorId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    // The user's org at insert time (0028). Filled by the `*_set_org_id`
+    // BEFORE INSERT trigger when omitted, so inserts never pass it.
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organisations.id, { onDelete: 'restrict' })
+      .$defaultFn(() => sql`NULL`),
     // Stored as text since 0011 — accepts any domain id declared by the
     // active signalstack network. Application layer validates against
     // `getNetworkConfig().domainIds`.
@@ -511,6 +552,12 @@ export const registrationLinks = pgTable(
     aggregatorId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    // The user's org at insert time (0028). Filled by the `*_set_org_id`
+    // BEFORE INSERT trigger when omitted, so inserts never pass it.
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organisations.id, { onDelete: 'restrict' })
+      .$defaultFn(() => sql`NULL`),
     slug: text('slug').notNull(),
     domain: text('domain').notNull(),
     context: jsonb('context').$type<Record<string, unknown>>().notNull().default({}),
@@ -551,6 +598,12 @@ export const linkSubmissions = pgTable(
     aggregatorId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    // The user's org at insert time (0028). Filled by the `*_set_org_id`
+    // BEFORE INSERT trigger when omitted, so inserts never pass it.
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organisations.id, { onDelete: 'restrict' })
+      .$defaultFn(() => sql`NULL`),
     metadataSnapshot: jsonb('metadata_snapshot')
       .$type<Record<string, unknown>>()
       .notNull()
@@ -641,6 +694,12 @@ export const onboarding = pgTable(
     aggregatorId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    // The user's org at insert time (0028). Filled by the `*_set_org_id`
+    // BEFORE INSERT trigger when omitted, so inserts never pass it.
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organisations.id, { onDelete: 'restrict' })
+      .$defaultFn(() => sql`NULL`),
     orgSlug: text('org_slug').notNull(),
     source: onboardingSourceEnum('source').notNull(),
     // For source='bulk': bulk_uploads.id. For source='link': NULL.
@@ -694,6 +753,12 @@ export const campaignJob = pgTable(
     aggregatorId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    // The user's org at insert time (0028). Filled by the `*_set_org_id`
+    // BEFORE INSERT trigger when omitted, so inserts never pass it.
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organisations.id, { onDelete: 'restrict' })
+      .$defaultFn(() => sql`NULL`),
     // Signalstack org id (the token's `signalstack_org_id` claim) — the tenant
     // scope every read/list/cap query filters on.
     signalstackOrgId: text('signalstack_org_id').notNull(),
@@ -879,8 +944,11 @@ export type ContactRow = typeof contact.$inferSelect;
 export type NewContactRow = typeof contact.$inferInsert;
 export type AggregatorRow = typeof users.$inferSelect;
 export type NewAggregatorRow = typeof users.$inferInsert;
-export type AggregatorOrgRow = typeof aggregatorOrgs.$inferSelect;
-export type NewAggregatorOrgRow = typeof aggregatorOrgs.$inferInsert;
+export type OrganisationRow = typeof organisations.$inferSelect;
+export type NewOrganisationRow = typeof organisations.$inferInsert;
+/** Pre-0028 names of {@link OrganisationRow} / {@link NewOrganisationRow}. */
+export type AggregatorOrgRow = OrganisationRow;
+export type NewAggregatorOrgRow = NewOrganisationRow;
 export type BulkUploadRow = typeof bulkUploads.$inferSelect;
 export type NewBulkUploadRow = typeof bulkUploads.$inferInsert;
 export type RegistrationLinkRow = typeof registrationLinks.$inferSelect;

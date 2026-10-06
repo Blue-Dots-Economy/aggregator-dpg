@@ -52,7 +52,7 @@ describe('linkAdminAccount', () => {
     const { db, sql } = fakeDb({ executes: [[], [{ id: 'admin-1' }]] });
     await expect(linkAdminAccount(db, 'c1')).resolves.toBe('admin-1');
     expect(sql[0]).toMatch(/INSERT INTO users/);
-    expect(sql[0]).toMatch(/'admin', \$1, NULL, NULL, NULL, NULL/);
+    expect(sql[0]).toMatch(/'admin', \$1, NULL, NULL, NULL, 'self'/);
     expect(sql[0]).toMatch(/ON CONFLICT \(contact_id, user_type\) DO NOTHING/);
     expect(sql[1]).toMatch(/FOR KEY SHARE/);
   });

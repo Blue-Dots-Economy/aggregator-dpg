@@ -210,15 +210,22 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
       const unlinked = await one<{ n: number }>(
         pool,
         `SELECT (SELECT count(*) FROM users WHERE contact_id IS NULL)
-              + (SELECT count(*) FROM aggregator_orgs WHERE owner_user_id IS NULL) AS n`,
+              + (SELECT count(*) FROM organisations WHERE org_owner IS NULL) AS n`,
       );
       expect(Number(unlinked.n)).toBe(0);
-      expect((await one<{ n: number }>(pool, 'SELECT count(*)::int AS n FROM contact')).n).toBe(3);
+      // Three people, plus the network admin's placeholder contact (0028).
+      expect((await one<{ n: number }>(pool, 'SELECT count(*)::int AS n FROM contact')).n).toBe(4);
 
       const coord = async (id: string) =>
-        one<{ name: string | null; email: string; phone: string; contact_extra: unknown }>(
+        one<{
+          name: string | null;
+          email: string;
+          phone: string;
+          contact_extra: unknown;
+          legacy_org_details: unknown;
+        }>(
           pool,
-          `SELECT c.name, c.email, c.phone, a.contact_extra
+          `SELECT c.name, c.email, c.phone, a.contact_extra, a.legacy_org_details
              FROM users a JOIN contact c ON c.id = a.contact_id WHERE a.id = $1`,
           [id],
         );
@@ -226,21 +233,25 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
         name: 'Coordinator A',
         email: 'coord.a@example.test',
         phone: '+919000000001',
-        contact_extra: { company: 'Acme Test Co' },
+        // Company belongs to the org since 0028; a flat coordinator lands in
+        // the Default org, which never adopts, so it is kept on the row.
+        contact_extra: {},
+        legacy_org_details: { company: 'Acme Test Co' },
       });
       expect(await coord(coordB)).toEqual({
         name: 'Coordinator B',
         email: 'coord.b@example.test',
         phone: '+919000000002',
         contact_extra: {},
+        legacy_org_details: null,
       });
 
       const org = async (id: string) =>
         one<{ name: string | null; email: string; phone: string }>(
           pool,
           `SELECT c.name, c.email, c.phone
-             FROM aggregator_orgs o
-             JOIN users u ON u.id = o.owner_user_id
+             FROM organisations o
+             JOIN users u ON u.id = o.org_owner
              JOIN contact c ON c.id = u.contact_id WHERE o.id = $1`,
           [id],
         );
@@ -258,7 +269,7 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
       const shared = await one<{ same: boolean }>(
         pool,
         `SELECT (SELECT contact_id FROM users WHERE id = $1)
-              = (SELECT u.contact_id FROM aggregator_orgs o JOIN users u ON u.id = o.owner_user_id
+              = (SELECT u.contact_id FROM organisations o JOIN users u ON u.id = o.org_owner
                   WHERE o.id = $2) AS same`,
         [coordB, orgShared],
       );
@@ -273,7 +284,8 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
                    HAVING count(*) = 2) d) AS both
            FROM users`,
       );
-      expect(roles).toEqual({ admins: 2, coordinators: 2, both: 1 });
+      // Two owners plus the network admin (0028).
+      expect(roles).toEqual({ admins: 3, coordinators: 2, both: 1 });
     },
     TIMEOUT_MS,
   );
@@ -345,7 +357,8 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
       expect(await appliedCount(pool)).toBe(fullJournalLength);
       expect(await legacyColumnCount(pool)).toBe(0);
       const n = await one<{ n: number }>(pool, 'SELECT count(*)::int AS n FROM contact');
-      expect(n.n).toBe(2);
+      // Two people, plus the network admin's placeholder contact (0028).
+      expect(n.n).toBe(3);
     },
     TIMEOUT_MS,
   );

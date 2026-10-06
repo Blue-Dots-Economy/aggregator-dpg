@@ -446,7 +446,7 @@ describe('aggregator profile routes', () => {
     expect(kcWrites).toBe(0);
   });
 
-  it('PATCH updates aggregator name/url/locations/consent successfully', async () => {
+  it('PATCH updates aggregator name/consent successfully', async () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/v1/aggregators/profile/me',
@@ -454,8 +454,6 @@ describe('aggregator profile routes', () => {
       payload: {
         aggregator: {
           name: 'TRRAIN Renamed',
-          url: 'https://trrain.example.org',
-          locations: [],
           consent: {
             value: true,
             given_at: '2026-01-15T10:00:00Z',
@@ -467,7 +465,6 @@ describe('aggregator profile routes', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>;
     expect(body.name).toBe('TRRAIN Renamed');
-    expect(body.url).toBe('https://trrain.example.org');
     for (const k of [
       'contact_name',
       'personas',
@@ -479,6 +476,40 @@ describe('aggregator profile routes', () => {
       expect(body).not.toHaveProperty(k);
     }
   });
+
+  it.each([
+    [{ url: 'https://trrain.example.org' }, ['url']],
+    [{ locations: [] }, ['locations']],
+    [
+      {
+        contact: {
+          name: 'Asha Rao',
+          phone: '+919876543210',
+          email: 'asha@trrain.org',
+          company: 'TRRAIN',
+          gstNumber: 'G1',
+        },
+      },
+      ['contact.company', 'contact.gstNumber'],
+    ],
+  ])(
+    'PATCH of org details %j → 409 ORG_DETAILS_READ_ONLY before any write (0028)',
+    async (aggregator, fields) => {
+      const before = await aggregatorStore.findById(aggregatorId);
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/v1/aggregators/profile/me',
+        headers: { authorization: 'Bearer good-token' },
+        payload: { aggregator: { name: 'Should Not Apply', ...aggregator } },
+      });
+      expect(res.statusCode).toBe(409);
+      const body = res.json() as { error: { code: string; fields: { fields: string[] } } };
+      expect(body.error.code).toBe('ORG_DETAILS_READ_ONLY');
+      expect(body.error.fields.fields).toEqual(fields);
+      const after = await aggregatorStore.findById(aggregatorId);
+      expect(after.ok && after.value?.name).toBe(before.ok && before.value?.name);
+    },
+  );
 
   it.each([
     ['DUPLICATE_PHONE', 409, 'PHONE_EXISTS'],

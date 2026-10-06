@@ -1,6 +1,4 @@
-// The org-hierarchy routes are flag-gated; `config` reads env once at import,
-// so the flag must be set before any import that pulls in `config`.
-process.env.ORG_HIERARCHY_ENABLED = 'true';
+// Org registration + dropdown routes (always registered since 0028).
 
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
@@ -8,6 +6,7 @@ import { buildApp } from '../app.js';
 import {
   AggregatorOrgStoreFake,
   buildAggregatorOrg,
+  buildDefaultOrg,
   _setAggregatorOrgStore,
   AggregatorOrgStoreBase,
   type AggregatorOrg,
@@ -269,6 +268,71 @@ describe('aggregator-orgs routes', () => {
     const body = res.json() as { orgs: { id: string; slug: string; display_name: string }[] };
     expect(body.orgs.map((o) => o.slug)).toEqual(['a']);
     expect(body.orgs[0]?.display_name).toBe('A');
+  });
+
+  it('GET /v1/orgs sorts by name and hides Default once a real org is active (0028)', async () => {
+    orgStore.seed([
+      buildDefaultOrg(),
+      buildAggregatorOrg({ id: 'o-z', slug: 'z', displayName: 'zeta Org', status: 'active' }),
+      buildAggregatorOrg({ id: 'o-a', slug: 'a', displayName: 'Alpha Org', status: 'active' }),
+    ]);
+    const res = await app.inject({ method: 'GET', url: '/v1/orgs', headers: AUTH_HEADER });
+    const body = res.json() as { orgs: { slug: string }[] };
+    expect(body.orgs.map((o) => o.slug)).toEqual(['a', 'z']);
+  });
+
+  it('GET /v1/orgs lists the Default org while it is the only active org', async () => {
+    orgStore.seed([buildDefaultOrg()]);
+    const res = await app.inject({ method: 'GET', url: '/v1/orgs', headers: AUTH_HEADER });
+    const body = res.json() as { orgs: { slug: string; display_name: string }[] };
+    expect(body.orgs).toEqual([
+      { id: buildDefaultOrg().id, slug: 'default', display_name: 'Default' },
+    ]);
+  });
+
+  it("stores the form's website and address as the org's url and location (0028)", async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...orgBody,
+        website: 'https://enable.example',
+        address: { streetAddress: '1 Main Rd', addressLocality: 'Bengaluru' },
+        coordinates: [77.59, 12.97],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const created = await orgStore.findById((res.json() as { org_id: string }).org_id);
+    expect(created.ok && created.value?.url).toBe('https://enable.example');
+    expect(created.ok && created.value?.locations).toEqual([
+      {
+        geo: { type: 'Point', coordinates: [77.59, 12.97] },
+        address: {
+          streetAddress: '1 Main Rd',
+          addressLocality: 'Bengaluru',
+          addressRegion: 'Karnataka',
+        },
+      },
+    ]);
+  });
+
+  it('retries a colliding random slug instead of failing (review A11)', async () => {
+    let calls = 0;
+    const realCreate = orgStore.create.bind(orgStore);
+    orgStore.create = async (input) => {
+      calls += 1;
+      if (calls === 1) return { ok: false, error: { code: 'DUPLICATE_SLUG', message: 'taken' } };
+      return realCreate(input);
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(201);
+    expect(calls).toBe(2);
   });
 
   it('rejects org registration when consent.value is false (400/validation)', async () => {
@@ -596,6 +660,12 @@ describe('aggregator-orgs routes', () => {
         return { ok: true, value: null };
       }
       async findBySlug(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+        return { ok: true, value: null };
+      }
+      async findDefault(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+        return { ok: true, value: null };
+      }
+      async findRoot(): Promise<OrgStoreResult<AggregatorOrg | null>> {
         return { ok: true, value: null };
       }
       async ownerIsShared(): Promise<OrgStoreResult<boolean>> {

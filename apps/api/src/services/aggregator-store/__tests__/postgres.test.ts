@@ -52,8 +52,18 @@ function makeFakeDb(
     return out.map((r: Record<string, unknown>) => {
       if ('a' in r) return r;
       const legacy = r['contact'] as { name: string; email: string; phone: string } | undefined;
+      const extra = (r['contact'] ?? {}) as { company?: string; gstNumber?: string };
       return {
-        a: r,
+        // The fixture is a domain row; the columns follow 0028 (the org link is
+        // `org_id`, org details come from the joined org).
+        a: { ...r, orgId: r['parentOrgId'], legacyOrgDetails: null },
+        o: {
+          slug: 'org',
+          url: r['url'] ?? null,
+          locations: r['locations'] ?? [],
+          legalName: extra.company ?? null,
+          gstNumber: extra.gstNumber ?? null,
+        },
         c: legacy
           ? {
               id: 'c'.repeat(64),
@@ -144,7 +154,8 @@ function makeRow(overrides: Partial<Aggregator> = {}): Aggregator {
     createdAt,
     updatedAt: createdAt,
     signalstackOrgId: null,
-    parentOrgId: null,
+    parentOrgId: 'org-0',
+    isDefaultOrg: false,
     inviteEmail: null,
     rejectedAt: null,
     ...overrides,
@@ -161,6 +172,7 @@ function makeInput(overrides: Partial<CreateAggregatorInput> = {}): CreateAggreg
     consent: { value: true, given_at: '2026-01-01T00:00:00Z', valid_till: '2027-01-01T00:00:00Z' },
     createdBy: 'system',
     updatedBy: 'system',
+    orgId: 'org-0',
     ...overrides,
   };
 }
@@ -179,7 +191,7 @@ describe('PostgresAggregatorStore.create', () => {
     _setDbClients(null, db as never);
     const store = new PostgresAggregatorStore();
 
-    const result = await store.create(makeInput({ parentOrgId: 'org-9' }));
+    const result = await store.create(makeInput({ orgId: 'org-9' }));
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -187,11 +199,11 @@ describe('PostgresAggregatorStore.create', () => {
     expect(callArgs(captured, 'values')?.[0]).toMatchObject({
       orgSlug: 'test-org',
       actorType: 'aggregator',
-      parentOrgId: 'org-9',
+      orgId: 'org-9',
     });
   });
 
-  it('defaults optional fields (url, locations, parentOrgId) when omitted', async () => {
+  it('stores no org details on the coordinator (0028): legacy values only when given', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
       // A write runs contact statements, then the aggregators statement, then
@@ -205,9 +217,10 @@ describe('PostgresAggregatorStore.create', () => {
     await store.create(makeInput());
 
     const values = callArgs(captured, 'values')?.[0] as Record<string, unknown>;
-    expect(values.url).toBeNull();
-    expect(values.locations).toEqual([]);
-    expect(values.parentOrgId).toBeNull();
+    expect(values).not.toHaveProperty('url');
+    expect(values).not.toHaveProperty('locations');
+    expect(values.legacyOrgDetails).toBeNull();
+    expect(values.orgId).toBe('org-0');
   });
 
   it('returns DB_UNAVAILABLE when insert returns no row', async () => {
@@ -630,16 +643,13 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
     await store.update('agg-1', {
       name: 'N',
       type: 'seeker',
-      url: 'https://x.org',
       contact: { name: 'A', phone: '+919000000001', email: 'a@x.org' },
-      locations: [],
       consent: {
         value: true,
         given_at: '2026-01-01T00:00:00Z',
         valid_till: '2027-01-01T00:00:00Z',
       },
       status: 'active',
-      parentOrgId: 'org-1',
       updatedBy: 'tester',
     });
 
@@ -648,13 +658,10 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
       [
         'name',
         'type',
-        'url',
         'contactId',
         'contactExtra',
-        'locations',
         'consent',
         'status',
-        'parentOrgId',
         'updatedBy',
         'updatedAt',
       ].sort(),
@@ -888,13 +895,17 @@ describe('PostgresAggregatorStore contact composition', () => {
     updatedAt: new Date(0),
   });
 
-  it('composes the Beckn contact from the linked row plus contact_extra, legacy key order', async () => {
+  it('composes the Beckn contact from the linked row plus the org company / GST, legacy key order', async () => {
     const a = {
       ...makeRow({ contactId: 'c'.repeat(64) }),
       contact: { name: 'STALE', phone: '+910000000000', email: 'stale@x.org' },
-      contactExtra: { gstNumber: 'G1', company: 'Acme' },
+      contactExtra: {},
+      orgId: 'org-0',
+      legacyOrgDetails: null,
     };
-    _setDbClients(null, makeFakeDb(() => [{ a, c: linked('Owner', '+919000000009') }]) as never);
+    // Company / GST are the org's since 0028 (`legal_name` / `gst_number`).
+    const o = { slug: 'org', url: null, locations: [], legalName: 'Acme', gstNumber: 'G1' };
+    _setDbClients(null, makeFakeDb(() => [{ a, o, c: linked('Owner', '+919000000009') }]) as never);
     const result = await new PostgresAggregatorStore().findById(a.id);
     expect(result.ok).toBe(true);
     if (!result.ok || !result.value) return;
@@ -918,8 +929,11 @@ describe('PostgresAggregatorStore contact composition', () => {
   });
 
   it('maps a NULL contact name to an empty string (the wire field is required)', async () => {
-    const a = { ...makeRow({ contactId: 'c'.repeat(64) }), contactExtra: {} };
-    _setDbClients(null, makeFakeDb(() => [{ a, c: linked(null, '+919000000009') }]) as never);
+    const a = { ...makeRow({ contactId: 'c'.repeat(64) }), contactExtra: {}, orgId: 'org-0' };
+    _setDbClients(
+      null,
+      makeFakeDb(() => [{ a, o: null, c: linked(null, '+919000000009') }]) as never,
+    );
     const result = await new PostgresAggregatorStore().findById(a.id);
     expect(result.ok && result.value?.contact.name).toBe('');
   });

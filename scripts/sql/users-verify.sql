@@ -10,9 +10,20 @@ SELECT u.id, u.contact_id, u.signalstack_org_slug, u.status,
        u.user_type = 'admin' AS is_admin
   FROM users u;
 
+-- The org table under either name (0028 renames it `organisations`), so this
+-- script stays valid at 0027 and after the rest of the train.
+DO $$
+BEGIN
+  IF to_regclass('public.organisations') IS NOT NULL THEN
+    EXECUTE 'CREATE TEMP VIEW verify_orgs AS SELECT id, org_owner AS owner FROM organisations';
+  ELSE
+    EXECUTE 'CREATE TEMP VIEW verify_orgs AS SELECT id, owner_user_id AS owner FROM aggregator_orgs';
+  END IF;
+END $$;
+
 -- V1  orgs whose owner is missing or not an admin account
 SELECT 'V1 orgs_without_admin_owner' AS check_id, count(*) AS n
-  FROM aggregator_orgs o LEFT JOIN verify_users u ON u.id = o.owner_user_id
+  FROM verify_orgs o LEFT JOIN verify_users u ON u.id = o.owner
  WHERE u.id IS NULL OR NOT u.is_admin;
 
 -- V2  accounts violating the role shape (the CHECK enforces it; a guard)
@@ -31,7 +42,7 @@ SELECT 'V4 duplicate_accounts' AS check_id, count(*) AS n FROM (
 
 -- V5  admin accounts that own no org (a release missed by aggregator_orgs_owner_ad)
 SELECT 'V5 admins_without_org' AS check_id, count(DISTINCT u.id) AS n
-  FROM verify_users u LEFT JOIN aggregator_orgs o ON o.owner_user_id = u.id
+  FROM verify_users u LEFT JOIN verify_orgs o ON o.owner = u.id
  WHERE u.is_admin AND o.id IS NULL;
 
 -- V6  (informational) coordinators without a recorded IdP login — `enrich` fills them

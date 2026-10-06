@@ -32,9 +32,9 @@ export async function linkAdminAccount(db: DbExecutor, contactId: string): Promi
     // Explicit NULLs: the coordinator columns keep their defaults for
     // coordinator inserts, and the role CHECK requires NULL on admin rows.
     await db.execute(sql`
-      INSERT INTO users (user_type, contact_id, status, locations, profile, contact_extra,
+      INSERT INTO users (user_type, contact_id, status, profile, contact_extra,
                          created_by, updated_by)
-      VALUES ('admin', ${contactId}, NULL, NULL, NULL, NULL, 'self', 'self')
+      VALUES ('admin', ${contactId}, NULL, NULL, NULL, 'self', 'self')
       ON CONFLICT (contact_id, user_type) DO NOTHING`);
     const held = await db.execute<{ id: string }>(sql`
       SELECT id FROM users
