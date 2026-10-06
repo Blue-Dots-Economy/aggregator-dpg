@@ -136,13 +136,20 @@ class FailingSignalStackWriter extends InMemorySignalStackWriter {
   constructor(
     private readonly code = 'UPSTREAM_TIMEOUT',
     private readonly message = 'signalstack unreachable',
+    /** The bare upstream sentence the real writer puts on `details.signalsMessage`. */
+    private readonly signalsMessage?: string,
   ) {
     super();
   }
   override async onboard(
     _input: SignalStackOnboardParticipantInput,
   ): Promise<Result<SignalStackOnboardParticipantResult, BaseError>> {
-    return err(new UpstreamError(this.message, { code: this.code }));
+    return err(
+      new UpstreamError(this.message, {
+        code: this.code,
+        ...(this.signalsMessage ? { details: { signalsMessage: this.signalsMessage } } : {}),
+      }),
+    );
   }
 }
 
@@ -325,11 +332,38 @@ describe('processBulkRow — signalstack push outcomes', () => {
       new FailingSignalStackWriter(
         'SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY',
         'signalstack onboard returned 400: LOCATION_OUTSIDE_COUNTRY: Location 23.8103, 90.4125 is outside the allowed region (IN).',
+        'Location 23.8103, 90.4125 is outside the allowed region (IN).',
       ),
     );
     const result = await processBulkRow(makeJob());
     expect(result.outcome).toBe('failed');
     expect(result.category).toBe('validation');
+    // errors.csv gets the bare sentence the operator can act on, exactly like a
+    // local validation failure — not the transport/status prefix chain.
+    expect(result.reasons).toEqual([
+      'Location 23.8103, 90.4125 is outside the allowed region (IN).',
+    ]);
+  });
+
+  it('falls back to the full upstream message when Signals sent no bare sentence', async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY',
+        'signalstack onboard returned 400',
+      ),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.category).toBe('validation');
+    expect(result.reasons).toEqual(['signalstack onboard returned 400']);
+  });
+
+  it('keeps the diagnostic prefix on a system error, where operators need the code', async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter('UPSTREAM_TIMEOUT', 'signalstack unreachable'),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.category).toBe('system_error');
+    expect(result.reasons).toEqual(['signalstack [UPSTREAM_TIMEOUT]: signalstack unreachable']);
   });
 
   it('categorises an owned-elsewhere push rejection distinctly', async () => {

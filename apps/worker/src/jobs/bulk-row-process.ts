@@ -233,11 +233,15 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
         : push.code === 'SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY'
           ? 'validation'
           : 'system_error';
-    outcome = {
-      outcome: 'failed',
-      category,
-      reasons: [`signalstack [${push.code}]: ${push.message}`],
-    };
+    // A validation row's reason is what the operator fixes the CSV from, so it
+    // gets Signals' bare sentence — the same shape as a local Ajv reason. A
+    // system error keeps the code + full upstream text, which is what someone
+    // debugging the platform needs.
+    const reason =
+      category === 'validation'
+        ? (push.signalsMessage ?? push.message)
+        : `signalstack [${push.code}]: ${push.message}`;
+    outcome = { outcome: 'failed', category, reasons: [reason] };
   }
 
   return await commit(job, outcome, log);
@@ -315,7 +319,19 @@ async function commit(
  * Returns void; status is observable via structured logs.
  */
 type SignalStackPushResult =
-  { success: true } | { success: false; code: string; message: string; ownedElsewhere?: boolean };
+  | { success: true }
+  | {
+      success: false;
+      code: string;
+      message: string;
+      /**
+       * Signals' own bare sentence (e.g. `Location 23.81, 90.41 is outside the
+       * allowed region (IN).`), without the transport/status prefixes `message`
+       * carries. Present only when Signals returned a JSON error body.
+       */
+      signalsMessage?: string;
+      ownedElsewhere?: boolean;
+    };
 
 /**
  * Derives the participant's age and consent record from a bulk row.
@@ -478,10 +494,13 @@ export async function pushToSignalStack(
       error: result.error.message,
       code: result.error.code,
     });
+    const signalsMessage = (result.error.details as { signalsMessage?: unknown } | undefined)
+      ?.signalsMessage;
     return {
       success: false,
       code: result.error.code,
       message: result.error.message,
+      ...(typeof signalsMessage === 'string' && signalsMessage ? { signalsMessage } : {}),
     };
   }
   // A 2xx with `owned_elsewhere` means signals recognised the person under a
