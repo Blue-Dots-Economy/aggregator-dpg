@@ -497,6 +497,38 @@ function deriveAgeAndConsent(
   return { ageNum, compliance };
 }
 
+/**
+ * Maps a failed signalstack onboard into the row's push result.
+ *
+ * Carries Signals' own user-safe message, rejection code and per-field map
+ * through when the writer captured them, so errors.csv can classify the row
+ * and point at the offending column.
+ *
+ * @param error - The writer's failure, with optional Signals details.
+ * @returns A failed {@link SignalStackPushResult}.
+ */
+function onboardFailure(error: {
+  code: string;
+  message: string;
+  details?: unknown;
+}): SignalStackPushResult {
+  const { signalsMessage, upstreamCode, signalsFields } = (error.details ?? {}) as {
+    signalsMessage?: unknown;
+    upstreamCode?: unknown;
+    signalsFields?: unknown;
+  };
+  return {
+    success: false,
+    code: error.code,
+    message: error.message,
+    ...(typeof signalsMessage === 'string' && signalsMessage ? { signalsMessage } : {}),
+    ...(typeof upstreamCode === 'string' && upstreamCode ? { upstreamCode } : {}),
+    ...(signalsFields && typeof signalsFields === 'object'
+      ? { signalsFields: signalsFields as Record<string, string> }
+      : {}),
+  };
+}
+
 export async function pushToSignalStack(
   job: BulkRowProcessJob,
   participantId: string,
@@ -626,22 +658,7 @@ export async function pushToSignalStack(
       error: result.error.message,
       code: result.error.code,
     });
-    const details = (result.error.details ?? {}) as {
-      signalsMessage?: unknown;
-      upstreamCode?: unknown;
-      signalsFields?: unknown;
-    };
-    const { signalsMessage, upstreamCode, signalsFields } = details;
-    return {
-      success: false,
-      code: result.error.code,
-      message: result.error.message,
-      ...(typeof signalsMessage === 'string' && signalsMessage ? { signalsMessage } : {}),
-      ...(typeof upstreamCode === 'string' && upstreamCode ? { upstreamCode } : {}),
-      ...(signalsFields && typeof signalsFields === 'object'
-        ? { signalsFields: signalsFields as Record<string, string> }
-        : {}),
-    };
+    return onboardFailure(result.error);
   }
   // A 2xx with `owned_elsewhere` means signals recognised the person under a
   // DIFFERENT aggregator and created no item here — it is NOT a successful

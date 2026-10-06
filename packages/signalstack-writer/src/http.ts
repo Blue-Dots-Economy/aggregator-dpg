@@ -320,12 +320,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         // and a supplied coordinate outside the instance's country
         // (signals-dpg#789) from other 400s, so callers can categorise them as
         // user/data conditions rather than a generic conflict or system error.
-        const code =
-          res.status === 409 && upstreamCode === 'PROFILE_LIMIT_REACHED'
-            ? 'SIGNALSTACK_PROFILE_LIMIT_REACHED'
-            : res.status === 400 && upstreamCode === 'LOCATION_OUTSIDE_COUNTRY'
-              ? 'SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY'
-              : this.codeForStatus(res.status);
+        const code = this.onboardErrorCode(res.status, upstreamCode);
         // `signalsMessage` is the bare, user-safe sentence (no infra prefixes) —
         // callers surfacing errors to end users (public forms) should prefer it;
         // errors.csv/operators keep the prefixed `message`.
@@ -1176,6 +1171,22 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       });
     }
     return null;
+  }
+
+  /**
+   * Picks the error code for a rejected onboard. The per-user profile cap
+   * (signals #349) and a coordinate outside the instance's country
+   * (signals-dpg#789) get their own codes so callers treat them as user/data
+   * conditions; everything else falls back to the status-based code.
+   */
+  private onboardErrorCode(status: number, upstreamCode: string | null): string {
+    if (status === 409 && upstreamCode === 'PROFILE_LIMIT_REACHED') {
+      return 'SIGNALSTACK_PROFILE_LIMIT_REACHED';
+    }
+    if (status === 400 && upstreamCode === 'LOCATION_OUTSIDE_COUNTRY') {
+      return 'SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY';
+    }
+    return this.codeForStatus(status);
   }
 
   private codeForStatus(status: number): string {
