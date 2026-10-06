@@ -39,6 +39,7 @@ import {
   schemaOwnsColumn,
   type ParsedGeoLocation,
 } from '@aggregator-dpg/shared-primitives/bulk-columns';
+import { buildSignalStackItemState } from '@aggregator-dpg/signalstack-writer/item-state';
 
 let participantsWriter: ParticipantsWriterBase | null = null;
 function getParticipantsWriter(): ParticipantsWriterBase {
@@ -649,7 +650,7 @@ export async function pushToSignalStack(
     // accepts partial item_state and classifies the resulting item as
     // `draft` when required fields are missing — that's signals' job,
     // not ours. Aggregator stays a thin pass-through.
-    profile: buildSignalStackItemState(job.participantType, job.payload, pushPhone, domainCfg),
+    profile: buildSignalStackItemState(job.payload, pushPhone, domainCfg.identity.phone),
   });
   if (!result.success) {
     log.error({
@@ -686,36 +687,6 @@ export async function pushToSignalStack(
     onboarded_at: result.value.onboarded_at,
   });
   return { success: true };
-}
-
-/**
- * Build the `item_state` block sent to signalstack from a bulk-upload row.
- *
- * Aggregator participant schemas already use the same field names as the
- * upstream signalstack profile item_state, so the row payload flows
- * through unchanged — we only override the phone field (chosen via the
- * domain's identity selectors) so signalstack stores the E.164 form the
- * writer resolved upstream, not whatever raw value the CSV cell carried.
- */
-function buildSignalStackItemState(
-  _domain: string,
-  body: Record<string, unknown>,
-  pushPhone: string | null,
-  domainCfg: { identity: { phone: string } },
-): Record<string, unknown> {
-  const itemState: Record<string, unknown> = { ...body };
-
-  // Keep the raw body value when present — signalstack validates the
-  // phone field against the network's own pattern (purple_dot expects
-  // `^[0-9]{10}$`, blue_dot expects E.164). The E.164 form is already
-  // carried up-stack as the user.phone_number identity arg, so the
-  // override here is only a fallback for empty cells.
-  const rawPhone = body[domainCfg.identity.phone];
-  if (pushPhone && (typeof rawPhone !== 'string' || rawPhone.length === 0)) {
-    itemState[domainCfg.identity.phone] = pushPhone;
-  }
-
-  return itemState;
 }
 
 /**
