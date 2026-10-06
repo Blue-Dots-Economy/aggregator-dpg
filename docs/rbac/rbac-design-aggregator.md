@@ -124,7 +124,7 @@ Blue: aggregator-dpg. Grey: outside it.
 | 1, 2 | The user logs in; the portal calls the API with the token                                                 |
 | 3    | `resolveActor` reads the user, their organisation, owned organisations, grants and the target's ancestors |
 | 4    | The hook sends that to OPA with the route                                                                 |
-| 5    | OPA loads the bundle at start-up: the Rego policy, `config/rbac.yaml` and the route map                   |
+| 5    | OPA loads the bundle at start-up: the Rego policy and `config/rbac.yaml`                                  |
 | 6    | Allowed requests that need profile data call Signals as today (`x-api-key` + `x-acting-org-id`)           |
 
 The bundle changes only on deploy or config change. Users, organisations and grants travel in each request's input, so a revoke takes effect on the next request.
@@ -156,12 +156,12 @@ sequenceDiagram
 
 OPA input:
 
-| Field     | Source                                                                                      |
-| --------- | ------------------------------------------------------------------------------------------- |
-| `actor`   | `user_id`, `user_type`, `org_id`, owned organisations, grants (PII Access with expiry)      |
-| `org_set` | The actor's organisation's PermissionSet: its override, else the `org_type` default         |
-| `route`   | Method and route pattern → capability from the route map; unmapped routes are denied        |
-| `target`  | The organisation or user the request touches, with its ancestor chain for the subtree check |
+| Field        | Source                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------- |
+| `actor`      | `user_id`, `user_type`, `org_id`, owned organisations, grants (PII Access with expiry)      |
+| `org_set`    | The actor's organisation's PermissionSet: its override, else the `org_type` default         |
+| `capability` | Declared on the route (`config.permission`); a route without a declaration fails at boot    |
+| `target`     | The organisation or user the request touches, with its ancestor chain for the subtree check |
 
 | Behaviour                           | Detail                                                                                     |
 | ----------------------------------- | ------------------------------------------------------------------------------------------ |
@@ -213,7 +213,7 @@ Admin and Coordinator come from `user_type` and cannot be combined in one accoun
 | `organisations.permission_set` | A custom set for one organisation; NULL = the `org_type` default                          | New column                                         |
 | `user_permission_grant`        | `user_id`, grant (`pii_access`), granted by, granted at, expires at                       | New table (the refactor's planned per-user grants) |
 | Audit                          | Every grant change and every personal-data use                                            | New `iam_audit`; `campaign_pii_audit` stays        |
-| Bundle                         | Rego policy + `config/rbac.yaml` + route map                                              | Built at deploy, mounted into the OPA sidecar      |
+| Bundle                         | Rego policy + `config/rbac.yaml`                                                          | Built at deploy, mounted into the OPA sidecar      |
 
 ---
 
