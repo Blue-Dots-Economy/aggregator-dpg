@@ -316,13 +316,16 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         const message = upstreamMsg
           ? `signalstack onboard returned ${res.status}: ${upstreamMsg}`
           : `signalstack onboard returned ${res.status}`;
-        // Distinguish the per-user profile cap (signals #349) from other 409s
-        // so callers can categorise it as a user/data condition rather than a
-        // generic conflict or system error.
+        // Distinguish the per-user profile cap (signals #349) from other 409s,
+        // and a supplied coordinate outside the instance's country
+        // (signals-dpg#789) from other 400s, so callers can categorise them as
+        // user/data conditions rather than a generic conflict or system error.
         const code =
           res.status === 409 && upstreamCode === 'PROFILE_LIMIT_REACHED'
             ? 'SIGNALSTACK_PROFILE_LIMIT_REACHED'
-            : this.codeForStatus(res.status);
+            : res.status === 400 && upstreamCode === 'LOCATION_OUTSIDE_COUNTRY'
+              ? 'SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY'
+              : this.codeForStatus(res.status);
         // `signalsMessage` is the bare, user-safe sentence (no infra prefixes) —
         // callers surfacing errors to end users (public forms) should prefer it;
         // errors.csv/operators keep the prefixed `message`.

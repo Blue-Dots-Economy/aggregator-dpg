@@ -320,6 +320,18 @@ describe('processBulkRow — signalstack push outcomes', () => {
     expect(result.category).toBe('limit_reached');
   });
 
+  it('categorises a coordinate outside the country as a validation failure, not a system error (signals-dpg#789)', async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY',
+        'signalstack onboard returned 400: LOCATION_OUTSIDE_COUNTRY: Location 23.8103, 90.4125 is outside the allowed region (IN).',
+      ),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.outcome).toBe('failed');
+    expect(result.category).toBe('validation');
+  });
+
   it('categorises an owned-elsewhere push rejection distinctly', async () => {
     signalStackWriter.seedForeignUser({ phoneNumber: '+919876543210' });
     const result = await processBulkRow(

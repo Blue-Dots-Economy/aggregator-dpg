@@ -222,13 +222,17 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     // `signalstack onboard returned 400: INVALID_ITEM_STATE: …`). Surface
     // it directly so operators see the actual rejection reason in
     // errors.csv instead of a generic status-code string.
-    // The per-user profile cap (signals #349) is a user/data condition, not a
-    // system fault — categorise it distinctly so errors.csv reads clearly.
+    // The per-user profile cap (signals #349) and a coordinate outside the
+    // instance's country (signals-dpg#789) are user/data conditions, not system
+    // faults — categorise them distinctly so errors.csv reads clearly and the
+    // operator knows the row, not the platform, needs fixing.
     const category: ErrorCategory = push.ownedElsewhere
       ? 'owned_elsewhere'
       : push.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED'
         ? 'limit_reached'
-        : 'system_error';
+        : push.code === 'SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY'
+          ? 'validation'
+          : 'system_error';
     outcome = {
       outcome: 'failed',
       category,
