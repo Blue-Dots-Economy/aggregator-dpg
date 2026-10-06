@@ -203,6 +203,20 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
 
+      // A link minted before migration 0028 for a formerly-flat coordinator has
+      // no org claim; the coordinator is now in the Default org. Such a link
+      // went to the admin list, so the page is served with a fresh token bound
+      // to the coordinator's org (the decision then passes the org check). A
+      // link bound to ANOTHER org is never re-bound.
+      const currentOrg = lookup.aggregator.parentOrgId;
+      let pageToken = token;
+      if (currentOrg && verified.org !== currentOrg) {
+        if (verified.org !== undefined || !lookup.aggregator.isDefaultOrg) {
+          return sendHtml(reply, 400, renderResultPage(orgMismatchView()));
+        }
+        pageToken = await mintReviewToken(aggregatorId, currentOrg);
+      }
+
       logApprovalAudit(req, { aggregatorId, action: 'view_confirm' });
 
       return sendHtml(
@@ -210,7 +224,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         200,
         renderConfirmPage({
           aggregatorId,
-          token,
+          token: pageToken,
           applicantEmail: lookup.kcUser.email,
           ...(lookup.aggregator.inviteEmail ? { invitedEmail: lookup.aggregator.inviteEmail } : {}),
           association: lookup.aggregator.name,
@@ -276,15 +290,26 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       // carries no claim and is rejected here; the admin regenerates it.
       const parentOrgId = lookup.aggregator.parentOrgId;
       if (parentOrgId && verified.org !== parentOrgId) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: 'Token does not match this organisation.',
-          }),
-        );
+        // A pre-0028 link of a formerly-flat coordinator: offer the inline
+        // regenerate step, which re-binds it to the Default org.
+        if (verified.org === undefined && lookup.aggregator.isDefaultOrg) {
+          return sendHtml(
+            reply,
+            400,
+            renderResultPage({
+              status: 'error',
+              title: 'Link out of date',
+              message:
+                'This approval link was sent before an upgrade. Click below to regenerate it and continue to the review.',
+              action: {
+                url: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/renew/${aggregatorId}`,
+                token: parsed.data.token,
+                label: 'Regenerate & review',
+              },
+            }),
+          );
+        }
+        return sendHtml(reply, 400, renderResultPage(orgMismatchView()));
       }
 
       // Re-validate the target org is still active before provisioning (spec
@@ -667,15 +692,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       const currentOrg = lookup.aggregator.parentOrgId;
       const legacyFlatLink = verified.org === undefined && lookup.aggregator.isDefaultOrg;
       if (currentOrg && verified.org !== currentOrg && !legacyFlatLink) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: 'Token does not match this organisation.',
-          }),
-        );
+        return sendHtml(reply, 400, renderResultPage(orgMismatchView()));
       }
 
       logApprovalAudit(req, { aggregatorId, action: 'renew' });
@@ -697,6 +714,15 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       );
     },
   );
+}
+
+/** The result page for a link bound to a different org than the coordinator's. */
+function orgMismatchView(): Parameters<typeof renderResultPage>[0] {
+  return {
+    status: 'error',
+    title: 'Invalid link',
+    message: 'Token does not match this organisation.',
+  };
 }
 
 interface PriorDecision {

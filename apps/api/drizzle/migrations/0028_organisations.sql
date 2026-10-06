@@ -215,24 +215,41 @@ BEGIN
   END IF;
 END $$;
 
--- ─── O4 make room for the Default org (first run only) ─────────────────────
+-- ─── O4 make room for the Default org and the root (first run only) ────────
 DO $$
 DECLARE
   n_name int;
   n_slug int;
 BEGIN
   IF current_setting('aggregator_dpg.p3_first_run') = 'true' THEN
+    -- The original name / slug is kept in `profile.renamed_from`, so a revert
+    -- (existing-instance-migration §13) restores it exactly.
     UPDATE organisations
-       SET name = name || ' (' || slug || ')'
-     WHERE lower(name) = 'default' AND status IN ('pending', 'active');
+       SET profile = profile || jsonb_build_object('renamed_from', jsonb_build_object('name', name)),
+           name = name || ' (' || slug || ')'
+     WHERE lower(name) IN ('default', 'network') AND status IN ('pending', 'active');
     GET DIAGNOSTICS n_name = ROW_COUNT;
-    UPDATE organisations SET slug = slug || '-r1' WHERE slug = 'default';
+    UPDATE organisations
+       SET profile = profile || jsonb_build_object('renamed_from',
+                       coalesce(profile -> 'renamed_from', '{}'::jsonb) || jsonb_build_object('slug', slug)),
+           slug = slug || '-r1'
+     WHERE slug IN ('default', 'network');
     GET DIAGNOSTICS n_slug = ROW_COUNT;
     IF n_name + n_slug > 0 THEN
-      RAISE NOTICE '0028: orgs renamed to free "Default": name=%, slug=%', n_name, n_slug;
+      RAISE NOTICE '0028: orgs renamed to free the Default / network names: name=%, slug=%', n_name, n_slug;
     END IF;
   END IF;
 END $$;
+
+-- ─── O4b live-name uniqueness for aggregator orgs only ─────────────────────
+-- Swapped BEFORE the root and Default are inserted: the old index covered every
+-- live row, so a live org named like the root ("Network") would have collided
+-- with it. Existing orgs get org_type in O7; until then they are unique under
+-- the old index's own guarantee.
+DROP INDEX IF EXISTS aggregator_orgs_display_name_active_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS organisations_name_live_unique
+  ON organisations (lower(name))
+  WHERE org_type = 'aggregator' AND status IN ('pending', 'active');
 
 -- ─── O5 NF root and the network admin (placeholders; reconciled at boot) ───
 -- Runs only while no NF exists, so the explicit-NULL column list (which names
@@ -408,11 +425,9 @@ BEGIN
      SET legacy_org_details = nullif(
            coalesce(CASE WHEN pg_temp.nz(u.url) IS DISTINCT FROM o.url
                          THEN jsonb_build_object('url', pg_temp.nz(u.url)) END, '{}'::jsonb)
-        || coalesce(CASE WHEN pg_temp.loc_nonempty(u.locations) <> pg_temp.loc_nonempty(o.locations)
-                           OR (pg_temp.loc_nonempty(u.locations) AND u.locations <> o.locations)
-                         THEN jsonb_build_object('locations',
-                                CASE WHEN pg_temp.loc_nonempty(u.locations) THEN u.locations
-                                     ELSE '[]'::jsonb END) END, '{}'::jsonb)
+        || coalesce(CASE WHEN coalesce(u.locations, '[]'::jsonb) IS DISTINCT FROM o.locations
+                         THEN jsonb_build_object('locations', coalesce(u.locations, '[]'::jsonb)) END,
+                    '{}'::jsonb)
         || coalesce(CASE WHEN pg_temp.nz(u.contact_extra ->> 'company') IS DISTINCT FROM o.legal_name
                          THEN jsonb_build_object('company', pg_temp.nz(u.contact_extra ->> 'company')) END, '{}'::jsonb)
         || coalesce(CASE WHEN pg_temp.nz(u.contact_extra ->> 'gstNumber') IS DISTINCT FROM o.gst_number
@@ -519,10 +534,6 @@ END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS organisations_single_nf
   ON organisations (org_type) WHERE org_type = 'network_facilitator';
 CREATE INDEX IF NOT EXISTS organisations_parent_status_idx ON organisations (parent_id, status);
-DROP INDEX IF EXISTS aggregator_orgs_display_name_active_unique;
-CREATE UNIQUE INDEX IF NOT EXISTS organisations_name_live_unique
-  ON organisations (lower(name))
-  WHERE org_type = 'aggregator' AND status IN ('pending', 'active');
 
 -- `org_type` never changes; an aggregator org's slug never changes (it names
 -- its Keycloak group). The NF slug follows config (ensureRootOrganisation()).

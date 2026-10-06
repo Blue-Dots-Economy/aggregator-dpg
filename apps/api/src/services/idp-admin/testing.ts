@@ -189,9 +189,39 @@ export class IdpAdminFake extends IdpAdminAdapter {
       this.failNext = null;
       return { ok: false, error: e };
     }
+    // Keycloak answers 409 for a duplicate top-level name (mapped to BAD_REQUEST).
+    if ([...this.groups.values()].some((g) => g.name === name)) {
+      return { ok: false, error: { code: 'BAD_REQUEST', message: `group exists: ${name}` } };
+    }
     const id = `grp-${this.groups.size + 1}`;
     this.groups.set(id, { id, name, ...(attributes ? { attributes } : {}) });
     return { ok: true, value: { id } };
+  }
+
+  async findGroupByName(
+    name: string,
+  ): Promise<IdpResult<{ id: string; attributes: Record<string, string[]> } | null>> {
+    if (this.failNext) {
+      const e = this.failNext;
+      this.failNext = null;
+      return { ok: false, error: e };
+    }
+    const g = [...this.groups.values()].find((x) => x.name === name);
+    if (!g) return { ok: true, value: null };
+    const attributes = Object.fromEntries(
+      Object.entries(g.attributes ?? {}).map(([k, v]) => [k, Array.isArray(v) ? v : [v]]),
+    );
+    return { ok: true, value: { id: g.id, attributes } };
+  }
+
+  async removeUserFromGroup(userId: string, groupId: string): Promise<IdpResult<void>> {
+    if (this.failNext) {
+      const e = this.failNext;
+      this.failNext = null;
+      return { ok: false, error: e };
+    }
+    this.memberships.get(userId)?.delete(groupId);
+    return { ok: true, value: undefined };
   }
 
   async deleteGroup(groupId: string): Promise<IdpResult<void>> {

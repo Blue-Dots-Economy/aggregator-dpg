@@ -26,26 +26,32 @@ SELECT 'P1 orgs_with_non_admin_owner' AS check_id, count(*) AS n
   FROM aggregator_orgs o LEFT JOIN users u ON u.id = o.owner_user_id
  WHERE u.id IS NULL OR u.user_type <> 'admin';
 
--- P2  orgs that 0028 renames to free the fixed Default org (expected 0)
-SELECT 'P2 orgs_named_or_slugged_default' AS check_id, count(*) AS n
+-- P2  orgs that 0028 renames to free the fixed Default org and the root's
+--     placeholder (original values are kept in profile.renamed_from; expected 0)
+SELECT 'P2 orgs_renamed_for_default_or_root' AS check_id, count(*) AS n
   FROM aggregator_orgs
- WHERE (lower(display_name) = 'default' AND status IN ('pending', 'active'))
-    OR slug = 'default';
+ WHERE (lower(display_name) IN ('default', 'network') AND status IN ('pending', 'active'))
+    OR slug IN ('default', 'network');
 
--- P3  F13: active coordinators of a real org whose own url / company / GST is
---     set and not shared by every active member (they will see the org's value,
---     or none, instead of their own). Locations are counted the same way.
-WITH per_org AS (
-  SELECT parent_org_id,
-         count(DISTINCT own_url)     FILTER (WHERE own_url IS NOT NULL)     AS urls,
-         count(DISTINCT own_company) FILTER (WHERE own_company IS NOT NULL) AS companies,
-         count(DISTINCT own_gst)     FILTER (WHERE own_gst IS NOT NULL)     AS gsts
-    FROM pre_coord
-   WHERE parent_org_id IS NOT NULL AND status = 'active'
-   GROUP BY parent_org_id)
-SELECT 'P3 orgs_with_disagreeing_coordinators' AS check_id, count(*) AS n
-  FROM per_org
- WHERE urls > 1 OR companies > 1 OR gsts > 1;
+-- P3  F13: active coordinators of a real org whose own url / locations /
+--     company / GST (empty included) is not shared by every active member —
+--     after the window they see the org's value (or none) instead of their own
+WITH own AS (
+  SELECT u.id, u.parent_org_id,
+         coalesce(nullif(btrim(u.url), ''), '')                         AS url,
+         coalesce(u.locations, '[]'::jsonb)                              AS locations,
+         coalesce(nullif(btrim(u.contact_extra ->> 'company'), ''), '')   AS company,
+         coalesce(nullif(btrim(u.contact_extra ->> 'gstNumber'), ''), '') AS gst
+    FROM users u
+   WHERE u.user_type = 'coordinator' AND u.status = 'active' AND u.parent_org_id IS NOT NULL),
+disagreeing AS (
+  SELECT parent_org_id
+    FROM own
+   GROUP BY parent_org_id
+  HAVING count(DISTINCT url) > 1 OR count(DISTINCT locations) > 1
+      OR count(DISTINCT company) > 1 OR count(DISTINCT gst) > 1)
+SELECT 'P3 coordinators_seeing_org_values' AS check_id, count(*) AS n
+  FROM own WHERE parent_org_id IN (SELECT parent_org_id FROM disagreeing);
 
 -- P4  coordinators that move into the Default org (formerly flat)
 SELECT 'P4 coordinators_into_default' AS check_id, count(*) AS n

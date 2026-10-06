@@ -25,7 +25,7 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
  * coordinator/aggregator registration (`'aggregator'`).
  */
 export const RecordConsentInputSchema = z.object({
-  /** Discriminator: `'org'` maps to `aggregator_orgs.id`; `'aggregator'` to `aggregators.id`. */
+  /** Discriminator: `'org'` maps to `organisations.id`; `'aggregator'` to `users.id` (a coordinator). */
   subjectType: z.enum(['org', 'aggregator']),
   /** UUID of the subject row that accepted the terms. */
   subjectId: z.string().uuid(),

@@ -112,6 +112,26 @@ export abstract class IdpAdminAdapter {
   abstract deleteGroup(groupId: string): Promise<IdpResult<void>>;
 
   /**
+   * Finds a top-level group by its exact name — used to adopt a group created
+   * by an earlier attempt whose id was never recorded (a 409 on create).
+   *
+   * @param name - Exact group name.
+   * @returns The group's id and attributes, or `null` when absent.
+   */
+  abstract findGroupByName(
+    name: string,
+  ): Promise<IdpResult<{ id: string; attributes: Record<string, string[]> } | null>>;
+
+  /**
+   * Removes a user from a group (an org owner replaced by another). A user or
+   * membership that is already gone is success (idempotent).
+   *
+   * @param userId - Keycloak user id.
+   * @param groupId - Group id.
+   */
+  abstract removeUserFromGroup(userId: string, groupId: string): Promise<IdpResult<void>>;
+
+  /**
    * Adds a user to a group.
    *
    * @param userId - Keycloak user id.

@@ -3,8 +3,8 @@
  *
  * Invokes the async page function directly. Covers: the session-redirect
  * guard, the consent-load-failure → null fallback (per CLAUDE.md's "Consent
- * content has no API round-trip" note), the org-hierarchy flag gating the org
- * schema load, and the org-schema-missing graceful degrade.
+ * content has no API round-trip" note), and that the coordinator page never
+ * loads the org schema (owner registration is the `/register/owner` deep link).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 

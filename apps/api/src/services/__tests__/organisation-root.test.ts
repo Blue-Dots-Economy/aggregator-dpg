@@ -49,6 +49,7 @@ describe('provisionRootIdp', () => {
     ownerUserId: 'u-1',
     ownerEmail: 'ops@example.org',
     ownerSubject: null,
+    ownerIsCoordinator: false,
     ...over,
   });
 
@@ -85,8 +86,15 @@ describe('provisionRootIdp', () => {
       },
       r,
     );
-    expect(report).toEqual({ groupsCreated: 2, usersCreated: 2, usersReused: 0, failures: 0 });
-    expect(idp.getGroup(groups.get('org-1')!)?.name).toBe('org-network');
+    expect(report).toEqual({
+      groupsCreated: 2,
+      groupsAdopted: 0,
+      usersCreated: 2,
+      usersReused: 0,
+      ownersRemoved: 0,
+      failures: 0,
+    });
+    expect(idp.getGroup(groups.get('org-1')!)?.name).toBe('org-network-org-1');
     const owner = await idp.findById(subjects.get('u-1')!);
     expect(owner.ok && owner.value?.enabled).toBe(false);
     expect(idp.groupsOf(subjects.get('u-2')!)).toEqual([groups.get('org-2')]);
@@ -141,5 +149,64 @@ describe('provisionRootIdp', () => {
     // The root's group create fails, its owner link conflicts, and adding the
     // Default owner to a group the IdP does not know fails.
     expect(report.failures).toBe(3);
+  });
+
+  it("adopts the org's own group after a 409, never another org's", async () => {
+    const idp = new IdpAdminFake();
+    // An earlier attempt created the root's group but its id was never stored.
+    await idp.createGroup('org-network-org-1', { org_id: 'org-1' });
+    // A group with the Default org's name already names another org.
+    await idp.createGroup('org-default-org-2', { org_id: 'someone-else' });
+    const { r, groups } = recorder();
+    const report = await provisionRootIdp(
+      idp,
+      {
+        root: org({ ownerEmail: PLACEHOLDER_OWNER_EMAIL }),
+        defaultOrg: org({ id: 'org-2', slug: 'default', ownerEmail: PLACEHOLDER_OWNER_EMAIL }),
+      },
+      r,
+    );
+    expect(report.groupsAdopted).toBe(1);
+    expect(groups.get('org-1')).toBeDefined();
+    expect(groups.has('org-2')).toBe(false);
+    expect(report.failures).toBe(1);
+  });
+
+  it('removes a replaced owner from the group, keeping its IdP user', async () => {
+    const idp = new IdpAdminFake();
+    const old = await idp.createUser({ email: 'old@example.org', enabled: true });
+    const g = await idp.createGroup('org-network', { org_id: 'org-1' });
+    if (!old.ok || !g.ok) throw new Error('seed');
+    await idp.addUserToGroup(old.value.id, g.value.id);
+    const { r } = recorder();
+    const report = await provisionRootIdp(
+      idp,
+      {
+        root: org({ kcGroupId: g.value.id }),
+        defaultOrg: org({ id: 'org-2', slug: 'default', kcGroupId: 'g2', ownerSubject: 's' }),
+        replacedOwners: [{ orgId: 'org-1', subject: old.value.id }],
+      },
+      r,
+    );
+    expect(report.ownersRemoved).toBe(1);
+    expect(idp.groupsOf(old.value.id)).toEqual([]);
+    const still = await idp.findById(old.value.id);
+    expect(still.ok && still.value).not.toBeNull();
+  });
+
+  it("never links a coordinator's IdP user to the admin account", async () => {
+    const idp = new IdpAdminFake();
+    await idp.createUser({ email: 'ops@example.org', enabled: true });
+    const { r, subjects } = recorder();
+    const report = await provisionRootIdp(
+      idp,
+      {
+        root: org({ ownerIsCoordinator: true }),
+        defaultOrg: org({ id: 'org-2', slug: 'default', ownerIsCoordinator: true }),
+      },
+      r,
+    );
+    expect(subjects.size).toBe(0);
+    expect(report.usersCreated + report.usersReused).toBe(0);
   });
 });

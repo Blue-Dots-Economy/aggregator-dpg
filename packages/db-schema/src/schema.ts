@@ -641,8 +641,8 @@ export const aggregatorConsentRecord = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
 
     /**
-     * Discriminator for the subject: `'org'` = `aggregator_orgs.id`;
-     * `'aggregator'` = `aggregators.id` (coordinator/aggregator flow).
+     * Discriminator for the subject: `'org'` = `organisations.id`;
+     * `'aggregator'` = `users.id` (a coordinator).
      */
     subjectType: text('subject_type').notNull(),
 

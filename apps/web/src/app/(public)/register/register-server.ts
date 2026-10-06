@@ -15,6 +15,22 @@ import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { logger } from '../../../lib/logger';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
 
+let legacyFlagWarned = false;
+
+/**
+ * Logs once per process when the removed `ORG_HIERARCHY_ENABLED` variable is
+ * still set: organisations are always on since migration 0028, so it has no
+ * effect and should be removed from the environment (the API warns too).
+ */
+export function warnIfLegacyHierarchyFlag(): void {
+  if (legacyFlagWarned || process.env.ORG_HIERARCHY_ENABLED === undefined) return;
+  legacyFlagWarned = true;
+  logger.warn(
+    { operation: 'config.orgHierarchy', status: 'skipped' },
+    'ORG_HIERARCHY_ENABLED is ignored — organisations are always on; remove it from the environment',
+  );
+}
+
 /**
  * Loads the versioned consent document content for both `aggregator` and `org`
  * audiences from the network/brand config tree.

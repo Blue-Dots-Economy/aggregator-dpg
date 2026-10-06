@@ -120,4 +120,14 @@ describe('org-detail rendering (0028)', () => {
     expect(r.value.url).toBeNull();
     expect(r.value.locations).toEqual([]);
   });
+
+  it('re-renders on every read, as the Postgres join does', async () => {
+    const store = new AggregatorStoreFake();
+    const r = await store.create(buildCreateAggregatorInput({ orgId: 'org-late' }));
+    if (!r.ok) throw new Error('create failed');
+    expect(r.value.url).toBeNull();
+    store.seedOrgDetails('org-late', { url: 'https://late.example' });
+    const again = await store.findById(r.value.id);
+    expect(again.ok && again.value?.url).toBe('https://late.example');
+  });
 });

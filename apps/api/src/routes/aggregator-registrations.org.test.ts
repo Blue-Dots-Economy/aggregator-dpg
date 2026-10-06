@@ -237,6 +237,24 @@ describe('coordinator submit with an org', () => {
       }
     });
 
+    it('routes a reclaimed (resubmitted) Default registration like a fresh one', async () => {
+      process.env.DEFAULT_ORG_OWNER_EMAIL = 'default.owner@bluedots.local';
+      try {
+        orgStore.seed([buildDefaultOrg()]);
+        expect((await submit({ ...validBody, org_id: DEFAULT_ID })).statusCode).toBe(201);
+        mailer.outbox.length = 0;
+        // Same person resubmits while still pending: the review link is re-sent.
+        const again = await submit({ ...validBody, org_id: DEFAULT_ID });
+        expect(again.statusCode).toBe(200);
+        const { to, token } = reviewLink();
+        expect(to).toEqual(['default.owner@bluedots.local']);
+        const v = await verifyApprovalToken(token);
+        expect(v.ok && v.org).toBe(DEFAULT_ID);
+      } finally {
+        delete process.env.DEFAULT_ORG_OWNER_EMAIL;
+      }
+    });
+
     it("ignores url / locations for a real org (they are the org's)", async () => {
       orgStore.seed([
         buildAggregatorOrg({ id: 'org-1', slug: 'o', status: 'active', ownerEmail: 'o@o.org' }),

@@ -207,19 +207,48 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
       // output), so the typed body can be consumed directly here.
       const body = req.body as z.infer<typeof ProfileUpdateBodySchema>;
 
-      // Org details are shared by every coordinator of the org: refuse them
-      // before any write (Keycloak or DB).
-      const orgDetailFields = [
-        ...(body.aggregator.url !== undefined ? ['url'] : []),
-        ...(body.aggregator.locations !== undefined ? ['locations'] : []),
-        ...(body.aggregator.contact?.company !== undefined ? ['contact.company'] : []),
-        ...(body.aggregator.contact?.gstNumber !== undefined ? ['contact.gstNumber'] : []),
-      ];
-      if (orgDetailFields.length > 0) {
-        throw httpError('ORG_DETAILS_READ_ONLY', { fields: { fields: orgDetailFields } });
-      }
-
       const aggregatorStore = getAggregatorStore();
+
+      // Org details are shared by every coordinator of the org: a CHANGE to any
+      // of them is refused before any write (Keycloak or DB). Sending back the
+      // values GET returned (a client echoing its own contact) is not a change.
+      const sentOrgDetails =
+        body.aggregator.url !== undefined ||
+        body.aggregator.locations !== undefined ||
+        body.aggregator.contact?.company !== undefined ||
+        body.aggregator.contact?.gstNumber !== undefined;
+      if (sentOrgDetails) {
+        const current = await aggregatorStore.findById(auth.aggregatorId);
+        if (!current.ok) {
+          throw httpError('DB_UNAVAILABLE', {
+            cause: new Error(current.error.message),
+            fields: { sub_operation: 'aggregatorStore.findById' },
+          });
+        }
+        const now = current.value;
+        const same = (a: unknown, b: unknown) =>
+          JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+        const changed = [
+          ...(body.aggregator.url !== undefined && !same(body.aggregator.url, now?.url)
+            ? ['url']
+            : []),
+          ...(body.aggregator.locations !== undefined &&
+          !same(body.aggregator.locations, now?.locations)
+            ? ['locations']
+            : []),
+          ...(body.aggregator.contact?.company !== undefined &&
+          !same(body.aggregator.contact.company, now?.contact.company)
+            ? ['contact.company']
+            : []),
+          ...(body.aggregator.contact?.gstNumber !== undefined &&
+          !same(body.aggregator.contact.gstNumber, now?.contact.gstNumber)
+            ? ['contact.gstNumber']
+            : []),
+        ];
+        if (changed.length > 0) {
+          throw httpError('ORG_DETAILS_READ_ONLY', { fields: { fields: changed } });
+        }
+      }
 
       // ─── 1. Mirror phone/email to Keycloak FIRST (authoritative). ──────────
       // If KC fails, abort before touching the DB so we never have the DB

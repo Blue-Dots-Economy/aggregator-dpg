@@ -477,9 +477,38 @@ describe('aggregator profile routes', () => {
     }
   });
 
+  it('PATCH accepts org details unchanged from what GET returned (an echoed contact)', async () => {
+    const before = await aggregatorStore.findById(aggregatorId);
+    if (!before.ok || !before.value) throw new Error('seed missing');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          name: 'Echoed',
+          url: before.value.url,
+          locations: before.value.locations,
+        },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { name: string }).name).toBe('Echoed');
+  });
+
   it.each([
     [{ url: 'https://trrain.example.org' }, ['url']],
-    [{ locations: [] }, ['locations']],
+    [
+      {
+        locations: [
+          {
+            geo: { type: 'Point', coordinates: [77.6, 12.9] },
+            address: { streetAddress: 'New st' },
+          },
+        ],
+      },
+      ['locations'],
+    ],
     [
       {
         contact: {

@@ -79,6 +79,25 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     };
   }
 
+  /**
+   * Re-renders a row's org details on read, as the Postgres join does, so org
+   * details seeded after a coordinator was created are reflected. Rows whose
+   * org has no seeded details and that hold no legacy values are returned as
+   * stored (rows seeded directly by tests keep their own url / locations).
+   */
+  protected view(row: Aggregator): Aggregator {
+    const orgId = row.parentOrgId;
+    const legacy = this.legacy.get(row.id) ?? null;
+    if (!orgId || (!this.orgDetails.has(orgId) && !legacy)) return row;
+    const rendered = this.render(orgId, legacy, row.contact);
+    return { ...row, url: rendered.url, locations: rendered.locations, contact: rendered.contact };
+  }
+
+  /** {@link view} for a possibly-missing row. */
+  protected viewOrNull(row: Aggregator | undefined): Aggregator | null {
+    return row ? this.view(row) : null;
+  }
+
   create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
     const invariant = checkInvariant(input.actorType, input.type);
     if (invariant) return Promise.resolve({ ok: false, error: invariant });
@@ -130,32 +149,34 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       rejectedAt: null,
     };
     this.indexInsert(row);
-    return Promise.resolve({ ok: true, value: row });
+    return Promise.resolve({ ok: true, value: this.view(row) });
   }
 
   findById(id: string): Promise<StoreResult<Aggregator | null>> {
-    return Promise.resolve({ ok: true, value: this.byId.get(id) ?? null });
+    return Promise.resolve({ ok: true, value: this.viewOrNull(this.byId.get(id)) });
   }
 
   findBySlug(orgSlug: string): Promise<StoreResult<Aggregator | null>> {
     const id = this.bySlug.get(orgSlug);
-    return Promise.resolve({ ok: true, value: id ? (this.byId.get(id) ?? null) : null });
+    return Promise.resolve({ ok: true, value: id ? this.viewOrNull(this.byId.get(id)) : null });
   }
 
   findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>> {
     const id = this.byPhone.get(phone);
-    return Promise.resolve({ ok: true, value: id ? (this.byId.get(id) ?? null) : null });
+    return Promise.resolve({ ok: true, value: id ? this.viewOrNull(this.byId.get(id)) : null });
   }
 
   findByContactEmail(email: string): Promise<StoreResult<Aggregator | null>> {
     const id = this.byEmail.get(email.toLowerCase());
-    return Promise.resolve({ ok: true, value: id ? (this.byId.get(id) ?? null) : null });
+    return Promise.resolve({ ok: true, value: id ? this.viewOrNull(this.byId.get(id)) : null });
   }
 
   findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>> {
     return Promise.resolve({
       ok: true,
-      value: [...this.byId.values()].filter((r) => r.parentOrgId === orgId),
+      value: [...this.byId.values()]
+        .filter((r) => r.parentOrgId === orgId)
+        .map((r) => this.view(r)),
     });
   }
 
@@ -172,7 +193,10 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     return Promise.resolve({
       ok: true,
-      value: { rows: rows.slice(offset, offset + limit), total: rows.length },
+      value: {
+        rows: rows.slice(offset, offset + limit).map((r) => this.view(r)),
+        total: rows.length,
+      },
     });
   }
 
@@ -221,7 +245,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       updatedAt: new Date(),
     };
     this.indexReplace(existing, next);
-    return Promise.resolve({ ok: true, value: next });
+    return Promise.resolve({ ok: true, value: this.view(next) });
   }
 
   async updateStatus(
@@ -253,7 +277,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       updatedAt: new Date(),
     };
     this.byId.set(id, next);
-    return Promise.resolve({ ok: true, value: next });
+    return Promise.resolve({ ok: true, value: this.view(next) });
   }
 
   deleteById(id: string): Promise<StoreResult<void>> {

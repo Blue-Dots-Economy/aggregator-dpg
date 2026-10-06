@@ -146,7 +146,20 @@ suite('organisations (migration 0028) — integration', () => {
   let pool: pg.Pool;
   let poolUrl: string;
   const ids = {} as Record<
-    'flat' | 'orgA' | 'a1' | 'orgB' | 'b1' | 'b2' | 'b3' | 'orgC' | 'c1' | 'c2' | 'named',
+    | 'flat'
+    | 'orgA'
+    | 'a1'
+    | 'a2'
+    | 'orgB'
+    | 'b1'
+    | 'b2'
+    | 'b3'
+    | 'orgC'
+    | 'c1'
+    | 'c2'
+    | 'named'
+    | 'netName'
+    | 'netSlug',
     string
   >;
 
@@ -249,8 +262,19 @@ suite('organisations (migration 0028) — integration', () => {
       parentOrgId: ids.orgC,
       url: 'https://c2.example',
     });
-    // A real org already named "Default".
+    // A real org already named "Default", one named like the root's
+    // placeholder, and one holding the root's placeholder slug.
     ids.named = await seedOrg(pool, 'default-4444', { name: 'Default', email: 'owner.d@x.test' });
+    ids.netName = await seedOrg(pool, 'net-5555', { name: 'Network', email: 'owner.n@x.test' });
+    ids.netSlug = await seedOrg(pool, 'network', { name: 'Net Slug Org', email: 'owner.s@x.test' });
+    // A coordinator whose location is only the web's unresolved placeholder,
+    // in an org that has a location: recorded verbatim so a revert is exact.
+    ids.a2 = await seedCoordinator(pool, 'a2', {
+      email: 'a2@x.test',
+      phone: '+919100000008',
+      parentOrgId: ids.orgA,
+      locations: [{ geo: { type: 'Point', coordinates: [0, 0] }, address: {} }],
+    });
     // Tenant rows.
     await pool.query(
       `INSERT INTO bulk_uploads (user_id, participant_type, s3_key, schema_id, schema_version, uploaded_by)
@@ -299,8 +323,29 @@ suite('organisations (migration 0028) — integration', () => {
     expect(r).toEqual({ nf: 1, nf_parent: true, def_parent_is_nf: true });
   });
 
-  it('renames a pre-existing org named "Default" so the fixed one can exist', async () => {
+  it('renames pre-existing orgs that would collide with Default or the root, keeping the originals', async () => {
     expect((await org(ids.named)).name).toBe('Default (default-4444)');
+    expect((await org(ids.netName)).name).toBe('Network (net-5555)');
+    const renamed = await one<{ slug: string; from: unknown }>(
+      pool,
+      `SELECT slug, profile -> 'renamed_from' AS from FROM organisations WHERE id = $1`,
+      [ids.netSlug],
+    );
+    expect(renamed).toEqual({ slug: 'network-r1', from: { slug: 'network' } });
+    const named = await one<{ from: unknown }>(
+      pool,
+      `SELECT profile -> 'renamed_from' AS from FROM organisations WHERE id = $1`,
+      [ids.named],
+    );
+    expect(named.from).toEqual({ name: 'Default' });
+  });
+
+  it("records a coordinator's raw locations whenever they differ from the org's", async () => {
+    // Its empty url differs from the org's too, so it is recorded as null.
+    expect((await user(ids.a2)).legacy_org_details).toEqual({
+      url: null,
+      locations: [{ geo: { type: 'Point', coordinates: [0, 0] }, address: {} }],
+    });
   });
 
   it('links every coordinator to an org; flat ones to Default', async () => {
@@ -503,6 +548,39 @@ suite('organisations (migration 0028) — integration', () => {
       defaultOwner: false,
     });
     expect(await hasRegistrationData(pool as never)).toBe(true);
+  });
+
+  it('hands the root to an existing org owner and releases the previous owner', async () => {
+    const before = await one<{ owner: string }>(
+      pool,
+      'SELECT org_owner AS owner FROM organisations WHERE id = $1',
+      [ids.orgC],
+    );
+    const state = await reconcileRootOrganisations(
+      {
+        nfSlug: 'blue-dots',
+        nfName: 'Blue Dots Network',
+        nfLegalName: 'Blue Dots Foundation',
+        nfOwnerEmail: 'owner.c@x.test',
+        defaultOwnerEmail: 'default.owner@x.test',
+      },
+      getDb(),
+    );
+    // The existing admin account is reused, not duplicated; it keeps its org.
+    expect(state?.root.ownerUserId).toBe(before.owner);
+    expect(state?.changed.rootOwner).toBe(true);
+    const after = await one<{ owner: string }>(
+      pool,
+      'SELECT org_owner AS owner FROM organisations WHERE id = $1',
+      [ids.orgC],
+    );
+    expect(after.owner).toBe(before.owner);
+    // ops@x.test owned only the root: its account and contact are released.
+    const ops = await one<{ n: number }>(
+      pool,
+      `SELECT count(*)::int AS n FROM contact WHERE email = 'ops@x.test'`,
+    );
+    expect(ops.n).toBe(0);
   });
 
   it('a fresh database reads as empty after 0028 and the root reconcile', async () => {

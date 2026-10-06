@@ -13,7 +13,12 @@ import { closeRedis } from './services/redis/index.js';
 import { closeBulkQueue } from './services/bulk-queue/index.js';
 import { closeCampaignProcessQueue } from './services/campaign-process-queue/index.js';
 import { getNetworkConfig } from './services/network-config.js';
-import { ensureRootOrganisation, rootConfigFrom } from './services/organisation-root.js';
+import {
+  ensureRootOrganisation,
+  mirrorRootOrganisations,
+  rootConfigFrom,
+  type RootState,
+} from './services/organisation-root.js';
 import { getIdpAdmin } from './services/idp-admin/index.js';
 import { adminEmails, defaultOrgOwnerEmail, legacyHierarchyFlagSet } from './config.js';
 import { setApprovalBrand } from './views/approval-pages.js';
@@ -67,7 +72,9 @@ async function main(): Promise<void> {
   // Put the configured network root / Default-org values in place of the
   // placeholders 0028 seeds. Runs on every boot, whether or not this process
   // ran the migrations (existing instances migrate with the operator tool).
-  // Never throws: a failure is logged and retried on the next boot.
+  // Never throws: a failure is logged and retried on the next boot. The IdP
+  // mirror runs after `listen` (below), so Keycloak never delays readiness.
+  let rootState: RootState | null = null;
   {
     let network: { urlSlug?: string; name?: string; legalName?: string | null } | null = null;
     try {
@@ -80,9 +87,8 @@ async function main(): Promise<void> {
     } catch {
       network = null; // logged above by the brand seed
     }
-    await ensureRootOrganisation(
+    rootState = await ensureRootOrganisation(
       rootConfigFrom(network, adminEmails, defaultOrgOwnerEmail()),
-      getIdpAdmin(),
     );
   }
 
@@ -125,6 +131,8 @@ async function main(): Promise<void> {
   try {
     await app.listen({ host: config.HOST, port: config.PORT });
     logger.info({ host: config.HOST, port: config.PORT }, 'api listening');
+    // Fire-and-forget: mirrorRootOrganisations never throws.
+    if (rootState) void mirrorRootOrganisations(rootState, getIdpAdmin());
   } catch (err) {
     logger.error({ err }, 'failed to start api');
     process.exit(1);

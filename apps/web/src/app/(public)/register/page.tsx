@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getSession } from '../../../lib/server-session';
 import { RegisterView } from './RegisterView';
 import { loadRegistrationSchema } from '../../../lib/aggregator-schema.server';
-import { loadConsentContent } from './register-server';
+import { loadConsentContent, warnIfLegacyHierarchyFlag } from './register-server';
 
 export const metadata: Metadata = {
   title: 'Register as Aggregator',
@@ -23,6 +23,7 @@ export const dynamic = 'force-dynamic';
 export default async function RegisterPage() {
   const session = await getSession();
   if (session) redirect('/dashboard');
+  warnIfLegacyHierarchyFlag();
 
   const { schema, uiSchema } = await loadRegistrationSchema();
   const consentContent = await loadConsentContent();

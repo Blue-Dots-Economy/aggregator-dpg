@@ -59,6 +59,18 @@ export interface RootOrgState {
   ownerEmail: string;
   /** The owner's recorded IdP subject, if any. */
   ownerSubject: string | null;
+  /**
+   * Whether the owner's person also holds a coordinator account. Its IdP user
+   * (one per person) then belongs to that login, so the mirror never links or
+   * creates one for the admin account.
+   */
+  ownerIsCoordinator: boolean;
+}
+
+/** An owner replaced by the reconcile: removed from the org's group. */
+export interface ReplacedOwner {
+  orgId: string;
+  subject: string;
 }
 
 /** What the database reconcile found and changed. */
@@ -66,6 +78,8 @@ export interface RootState {
   root: RootOrgState;
   defaultOrg: RootOrgState;
   changed: { slug: boolean; name: boolean; rootOwner: boolean; defaultOwner: boolean };
+  /** Owners replaced in this run that had a recorded IdP subject. */
+  replacedOwners: ReplacedOwner[];
 }
 
 /**
@@ -135,8 +149,11 @@ async function readOrg(tx: DbExecutor, where: 'root' | 'default'): Promise<RootO
     org_owner: string;
     email: string;
     subject: string | null;
+    is_coordinator: boolean;
   }>(sql`
-    SELECT o.id, o.slug, o.name, o.kc_group_id, o.org_owner, c.email, i.subject
+    SELECT o.id, o.slug, o.name, o.kc_group_id, o.org_owner, c.email, i.subject,
+           EXISTS (SELECT 1 FROM users x
+                    WHERE x.contact_id = u.contact_id AND x.user_type = 'coordinator') AS is_coordinator
       FROM organisations o
       JOIN users u ON u.id = o.org_owner
       JOIN contact c ON c.id = u.contact_id
@@ -153,6 +170,7 @@ async function readOrg(tx: DbExecutor, where: 'root' | 'default'): Promise<RootO
         ownerUserId: r.org_owner,
         ownerEmail: r.email,
         ownerSubject: r.subject,
+        ownerIsCoordinator: Boolean(r.is_coordinator),
       }
     : null;
 }
@@ -224,13 +242,23 @@ export async function reconcileRootOrganisations(
       );
       changed.defaultOwner = true;
     }
+    // Remember the replaced owners' IdP subjects before their accounts (and
+    // identities) are released, so the mirror can take them out of the group.
+    const replacedOwners: ReplacedOwner[] = [
+      ...(changed.rootOwner && root.ownerSubject
+        ? [{ orgId: root.id, subject: root.ownerSubject }]
+        : []),
+      ...(changed.defaultOwner && dflt.ownerSubject
+        ? [{ orgId: dflt.id, subject: dflt.ownerSubject }]
+        : []),
+    ];
     if (changed.rootOwner) await releaseIfUnowned(tx, root.ownerUserId);
     if (changed.defaultOwner) await releaseIfUnowned(tx, dflt.ownerUserId);
 
     const nextRoot = await readOrg(tx, 'root');
     const nextDefault = await readOrg(tx, 'default');
     if (!nextRoot || !nextDefault) return null;
-    return { root: nextRoot, defaultOrg: nextDefault, changed };
+    return { root: nextRoot, defaultOrg: nextDefault, changed, replacedOwners };
   });
 }
 
@@ -244,9 +272,57 @@ export interface RootIdpRecorder {
 /** Counts of what the IdP mirror did. */
 export interface RootIdpReport {
   groupsCreated: number;
+  /** Groups found by name from an earlier attempt and adopted. */
+  groupsAdopted: number;
   usersCreated: number;
   usersReused: number;
+  /** Replaced owners removed from their org's group. */
+  ownersRemoved: number;
   failures: number;
+}
+
+/**
+ * Creates the org's group, or adopts it when an earlier attempt created it but
+ * its id was never recorded (Keycloak answers 409): the existing group is
+ * adopted only when its `org_id` attribute names this org.
+ *
+ * The name is `org-<slug>-<first 8 of the org id>`: the root's and the Default
+ * org's slugs are the same on every instance (`default`, the brand slug), so a
+ * plain `org-<slug>` would collide on a realm shared by several instances or
+ * with a group left by a recreated database. (Aggregator orgs' slugs already
+ * carry a random suffix.)
+ *
+ * @returns The group id, or `null` (counted as a failure, retried next boot).
+ */
+async function ensureGroup(
+  idp: IdpAdminAdapter,
+  org: RootOrgState,
+  report: RootIdpReport,
+  fail: (step: string, code: string) => void,
+): Promise<string | null> {
+  const name = `org-${org.slug}-${org.id.slice(0, 8)}`;
+  const created = await idp.createGroup(name, { org_id: org.id, display_name: org.name });
+  if (created.ok) {
+    report.groupsCreated += 1;
+    return created.value.id;
+  }
+  if (created.error.code !== 'BAD_REQUEST') {
+    fail('createGroup', created.error.code);
+    return null;
+  }
+  const found = await idp.findGroupByName(name);
+  if (!found.ok) {
+    fail('findGroupByName', found.error.code);
+    return null;
+  }
+  if (found.value && (found.value.attributes['org_id'] ?? []).includes(org.id)) {
+    report.groupsAdopted += 1;
+    return found.value.id;
+  }
+  // The name belongs to another org (another instance on a shared realm, or a
+  // renamed old org): never take it over.
+  fail('createGroup', 'group_name_taken');
+  return null;
 }
 
 /**
@@ -262,10 +338,17 @@ export interface RootIdpReport {
  */
 export async function provisionRootIdp(
   idp: IdpAdminAdapter,
-  state: Pick<RootState, 'root' | 'defaultOrg'>,
+  state: Pick<RootState, 'root' | 'defaultOrg'> & Partial<Pick<RootState, 'replacedOwners'>>,
   recorder: RootIdpRecorder,
 ): Promise<RootIdpReport> {
-  const report: RootIdpReport = { groupsCreated: 0, usersCreated: 0, usersReused: 0, failures: 0 };
+  const report: RootIdpReport = {
+    groupsCreated: 0,
+    groupsAdopted: 0,
+    usersCreated: 0,
+    usersReused: 0,
+    ownersRemoved: 0,
+    failures: 0,
+  };
   const fail = (step: string, code: string) => {
     report.failures += 1;
     logger.warn(
@@ -277,20 +360,33 @@ export async function provisionRootIdp(
   for (const org of [state.root, state.defaultOrg]) {
     let groupId = org.kcGroupId;
     if (!groupId) {
-      const g = await idp.createGroup(`org-${org.slug}`, {
-        org_id: org.id,
-        display_name: org.name,
-      });
-      if (g.ok) {
-        groupId = g.value.id;
-        await recorder.setGroupId(org.id, groupId);
-        report.groupsCreated += 1;
-      } else {
-        fail('createGroup', g.error.code);
-      }
+      groupId = await ensureGroup(idp, org, report, fail);
+      if (groupId) await recorder.setGroupId(org.id, groupId);
+    }
+
+    // Owners replaced by the reconcile leave the org's group (their IdP user
+    // is never deleted: it may be a person with other roles).
+    for (const gone of (state.replacedOwners ?? []).filter((r) => r.orgId === org.id)) {
+      if (!groupId) break;
+      const removed = await idp.removeUserFromGroup(gone.subject, groupId);
+      if (removed.ok) report.ownersRemoved += 1;
+      else fail('removeUserFromGroup', removed.error.code);
     }
 
     if (org.ownerEmail === PLACEHOLDER_OWNER_EMAIL) continue;
+    // One IdP user per person: if the owner is also a coordinator, that user
+    // is the coordinator's login and must not be linked to the admin account.
+    if (org.ownerIsCoordinator && !org.ownerSubject) {
+      logger.warn(
+        {
+          operation: 'ensureRootOrganisation.idp',
+          status: 'skipped',
+          reason: 'owner_is_coordinator',
+        },
+        'the configured owner also holds a coordinator account — no admin IdP user is linked',
+      );
+      continue;
+    }
     let subject = org.ownerSubject;
     if (!subject) {
       const existing = await idp.findByEmail(org.ownerEmail);
@@ -347,13 +443,13 @@ export const dbRootIdpRecorder: RootIdpRecorder = {
 };
 
 /**
- * Runs the reconcile and the IdP mirror at boot. Never throws: a failure is
- * logged and the next boot retries.
+ * Runs the database reconcile at boot (awaited before the server listens).
+ * Never throws: a failure is logged and the next boot retries.
  *
  * @param cfg - The configured values.
- * @param idp - The IdP admin adapter.
+ * @returns The reconciled state for {@link mirrorRootOrganisations}, or `null`.
  */
-export async function ensureRootOrganisation(cfg: RootConfig, idp: IdpAdminAdapter): Promise<void> {
+export async function ensureRootOrganisation(cfg: RootConfig): Promise<RootState | null> {
   const start = Date.now();
   try {
     const state = await reconcileRootOrganisations(cfg);
@@ -362,7 +458,7 @@ export async function ensureRootOrganisation(cfg: RootConfig, idp: IdpAdminAdapt
         { operation: 'ensureRootOrganisation', status: 'skipped', reason: 'no_root' },
         'no network root (database predates migration 0028)',
       );
-      return;
+      return null;
     }
     if (!cfg.nfOwnerEmail) {
       logger.warn(
@@ -370,20 +466,53 @@ export async function ensureRootOrganisation(cfg: RootConfig, idp: IdpAdminAdapt
         'ADMIN_EMAILS is empty — the network root keeps its placeholder owner',
       );
     }
-    const idpReport = await provisionRootIdp(idp, state, dbRootIdpRecorder);
     logger.info({
       operation: 'ensureRootOrganisation',
       status: 'success',
       latency_ms: Date.now() - start,
       ...state.changed,
-      ...idpReport,
+      replaced_owners: state.replacedOwners.length,
     });
+    return state;
   } catch (err) {
     logger.error({
       operation: 'ensureRootOrganisation',
       status: 'failure',
       // Never the driver message: Drizzle includes the query parameters (emails).
       error: pgErrorCode(err) ? `database error ${pgErrorCode(err)}` : 'reconcile failed',
+      error_type: (err as Error | undefined)?.constructor?.name ?? 'unknown',
+      latency_ms: Date.now() - start,
+    });
+    return null;
+  }
+}
+
+/**
+ * Mirrors the reconciled orgs into the IdP. Runs AFTER the server listens
+ * (fire-and-forget at boot), so a slow or unreachable IdP never delays
+ * readiness. Never throws.
+ *
+ * @param state - The state {@link ensureRootOrganisation} returned.
+ * @param idp - The IdP admin adapter.
+ */
+export async function mirrorRootOrganisations(
+  state: RootState,
+  idp: IdpAdminAdapter,
+): Promise<void> {
+  const start = Date.now();
+  try {
+    const report = await provisionRootIdp(idp, state, dbRootIdpRecorder);
+    logger.info({
+      operation: 'ensureRootOrganisation.idp',
+      status: report.failures > 0 ? 'failure' : 'success',
+      latency_ms: Date.now() - start,
+      ...report,
+    });
+  } catch (err) {
+    logger.error({
+      operation: 'ensureRootOrganisation.idp',
+      status: 'failure',
+      error: pgErrorCode(err) ? `database error ${pgErrorCode(err)}` : 'mirror failed',
       error_type: (err as Error | undefined)?.constructor?.name ?? 'unknown',
       latency_ms: Date.now() - start,
     });

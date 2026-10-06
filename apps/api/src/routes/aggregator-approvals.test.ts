@@ -820,7 +820,29 @@ describe('admin approval routes', () => {
     expect(res.body).toContain('Token does not match this organisation.');
   });
 
-  it('rejects a decision with a pre-0028 org-less link (the admin regenerates it)', async () => {
+  it('serves the review page for a pre-0028 org-less link with a token bound to the Default org', async () => {
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}&intent=approve`,
+    });
+    expect(res.statusCode).toBe(200);
+    const pageToken = /name="token" value="([^"]+)"/.exec(res.body)?.[1] ?? '';
+    const v = await verifyApprovalToken(pageToken);
+    expect(v.ok && v.org).toBe(DEFAULT_ORG);
+  });
+
+  it('refuses the review page for a link bound to another org', async () => {
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve', org: 'org-A' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}&intent=approve`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Token does not match this organisation.');
+  });
+
+  it('rejects a decision with a pre-0028 org-less link and offers to regenerate it', async () => {
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
     const res = await app.inject({
       method: 'POST',
@@ -828,6 +850,8 @@ describe('admin approval routes', () => {
       payload: { token, decision: 'approve' },
     });
     expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Regenerate &amp; review');
+    expect(res.body).toContain(`/admin/v1/aggregator-registrations/renew/${aggregatorId}`);
     const stored = await aggregatorStore.findById(aggregatorId);
     expect(stored.ok && stored.value?.status).toBe('pending');
   });
