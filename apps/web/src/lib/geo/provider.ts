@@ -52,7 +52,7 @@ export function getGeoProvider(config: GeoProviderConfig): GeoProvider {
   const base = withGeoCache(
     config.googleMapsApiKey
       ? createGooglePlacesProvider(config.googleMapsApiKey, config.country)
-      : createPhotonProvider(config.photonUrl || undefined),
+      : createPhotonProvider(config.photonUrl || undefined, config.country),
   );
   const provider: GeoProvider = {
     suggest: (query, signal) =>
