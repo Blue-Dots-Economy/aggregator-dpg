@@ -330,6 +330,11 @@ const SIGNALS_REJECTION_CATEGORY: Readonly<Record<string, ErrorCategory>> = {
   AGE_REQUIRED: 'validation',
   USER_LEVEL_INCOMPLETE: 'validation',
   CONSENT_DECLINED: 'validation',
+  // A returning participant Signals already holds a sub-18 age for: Signals
+  // falls back to the stored age, so omitting it from the row does not help.
+  // The operator removes the row (minors onboard through the portal) — a row
+  // problem, not a platform fault. Same checkAgeGates as the two above.
+  U18_NOT_ALLOWED: 'validation',
   LOCATION_OUTSIDE_COUNTRY: 'validation',
   // The person already exists in a way this row cannot override: registered in
   // the other domain (single-domain lock) or an identity clash.
@@ -473,14 +478,8 @@ export async function pushToSignalStack(
   }
   const nameSourceKey = domainCfg.identity.name;
   const phoneSourceKey = domainCfg.identity.phone;
-  const name =
-    typeof job.payload[nameSourceKey] === 'string'
-      ? (job.payload[nameSourceKey] as string)
-      : participantId;
-  const phoneFromBody =
-    typeof job.payload[phoneSourceKey] === 'string'
-      ? (job.payload[phoneSourceKey] as string)
-      : phone;
+  const name = stringCell(job.payload, nameSourceKey) ?? participantId;
+  const phoneFromBody = stringCell(job.payload, phoneSourceKey) ?? phone;
   const pushPhone = phone ?? phoneFromBody;
   // Aggregator-level consent captured at registration is the legal basis for
   // the bulk-row push — there is no per-row consent column in the bulk CSV
@@ -535,22 +534,7 @@ export async function pushToSignalStack(
       error: result.error.message,
       code: result.error.code,
     });
-    const details = (result.error.details ?? {}) as {
-      signalsMessage?: unknown;
-      upstreamCode?: unknown;
-      signalsFields?: unknown;
-    };
-    const { signalsMessage, upstreamCode, signalsFields } = details;
-    return {
-      success: false,
-      code: result.error.code,
-      message: result.error.message,
-      ...(typeof signalsMessage === 'string' && signalsMessage ? { signalsMessage } : {}),
-      ...(typeof upstreamCode === 'string' && upstreamCode ? { upstreamCode } : {}),
-      ...(signalsFields && typeof signalsFields === 'object'
-        ? { signalsFields: signalsFields as Record<string, string> }
-        : {}),
-    };
+    return onboardFailure(result.error);
   }
   // A 2xx with `owned_elsewhere` means signals recognised the person under a
   // DIFFERENT aggregator and created no item here — it is NOT a successful
@@ -578,6 +562,50 @@ export async function pushToSignalStack(
     onboarded_at: result.value.onboarded_at,
   });
   return { success: true };
+}
+
+/**
+ * Returns the row cell at `key` when it holds a string, else `undefined`.
+ *
+ * @param payload - The bulk row's parsed cells.
+ * @param key - Column name to read.
+ * @returns The string value, or `undefined` for a missing or non-string cell.
+ */
+function stringCell(payload: Record<string, unknown>, key: string): string | undefined {
+  const value = payload[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * Maps a failed signalstack onboard into the row's push result.
+ *
+ * Carries Signals' own user-safe message, rejection code and per-field map
+ * through when the writer captured them, so errors.csv can classify the row
+ * and point at the offending column.
+ *
+ * @param error - The writer's failure, with optional Signals details.
+ * @returns A failed {@link SignalStackPushResult}.
+ */
+function onboardFailure(error: {
+  code: string;
+  message: string;
+  details?: unknown;
+}): SignalStackPushResult {
+  const { signalsMessage, upstreamCode, signalsFields } = (error.details ?? {}) as {
+    signalsMessage?: unknown;
+    upstreamCode?: unknown;
+    signalsFields?: unknown;
+  };
+  return {
+    success: false,
+    code: error.code,
+    message: error.message,
+    ...(typeof signalsMessage === 'string' && signalsMessage ? { signalsMessage } : {}),
+    ...(typeof upstreamCode === 'string' && upstreamCode ? { upstreamCode } : {}),
+    ...(signalsFields && typeof signalsFields === 'object'
+      ? { signalsFields: signalsFields as Record<string, string> }
+      : {}),
+  };
 }
 
 /**
