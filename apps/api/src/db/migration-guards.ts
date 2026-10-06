@@ -136,11 +136,14 @@ export async function runMigrationGuards(
   );
   const applied = appliedRows.rows.map((r) => ({ createdAt: Number(r.created_at), hash: r.hash }));
 
-  const fileHashes = new Map<number, string>();
-  for (const e of entries) {
-    const sql = await readFile(path.join(migrationsFolder, `${e.tag}.sql`), 'utf8');
-    fileHashes.set(e.when, createHash('sha256').update(sql).digest('hex'));
-  }
+  const fileHashes = new Map<number, string>(
+    await Promise.all(
+      entries.map(async (e): Promise<[number, string]> => {
+        const sql = await readFile(path.join(migrationsFolder, `${e.tag}.sql`), 'utf8');
+        return [e.when, createHash('sha256').update(sql).digest('hex')];
+      }),
+    ),
+  );
 
   const foreign = checkForeign(entries, applied, fileHashes);
   if (foreign.hashMismatches.length > 0) {

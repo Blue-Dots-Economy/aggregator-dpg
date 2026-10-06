@@ -332,20 +332,20 @@ export const users = pgTable(
     // mutable `updated_at`. NULL until/unless rejected.
     rejectedAt: timestamp('rejected_at', { withTimezone: true }),
   },
-  (table) => ({
+  (table) => [
     // Phone/email uniqueness now lives on `contact` (contact_email_unique,
     // contact_phone_unique) — one person per email and per phone across roles.
     // Approval queue + tenant-classification filters.
-    statusIdx: index('users_status_idx').on(table.status),
-    actorTypeIdx: index('users_actor_type_idx').on(table.actorType),
+    index('users_status_idx').on(table.status),
+    index('users_actor_type_idx').on(table.actorType),
     // One account per person per role (0027; was one coordinator row per person).
-    contactTypeUnique: uniqueIndex('users_contact_type_unique').on(table.contactId, table.userType),
-  }),
+    uniqueIndex('users_contact_type_unique').on(table.contactId, table.userType),
+  ],
 );
 
 /**
- * @deprecated Phase 2 alias for {@link users}; removed by the Phase 4 naming
- * commit. New code should import `users`.
+ * Phase 2 alias for {@link users}, kept for callers not yet renamed; removed
+ * by the Phase 4 naming commit. New code should import `users`.
  */
 export const aggregators = users;
 
@@ -364,13 +364,10 @@ export const userIdentities = pgTable(
     subject: text('subject').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => ({
-    pk: primaryKey({ name: 'user_identities_pkey', columns: [table.userId, table.provider] }),
-    providerSubjectUnique: unique('user_identities_provider_subject_unique').on(
-      table.provider,
-      table.subject,
-    ),
-  }),
+  (table) => [
+    primaryKey({ name: 'user_identities_pkey', columns: [table.userId, table.provider] }),
+    unique('user_identities_provider_subject_unique').on(table.provider, table.subject),
+  ],
 );
 
 // ─── aggregator_orgs ─────────────────────────────────────────────────────────
@@ -880,8 +877,8 @@ export const campaignPiiAudit = pgTable(
 
 export type ContactRow = typeof contact.$inferSelect;
 export type NewContactRow = typeof contact.$inferInsert;
-export type AggregatorRow = typeof aggregators.$inferSelect;
-export type NewAggregatorRow = typeof aggregators.$inferInsert;
+export type AggregatorRow = typeof users.$inferSelect;
+export type NewAggregatorRow = typeof users.$inferInsert;
 export type AggregatorOrgRow = typeof aggregatorOrgs.$inferSelect;
 export type NewAggregatorOrgRow = typeof aggregatorOrgs.$inferInsert;
 export type BulkUploadRow = typeof bulkUploads.$inferSelect;

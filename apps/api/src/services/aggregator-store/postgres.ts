@@ -1,7 +1,7 @@
 /**
  * Postgres adapter for the aggregator store.
  *
- * Wraps Drizzle queries against the `aggregators` table. Driver-level errors
+ * Wraps Drizzle queries against the `users` table. Driver-level errors
  * are normalised to the abstract `StoreError` codes so callers never see raw
  * pg error fields.
  *
@@ -16,7 +16,7 @@
 import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import type { AggregatorStatus, BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { logger } from '../../logger.js';
-import { aggregators, contact } from '../../db/schema.js';
+import { users, contact } from '../../db/schema.js';
 import {
   changeContact,
   ContactTakenError,
@@ -53,7 +53,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
         const { identity, extra } = splitBecknContact(input.contact);
         const contactId = await linkContact(tx, identity);
         const rows = await tx
-          .insert(aggregators)
+          .insert(users)
           .values({
             userType: 'coordinator',
             orgSlug: input.orgSlug,
@@ -72,7 +72,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
             profile: input.profile ?? {},
             profileRef: input.profileRef ?? null,
           })
-          .returning({ id: aggregators.id });
+          .returning({ id: users.id });
         return rows[0] ? this.readIn(tx, rows[0].id) : null;
       });
     } catch (err: unknown) {
@@ -91,11 +91,11 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
   }
 
   async findById(id: string): Promise<StoreResult<Aggregator | null>> {
-    return this.findOne('aggregatorStore.findById', eq(aggregators.id, id));
+    return this.findOne('aggregatorStore.findById', eq(users.id, id));
   }
 
   async findBySlug(orgSlug: string): Promise<StoreResult<Aggregator | null>> {
-    return this.findOne('aggregatorStore.findBySlug', eq(aggregators.orgSlug, orgSlug));
+    return this.findOne('aggregatorStore.findBySlug', eq(users.orgSlug, orgSlug));
   }
 
   async findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>> {
@@ -103,7 +103,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     return this.findOne(
       'aggregatorStore.findByContactPhone',
       eq(
-        aggregators.contactId,
+        users.contactId,
         sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.phone} = ${phone})`,
       ),
     );
@@ -114,7 +114,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     return this.findOne(
       'aggregatorStore.findByContactEmail',
       eq(
-        aggregators.contactId,
+        users.contactId,
         sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.email} = ${e})`,
       ),
     );
@@ -122,7 +122,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
 
   async findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>> {
     try {
-      const rows = await this.selectJoined().where(coordinator(eq(aggregators.parentOrgId, orgId)));
+      const rows = await this.selectJoined().where(coordinator(eq(users.parentOrgId, orgId)));
       return { ok: true, value: rows.map(toDomain) };
     } catch (err: unknown) {
       return this.mapReadError('aggregatorStore.findByParentOrgId', err);
@@ -134,20 +134,20 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     const offset = Math.max(0, filter.offset ?? 0);
     try {
       const conds = [];
-      if (filter.status) conds.push(eq(aggregators.status, filter.status));
-      if (filter.actorType) conds.push(eq(aggregators.actorType, filter.actorType));
-      if (filter.updatedBefore) conds.push(lt(aggregators.updatedAt, filter.updatedBefore));
+      if (filter.status) conds.push(eq(users.status, filter.status));
+      if (filter.actorType) conds.push(eq(users.actorType, filter.actorType));
+      if (filter.updatedBefore) conds.push(lt(users.updatedAt, filter.updatedBefore));
       const where = coordinator(...conds);
 
       const rows = await this.selectJoined()
         .where(where)
-        .orderBy(desc(aggregators.createdAt))
+        .orderBy(desc(users.createdAt))
         .limit(limit)
         .offset(offset);
 
       const totals = await getDb()
         .select({ total: sql<number>`count(*)::int` })
-        .from(aggregators)
+        .from(users)
         .where(where);
       const total = totals[0]?.total ?? 0;
       return { ok: true, value: { rows: rows.map(toDomain), total } };
@@ -177,9 +177,9 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           // Lock the row, then move its contact. A re-key is done in place and
           // cascades to the FK, so no contact is left orphaned.
           const [current] = await tx
-            .select({ contactId: aggregators.contactId })
-            .from(aggregators)
-            .where(coordinator(eq(aggregators.id, id)))
+            .select({ contactId: users.contactId })
+            .from(users)
+            .where(coordinator(eq(users.id, id)))
             .for('update');
           if (!current) return null;
           const { identity, extra } = splitBecknContact(patch.contact);
@@ -187,10 +187,10 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           updates['contactExtra'] = extra;
         }
         const rows = await tx
-          .update(aggregators)
+          .update(users)
           .set(updates)
-          .where(coordinator(eq(aggregators.id, id)))
-          .returning({ id: aggregators.id });
+          .where(coordinator(eq(users.id, id)))
+          .returning({ id: users.id });
         return rows.length > 0 ? this.readIn(tx, id) : null;
       });
     } catch (err: unknown) {
@@ -229,10 +229,10 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
   async approveFromPending(id: string, updatedBy: string): Promise<StoreResult<Aggregator | null>> {
     try {
       const rows = await getDb()
-        .update(aggregators)
+        .update(users)
         .set({ status: 'active', updatedBy, updatedAt: new Date() })
-        .where(coordinator(eq(aggregators.id, id), eq(aggregators.status, 'pending')))
-        .returning({ id: aggregators.id });
+        .where(coordinator(eq(users.id, id), eq(users.status, 'pending')))
+        .returning({ id: users.id });
       // No row → not pending (a concurrent approval already committed).
       if (!rows[0]) return { ok: true, value: null };
       return this.reread('aggregatorStore.approveFromPending', id);
@@ -249,14 +249,14 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     const start = Date.now();
     try {
       const rows = await getDb()
-        .update(aggregators)
+        .update(users)
         .set({
           signalstackOrgId,
           updatedBy,
           updatedAt: new Date(),
         })
-        .where(coordinator(eq(aggregators.id, id)))
-        .returning({ id: aggregators.id });
+        .where(coordinator(eq(users.id, id)))
+        .returning({ id: users.id });
       if (!rows[0]) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
       const updated = await this.reread('aggregatorStore.updateSignalstackOrgId', id);
       if (updated.ok) {
@@ -276,9 +276,9 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
   async deleteById(id: string): Promise<StoreResult<void>> {
     try {
       const rows = await getDb()
-        .delete(aggregators)
-        .where(coordinator(eq(aggregators.id, id)))
-        .returning({ id: aggregators.id });
+        .delete(users)
+        .where(coordinator(eq(users.id, id)))
+        .returning({ id: users.id });
       if (rows.length === 0) {
         return { ok: false, error: { code: 'NOT_FOUND', message: id } };
       }
@@ -300,15 +300,15 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
    */
   private selectJoined(db: DbExecutor = getDb()) {
     return db
-      .select({ a: aggregators, c: contact })
-      .from(aggregators)
-      .innerJoin(contact, eq(contact.id, aggregators.contactId));
+      .select({ a: users, c: contact })
+      .from(users)
+      .innerJoin(contact, eq(contact.id, users.contactId));
   }
 
   /** Reads one joined row through `db` (used inside write transactions). */
   private async readIn(db: DbExecutor, id: string): Promise<Aggregator | null> {
     const [row] = await this.selectJoined(db)
-      .where(coordinator(eq(aggregators.id, id)))
+      .where(coordinator(eq(users.id, id)))
       .limit(1);
     return row ? toDomain(row) : null;
   }
@@ -329,7 +329,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
    * reported as `NOT_FOUND`.
    */
   private async reread(op: string, id: string): Promise<StoreResult<Aggregator>> {
-    const found = await this.findOne(op, eq(aggregators.id, id));
+    const found = await this.findOne(op, eq(users.id, id));
     if (!found.ok) return found;
     if (!found.value) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
     return { ok: true, value: found.value };
@@ -424,7 +424,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
 }
 
 type JoinedRow = {
-  a: typeof aggregators.$inferSelect;
+  a: typeof users.$inferSelect;
   c: typeof contact.$inferSelect;
 };
 
@@ -492,6 +492,6 @@ function toDomain(row: JoinedRow): Aggregator {
  * @returns The combined condition.
  */
 function coordinator(...conds: (SQL | undefined)[]): SQL {
-  const isCoordinator = eq(aggregators.userType, 'coordinator');
+  const isCoordinator = eq(users.userType, 'coordinator');
   return and(isCoordinator, ...conds) ?? isCoordinator;
 }

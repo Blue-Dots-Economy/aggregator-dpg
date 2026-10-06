@@ -199,7 +199,8 @@ async function readErrors(redis: ReturnType<typeof getRedis>, key: string): Prom
   const errors: ErrorRecord[] = [];
   let cursor = '0';
   do {
-    const [next, fields] = (await redis.hscan(key, cursor, 'COUNT', 200)) as [string, string[]];
+    // Each HSCAN needs the cursor the previous one returned: sequential by design.
+    const [next, fields] = (await redis.hscan(key, cursor, 'COUNT', 200)) as [string, string[]]; // NOSONAR typescript:S9382
     for (let i = 1; i < fields.length; i += 2) {
       const raw = fields[i];
       if (!raw) continue;

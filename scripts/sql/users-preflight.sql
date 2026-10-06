@@ -40,8 +40,8 @@ SELECT 'I1 owners_of_several_orgs' AS check_id, count(*) AS n FROM (
   SELECT contact_id FROM aggregator_orgs GROUP BY contact_id HAVING count(*) > 1) d;
 
 -- I2  F3: persons who are both an org owner and a coordinator
-SELECT 'I2 owner_and_coordinator' AS check_id, count(*) AS n
-  FROM aggregator_orgs o WHERE EXISTS (SELECT 1 FROM aggregators a WHERE a.contact_id = o.contact_id);
+SELECT 'I2 owner_and_coordinator' AS check_id, count(DISTINCT o.contact_id) AS n
+  FROM aggregator_orgs o JOIN aggregators a ON a.contact_id = o.contact_id;
 
 -- I3  coordinators (their Keycloak identity is filled later by `enrich`)
 SELECT 'I3 coordinators_without_identity_after_0027' AS check_id, count(*) AS n FROM aggregators;
