@@ -406,6 +406,11 @@ const SIGNALS_REJECTION_CATEGORY: Readonly<Record<string, ErrorCategory>> = {
   AGE_REQUIRED: 'validation',
   USER_LEVEL_INCOMPLETE: 'validation',
   CONSENT_DECLINED: 'validation',
+  // A returning participant Signals already holds a sub-18 age for: Signals
+  // falls back to the stored age, so omitting it from the row does not help.
+  // The operator removes the row (minors onboard through the portal) — a row
+  // problem, not a platform fault. Same checkAgeGates as the two above.
+  U18_NOT_ALLOWED: 'validation',
   LOCATION_OUTSIDE_COUNTRY: 'validation',
   // The person already exists in a way this row cannot override: registered in
   // the other domain (single-domain lock) or an identity clash.

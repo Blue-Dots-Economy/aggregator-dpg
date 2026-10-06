@@ -427,6 +427,7 @@ describe('processBulkRow — writer + signalstack push interplay', () => {
     ['AGE_REQUIRED', 'validation'],
     ['USER_LEVEL_INCOMPLETE', 'validation'],
     ['CONSENT_DECLINED', 'validation'],
+    ['U18_NOT_ALLOWED', 'validation'],
     ['LOCATION_OUTSIDE_COUNTRY', 'validation'],
     ['DOMAIN_LOCKED', 'duplicate'],
     ['USER_ALREADY_EXISTS', 'duplicate'],
