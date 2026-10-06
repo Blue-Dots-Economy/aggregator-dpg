@@ -21,6 +21,7 @@ import {
 } from './services/organisation-root.js';
 import { getIdpAdmin } from './services/idp-admin/index.js';
 import { setApprovalBrand } from './views/approval-pages.js';
+import { initRbac } from './services/authz/index.js';
 import { setEmailBrand } from './services/email-templates/shared.js';
 import {
   loadEmailMessageOverrides,
@@ -38,6 +39,16 @@ async function main(): Promise<void> {
   }
 
   const app = await buildApp();
+
+  // RBAC: load and validate rbac.yaml once. A no-op with RBAC_MODE=off; with
+  // log/enforce a missing or invalid file stops boot rather than failing
+  // requests later.
+  try {
+    await initRbac();
+  } catch (err) {
+    logger.error({ err }, 'failed to initialise rbac');
+    process.exit(1);
+  }
 
   // Seed the admin-approval HTML pages with the active deployment's
   // brand so the email-triggered approve/reject flow renders the same
