@@ -1,197 +1,175 @@
-# RBAC Catalogue — Permissions & Default Roles
+# RBAC Catalogue — Capabilities, PermissionSets & Roles
 
 ## Summary
 
-The fixed permission catalogue and default roles for signals-dpg and aggregator-dpg, and the rules for building custom roles.
+The fixed list of capabilities, the default PermissionSets given to organisations, and the four roles given to people. [rbac-design.md](rbac-design.md) covers how they are stored and enforced.
 
 ## Highlights
 
-| Item            | Value                                                                                                                                               |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Naming          | `<resource>:<action>`, e.g. `participant:decrypt`. One permission is checked by both APIs wherever the operation crosses them.                      |
-| Size            | 24 permissions: 21 for people, 3 service-only                                                                                                       |
-| Implicit access | Every signed-in user can read their own account and contact support. Any role on a unit or org lets the holder read that node's profile and config. |
-| System roles    | 11 human roles and 5 service roles. They cannot be edited; you can clone them.                                                                      |
-| Custom roles    | Built only from catalogue permissions, owned by platform or an org, capped by the org's entitlement and the granter's own ceiling                   |
+| Item             | Value                                                                                                                      |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Capabilities     | 13, fixed in code, each with a stable `resource.action` ID                                                                 |
+| PermissionSets   | A named list of capabilities given to an organisation. 3 defaults; organisations can compose their own for their children. |
+| Roles            | 4, fixed: Admin, Coordinator, Viewer, plus PII Access as an add-on                                                         |
+| Effective access | The organisation's PermissionSet ∩ the person's roles, over that organisation and everything beneath it                    |
+| Sensitive data   | No default role includes personal data. It needs PII Access, which expires and is audited.                                 |
+
+## Glossary
+
+| Term          | Meaning                                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------ |
+| Profile       | A seeker's or provider's record on the network, with the person's details                                    |
+| Organisation  | A node in the network tree: the Network Admin organisation at the root, aggregators beneath it, at any depth |
+| Capability    | One thing that can be done, e.g. `profiles.verify`                                                           |
+| PermissionSet | A named list of capabilities that an organisation holds                                                      |
+| Role          | What a person may do inside their organisation                                                               |
+| Member        | A person with one or more roles in an organisation                                                           |
 
 ---
 
-## 1. Permission catalogue
+## 1. Capabilities
 
-Every permission is a code constant. Deploys seed them into the registry. There is no API to add, rename or delete one (§2.4).
-
-| Flag  | Meaning                                       | Effect                                                                                         |
-| ----- | --------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `S`   | Sensitive: exposes or processes decrypted PII | Every use writes an audit row. Network Admin can withdraw it from an org's entitlement (§2.3). |
-| `D`   | Destructive or irreversible                   | Confirm dialog in the UI; audit row                                                            |
-| `SVC` | Service principals only                       | Never shown in the role builder                                                                |
-
-Scopes: `P` platform (the instance), `O` org, `U` unit (an aggregator), `Me` the caller's own resources. A grant applies at its scope and every scope below it.
-
-### 1.1 Self-service (Participant)
-
-| Permission     | Covers                                                                                                                                                | Scopes | Flags | Enforced at                                                                      |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ----- | -------------------------------------------------------------------------------- |
-| `self:account` | Declare domain; terms, privacy and profile consent; U18 DOB and guardian OTP flows                                                                    | Me     | -     | `/user/domains`, `/consent/*` (authenticated routes)                             |
-| `self:items`   | Create, read, update, pause, unpause, retire and delete own items                                                                                     | Me     | -     | `/item/create`, `/item/fetch`, `PATCH`/`DELETE /item/:itemId`, `/item/lifecycle` |
-| `self:actions` | Match score; perform (single and bulk); read, accept, reject, complete and cancel actions; events; reveal the counterparty's contact after acceptance | Me     | -     | `/match-score/calculate`, `/action/*`, `/event/*`                                |
-
-Revealing a contact is audited whatever the permission says (`pii_reveal_audit`).
-
-### 1.2 Participants and campaigns (operators)
-
-| Permission            | Covers                                                                                                                                                                                                                    | Scopes  | Flags | Enforced at                                                                                                                                                                                                    |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `participant:read`    | Dashboards and rollups, onboarding metrics, participant lookup, masked item lists, registration links, bulk-upload status, campaign job status                                                                            | U, O, P | -     | signals `GET /admin/participant`, `/aggregator/dashboard`; aggregator `GET /v1/dashboard`, `/v1/onboarding/*`, `GET /v1/links*`, `GET /v1/bulk-uploads*`, `GET /v1/campaign/*`                                 |
-| `participant:manage`  | Onboard and update participants and their items. Pause and unpause items. Act on a participant's behalf. Create, edit, activate and retire registration links. Run bulk uploads, including the template and `errors.csv`. | U, P    | -     | signals `POST /admin/participant`, `/item/create` (`created_by`), `PATCH /item/:itemId`, `/item/lifecycle` (pause), `/action/perform*` (on behalf); aggregator `/v1/links*` writes, `/v1/bulk-uploads*` writes |
-| `participant:retire`  | Retire a participant's item: PII scrub, cancel connections, de-index                                                                                                                                                      | U, P    | `D`   | signals `/item/lifecycle` (`retire`) on an item the caller does not own                                                                                                                                        |
-| `participant:export`  | Masked CSV exports                                                                                                                                                                                                        | U, O    | -     | signals `/aggregator/dashboard/export`; aggregator `GET /v1/dashboard/export`, "Export selected CSV"                                                                                                           |
-| `participant:decrypt` | Any decrypted-profile read: dashboard profile export, campaign export job                                                                                                                                                 | U, P    | `S`   | signals `POST /admin/participant/decrypt`; aggregator `POST /v1/dashboard/export/profiles`, `POST /v1/campaign/export`                                                                                         |
-| `campaign:run`        | Start email and voice campaigns and dashboard bulk actions                                                                                                                                                                | U, O    | `S`   | aggregator `POST /v1/campaign/email`, `POST /v1/campaign/voice`, `POST /api/dashboard/actions`                                                                                                                 |
-
-`campaign:run` is `S` because the worker decrypts contacts to send. No person sees the decrypted fields.
-
-### 1.3 Orgs and units
-
-| Permission       | Covers                                                                    | Scopes | Flags | Enforced at                                                               |
-| ---------------- | ------------------------------------------------------------------------- | ------ | ----- | ------------------------------------------------------------------------- |
-| `org:read`       | List orgs and their units and domains                                     | O, P   | -     | aggregator `GET /v1/orgs`; signals org list (no route yet)                |
-| `org:manage`     | Edit org details; transfer ownership (current Org Owner only)             | O      | `D`   | No route yet                                                              |
-| `org:govern`     | Approve, reject and offboard orgs                                         | P      | `D`   | aggregator `/admin/v1/orgs/*`                                             |
-| `unit:configure` | Edit the unit profile and contact                                         | U      | -     | aggregator `PATCH /v1/aggregators/profile/me`                             |
-| `unit:govern`    | Approve, reject and offboard units (aggregator/coordinator registrations) | O, P   | `D`   | aggregator `/admin/v1/aggregator-registrations/{read,decision,renew}/:id` |
-
-### 1.4 Access management
-
-| Permission          | Covers                                                                                     | Scopes  | Flags | Enforced at                                                        |
-| ------------------- | ------------------------------------------------------------------------------------------ | ------- | ----- | ------------------------------------------------------------------ |
-| `access:read`       | View members, their roles, roles and the catalogue                                         | U, O, P | -     | `GET /iam/roles`, `GET /iam/bindings`, `GET /iam/catalogue`        |
-| `access:manage`     | Invite and remove members; assign and revoke roles within the grant ceiling                | U, O, P | -     | `POST`/`DELETE /iam/bindings`; aggregator `POST /admin/v1/invites` |
-| `role:manage`       | Create, edit, clone and delete custom roles at the owner scope                             | O, P    | -     | `/iam/roles` writes                                                |
-| `access:administer` | Set org entitlements; register service clients, assign service roles and rotate their keys | P       | `D`   | `/iam/orgs/:orgId/entitlement`, service-client admin               |
-| `audit:read`        | Read IAM and PII audit logs for the scope                                                  | O, P    | `S`   | `GET /iam/audit`                                                   |
-
-### 1.5 Platform
-
-| Permission          | Covers                                                                                                             | Scopes | Flags | Enforced at                                                               |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------ | ------ | ----- | ------------------------------------------------------------------------- |
-| `network:configure` | Refresh the schema cache; publish `network.json`, item schemas and consent documents; nominate default aggregators | P      | `D`   | signals `POST /network/refetch_schemas`; the rest are files and SQL today |
-| `user:administer`   | Ban or unban a user; clear a single-domain lock                                                                    | P      | `D`   | No route yet (`user.banned` column and support SQL)                       |
-
-### 1.6 Service-only
-
-| Permission         | Covers                                                                 | Scopes | Flags     | Enforced at                                                                                                 |
-| ------------------ | ---------------------------------------------------------------------- | ------ | --------- | ----------------------------------------------------------------------------------------------------------- |
-| `org:sync`         | Mirror orgs and units into Signals; delete stale pending registrations | P      | `SVC` `D` | signals `POST /admin/aggregator/upsert`; aggregator `POST /admin/v1/aggregator-registrations/cleanup-stale` |
-| `network:federate` | Peer-instance reads and cross-instance action writes                   | P      | `SVC`     | signals `/network/item/*_local`, `POST /network/action/perform`                                             |
-| `network:dump`     | Presigned URLs for the network-wide non-PII dump                       | P      | `SVC`     | aggregator `GET /v1/campaign/dump`                                                                          |
-
-### 1.7 No permission needed
-
-| Access                                         | Operations                                                                                                                                                                                                                                                                                                                                                                                                |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Public (rate limits, Turnstile, signed tokens) | Signals: `/`, `/health/*`, `/auth/config`, `/auth/session*`, `/auth/signup`, `/auth/u18-precheck`, `/network/schemas`, `/network/schema/*`, `/network/item/fetch`, `/network/item/markers`, `/network/item/discover`, `/consent/status-by-identifier`, `/consent/u18/signup/guardian*`. Aggregator: `/health/*`, `/v1/aggregator-config`, `/v1/participant-consent`, `/public/v1/aggregators/:orgSlug/*`. |
-| BFF service token only (`svc:aggregator_bff`)  | `POST /v1/aggregator-registrations/create`, `POST /v1/orgs/create`                                                                                                                                                                                                                                                                                                                                        |
-| Any signed-in user                             | Signals `GET /auth/me`, `/support/*`; aggregator `/v1/support/*`                                                                                                                                                                                                                                                                                                                                          |
-| Any role on the unit or org                    | aggregator `GET /v1/aggregators/profile/me`, `GET /iam/me`                                                                                                                                                                                                                                                                                                                                                |
+| ID                       | Label                 | Lets the holder                                                                     | Notes                                                      |
+| ------------------------ | --------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `profiles.view`          | View profiles         | See masked profiles, dashboards and metrics in the subtree                          | -                                                          |
+| `profiles.export`        | Export profiles       | Download masked profile lists                                                       | Data leaving the system                                    |
+| `profiles.view_pii`      | View personal data    | See and export decrypted personal details                                           | Audited on every use                                       |
+| `profiles.onboard`       | Onboard profiles      | Registration links, bulk uploads, forms; edit, pause and unpause onboarded profiles | Every organisation holds it                                |
+| `profiles.verify`        | Verify profiles       | Mark a seeker or provider as verified                                               | -                                                          |
+| `profiles.retire`        | Retire profiles       | Retire a profile: removes personal data, cancels connections                        | Irreversible                                               |
+| `profiles.move`          | Move profiles         | Move profiles to another aggregator                                                 | Comes with Super Aggregator status; never granted directly |
+| `profiles.act_on_behalf` | Act on behalf         | Connect or apply on a profile owner's behalf                                        | In no default set; used by service clients today           |
+| `campaigns.run`          | Run campaigns         | Send email and voice campaigns to profiles in the subtree                           | Uses decrypted contacts; audited                           |
+| `orgs.onboard`           | Onboard organisations | Invite and approve child organisations; compose PermissionSets for them             | -                                                          |
+| `orgs.block`             | Block organisations   | Suspend or remove a child organisation                                              | Not grantable until built                                  |
+| `org.manage`             | Manage organisation   | Edit the organisation's profile; invite and remove members; assign roles            | Never on yourself                                          |
+| `network.administer`     | Administer network    | Network configuration and schemas, service clients, audit log, user bans            | Network Admin organisation only                            |
 
 ---
 
-## 2. Roles
+## 2. PermissionSets for organisations
 
-### 2.1 System roles
+An organisation's parent chooses its PermissionSet when it invites or approves it.
 
-System roles are seeded from code. They cannot be edited or deleted, but they can be cloned into a custom role.
+| Capability               | Network | Super Aggregator | Aggregator |
+| ------------------------ | ------- | ---------------- | ---------- |
+| `profiles.view`          | ✓       | ✓                | ✓          |
+| `profiles.export`        | ✓       | ✓                | ✓          |
+| `profiles.view_pii`      | -       | ✓                | ✓          |
+| `profiles.onboard`       | ✓       | ✓                | ✓          |
+| `profiles.verify`        | ✓       | ✓                | -          |
+| `profiles.retire`        | ✓       | ✓                | ✓          |
+| `profiles.move`          | ✓       | ✓                | -          |
+| `profiles.act_on_behalf` | -       | -                | -          |
+| `campaigns.run`          | -       | ✓                | ✓          |
+| `orgs.onboard`           | ✓       | ✓                | -          |
+| `orgs.block`             | -       | -                | -          |
+| `org.manage`             | ✓       | ✓                | ✓          |
+| `network.administer`     | ✓       | -                | -          |
 
-| Key                   | Name                | Bound at | Purpose                                                                          | Assigned by                                                          |
-| --------------------- | ------------------- | -------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `network_admin`       | Network Admin       | P        | Governance, network config, entitlements, access, moderation. No PII.            | Bootstrap script (`create_admin_user.ts`), then other Network Admins |
-| `network_auditor`     | Network Auditor     | P        | Read-only oversight, audit logs                                                  | Network Admin                                                        |
-| `support_agent`       | Support Agent       | P        | Find participants, ban users, clear domain locks. No decrypt.                    | Network Admin                                                        |
-| `org_owner`           | Org Owner           | O        | Runs one org: members, custom roles, unit approvals, org-wide read. One per org. | Automatic on org approval                                            |
-| `org_admin`           | Org Admin           | O        | Org Owner without custom-role authoring, audit access or ownership transfer      | Org Owner                                                            |
-| `org_viewer`          | Org Viewer          | O        | Read-only, whole org, masked                                                     | Org Owner, Org Admin                                                 |
-| `coordinator`         | Coordinator         | U        | Unit lead: onboarding, campaigns, gated PII, unit members                        | Automatic on unit approval; Org Owner/Admin                          |
-| `onboarding_operator` | Onboarding Operator | U        | Links, bulk uploads, participant onboarding. No export, no PII.                  | Coordinator, Org Owner/Admin                                         |
-| `campaign_operator`   | Campaign Operator   | U        | Email and voice campaigns; masked export                                         | Coordinator, Org Owner/Admin                                         |
-| `unit_viewer`         | Unit Viewer         | U        | Read-only, one unit, masked                                                      | Coordinator, Org Owner/Admin                                         |
-| `participant`         | Participant         | Me       | Seeker or provider using the Signals portal                                      | Implicit for every provisioned user                                  |
+The Network set leaves out personal data. The network operator governs the network; it does not read seekers' and providers' details.
 
-Service roles belong to Keycloak service clients and API keys. They never appear in the role builder.
+Custom PermissionSets:
 
-| Key                    | Client today       | Permissions                                                                                       | Condition                                                         |
-| ---------------------- | ------------------ | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `svc:aggregator_api`   | `aggregator-dpg`   | `participant:read`, `participant:manage`, `participant:export`, `participant:decrypt`, `org:sync` | User-data calls carry the acting user; effective = service ∩ user |
-| `svc:aggregator_bff`   | `aggregator-bff`   | `org:read`                                                                                        | No user data                                                      |
-| `svc:voice_bot`        | `voice-dpg` / Raya | `self:items`, `self:actions`                                                                      | Only for the OTP-verified caller (IAM spec D7)                    |
-| `svc:campaign_manager` | `campaign-manager` | `participant:read`, `participant:decrypt`, `campaign:run`, `network:dump`                         | Intersects with the operator's token, except `network:dump`       |
-| `svc:peer_instance`    | Peer instances     | `network:federate`                                                                                | -                                                                 |
+| Rule    | Detail                                                                                        |
+| ------- | --------------------------------------------------------------------------------------------- |
+| Who     | Any organisation holding `orgs.onboard`, for its own children                                 |
+| Content | Any capabilities the composing organisation itself holds. `profiles.onboard` is always added. |
+| Example | "Verifier only" = `profiles.view`, `profiles.onboard`, `profiles.verify`                      |
+| Changes | Editing a set updates every organisation holding it, and is audited                           |
 
-### 2.2 Role × permission matrix
+---
 
-Columns:
+## 3. Roles for people
 
-| Code | Role                |
-| ---- | ------------------- |
-| NA   | Network Admin       |
-| NAu  | Network Auditor     |
-| SUP  | Support Agent       |
-| OO   | Org Owner           |
-| OA   | Org Admin           |
-| OV   | Org Viewer          |
-| CO   | Coordinator         |
-| OP   | Onboarding Operator |
-| CM   | Campaign Operator   |
-| UV   | Unit Viewer         |
-| PA   | Participant         |
+Roles are fixed. A person can hold more than one; their access is the union, capped by the organisation's PermissionSet.
 
-| Permission            | NA  | NAu | SUP | OO  | OA  | OV  | CO  | OP  | CM  | UV  | PA  |
-| --------------------- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `self:account`        | -   | -   | -   | -   | -   | -   | -   | -   | -   | -   | ✓   |
-| `self:items`          | -   | -   | -   | -   | -   | -   | -   | -   | -   | -   | ✓   |
-| `self:actions`        | -   | -   | -   | -   | -   | -   | -   | -   | -   | -   | ✓   |
-| `participant:read`    | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | ✓   | -   |
-| `participant:manage`  | -   | -   | -   | -   | -   | -   | ✓   | ✓   | -   | -   | -   |
-| `participant:retire`  | ✓   | -   | -   | -   | -   | -   | ✓   | -   | -   | -   | -   |
-| `participant:export`  | -   | -   | -   | ✓   | ✓   | -   | ✓   | -   | ✓   | -   | -   |
-| `participant:decrypt` | -   | -   | -   | -   | -   | -   | ✓   | -   | -   | -   | -   |
-| `campaign:run`        | -   | -   | -   | -   | -   | -   | ✓   | -   | ✓   | -   | -   |
-| `org:read`            | ✓   | ✓   | -   | ✓   | ✓   | ✓   | -   | -   | -   | -   | -   |
-| `org:manage`          | -   | -   | -   | ✓   | ✓   | -   | -   | -   | -   | -   | -   |
-| `org:govern`          | ✓   | -   | -   | -   | -   | -   | -   | -   | -   | -   | -   |
-| `unit:configure`      | -   | -   | -   | ✓   | ✓   | -   | ✓   | -   | -   | -   | -   |
-| `unit:govern`         | ✓   | -   | -   | ✓   | ✓   | -   | -   | -   | -   | -   | -   |
-| `access:read`         | ✓   | ✓   | -   | ✓   | ✓   | -   | ✓   | -   | -   | -   | -   |
-| `access:manage`       | ✓   | -   | -   | ✓   | ✓   | -   | ✓   | -   | -   | -   | -   |
-| `role:manage`         | ✓   | -   | -   | ✓   | -   | -   | -   | -   | -   | -   | -   |
-| `access:administer`   | ✓   | -   | -   | -   | -   | -   | -   | -   | -   | -   | -   |
-| `audit:read`          | ✓   | ✓   | -   | ✓   | -   | -   | -   | -   | -   | -   | -   |
-| `network:configure`   | ✓   | -   | -   | -   | -   | -   | -   | -   | -   | -   | -   |
-| `user:administer`     | ✓   | -   | ✓   | -   | -   | -   | -   | -   | -   | -   | -   |
+| Role                | Capabilities                                                            | Typical holder                                                                              |
+| ------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Admin               | Everything in the organisation's set, except `profiles.view_pii`        | Organisation owner, Network Admin                                                           |
+| Coordinator         | `profiles.view`, `profiles.onboard`, `profiles.verify`, `campaigns.run` | Field and onboarding staff                                                                  |
+| Viewer              | `profiles.view`                                                         | Supervisors, auditors, funders                                                              |
+| PII Access (add-on) | `profiles.view_pii`                                                     | Named people who need personal details. Held alongside another role; expires after 90 days. |
 
-Org Owner and Org Admin have no PII permissions by default, following IAM spec D3. This is an open question. Ownership transfer is the one action inside `org:manage` that only the current Org Owner may perform.
+| Capability           | Admin | Coordinator | Viewer | PII Access |
+| -------------------- | ----- | ----------- | ------ | ---------- |
+| `profiles.view`      | ✓     | ✓           | ✓      | -          |
+| `profiles.export`    | ✓     | -           | -      | -          |
+| `profiles.view_pii`  | -     | -           | -      | ✓          |
+| `profiles.onboard`   | ✓     | ✓           | -      | -          |
+| `profiles.verify`    | ✓     | ✓           | -      | -          |
+| `profiles.retire`    | ✓     | -           | -      | -          |
+| `profiles.move`      | ✓     | -           | -      | -          |
+| `campaigns.run`      | ✓     | ✓           | -      | -          |
+| `orgs.onboard`       | ✓     | -           | -      | -          |
+| `org.manage`         | ✓     | -           | -      | -          |
+| `network.administer` | ✓     | -           | -      | -          |
 
-### 2.3 Custom roles
+A ✓ applies only where the organisation's PermissionSet also holds the capability. An Admin of an Aggregator, for example, has no `orgs.onboard`.
 
-| Rule                          | Detail                                                                                                                                                                                                                                                 |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Built only from the catalogue | A custom role is a name, a description and a set of permission keys. Unknown keys are rejected.                                                                                                                                                        |
-| Owner scope                   | A custom role belongs to `platform` or to one org. Org custom roles are visible and bindable only inside that org and its units.                                                                                                                       |
-| Who can author                | `role:manage` at the owner scope                                                                                                                                                                                                                       |
-| Content ceiling               | Platform roles: any non-`SVC` permission. Org roles: only permissions in the org's entitlement, and never platform-only ones.                                                                                                                          |
-| Org entitlement               | The permission set an org may use, set by Network Admin (`access:administer`). It defaults to the union of the org and unit system roles. Removing a permission strips it from the org's custom roles and audits the change.                           |
-| Grant ceiling                 | Assigning a role needs `access:manage` at the target scope, and every permission in the role must be within the granter's ceiling. Platform: the full catalogue. Org managers: the org entitlement. Unit managers: their own permissions at that unit. |
-| No self-grant                 | Nobody can create or change their own bindings                                                                                                                                                                                                         |
-| Last owner                    | Removing or demoting the only Org Owner is refused; transfer ownership instead                                                                                                                                                                         |
-| Edits apply live              | Editing a custom role updates every holder, bumps the role version and writes an audit row                                                                                                                                                             |
-| Deletion                      | Refused while bindings exist, unless the holders are reassigned in the same request                                                                                                                                                                    |
+---
 
-### 2.4 Catalogue changes
+## 4. Rules
 
-| Change                                     | Procedure                                                                                                                                                                                  |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Add a permission                           | Add the constant, list the operations it covers, and update the system roles that should hold it. The deploy seeds it. Custom roles are unchanged until an author opts in.                 |
-| Add an operation to an existing permission | Add it to the permission's covered operations. Every holder gets it, so only do this when every role holding the permission should have the new operation. Otherwise add a new permission. |
-| Rename                                     | Not allowed. Add a new key, alias the old one for one release, then deprecate the old one.                                                                                                 |
-| Deprecate                                  | Mark `deprecated_at`. The next deploy removes it from custom roles and entitlements, with one audit row per affected role.                                                                 |
-| Split                                      | The new key goes to every role that held the parent, so nobody loses access at deploy                                                                                                      |
+| Rule                  | Detail                                                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Effective access      | Organisation's PermissionSet ∩ the person's roles. Applies to that organisation and every organisation beneath it. |
+| Subset rule           | A child's PermissionSet can never exceed its parent's. Checked when the grant is made.                             |
+| Onboarding always on  | `profiles.onboard` is in every organisation's set and cannot be removed. Roles still decide which people use it.   |
+| Earned capability     | `profiles.move` is held only while the organisation has Super Aggregator status                                    |
+| Not yet grantable     | `orgs.block` is listed but refused until it is built                                                               |
+| Separation of duties  | Admins grant PII Access to others but do not hold it by default. Nobody changes their own roles.                   |
+| Last Admin            | An organisation's last Admin cannot be removed                                                                     |
+| Review                | PII Access expires after 90 days unless renewed. Every grant, change, revoke and use of personal data is audited.  |
+| Seekers and providers | Manage their own account, profiles and connections through fixed self-service rules, outside roles                 |
+
+---
+
+## 5. Changing the catalogue
+
+| Change                           | Procedure                                                                                                         |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Add a capability                 | Add it in code with its routes (Appendix A) and decide which default sets and roles hold it. The deploy seeds it. |
+| Add an operation to a capability | Only if every holder of the capability should get it; otherwise add a new capability                              |
+| Rename                           | Not allowed. Add a new ID, keep the old one as an alias for one release, then remove it.                          |
+| Remove                           | Mark deprecated; the next deploy removes it from every set and audits each change                                 |
+
+---
+
+## Appendix A. Capability → routes
+
+| Capability               | signals-dpg                                                                                                                   | aggregator-dpg                                                                                           |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `profiles.view`          | `GET /admin/participant`, `GET /aggregator/dashboard`                                                                         | `GET /v1/dashboard`, `/v1/onboarding/*`, `GET /v1/links*`, `GET /v1/bulk-uploads*`, `GET /v1/campaign/*` |
+| `profiles.export`        | `GET /aggregator/dashboard/export`                                                                                            | `GET /v1/dashboard/export`                                                                               |
+| `profiles.view_pii`      | `POST /admin/participant/decrypt`                                                                                             | `POST /v1/dashboard/export/profiles`, `POST /v1/campaign/export`                                         |
+| `profiles.onboard`       | `POST /admin/participant`, `POST /item/create` (`created_by`), `PATCH /item/:itemId`, `POST /item/lifecycle` (pause, unpause) | `/v1/links*` writes, `/v1/bulk-uploads*` writes, including template and `errors.csv`                     |
+| `profiles.verify`        | No route yet                                                                                                                  | No route yet                                                                                             |
+| `profiles.retire`        | `POST /item/lifecycle` (retire, on a profile the caller does not own)                                                         | -                                                                                                        |
+| `profiles.move`          | No route yet                                                                                                                  | No route yet                                                                                             |
+| `profiles.act_on_behalf` | `POST /action/perform*` with `acting_as_user_id`                                                                              | -                                                                                                        |
+| `campaigns.run`          | -                                                                                                                             | `POST /v1/campaign/email`, `POST /v1/campaign/voice`, `POST /api/dashboard/actions`                      |
+| `orgs.onboard`           | -                                                                                                                             | `/admin/v1/orgs/*`, `/admin/v1/aggregator-registrations/{read,decision,renew}/:id`, PermissionSet editor |
+| `orgs.block`             | No route yet                                                                                                                  | No route yet                                                                                             |
+| `org.manage`             | -                                                                                                                             | `PATCH /v1/aggregators/profile/me`, `POST /admin/v1/invites`, members and roles pages                    |
+| `network.administer`     | `POST /network/refetch_schemas`, audit log                                                                                    | Service-client and network settings pages                                                                |
+
+## Appendix B. Access that is not a capability
+
+| Access                                        | Operations                                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Public (rate limits, Turnstile, signed links) | signals: `/health/*`, `/auth/config`, `/auth/session*`, `/auth/signup`, `/auth/u18-precheck`, `/network/schema*`, `/network/item/fetch`, `/network/item/markers`, `/network/item/discover`, `/consent/status-by-identifier`, `/consent/u18/signup/guardian*`. aggregator: `/health/*`, `/v1/aggregator-config`, `/v1/participant-consent`, `/public/v1/aggregators/:orgSlug/*` |
+| Any signed-in person                          | Own account (`GET /auth/me`), support requests                                                                                                                                                                                                                                                                                                                                 |
+| Seeker or provider, own data only             | `/user/domains`, `/consent/*`, `/item/*` on own profiles, `/action/*`, `/event/*`, `/match-score/calculate`                                                                                                                                                                                                                                                                    |
+
+## Appendix C. Service clients
+
+Service clients are machine identities. People never hold these.
+
+| Client                            | Allowed                                                                                                                                          | Condition                                                          |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| `aggregator-dpg` (API and worker) | `profiles.view`, `profiles.export`, `profiles.view_pii`, `profiles.onboard`; syncing organisations into Signals; cleaning up stale registrations | Profile calls carry the acting person; effective = client ∩ person |
+| `aggregator-bff`                  | Registration and organisation sign-up forms, organisation list                                                                                   | No profile data                                                    |
+| `voice-dpg` (Raya)                | `profiles.act_on_behalf`, own-data access                                                                                                        | Only for the OTP-verified caller                                   |
+| `campaign-manager`                | `profiles.view`, `profiles.view_pii`, `campaigns.run`, network-wide non-PII dump                                                                 | Intersects with the operator's access, except the dump             |
+| Peer instances                    | Federated reads and cross-instance actions                                                                                                       | Signed peer requests                                               |
