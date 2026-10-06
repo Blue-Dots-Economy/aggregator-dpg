@@ -39,6 +39,13 @@ export interface FormRuntimeConfig {
   /** Override for the key-less Photon endpoint. Absent → Photon's public host. */
   photonUrl?: string;
   /**
+   * ISO 3166-1 alpha-2 country the address autocomplete is restricted to
+   * (signals-dpg#785), upper-cased, e.g. `IN`. Mirrors Signals' runtime
+   * `VITE_GEO_COUNTRY`. Absent (unset, blank, or not a two-letter code) → no
+   * restriction, the behaviour before this existed.
+   */
+  geoCountry?: string;
+  /**
    * Region code selecting which college dataset the reference picker loads:
    * `colleges-<code>.json`. Mirrors Signals' `VITE_COLLEGE_DATASET`, including
    * its `ka` default, so the same region code means the same file in both apps.
@@ -76,6 +83,17 @@ function cleaned(raw: string | undefined): string | undefined {
 }
 
 /**
+ * Normalises a country setting to an upper-case ISO 3166-1 alpha-2 code.
+ *
+ * @param raw - The raw environment value, if any.
+ * @returns The code, or `undefined` when unset, blank, or not two letters.
+ */
+function countryCode(raw: string | undefined): string | undefined {
+  const code = cleaned(raw)?.toUpperCase();
+  return code && /^[A-Z]{2}$/.test(code) ? code : undefined;
+}
+
+/**
  * Resolves the form widgets' runtime configuration from the environment.
  *
  * SERVER ONLY — see the module note. Call it in a server component and publish
@@ -86,10 +104,12 @@ function cleaned(raw: string | undefined): string | undefined {
 export function getFormRuntimeConfig(): FormRuntimeConfig {
   const googleMapsApiKey = cleaned(process.env.GOOGLE_MAPS_API_KEY);
   const photonUrl = cleaned(process.env.PHOTON_URL);
+  const geoCountry = countryCode(process.env.GEO_COUNTRY);
   const referenceBaseUrl = cleaned(process.env.REFERENCE_BASE_URL);
   return {
     ...(googleMapsApiKey ? { googleMapsApiKey } : {}),
     ...(photonUrl ? { photonUrl } : {}),
+    ...(geoCountry ? { geoCountry } : {}),
     ...(referenceBaseUrl ? { referenceBaseUrl } : {}),
     collegeDataset: cleaned(process.env.COLLEGE_DATASET) ?? DEFAULT_COLLEGE_DATASET,
   };

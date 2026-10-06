@@ -12,6 +12,10 @@
       "import": "./dist/http.js",
       "types": "./dist/http.d.ts"
     },
+    "./item-state": {
+      "import": "./dist/item-state.js",
+      "types": "./dist/item-state.d.ts"
+    },
     "./keycloak-token-provider": {
       "import": "./dist/keycloak-token-provider.js",
       "types": "./dist/keycloak-token-provider.d.ts"

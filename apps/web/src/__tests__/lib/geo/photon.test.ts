@@ -213,3 +213,55 @@ describe('request deadline', () => {
     vi.useRealTimers();
   });
 });
+
+describe('createPhotonProvider country restriction (signals-dpg#788)', () => {
+  /** A minimal feature in `countrycode` at granularity `type`. */
+  function feature(name: string, countrycode: string, type = 'city') {
+    return {
+      geometry: { coordinates: [77, 12] },
+      properties: { name, country: countrycode, countrycode, type },
+    };
+  }
+
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  /** Makes the stubbed Photon answer with `features`. */
+  function respond(features: unknown[]) {
+    fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ features }) });
+    vi.stubGlobal('fetch', fetchMock);
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('adds countrycode to the request when a country is set', async () => {
+    respond([]);
+    await createPhotonProvider('https://photon.test', 'IN').suggest('dhaka');
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      'https://photon.test/api?q=dhaka&limit=5&countrycode=IN',
+    );
+  });
+
+  it('drops foreign and country/state-level features as a backstop', async () => {
+    // An older Photon server ignores countrycode and answers worldwide, so the
+    // filter has to hold on its own.
+    respond([
+      feature('Dhaka BD', 'BD'),
+      feature('India', 'IN', 'country'),
+      feature('Bihar', 'IN', 'state'),
+      feature('Dhaka IN', 'IN'),
+    ]);
+    const results = await createPhotonProvider('https://photon.test', 'IN').suggest('dhaka');
+
+    expect(results.map((s) => s.components?.locality)).toEqual(['Dhaka IN']);
+  });
+
+  it('keeps every feature when no country is set', async () => {
+    respond([feature('Dhaka BD', 'BD'), feature('Dhaka IN', 'IN')]);
+    const results = await createPhotonProvider('https://photon.test').suggest('dhaka');
+
+    expect(results).toHaveLength(2);
+  });
+});

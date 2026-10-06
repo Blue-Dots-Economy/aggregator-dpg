@@ -39,6 +39,7 @@ import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { config } from '../config.js';
+import { buildSignalStackItemState } from '@aggregator-dpg/signalstack-writer/item-state';
 
 interface OrgSlugParams {
   orgSlug?: string;
@@ -649,7 +650,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             network: config.SIGNALSTACK_ITEM_NETWORK,
             domain: link.domain,
             item_type: linkDomainCfg.itemType,
-            profile: buildSignalStackItemState(link.domain, body, pushPhone, linkDomainCfg),
+            profile: buildSignalStackItemState(body, pushPhone, linkDomainCfg.identity.phone),
             // Omitted when empty so signalstack geocodes the address text
             // instead — it treats an empty array as "none supplied", but not
             // sending the key at all keeps that explicit on the wire.
@@ -822,29 +823,6 @@ function stripEmptyCells(payload: Record<string, unknown>): void {
       delete payload[field];
     }
   }
-}
-
-function buildSignalStackItemState(
-  _domain: string,
-  body: Record<string, unknown>,
-  pushPhone: string | null,
-  domainCfg: { identity: { phone: string } },
-): Record<string, unknown> {
-  const itemState: Record<string, unknown> = { ...body };
-
-  // Signalstack's item_state schema validates the phone field with the
-  // network's own pattern (e.g. purple_dot mobile_number requires
-  // `^[0-9]{10}$`). The E.164 form is already carried up-stack as the
-  // user.phone_number identity arg, so item_state should keep the raw
-  // body value the user submitted. Only overwrite when the body had no
-  // value at all — preserves the bulk-CSV fallback while letting form
-  // submits pass schema validation upstream.
-  const rawPhone = body[domainCfg.identity.phone];
-  if (pushPhone && (typeof rawPhone !== 'string' || rawPhone.length === 0)) {
-    itemState[domainCfg.identity.phone] = pushPhone;
-  }
-
-  return itemState;
 }
 
 /**
