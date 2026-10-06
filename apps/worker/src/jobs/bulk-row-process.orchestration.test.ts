@@ -138,16 +138,23 @@ class FailingSignalStackWriter extends InMemorySignalStackWriter {
     private readonly message = 'signalstack unreachable',
     /** The bare upstream sentence the real writer puts on `details.signalsMessage`. */
     private readonly signalsMessage?: string,
+    /** Signals' own error code and per-field map, as the real writer forwards them. */
+    private readonly upstream: { code?: string; fields?: Record<string, string> } = {},
   ) {
     super();
   }
   override async onboard(
     _input: SignalStackOnboardParticipantInput,
   ): Promise<Result<SignalStackOnboardParticipantResult, BaseError>> {
+    const details = {
+      ...(this.signalsMessage ? { signalsMessage: this.signalsMessage } : {}),
+      ...(this.upstream.code ? { upstreamCode: this.upstream.code } : {}),
+      ...(this.upstream.fields ? { signalsFields: this.upstream.fields } : {}),
+    };
     return err(
       new UpstreamError(this.message, {
         code: this.code,
-        ...(this.signalsMessage ? { details: { signalsMessage: this.signalsMessage } } : {}),
+        ...(Object.keys(details).length > 0 ? { details } : {}),
       }),
     );
   }
@@ -364,6 +371,73 @@ describe('processBulkRow — signalstack push outcomes', () => {
     const result = await processBulkRow(makeJob());
     expect(result.category).toBe('system_error');
     expect(result.reasons).toEqual(['signalstack [UPSTREAM_TIMEOUT]: signalstack unreachable']);
+  });
+
+  it.each([
+    ['INVALID_ITEM_STATE', 'validation'],
+    ['FST_ERR_VALIDATION', 'validation'],
+    ['MISSING_IDENTIFIER', 'validation'],
+    ['AGE_REQUIRED', 'validation'],
+    ['USER_LEVEL_INCOMPLETE', 'validation'],
+    ['CONSENT_DECLINED', 'validation'],
+    ['LOCATION_OUTSIDE_COUNTRY', 'validation'],
+    ['DOMAIN_LOCKED', 'duplicate'],
+    ['USER_ALREADY_EXISTS', 'duplicate'],
+    ['IDENTITY_CONFLICT', 'duplicate'],
+    ['PROFILE_LIMIT_REACHED', 'limit_reached'],
+    ['UNSERVED_DOMAIN', 'system_error'],
+    ['ONBOARD_FAILED', 'system_error'],
+  ])("categorises Signals' %s as %s", async (upstreamCode, category) => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_BAD_REQUEST',
+        'signalstack onboard returned 400',
+        'why',
+        {
+          code: upstreamCode,
+        },
+      ),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.outcome).toBe('failed');
+    expect(result.category).toBe(category);
+  });
+
+  it("lists Signals' per-field messages as the row's reasons, like a local schema failure", async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_BAD_REQUEST',
+        'signalstack onboard returned 400: INVALID_ITEM_STATE: …',
+        'Invalid item_state: mobile_number: Enter a 10-digit mobile number, gender: must be one of: Male, Female',
+        {
+          code: 'INVALID_ITEM_STATE',
+          fields: {
+            mobile_number: 'Enter a 10-digit mobile number',
+            gender: 'must be one of: Male, Female',
+          },
+        },
+      ),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.category).toBe('validation');
+    expect(result.reasons).toEqual([
+      'mobile_number: Enter a 10-digit mobile number',
+      'gender: must be one of: Male, Female',
+    ]);
+  });
+
+  it("uses Signals' sentence for a duplicate, not the transport prefix", async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_FORBIDDEN',
+        'signalstack onboard returned 403: DOMAIN_LOCKED: …',
+        'This participant is already registered as a provider.',
+        { code: 'DOMAIN_LOCKED' },
+      ),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.category).toBe('duplicate');
+    expect(result.reasons).toEqual(['This participant is already registered as a provider.']);
   });
 
   it('categorises an owned-elsewhere push rejection distinctly', async () => {

@@ -644,6 +644,63 @@ describe('HttpSignalStackWriter.onboard', () => {
     expect(result.error.message).toContain('outside the allowed region (IN)');
   });
 
+  it("forwards Signals' error code and per-field map on the error details", async () => {
+    fetchMock.mockResolvedValueOnce(
+      errJsonResponse(400, {
+        error: 'INVALID_ITEM_STATE',
+        message: 'Invalid item_state: mobile_number: Enter a 10-digit mobile number',
+        fields: { mobile_number: 'Enter a 10-digit mobile number' },
+      }),
+    );
+
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'bulk',
+      source_id: 'upload-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.details).toMatchObject({
+      upstreamCode: 'INVALID_ITEM_STATE',
+      signalsFields: { mobile_number: 'Enter a 10-digit mobile number' },
+      signalsMessage: 'Invalid item_state: mobile_number: Enter a 10-digit mobile number',
+    });
+  });
+
+  it("reads a Fastify request-validation error's `code`, not its generic `error`", async () => {
+    fetchMock.mockResolvedValueOnce(
+      errJsonResponse(400, {
+        statusCode: 400,
+        code: 'FST_ERR_VALIDATION',
+        error: 'Bad Request',
+        message: 'body/email Invalid email address',
+      }),
+    );
+
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'bulk',
+      source_id: 'upload-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.details).toMatchObject({ upstreamCode: 'FST_ERR_VALIDATION' });
+  });
+
   it('combines a nested { error: { code, message } } body into one message', async () => {
     fetchMock.mockResolvedValueOnce(
       errJsonResponse(422, { error: { code: 'FANCY_CODE', message: 'fancy message' } }),
