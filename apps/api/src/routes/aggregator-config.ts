@@ -176,6 +176,7 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
   app.get(
     '/v1/aggregator-config',
     {
+      config: { rbac: { access: 'public' } },
       schema: {
         tags: ['aggregator-config'],
         summary: 'Public brand + network config',
@@ -271,6 +272,7 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
   app.get(
     '/v1/participant-consent',
     {
+      config: { rbac: { access: 'public' } },
       schema: {
         tags: ['aggregator-config'],
         summary: 'Participant registration-link consent document',

@@ -33,8 +33,8 @@ export interface GuardOutcome {
 /** The request facts the guard needs. */
 export interface GuardRequest {
   log: FastifyBaseLogger;
-  routeOptions?: { url?: string };
-  method?: string;
+  routeOptions?: { url?: string | undefined };
+  method?: string | undefined;
 }
 
 /**
