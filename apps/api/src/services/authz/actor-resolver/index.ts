@@ -19,7 +19,7 @@ export function _setActorResolver(r: ActorResolverBase | null): void {
   instance = r;
 }
 
-export { ActorResolverBase, DEFAULT_ORG_PLACEHOLDER } from './interface.js';
+export { ActorResolverBase } from './interface.js';
 export type {
   ActorResolverError,
   ActorResolverResult,

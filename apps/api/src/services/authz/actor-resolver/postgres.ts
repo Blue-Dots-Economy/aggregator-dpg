@@ -1,25 +1,29 @@
 /**
- * Postgres actor resolver (`@aggregator-dpg/api`, RBAC R0).
+ * Postgres actor resolver (`@aggregator-dpg/api`, RBAC R1).
  *
- * Reads today's schema: a coordinator by `users.id` (the `aggregator_id`
- * claim) with its `parent_org_id`; an admin through `user_identities` with the
- * active orgs it owns (`aggregator_orgs.owner_user_id`). Logs SQLSTATE only —
- * never the driver message, which carries query parameters.
+ * Reads the user-org model (migrations 0027–0029): a coordinator by `users.id`
+ * (the `aggregator_id` claim) with its organisation (`users.org_id`); an
+ * admin through `user_identities` with the active organisations it owns
+ * (`organisations.org_owner`). Logs SQLSTATE only — never the driver message,
+ * which carries query parameters.
  */
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../../db/client.js';
-import { aggregatorOrgs, userIdentities, users } from '../../../db/schema.js';
+import { organisations, userIdentities, users } from '../../../db/schema.js';
 import { pgErrorCode } from '../../../db/pg-error.js';
 import { logger } from '../../../logger.js';
 import { IDP_PROVIDER } from '../../idp-admin/provider.js';
 import {
   ActorResolverBase,
-  DEFAULT_ORG_PLACEHOLDER,
   type ActorResolverResult,
   type ResolvedActor,
+  type ResolvedOrg,
   type TokenIdentity,
 } from './interface.js';
+
+/** Upper bound on the ancestor walk; a deeper chain is a data fault, not a real tree. */
+const MAX_CHAIN_DEPTH = 64;
 
 /** Postgres-backed {@link ActorResolverBase}. */
 export class PostgresActorResolver extends ActorResolverBase {
@@ -43,35 +47,41 @@ export class PostgresActorResolver extends ActorResolverBase {
       if (!userId) return { ok: true, value: null };
 
       const [user] = await db
-        .select({ userType: users.userType, status: users.status, parentOrgId: users.parentOrgId })
+        .select({ userType: users.userType, status: users.status, orgId: users.orgId })
         .from(users)
         .where(eq(users.id, userId));
       if (!user) return { ok: true, value: null };
 
       if (user.userType === 'coordinator') {
+        const [org] = user.orgId
+          ? await db
+              .select({
+                id: organisations.id,
+                orgType: organisations.orgType,
+                status: organisations.status,
+              })
+              .from(organisations)
+              .where(eq(organisations.id, user.orgId))
+          : [];
+        const orgs: ResolvedOrg[] = org
+          ? [{ id: org.id, orgType: org.orgType, relation: 'member', permissionSet: null }]
+          : [];
         return {
           ok: true,
           value: {
             userId,
             userType: 'coordinator',
-            active: user.status === 'active',
-            orgs: [
-              {
-                id: user.parentOrgId ?? DEFAULT_ORG_PLACEHOLDER,
-                orgType: 'aggregator',
-                relation: 'member',
-                permissionSet: null,
-              },
-            ],
+            active: user.status === 'active' && org?.status === 'active',
+            orgs,
             grants: [],
           },
         };
       }
 
       const owned = await db
-        .select({ id: aggregatorOrgs.id })
-        .from(aggregatorOrgs)
-        .where(and(eq(aggregatorOrgs.ownerUserId, userId), eq(aggregatorOrgs.status, 'active')));
+        .select({ id: organisations.id, orgType: organisations.orgType })
+        .from(organisations)
+        .where(and(eq(organisations.orgOwner, userId), eq(organisations.status, 'active')));
       return {
         ok: true,
         value: {
@@ -80,7 +90,7 @@ export class PostgresActorResolver extends ActorResolverBase {
           active: owned.length > 0,
           orgs: owned.map((o) => ({
             id: o.id,
-            orgType: 'aggregator' as const,
+            orgType: o.orgType,
             relation: 'owner' as const,
             permissionSet: null,
           })),
@@ -94,9 +104,21 @@ export class PostgresActorResolver extends ActorResolverBase {
 
   /** {@inheritDoc ActorResolverBase.orgChain} */
   async orgChain(orgId: string): Promise<ActorResolverResult<string[]>> {
-    // `aggregator_orgs` has no parent until refactor Phase 3 adds
-    // `organisations.parent_id`; the chain is the organisation alone.
-    return { ok: true, value: [orgId] };
+    if (orgId.trim() === '') return { ok: true, value: [] };
+    try {
+      const res = await getDb().execute<{ id: string }>(sql`
+        WITH RECURSIVE chain(id, parent_id, depth) AS (
+          SELECT id, parent_id, 0 FROM organisations WHERE id = ${orgId}::uuid
+          UNION ALL
+          SELECT o.id, o.parent_id, c.depth + 1
+            FROM organisations o JOIN chain c ON o.id = c.parent_id
+           WHERE c.depth < ${MAX_CHAIN_DEPTH}
+        )
+        SELECT id FROM chain ORDER BY depth`);
+      return { ok: true, value: res.rows.map((r) => r.id) };
+    } catch (e) {
+      return dbFailure('actorResolver.orgChain', e);
+    }
   }
 }
 

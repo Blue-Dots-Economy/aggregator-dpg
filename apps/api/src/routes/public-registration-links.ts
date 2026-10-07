@@ -142,6 +142,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
   app.get(
     '/public/v1/aggregators/:orgSlug/links/:slug',
     {
+      config: { rbac: { access: 'public' } },
       schema: {
         tags: ['public-registration'],
         summary: 'Resolve a public registration link',
@@ -221,6 +222,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
   app.post(
     '/public/v1/aggregators/:orgSlug/registrations/:slug',
     {
+      config: { rbac: { access: 'public' } },
       schema: {
         tags: ['public-registration'],
         summary: 'Submit a public participant registration',

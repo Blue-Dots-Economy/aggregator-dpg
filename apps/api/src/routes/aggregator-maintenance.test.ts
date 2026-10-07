@@ -39,7 +39,11 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     _setMailer(mailer);
     _setAccessTokenVerifier(async (token) => {
       if (token === SERVICE_BEARER) {
-        return { sub: 'service-account-aggregator-bff', azp: 'aggregator-bff' };
+        return {
+          sub: '3f1c2b9e-0000-4000-8000-00000000b0ff',
+          azp: 'aggregator-bff',
+          preferred_username: 'service-account-aggregator-bff',
+        };
       }
       throw new Error('invalid token');
     });
@@ -146,7 +150,11 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
         return { sub: '9c1e2f00-user-uuid', aggregator_id: 'agg-1' };
       }
       if (token === SERVICE_BEARER) {
-        return { sub: 'service-account-aggregator-bff', azp: 'aggregator-bff' };
+        return {
+          sub: '3f1c2b9e-0000-4000-8000-00000000b0ff',
+          azp: 'aggregator-bff',
+          preferred_username: 'service-account-aggregator-bff',
+        };
       }
       throw new Error('invalid token');
     });

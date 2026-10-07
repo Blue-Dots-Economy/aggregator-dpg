@@ -45,6 +45,7 @@ import { getConsentLedger } from '../services/consent-ledger/index.js';
 import type { RecordConsentHook } from '../services/consent-ledger/hook.js';
 import { stampConsent } from '../services/registration-consent.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
+import { callerFromAny, enforceRouteAccess } from '../services/authz/index.js';
 
 const OrgCreateBodySchema = z.object({
   display_name: z.string().min(1).max(200),
@@ -158,6 +159,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/orgs/create',
     {
+      config: { rbac: { access: 'service' } },
       schema: {
         tags: ['aggregator-orgs'],
         summary: 'Submit a new parent-org registration',
@@ -178,6 +180,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           fields: { reason: auth.error.code },
         });
       }
+      await enforceRouteAccess(req, callerFromAny(auth.context));
 
       const body = req.body as z.infer<typeof OrgCreateBodySchema>;
 
@@ -579,6 +582,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/orgs',
     {
+      config: { rbac: { access: 'service' } },
       schema: {
         tags: ['aggregator-orgs'],
         summary: 'List active orgs for the coordinator-registration dropdown',
@@ -595,6 +599,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           fields: { reason: auth.error.code },
         });
       }
+      await enforceRouteAccess(req, callerFromAny(auth.context));
       const page = await getAggregatorOrgStore().listActive();
       if (!page.ok) {
         throw httpError('DB_UNAVAILABLE', {

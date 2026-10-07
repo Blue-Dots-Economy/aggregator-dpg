@@ -17,6 +17,7 @@ import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
+import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
 
 const RangeQuerySchema = z.object({
   from: z.string().datetime({ offset: true }).optional(),
@@ -50,6 +51,7 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
   app.get(
     '/v1/onboarding/summary',
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['onboarding'],
         summary: 'Aggregated onboarding totals',
@@ -93,6 +95,7 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
   app.get(
     '/v1/onboarding/by-source',
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['onboarding'],
         summary: 'Onboarding totals grouped by source',
@@ -162,5 +165,6 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   if (!result.context.aggregatorId) {
     throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
   }
+  await enforceRouteAccess(req, callerFromAuth(result.context));
   return result.context;
 }

@@ -51,6 +51,7 @@ export async function registerHealthRoutes(app: FastifyInstance): Promise<void> 
   app.get(
     '/health/live',
     {
+      config: { rbac: { access: 'public' } },
       schema: {
         tags: ['health'],
         summary: 'Liveness probe',
@@ -64,6 +65,7 @@ export async function registerHealthRoutes(app: FastifyInstance): Promise<void> 
   app.get(
     '/health/ready',
     {
+      config: { rbac: { access: 'public' } },
       schema: {
         tags: ['health'],
         summary: 'Readiness probe',

@@ -74,6 +74,7 @@ export async function registerPublicLookupRoute(app: FastifyInstance): Promise<v
   app.get(
     '/public/v1/aggregators/:orgSlug/lookup',
     {
+      config: { rbac: { access: 'public' } },
       schema: {
         tags: ['public-registration'],
         summary: 'Probe an identity before opening the registration form',

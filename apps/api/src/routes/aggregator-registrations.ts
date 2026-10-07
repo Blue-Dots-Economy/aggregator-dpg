@@ -62,6 +62,7 @@ import { KC_ATTR } from '../services/idp-admin/index.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import type { ErrorCode } from '../errors/codes.js';
+import { callerFromAny, enforceRouteAccess } from '../services/authz/index.js';
 
 const SLUG_RETRIES = 3;
 
@@ -129,6 +130,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
   app.post(
     '/v1/aggregator-registrations/create',
     {
+      config: { rbac: { access: 'service' } },
       schema: {
         tags: ['aggregator-registrations'],
         summary: 'Submit a new aggregator registration',
@@ -204,6 +206,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             fields: { reason: auth.error.code },
           });
         }
+        await enforceRouteAccess(req, callerFromAny(auth.context));
 
         // `schema.body` already validated against `RegistrationPayloadSchema`
         // (the zod validator compiler replaces `req.body` with the parse

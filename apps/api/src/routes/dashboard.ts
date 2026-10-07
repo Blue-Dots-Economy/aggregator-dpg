@@ -22,6 +22,7 @@ import { getSignalStackWriter } from '../services/signalstack.js';
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
 import { buildDecryptedProfilesCsv } from '@aggregator-dpg/profile-csv';
 import { httpError } from '../errors/http-error.js';
+import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
 
 /**
  * Lifecycle statuses the aggregator dashboard surfaces. Signals filters the
@@ -98,6 +99,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
   app.get(
     '/v1/dashboard',
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['dashboard'],
         summary: 'Aggregator dashboard rollup + items',
@@ -191,6 +193,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
   app.get(
     '/v1/dashboard/export',
     {
+      config: { rbac: { capability: 'profiles.export' } },
       schema: {
         tags: ['dashboard'],
         summary: 'CSV export of dashboard items',
@@ -274,6 +277,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
   app.post(
     '/v1/dashboard/export/profiles',
     {
+      config: { rbac: { capability: 'profiles.view_pii' } },
       schema: {
         tags: ['dashboard'],
         summary: 'CSV export of DECRYPTED profile data for selected items',
@@ -436,7 +440,10 @@ async function resolveActingOrgId(auth: AuthContext, log: FastifyRequest['log'])
  */
 async function requireApprovedAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await requireApproved(req);
-  if (result.ok) return result.context;
+  if (result.ok) {
+    await enforceRouteAccess(req, callerFromAuth(result.context));
+    return result.context;
+  }
   if (result.error.code === 'MISSING_AGGREGATOR_ID') {
     throw httpError('FORBIDDEN', {
       detail: result.error.message,

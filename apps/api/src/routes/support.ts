@@ -30,6 +30,7 @@ import {
   supportBodyLimitBytes,
   validateSupportAttachments,
 } from '../services/support-attachments.js';
+import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
 
 const SupportRequestSchema = z
   .object({
@@ -71,6 +72,7 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
   app.get(
     '/v1/support/config',
     {
+      config: { rbac: { access: 'signed_in' } },
       schema: {
         tags: ['support'],
         summary: 'Whether the contact-support form is enabled',
@@ -108,6 +110,7 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
   app.post(
     '/v1/support',
     {
+      config: { rbac: { access: 'signed_in' } },
       schema: {
         tags: ['support'],
         summary: 'Send a contact-support message',
@@ -229,7 +232,10 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
 /** Unwrap the auth context or throw the catalogue error. Mirrors the local helper in other route modules (e.g. `dashboard.ts`, `aggregator-profile.ts`). */
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await authenticate(req);
-  if (result.ok) return result.context;
+  if (result.ok) {
+    await enforceRouteAccess(req, callerFromAuth(result.context));
+    return result.context;
+  }
   const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
   throw httpError(code, {
     detail: result.error.message,

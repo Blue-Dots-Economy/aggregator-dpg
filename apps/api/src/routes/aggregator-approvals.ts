@@ -137,6 +137,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
   app.get(
     '/admin/v1/aggregator-registrations/read/:id',
     {
+      config: { rbac: { access: 'link_token' } },
       schema: {
         tags: ['aggregator-approvals'],
         summary: 'Render the admin approve/reject page',
@@ -227,6 +228,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
   app.post(
     '/admin/v1/aggregator-registrations/decision/:id',
     {
+      config: { rbac: { access: 'link_token' } },
       schema: {
         tags: ['aggregator-approvals'],
         summary: 'Approve or reject a pending aggregator',
@@ -353,6 +355,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
   app.post(
     '/admin/v1/aggregator-registrations/renew/:id',
     {
+      config: { rbac: { access: 'link_token' } },
       schema: {
         tags: ['aggregator-approvals'],
         summary: 'Regenerate an expired approval link and show the confirm page',

@@ -66,6 +66,7 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
   app.post(
     '/admin/v1/invites',
     {
+      config: { rbac: { access: 'link_token' } },
       schema: {
         tags: ['invites'],
         summary: 'Mint coordinator invites (owner grant-authed)',

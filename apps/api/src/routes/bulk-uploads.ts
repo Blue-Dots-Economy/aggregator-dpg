@@ -44,6 +44,7 @@ import { config } from '../config.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getRedis } from '../services/redis/index.js';
+import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
 
 /**
  * Loads the network config and returns the set of valid participant
@@ -213,6 +214,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
   app.get(
     '/v1/bulk-uploads/template',
     {
+      config: { rbac: { capability: 'profiles.onboard' } },
       schema: {
         tags: ['bulk-uploads'],
         summary: 'Download the bulk-upload template (CSV or XLSX)',
@@ -292,6 +294,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
   app.post(
     '/v1/bulk-uploads',
     {
+      config: { rbac: { capability: 'profiles.onboard' } },
       schema: {
         tags: ['bulk-uploads'],
         summary: 'Create a new bulk-upload job',
@@ -390,6 +393,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
   app.post(
     '/v1/bulk-uploads/:id/start',
     {
+      config: { rbac: { capability: 'profiles.onboard' } },
       schema: {
         tags: ['bulk-uploads'],
         summary: 'Start processing a pending bulk-upload job',
@@ -540,6 +544,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
   app.get(
     '/v1/bulk-uploads',
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['bulk-uploads'],
         summary: 'List bulk-upload jobs',
@@ -577,6 +582,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
   app.get(
     '/v1/bulk-uploads/:id',
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['bulk-uploads'],
         summary: 'Read a bulk-upload job',
@@ -612,6 +618,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
   app.get(
     '/v1/bulk-uploads/:id/errors.csv',
     {
+      config: { rbac: { capability: 'profiles.onboard' } },
       schema: {
         tags: ['bulk-uploads'],
         summary: 'Download per-row error CSV',
@@ -870,6 +877,7 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   if (!result.context.aggregatorId) {
     throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
   }
+  await enforceRouteAccess(req, callerFromAuth(result.context));
   return result.context;
 }
 

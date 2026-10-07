@@ -22,6 +22,7 @@ import type { FastifyRequest } from 'fastify';
 import { authenticate, authenticateAny, type AuthContext } from '../services/auth/access-token.js';
 import { campaignDumpServiceAccount, campaignManagerAllowedAzp } from '../config.js';
 import { httpError, type HttpError } from '../errors/http-error.js';
+import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
 
 /**
  * Authenticates a campaign request and returns the auth context, or throws the
@@ -52,6 +53,7 @@ export async function requireCampaignAuth(req: FastifyRequest): Promise<AuthCont
       fields: { reason: 'SYSTEM_TOKEN_NOT_PERMITTED' },
     });
   }
+  await enforceRouteAccess(req, callerFromAuth(result.context));
   return result.context;
 }
 

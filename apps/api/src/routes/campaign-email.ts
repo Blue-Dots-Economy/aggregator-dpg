@@ -43,6 +43,7 @@ export async function registerCampaignEmailRoutes(app: FastifyInstance): Promise
   app.post(
     '/v1/campaign/email',
     {
+      config: { rbac: { capability: 'campaigns.run' } },
       schema: {
         tags: ['campaign'],
         summary: 'Email owned participants (async)',

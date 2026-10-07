@@ -45,6 +45,7 @@ export async function registerCampaignVoiceRoutes(app: FastifyInstance): Promise
   app.post(
     '/v1/campaign/voice',
     {
+      config: { rbac: { capability: 'campaigns.run' } },
       schema: {
         tags: ['campaign'],
         summary: 'Request an async voice-call campaign dispatch',

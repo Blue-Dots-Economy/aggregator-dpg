@@ -17,6 +17,7 @@ import type { IdpAdminAdapter } from '../services/idp-admin/index.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
+import { callerFromAny, enforceRouteAccess, isServiceAccount } from '../services/authz/index.js';
 
 /** Minimal Result shape the prune helper needs from an idp delete. */
 type DeleteResult = { ok: true } | { ok: false; error: { code: string } };
@@ -146,6 +147,7 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
   app.post(
     '/admin/v1/aggregator-registrations/cleanup-stale',
     {
+      config: { rbac: { access: 'service' } },
       schema: {
         tags: ['aggregator-registrations'],
         summary: 'Prune registrations stuck pending past token expiry + grace',
@@ -159,14 +161,16 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
         throw httpError('UNAUTHORIZED', { detail: auth.error.message });
       }
       // Destructive op — restrict to a service-account token (the scheduler),
-      // not any authenticated end user. Keycloak service accounts have a
-      // `service-account-<client>` subject; human tokens carry a UUID subject.
-      if (!auth.context.subject.startsWith('service-account-')) {
+      // not any authenticated end user. `sub` is a UUID for service accounts
+      // too; only `preferred_username` (`service-account-<client>`) tells them
+      // apart (same discriminator as campaign/auth.ts).
+      if (!isServiceAccount(auth.context.preferredUsername)) {
         throw httpError('FORBIDDEN', {
           detail: 'cleanup-stale requires a service-account token',
           fields: { subject: auth.context.subject },
         });
       }
+      await enforceRouteAccess(req, callerFromAny(auth.context));
 
       const store = getAggregatorStore();
       const idp = getIdpAdmin();

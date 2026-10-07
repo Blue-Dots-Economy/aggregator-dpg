@@ -32,7 +32,11 @@ describe('cleanup-stale — org prune', () => {
     _setIdpAdmin(idp);
     _setAccessTokenVerifier(async (token) => {
       if (token === SERVICE_BEARER) {
-        return { sub: 'service-account-aggregator-bff', azp: 'aggregator-bff' };
+        return {
+          sub: '3f1c2b9e-0000-4000-8000-00000000b0ff',
+          azp: 'aggregator-bff',
+          preferred_username: 'service-account-aggregator-bff',
+        };
       }
       throw new Error('invalid token');
     });
