@@ -134,18 +134,6 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
         update-types: ["version-update:semver-major"]
-      # nodemailer v10 moves its types in-package and drops the `nodemailer`
-      # global namespace that @types/nodemailer supplied. #750 is GREEN here
-      # because apps/api's mailer never referenced that namespace — but the same
-      # major is RED on notification-service #122 (`TS2503: Cannot find namespace
-      # 'nodemailer'` in sendMailCore.ts), so taking it here would split the fleet
-      # across two majors of the mail library. Held on that basis rather than on a
-      # failure of our own: mail is the one dependency where a green typecheck and
-      # a green test suite prove the least, since neither performs an SMTP round
-      # trip. Both repos move together once notification-service drops
-      # @types/nodemailer and switches to `import type { Transporter }`.
-      - dependency-name: "nodemailer"
-        update-types: ["version-update:semver-major"]
       # ioredis v6 CANNOT land while the pnpm-workspace.yaml override pins
       # `ioredis: ^5.11.1`, which is why #744 is lockfile-only and would be
       # reverted by the next install. That override is not incidental: bullmq
