@@ -625,6 +625,83 @@ describe('schema validation failure branches (account_and_profile)', () => {
     expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
   });
 
+  describe('conditional requirement (if/then), e.g. category RCI → crr_number + professional_type', () => {
+    // Signals relaxes only TOP-LEVEL required fields (a partial profile lands
+    // as a draft); a requirement inside an if/then branch it enforces. So the
+    // link route must block it too — naming the missing fields, never Ajv's
+    // bare `if` summary ("must match \"then\" schema").
+    const withRciSchema = () => {
+      const cfg = buildBlueDotConfig();
+      _setNetworkConfig({
+        ...cfg,
+        domains: {
+          ...cfg.domains,
+          seeker: {
+            ...cfg.domains.seeker,
+            schema: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                phone: { type: 'string' },
+                category: { type: 'string', enum: ['NGO', 'RCI'] },
+                crr_number: { type: 'string', pattern: '^$|^[0-9]+$' },
+                professional_type: { type: 'string', enum: ['Special Educator', 'Other'] },
+              },
+              required: ['name', 'category'],
+              allOf: [
+                {
+                  if: { properties: { category: { const: 'RCI' } }, required: ['category'] },
+                  then: { required: ['crr_number', 'professional_type'] },
+                },
+              ],
+            },
+          },
+        },
+      } as ResolvedNetworkConfig);
+    };
+    const submit = (extra: Record<string, unknown>) =>
+      app.inject({
+        method: 'POST',
+        url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_FULL}`,
+        payload: {
+          name: 'A. User',
+          phone: '+919999999999',
+          consent_terms: true,
+          consent_privacy: true,
+          consent_profile: true,
+          year_of_birth: 1990,
+          ...extra,
+        },
+      });
+
+    it('400s naming each conditionally required field that is missing', async () => {
+      withRciSchema();
+      const r = await submit({ category: 'RCI' });
+      expect(r.statusCode).toBe(400);
+      const issues = r.json().error.fields.issues as Array<{
+        keyword: string;
+        params?: { missingProperty?: string };
+      }>;
+      expect(issues.map((i) => i.params?.missingProperty).sort()).toEqual([
+        'crr_number',
+        'professional_type',
+      ]);
+      expect(issues.some((i) => i.keyword === 'if')).toBe(false);
+    });
+
+    it('does not 400 when the conditional fields are filled, or the condition does not apply', async () => {
+      withRciSchema();
+      const filled = await submit({
+        category: 'RCI',
+        crr_number: '123',
+        professional_type: 'Other',
+      });
+      expect(filled.json().error?.code).not.toBe('SCHEMA_VALIDATION');
+      const ngo = await submit({ category: 'NGO' });
+      expect(ngo.json().error?.code).not.toBe('SCHEMA_VALIDATION');
+    });
+  });
+
   it('400s (SCHEMA_VALIDATION) when name/phone/email are all empty after stripping blank cells', async () => {
     const r = await app.inject({
       method: 'POST',

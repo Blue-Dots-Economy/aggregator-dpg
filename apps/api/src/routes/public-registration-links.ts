@@ -536,8 +536,19 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           // `minimum`/`type`/`format`/`pattern`/`enum`/`additionalProperties` —
           // still 400s here, matching signals' shape-only validation. Relaxing
           // value constraints would green-light data signals later rejects.
-          const PARTIAL_OK = new Set(['required']);
-          const issues = (validate.errors ?? []).filter((e) => !PARTIAL_OK.has(e.keyword ?? ''));
+          //
+          // Two refinements for a conditional requirement (`allOf: [{ if:
+          // category is RCI, then: { required: [crr_number, professional_type] } }]`):
+          // Signals relaxes only TOP-LEVEL required fields, so a `required`
+          // error from inside a `then` branch is enforced here too — it names
+          // the missing field. Ajv's accompanying `if` error ("must match
+          // \"then\" schema") only summarises those and names nothing, so it is
+          // dropped.
+          const isConditionalRequired = (e: { keyword?: string; schemaPath?: string }) =>
+            e.keyword === 'required' && (e.schemaPath ?? '').includes('/then/');
+          const issues = (validate.errors ?? []).filter(
+            (e) => e.keyword !== 'if' && (e.keyword !== 'required' || isConditionalRequired(e)),
+          );
           if (issues.length > 0) {
             throw httpError('SCHEMA_VALIDATION', {
               detail: 'Submission failed schema validation.',
