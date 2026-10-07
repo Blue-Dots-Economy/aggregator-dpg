@@ -9,7 +9,16 @@
  *
  * @module apps/web/src/components/consent/ConsentGate
  */
-import { useEffect, useLayoutEffect, useRef, useState, type JSX } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type JSX,
+  type RefObject,
+  type UIEvent,
+} from 'react';
 import { useTranslations } from 'next-intl';
 import { ArrowDown, Check, Maximize2, Minimize2, X } from 'lucide-react';
 import { cn } from '../../lib/cn';
@@ -63,6 +72,89 @@ export function ConsentGate({
       onAccept={onAccept}
       onCancel={onCancel}
     />
+  );
+}
+
+/** What {@link useFullScreenReader} hands back to the dialog. */
+interface FullScreenReader {
+  /** Whether the gate is in full-screen reading mode. */
+  expanded: boolean;
+  /** Switches full-screen reading mode on or off. */
+  toggleExpanded: () => void;
+  /** Attach to the reader's `onScroll`, so its position survives the switch. */
+  onReaderScroll: (e: UIEvent<HTMLElement>) => void;
+}
+
+/**
+ * Full-screen reading mode for the gate (desktop only — the phone sheet is
+ * already ~92dvh).
+ *
+ * Toggling reflows the text, so a raw scrollTop would land the reader
+ * somewhere else. The scroll *fraction* is kept instead: tracked on every
+ * scroll, restored right after the layout switch, before paint. Esc leaves
+ * full screen; it never dismisses the gate itself.
+ *
+ * @param readerRef - The scrollable reader element.
+ * @returns The mode, its toggle, and the reader's scroll handler.
+ */
+function useFullScreenReader(readerRef: RefObject<HTMLElement | null>): FullScreenReader {
+  const [expanded, setExpanded] = useState(false);
+  const scrollFraction = useRef(0);
+
+  useLayoutEffect(() => {
+    const el = readerRef.current;
+    if (!el) return;
+    const max = el.scrollHeight - el.clientHeight;
+    if (max > 0) el.scrollTop = scrollFraction.current * max;
+  }, [readerRef, expanded]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setExpanded(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [expanded]);
+
+  const toggleExpanded = useCallback(() => setExpanded((v) => !v), []);
+  const onReaderScroll = useCallback((e: UIEvent<HTMLElement>) => {
+    const el = e.currentTarget;
+    const max = el.scrollHeight - el.clientHeight;
+    scrollFraction.current = max > 0 ? el.scrollTop / max : 0;
+  }, []);
+
+  return { expanded, toggleExpanded, onReaderScroll };
+}
+
+/** Props for {@link ExpandToggle}. */
+interface ExpandToggleProps {
+  expanded: boolean;
+  onToggle: () => void;
+}
+
+/**
+ * Header button that switches the gate in and out of full screen. Hidden
+ * below `sm`, where the gate is already a near-full-height sheet.
+ *
+ * @param props - Current mode and the toggle callback.
+ * @returns The toggle button.
+ */
+function ExpandToggle({ expanded, onToggle }: Readonly<ExpandToggleProps>): JSX.Element {
+  const t = useTranslations('consent_gate');
+  const label = expanded ? t('collapse') : t('expand');
+  const Icon = expanded ? Minimize2 : Maximize2;
+  return (
+    <button
+      type="button"
+      aria-pressed={expanded}
+      aria-label={label}
+      title={label}
+      onClick={onToggle}
+      className="hidden shrink-0 rounded-lg p-1.5 text-ink-500 transition-colors hover:bg-slate-100 hover:text-ink-900 sm:inline-flex"
+    >
+      <Icon className="h-5 w-5" aria-hidden="true" />
+    </button>
   );
 }
 
@@ -123,30 +215,8 @@ function ConsentGateDialog({
   const readerRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [agreed, setAgreed] = useState(false);
-  // Full-screen reading mode (desktop only — the phone sheet is already ~92dvh).
-  const [expanded, setExpanded] = useState(false);
   const progress = useReadProgress(readerRef, docs);
-
-  // Toggling `expanded` reflows the text, so a raw scrollTop would land the
-  // reader somewhere else. Keep the scroll *fraction* instead: tracked on every
-  // scroll, restored right after the layout switch, before paint.
-  const scrollFraction = useRef(0);
-  useLayoutEffect(() => {
-    const el = readerRef.current;
-    if (!el) return;
-    const max = el.scrollHeight - el.clientHeight;
-    if (max > 0) el.scrollTop = scrollFraction.current * max;
-  }, [expanded]);
-
-  // Esc leaves full screen. It never dismisses the gate itself.
-  useEffect(() => {
-    if (!expanded) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setExpanded(false);
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [expanded]);
+  const { expanded, toggleExpanded, onReaderScroll } = useFullScreenReader(readerRef);
 
   // Move focus into the dialog on mount, the same way ConsentModal does: a
   // hard-blocking modal that leaves focus wherever it was tells keyboard and
@@ -199,20 +269,7 @@ function ConsentGateDialog({
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              aria-pressed={expanded}
-              aria-label={expanded ? t('collapse') : t('expand')}
-              title={expanded ? t('collapse') : t('expand')}
-              onClick={() => setExpanded((v) => !v)}
-              className="hidden shrink-0 rounded-lg p-1.5 text-ink-500 transition-colors hover:bg-slate-100 hover:text-ink-900 sm:inline-flex"
-            >
-              {expanded ? (
-                <Minimize2 className="h-5 w-5" aria-hidden="true" />
-              ) : (
-                <Maximize2 className="h-5 w-5" aria-hidden="true" />
-              )}
-            </button>
+            <ExpandToggle expanded={expanded} onToggle={toggleExpanded} />
             {onCancel && (
               <button
                 ref={closeButtonRef}
@@ -256,11 +313,7 @@ function ConsentGateDialog({
             // rule's default allowlist just doesn't include `region`.
             // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
             tabIndex={0}
-            onScroll={(e) => {
-              const el = e.currentTarget;
-              const max = el.scrollHeight - el.clientHeight;
-              scrollFraction.current = max > 0 ? el.scrollTop / max : 0;
-            }}
+            onScroll={onReaderScroll}
             // `relative`: read-progress.ts measures each section via a
             // getBoundingClientRect delta, which is correct regardless of
             // which ancestor is positioned — this class isn't load-bearing

@@ -26,7 +26,10 @@ export interface MarkdownContentProps {
  * @param props - The Markdown content string to render.
  * @returns A div containing the rendered Markdown.
  */
-export function MarkdownContent({ content, className }: MarkdownContentProps): JSX.Element {
+export function MarkdownContent({
+  content,
+  className,
+}: Readonly<MarkdownContentProps>): JSX.Element {
   // The web app does not ship @tailwindcss/typography, and Tailwind's preflight
   // strips default heading/list styling — so every element is styled explicitly
   // via arbitrary variants (descendant selectors so nested inline elements are
