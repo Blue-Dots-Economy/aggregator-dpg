@@ -95,7 +95,7 @@ export function rootConfigFrom(
   adminEmails: readonly string[],
   defaultOwnerEmail: string | null,
 ): RootConfig {
-  const clean = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);
+  const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
   const legal = clean(network?.legalName);
   return {
     nfSlug: clean(network?.urlSlug),
@@ -175,6 +175,89 @@ async function readOrg(tx: DbExecutor, where: 'root' | 'default'): Promise<RootO
     : null;
 }
 
+/** What {@link reconcileRootOrganisations} changed. */
+type Changed = RootState['changed'];
+
+/**
+ * Applies the configured slug (only when no live org holds it), name and
+ * legal name to the root.
+ */
+async function applyRootConfig(
+  tx: DbExecutor,
+  cfg: RootConfig,
+  root: RootOrgState,
+  changed: Changed,
+): Promise<void> {
+  if (cfg.nfSlug && cfg.nfSlug !== root.slug) {
+    const taken = await tx.execute(sql`
+      SELECT 1 FROM organisations
+       WHERE slug = ${cfg.nfSlug} AND id <> ${root.id} AND status IN ('pending','active')`);
+    if (taken.rows.length === 0) {
+      await tx.execute(sql`UPDATE organisations SET slug = ${cfg.nfSlug} WHERE id = ${root.id}`);
+      changed.slug = true;
+    } else {
+      logger.warn(
+        { operation: 'ensureRootOrganisation', status: 'skipped', reason: 'slug_taken' },
+        'configured network slug is held by another org — keeping the current one',
+      );
+    }
+  }
+  if (cfg.nfName && cfg.nfName !== root.name) {
+    await tx.execute(sql`UPDATE organisations SET name = ${cfg.nfName} WHERE id = ${root.id}`);
+    changed.name = true;
+  }
+  if (cfg.nfLegalName) {
+    await tx.execute(sql`
+      UPDATE organisations SET legal_name = ${cfg.nfLegalName}
+       WHERE id = ${root.id} AND legal_name IS DISTINCT FROM ${cfg.nfLegalName}`);
+  }
+}
+
+/**
+ * Hands the root and the Default org to their configured owners, releasing
+ * an owner account left with no org.
+ *
+ * @returns The replaced owners that had an IdP subject, captured before their
+ *   accounts (and identities) are released, so the mirror can take them out
+ *   of the org's group.
+ */
+async function applyOwners(
+  tx: DbExecutor,
+  cfg: RootConfig,
+  root: RootOrgState,
+  dflt: RootOrgState,
+  changed: Changed,
+): Promise<ReplacedOwner[]> {
+  let rootOwner = root.ownerUserId;
+  if (cfg.nfOwnerEmail && cfg.nfOwnerEmail !== root.ownerEmail) {
+    rootOwner = await adminAccountFor(tx, cfg.nfOwnerEmail);
+    if (rootOwner !== root.ownerUserId) {
+      await tx.execute(
+        sql`UPDATE organisations SET org_owner = ${rootOwner} WHERE id = ${root.id}`,
+      );
+      changed.rootOwner = true;
+    }
+  }
+  const defaultOwner = cfg.defaultOwnerEmail
+    ? await adminAccountFor(tx, cfg.defaultOwnerEmail)
+    : rootOwner;
+  if (defaultOwner !== dflt.ownerUserId) {
+    await tx.execute(
+      sql`UPDATE organisations SET org_owner = ${defaultOwner} WHERE id = ${dflt.id}`,
+    );
+    changed.defaultOwner = true;
+  }
+  const replaced = (org: RootOrgState, didChange: boolean): ReplacedOwner[] =>
+    didChange && org.ownerSubject ? [{ orgId: org.id, subject: org.ownerSubject }] : [];
+  const replacedOwners = [
+    ...replaced(root, changed.rootOwner),
+    ...replaced(dflt, changed.defaultOwner),
+  ];
+  if (changed.rootOwner) await releaseIfUnowned(tx, root.ownerUserId);
+  if (changed.defaultOwner) await releaseIfUnowned(tx, dflt.ownerUserId);
+  return replacedOwners;
+}
+
 /**
  * Reconciles the root and the Default org with config in one transaction.
  *
@@ -196,64 +279,8 @@ export async function reconcileRootOrganisations(
     const dflt = await readOrg(tx, 'default');
     if (!root || !dflt) return null;
     const changed = { slug: false, name: false, rootOwner: false, defaultOwner: false };
-
-    // Root slug: applied only when no live org already holds it.
-    if (cfg.nfSlug && cfg.nfSlug !== root.slug) {
-      const taken = await tx.execute(sql`
-        SELECT 1 FROM organisations
-         WHERE slug = ${cfg.nfSlug} AND id <> ${root.id} AND status IN ('pending','active')`);
-      if (taken.rows.length === 0) {
-        await tx.execute(sql`UPDATE organisations SET slug = ${cfg.nfSlug} WHERE id = ${root.id}`);
-        changed.slug = true;
-      } else {
-        logger.warn(
-          { operation: 'ensureRootOrganisation', status: 'skipped', reason: 'slug_taken' },
-          'configured network slug is held by another org — keeping the current one',
-        );
-      }
-    }
-    if (cfg.nfName && cfg.nfName !== root.name) {
-      await tx.execute(sql`UPDATE organisations SET name = ${cfg.nfName} WHERE id = ${root.id}`);
-      changed.name = true;
-    }
-    if (cfg.nfLegalName) {
-      await tx.execute(sql`
-        UPDATE organisations SET legal_name = ${cfg.nfLegalName}
-         WHERE id = ${root.id} AND legal_name IS DISTINCT FROM ${cfg.nfLegalName}`);
-    }
-
-    // Owners.
-    let rootOwner = root.ownerUserId;
-    if (cfg.nfOwnerEmail && cfg.nfOwnerEmail !== root.ownerEmail) {
-      rootOwner = await adminAccountFor(tx, cfg.nfOwnerEmail);
-      if (rootOwner !== root.ownerUserId) {
-        await tx.execute(
-          sql`UPDATE organisations SET org_owner = ${rootOwner} WHERE id = ${root.id}`,
-        );
-        changed.rootOwner = true;
-      }
-    }
-    const defaultOwner = cfg.defaultOwnerEmail
-      ? await adminAccountFor(tx, cfg.defaultOwnerEmail)
-      : rootOwner;
-    if (defaultOwner !== dflt.ownerUserId) {
-      await tx.execute(
-        sql`UPDATE organisations SET org_owner = ${defaultOwner} WHERE id = ${dflt.id}`,
-      );
-      changed.defaultOwner = true;
-    }
-    // Remember the replaced owners' IdP subjects before their accounts (and
-    // identities) are released, so the mirror can take them out of the group.
-    const replacedOwners: ReplacedOwner[] = [
-      ...(changed.rootOwner && root.ownerSubject
-        ? [{ orgId: root.id, subject: root.ownerSubject }]
-        : []),
-      ...(changed.defaultOwner && dflt.ownerSubject
-        ? [{ orgId: dflt.id, subject: dflt.ownerSubject }]
-        : []),
-    ];
-    if (changed.rootOwner) await releaseIfUnowned(tx, root.ownerUserId);
-    if (changed.defaultOwner) await releaseIfUnowned(tx, dflt.ownerUserId);
+    await applyRootConfig(tx, cfg, root, changed);
+    const replacedOwners = await applyOwners(tx, cfg, root, dflt, changed);
 
     const nextRoot = await readOrg(tx, 'root');
     const nextDefault = await readOrg(tx, 'default');
@@ -325,6 +352,113 @@ async function ensureGroup(
   return null;
 }
 
+/** What every step of the IdP mirror shares. */
+interface MirrorContext {
+  idp: IdpAdminAdapter;
+  recorder: RootIdpRecorder;
+  report: RootIdpReport;
+  fail: (step: string, code: string) => void;
+}
+
+/** Mirrors one org: its group, its replaced owners leaving it, and its owner. */
+async function mirrorOrg(
+  ctx: MirrorContext,
+  org: RootOrgState,
+  replacedOwners: readonly ReplacedOwner[],
+): Promise<void> {
+  let groupId = org.kcGroupId;
+  if (!groupId) {
+    groupId = await ensureGroup(ctx.idp, org, ctx.report, ctx.fail);
+    if (groupId) await ctx.recorder.setGroupId(org.id, groupId);
+  }
+  if (groupId)
+    await removeReplacedOwners(
+      ctx,
+      groupId,
+      replacedOwners.filter((r) => r.orgId === org.id),
+    );
+
+  const subject = await ownerSubject(ctx, org);
+  if (subject && groupId) {
+    const added = await ctx.idp.addUserToGroup(subject, groupId);
+    if (!added.ok) ctx.fail('addUserToGroup', added.error.code);
+  }
+}
+
+/**
+ * Takes owners replaced by the reconcile out of the org's group. Their IdP
+ * user is never deleted: it may be a person with other roles.
+ */
+async function removeReplacedOwners(
+  ctx: MirrorContext,
+  groupId: string,
+  gone: readonly ReplacedOwner[],
+): Promise<void> {
+  const results = await Promise.all(
+    gone.map((g) => ctx.idp.removeUserFromGroup(g.subject, groupId)),
+  );
+  for (const removed of results) {
+    if (removed.ok) ctx.report.ownersRemoved += 1;
+    else ctx.fail('removeUserFromGroup', removed.error.code);
+  }
+}
+
+/**
+ * The org owner's IdP subject: the recorded one, else the existing user for
+ * the owner's email (reused untouched), else a new disabled user — linked to
+ * the owner's admin account. `null` when nothing should be mirrored (the
+ * placeholder owner; an owner who is also a coordinator) or a step failed.
+ */
+async function ownerSubject(ctx: MirrorContext, org: RootOrgState): Promise<string | null> {
+  if (org.ownerEmail === PLACEHOLDER_OWNER_EMAIL) return null;
+  if (org.ownerSubject) return org.ownerSubject;
+  // One IdP user per person: if the owner is also a coordinator, that user is
+  // the coordinator's login and must not be linked to the admin account.
+  if (org.ownerIsCoordinator) {
+    logger.warn(
+      {
+        operation: 'ensureRootOrganisation.idp',
+        status: 'skipped',
+        reason: 'owner_is_coordinator',
+      },
+      'the configured owner also holds a coordinator account — no admin IdP user is linked',
+    );
+    return null;
+  }
+  const subject = await findOrCreateOwner(ctx, org.ownerEmail);
+  if (!subject) return null;
+  if (!(await ctx.recorder.linkSubject(org.ownerUserId, subject))) {
+    ctx.fail('linkSubject', 'identity_conflict');
+    return null;
+  }
+  return subject;
+}
+
+/** The existing IdP user for `email`, else a new disabled one; `null` on failure. */
+async function findOrCreateOwner(ctx: MirrorContext, email: string): Promise<string | null> {
+  const existing = await ctx.idp.findByEmail(email);
+  if (!existing.ok) {
+    ctx.fail('findByEmail', existing.error.code);
+    return null;
+  }
+  if (existing.value) {
+    ctx.report.usersReused += 1;
+    return existing.value.id;
+  }
+  const created = await ctx.idp.createUser({
+    email,
+    username: email,
+    enabled: false,
+    attributes: { [KC_ATTR.DECISION_MADE]: 'pending' },
+  });
+  if (!created.ok) {
+    ctx.fail('createUser', created.error.code);
+    return null;
+  }
+  ctx.report.usersCreated += 1;
+  return created.value.id;
+}
+
 /**
  * Mirrors the root and the Default org into the IdP, as org registration does:
  * a group per org (`org-<slug>`) and, for each configured owner, a disabled
@@ -357,70 +491,9 @@ export async function provisionRootIdp(
     );
   };
 
-  for (const org of [state.root, state.defaultOrg]) {
-    let groupId = org.kcGroupId;
-    if (!groupId) {
-      groupId = await ensureGroup(idp, org, report, fail);
-      if (groupId) await recorder.setGroupId(org.id, groupId);
-    }
-
-    // Owners replaced by the reconcile leave the org's group (their IdP user
-    // is never deleted: it may be a person with other roles).
-    for (const gone of (state.replacedOwners ?? []).filter((r) => r.orgId === org.id)) {
-      if (!groupId) break;
-      const removed = await idp.removeUserFromGroup(gone.subject, groupId);
-      if (removed.ok) report.ownersRemoved += 1;
-      else fail('removeUserFromGroup', removed.error.code);
-    }
-
-    if (org.ownerEmail === PLACEHOLDER_OWNER_EMAIL) continue;
-    // One IdP user per person: if the owner is also a coordinator, that user
-    // is the coordinator's login and must not be linked to the admin account.
-    if (org.ownerIsCoordinator && !org.ownerSubject) {
-      logger.warn(
-        {
-          operation: 'ensureRootOrganisation.idp',
-          status: 'skipped',
-          reason: 'owner_is_coordinator',
-        },
-        'the configured owner also holds a coordinator account — no admin IdP user is linked',
-      );
-      continue;
-    }
-    let subject = org.ownerSubject;
-    if (!subject) {
-      const existing = await idp.findByEmail(org.ownerEmail);
-      if (!existing.ok) {
-        fail('findByEmail', existing.error.code);
-        continue;
-      }
-      if (existing.value) {
-        subject = existing.value.id;
-        report.usersReused += 1;
-      } else {
-        const created = await idp.createUser({
-          email: org.ownerEmail,
-          username: org.ownerEmail,
-          enabled: false,
-          attributes: { [KC_ATTR.DECISION_MADE]: 'pending' },
-        });
-        if (!created.ok) {
-          fail('createUser', created.error.code);
-          continue;
-        }
-        subject = created.value.id;
-        report.usersCreated += 1;
-      }
-      if (!(await recorder.linkSubject(org.ownerUserId, subject))) {
-        fail('linkSubject', 'identity_conflict');
-        continue;
-      }
-    }
-    if (groupId) {
-      const added = await idp.addUserToGroup(subject, groupId);
-      if (!added.ok) fail('addUserToGroup', added.error.code);
-    }
-  }
+  const ctx: MirrorContext = { idp, recorder, report, fail };
+  await mirrorOrg(ctx, state.root, state.replacedOwners ?? []);
+  await mirrorOrg(ctx, state.defaultOrg, state.replacedOwners ?? []);
   return report;
 }
 

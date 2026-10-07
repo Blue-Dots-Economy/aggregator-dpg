@@ -412,8 +412,7 @@ export function legacyHierarchyFlagSet(): boolean {
  * @returns The lowercased email, or `null` when unset or blank.
  */
 export function defaultOrgOwnerEmail(): string | null {
-  const v = process.env.DEFAULT_ORG_OWNER_EMAIL?.trim().toLowerCase();
-  return v ? v : null;
+  return process.env.DEFAULT_ORG_OWNER_EMAIL?.trim().toLowerCase() || null;
 }
 
 /**

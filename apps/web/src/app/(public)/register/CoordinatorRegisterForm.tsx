@@ -252,80 +252,76 @@ export function CoordinatorRegisterForm({
         />
       ) : null}
 
-      <>
-        {inviteMode ? (
-          <output className="mb-5 block text-[13.5px] text-ink-500">
-            Registering as a coordinator under{' '}
-            <span className="font-semibold text-ink-800">{selectedOrgName}</span>.
-          </output>
-        ) : null}
-        {!inviteMode ? (
-          <div className="form-group mb-4">
-            <label className="bd-label" htmlFor="coordinator-org">
-              {t('org_selector_label')}
-              <span className="text-rose-500"> *</span>
-            </label>
-            {orgsQuery.isError ? (
-              <div className="text-[13px] text-red-600 flex items-center gap-2">
-                {t('org_selector_error')}
-                <button
-                  type="button"
-                  onClick={() => orgsQuery.refetch()}
-                  className="text-primary-600 font-semibold hover:underline"
-                >
-                  {t('org_selector_retry')}
-                </button>
-              </div>
-            ) : (
-              <Select
-                {...(orgId ? { value: orgId } : {})}
-                onValueChange={setOrgId}
-                disabled={orgsQuery.isLoading}
+      {inviteMode ? (
+        <output className="mb-5 block text-[13.5px] text-ink-500">
+          Registering as a coordinator under{' '}
+          <span className="font-semibold text-ink-800">{selectedOrgName}</span>.
+        </output>
+      ) : null}
+      {!inviteMode ? (
+        <div className="form-group mb-4">
+          <label className="bd-label" htmlFor="coordinator-org">
+            {t('org_selector_label')}
+            <span className="text-rose-500"> *</span>
+          </label>
+          {orgsQuery.isError ? (
+            <div className="text-[13px] text-red-600 flex items-center gap-2">
+              {t('org_selector_error')}
+              <button
+                type="button"
+                onClick={() => orgsQuery.refetch()}
+                className="text-primary-600 font-semibold hover:underline"
               >
-                <SelectTrigger id="coordinator-org" aria-required>
-                  <SelectValue
-                    placeholder={
-                      orgsQuery.isLoading
-                        ? t('org_selector_loading')
-                        : t('org_selector_placeholder')
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {orgs.map((o) => (
-                    <SelectItem key={o.id} value={o.id}>
-                      {o.display_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-        ) : null}
+                {t('org_selector_retry')}
+              </button>
+            </div>
+          ) : (
+            <Select
+              {...(orgId ? { value: orgId } : {})}
+              onValueChange={setOrgId}
+              disabled={orgsQuery.isLoading}
+            >
+              <SelectTrigger id="coordinator-org" aria-required>
+                <SelectValue
+                  placeholder={
+                    orgsQuery.isLoading ? t('org_selector_loading') : t('org_selector_placeholder')
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {orgs.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.display_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      ) : null}
 
-        <RjsfThemedForm
-          schema={formSchema}
-          uiSchema={formUiSchema as unknown as UiSchema<Record<string, unknown>>}
-          {...sharedRegistrationFormProps({
-            formData,
-            setFormData,
-            setCanSubmit,
-            setState,
-            handleSubmit,
-            formSchema,
-            consentContent,
-            onLocationResolved: setResolvedPlace,
-            validationErrorTitle: t('validation_error_title'),
-          })}
-        >
-          <RegistrationSubmitButton
-            submitting={state.status === 'submitting'}
-            canSubmit={canSubmit && (inviteMode || Boolean(orgId))}
-            label={t('submit')}
-            submittingLabel={t('submitting')}
-          />
-        </RjsfThemedForm>
-      </>
+      <RjsfThemedForm
+        schema={formSchema}
+        uiSchema={formUiSchema as unknown as UiSchema<Record<string, unknown>>}
+        {...sharedRegistrationFormProps({
+          formData,
+          setFormData,
+          setCanSubmit,
+          setState,
+          handleSubmit,
+          formSchema,
+          consentContent,
+          onLocationResolved: setResolvedPlace,
+          validationErrorTitle: t('validation_error_title'),
+        })}
+      >
+        <RegistrationSubmitButton
+          submitting={state.status === 'submitting'}
+          canSubmit={canSubmit && (inviteMode || Boolean(orgId))}
+          label={t('submit')}
+          submittingLabel={t('submitting')}
+        />
+      </RjsfThemedForm>
 
       <ConsentGate
         open={gateOpen}

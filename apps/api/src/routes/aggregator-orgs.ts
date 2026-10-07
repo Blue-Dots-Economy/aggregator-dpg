@@ -436,15 +436,15 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           profileRef: orgProfileRef,
           recordConsent,
         });
-      let created = await createOnce(slug);
-      for (
-        let attempt = 1;
-        attempt < ORG_SLUG_RETRIES && !created.ok && created.error.code === 'DUPLICATE_SLUG';
-        attempt += 1
-      ) {
+      // Each retry depends on the previous outcome, so the attempts are sequential.
+      const createWithRetry = async (attempt: number): ReturnType<typeof createOnce> => {
+        const result = await createOnce(slug);
+        if (result.ok || result.error.code !== 'DUPLICATE_SLUG') return result;
+        if (attempt + 1 >= ORG_SLUG_RETRIES) return result;
         slug = slugFromName(body.display_name);
-        created = await createOnce(slug);
-      }
+        return createWithRetry(attempt + 1);
+      };
+      const created = await createWithRetry(0);
       if (!created.ok) {
         if (created.error.code === 'DUPLICATE_NAME') {
           throw httpError('ORG_NAME_TAKEN', { fields: { display_name: body.display_name } });

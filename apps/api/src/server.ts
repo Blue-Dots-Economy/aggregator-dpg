@@ -4,7 +4,7 @@
 
 import './env.js';
 import { buildApp } from './app.js';
-import { config } from './config.js';
+import { adminEmails, config, defaultOrgOwnerEmail, legacyHierarchyFlagSet } from './config.js';
 import { logger } from './logger.js';
 import { runMigrations } from './db/migrate.js';
 import { closeDb } from './db/client.js';
@@ -20,7 +20,6 @@ import {
   type RootState,
 } from './services/organisation-root.js';
 import { getIdpAdmin } from './services/idp-admin/index.js';
-import { adminEmails, defaultOrgOwnerEmail, legacyHierarchyFlagSet } from './config.js';
 import { setApprovalBrand } from './views/approval-pages.js';
 import { setEmailBrand } from './services/email-templates/shared.js';
 import {

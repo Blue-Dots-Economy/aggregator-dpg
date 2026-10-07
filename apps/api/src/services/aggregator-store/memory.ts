@@ -18,12 +18,12 @@ import {
   type ListAggregatorsPage,
   type StoreError,
   type StoreResult,
+  type LegacyOrgDetails,
   type UpdateAggregatorPatch,
 } from './interface.js';
 import type { AggregatorStatus, BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { renderOrgDetails, type OrgDetailColumns } from './org-details.js';
 import { servesOf } from './serves.js';
-import type { LegacyOrgDetails } from './interface.js';
 
 /** The Default org's id in the in-memory store (matches `buildDefaultOrg`). */
 export const MEMORY_DEFAULT_ORG_ID = '00000000-0000-0000-0000-0000000000d0';

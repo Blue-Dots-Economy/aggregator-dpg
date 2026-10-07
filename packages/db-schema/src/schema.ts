@@ -45,13 +45,13 @@ import {
   unique,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
-import type {
+import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
+
+export type {
   BecknContact,
   BecknLocation,
   ConsentRecord,
 } from '@aggregator-dpg/shared-primitives/aggregator';
-
-export type { BecknContact, BecknLocation, ConsentRecord };
 
 /**
  * A coordinator's own org-detail values that its org did not adopt (0028).
@@ -664,15 +664,15 @@ export const consentRecord = pgTable(
     /** Row-creation timestamp; set automatically by Postgres on INSERT. */
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => ({
-    subjectIdx: index('consent_record_subject_idx').on(table.subjectType, table.subjectId),
-    userIdx: index('consent_record_user_idx')
+  (table) => [
+    index('consent_record_subject_idx').on(table.subjectType, table.subjectId),
+    index('consent_record_user_idx')
       .on(table.userId, table.acceptedAt.desc())
       .where(sql`user_id IS NOT NULL`),
-    orgIdx: index('consent_record_org_idx')
+    index('consent_record_org_idx')
       .on(table.orgId)
       .where(sql`org_id IS NOT NULL`),
-  }),
+  ],
 );
 
 // ─── onboarding (unified metrics rollup) ─────────────────────────────────────

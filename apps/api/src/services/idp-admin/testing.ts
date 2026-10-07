@@ -198,9 +198,16 @@ export class IdpAdminFake extends IdpAdminAdapter {
     return { ok: true, value: { id } };
   }
 
-  async findGroupByName(
+  findGroupByName(
     name: string,
   ): Promise<IdpResult<{ id: string; attributes: Record<string, string[]> } | null>> {
+    return Promise.resolve(this.lookupGroupByName(name));
+  }
+
+  /** Synchronous body of {@link findGroupByName}. */
+  private lookupGroupByName(
+    name: string,
+  ): IdpResult<{ id: string; attributes: Record<string, string[]> } | null> {
     if (this.failNext) {
       const e = this.failNext;
       this.failNext = null;
@@ -214,14 +221,14 @@ export class IdpAdminFake extends IdpAdminAdapter {
     return { ok: true, value: { id: g.id, attributes } };
   }
 
-  async removeUserFromGroup(userId: string, groupId: string): Promise<IdpResult<void>> {
+  removeUserFromGroup(userId: string, groupId: string): Promise<IdpResult<void>> {
     if (this.failNext) {
       const e = this.failNext;
       this.failNext = null;
-      return { ok: false, error: e };
+      return Promise.resolve({ ok: false, error: e });
     }
     this.memberships.get(userId)?.delete(groupId);
-    return { ok: true, value: undefined };
+    return Promise.resolve({ ok: true, value: undefined });
   }
 
   async deleteGroup(groupId: string): Promise<IdpResult<void>> {

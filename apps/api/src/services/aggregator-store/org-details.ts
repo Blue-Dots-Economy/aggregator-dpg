@@ -47,14 +47,10 @@ export function renderOrgDetails(
 ): RenderedOrgDetails {
   const own = legacy ?? {};
   const orgLocations = org?.locations ?? [];
+  const ownLocations = Array.isArray(own.locations) ? own.locations : [];
   return {
     url: present(org?.url) ?? present(own.url) ?? null,
-    locations:
-      orgLocations.length > 0
-        ? orgLocations
-        : Array.isArray(own.locations) && own.locations.length > 0
-          ? own.locations
-          : [],
+    locations: orgLocations.length > 0 ? orgLocations : ownLocations,
     company: present(org?.legalName) ?? present(own.company),
     gstNumber: present(org?.gstNumber) ?? present(own.gstNumber),
   };

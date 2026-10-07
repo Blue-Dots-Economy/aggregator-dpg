@@ -36,21 +36,19 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
     const slugTaken = [...this.byId.values()].some(
       (o) => o.slug === input.slug && NON_TERMINAL.has(o.status),
     );
-    if (slugTaken)
-      return Promise.resolve(err('DUPLICATE_SLUG', `slug already in use: ${input.slug}`));
+    if (slugTaken) return err('DUPLICATE_SLUG', `slug already in use: ${input.slug}`);
     // Case-insensitive display-name uniqueness over non-terminal rows.
     const nameKey = input.displayName.trim().toLowerCase();
     const nameTaken = [...this.byId.values()].some(
       (o) => o.displayName.trim().toLowerCase() === nameKey && NON_TERMINAL.has(o.status),
     );
-    if (nameTaken)
-      return Promise.resolve(err('DUPLICATE_NAME', `organisation name already in use`));
+    if (nameTaken) return err('DUPLICATE_NAME', `organisation name already in use`);
     let id: string;
     try {
       id = contactId(input.ownerEmail, input.ownerPhone ?? null);
     } catch {
       // Postgres fails the same write (contactId() runs before any SQL).
-      return Promise.resolve(err('DB_UNAVAILABLE', 'TypeError'));
+      return err('DB_UNAVAILABLE', 'TypeError');
     }
     const orgId = randomUUID();
     // Fail-closed like the Postgres transaction: nothing is stored when the

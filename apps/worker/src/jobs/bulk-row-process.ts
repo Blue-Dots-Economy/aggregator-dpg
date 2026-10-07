@@ -224,11 +224,9 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     // errors.csv instead of a generic status-code string.
     // The per-user profile cap (signals #349) is a user/data condition, not a
     // system fault — categorise it distinctly so errors.csv reads clearly.
-    const category: ErrorCategory = push.ownedElsewhere
-      ? 'owned_elsewhere'
-      : push.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED'
-        ? 'limit_reached'
-        : 'system_error';
+    let category: ErrorCategory = 'system_error';
+    if (push.ownedElsewhere) category = 'owned_elsewhere';
+    else if (push.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED') category = 'limit_reached';
     outcome = {
       outcome: 'failed',
       category,

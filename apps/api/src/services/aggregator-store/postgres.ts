@@ -537,7 +537,7 @@ function composeContact(
  * it has no `valid_till`.
  */
 function composeConsent(c: JoinedRow['consent']): Aggregator['consent'] {
-  if (!c || c.till === null) return null;
+  if (c?.till == null) return null;
   return {
     value: true,
     given_at: new Date(Number(c.at)).toISOString(),
