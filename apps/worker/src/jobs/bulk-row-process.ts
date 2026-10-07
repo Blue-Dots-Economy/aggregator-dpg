@@ -719,25 +719,42 @@ export interface SchemaValidationError {
   keyword?: string;
   instancePath?: string;
   schemaPath?: string;
+  params?: { missingProperty?: string };
   message?: string;
+}
+
+/** A `required` error raised inside a conditional branch (`if` … `then`). */
+function isConditionalRequired(e: SchemaValidationError): boolean {
+  return e.keyword === 'required' && (e.schemaPath ?? '').includes('/then/');
 }
 
 /**
  * Reduce Ajv errors to the human-readable reasons that should FAIL a bulk row.
  *
  * Required-field gaps are NOT failures at this layer — signals accepts partial
- * `item_state` and classifies the item as `draft`. Every other error
+ * `item_state` and classifies the item as `draft`. A conditional requirement is
+ * the exception: `if` category is RCI `then` two more fields are required, and
+ * Signals rejects that row outright rather than drafting it, so letting it
+ * through would only come back as an opaque upstream 400 categorised as a
+ * system error. Ajv reports it as one `required` error per missing field (its
+ * `schemaPath` runs through `/then/`) plus one `if` error ("must match \"then\"
+ * schema") that only summarises them: the former fail the row by field name,
+ * the latter is dropped. Every other error
  * (type/format/pattern/enum/additionalProperties/minLength/minItems/…) is
  * surfaced so the row fails fast before reaching signals.
  *
  * @param errors - Ajv `validate.errors` (or `[]`).
- * @returns One reason string per blocking (non-`required`) error; empty when
- *   the only failures were missing required fields.
+ * @returns One reason string per blocking error; empty when the only failures
+ *   were missing top-level required fields.
  */
 export function blockingValidationReasons(errors: readonly SchemaValidationError[]): string[] {
   return errors
-    .filter((e) => e.keyword !== 'required')
-    .map((e) => `${e.instancePath || e.schemaPath}: ${e.message ?? 'invalid'}`);
+    .filter((e) => e.keyword !== 'if' && (e.keyword !== 'required' || isConditionalRequired(e)))
+    .map((e) => {
+      const missing = e.keyword === 'required' ? e.params?.missingProperty : undefined;
+      const where = missing ? `${e.instancePath ?? ''}/${missing}` : e.instancePath || e.schemaPath;
+      return `${where}: ${e.message ?? 'invalid'}`;
+    });
 }
 
 /**

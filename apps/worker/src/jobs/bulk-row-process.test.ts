@@ -105,6 +105,55 @@ describe('blockingValidationReasons', () => {
     expect(reasons[0]).toContain('must be number');
   });
 
+  // A conditional requirement (`allOf: [{ if: category === 'RCI', then:
+  // { required: [...] } }]`) makes Ajv report each missing field as `required`
+  // PLUS one `if` error ("must match \"then\" schema") that only summarises
+  // them. Unlike a plain required gap, Signals never accepts it as a draft, so
+  // each missing field fails the row here, by name; the summary is dropped.
+  const ifErr: SchemaValidationError = {
+    keyword: 'if',
+    schemaPath: '#/allOf/0/if',
+    message: 'must match "then" schema',
+  };
+  const conditionalRequired = (field: string): SchemaValidationError => ({
+    keyword: 'required',
+    instancePath: '',
+    schemaPath: '#/allOf/0/then/required',
+    params: { missingProperty: field },
+    message: `must have required property '${field}'`,
+  });
+
+  it('fails a conditional requirement, naming each missing field, without the if summary', () => {
+    expect(
+      blockingValidationReasons([
+        conditionalRequired('crr_number'),
+        conditionalRequired('professional_type'),
+        ifErr,
+      ]),
+    ).toEqual([
+      "/crr_number: must have required property 'crr_number'",
+      "/professional_type: must have required property 'professional_type'",
+    ]);
+  });
+
+  it('still treats a top-level required gap as advisory next to a conditional one', () => {
+    expect(blockingValidationReasons([required, conditionalRequired('crr_number'), ifErr])).toEqual(
+      ["/crr_number: must have required property 'crr_number'"],
+    );
+  });
+
+  it('still fails a content error inside a conditional branch, without the if summary', () => {
+    const crrPattern: SchemaValidationError = {
+      keyword: 'pattern',
+      instancePath: '/crr_number',
+      message: 'must match pattern "^$|^[0-9]+$"',
+    };
+    const reasons = blockingValidationReasons([crrPattern, ifErr]);
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain('/crr_number');
+    expect(reasons.join(' ')).not.toContain('"then"');
+  });
+
   it('keeps only the non-required errors when required + content errors are mixed', () => {
     const reasons = blockingValidationReasons([required, typeErr, enumErr]);
     expect(reasons).toHaveLength(2);
