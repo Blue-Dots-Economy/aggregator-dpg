@@ -77,6 +77,9 @@ suite('console store methods (Postgres)', () => {
       max: 4,
       options: '-c aggregator_dpg.network=blue_dot',
     });
+    // Teardown force-drops the database; a client still closing then gets
+    // 57P01 from the server. Expected at that point, so never unhandled.
+    pool.on('error', () => undefined);
     await migrate(drizzle(pool), { migrationsFolder: MIGRATIONS_DIR });
     _setDbClients(null, null);
     getPool({ url: url.toString() });
