@@ -130,6 +130,35 @@ describe('aggregator profile routes', () => {
     expect(body.error.code).toBe('SCHEMA_VALIDATION');
   });
 
+  it('PATCH rejects `consent` — it is read-only and the stored record is unchanged', async () => {
+    const before = await aggregatorStore.findById(aggregatorId);
+    let updateCalls = 0;
+    const realUpdate = aggregatorStore.update.bind(aggregatorStore);
+    aggregatorStore.update = async (...args) => {
+      updateCalls += 1;
+      return realUpdate(...args);
+    };
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          consent: {
+            value: false,
+            given_at: '2020-01-01T00:00:00Z',
+            valid_till: '2099-01-01T00:00:00Z',
+          },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
+    expect(updateCalls).toBe(0);
+    const after = await aggregatorStore.findById(aggregatorId);
+    expect(after.ok && after.value?.consent).toEqual(before.ok && before.value?.consent);
+  });
+
   it('PATCH rejects a `profile` key — the profile half of the body is gone', async () => {
     const res = await app.inject({
       method: 'PATCH',
@@ -446,7 +475,7 @@ describe('aggregator profile routes', () => {
     expect(kcWrites).toBe(0);
   });
 
-  it('PATCH updates aggregator name/url/locations/consent successfully', async () => {
+  it('PATCH updates aggregator name/url/locations successfully', async () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/v1/aggregators/profile/me',
@@ -456,11 +485,6 @@ describe('aggregator profile routes', () => {
           name: 'TRRAIN Renamed',
           url: 'https://trrain.example.org',
           locations: [],
-          consent: {
-            value: true,
-            given_at: '2026-01-15T10:00:00Z',
-            valid_till: '2027-01-15T10:00:00Z',
-          },
         },
       },
     });
