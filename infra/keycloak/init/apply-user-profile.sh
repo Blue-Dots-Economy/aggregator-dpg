@@ -85,22 +85,15 @@ UPDATED=$(printf '%s' "$PROFILE" | jq --arg policy "$POLICY" '
 
   .unmanagedAttributePolicy = $policy
   | .attributes = (
-      # aggregator_id and decision_made drive the portal gate and the API'"'"'s
-      # coordinator identity; only the API'"'"'s service account writes them, so they
-      # are declared admin-only. Forced: any earlier declaration is replaced.
-      ([(.attributes // [])[] | select(.name != "aggregator_id" and .name != "decision_made")] + [
-        {
-          name: "aggregator_id",
-          displayName: "Aggregator id",
-          permissions: { view: ["admin"], edit: ["admin"] },
-          multivalued: false
-        },
-        {
-          name: "decision_made",
-          displayName: "Registration decision",
-          permissions: { view: ["admin"], edit: ["admin"] },
-          multivalued: false
-        },
+      # The aggregator identity attributes drive the portal gate and the token
+      # claims apps act on (aggregator_id, aggregator_type, signalstack_org_id,
+      # signals_acting_orgs); only the API'"'"'s service account writes them, so
+      # they are declared admin-only. Forced: any earlier declaration is replaced.
+      ([(.attributes // [])[] | select(.name as $n | ["aggregator_id", "decision_made", "aggregator_type", "signalstack_org_id"] | index($n) | not)] + [
+        { name: "aggregator_id", displayName: "Aggregator id", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: false },
+        { name: "decision_made", displayName: "Registration decision", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: false },
+        { name: "aggregator_type", displayName: "Aggregator type", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: false },
+        { name: "signalstack_org_id", displayName: "Signals organisation id", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: false },
         {
           name: "phoneNumber",
           displayName: "Phone Number",
@@ -140,9 +133,9 @@ STILL_REQUIRED=$(printf '%s' "$VERIFY" | jq -r '[.attributes[]? | select(.name =
 
 echo "[kc-init] unmanagedAttributePolicy=${GOT_POLICY} phoneNumber declared=${HAS_PHONE}"
 
-ADMIN_ONLY=$(printf '%s' "$VERIFY" | jq -r '[.attributes[]? | select(.name == "aggregator_id" or .name == "decision_made") | select(.permissions.edit == ["admin"])] | length')
-if [ "${ADMIN_ONLY:-0}" -lt 2 ]; then
-  echo "[kc-init] aggregator_id / decision_made are not declared admin-only"
+ADMIN_ONLY=$(printf '%s' "$VERIFY" | jq -r '[.attributes[]? | select(.name as $n | ["aggregator_id", "decision_made", "aggregator_type", "signalstack_org_id"] | index($n)) | select(.permissions.edit == ["admin"])] | length')
+if [ "${ADMIN_ONLY:-0}" -lt 4 ]; then
+  echo "[kc-init] aggregator_id / decision_made / aggregator_type / signalstack_org_id are not all declared admin-only"
   exit 1
 fi
 
