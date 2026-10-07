@@ -344,9 +344,6 @@ services:
       # deployment sets them.
       NEXT_PUBLIC_ENABLED_LANGUAGES: ${NEXT_PUBLIC_ENABLED_LANGUAGES:-}
       NEXT_PUBLIC_INVITE_MAX_RECIPIENTS: ${NEXT_PUBLIC_INVITE_MAX_RECIPIENTS:-}
-      # Gates the "Register Organisation" tab; read server-side by the register
-      # page. Must match the api's ORG_HIERARCHY_ENABLED so both agree.
-      ORG_HIERARCHY_ENABLED: ${ORG_HIERARCHY_ENABLED:-false}
       # ─── OIDC (Authorization Code + PKCE) ────────────────────────────
       # OIDC_ISSUER must resolve identically from the browser AND the web
       # container. With nginx as the sole ingress, both reach Keycloak via
@@ -438,6 +435,10 @@ services:
       CORS_ORIGINS: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}"
       DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-aggregator}
       RUN_MIGRATIONS_ON_BOOT: "true"
+      # Dev / e2e only: lets a database WITH data apply the user & org release
+      # train at boot. Deployments apply it with the release-train tool; leave
+      # this false there (apps/api/src/db/migration-guards.ts).
+      ALLOW_TRAIN_ON_BOOT: ${ALLOW_TRAIN_ON_BOOT:-false}
       # Keycloak admin (service account). Must equal the public issuer prefix
       # so the JWT `iss` claim matches what `expectedIssuer()` derives from
       # KEYCLOAK_URL (apps/api/src/services/auth/access-token.ts).
@@ -462,12 +463,12 @@ services:
       AWS_REGION: ${AWS_REGION:-ap-south-1}
       SES_FROM: ${SES_FROM:-}
       SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}
-      # Org hierarchy — when true, registers the org-registration + approval
-      # routes. Must match the web app's ORG_HIERARCHY_ENABLED so both agree.
-      ORG_HIERARCHY_ENABLED: ${ORG_HIERARCHY_ENABLED:-false}
       # Approval flow
       APPROVAL_TOKEN_SECRET: ${APPROVAL_TOKEN_SECRET:?APPROVAL_TOKEN_SECRET must be set in .env (≥32 chars)}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@bluedots.local}
+      # Owner of the fixed Default org (migration 0028); optional. Unset: Default
+      # org approvals go to ADMIN_EMAILS.
+      DEFAULT_ORG_OWNER_EMAIL: ${DEFAULT_ORG_OWNER_EMAIL:-}
       # ─── Signals UI hand-off ──────────────────────────────────────────
       # Per-domain Signals UI login URLs (`domain=url` pairs). Without this
       # passed through, the feature was unreachable in the composed stack

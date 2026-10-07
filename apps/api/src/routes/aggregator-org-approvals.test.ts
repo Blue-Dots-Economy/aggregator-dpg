@@ -1,5 +1,4 @@
-// Flag-gated routes; set the flag before any import that pulls in `config`.
-process.env.ORG_HIERARCHY_ENABLED = 'true';
+// Org approval routes (always registered since 0028).
 
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';

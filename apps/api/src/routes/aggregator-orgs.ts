@@ -1,9 +1,8 @@
 /**
  * Org registration endpoints (spec §6.1 / §6 dropdown).
  *
- * Flag-gated by `ORG_HIERARCHY_ENABLED`: when the flag is OFF these routes are
- * not registered at all (Fastify returns 404), so flag-off behaviour is
- * unchanged. When ON:
+ * Always registered: the org hierarchy is always on since migration 0028.
+ * Orgs live in `organisations` (`org_type = 'aggregator'`):
  *
  *   POST /v1/orgs/create
  *     Inserts a `pending` `aggregator_orgs` row (system of record), creates the
@@ -19,7 +18,7 @@
 
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { config, orgHierarchyEnabled } from '../config.js';
+import { config } from '../config.js';
 import { coolingRetryAfter } from '../services/registration-cooling.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
@@ -35,11 +34,17 @@ import { splitName } from '../services/name.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import { checkOrgInviteResendRate } from '../services/org-invite-resend-rate.js';
 import { slugFromName } from '../services/slug.js';
+import { orgLocationsFrom, orgUrlFrom } from '../services/org-location.js';
+
+/** Attempts at a fresh random-suffixed slug when one collides. */
+const ORG_SLUG_RETRIES = 3;
 import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
+import type { RecordConsentHook } from '../services/consent-ledger/hook.js';
+import { stampConsent } from '../services/registration-consent.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
 
 const OrgCreateBodySchema = z.object({
@@ -101,8 +106,8 @@ const OrgCreateBodySchema = z.object({
  * never be copied into `profile`.
  *
  * Keeping one authoritative home per field is what stops the jsonb payload and
- * the columns drifting apart. `consent` is excluded because the consent ledger
- * plus the existing column already record it.
+ * the columns drifting apart. `consent` is excluded because the consent
+ * ledger records it (with its `valid_till`, 0029).
  */
 const ORG_COLUMN_BACKED_KEYS: ReadonlySet<string> = new Set([
   'display_name',
@@ -146,14 +151,11 @@ const OrgListResponseSchema = z
   .passthrough();
 
 /**
- * Registers the org registration + dropdown routes. No-op (routes absent) when
- * `ORG_HIERARCHY_ENABLED` is false, so flag-off deployments behave as today.
+ * Registers the org registration + dropdown routes.
  *
  * @param app - Fastify instance to attach the routes to.
  */
 export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
-  if (!orgHierarchyEnabled()) return;
-
   app.post(
     '/v1/orgs/create',
     {
@@ -161,7 +163,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         tags: ['aggregator-orgs'],
         summary: 'Submit a new parent-org registration',
         description:
-          'Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link. Only registered when ORG_HIERARCHY_ENABLED=true.',
+          'Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link.',
         body: OrgCreateBodySchema,
         response: { 201: OrgCreatedResponseSchema, ...errorResponses(400, 401, 409, 500, 503) },
       },
@@ -397,23 +399,52 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           'org-registration schema not found — storing profile without a variant ref',
         );
       }
-      const slug = slugFromName(body.display_name);
-      const created = await orgStore.create({
-        slug,
-        displayName: body.display_name,
-        // `address.addressRegion` is the form's only State input on schemas that
-        // declare an address block; the standalone `state` field is hidden there.
-        // Prefer it so the column stays populated either way.
-        state: body.address?.addressRegion ?? body.state ?? null,
-        ownerEmail: ownerEmail,
-        ownerPhone: phoneE164,
-        ownerName: body.owner.name,
-        profile: buildOrgProfile(body),
-        // Derived from the schema file that actually resolved, not from the
-        // brand env — a missing override must not be recorded as if its
-        // variant had produced the payload. NULL means "variant unknown".
-        profileRef: orgProfileRef,
-      });
+      // The slug carries a random suffix; retry a collision like
+      // createAggregatorWithSlug does (review A11).
+      // Registration consent is written in the SAME transaction as the org
+      // (0029): a ledger failure leaves no org, owner account or contact, and
+      // nothing has reached Keycloak yet. The config is read before the
+      // transaction opens; `valid_till` is clamped like a coordinator's.
+      const orgConsent = stampConsent(body.consent);
+      if (!orgConsent) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'consent.valid_till must be in the future.',
+          fields: { 'consent.valid_till': 'invalid' },
+        });
+      }
+      const recordConsent = await orgConsentWriter({ consent: orgConsent, log });
+      let slug = slugFromName(body.display_name);
+      const createOnce = (s: string) =>
+        orgStore.create({
+          slug: s,
+          displayName: body.display_name,
+          // `address.addressRegion` is the form's only State input on schemas that
+          // declare an address block; the standalone `state` field is hidden there.
+          // Prefer it so the column stays populated either way.
+          state: body.address?.addressRegion ?? body.state ?? null,
+          ownerEmail: ownerEmail,
+          ownerPhone: phoneE164,
+          ownerName: body.owner.name,
+          // Org details (0028); the same values also stay in `profile` /
+          // `state` until Phase 4 drops them.
+          url: orgUrlFrom(body.website),
+          locations: orgLocationsFrom(body.address, body.state, body.coordinates),
+          profile: buildOrgProfile(body),
+          // Derived from the schema file that actually resolved, not from the
+          // brand env — a missing override must not be recorded as if its
+          // variant had produced the payload. NULL means "variant unknown".
+          profileRef: orgProfileRef,
+          recordConsent,
+        });
+      // Each retry depends on the previous outcome, so the attempts are sequential.
+      const createWithRetry = async (attempt: number): ReturnType<typeof createOnce> => {
+        const result = await createOnce(slug);
+        if (result.ok || result.error.code !== 'DUPLICATE_SLUG') return result;
+        if (attempt + 1 >= ORG_SLUG_RETRIES) return result;
+        slug = slugFromName(body.display_name);
+        return createWithRetry(attempt + 1);
+      };
+      const created = await createWithRetry(0);
       if (!created.ok) {
         if (created.error.code === 'DUPLICATE_NAME') {
           throw httpError('ORG_NAME_TAKEN', { fields: { display_name: body.display_name } });
@@ -429,31 +460,18 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         if (created.error.code === 'DUPLICATE_PHONE') {
           throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
         }
+        if (created.error.code === 'CONSENT_WRITE_FAILED') {
+          throw httpError('CONSENT_WRITE_FAILED', {
+            cause: new Error(created.error.message),
+            fields: { sub_operation: 'recordOrgConsent', rolled_back: true },
+          });
+        }
         throw httpError('DB_UNAVAILABLE', {
           cause: new Error(created.error.message),
           fields: { sub_operation: 'orgStore.create' },
         });
       }
       const org = created.value;
-
-      // Record registration consent BEFORE provisioning Keycloak, so a
-      // consent-write failure rolls back cleanly (just the org row, no external
-      // side effects). Fail-closed: never leave an org without a consent
-      // record. Network/brand come from resolveActiveNetwork() so the recorded
-      // version matches the content the web layer displayed.
-      const { network: activeNetwork, brand: activeBrand } = resolveActiveNetwork();
-      const consentRecorded = await recordOrgConsent({
-        orgId: org.id,
-        network: activeNetwork,
-        brand: activeBrand,
-        log,
-      });
-      if (!consentRecorded) {
-        await orgStore.deleteById(org.id);
-        throw httpError('CONSENT_WRITE_FAILED', {
-          fields: { sub_operation: 'recordOrgConsent', rolled_back: true },
-        });
-      }
 
       // Mirrored KC group (authz mirror — spec §9). On failure the org is
       // deleted (below), so a half-provisioned org never lingers.
@@ -507,9 +525,25 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         ownerKcSub: ownerUser.value.id,
       });
       if (!stamped.ok) {
+        // Roll the half-created org back completely: its group and row, and
+        // the owner user this request just created (so a retry can register
+        // again instead of hitting USER_EXISTS on a stranded disabled user).
+        await discardHalfCreatedOrg(org.id, group.value.id, log);
+        const removed = await idp.deleteUser(ownerUser.value.id);
+        if (!removed.ok) {
+          log.warn(
+            {
+              status: 'failure',
+              sub_operation: 'idp.deleteUser',
+              org_id: org.id,
+              code: removed.error.code,
+            },
+            'could not remove the Keycloak owner user of a half-created org',
+          );
+        }
         throw httpError('DB_UNAVAILABLE', {
           cause: new Error(stamped.error.message),
-          fields: { sub_operation: 'orgStore.update.stamp' },
+          fields: { sub_operation: 'orgStore.update.stamp', rolled_back: true },
         });
       }
 
@@ -550,7 +584,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         tags: ['aggregator-orgs'],
         summary: 'List active orgs for the coordinator-registration dropdown',
         description:
-          'Returns active orgs only (plain SQL, no Keycloak admin API). Only registered when ORG_HIERARCHY_ENABLED=true.',
+          'Returns active aggregator orgs sorted by name (plain SQL, no Keycloak admin API). The Default org is listed only while it is the only active org.',
         response: { 200: OrgListResponseSchema, ...errorResponses(401, 500, 503) },
       },
     },
@@ -569,42 +603,42 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           fields: { sub_operation: 'orgStore.listActive' },
         });
       }
+      // The Default org is selectable only while no real org is active (D3-12).
+      const hasRealOrg = page.value.some((o) => !o.isDefault);
+      const listed = hasRealOrg ? page.value.filter((o) => !o.isDefault) : page.value;
       return reply.status(200).send({
-        orgs: page.value.map((o) => ({ id: o.id, slug: o.slug, display_name: o.displayName })),
+        orgs: listed.map((o) => ({ id: o.id, slug: o.slug, display_name: o.displayName })),
       });
     },
   );
 }
 
 /**
- * Loads the consent config for the given network/brand and records an org
- * registration-consent row in the append-only ledger.
+ * Builds the org's consent-ledger write for `orgStore.create`, which runs it
+ * inside the create transaction (0029). The consent config is read here,
+ * BEFORE the transaction opens. Network/brand come from
+ * resolveActiveNetwork() so the recorded version matches the content the web
+ * layer displayed.
  *
- * Fail-closed: returns `false` if the consent config cannot be read or the
- * ledger write fails, so the caller can roll the registration back rather than
- * leave an org with no consent record. Failures are logged at `error` with the
- * network + both versions so a missed write is reconstructable.
+ * Fail-closed: a config that cannot be read refuses the registration up front;
+ * a failed ledger write throws inside the transaction, so the store rolls the
+ * org, its owner account and contact back and answers `CONSENT_WRITE_FAILED`.
  *
- * @param orgId - The newly-created `aggregator_orgs.id`.
- * @param network - Signal Stack network identifier (e.g. `blue_dot`).
- * @param brand - Optional per-brand variant; undefined for the network default.
+ * @param consent - The server-stamped consent (its `valid_till` is stored, D4-4).
  * @param log - Request-scoped child logger.
- * @returns `true` when the consent row was written, `false` otherwise.
+ * @returns The hook to pass as `recordConsent`.
+ * @throws {HttpError} CONSENT_WRITE_FAILED when the consent config cannot be read.
  */
-async function recordOrgConsent({
-  orgId,
-  network,
-  brand,
+async function orgConsentWriter({
+  consent,
   log,
 }: {
-  orgId: string;
-  network: string;
-  brand: string | undefined;
+  consent: { valid_till: string };
   log: ReturnType<FastifyRequest['log']['child']>;
-}): Promise<boolean> {
+}): Promise<RecordConsentHook> {
+  const { network, brand } = resolveActiveNetwork();
   let termsVersion: number;
   let privacyVersion: number;
-
   try {
     const consentCfg = await loadConsentConfig(network, brand);
     termsVersion = consentCfg.audiences.org.documents.terms.current_version;
@@ -615,43 +649,47 @@ async function recordOrgConsent({
         operation: 'consentLedger.recordOrgConsent',
         status: 'failure',
         error: e instanceof Error ? e.message : String(e),
-        org_id: orgId,
         network,
         brand: brand ?? null,
       },
-      'consent config load failed — registration rolled back',
+      'consent config load failed — registration refused',
     );
-    return false;
+    throw httpError('CONSENT_WRITE_FAILED', {
+      fields: { sub_operation: 'loadConsentConfig', rolled_back: true },
+    });
   }
 
-  const result = await getConsentLedger().recordRegistrationConsent({
-    subjectType: 'org',
-    subjectId: orgId,
-    network,
-    brand: brand ?? null,
-    termsVersion,
-    privacyVersion,
-  });
-
-  if (!result.success) {
-    log.error(
-      {
-        operation: 'consentLedger.recordOrgConsent',
-        status: 'failure',
-        error: result.error.message,
-        error_type: result.error.name,
-        org_id: orgId,
+  return async (executor, orgId) => {
+    const result = await getConsentLedger()
+      .withExecutor(executor)
+      .recordRegistrationConsent({
+        subjectType: 'organisation',
+        subjectId: orgId,
         network,
         brand: brand ?? null,
-        terms_version: termsVersion,
-        privacy_version: privacyVersion,
-      },
-      'consent ledger write failed — registration rolled back',
-    );
-    return false;
-  }
-
-  return true;
+        termsVersion,
+        privacyVersion,
+        validTill: new Date(consent.valid_till),
+      });
+    if (!result.success) {
+      log.error(
+        {
+          operation: 'consentLedger.recordOrgConsent',
+          status: 'failure',
+          error: result.error.message,
+          error_type: result.error.name,
+          org_id: orgId,
+          network,
+          brand: brand ?? null,
+          terms_version: termsVersion,
+          privacy_version: privacyVersion,
+        },
+        'consent ledger write failed — registration rolled back',
+      );
+      // Throwing inside the store's transaction rolls the registration back.
+      throw result.error;
+    }
+  };
 }
 
 /**

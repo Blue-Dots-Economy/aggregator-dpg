@@ -31,7 +31,7 @@ export interface RequestedAuditInput {
   correlationId: string;
   channel: Exclude<AuditChannel, 'dump'>;
   actorUserId: string;
-  actorOrgId: string;
+  actorSignalstackOrgId: string;
   actorAzp?: string;
   /** PII field NAMES that this action will release. Never values. */
   piiFields: string[];
@@ -51,14 +51,14 @@ export interface RequestedAuditInput {
  * The `completed` row, written by the worker once the job reaches a TERMINAL
  * status. Never written for a mid-sequence attempt that will be retried.
  *
- * `actorOrgId` is repeated here on purpose: the worker already loads the job,
+ * `actorSignalstackOrgId` is repeated here on purpose: the worker already loads the job,
  * so it is free, and it keeps "everything org X did" a single indexed scan
  * instead of a self-join.
  */
 export interface CompletedAuditInput {
   correlationId: string;
   channel: Exclude<AuditChannel, 'dump'>;
-  actorOrgId: string;
+  actorSignalstackOrgId: string;
   outcome: AuditOutcome;
   completedAt: Date;
   /** `raya` | the mail provider | `s3://bucket/key`. */
@@ -76,7 +76,7 @@ export interface CompletedAuditInput {
  * The single row for a non-PII dump access.
  *
  * The dump is synchronous, has no org, no items and no purpose, so it produces
- * ONE row rather than the request/complete pair. `actorOrgId` is absent by
+ * ONE row rather than the request/complete pair. `actorSignalstackOrgId` is absent by
  * design — that is the signature of a whole-network access.
  */
 export interface DumpAuditInput {
@@ -129,7 +129,7 @@ export abstract class CampaignAuditWriterBase {
    * Appends the single row for a synchronous, non-PII dump access.
    *
    * @param input - Requester identity + outcome for the whole-network dump;
-   *   has no `actorOrgId` by design.
+   *   has no `actorSignalstackOrgId` by design.
    * @returns ok(void) on successful insert; err(BaseError) on validation
    *   failure or DB/upstream error.
    */

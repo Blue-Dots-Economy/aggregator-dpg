@@ -12,9 +12,10 @@
  *      that then has to be rolled back.
  *   4. Generate `org_slug = slugFromName(body.name)` with retry on the
  *      (statistically tiny) suffix collision.
- *   5. INSERT `aggregators` (status='pending', actor_type='aggregator',
- *      type=null). Schema-declared fields with no column of their own go
- *      into the `profile` jsonb, tagged by `profile_ref`.
+ *   5. INSERT the coordinator into `users` (status='pending', `serves` from
+ *      `type`) and its registration consent row into `consent_record`, in one
+ *      transaction (0029). Schema-declared fields with no column of their own
+ *      go into the `profile` jsonb, tagged by `profile_ref`.
  *   6. Create the Keycloak user with attributes
  *      { aggregator_id, aggregator_type, phoneNumber, decision_made: 'pending' }.
  *      Email is a built-in field. The user is created disabled — login is
@@ -24,23 +25,29 @@
  *      bulk uploads and public registration links.
  *   7. Mint approve / reject JWTs and email the configured admins.
  *
- * Failures throw `httpError(<CODE>)`. A consent-ledger or KC failure after the
- * DB write rolls back the aggregator row (FK cascades its children).
+ * Failures throw `httpError(<CODE>)`. A consent-ledger failure rolls the whole
+ * insert back inside its transaction; a KC failure after the commit deletes the
+ * coordinator row (its consent row stays, unlinked).
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { RegistrationPayloadSchema } from '@aggregator-dpg/shared-primitives/aggregator';
-import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
+import type { BecknContact, BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getRegistrationValidator } from '../services/registration-validator.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
-import type { Aggregator } from '../services/aggregator-store/interface.js';
+import { stampConsent } from '../services/registration-consent.js';
+import type {
+  Aggregator,
+  LegacyOrgDetails,
+  RecordConsentHook,
+} from '../services/aggregator-store/interface.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { verifyInviteToken } from '../services/invite-token.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { sendAdminReviewEmail } from '../services/registration-notify.js';
-import { orgHierarchyEnabled } from '../config.js';
+import { defaultOrgOwnerEmail } from '../config.js';
 import { coolingRetryAfter } from '../services/registration-cooling.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
@@ -58,10 +65,10 @@ import type { ErrorCode } from '../errors/codes.js';
 
 const SLUG_RETRIES = 3;
 
-// The coordinator submit accepts an optional `org_id` when the org hierarchy
-// is enabled. `RegistrationPayloadSchema` is strict (rejects unknown keys), so
-// the route body schema must explicitly permit it; the handler validates its
-// presence/shape against the flag + the org store.
+// The coordinator submit carries the coordinator's org (`org_id`) or an invite.
+// `RegistrationPayloadSchema` is strict (rejects unknown keys), so the route
+// body schema must explicitly permit them; the handler validates them against
+// the org store.
 const CoordinatorRegistrationBodySchema = RegistrationPayloadSchema.extend({
   org_id: z.string().optional(),
   // Coordinator invite token (#700). When present it supersedes `org_id`: the
@@ -73,7 +80,8 @@ const CoordinatorRegistrationBodySchema = RegistrationPayloadSchema.extend({
  * Body keys that already own a typed column on `aggregators`, and so must never
  * be copied into `profile`.
  *
- * `org_id` is excluded too — it is stored as `parent_org_id`, not payload data.
+ * `org_id` is excluded too — it is stored as `users.org_id`, not payload data;
+ * `url` / `locations` belong to the org (0028).
  * Keeping one authoritative home per field is what stops the jsonb payload and
  * the columns drifting apart.
  */
@@ -248,6 +256,12 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         // 1000-year consent window. Computed early so it is in scope for both
         // the reclaim path and the new-registration path below.
         const serverConsent = stampConsent(body.consent);
+        if (!serverConsent) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: 'consent.valid_till must be in the future.',
+            fields: { 'consent.valid_till': 'invalid' },
+          });
+        }
 
         // Rate limit per (ip, email) (spec A6). This bounds submission volume on
         // an endpoint that provisions a Keycloak user and sends mail, so it has
@@ -264,14 +278,15 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           });
         }
 
-        // Org-hierarchy gate (spec §6.2). When enabled, a coordinator must select
-        // an *active* org; the link lives in `aggregators.parent_org_id`.
-        let parentOrgId: string | null = null;
+        // The coordinator's org (spec §6.2; always required since 0028): an
+        // *active* aggregator org; the link lives in `users.org_id`.
+        let parentOrgId: string;
+        let orgIsDefault = false;
         // Email the invite was addressed to (#701). A coordinator MAY register with
         // a different email than they were invited at; we keep the invited address
         // for provenance so the approving owner can see who was originally targeted.
         let inviteEmailClaim: string | null = null;
-        if (orgHierarchyEnabled()) {
+        {
           const orgStore = getAggregatorOrgStore();
           const reqInvite = (req.body as { invite?: string }).invite;
 
@@ -301,7 +316,9 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
                 fields: { sub_operation: 'orgStore.findById' },
               });
             }
-            if (org.value?.status !== 'active') {
+            // Invites are minted for real orgs only; the Default org has no owner
+            // console to invite from.
+            if (org.value?.status !== 'active' || org.value.isDefault) {
               throw httpError('TARGET_ORG_INACTIVE');
             }
             const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
@@ -331,14 +348,21 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             inviteJti = verified.jti;
             parentOrgId = verified.org;
           } else {
-            // Interim selector path: coordinator picks an active org (spec §6.2).
+            // Selector path: the coordinator picks an active org (spec §6.2).
             const reqOrgId = (req.body as { org_id?: string }).org_id;
-            if (!reqOrgId) {
-              throw httpError('SCHEMA_VALIDATION', {
-                detail: 'org_id is required when the organisation hierarchy is enabled.',
-              });
+            // For one release a body without `org_id` (an old or formerly-flat
+            // client, or a pending resubmission) is placed in the Default org
+            // with a warning; afterwards it becomes a 400 (D3-13).
+            const org = reqOrgId ? await orgStore.findById(reqOrgId) : await orgStore.findDefault();
+            if (!reqOrgId && org.ok) {
+              if (!org.value) {
+                throw httpError('SCHEMA_VALIDATION', { detail: 'org_id is required.' });
+              }
+              log.warn(
+                { status: 'skipped', sub_operation: 'registration.org_id_missing' },
+                'registration without org_id — placed in the Default org (accepted for one release)',
+              );
             }
-            const org = await orgStore.findById(reqOrgId);
             if (!org.ok) {
               throw httpError('DB_UNAVAILABLE', {
                 cause: new Error(org.error.message),
@@ -354,8 +378,54 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             if (ownerMatch.ok && ownerMatch.value) {
               throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
             }
-            parentOrgId = reqOrgId;
+            // The Default org is selectable only while it is the only active
+            // org (D3-12): otherwise its coordinators' approvals would bypass
+            // every real org's owner. The no-org_id fallback above is exempt for
+            // this release.
+            if (reqOrgId && org.value.isDefault) {
+              const active = await orgStore.listActive();
+              if (!active.ok) {
+                throw httpError('DB_UNAVAILABLE', {
+                  cause: new Error(active.error.message),
+                  fields: { sub_operation: 'orgStore.listActive' },
+                });
+              }
+              if (active.value.some((o) => !o.isDefault)) {
+                throw httpError('TARGET_ORG_INACTIVE');
+              }
+            }
+            parentOrgId = org.value.id;
+            orgIsDefault = org.value.isDefault;
           }
+        }
+
+        // A Default-org coordinator names its own organisation (the form shows
+        // the name field, as flat mode did); it must never inherit "Default".
+        if (orgIsDefault && body.name.trim().toLowerCase() === 'default') {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: 'The organisation name cannot be "Default".',
+            fields: { field: 'name' },
+          });
+        }
+
+        // Org details (0028): a real org's url / locations are its own, so the
+        // submitted ones are ignored (accepted for one release); a Default-org
+        // coordinator keeps its own as `legacy_org_details`, rendered as a
+        // fallback since the Default org has no shared value.
+        const submittedLocations = (body.locations ?? []).filter(hasLocationContent);
+        const ownOrgDetails: LegacyOrgDetails = {
+          ...(body.url?.trim() ? { url: body.url.trim() } : {}),
+          ...(submittedLocations.length > 0 ? { locations: submittedLocations } : {}),
+        };
+        if (!orgIsDefault && Object.keys(ownOrgDetails).length > 0) {
+          log.warn(
+            {
+              status: 'skipped',
+              sub_operation: 'registration.org_details_ignored',
+              fields: Object.keys(ownOrgDetails),
+            },
+            'org details on a coordinator registration are ignored (they belong to the org)',
+          );
         }
 
         // Pre-check email + phone uniqueness in both stores. The DB
@@ -468,41 +538,39 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
         }
 
+        // Registration consent is written in the SAME transaction as the
+        // coordinator row (0029): a ledger failure leaves no row, contact or
+        // consent behind, and nothing has reached Keycloak yet. Fail-closed:
+        // never an aggregator without a consent record. Network/brand come from
+        // resolveActiveNetwork() so the recorded version matches what the web
+        // layer displayed; the config is read before the transaction opens.
+        const recordConsent = await aggregatorConsentWriter({
+          consent: serverConsent,
+          log,
+        });
+
         const aggregator = await createAggregatorWithSlug(aggregatorStore, body.name, {
           type: body.type,
-          url: body.url ?? null,
           contact,
-          locations: body.locations,
           consent: serverConsent,
-          parentOrgId,
-          inviteEmail: inviteEmailClaim,
+          recordConsent,
+          orgId: parentOrgId,
+          legacyOrgDetails:
+            orgIsDefault && Object.keys(ownOrgDetails).length > 0 ? ownOrgDetails : null,
+          inviteId: inviteJti,
           profile: buildAggregatorProfile(body as unknown as Record<string, unknown>),
           profileRef: resolveProfileRef('registration.v1.json'),
         });
         if (!aggregator.ok) {
           const code = mapStoreCreateError(aggregator.error.code);
-          throw httpError(code, { cause: new Error(aggregator.error.message) });
-        }
-        const { id: aggregatorId, orgSlug } = aggregator.value;
-
-        // Record registration consent BEFORE provisioning the profile + Keycloak
-        // user, so a consent-write failure rolls back cleanly (just the aggregator
-        // row, no external side effects). Fail-closed: never leave an aggregator
-        // without a consent record. Network/brand come from resolveActiveNetwork()
-        // so the recorded version matches what the web layer displayed.
-        const { network: activeNetwork, brand: activeBrand } = resolveActiveNetwork();
-        const consentRecorded = await recordAggregatorConsent({
-          aggregatorId,
-          network: activeNetwork,
-          brand: activeBrand,
-          log,
-        });
-        if (!consentRecorded) {
-          await aggregatorStore.deleteById(aggregatorId);
-          throw httpError('CONSENT_WRITE_FAILED', {
-            fields: { sub_operation: 'recordAggregatorConsent', rolled_back: true },
+          throw httpError(code, {
+            cause: new Error(aggregator.error.message),
+            ...(code === 'CONSENT_WRITE_FAILED'
+              ? { fields: { sub_operation: 'recordAggregatorConsent', rolled_back: true } }
+              : {}),
           });
         }
+        const { id: aggregatorId, orgSlug } = aggregator.value;
 
         // Keycloak carries four attributes:
         //   - aggregator_id    reverse pointer to Postgres
@@ -599,34 +667,31 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
 }
 
 /**
- * Loads the consent config for the given network/brand and records an
- * aggregator registration-consent row in the append-only ledger.
+ * Builds the coordinator's consent-ledger write for `store.create`, which runs
+ * it inside the create transaction (0029). The consent config is read here,
+ * BEFORE the transaction opens, so no file I/O happens inside it.
  *
- * Fail-closed: returns `false` if the consent config cannot be read or the
- * ledger write fails, so the caller can roll the registration back rather than
- * leave an aggregator with no consent record. Failures are logged at `error`
- * with the network + both versions so a missed write is reconstructable.
+ * Fail-closed: a config that cannot be read refuses the registration up front;
+ * a ledger write that fails throws inside the transaction, so the store rolls
+ * the row and its contact back and answers `CONSENT_WRITE_FAILED`. Failures
+ * are logged at `error` with the network and both versions so a missed write
+ * is reconstructable.
  *
- * @param aggregatorId - The newly-created `aggregators.id`.
- * @param network - Signal Stack network identifier (e.g. `blue_dot`).
- * @param brand - Optional per-brand variant; undefined for the network default.
+ * @param consent - The server-stamped registration consent (`valid_till` is stored).
  * @param log - Request-scoped child logger.
- * @returns `true` when the consent row was written, `false` otherwise.
+ * @returns The hook to pass as `recordConsent`.
+ * @throws {HttpError} CONSENT_WRITE_FAILED when the consent config cannot be read.
  */
-async function recordAggregatorConsent({
-  aggregatorId,
-  network,
-  brand,
+async function aggregatorConsentWriter({
+  consent,
   log,
 }: {
-  aggregatorId: string;
-  network: string;
-  brand: string | undefined;
+  consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
   log: ReturnType<FastifyRequest['log']['child']>;
-}): Promise<boolean> {
+}): Promise<RecordConsentHook> {
+  const { network, brand } = resolveActiveNetwork();
   let termsVersion: number;
   let privacyVersion: number;
-
   try {
     const consentCfg = await loadConsentConfig(network, brand);
     termsVersion = consentCfg.audiences.aggregator.documents.terms.current_version;
@@ -637,43 +702,47 @@ async function recordAggregatorConsent({
         operation: 'consentLedger.recordAggregatorConsent',
         status: 'failure',
         error: e instanceof Error ? e.message : String(e),
-        aggregator_id: aggregatorId,
         network,
         brand: brand ?? null,
       },
-      'consent config load failed — registration rolled back',
+      'consent config load failed — registration refused',
     );
-    return false;
+    throw httpError('CONSENT_WRITE_FAILED', {
+      fields: { sub_operation: 'loadConsentConfig', rolled_back: true },
+    });
   }
 
-  const result = await getConsentLedger().recordRegistrationConsent({
-    subjectType: 'aggregator',
-    subjectId: aggregatorId,
-    network,
-    brand: brand ?? null,
-    termsVersion,
-    privacyVersion,
-  });
-
-  if (!result.success) {
-    log.error(
-      {
-        operation: 'consentLedger.recordAggregatorConsent',
-        status: 'failure',
-        error: result.error.message,
-        error_type: result.error.name,
-        aggregator_id: aggregatorId,
+  return async (executor, aggregatorId) => {
+    const result = await getConsentLedger()
+      .withExecutor(executor)
+      .recordRegistrationConsent({
+        subjectType: 'user',
+        subjectId: aggregatorId,
         network,
         brand: brand ?? null,
-        terms_version: termsVersion,
-        privacy_version: privacyVersion,
-      },
-      'consent ledger write failed — registration rolled back',
-    );
-    return false;
-  }
-
-  return true;
+        termsVersion,
+        privacyVersion,
+        validTill: new Date(consent.valid_till),
+      });
+    if (!result.success) {
+      log.error(
+        {
+          operation: 'consentLedger.recordAggregatorConsent',
+          status: 'failure',
+          error: result.error.message,
+          error_type: result.error.name,
+          aggregator_id: aggregatorId,
+          network,
+          brand: brand ?? null,
+          terms_version: termsVersion,
+          privacy_version: privacyVersion,
+        },
+        'consent ledger write failed — registration rolled back',
+      );
+      // Throwing inside the store's transaction rolls the registration back.
+      throw result.error;
+    }
+  };
 }
 
 /**
@@ -687,13 +756,16 @@ async function createAggregatorWithSlug(
   name: string,
   extras: {
     type: ReturnType<typeof RegistrationPayloadSchema.parse>['type'];
-    url: string | null;
     contact: BecknContact;
-    locations: ReturnType<typeof RegistrationPayloadSchema.parse>['locations'];
     consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
-    parentOrgId: string | null;
-    /** Invited email (#701) — provenance when registered via an invite. */
-    inviteEmail: string | null;
+    /** Writes the consent ledger row inside the create transaction. */
+    recordConsent: RecordConsentHook;
+    /** The coordinator's org (`users.org_id`). */
+    orgId: string;
+    /** The coordinator's own org details (Default-org registrations only). */
+    legacyOrgDetails: LegacyOrgDetails | null;
+    /** The consumed invite (#701; `registration_invites.jti`), when registered via one. */
+    inviteId: string | null;
     profile: Record<string, unknown>;
     /** `null` when no registration schema resolved — variant unknown. */
     profileRef: string | null;
@@ -704,17 +776,16 @@ async function createAggregatorWithSlug(
     const orgSlug = slugFromName(name);
     last = await store.create({
       orgSlug,
-      actorType: 'aggregator',
       name,
       type: extras.type,
-      url: extras.url,
       contact: extras.contact,
-      locations: extras.locations,
       consent: extras.consent,
+      recordConsent: extras.recordConsent,
       createdBy: 'self',
       updatedBy: 'self',
-      parentOrgId: extras.parentOrgId,
-      inviteEmail: extras.inviteEmail,
+      orgId: extras.orgId,
+      legacyOrgDetails: extras.legacyOrgDetails,
+      inviteId: extras.inviteId,
       profile: extras.profile,
       profileRef: extras.profileRef,
     });
@@ -729,39 +800,6 @@ async function createAggregatorWithSlug(
   );
 }
 
-/**
- * Maximum consent validity window. Hard ceiling so a buggy or hostile
- * client cannot persist a consent record that is effectively permanent.
- * Five years lines up with typical regulatory retention envelopes; tune
- * via config if a deployment needs something different.
- */
-const MAX_CONSENT_VALIDITY_MS = 5 * 365 * 24 * 60 * 60 * 1000;
-
-/**
- * Server-stamp `given_at` to the current instant and clamp `valid_till` to
- * at most {@link MAX_CONSENT_VALIDITY_MS} after that instant. The client is
- * allowed to ask for a shorter window but never a longer one.
- *
- * @param incoming - Consent block as it arrived from the registration form.
- * @returns Consent record with server-authoritative timestamps.
- */
-function stampConsent(
-  incoming: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'],
-): ReturnType<typeof RegistrationPayloadSchema.parse>['consent'] {
-  const now = new Date();
-  const maxValidTill = new Date(now.getTime() + MAX_CONSENT_VALIDITY_MS);
-  const requestedValidTill = new Date(incoming.valid_till);
-  const validTill =
-    Number.isFinite(requestedValidTill.getTime()) && requestedValidTill < maxValidTill
-      ? requestedValidTill
-      : maxValidTill;
-  return {
-    ...incoming,
-    given_at: now.toISOString(),
-    valid_till: validTill.toISOString(),
-  };
-}
-
 function mapStoreCreateError(
   code:
     | 'NOT_FOUND'
@@ -770,11 +808,15 @@ function mapStoreCreateError(
     | 'DUPLICATE_EMAIL'
     | 'DUPLICATE'
     | 'CHECK_VIOLATION'
+    | 'CONSENT_WRITE_FAILED'
     | 'DB_UNAVAILABLE',
 ): ErrorCode {
   switch (code) {
     case 'DUPLICATE_SLUG':
       return 'DUPLICATE_SLUG';
+    // The ledger write failed inside the create transaction: nothing exists.
+    case 'CONSENT_WRITE_FAILED':
+      return 'CONSENT_WRITE_FAILED';
     // An unrecognised unique violation is a real conflict, but not one this
     // layer can name — don't dress it up as a taken slug (#718 review).
     case 'DUPLICATE':
@@ -791,13 +833,13 @@ function mapStoreCreateError(
 }
 
 /**
-/**
- * Resolves the approval-email routing for a coordinator. When the coordinator
- * belongs to an org, the approve/reject tokens carry the `org` claim and the
- * review email routes to the org owner (spec §6.2 / §9); otherwise (flat flow)
- * it returns empty extras so the email goes to the network-admin list.
+ * Resolves the approval-email routing for a coordinator. The approve/reject
+ * tokens always carry the coordinator's `org` claim (spec §6.2 / §9; the
+ * Default org included, D3-6). The review email goes to the org's owner; for
+ * the Default org, to `DEFAULT_ORG_OWNER_EMAIL` when configured, otherwise to
+ * the network-admin list (empty `recipientEmail`), as flat instances did.
  *
- * @param parentOrgId - The coordinator's parent org id, or null for flat.
+ * @param parentOrgId - The coordinator's org id (`null` only for a pre-0028 row).
  * @returns `{ org?, recipientEmail? }` extras for `sendAdminReviewEmail`.
  */
 async function resolveOwnerRouting(
@@ -805,6 +847,24 @@ async function resolveOwnerRouting(
 ): Promise<{ org?: string; recipientEmail?: string }> {
   if (!parentOrgId) return {};
   const org = await getAggregatorOrgStore().findById(parentOrgId);
+  if (org.ok && org.value?.isDefault) {
+    const owner = defaultOrgOwnerEmail();
+    return { org: parentOrgId, ...(owner ? { recipientEmail: owner } : {}) };
+  }
   const ownerEmail = org.ok && org.value ? org.value.ownerEmail : undefined;
   return { org: parentOrgId, ...(ownerEmail ? { recipientEmail: ownerEmail } : {}) };
+}
+
+/**
+ * Whether a submitted Beckn location carries anything real: a street or
+ * locality, or coordinates other than the web form's `[0,0]` placeholder.
+ *
+ * @param loc - One submitted location.
+ * @returns `true` when it is worth keeping.
+ */
+function hasLocationContent(loc: BecknLocation): boolean {
+  const a = loc.address;
+  if (a?.streetAddress?.trim() || a?.addressLocality?.trim()) return true;
+  const c = (loc.geo as { coordinates?: unknown }).coordinates;
+  return Array.isArray(c) && c.length === 2 && (c[0] !== 0 || c[1] !== 0);
 }

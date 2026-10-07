@@ -5,6 +5,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyRequest } from 'fastify';
 import { requireApproved, _setAccessTokenVerifier, _resetJwks } from './access-token.js';
+import { getIdentityStore } from '../identity-store/index.js';
+import type { IdentityStoreFake } from '../identity-store/testing.js';
 import {
   AggregatorStoreFake,
   _setAggregatorStore,
@@ -121,6 +123,11 @@ describe('requireApproved + signalstack backfill', () => {
 
     const result = await requireApproved(req);
     expect(result.ok).toBe(true);
+    // 0027: the first approved request records the coordinator's IdP login.
+    const identities = getIdentityStore() as IdentityStoreFake;
+    expect(identities.all()).toEqual([
+      { userId: aggregatorId, provider: 'keycloak', subject: kcUserId },
+    ]);
 
     const aggregators = writer.listAggregators();
     expect(aggregators).toHaveLength(1);

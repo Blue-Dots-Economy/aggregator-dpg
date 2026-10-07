@@ -1,14 +1,24 @@
 /**
  * Aggregator store contract.
  *
- * Persistence port for the `aggregators` table — the registration-essential
- * row a coordinator has after signup.
+ * Persistence port for coordinator rows of the `users` table — the
+ * registration-essential row a coordinator has after signup.
  *
  * Concrete adapters: Postgres for production, in-memory for tests. The
  * person's name / email / phone live in the `contact` table (migration 0025),
  * referenced by `contactId`; `contact`, `contactPhone` and `contactEmail` on
  * the record are composed from it so callers see the same Beckn shape as
  * before. Keycloak keeps its own copy of the login identifiers.
+ *
+ * Org details (migration 0028): `url`, `locations`, `contact.company` and
+ * `contact.gstNumber` are RENDERED from the coordinator's org
+ * (`organisations`), falling back per field to the coordinator's own values in
+ * `legacy_org_details` when the org's is empty. They are never written through
+ * this store's update; the org's owner edits them (Phase 5).
+ *
+ * Consent (migration 0029) lives only in the `consent_record` ledger: `create`
+ * writes the registration row through the caller's `recordConsent` inside its
+ * transaction, and reads compose `consent` from the newest registration row.
  */
 
 import type {
@@ -19,24 +29,49 @@ import type {
   ConsentRecord,
   RoleType,
 } from '@aggregator-dpg/shared-primitives/aggregator';
+import type { RecordConsentHook } from '../consent-ledger/hook.js';
+
+export type { RecordConsentHook };
+
+/**
+ * A coordinator's own org-detail values that its org did not adopt (0028):
+ * a key is present only where the value differs from the org's.
+ */
+export interface LegacyOrgDetails {
+  url?: string | null;
+  locations?: BecknLocation[];
+  company?: string | null;
+  gstNumber?: string | null;
+}
 
 export interface Aggregator {
   id: string;
   orgSlug: string;
+  /** Always `'aggregator'` since 0029 (the column is gone; the API still returns it). */
   actorType: ActorType;
   name: string;
+  /** The first domain of {@link serves}, or `null` when it serves every domain. */
   type: RoleType | null;
+  /** The network domain ids the coordinator serves (`users.serves`, 0029); `[]` = every domain. */
+  serves: RoleType[];
+  /** Rendered from the org, else the coordinator's own value (0028). */
   url: string | null;
   /** FK → `contact.id` (migrations 0025/0026). PII-derived hash — never log it. */
   contactId: string;
-  /** Beckn contact, composed from the linked `contact` row + `contact_extra`. */
+  /** Beckn contact, composed from the linked `contact` row + `alternate_phone`. */
   contact: BecknContact;
   /** The contact's phone (derived from `contact`; kept for existing callers). */
   contactPhone: string;
   /** The contact's email, lowercased (derived from `contact`). */
   contactEmail: string;
+  /** Rendered from the org, else the coordinator's own value (0028). */
   locations: BecknLocation[];
-  consent: ConsentRecord;
+  /**
+   * The newest registration consent from the ledger (`given_at` = its
+   * `accepted_at`). `null` only when the ledger holds no registration row for
+   * the coordinator (the 0029 verify gate V1 keeps that at zero).
+   */
+  consent: ConsentRecord | null;
   /**
    * Schema-driven registration fields with no column of their own. `{}` when
    * the deployment's registration schema declares no extra fields.
@@ -61,18 +96,23 @@ export interface Aggregator {
    */
   signalstackOrgId: string | null;
   /**
-   * Parent org this coordinator belongs to (spec §5.2). FK → `aggregator_orgs.id`.
-   * The SINGLE authority for the org→coordinator link (spec A1). `null` = flat
-   * coordinator (flag off) or legacy orphan; only populated when the org
-   * hierarchy is enabled.
+   * The coordinator's org (`users.org_id`, migration 0028; was
+   * `parent_org_id`). The single authority for the org→coordinator link
+   * (spec A1). Every coordinator has one — formerly-flat coordinators belong
+   * to the Default org — so it is `null` only for a store that predates 0028.
    */
   parentOrgId: string | null;
+  /** Whether {@link parentOrgId} is the fixed Default org. */
+  isDefaultOrg: boolean;
   /**
-   * Email the coordinator was invited at (#701), when registered via an invite.
-   * May differ from `contact.email`; kept for provenance so the approving owner
-   * sees who was originally targeted. `null` for non-invite registrations.
+   * Email the coordinator was invited at (#701), when registered via an invite:
+   * the invite's address (`users.invite_id`, 0029), else a pre-0029 address
+   * kept in `profile.legacy_invite_email`. May differ from `contact.email`.
+   * `null` for non-invite registrations.
    */
   inviteEmail: string | null;
+  /** The invite the coordinator registered with (`registration_invites.jti`), or `null`. */
+  inviteId: string | null;
   /**
    * Write-once rejection timestamp (#726). Set when a pending registration is
    * rejected (status → inactive); drives the re-registration cooling window.
@@ -83,19 +123,33 @@ export interface Aggregator {
 
 export interface CreateAggregatorInput {
   orgSlug: string;
-  actorType: ActorType;
   name: string;
+  /** The domain served; `null` or `'both'` = every domain (stored as `serves = '{}'`). */
   type: RoleType | null;
-  url?: string | null;
+  /** `contact.company` / `contact.gstNumber` are not stored (they belong to the org). */
   contact: BecknContact;
-  locations?: BecknLocation[];
+  /**
+   * The registration's consent as accepted — a snapshot only the in-memory
+   * store keeps (the Postgres store reads consent back from the ledger row
+   * that {@link recordConsent} writes).
+   */
   consent: ConsentRecord;
+  /**
+   * Writes the consent ledger row in the create transaction. Required, so no
+   * caller can create a coordinator without a consent record (fail-closed).
+   */
+  recordConsent: RecordConsentHook;
   createdBy: string;
   updatedBy: string;
-  /** Optional parent org id (spec §5.2). Defaults to null when omitted. */
-  parentOrgId?: string | null;
-  /** Invited email (#701) — provenance when registered via an invite. */
-  inviteEmail?: string | null;
+  /** The coordinator's org (`users.org_id`, required since 0028). */
+  orgId: string;
+  /**
+   * The coordinator's own org-detail values. Set only for Default-org
+   * registrations, whose org has no shared value (0028).
+   */
+  legacyOrgDetails?: LegacyOrgDetails | null;
+  /** The invite consumed by this registration (#701; `registration_invites.jti`). */
+  inviteId?: string | null;
   /**
    * Schema-driven registration fields with no column of their own. Defaults to
    * `{}` when omitted — the typed fields above stay authoritative for
@@ -111,17 +165,17 @@ export interface CreateAggregatorInput {
 
 /**
  * Patch shape for updates. `orgSlug` is intentionally absent — the DB trigger
- * `aggregators_lock_slug` rejects any attempt to mutate the slug. Identity
- * (`id`) and audit timestamps are server-managed too.
+ * `users_lock_signalstack_org_slug` rejects any attempt to mutate the slug.
+ * Identity (`id`) and audit timestamps are server-managed too. Org details
+ * (`url`, `locations`, company / GST) and the org link are not patchable here
+ * (0028).
  */
 export interface UpdateAggregatorPatch {
   name?: string;
   type?: RoleType | null;
-  url?: string | null;
+  /** `company` / `gstNumber` in it are ignored: they belong to the org. */
   contact?: BecknContact;
-  locations?: BecknLocation[];
   status?: AggregatorStatus;
-  parentOrgId?: string | null;
   /** Write-once rejection stamp (#726) — set only on the reject transition. */
   rejectedAt?: Date | null;
   updatedBy: string;
@@ -131,7 +185,6 @@ export interface ListAggregatorsFilter {
   limit?: number;
   offset?: number;
   status?: AggregatorStatus;
-  actorType?: ActorType;
   /**
    * Only rows last updated strictly before this instant. Lets the stale-pending
    * cleanup filter by age in SQL, so the row cap counts stale rows (not fresh
@@ -153,6 +206,8 @@ export type StoreError =
   /** Unique violation on a constraint this layer does not recognise (#718 review). */
   | { code: 'DUPLICATE'; message: string }
   | { code: 'CHECK_VIOLATION'; message: string }
+  /** The `recordConsent` hook failed: nothing was created (0029). */
+  | { code: 'CONSENT_WRITE_FAILED'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
 
 export type StoreResult<T> = { ok: true; value: T } | { ok: false; error: StoreError };
@@ -169,11 +224,11 @@ export abstract class AggregatorStoreBase {
   abstract findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>>;
   abstract findByContactEmail(email: string): Promise<StoreResult<Aggregator | null>>;
   /**
-   * Returns every coordinator (`aggregators` row) whose `parent_org_id`
-   * matches the given org id — the spec §10 org-view query. `parent_org_id`
-   * is the single authority for the org→coordinator link (spec A1).
+   * Returns every coordinator whose `org_id` matches the given org id — the
+   * spec §10 org-view query. `org_id` is the single authority for the
+   * org→coordinator link (spec A1).
    *
-   * @param orgId - `aggregator_orgs.id`.
+   * @param orgId - `organisations.id`.
    * @returns The org's coordinators (possibly empty); never throws.
    */
   abstract findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>>;

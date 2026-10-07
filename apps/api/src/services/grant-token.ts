@@ -30,7 +30,7 @@ const AUDIENCE = 'aggregator-grant';
 const DEFAULT_TTL_SEC = 90 * 24 * 60 * 60;
 
 export interface MintGrantInput {
-  /** `parent_org_id` the grant admits its holder to invite coordinators for. */
+  /** The org id (`organisations.id`) the grant admits its holder to invite coordinators for. */
   org: string;
   /** Lifetime in seconds. Default 90 days. */
   ttlSec?: number;
@@ -64,7 +64,7 @@ export async function mintGrantToken(input: MintGrantInput): Promise<MintGrantRe
 
 export interface VerifyGrantOk {
   ok: true;
-  /** `parent_org_id` (token `sub`). */
+  /** The org id (`organisations.id`, token `sub`). */
   org: string;
   /** True when the token was accepted only because `allowExpired` was set. */
   expired: boolean;

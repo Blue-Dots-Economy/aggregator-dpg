@@ -3,8 +3,7 @@
  *
  * Anonymous browser; forwards `GET /v1/orgs` with a Keycloak service-account
  * token and returns the upstream `{ orgs: [...] }` shape verbatim. Cached
- * `no-store` so a newly-approved org appears without a stale-cache delay. Only
- * meaningful with `ORG_HIERARCHY_ENABLED=true` upstream.
+ * `no-store` so a newly-approved org appears without a stale-cache delay.
  *
  * GET /api/orgs
  */

@@ -68,13 +68,13 @@ function makeDb() {
 vi.mock('../db.js', () => ({
   getDb: () => makeDb(),
   schema: {
-    bulkUploads: { id: 'id', aggregatorId: 'aggregatorId' },
-    aggregators: { id: 'id', orgSlug: 'orgSlug' },
+    bulkUploads: { id: 'id', userId: 'userId' },
+    users: { id: 'id', signalstackOrgSlug: 'signalstackOrgSlug' },
     onboarding: {
       id: 'id',
       source: 'source',
       batchId: 'batchId',
-      aggregatorId: 'aggregatorId',
+      userId: 'userId',
       linkId: 'linkId',
       periodStart: 'periodStart',
     },
@@ -125,7 +125,7 @@ beforeEach(() => {
   uploadRow = {
     upload: {
       id: 'up-1',
-      aggregatorId: 'agg-1',
+      userId: 'agg-1',
       status: 'row_processing',
       createdAt: new Date('2024-01-01T00:00:00Z'),
     },
@@ -186,8 +186,8 @@ describe('finaliseBulk — normal completion', () => {
     expect(txUpdates[0]).toMatchObject({ status: 'completed', errorsCsvS3Key: null });
     expect(insertedOnboarding).toHaveLength(1);
     expect(insertedOnboarding[0]).toMatchObject({
-      aggregatorId: 'agg-1',
-      orgSlug: 'org-1',
+      userId: 'agg-1',
+      signalstackOrgSlug: 'org-1',
       source: 'bulk',
       batchId: 'up-1',
       total: 3,

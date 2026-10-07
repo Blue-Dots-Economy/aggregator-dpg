@@ -1,6 +1,4 @@
-// The org-hierarchy routes are flag-gated; `config` reads env once at import,
-// so the flag must be set before any import that pulls in `config`.
-process.env.ORG_HIERARCHY_ENABLED = 'true';
+// Org registration + dropdown routes (always registered since 0028).
 
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
@@ -8,6 +6,7 @@ import { buildApp } from '../app.js';
 import {
   AggregatorOrgStoreFake,
   buildAggregatorOrg,
+  buildDefaultOrg,
   _setAggregatorOrgStore,
   AggregatorOrgStoreBase,
   type AggregatorOrg,
@@ -104,7 +103,7 @@ describe('aggregator-orgs routes', () => {
     display_name: 'Enable India',
     state: 'Karnataka',
     owner: { name: 'Ravi Kumar', email: 'ravi@enable.org', phone: '+919876500000' },
-    consent: { value: true, given_at: '2026-01-15T10:00:00Z', valid_till: '2027-01-15T10:00:00Z' },
+    consent: { value: true, given_at: '2026-01-15T10:00:00Z', valid_till: '2099-01-15T10:00:00Z' },
   };
 
   describe('one person per email/phone across coordinators and org owners (contact, 0025)', () => {
@@ -209,7 +208,7 @@ describe('aggregator-orgs routes', () => {
     const ledgerRows = consentLedger.list();
     expect(ledgerRows).toHaveLength(1);
     const consentRow = ledgerRows[0];
-    expect(consentRow?.subjectType).toBe('org');
+    expect(consentRow?.subjectType).toBe('organisation');
     expect(consentRow?.subjectId).toBe(body.org_id);
     expect(consentRow?.termsVersion).toBeGreaterThanOrEqual(1);
     expect(consentRow?.privacyVersion).toBeGreaterThanOrEqual(1);
@@ -232,7 +231,7 @@ describe('aggregator-orgs routes', () => {
 
     const ledgerRows = consentLedger.list();
     expect(ledgerRows).toHaveLength(1);
-    expect(ledgerRows[0]?.subjectType).toBe('org');
+    expect(ledgerRows[0]?.subjectType).toBe('organisation');
     expect(ledgerRows[0]?.subjectId).toBe(org_id);
   });
 
@@ -257,6 +256,66 @@ describe('aggregator-orgs routes', () => {
     expect(res.statusCode).toBe(500);
     const body = res.json() as { error: { code: string } };
     expect(body.error.code).toBe('CONSENT_WRITE_FAILED');
+    // One transaction (0029): no org and no owner remain, and Keycloak was
+    // never reached.
+    const owner = await orgStore.findByOwnerEmail('ledger-fail@enable.org');
+    expect(owner.ok && owner.value).toBeNull();
+    const kc = await idp.findByEmail('ledger-fail@enable.org');
+    expect(kc.ok && kc.value).toBeNull();
+  });
+
+  it.each([
+    // A month from now: always inside the window, whatever the run date.
+    ['a date within the window', new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(), false],
+    ['a date beyond the ceiling', '2099-01-01T00:00:00Z', true],
+    ['an unparseable value', 'not-a-date', true],
+  ])(
+    'stores the org consent valid_till on the ledger row: %s',
+    async (_label, validTill, clamped) => {
+      const email = `till-${validTill.slice(0, 4)}@enable.org`;
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/orgs/create',
+        headers: AUTH_HEADER,
+        payload: {
+          ...orgBody,
+          display_name: `Till ${validTill.slice(0, 7)}`,
+          owner: {
+            ...orgBody.owner,
+            email,
+            phone: `+9198765${String(validTill.length).padStart(5, '0')}`,
+          },
+          consent: { ...orgBody.consent, valid_till: validTill },
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      const { org_id } = res.json() as { org_id: string };
+      const row = consentLedger.list().find((r) => r.subjectId === org_id);
+      expect(row?.subjectType).toBe('organisation');
+      const stored = row?.validTill?.getTime() ?? 0;
+      if (clamped) {
+        const ceiling = Date.now() + 5 * 365 * 24 * 60 * 60 * 1000;
+        expect(Math.abs(stored - ceiling)).toBeLessThan(60_000);
+      } else {
+        expect(stored).toBe(new Date(validTill).getTime());
+      }
+    },
+  );
+
+  it('400 SCHEMA_VALIDATION for an org consent that is already expired', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...orgBody,
+        owner: { ...orgBody.owner, email: 'expired@enable.org' },
+        consent: { ...orgBody.consent, valid_till: '2020-01-01T00:00:00Z' },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    const owner = await orgStore.findByOwnerEmail('expired@enable.org');
+    expect(owner.ok && owner.value).toBeNull();
   });
 
   it('GET /v1/orgs lists only active orgs', async () => {
@@ -269,6 +328,71 @@ describe('aggregator-orgs routes', () => {
     const body = res.json() as { orgs: { id: string; slug: string; display_name: string }[] };
     expect(body.orgs.map((o) => o.slug)).toEqual(['a']);
     expect(body.orgs[0]?.display_name).toBe('A');
+  });
+
+  it('GET /v1/orgs sorts by name and hides Default once a real org is active (0028)', async () => {
+    orgStore.seed([
+      buildDefaultOrg(),
+      buildAggregatorOrg({ id: 'o-z', slug: 'z', displayName: 'zeta Org', status: 'active' }),
+      buildAggregatorOrg({ id: 'o-a', slug: 'a', displayName: 'Alpha Org', status: 'active' }),
+    ]);
+    const res = await app.inject({ method: 'GET', url: '/v1/orgs', headers: AUTH_HEADER });
+    const body = res.json() as { orgs: { slug: string }[] };
+    expect(body.orgs.map((o) => o.slug)).toEqual(['a', 'z']);
+  });
+
+  it('GET /v1/orgs lists the Default org while it is the only active org', async () => {
+    orgStore.seed([buildDefaultOrg()]);
+    const res = await app.inject({ method: 'GET', url: '/v1/orgs', headers: AUTH_HEADER });
+    const body = res.json() as { orgs: { slug: string; display_name: string }[] };
+    expect(body.orgs).toEqual([
+      { id: buildDefaultOrg().id, slug: 'default', display_name: 'Default' },
+    ]);
+  });
+
+  it("stores the form's website and address as the org's url and location (0028)", async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...orgBody,
+        website: 'https://enable.example',
+        address: { streetAddress: '1 Main Rd', addressLocality: 'Bengaluru' },
+        coordinates: [77.59, 12.97],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const created = await orgStore.findById((res.json() as { org_id: string }).org_id);
+    expect(created.ok && created.value?.url).toBe('https://enable.example');
+    expect(created.ok && created.value?.locations).toEqual([
+      {
+        geo: { type: 'Point', coordinates: [77.59, 12.97] },
+        address: {
+          streetAddress: '1 Main Rd',
+          addressLocality: 'Bengaluru',
+          addressRegion: 'Karnataka',
+        },
+      },
+    ]);
+  });
+
+  it('retries a colliding random slug instead of failing (review A11)', async () => {
+    let calls = 0;
+    const realCreate = orgStore.create.bind(orgStore);
+    orgStore.create = async (input) => {
+      calls += 1;
+      if (calls === 1) return { ok: false, error: { code: 'DUPLICATE_SLUG', message: 'taken' } };
+      return realCreate(input);
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(201);
+    expect(calls).toBe(2);
   });
 
   it('rejects org registration when consent.value is false (400/validation)', async () => {
@@ -598,6 +722,15 @@ describe('aggregator-orgs routes', () => {
       async findBySlug(): Promise<OrgStoreResult<AggregatorOrg | null>> {
         return { ok: true, value: null };
       }
+      async findDefault(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+        return { ok: true, value: null };
+      }
+      async findRoot(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+        return { ok: true, value: null };
+      }
+      async ownerIsShared(): Promise<OrgStoreResult<boolean>> {
+        return { ok: true, value: false };
+      }
       async findByOwnerEmail(): Promise<OrgStoreResult<AggregatorOrg | null>> {
         return { ok: true, value: null };
       }
@@ -856,6 +989,12 @@ describe('aggregator-orgs routes', () => {
     });
     expect(res.statusCode).toBe(503);
     expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+    // Rolled back completely: no org row, no stranded Keycloak owner user, so
+    // the same owner can register again.
+    const org = await orgStore.findByOwnerEmail('stamp-fail@enable.org');
+    expect(org.ok && org.value).toBeNull();
+    const kc = await idp.findByEmail('stamp-fail@enable.org');
+    expect(kc.ok && kc.value).toBeNull();
   });
 
   it('401s GET /v1/orgs without a token', async () => {

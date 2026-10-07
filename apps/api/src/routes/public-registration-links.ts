@@ -559,7 +559,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 
       // 2a. Resolve the aggregator's signalstack org id BEFORE opening the
       // transaction. Anonymous submitters carry no token, so the value must
-      // come from `aggregators.signalstack_org_id` (written at approval time
+      // come from `users.signalstack_org_id` (written at approval time
       // or by the login-time backfill in `requireApproved`). A NULL here means
       // the aggregator never completed the signalstack handshake — fail fast
       // with 503 so the participant retries rather than landing a half-pushed
@@ -608,7 +608,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           .insert(linkSubmissions)
           .values({
             linkId: link.id,
-            aggregatorId: link.aggregatorId,
+            userId: link.aggregatorId,
             metadataSnapshot: link.context,
             submittedData: body,
             outcome,

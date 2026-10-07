@@ -21,7 +21,7 @@
  * values into the `requested` row — `itemCount` (a count, not a value) and
  * `purpose` (a metadata value, deliberately plumbed through). Everything else
  * on the row is either fixed deployment config (`piiFields`) or derived from
- * the verified token (`actorUserId`/`actorOrgId`/`actorAzp`). The realistic
+ * the verified token (`actorUserId`/`actorSignalstackOrgId`/`actorAzp`). The realistic
  * regression this test catches is a future change that widens that surface —
  * e.g. spreading `content` or the full `metadata` array into the audit input
  * instead of just the field names/counts/purpose it's contracted to carry.

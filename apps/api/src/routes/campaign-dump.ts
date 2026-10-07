@@ -17,7 +17,7 @@
  * (served or failed) additionally writes exactly one row to the append-only
  * `campaign_pii_audit` table (aggregator-dpg#617), best-effort via
  * `safeAudit` — that row, not this log line, is the durable/queryable trail
- * compliance reads. It carries no `actorOrgId`: the caller's token has no org
+ * compliance reads. It carries no `actorSignalstackOrgId`: the caller's token has no org
  * claim, and this route serves the whole network, so an org would misrepresent
  * the access. An outright denial (bad/missing/wrong-client token) is not
  * audited there, only logged — no row is possible without a verified actor.
@@ -266,7 +266,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
         );
 
         // Best-effort audit row (#617) — never blocks or fails the response;
-        // see `../services/campaign-audit/index.ts`. No `actorOrgId`: this
+        // see `../services/campaign-audit/index.ts`. No `actorSignalstackOrgId`: this
         // route is whole-network by design and the caller's token carries no
         // org claim, so one must never be fabricated here (see
         // `DumpAuditInput`).

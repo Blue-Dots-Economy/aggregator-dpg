@@ -16,104 +16,91 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  aggregators,
-  aggregatorOrgs,
+  users,
+  organisations,
   bulkUploads,
   registrationLinks,
   linkSubmissions,
-  aggregatorConsentRecord,
+  consentRecord,
   onboarding,
 } from '../schema.js';
 
-describe('aggregators columns', () => {
+describe('users columns', () => {
   it('identity + lifecycle columns', () => {
-    expect(aggregators.id.name).toBe('id');
-    expect(aggregators.id.primary).toBe(true);
-    expect(aggregators.id.hasDefault).toBe(true);
-    expect(aggregators.id.columnType).toBe('PgUUID');
+    expect(users.id.name).toBe('id');
+    expect(users.id.primary).toBe(true);
+    expect(users.id.hasDefault).toBe(true);
+    expect(users.id.columnType).toBe('PgUUID');
 
-    expect(aggregators.orgSlug.name).toBe('org_slug');
-    expect(aggregators.orgSlug.notNull).toBe(true);
-    expect(aggregators.orgSlug.isUnique).toBe(true);
+    expect(users.signalstackOrgSlug.name).toBe('signalstack_org_slug');
+    expect(users.signalstackOrgSlug.notNull).toBe(true);
+    expect(users.signalstackOrgSlug.isUnique).toBe(true);
 
-    expect(aggregators.actorType.name).toBe('actor_type');
-    expect(aggregators.actorType.notNull).toBe(true);
-    expect(aggregators.actorType.columnType).toBe('PgEnumColumn');
+    expect(users.signalstackOrgName.name).toBe('signalstack_org_name');
+    expect(users.signalstackOrgName.notNull).toBe(true);
 
-    expect(aggregators.name.name).toBe('name');
-    expect(aggregators.name.notNull).toBe(true);
+    // `serves` (0029, was `type`): the domain ids served; '{}' = every domain.
+    expect(users.serves.name).toBe('serves');
+    expect(users.serves.notNull).toBe(true);
+    expect(users.serves.hasDefault).toBe(true);
+    expect('type' in users).toBe(false);
+    expect('actorType' in users).toBe(false);
 
-    // `type` is nullable — enforced via a CHECK constraint in the migration,
-    // not at the Drizzle column level.
-    expect(aggregators.type.name).toBe('type');
-    expect(aggregators.type.notNull).toBe(false);
+    expect(users.status.name).toBe('status');
+    expect(users.status.notNull).toBe(true);
+    expect(users.status.hasDefault).toBe(true);
 
-    expect(aggregators.url.name).toBe('url');
-    expect(aggregators.url.notNull).toBe(false);
+    expect(users.createdBy.name).toBe('created_by');
+    expect(users.createdBy.notNull).toBe(true);
+    expect(users.updatedBy.name).toBe('updated_by');
+    expect(users.updatedBy.notNull).toBe(true);
 
-    expect(aggregators.status.name).toBe('status');
-    expect(aggregators.status.notNull).toBe(true);
-    expect(aggregators.status.hasDefault).toBe(true);
+    expect(users.createdAt.name).toBe('created_at');
+    expect(users.createdAt.notNull).toBe(true);
+    expect(users.createdAt.hasDefault).toBe(true);
+    expect(users.updatedAt.name).toBe('updated_at');
+    expect(users.updatedAt.notNull).toBe(true);
+    expect(users.updatedAt.hasDefault).toBe(true);
 
-    expect(aggregators.createdBy.name).toBe('created_by');
-    expect(aggregators.createdBy.notNull).toBe(true);
-    expect(aggregators.updatedBy.name).toBe('updated_by');
-    expect(aggregators.updatedBy.notNull).toBe(true);
-
-    expect(aggregators.createdAt.name).toBe('created_at');
-    expect(aggregators.createdAt.notNull).toBe(true);
-    expect(aggregators.createdAt.hasDefault).toBe(true);
-    expect(aggregators.updatedAt.name).toBe('updated_at');
-    expect(aggregators.updatedAt.notNull).toBe(true);
-    expect(aggregators.updatedAt.hasDefault).toBe(true);
-
-    expect(aggregators.signalstackOrgId.name).toBe('signalstack_org_id');
-    expect(aggregators.signalstackOrgId.notNull).toBe(false);
+    expect(users.signalstackOrgId.name).toBe('signalstack_org_id');
+    expect(users.signalstackOrgId.notNull).toBe(false);
   });
 
-  it('contact FK + contact_extra (migration 0025)', () => {
-    expect(aggregators.contactId.name).toBe('contact_id');
-    expect(aggregators.contactId.notNull).toBe(true);
-    expect(aggregators.contactExtra.name).toBe('contact_extra');
-    expect(aggregators.contactExtra.notNull).toBe(true);
-    expect(aggregators.contactExtra.hasDefault).toBe(true);
+  it('contact FK (0025) + alternate_phone (0029, was contact_extra)', () => {
+    expect(users.contactId.name).toBe('contact_id');
+    expect(users.contactId.notNull).toBe(true);
+    expect(users.alternatePhone.name).toBe('alternate_phone');
+    expect(users.alternatePhone.notNull).toBe(false);
+    expect('contactExtra' in users).toBe(false);
   });
 
   it('the legacy Beckn contact jsonb and generated lookup columns are gone (0026)', () => {
-    expect('contact' in aggregators).toBe(false);
-    expect('contactPhone' in aggregators).toBe(false);
-    expect('contactEmail' in aggregators).toBe(false);
+    expect('contact' in users).toBe(false);
+    expect('contactPhone' in users).toBe(false);
+    expect('contactEmail' in users).toBe(false);
   });
 
-  it('locations + consent jsonb columns', () => {
-    expect(aggregators.locations.name).toBe('locations');
-    expect(aggregators.locations.notNull).toBe(true);
-    expect(aggregators.locations.hasDefault).toBe(true);
-
-    expect(aggregators.consent.name).toBe('consent');
-    expect(aggregators.consent.notNull).toBe(true);
-    expect(aggregators.consent.hasDefault).toBe(false);
+  it('consent lives only in consent_record; invite_id replaces invite_email (0029)', () => {
+    expect('consent' in users).toBe(false);
+    expect('inviteEmail' in users).toBe(false);
+    expect(users.inviteId.name).toBe('invite_id');
+    expect(users.inviteId.notNull).toBe(false);
   });
 });
 
-describe('aggregator_orgs remaining columns (not covered by aggregator-orgs.schema.test.ts)', () => {
-  it('contact_id FK column (0025)', () => {
-    expect(aggregatorOrgs.contactId.name).toBe('contact_id');
-    expect(aggregatorOrgs.contactId.notNull).toBe(true);
-  });
-
+describe('organisations remaining columns (not covered by organisations.schema.test.ts)', () => {
   it('id is a defaulted primary key', () => {
-    expect(aggregatorOrgs.id.name).toBe('id');
-    expect(aggregatorOrgs.id.primary).toBe(true);
-    expect(aggregatorOrgs.id.hasDefault).toBe(true);
+    expect(organisations.id.name).toBe('id');
+    expect(organisations.id.primary).toBe(true);
+    expect(organisations.id.hasDefault).toBe(true);
   });
 });
 
 describe('bulk_uploads columns', () => {
   it('lifecycle + counters', () => {
     expect(bulkUploads.id.primary).toBe(true);
-    expect(bulkUploads.aggregatorId.name).toBe('aggregator_id');
-    expect(bulkUploads.aggregatorId.notNull).toBe(true);
+    expect(bulkUploads.userId.name).toBe('user_id');
+    expect(bulkUploads.userId.notNull).toBe(true);
 
     expect(bulkUploads.participantType.name).toBe('participant_type');
     expect(bulkUploads.participantType.notNull).toBe(true);
@@ -145,8 +132,8 @@ describe('bulk_uploads columns', () => {
 
 describe('registration_links remaining columns', () => {
   it('domain/context/status/expiry/audit columns', () => {
-    expect(registrationLinks.aggregatorId.name).toBe('aggregator_id');
-    expect(registrationLinks.aggregatorId.notNull).toBe(true);
+    expect(registrationLinks.userId.name).toBe('user_id');
+    expect(registrationLinks.userId.notNull).toBe(true);
 
     expect(registrationLinks.slug.name).toBe('slug');
     expect(registrationLinks.slug.notNull).toBe(true);
@@ -178,8 +165,8 @@ describe('link_submissions columns', () => {
     expect(linkSubmissions.linkId.name).toBe('link_id');
     expect(linkSubmissions.linkId.notNull).toBe(true);
 
-    expect(linkSubmissions.aggregatorId.name).toBe('aggregator_id');
-    expect(linkSubmissions.aggregatorId.notNull).toBe(true);
+    expect(linkSubmissions.userId.name).toBe('user_id');
+    expect(linkSubmissions.userId.notNull).toBe(true);
 
     expect(linkSubmissions.metadataSnapshot.name).toBe('metadata_snapshot');
     expect(linkSubmissions.metadataSnapshot.notNull).toBe(true);
@@ -199,50 +186,58 @@ describe('link_submissions columns', () => {
   });
 });
 
-describe('aggregator_consent_record columns', () => {
+describe('consent_record columns', () => {
   it('polymorphic subject + versioned consent columns', () => {
-    expect(aggregatorConsentRecord.id.primary).toBe(true);
+    expect(consentRecord.id.primary).toBe(true);
 
-    expect(aggregatorConsentRecord.subjectType.name).toBe('subject_type');
-    expect(aggregatorConsentRecord.subjectType.notNull).toBe(true);
+    expect(consentRecord.subjectType.name).toBe('subject_type');
+    expect(consentRecord.subjectType.notNull).toBe(true);
 
-    expect(aggregatorConsentRecord.subjectId.name).toBe('subject_id');
-    expect(aggregatorConsentRecord.subjectId.notNull).toBe(true);
+    expect(consentRecord.subjectId.name).toBe('subject_id');
+    expect(consentRecord.subjectId.notNull).toBe(true);
 
-    expect(aggregatorConsentRecord.termsVersion.name).toBe('terms_version');
-    expect(aggregatorConsentRecord.termsVersion.notNull).toBe(true);
-    expect(aggregatorConsentRecord.termsVersion.columnType).toBe('PgInteger');
+    expect(consentRecord.termsVersion.name).toBe('terms_version');
+    expect(consentRecord.termsVersion.notNull).toBe(true);
+    expect(consentRecord.termsVersion.columnType).toBe('PgInteger');
 
-    expect(aggregatorConsentRecord.privacyVersion.name).toBe('privacy_version');
-    expect(aggregatorConsentRecord.privacyVersion.notNull).toBe(true);
+    expect(consentRecord.privacyVersion.name).toBe('privacy_version');
+    expect(consentRecord.privacyVersion.notNull).toBe(true);
 
-    expect(aggregatorConsentRecord.network.name).toBe('network');
-    expect(aggregatorConsentRecord.network.notNull).toBe(true);
+    expect(consentRecord.network.name).toBe('network');
+    expect(consentRecord.network.notNull).toBe(true);
 
     // Nullable — the network-default registration has no brand override.
-    expect(aggregatorConsentRecord.brand.name).toBe('brand');
-    expect(aggregatorConsentRecord.brand.notNull).toBe(false);
+    expect(consentRecord.brand.name).toBe('brand');
+    expect(consentRecord.brand.notNull).toBe(false);
 
-    expect(aggregatorConsentRecord.source.name).toBe('source');
-    expect(aggregatorConsentRecord.source.notNull).toBe(true);
+    expect(consentRecord.source.name).toBe('source');
+    expect(consentRecord.source.notNull).toBe(true);
 
     // Server-stamped at accept time — no DB default, the app supplies it.
-    expect(aggregatorConsentRecord.acceptedAt.name).toBe('accepted_at');
-    expect(aggregatorConsentRecord.acceptedAt.notNull).toBe(true);
-    expect(aggregatorConsentRecord.acceptedAt.hasDefault).toBe(false);
+    expect(consentRecord.acceptedAt.name).toBe('accepted_at');
+    expect(consentRecord.acceptedAt.notNull).toBe(true);
+    expect(consentRecord.acceptedAt.hasDefault).toBe(false);
 
-    expect(aggregatorConsentRecord.createdAt.name).toBe('created_at');
-    expect(aggregatorConsentRecord.createdAt.hasDefault).toBe(true);
+    // Typed links (0029): NULL once the subject is deleted.
+    expect(consentRecord.userId.name).toBe('user_id');
+    expect(consentRecord.userId.notNull).toBe(false);
+    expect(consentRecord.orgId.name).toBe('org_id');
+    expect(consentRecord.orgId.notNull).toBe(false);
+    expect(consentRecord.validTill.name).toBe('valid_till');
+    expect(consentRecord.validTill.notNull).toBe(false);
+
+    expect(consentRecord.createdAt.name).toBe('created_at');
+    expect(consentRecord.createdAt.hasDefault).toBe(true);
   });
 });
 
 describe('onboarding columns', () => {
   it('period window + rollup counters', () => {
-    expect(onboarding.aggregatorId.name).toBe('aggregator_id');
-    expect(onboarding.aggregatorId.notNull).toBe(true);
+    expect(onboarding.userId.name).toBe('user_id');
+    expect(onboarding.userId.notNull).toBe(true);
 
-    expect(onboarding.orgSlug.name).toBe('org_slug');
-    expect(onboarding.orgSlug.notNull).toBe(true);
+    expect(onboarding.signalstackOrgSlug.name).toBe('signalstack_org_slug'); // renamed in 0029
+    expect(onboarding.signalstackOrgSlug.notNull).toBe(true);
 
     expect(onboarding.source.name).toBe('source');
     expect(onboarding.source.notNull).toBe(true);

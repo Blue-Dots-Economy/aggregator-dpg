@@ -16,6 +16,7 @@ import { getSignalStackWriter } from '../signalstack.js';
 import { getNetworkConfig } from '../network-config.js';
 import { logger } from '../../logger.js';
 import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
+import { recordLoginIdentity } from '../identity-store/record.js';
 
 let cachedJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 let cachedJwksUrl: string | null = null;
@@ -223,6 +224,13 @@ export async function requireApproved(req: FastifyRequest): Promise<AuthResult> 
   if (!result.context.signalstackOrgId) {
     await backfillSignalstackOrgId(result.context);
   }
+  // Record the coordinator's IdP login on its account (0027): once per process
+  // per user, best-effort, never blocks the request.
+  await recordLoginIdentity(
+    result.context.aggregatorId,
+    result.context.userId,
+    'auth.recordIdentity',
+  );
   return result;
 }
 

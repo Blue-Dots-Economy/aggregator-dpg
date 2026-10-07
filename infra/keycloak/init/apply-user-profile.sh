@@ -143,7 +143,7 @@ echo "[kc-init] email/firstName/lastName optional — phone-only login is viable
 #
 # realm.json is only consulted on first import, so these are re-applied
 # idempotently here for realms that already exist in postgres. Both are
-# required before ORG_HIERARCHY_ENABLED=true, and harmless when it is off:
+# required on every instance (organisations are always on since migration 0028):
 #   - org_owner realm role: assigned to the org-owner user at org approval.
 #   - aggregator-api service account needs realm-management:manage-realm
 #     (in addition to manage-users) to create/manage the org's KC group.

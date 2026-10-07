@@ -812,7 +812,7 @@
         "tags": [
           "aggregator-orgs"
         ],
-        "description": "Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link. Only registered when ORG_HIERARCHY_ENABLED=true.",
+        "description": "Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1270,7 +1270,7 @@
         "tags": [
           "aggregator-orgs"
         ],
-        "description": "Returns active orgs only (plain SQL, no Keycloak admin API). Only registered when ORG_HIERARCHY_ENABLED=true.",
+        "description": "Returns active aggregator orgs sorted by name (plain SQL, no Keycloak admin API). The Default org is listed only while it is the only active org.",
         "responses": {
           "200": {
             "description": "Default Response",
@@ -1473,7 +1473,7 @@
         "tags": [
           "aggregator-orgs"
         ],
-        "description": "HTML page reached from the network-admin notification email. All responses are text/html. Only registered when ORG_HIERARCHY_ENABLED=true.",
+        "description": "HTML page reached from the network-admin notification email. All responses are text/html.",
         "parameters": [
           {
             "schema": {
@@ -1513,7 +1513,7 @@
         "tags": [
           "aggregator-orgs"
         ],
-        "description": "Browser form flow; every response is text/html. approve = enable owner + org_owner role + group + atomic status CAS; reject = atomic status CAS to inactive. Only registered when ORG_HIERARCHY_ENABLED=true.",
+        "description": "Browser form flow; every response is text/html. approve = enable owner + org_owner role + group + atomic status CAS; reject = atomic status CAS to inactive.",
         "parameters": [
           {
             "schema": {
@@ -1537,7 +1537,7 @@
         "tags": [
           "aggregator-orgs"
         ],
-        "description": "Reached from the \"Regenerate & review\" button on the expired-link page. Accepts an expired-but-signature-valid token as proof the admin held a legitimate link, mints a fresh decision token, and renders the approve/reject confirm page inline (no email). Only registered when ORG_HIERARCHY_ENABLED=true.",
+        "description": "Reached from the \"Regenerate & review\" button on the expired-link page. Accepts an expired-but-signature-valid token as proof the admin held a legitimate link, mints a fresh decision token, and renders the approve/reject confirm page inline (no email).",
         "parameters": [
           {
             "schema": {
@@ -1561,7 +1561,7 @@
         "tags": [
           "invites"
         ],
-        "description": "Authed by the owner grant token. A valid grant mints/refreshes one 14-day invite per recipient and emails each. An expired grant mints nothing and re-mails a fresh grant to the registered owner (recovery). Per-org rate limited. Only registered when ORG_HIERARCHY_ENABLED=true.",
+        "description": "Authed by the owner grant token. A valid grant mints/refreshes one 14-day invite per recipient and emails each. An expired grant mints nothing and re-mails a fresh grant to the registered owner (recovery). Per-org rate limited.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2114,7 +2114,8 @@
                         "given_at",
                         "valid_till"
                       ],
-                      "additionalProperties": false
+                      "additionalProperties": false,
+                      "nullable": true
                     },
                     "status": {
                       "type": "string"
@@ -2400,7 +2401,7 @@
         "tags": [
           "aggregator-profile"
         ],
-        "description": "Partial update of the caller aggregator (name / url / contact / locations). Contact phone + email are mirrored to Keycloak before the DB write. `consent` is read-only (recorded at registration) and is rejected here.",
+        "description": "Partial update of the caller aggregator (name / contact). Consent is read-only after registration: a body carrying `consent` is refused with 400 SCHEMA_VALIDATION. Contact phone + email are mirrored to Keycloak before the DB write. Org details (url, locations, contact.company, contact.gstNumber) belong to the coordinator's organisation and are refused with 409 ORG_DETAILS_READ_ONLY.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2704,7 +2705,8 @@
                         "given_at",
                         "valid_till"
                       ],
-                      "additionalProperties": false
+                      "additionalProperties": false,
+                      "nullable": true
                     },
                     "status": {
                       "type": "string"

@@ -51,10 +51,10 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
   const found = await getDb()
     .select({
       upload: schema.bulkUploads,
-      orgSlug: schema.aggregators.orgSlug,
+      orgSlug: schema.users.signalstackOrgSlug,
     })
     .from(schema.bulkUploads)
-    .innerJoin(schema.aggregators, eq(schema.bulkUploads.aggregatorId, schema.aggregators.id))
+    .innerJoin(schema.users, eq(schema.bulkUploads.userId, schema.users.id))
     .where(eq(schema.bulkUploads.id, job.uploadId))
     .limit(1);
   const row = found[0];
@@ -158,8 +158,8 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
       .limit(1);
     if (existing.length === 0) {
       await tx.insert(schema.onboarding).values({
-        aggregatorId: upload.aggregatorId,
-        orgSlug,
+        userId: upload.userId,
+        signalstackOrgSlug: orgSlug,
         source: 'bulk',
         batchId: job.uploadId,
         linkId: null,
@@ -199,7 +199,8 @@ async function readErrors(redis: ReturnType<typeof getRedis>, key: string): Prom
   const errors: ErrorRecord[] = [];
   let cursor = '0';
   do {
-    const [next, fields] = (await redis.hscan(key, cursor, 'COUNT', 200)) as [string, string[]];
+    // Each HSCAN needs the cursor the previous one returned: sequential by design.
+    const [next, fields] = (await redis.hscan(key, cursor, 'COUNT', 200)) as [string, string[]]; // NOSONAR typescript:S9382
     for (let i = 1; i < fields.length; i += 2) {
       const raw = fields[i];
       if (!raw) continue;

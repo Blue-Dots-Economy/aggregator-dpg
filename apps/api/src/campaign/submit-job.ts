@@ -167,7 +167,7 @@ export async function submitCampaignJob(
           correlationId: created.value.job.id,
           channel: opts.channel,
           actorUserId: auth.userId,
-          actorOrgId: orgId,
+          actorSignalstackOrgId: orgId,
           ...(auth.azp ? { actorAzp: auth.azp } : {}),
           piiFields: opts.piiFields(content),
           itemCount: itemIds.length,

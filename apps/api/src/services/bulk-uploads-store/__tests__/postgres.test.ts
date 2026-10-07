@@ -117,7 +117,7 @@ describe('PostgresBulkUploadsStore.create', () => {
     if (!result.ok) return;
     expect(result.value.id).toBe('upload-9');
     expect(callArgs(captured, 'values')?.[0]).toMatchObject({
-      aggregatorId: 'agg-1',
+      userId: 'agg-1',
       participantType: 'seeker',
       s3Key: 'uploads/upload-1.csv',
       schemaId: 'seeker_profile',

@@ -54,12 +54,12 @@ export class ConsentLedgerFake extends InMemoryConsentLedger {
  *
  * Defaults:
  *   - `id: 'consent-default-id'`
- *   - `subjectType: 'aggregator'`
+ *   - `subjectType: 'user'`
  *   - `subjectId: '00000000-0000-0000-0000-000000000001'`
  *   - `termsVersion: 1`, `privacyVersion: 1`
  *   - `network: 'blue_dot'`, `brand: null`
  *   - `source: 'registration'`
- *   - `acceptedAt` and `createdAt`: `2026-01-01T00:00:00.000Z`
+ *   - `acceptedAt` and `createdAt`: `2026-01-01T00:00:00.000Z`; `validTill: null`
  *
  * @param overrides - Partial fields to apply on top of the defaults.
  * @returns A complete `ConsentRecord` ready to pass to `seed()` or assertions.
@@ -67,7 +67,7 @@ export class ConsentLedgerFake extends InMemoryConsentLedger {
 export function buildConsentRecord(overrides: Partial<ConsentRecord> = {}): ConsentRecord {
   return {
     id: '00000000-0000-0000-0000-000000000099',
-    subjectType: 'aggregator',
+    subjectType: 'user',
     subjectId: '00000000-0000-0000-0000-000000000001',
     termsVersion: 1,
     privacyVersion: 1,
@@ -75,6 +75,7 @@ export function buildConsentRecord(overrides: Partial<ConsentRecord> = {}): Cons
     brand: null,
     source: 'registration',
     acceptedAt: FIXED_NOW,
+    validTill: null,
     createdAt: FIXED_NOW,
     ...overrides,
   };

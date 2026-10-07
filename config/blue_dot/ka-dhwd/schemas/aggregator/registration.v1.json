@@ -33,13 +33,12 @@
       "format": "uri",
       "maxLength": 2048,
       "examples": ["https://skillbridge.in"],
-      "x-updatable": true
+      "x-org-detail": true
     },
     "locations": {
       "type": "array",
       "title": "Location",
       "maxItems": 1,
-      "x-updatable": true,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -85,7 +84,8 @@
             }
           }
         }
-      }
+      },
+      "x-org-detail": true
     },
     "contact": {
       "type": "object",

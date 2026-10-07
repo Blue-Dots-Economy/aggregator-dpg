@@ -224,11 +224,9 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     // errors.csv instead of a generic status-code string.
     // The per-user profile cap (signals #349) is a user/data condition, not a
     // system fault — categorise it distinctly so errors.csv reads clearly.
-    const category: ErrorCategory = push.ownedElsewhere
-      ? 'owned_elsewhere'
-      : push.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED'
-        ? 'limit_reached'
-        : 'system_error';
+    let category: ErrorCategory = 'system_error';
+    if (push.ownedElsewhere) category = 'owned_elsewhere';
+    else if (push.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED') category = 'limit_reached';
     outcome = {
       outcome: 'failed',
       category,
@@ -372,9 +370,9 @@ export async function pushToSignalStack(
   // so the `signalstack_org_id` claim is unreachable here — `aggregators`
   // is the only authoritative source available offline.
   const orgIdRow = await getDb()
-    .select({ signalstackOrgId: schema.aggregators.signalstackOrgId })
-    .from(schema.aggregators)
-    .where(eq(schema.aggregators.id, job.aggregatorId))
+    .select({ signalstackOrgId: schema.users.signalstackOrgId })
+    .from(schema.users)
+    .where(eq(schema.users.id, job.aggregatorId))
     .limit(1);
   const signalstackOrgId = orgIdRow[0]?.signalstackOrgId ?? null;
   if (!signalstackOrgId) {

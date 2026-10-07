@@ -4,7 +4,6 @@
  * Anonymous browser; the API still needs a Bearer token, so this attaches a
  * Keycloak service-account token and forwards to `/v1/orgs/create`. Upstream
  * errors (`ORG_SLUG_TAKEN`, `OWNER_ALREADY_REGISTERED`, …) pass through verbatim.
- * Only meaningful when the API runs with `ORG_HIERARCHY_ENABLED=true`.
  *
  * POST /api/org/register
  */
