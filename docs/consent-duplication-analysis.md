@@ -1,5 +1,7 @@
 # Consent storage: `aggregators.consent` vs `aggregator_consent_record`
 
+> **Resolved by migration 0029 (user & org refactor, Phase 4).** The ledger, renamed `consent_record`, is now the only home of consent: `users.consent` is dropped, the profile composes `consent` from the newest registration row, registration writes the row in the same transaction as the account, and a trigger keeps the ledger append-only. The analysis below is kept as the record of why. See `docs/plans/cleanup-phase-4-implementation.md`.
+
 Analysis of whether coordinator (aggregator) consent is stored twice, and what to
 do about it. Checked against the code on `refactor/contact-phase1` (PR #825) and
 the local `aggregator` database on 2026-10-01.

@@ -30,7 +30,7 @@
 **Not in this phase:**
 
 - `organisations`, `org_id`, the hierarchy flag, moving org details: Phase 3.
-- Consent, `agg_for`, `actor_type`, `contact_extra`, `invite_id`, the enum rename: Phase 4.
+- Consent, `serves`, `actor_type`, `contact_extra`, `invite_id`, the enum rename: Phase 4.
 - The operator tool `scripts/user-org-migrate.sh` is its own PR in the train (§7.3). Phase 2 ships the SQL it runs and the boot guard it satisfies.
 
 ## 1. Migration `0027_users.sql`

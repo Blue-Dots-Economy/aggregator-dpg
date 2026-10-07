@@ -76,17 +76,17 @@ users (                                          -- was aggregators (renamed, id
   signalstack_org_slug        text,                       -- was org_slug; immutable; public-link URL segment
   signalstack_org_name        text,                       -- was name; NULL = the org's name (M4)
   signalstack_org_id text,
-  agg_for            text[],                     -- was type (design doc: Coordinator.agg_for)
+  serves            text[],                     -- was type (design doc: Coordinator.agg_for; renamed `serves`, D4-1)
   profile            jsonb,                      -- instance-specific registration fields (0018 rule: no field that has a column)
   legacy_org_details jsonb,                     -- coordinator values its org did not adopt (§4.2; review A20)
   profile_ref        text,
   CHECK (CASE user_type
            WHEN 'coordinator' THEN org_id IS NOT NULL AND status IS NOT NULL AND signalstack_org_slug IS NOT NULL
-                                   AND agg_for IS NOT NULL AND profile IS NOT NULL
+                                   AND serves IS NOT NULL AND profile IS NOT NULL
            ELSE org_id IS NULL AND status IS NULL AND rejected_at IS NULL AND invite_id IS NULL
                 AND signalstack_org_slug IS NULL AND signalstack_org_name IS NULL AND signalstack_org_id IS NULL
                 AND legacy_org_details IS NULL
-                AND agg_for IS NULL AND profile IS NULL AND profile_ref IS NULL
+                AND serves IS NULL AND profile IS NULL AND profile_ref IS NULL
          END)
 )
 UNIQUE (contact_id, user_type)                   -- one account per person per role
@@ -165,7 +165,7 @@ consent_record (                                 -- was aggregator_consent_recor
 | `signalstack_org_id`, `profile`, `profile_ref`                         | stay                                                                                                                                                                                           | 2     |
 | `parent_org_id`                                                        | `users.org_id` (NULL → the Default org)                                                                                                                                                        | 3     |
 | `url`, `locations`, `contact_extra.company`, `contact_extra.gstNumber` | **`organisations.url` / `locations` / `legal_name` / `gst_number`** by the adoption rule (§4.1); values not adopted are kept in `users.legacy_org_details` (§4.2)                              | 3     |
-| `type`                                                                 | `users.agg_for` (`ARRAY[type]`)                                                                                                                                                                | 4     |
+| `type`                                                                 | `users.serves` (`ARRAY[type]`)                                                                                                                                                                 | 4     |
 | `actor_type`                                                           | dropped (always `'aggregator'`; `type` holds the same value)                                                                                                                                   | 4     |
 | `contact_extra.alternatePhone`                                         | `users.alternate_phone`; then `contact_extra` is dropped                                                                                                                                       | 4     |
 | `consent`                                                              | dropped; the ledger is the record                                                                                                                                                              | 4     |
@@ -223,15 +223,15 @@ There is no archive (G18), so a coordinator value that was **not** adopted is ke
 
 All phases land on `feature` as separate PRs and ship in **one release train** (G15). Every existing instance goes from migration 0022 to the end in one window (`existing-instance-migration.md`).
 
-| Phase | Name                | Content                                                                                                                                                                                                                                                 | Migration  | Plan                                   |
-| ----- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | -------------------------------------- |
-| 1     | `contact`           | One record per person.                                                                                                                                                                                                                                  | 0025, 0026 | shipped (#825)                         |
-| fix   | consent PATCH       | Remove `consent` from the profile PATCH body. Own PR, before the train.                                                                                                                                                                                 | none       | `docs/consent-duplication-analysis.md` |
-| 2     | **`users`**         | Rename `aggregators` → `users`; `user_type`; identity-only admin rows for org owners; `user_identities`; tenant `aggregator_id` → `user_id`; `contact_gc` on `users`; the org owner via `owner_user_id`. Replaces the `app_user` design.                | 0027       | `users-phase-2.md`                     |
-| 3     | **`organisations`** | Rename `aggregator_orgs` → `organisations`; `org_type`, NF root (+ NF admin), Default org, `parent_id`, `org_owner`; `users.org_id`; the hierarchy flag removed; org details moved (§4); tenant `org_id`.                                               | 0028       | `organisation-phase-3.md`              |
-| 4     | **cleanup**         | Consent → ledger only (`consent_record`, typed FKs, `valid_till`); `type` → `agg_for`; drop `actor_type`; `alternate_phone`; drop `contact_extra`; `invite_email` → `invite_id`; enum `registration_status`; the remaining `aggregator_*` object names. |            | 0029                                   | `cleanup-phase-4.md` |
-| 5     | APIs                | `/v1/org/*`, `/v1/user/*`, admin and NF-admin login, owner console (org detail edits live here).                                                                                                                                                        | —          | `apis-phase-5.md`                      |
-| 6     | cross-cutting       | PII encryption, agreements, RBAC.                                                                                                                                                                                                                       | —          | `cross-cutting-phase-6.md`             |
+| Phase | Name                | Content                                                                                                                                                                                                                                                | Migration  | Plan                                   |
+| ----- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- | -------------------------------------- |
+| 1     | `contact`           | One record per person.                                                                                                                                                                                                                                 | 0025, 0026 | shipped (#825)                         |
+| fix   | consent PATCH       | Remove `consent` from the profile PATCH body. Own PR, before the train.                                                                                                                                                                                | none       | `docs/consent-duplication-analysis.md` |
+| 2     | **`users`**         | Rename `aggregators` → `users`; `user_type`; identity-only admin rows for org owners; `user_identities`; tenant `aggregator_id` → `user_id`; `contact_gc` on `users`; the org owner via `owner_user_id`. Replaces the `app_user` design.               | 0027       | `users-phase-2.md`                     |
+| 3     | **`organisations`** | Rename `aggregator_orgs` → `organisations`; `org_type`, NF root (+ NF admin), Default org, `parent_id`, `org_owner`; `users.org_id`; the hierarchy flag removed; org details moved (§4); tenant `org_id`.                                              | 0028       | `organisation-phase-3.md`              |
+| 4     | **cleanup**         | Consent → ledger only (`consent_record`, typed FKs, `valid_till`); `type` → `serves`; drop `actor_type`; `alternate_phone`; drop `contact_extra`; `invite_email` → `invite_id`; enum `registration_status`; the remaining `aggregator_*` object names. |            | 0029                                   | `cleanup-phase-4.md` |
+| 5     | APIs                | `/v1/org/*`, `/v1/user/*`, admin and NF-admin login, owner console (org detail edits live here).                                                                                                                                                       | —          | `apis-phase-5.md`                      |
+| 6     | cross-cutting       | PII encryption, agreements, RBAC.                                                                                                                                                                                                                      | —          | `cross-cutting-phase-6.md`             |
 
 **Why this order.** `organisations.org_owner` and the NF admin need `users` rows, so users come first. Org details can move only once `users.org_id` exists. Cleanup comes last because it depends on both.
 

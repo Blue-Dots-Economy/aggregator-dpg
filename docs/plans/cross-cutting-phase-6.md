@@ -197,7 +197,7 @@ agreement_acceptance (id uuid PK, agreement_id uuid, version int, subject_type t
 
 - **Seeding:** at boot, the API upserts `agreement` + `agreement_version` from config (idempotent; a version already present with different content → `ConfigError`, because published versions are immutable).
 - **`aggregator_consent_record` is frozen, not migrated.** It is append-only and must not be rewritten. A view `agreement_acceptance_all` unions it (each legacy row split into a terms row and a privacy row, subjects mapped through `aggregators.user_id` / `aggregator_orgs.owner_user_id` / the Phase 3 org id) with the new table.
-- **Which agreements apply to a subject** = `applies_to` matches the user's `user_type`/`agg_for` and the org's `org_type`, **plus** any `agreement_link` rows for the user or their org.
+- **Which agreements apply to a subject** = `applies_to` matches the user's `user_type`/`serves` and the org's `org_type`, **plus** any `agreement_link` rows for the user or their org.
 
 ### 5b.3 Ledger contract
 
@@ -297,7 +297,7 @@ defaults:                        # user_type (+ org_type for admins) → sets
 - Keep the per-file wrapper pattern (`apps/api/CLAUDE.md:5-7`). Each wrapper gets a second argument: `requireAuth(req, 'bulk_upload.create')`. In the existing files that is a one-line change per handler; the Phase 4 `policy.ts` bodies become `hasPermission(actor, perm) && inScope(actor, target)`.
 - Every route declares `config: { permission: '<perm>' }` or `config: { permission: 'public' | 'service' }`. The Phase 4 route-guard test extends to **all** routes: a route without a declaration fails CI. This closes the "nothing prevents a new route from omitting the call" gap for the whole API, not just the new routes.
 - Failure → `403 FORBIDDEN` with `fields.permission` (the name only).
-- Data-scope checks (`enforceAggregatorType`, the token↔`parent_org_id` binding in `aggregator-approvals.ts`) stay as they are: they are scope, not permission. They move to `agg_for` in a later step once `aggregators.type` is retired.
+- Data-scope checks (`enforceAggregatorType`, the token↔`parent_org_id` binding in `aggregator-approvals.ts`) stay as they are: they are scope, not permission. They move to `serves` in a later step once `aggregators.type` is retired.
 
 ### 5c.4 Token claims or DB lookup
 

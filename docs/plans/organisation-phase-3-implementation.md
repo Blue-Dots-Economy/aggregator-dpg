@@ -30,7 +30,7 @@
 
 **Not in this phase:**
 
-- Consent, `agg_for`, `actor_type`, `alternate_phone`, `contact_extra` removal, `invite_id`, the enum rename, the remaining `aggregator_*` TypeScript names: Phase 4.
+- Consent, `serves`, `actor_type`, `alternate_phone`, `contact_extra` removal, `invite_id`, the enum rename, the remaining `aggregator_*` TypeScript names: Phase 4.
 - Org editing (`/v1/org/*`), network-admin login, the owner console: Phase 5.
 - `known_as` and the optional `limits` config: deferred to Phase 5, where they are first used (§9, D3-9).
 - The operator tool `scripts/user-org-migrate.sh`: its own PR in the train.

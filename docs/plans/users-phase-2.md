@@ -20,7 +20,7 @@
 
 **Unchanged:** the API contract, tokens, Keycloak, Signals. One person may hold both roles (a coordinator and an org owner): one `contact`, two `users` rows (`UNIQUE (contact_id, user_type)`), as Phase 1 allowed.
 
-**Not in this phase:** `organisations`, `org_id`, moving org details (Phase 3); consent, `agg_for`, `actor_type`, `contact_extra` (Phase 4).
+**Not in this phase:** `organisations`, `org_id`, moving org details (Phase 3); consent, `serves`, `actor_type`, `contact_extra` (Phase 4).
 
 ## 2. Schema after Phase 2
 
