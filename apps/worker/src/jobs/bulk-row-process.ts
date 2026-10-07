@@ -733,7 +733,7 @@ function isConditionalRequired(e: SchemaValidationError): boolean {
  *
  * Required-field gaps are NOT failures at this layer — signals accepts partial
  * `item_state` and classifies the item as `draft`. A conditional requirement is
- * the exception: `if` category is RCI `then` two more fields are required, and
+ * the exception: `if` category is `licensed` `then` two more fields are required, and
  * Signals rejects that row outright rather than drafting it, so letting it
  * through would only come back as an opaque upstream 400 categorised as a
  * system error. Ajv reports it as one `required` error per missing field (its

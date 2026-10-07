@@ -625,12 +625,12 @@ describe('schema validation failure branches (account_and_profile)', () => {
     expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
   });
 
-  describe('conditional requirement (if/then), e.g. category RCI → crr_number + professional_type', () => {
+  describe('conditional requirement (if/then), e.g. category licensed → licence_number + licence_type', () => {
     // Signals relaxes only TOP-LEVEL required fields (a partial profile lands
     // as a draft); a requirement inside an if/then branch it enforces. So the
     // link route must block it too — naming the missing fields, never Ajv's
     // bare `if` summary ("must match \"then\" schema").
-    const withRciSchema = () => {
+    const withConditionalSchema = () => {
       const cfg = buildBlueDotConfig();
       _setNetworkConfig({
         ...cfg,
@@ -643,15 +643,15 @@ describe('schema validation failure branches (account_and_profile)', () => {
               properties: {
                 name: { type: 'string' },
                 phone: { type: 'string' },
-                category: { type: 'string', enum: ['NGO', 'RCI'] },
-                crr_number: { type: 'string', pattern: '^$|^[0-9]+$' },
-                professional_type: { type: 'string', enum: ['Special Educator', 'Other'] },
+                category: { type: 'string', enum: ['individual', 'licensed'] },
+                licence_number: { type: 'string', pattern: '^$|^[0-9]+$' },
+                licence_type: { type: 'string', enum: ['Clinical', 'Other'] },
               },
               required: ['name', 'category'],
               allOf: [
                 {
-                  if: { properties: { category: { const: 'RCI' } }, required: ['category'] },
-                  then: { required: ['crr_number', 'professional_type'] },
+                  if: { properties: { category: { const: 'licensed' } }, required: ['category'] },
+                  then: { required: ['licence_number', 'licence_type'] },
                 },
               ],
             },
@@ -675,29 +675,29 @@ describe('schema validation failure branches (account_and_profile)', () => {
       });
 
     it('400s naming each conditionally required field that is missing', async () => {
-      withRciSchema();
-      const r = await submit({ category: 'RCI' });
+      withConditionalSchema();
+      const r = await submit({ category: 'licensed' });
       expect(r.statusCode).toBe(400);
       const issues = r.json().error.fields.issues as Array<{
         keyword: string;
         params?: { missingProperty?: string };
       }>;
       expect(issues.map((i) => i.params?.missingProperty).sort()).toEqual([
-        'crr_number',
-        'professional_type',
+        'licence_number',
+        'licence_type',
       ]);
       expect(issues.some((i) => i.keyword === 'if')).toBe(false);
     });
 
     it('does not 400 when the conditional fields are filled, or the condition does not apply', async () => {
-      withRciSchema();
+      withConditionalSchema();
       const filled = await submit({
-        category: 'RCI',
-        crr_number: '123',
-        professional_type: 'Other',
+        category: 'licensed',
+        licence_number: '123',
+        licence_type: 'Other',
       });
       expect(filled.json().error?.code).not.toBe('SCHEMA_VALIDATION');
-      const ngo = await submit({ category: 'NGO' });
+      const ngo = await submit({ category: 'individual' });
       expect(ngo.json().error?.code).not.toBe('SCHEMA_VALIDATION');
     });
   });

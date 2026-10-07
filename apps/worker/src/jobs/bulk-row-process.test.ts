@@ -105,7 +105,7 @@ describe('blockingValidationReasons', () => {
     expect(reasons[0]).toContain('must be number');
   });
 
-  // A conditional requirement (`allOf: [{ if: category === 'RCI', then:
+  // A conditional requirement (`allOf: [{ if: category === 'licensed', then:
   // { required: [...] } }]`) makes Ajv report each missing field as `required`
   // PLUS one `if` error ("must match \"then\" schema") that only summarises
   // them. Unlike a plain required gap, Signals never accepts it as a draft, so
@@ -126,31 +126,31 @@ describe('blockingValidationReasons', () => {
   it('fails a conditional requirement, naming each missing field, without the if summary', () => {
     expect(
       blockingValidationReasons([
-        conditionalRequired('crr_number'),
-        conditionalRequired('professional_type'),
+        conditionalRequired('licence_number'),
+        conditionalRequired('licence_type'),
         ifErr,
       ]),
     ).toEqual([
-      "/crr_number: must have required property 'crr_number'",
-      "/professional_type: must have required property 'professional_type'",
+      "/licence_number: must have required property 'licence_number'",
+      "/licence_type: must have required property 'licence_type'",
     ]);
   });
 
   it('still treats a top-level required gap as advisory next to a conditional one', () => {
-    expect(blockingValidationReasons([required, conditionalRequired('crr_number'), ifErr])).toEqual(
-      ["/crr_number: must have required property 'crr_number'"],
-    );
+    expect(
+      blockingValidationReasons([required, conditionalRequired('licence_number'), ifErr]),
+    ).toEqual(["/licence_number: must have required property 'licence_number'"]);
   });
 
   it('still fails a content error inside a conditional branch, without the if summary', () => {
-    const crrPattern: SchemaValidationError = {
+    const licencePattern: SchemaValidationError = {
       keyword: 'pattern',
-      instancePath: '/crr_number',
+      instancePath: '/licence_number',
       message: 'must match pattern "^$|^[0-9]+$"',
     };
-    const reasons = blockingValidationReasons([crrPattern, ifErr]);
+    const reasons = blockingValidationReasons([licencePattern, ifErr]);
     expect(reasons).toHaveLength(1);
-    expect(reasons[0]).toContain('/crr_number');
+    expect(reasons[0]).toContain('/licence_number');
     expect(reasons.join(' ')).not.toContain('"then"');
   });
 

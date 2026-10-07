@@ -538,7 +538,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           // value constraints would green-light data signals later rejects.
           //
           // Two refinements for a conditional requirement (`allOf: [{ if:
-          // category is RCI, then: { required: [crr_number, professional_type] } }]`):
+          // category is 'licensed', then: { required: [licence_number, licence_type] } }]`):
           // Signals relaxes only TOP-LEVEL required fields, so a `required`
           // error from inside a `then` branch is enforced here too — it names
           // the missing field. Ajv's accompanying `if` error ("must match
