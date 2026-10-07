@@ -104,7 +104,7 @@ flowchart TB
     SIG["Signals API<br/>unchanged in v1"]
     DB[("Aggregator DB<br/>users · orgs · grants")]
     AOPA["OPA sidecar"]
-    CFG["Bundle<br/>policy · rbac.yaml"]
+    CFG["Policy<br/>policy/rbac/*.rego"]
     KC -- "1" --> WEB
     WEB -- "2" --> AAPI
     AAPI -- "6" --> SIG
@@ -119,13 +119,13 @@ flowchart TB
 
 Blue: aggregator-dpg. Grey: outside it.
 
-| Step | What happens                                                                                              |
-| ---- | --------------------------------------------------------------------------------------------------------- |
-| 1, 2 | The user logs in; the portal calls the API with the token                                                 |
-| 3    | `resolveActor` reads the user, their organisation, owned organisations, grants and the target's ancestors |
-| 4    | The hook sends that to OPA with the route                                                                 |
-| 5    | OPA loads the bundle at start-up: the Rego policy and `config/rbac.yaml`                                  |
-| 6    | Allowed requests that need profile data call Signals as today (`x-api-key` + `x-acting-org-id`)           |
+| Step | What happens                                                                                                            |
+| ---- | ----------------------------------------------------------------------------------------------------------------------- |
+| 1, 2 | The user logs in; the portal calls the API with the token                                                               |
+| 3    | `resolveActor` reads the user, their organisation, owned organisations, grants and the target's ancestors               |
+| 4    | The hook sends that to OPA with the route                                                                               |
+| 5    | OPA loads the Rego policy at start-up; the API sends the capabilities it read from `config/rbac.yaml` with each request |
+| 6    | Allowed requests that need profile data call Signals as today (`x-api-key` + `x-acting-org-id`)                         |
 
 The bundle changes only on deploy or config change. Users, organisations and grants travel in each request's input, so a revoke takes effect on the next request.
 
@@ -156,12 +156,12 @@ sequenceDiagram
 
 OPA input:
 
-| Field        | Source                                                                                      |
-| ------------ | ------------------------------------------------------------------------------------------- |
-| `actor`      | `user_id`, `user_type`, `org_id`, owned organisations, grants (PII Access with expiry)      |
-| `org_set`    | The actor's organisation's PermissionSet: its override, else the `org_type` default         |
-| `capability` | Declared on the route (`config.permission`); a route without a declaration fails at boot    |
-| `target`     | The organisation or user the request touches, with its ancestor chain for the subtree check |
+| Field                                                 | Source                                                                                                                            |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `actor`                                               | `user_id`, `user_type`, `org_id`, owned organisations, grants (PII Access with expiry)                                            |
+| `actor.orgs[].capabilities`, `actor.roleCapabilities` | The organisation's PermissionSet (its override, else the `org_type` default) and the role's capabilities, from `config/rbac.yaml` |
+| `capability`                                          | Declared on the route (`config.permission`); a route without a declaration fails at boot                                          |
+| `target`                                              | The organisation or user the request touches, with its ancestor chain for the subtree check                                       |
 
 | Behaviour                           | Detail                                                                                     |
 | ----------------------------------- | ------------------------------------------------------------------------------------------ |
@@ -213,7 +213,7 @@ Admin and Coordinator come from `user_type` and cannot be combined in one accoun
 | `organisations.permission_set` | A custom set for one organisation; NULL = the `org_type` default                          | New column                                         |
 | `user_permission_grant`        | `user_id`, grant (`pii_access`), granted by, granted at, expires at                       | New table (the refactor's planned per-user grants) |
 | Audit                          | Every grant change and every personal-data use                                            | New `iam_audit`; `campaign_pii_audit` stays        |
-| Bundle                         | Rego policy + `config/rbac.yaml`                                                          | Built at deploy, mounted into the OPA sidecar      |
+| Policy                         | Rego rules in `policy/rbac/`                                                              | Mounted into the OPA sidecar                       |
 
 ---
 
@@ -223,7 +223,7 @@ Admin and Coordinator come from `user_type` and cannot be combined in one accoun
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
 | R0   | Catalogue, `config/rbac.yaml`, Rego policy, OPA sidecar, `resolveActor` hook. Decisions logged only. Test: default sets ≡ today's coordinator access. | Code only             |
 | R1   | Enforce on the new Phase 5 org and user routes                                                                                                        | Code only             |
-| R2   | Existing routes behind `RBAC_ENFORCE_LEGACY` (log-only → enforce per instance after a clean window)                                                   | Flag back to log-only |
+| R2   | Existing routes enforced per instance with `RBAC_MODE=enforce`, after a clean `log` window                                                            | Flag back to log-only |
 | R3   | `user_permission_grant`, PII Access, `organisations.permission_set`, the Members and PermissionSet pages                                              | Tables unused         |
 
 Depends on refactor Phases 3 (organisations) and 5 (`resolveActor`, admin login). At R3, existing coordinators get PII Access so nobody loses today's access; it comes up for review after 90 days.
