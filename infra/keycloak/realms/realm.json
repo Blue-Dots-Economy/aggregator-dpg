@@ -773,6 +773,19 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "notification-service",
+      "name": "Notification service (resource server)",
+      "description": "Resource server only: never logs in. A caller is authorised by being granted one of this client's roles; Keycloak's audience-resolve mapper (default roles scope) then adds aud=notification-service to its tokens.",
+      "enabled": true,
+      "bearerOnly": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocolMappers": []
     }
   ],
   "users": [
@@ -789,11 +802,28 @@
       "enabled": true,
       "serviceAccountClientId": "signals-api",
       "clientRoles": {
-        "realm-management": ["view-users", "manage-users", "query-users", "manage-realm"]
+        "realm-management": ["view-users", "manage-users", "query-users", "manage-realm"],
+        "notification-service": ["notify:send"]
       }
     }
   ],
   "roles": {
+    "client": {
+      "notification-service": [
+        {
+          "name": "notify:send",
+          "description": "Send notifications through POST /v1/notify.",
+          "composite": false,
+          "clientRole": true
+        },
+        {
+          "name": "templates:admin",
+          "description": "Administer notification templates and routing policies; replay the dead-letter queue.",
+          "composite": false,
+          "clientRole": true
+        }
+      ]
+    },
     "realm": [
       {
         "name": "org_owner",
