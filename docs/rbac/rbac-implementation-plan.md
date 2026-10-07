@@ -9,9 +9,9 @@ The work to build [rbac-design-aggregator.md](rbac-design-aggregator.md) on bran
 | Item        | Value                                                                                                                  |
 | ----------- | ---------------------------------------------------------------------------------------------------------------------- |
 | New package | `packages/rbac`: capability catalogue, `rbac.yaml` schema, `AuthorizerBase` and its OPA implementation                 |
-| New runtime | OPA sidecar next to the API, loading `policy/rbac/` and `config/rbac.yaml`                                             |
+| New runtime | OPA sidecar next to the API, loading `policy/rbac/`; the API sends the capabilities from `config/rbac.yaml`            |
 | API change  | A `requirePermission()` guard inside each route file's existing auth wrapper; every route declares `config.permission` |
-| Safety      | Log-only until R2; `RBAC_ENFORCE_LEGACY` turns enforcement on per instance                                             |
+| Safety      | `RBAC_MODE` (`off` / `log` / `enforce`) per instance; `off` by default                                                 |
 | Depends on  | Refactor Phase 3 (organisations) before R1; Phase 5 (`resolveActor`, admin login) before R2                            |
 
 ---
@@ -90,7 +90,7 @@ flowchart TB
 | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | Create `packages/rbac` from `packages/_template`                                                                           | `packages/rbac`                              | Builds; dep-cruiser passes                                                                   |
 | Catalogue, roles and `rbac.yaml` schema                                                                                    | `packages/rbac/src`                          | Unit tests cover every capability and an invalid config                                      |
-| `config/rbac.yaml` with the default sets                                                                                   | `config/rbac.yaml`                           | Loaded once at boot through `@aggregator-dpg/config-loader`                                  |
+| `config/rbac.yaml` with the default sets                                                                                   | `config/rbac.yaml`                           | Loaded once at boot by the API (`loadRbacConfig`); invalid config stops boot                 |
 | Rego policy and its tests                                                                                                  | `policy/rbac/`                               | `opa test policy/rbac` passes                                                                |
 | OPA authorizer and in-memory fake                                                                                          | `packages/rbac/src/opa`, `src/in-memory`     | Timeout and OPA-down return a deny `Result`, never throw                                     |
 | Actor resolver against today's schema (`users`, `aggregator_orgs.owner_user_id`, `users.parent_org_id`, `user_identities`) | `apps/api/src/services/authz/actor-resolver` | One indexed query per request; tests for coordinator, admin, unknown user                    |
@@ -108,17 +108,17 @@ flowchart TB
 | Switch the resolver to `organisations.parent_id` and `org_type` | actor resolver                                                                   | Subtree tests: five levels, flat, siblings, removed parent (#805)         |
 | Profile and support use an approved, active user                | `aggregator-profile.ts`, `support.ts`                                            | A pending user gets `403`                                                 |
 | Service-only routes check `preferred_username`                  | `aggregator-registrations.ts`, `aggregator-orgs.ts`, `aggregator-maintenance.ts` | A portal user's token gets `403`; `cleanup-stale` works for the scheduler |
-| `capabilities` in the caller's profile response                 | `aggregator-profile.ts` (later `/v1/user/read/me`)                               | Portal receives the list                                                  |
 
 ### R2 — Enforce
 
-| Task                                                                                      | Where                                                                  | Done when                                                                     |
-| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `RBAC_ENFORCE_LEGACY` (`log` / `enforce`) through config-loader                           | `config/`, guard                                                       | Defaults to `log`; `enforce` returns `403 FORBIDDEN` with `fields.permission` |
-| Approval and invite routes move from link tokens to login + `orgs.onboard` / `org.manage` | `aggregator-approvals.ts`, `aggregator-org-approvals.ts`, `invites.ts` | Needs Phase 5 admin login; links open a login-protected page                  |
-| Worker re-checks the requester before running PII jobs                                    | `apps/worker` campaign and bulk jobs                                   | A job of a revoked user fails with an audit row                               |
-| Portal hides what the user cannot use                                                     | `apps/web` `AuthProvider`, `Sidebar.tsx`, dashboard actions            | Menus and buttons follow `capabilities`                                       |
-| Flip to `enforce` per instance after a clean log window                                   | Instance config                                                        | No unexplained would-deny lines for one release                               |
+| Task                                                                                      | Where                                                                  | Done when                                                    |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `RBAC_MODE` per instance: `off` → `log` → `enforce`                                       | Instance env                                                           | `enforce` returns `403 FORBIDDEN` with `fields.permission`   |
+| Approval and invite routes move from link tokens to login + `orgs.onboard` / `org.manage` | `aggregator-approvals.ts`, `aggregator-org-approvals.ts`, `invites.ts` | Needs Phase 5 admin login; links open a login-protected page |
+| Worker re-checks the requester before running PII jobs                                    | `apps/worker` campaign and bulk jobs                                   | A job of a revoked user fails with an audit row              |
+| `capabilities` in the caller's profile response                                           | `aggregator-profile.ts` (later `/v1/user/read/me`)                     | Portal receives the list                                     |
+| Portal hides what the user cannot use                                                     | `apps/web` `AuthProvider`, `Sidebar.tsx`, dashboard actions            | Menus and buttons follow `capabilities`                      |
+| Flip to `enforce` per instance after a clean log window                                   | Instance config                                                        | No unexplained would-deny lines for one release              |
 
 ### R3 — Grants and pages
 
