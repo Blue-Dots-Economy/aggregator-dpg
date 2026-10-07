@@ -68,10 +68,20 @@ export function generateSupportReference(now: Date = new Date()): string {
   const y = now.getUTCFullYear();
   const m = String(now.getUTCMonth() + 1).padStart(2, '0');
   const d = String(now.getUTCDate()).padStart(2, '0');
-  const bytes = randomBytes(6);
+  // Rejection sampling rather than `% REF_ALPHABET.length`. The alphabet is 36
+  // symbols and 256 % 36 = 4, so a plain modulo draws the first four symbols
+  // from 8 byte values each and the rest from 7 — a ~14% skew toward A-D
+  // (CodeQL js/biased-cryptographic-random). Discarding the final partial block
+  // makes every symbol equally likely. The loop is bounded in practice: each
+  // byte has a 252/256 chance of being usable.
+  const limit = Math.floor(256 / REF_ALPHABET.length) * REF_ALPHABET.length;
   let suffix = '';
-  for (let i = 0; i < 6; i++) {
-    suffix += REF_ALPHABET[bytes[i]! % REF_ALPHABET.length];
+  while (suffix.length < 6) {
+    for (const b of randomBytes(6)) {
+      if (b >= limit) continue;
+      suffix += REF_ALPHABET[b % REF_ALPHABET.length];
+      if (suffix.length === 6) break;
+    }
   }
   return `SUP-${y}${m}${d}-${suffix}`;
 }

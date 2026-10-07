@@ -8,8 +8,21 @@
  */
 
 /**
+ * Keys that reach Object.prototype if assigned through bracket notation.
+ *
+ * `Object.keys` does not surface `__proto__` on an object literal, but it DOES
+ * on anything built by `JSON.parse` or a YAML loader, where it is an own
+ * enumerable property. Config here is assembled from fetched documents, so the
+ * source side is not guaranteed to be a literal.
+ */
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
  * Recursively merges source into target. Arrays are replaced, not concatenated.
  * Mutates and returns target.
+ *
+ * Keys that would reach `Object.prototype` are skipped rather than copied
+ * (CodeQL js/prototype-pollution-utility).
  *
  * @param target - Object to merge into (mutated in place).
  * @param source - Object providing override values.
@@ -20,6 +33,7 @@ export function deepMerge(
   source: Record<string, unknown>,
 ): Record<string, unknown> {
   for (const key of Object.keys(source)) {
+    if (FORBIDDEN_KEYS.has(key)) continue;
     const src = source[key];
     const tgt = target[key];
     if (

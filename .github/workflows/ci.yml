@@ -21,8 +21,16 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege by default: every job here only reads the repo. Jobs needing
+# more declare it themselves (zizmor excessive-permissions,
+# actions/missing-workflow-permissions).
+permissions:
+  contents: read
+
 jobs:
   ci:
+    permissions:
+      contents: read
     name: CI
     runs-on: ubuntu-latest
 
@@ -35,6 +43,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Do not leave the job token in .git/config for later steps.
+          persist-credentials: false
           fetch-depth: 0
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -106,6 +116,8 @@ jobs:
   # A separate job (not a step in `ci`) so it reports as its own check; see
   # docs/ci-required-checks.md for whether it is required.
   db-integration:
+    permissions:
+      contents: read
     name: db-integration
     runs-on: ubuntu-latest
     services:
@@ -186,6 +198,8 @@ jobs:
   #
   # Without this, a broken Dockerfile first surfaces when a release tag is cut.
   smoke-image:
+    permissions:
+      contents: read
     name: smoke-image / ${{ matrix.app }}
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

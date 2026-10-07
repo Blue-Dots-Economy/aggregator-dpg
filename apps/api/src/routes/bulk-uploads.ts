@@ -33,6 +33,7 @@ import {
 } from '../services/object-storage/index.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
+import { checkBulkTemplateRate, checkBulkUploadRate } from '../services/bulk-upload-rate.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { buildCsvTemplate } from '../services/csv-template/index.js';
 import { buildXlsxTemplate } from '../services/xlsx-template/index.js';
@@ -221,12 +222,25 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         security: [{ bearerAuth: [] }],
         querystring: TemplateQuerySchema,
         response: {
-          ...errorResponses(400, 401, 403, 500),
+          ...errorResponses(400, 401, 403, 429, 500),
         },
       },
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
+
+      // Per-coordinator, so one caller cannot exhaust anyone else's quota. Each
+      // call renders a four-tab xlsx workbook, so this is a cost bound rather
+      // than an abuse one. The limiter fails open on a Redis error — an outage
+      // must not block a coordinator from starting work.
+      const templateRate = await checkBulkTemplateRate(auth.userId);
+      if (!templateRate.allowed) {
+        throw httpError('RATE_LIMITED', {
+          detail: 'Too many template requests; please try again later.',
+          fields: { retryAfterSeconds: templateRate.retryAfterSeconds },
+        });
+      }
+
       const format = (req.query as { format?: 'csv' | 'xlsx' }).format ?? 'csv';
       const validTypes = await getValidParticipantTypes();
 
@@ -301,12 +315,23 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         body: CreateBulkUploadBodySchema,
         response: {
           201: CreateBulkUploadResponseSchema,
-          ...errorResponses(400, 401, 403, 503),
+          ...errorResponses(400, 401, 403, 429, 503),
         },
       },
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
+
+      // Per-coordinator. This endpoint accepts a multi-MB file and persists it,
+      // the same shape support.ts guards, so it uses the same allowance.
+      const uploadRate = await checkBulkUploadRate(auth.userId);
+      if (!uploadRate.allowed) {
+        throw httpError('RATE_LIMITED', {
+          detail: 'Too many bulk uploads; please try again later.',
+          fields: { retryAfterSeconds: uploadRate.retryAfterSeconds },
+        });
+      }
+
       const log = req.log.child({ operation: 'bulkUploads.create', actor: auth.userId });
       const start = Date.now();
 
