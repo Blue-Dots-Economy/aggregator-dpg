@@ -167,8 +167,10 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     JSON.stringify(headers),
   );
 
-  for (let off = 0; off < rows.length; off += ENQUEUE_CHUNK) {
-    const slice = rows.slice(off, off + ENQUEUE_CHUNK);
+  // Chunks run strictly one after another (a promise chain, not Promise.all):
+  // each chunk's `:lines` must be written before that chunk is enqueued, and
+  // serialising the chunks keeps Redis / BullMQ load bounded on big files.
+  const writeChunk = async (slice: typeof rows): Promise<void> => {
     const payloads = slice.map((r) => ({
       uploadId: job.uploadId,
       aggregatorId: job.aggregatorId,
@@ -179,25 +181,32 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
       payload: r.payload,
     }));
 
-    // Persist reconstructed CSV lines under bu:{id}:lines so the Finaliser can
-    // rebuild errors.csv. The line round-trips through positional re-parse, so
-    // the Finaliser's `parseRawRow` recovers the original cells.
+    // Persist each row's cells as a JSON array under bu:{id}:lines so the
+    // Finaliser can rebuild errors.csv without CSV-parsing the row again.
     const linesArgs: string[] = [];
     for (const r of slice) {
-      linesArgs.push(String(r.rowIndex), r.rawLine);
+      linesArgs.push(String(r.rowIndex), JSON.stringify(r.cells));
     }
     if (linesArgs.length > 0) {
       await redis.hset(`${ns}:lines`, ...linesArgs);
     }
 
     await enqueueRowProcessBulk(payloads);
+  };
+  const chunks: (typeof rows)[] = [];
+  for (let off = 0; off < rows.length; off += ENQUEUE_CHUNK) {
+    chunks.push(rows.slice(off, off + ENQUEUE_CHUNK));
   }
+  await chunks.reduce<Promise<void>>(
+    (prev, slice) => prev.then(() => writeChunk(slice)),
+    Promise.resolve(),
+  );
 
   // Now safe to publish total_rows + reader_done.
   await redis.hset(`${ns}:meta`, 'total_rows', String(rows.length), 'reader_done', '1');
 
-  // Bound the lifetime of the File Processor's keys — `:lines` holds the raw
-  // participant CSV (PII). The Finaliser DELs them on success; this TTL is the
+  // Bound the lifetime of the File Processor's keys — `:lines` holds every
+  // participant row's cells (PII). The Finaliser DELs them on success; this TTL is the
   // safety net for uploads that fail or are abandoned before then. The Row
   // Processor's Lua refreshes the same TTL on its keys per commit.
   const ttl = config.BULK_UPLOAD_REDIS_TTL_SECONDS;

@@ -39,6 +39,7 @@ import {
   schemaOwnsColumn,
   type ParsedGeoLocation,
 } from '@aggregator-dpg/shared-primitives/bulk-columns';
+import { buildSignalStackItemState } from '@aggregator-dpg/signalstack-writer/item-state';
 
 let participantsWriter: ParticipantsWriterBase | null = null;
 function getParticipantsWriter(): ParticipantsWriterBase {
@@ -282,23 +283,11 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
       geo.status === 'ok' ? geo.value : null,
     );
     if (!push.success) {
-      // `push.message` already includes the upstream's own error text when
-      // signalstack returned a JSON body (e.g.
-      // `signalstack onboard returned 400: INVALID_ITEM_STATE: …`). Surface
-      // it directly so operators see the actual rejection reason in
-      // errors.csv instead of a generic status-code string.
-      // The per-user profile cap (signals #349) is a user/data condition, not a
-      // system fault — categorise it distinctly so errors.csv reads clearly.
-      const category: ErrorCategory = push.ownedElsewhere
-        ? 'owned_elsewhere'
-        : push.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED'
-          ? 'limit_reached'
-          : 'system_error';
-      outcome = {
-        outcome: 'failed',
-        category,
-        reasons: [`signalstack [${push.code}]: ${push.message}`],
-      };
+      // Classified by Signals' own error code: a row Signals rejected for its
+      // data is the operator's to fix and reads like a local schema failure;
+      // only a genuine platform fault is `system_error`.
+      const category = categoriseSignalsRejection(push);
+      outcome = { outcome: 'failed', category, reasons: signalsRejectionReasons(push, category) };
     }
   } else {
     log.error({
@@ -387,7 +376,85 @@ async function commit(
  * Returns void; status is observable via structured logs.
  */
 type SignalStackPushResult =
-  { success: true } | { success: false; code: string; message: string; ownedElsewhere?: boolean };
+  | { success: true }
+  | {
+      success: false;
+      code: string;
+      message: string;
+      /**
+       * Signals' own bare sentence (e.g. `Location 23.81, 90.41 is outside the
+       * allowed region (IN).`), without the transport/status prefixes `message`
+       * carries. Present only when Signals returned a JSON error body.
+       */
+      signalsMessage?: string;
+      /** Signals' own error code (e.g. `INVALID_ITEM_STATE`), when it sent one. */
+      upstreamCode?: string;
+      /** Signals' per-field messages (`fields` on INVALID_ITEM_STATE), when it sent them. */
+      signalsFields?: Record<string, string>;
+      ownedElsewhere?: boolean;
+    };
+
+/**
+ * Signals rejections caused by the ROW — the operator fixes the CSV and
+ * re-uploads. Anything not listed here (auth, an unserved domain, a 5xx, a
+ * timeout) is the platform's problem and stays `system_error`. Keyed on Signals'
+ * own error code, so a new data error Signals adds is one line here.
+ */
+const SIGNALS_REJECTION_CATEGORY: Readonly<Record<string, ErrorCategory>> = {
+  INVALID_ITEM_STATE: 'validation',
+  FST_ERR_VALIDATION: 'validation',
+  MISSING_IDENTIFIER: 'validation',
+  AGE_REQUIRED: 'validation',
+  USER_LEVEL_INCOMPLETE: 'validation',
+  CONSENT_DECLINED: 'validation',
+  // A returning participant Signals already holds a sub-18 age for: Signals
+  // falls back to the stored age, so omitting it from the row does not help.
+  // The operator removes the row (minors onboard through the portal) — a row
+  // problem, not a platform fault. Same checkAgeGates as the two above.
+  U18_NOT_ALLOWED: 'validation',
+  LOCATION_OUTSIDE_COUNTRY: 'validation',
+  // The person already exists in a way this row cannot override: registered in
+  // the other domain (single-domain lock) or an identity clash.
+  DOMAIN_LOCKED: 'duplicate',
+  USER_ALREADY_EXISTS: 'duplicate',
+  IDENTITY_CONFLICT: 'duplicate',
+  PROFILE_LIMIT_REACHED: 'limit_reached',
+};
+
+/**
+ * Category for a failed push. `owned_elsewhere` comes from a 2xx and is flagged
+ * on the result; everything else is looked up by Signals' code, falling back to
+ * the writer's own codes for callers (and older Signals) that send none.
+ */
+function categoriseSignalsRejection(
+  push: Extract<SignalStackPushResult, { success: false }>,
+): ErrorCategory {
+  if (push.ownedElsewhere) return 'owned_elsewhere';
+  const byUpstream = push.upstreamCode ? SIGNALS_REJECTION_CATEGORY[push.upstreamCode] : undefined;
+  if (byUpstream) return byUpstream;
+  if (push.code === 'SIGNALSTACK_PROFILE_LIMIT_REACHED') return 'limit_reached';
+  if (push.code === 'SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY') return 'validation';
+  return 'system_error';
+}
+
+/**
+ * errors.csv reasons for a failed push. A row-caused rejection reads like a
+ * local schema failure — one `field: message` line per field when Signals sent
+ * them, else Signals' bare sentence — because that is what the operator fixes
+ * the CSV from. A system error keeps the code + full upstream text, which is
+ * what someone debugging the platform needs.
+ */
+function signalsRejectionReasons(
+  push: Extract<SignalStackPushResult, { success: false }>,
+  category: ErrorCategory,
+): string[] {
+  if (category === 'system_error') return [`signalstack [${push.code}]: ${push.message}`];
+  if (push.signalsFields) {
+    const lines = Object.entries(push.signalsFields).map(([field, msg]) => `${field}: ${msg}`);
+    if (lines.length > 0) return lines;
+  }
+  return [push.signalsMessage ?? push.message];
+}
 
 /**
  * Derives the participant's age and consent record from a bulk row.
@@ -429,6 +496,38 @@ function deriveAgeAndConsent(
         ]
       : undefined;
   return { ageNum, compliance };
+}
+
+/**
+ * Maps a failed signalstack onboard into the row's push result.
+ *
+ * Carries Signals' own user-safe message, rejection code and per-field map
+ * through when the writer captured them, so errors.csv can classify the row
+ * and point at the offending column.
+ *
+ * @param error - The writer's failure, with optional Signals details.
+ * @returns A failed {@link SignalStackPushResult}.
+ */
+function onboardFailure(error: {
+  code: string;
+  message: string;
+  details?: unknown;
+}): SignalStackPushResult {
+  const { signalsMessage, upstreamCode, signalsFields } = (error.details ?? {}) as {
+    signalsMessage?: unknown;
+    upstreamCode?: unknown;
+    signalsFields?: unknown;
+  };
+  return {
+    success: false,
+    code: error.code,
+    message: error.message,
+    ...(typeof signalsMessage === 'string' && signalsMessage ? { signalsMessage } : {}),
+    ...(typeof upstreamCode === 'string' && upstreamCode ? { upstreamCode } : {}),
+    ...(signalsFields && typeof signalsFields === 'object'
+      ? { signalsFields: signalsFields as Record<string, string> }
+      : {}),
+  };
 }
 
 export async function pushToSignalStack(
@@ -551,7 +650,7 @@ export async function pushToSignalStack(
     // accepts partial item_state and classifies the resulting item as
     // `draft` when required fields are missing — that's signals' job,
     // not ours. Aggregator stays a thin pass-through.
-    profile: buildSignalStackItemState(job.participantType, job.payload, pushPhone, domainCfg),
+    profile: buildSignalStackItemState(job.payload, pushPhone, domainCfg.identity.phone),
   });
   if (!result.success) {
     log.error({
@@ -560,11 +659,7 @@ export async function pushToSignalStack(
       error: result.error.message,
       code: result.error.code,
     });
-    return {
-      success: false,
-      code: result.error.code,
-      message: result.error.message,
-    };
+    return onboardFailure(result.error);
   }
   // A 2xx with `owned_elsewhere` means signals recognised the person under a
   // DIFFERENT aggregator and created no item here — it is NOT a successful
@@ -592,36 +687,6 @@ export async function pushToSignalStack(
     onboarded_at: result.value.onboarded_at,
   });
   return { success: true };
-}
-
-/**
- * Build the `item_state` block sent to signalstack from a bulk-upload row.
- *
- * Aggregator participant schemas already use the same field names as the
- * upstream signalstack profile item_state, so the row payload flows
- * through unchanged — we only override the phone field (chosen via the
- * domain's identity selectors) so signalstack stores the E.164 form the
- * writer resolved upstream, not whatever raw value the CSV cell carried.
- */
-function buildSignalStackItemState(
-  _domain: string,
-  body: Record<string, unknown>,
-  pushPhone: string | null,
-  domainCfg: { identity: { phone: string } },
-): Record<string, unknown> {
-  const itemState: Record<string, unknown> = { ...body };
-
-  // Keep the raw body value when present — signalstack validates the
-  // phone field against the network's own pattern (purple_dot expects
-  // `^[0-9]{10}$`, blue_dot expects E.164). The E.164 form is already
-  // carried up-stack as the user.phone_number identity arg, so the
-  // override here is only a fallback for empty cells.
-  const rawPhone = body[domainCfg.identity.phone];
-  if (pushPhone && (typeof rawPhone !== 'string' || rawPhone.length === 0)) {
-    itemState[domainCfg.identity.phone] = pushPhone;
-  }
-
-  return itemState;
 }
 
 /**
