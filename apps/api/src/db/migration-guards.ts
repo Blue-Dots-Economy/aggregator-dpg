@@ -25,64 +25,22 @@
  * guard 2. Decision logic is pure and unit-tested; the IO is a thin reader.
  */
 
-import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import type { Pool } from 'pg';
 import { logger } from '../logger.js';
+import {
+  checkForeign,
+  readApplied,
+  readJournal,
+  shippedFileHashes,
+  TRAIN_FIRST_WHEN,
+  TRAIN_LAST_WHEN,
+  type AppliedMigration,
+  type ForeignVerdict,
+  type JournalEntry,
+} from './migrate-core.js';
 
-/** Journal `when` of the first train migration (0023). */
-export const TRAIN_FIRST_WHEN = 1790600000000;
-/** Journal `when` of the last train migration (0029, the end of the train). */
-export const TRAIN_LAST_WHEN = 1791400000000;
-
-/** One journal entry (the fields the guards need). */
-export interface JournalEntry {
-  when: number;
-  tag: string;
-}
-
-/** One applied row of `drizzle.__drizzle_migrations`. */
-export interface AppliedMigration {
-  createdAt: number;
-  hash: string;
-}
-
-/** Verdict of the foreign-migration check. */
-export interface ForeignVerdict {
-  /** Applied rows whose `created_at` matches no journal entry. */
-  unknown: AppliedMigration[];
-  /** Tags whose applied hash differs from the shipped file. */
-  hashMismatches: string[];
-}
-
-/**
- * Classifies the applied migrations against the shipped journal.
- *
- * @param journal - Shipped entries.
- * @param applied - Rows recorded by drizzle.
- * @param fileHashes - sha256 of each shipped file, keyed by `when`.
- * @returns Unknown rows and hash mismatches.
- */
-export function checkForeign(
-  journal: JournalEntry[],
-  applied: AppliedMigration[],
-  fileHashes: Map<number, string>,
-): ForeignVerdict {
-  const byWhen = new Map(journal.map((e) => [e.when, e]));
-  const unknown: AppliedMigration[] = [];
-  const hashMismatches: string[] = [];
-  for (const row of applied) {
-    const entry = byWhen.get(row.createdAt);
-    if (!entry) {
-      unknown.push(row);
-      continue;
-    }
-    const shipped = fileHashes.get(row.createdAt);
-    if (shipped && shipped !== row.hash) hashMismatches.push(entry.tag);
-  }
-  return { unknown, hashMismatches };
-}
+export { checkForeign, TRAIN_FIRST_WHEN, TRAIN_LAST_WHEN };
+export type { AppliedMigration, ForeignVerdict, JournalEntry };
 
 /**
  * Whether the train guard refuses this migration run.
@@ -121,29 +79,10 @@ export async function runMigrationGuards(
   migrationsFolder: string,
   allowTrainOnBoot: boolean,
 ): Promise<void> {
-  const journal = JSON.parse(
-    await readFile(path.join(migrationsFolder, 'meta/_journal.json'), 'utf8'),
-  ) as { entries: JournalEntry[] };
-  const entries = journal.entries;
-
-  const metaExists = await pool.query<{ t: string | null }>(
-    `SELECT to_regclass('drizzle.__drizzle_migrations')::text AS t`,
-  );
-  if (!metaExists.rows[0]?.t) return; // brand-new database: nothing applied yet
-
-  const appliedRows = await pool.query<{ created_at: string; hash: string }>(
-    'SELECT created_at::text AS created_at, hash FROM drizzle.__drizzle_migrations',
-  );
-  const applied = appliedRows.rows.map((r) => ({ createdAt: Number(r.created_at), hash: r.hash }));
-
-  const fileHashes = new Map<number, string>(
-    await Promise.all(
-      entries.map(async (e): Promise<[number, string]> => {
-        const sql = await readFile(path.join(migrationsFolder, `${e.tag}.sql`), 'utf8');
-        return [e.when, createHash('sha256').update(sql).digest('hex')];
-      }),
-    ),
-  );
+  const entries = await readJournal(migrationsFolder);
+  const applied = await readApplied(pool);
+  if (!applied) return; // brand-new database: nothing applied yet
+  const fileHashes = await shippedFileHashes(migrationsFolder, entries);
 
   const foreign = checkForeign(entries, applied, fileHashes);
   if (foreign.hashMismatches.length > 0) {
@@ -176,8 +115,7 @@ export async function runMigrationGuards(
     throw new Error(
       `refusing to migrate: ${foreign.unknown.length} applied migration(s) are not in this release ` +
         `(created_at ${foreign.unknown.map((u) => u.createdAt).join(', ')}). ` +
-        'A dev database that ran abandoned migrations must be recreated (or cleaned with the ' +
-        "migration tool's `fix drop-app-user`).",
+        'A dev database that ran abandoned migrations must be recreated.',
     );
   }
 
@@ -192,8 +130,8 @@ export async function runMigrationGuards(
     throw new Error(
       `refusing to apply the user & org release train at boot (${refused.join(', ')}) on a ` +
         'database that holds data. Existing instances apply it with the release-train tool ' +
-        '(scripts/user-org-migrate.sh — shipped with the train; until then the train must not be ' +
-        'deployed) with pods at zero — see docs/plans/existing-instance-migration.md. ' +
+        '(`node dist/tools/train.js run` from the API image) with pods at zero — see ' +
+        'docs/user-org-migration-runbook.md. ' +
         'Dev / e2e only: ALLOW_TRAIN_ON_BOOT=true.',
     );
   }

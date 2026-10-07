@@ -44,6 +44,9 @@ COPY --from=builder --chown=node:node /app/config ./config
 # Drizzle migrations are read at runtime by db/migrate.ts (resolved via
 # `../../drizzle/migrations` relative to dist/db/, i.e. /app/drizzle/migrations).
 COPY --from=builder --chown=node:node /app/apps/api/drizzle ./drizzle
+# Operator SQL for the release-train tool (dist/tools/train.js resolves it at
+# `../../sql`, i.e. /app/sql): the checks, verify gates, counts and fixes.
+COPY --from=builder --chown=node:node /app/scripts/sql ./sql
 USER node
 EXPOSE 4000
 CMD ["node", "dist/server.js"]
