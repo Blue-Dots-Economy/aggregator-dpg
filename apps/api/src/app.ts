@@ -54,6 +54,7 @@ import { registerCampaignDumpRoutes } from './routes/campaign-dump.js';
 import { ERR } from './errors/codes.js';
 import { HttpError } from './errors/http-error.js';
 import { coerceToHttpError, toEnvelope, toLogPayload } from './errors/serialize.js';
+import { assertRouteDeclared } from './services/authz/index.js';
 
 const REQUEST_ID_HEADER = 'x-request-id';
 const pkg = createRequire(import.meta.url)('../package.json') as { version: string };
@@ -201,6 +202,10 @@ export async function buildApp(): Promise<FastifyInstance> {
       routePrefix: '/api/reference',
     });
   }
+
+  // RBAC: every route must declare its access in `config.rbac`; a route
+  // without one stops the app from booting (docs/rbac/rbac-design-aggregator.md).
+  app.addHook('onRoute', assertRouteDeclared);
 
   app.addHook('onRequest', async (req, reply) => {
     reply.header(REQUEST_ID_HEADER, req.id);

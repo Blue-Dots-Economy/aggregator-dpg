@@ -68,6 +68,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
   app.get(
     '/admin/v1/orgs/read/:id',
     {
+      config: { rbac: { access: 'link_token' } },
       schema: {
         tags: ['aggregator-orgs'],
         summary: 'Render the network-admin approve/reject page for an org',
@@ -145,6 +146,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
   app.post(
     '/admin/v1/orgs/decision/:id',
     {
+      config: { rbac: { access: 'link_token' } },
       schema: {
         tags: ['aggregator-orgs'],
         summary: 'Approve or reject a pending org',
@@ -226,6 +228,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
   app.post(
     '/admin/v1/orgs/renew/:id',
     {
+      config: { rbac: { access: 'link_token' } },
       schema: {
         tags: ['aggregator-orgs'],
         summary: 'Regenerate an expired org review link and show the confirm page',

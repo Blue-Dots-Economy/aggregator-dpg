@@ -5,7 +5,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { _setDbClients } from '../../../db/client.js';
 import {
-  DEFAULT_ORG_PLACEHOLDER,
   InMemoryActorResolver,
   PostgresActorResolver,
   getActorResolver,
@@ -34,10 +33,13 @@ function fakeDb(results: unknown[][], fail = false) {
 }
 
 describe('PostgresActorResolver', () => {
-  it('resolves a coordinator by aggregator_id with its parent org', async () => {
+  it('resolves a coordinator by aggregator_id with its organisation', async () => {
     _setDbClients(
       null,
-      fakeDb([[{ userType: 'coordinator', status: 'active', parentOrgId: 'org-a' }]]) as never,
+      fakeDb([
+        [{ userType: 'coordinator', status: 'active', orgId: 'org-a' }],
+        [{ id: 'org-a', orgType: 'aggregator', status: 'active' }],
+      ]) as never,
     );
     const res = await new PostgresActorResolver().resolve({ subject: 's', aggregatorId: 'u1' });
     expect(res).toEqual({
@@ -52,23 +54,49 @@ describe('PostgresActorResolver', () => {
     });
   });
 
-  it('puts a flat coordinator in the default org placeholder', async () => {
+  it('marks a coordinator inactive when its organisation is not active', async () => {
     _setDbClients(
       null,
-      fakeDb([[{ userType: 'coordinator', status: 'pending', parentOrgId: null }]]) as never,
+      fakeDb([
+        [{ userType: 'coordinator', status: 'active', orgId: 'org-a' }],
+        [{ id: 'org-a', orgType: 'aggregator', status: 'inactive' }],
+      ]) as never,
     );
     const res = await new PostgresActorResolver().resolve({ subject: 's', aggregatorId: 'u1' });
-    expect(res.ok && res.value?.orgs[0]?.id).toBe(DEFAULT_ORG_PLACEHOLDER);
     expect(res.ok && res.value?.active).toBe(false);
   });
 
-  it('resolves an admin by subject with the active orgs it owns', async () => {
+  it('marks a pending coordinator inactive', async () => {
+    _setDbClients(
+      null,
+      fakeDb([
+        [{ userType: 'coordinator', status: 'pending', orgId: 'org-a' }],
+        [{ id: 'org-a', orgType: 'aggregator', status: 'active' }],
+      ]) as never,
+    );
+    const res = await new PostgresActorResolver().resolve({ subject: 's', aggregatorId: 'u1' });
+    expect(res.ok && res.value?.active).toBe(false);
+  });
+
+  it('gives a coordinator whose organisation row is missing no organisation', async () => {
+    _setDbClients(
+      null,
+      fakeDb([[{ userType: 'coordinator', status: 'active', orgId: 'gone' }], []]) as never,
+    );
+    const res = await new PostgresActorResolver().resolve({ subject: 's', aggregatorId: 'u1' });
+    expect(res.ok && res.value).toMatchObject({ active: false, orgs: [] });
+  });
+
+  it('resolves an admin by subject with the active organisations it owns', async () => {
     _setDbClients(
       null,
       fakeDb([
         [{ userId: 'adm' }],
-        [{ userType: 'admin', status: null, parentOrgId: null }],
-        [{ id: 'o1' }, { id: 'o2' }],
+        [{ userType: 'admin', status: 'active', orgId: null }],
+        [
+          { id: 'nf', orgType: 'network_facilitator' },
+          { id: 'o2', orgType: 'aggregator' },
+        ],
       ]) as never,
     );
     const res = await new PostgresActorResolver().resolve({ subject: 'kc-sub' });
@@ -77,18 +105,18 @@ describe('PostgresActorResolver', () => {
       userType: 'admin',
       active: true,
       orgs: [
-        { id: 'o1', relation: 'owner' },
-        { id: 'o2', relation: 'owner' },
+        { id: 'nf', orgType: 'network_facilitator', relation: 'owner' },
+        { id: 'o2', orgType: 'aggregator', relation: 'owner' },
       ],
     });
   });
 
-  it('marks an admin with no active org inactive', async () => {
+  it('marks an admin with no active organisation inactive', async () => {
     _setDbClients(
       null,
       fakeDb([
         [{ userId: 'adm' }],
-        [{ userType: 'admin', status: null, parentOrgId: null }],
+        [{ userType: 'admin', status: 'active', orgId: null }],
         [],
       ]) as never,
     );
@@ -123,8 +151,25 @@ describe('PostgresActorResolver', () => {
     });
   });
 
-  it('returns the organisation alone as its chain', async () => {
-    expect(await new PostgresActorResolver().orgChain('o1')).toEqual({ ok: true, value: ['o1'] });
+  it('returns the ancestor chain from the recursive query', async () => {
+    _setDbClients(null, {
+      execute: async () => ({ rows: [{ id: 'a1' }, { id: 'a' }, { id: 'nf' }] }),
+    } as never);
+    expect(await new PostgresActorResolver().orgChain('a1')).toEqual({
+      ok: true,
+      value: ['a1', 'a', 'nf'],
+    });
+  });
+
+  it('returns an empty chain for an empty id without querying', async () => {
+    expect(await new PostgresActorResolver().orgChain(' ')).toEqual({ ok: true, value: [] });
+  });
+
+  it('maps a chain query failure to DB_UNAVAILABLE', async () => {
+    _setDbClients(null, {
+      execute: async () => Promise.reject(Object.assign(new Error('x'), { code: '08006' })),
+    } as never);
+    expect((await new PostgresActorResolver().orgChain('a1')).ok).toBe(false);
   });
 });
 
