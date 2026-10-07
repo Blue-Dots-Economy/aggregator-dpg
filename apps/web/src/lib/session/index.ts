@@ -36,4 +36,4 @@ export function _resetSessionStore(): void {
 }
 
 export { SessionStoreBase } from './interface';
-export type { SessionData, SessionResult, SessionError } from './interface';
+export type { CachedActor, SessionData, SessionResult, SessionError } from './interface';

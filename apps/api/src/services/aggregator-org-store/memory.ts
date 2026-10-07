@@ -19,6 +19,9 @@ import {
   type OrgStoreError,
   type OrgStoreResult,
   type UpdateOrgPatch,
+  type OrgDeleteIfPendingOutcome,
+  type SearchOrgsFilter,
+  type SearchOrgsPage,
 } from './interface.js';
 
 const NON_TERMINAL = new Set(['pending', 'active']);
@@ -83,6 +86,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       status: 'pending',
       createdAt: now,
       updatedAt: now,
+      updatedBy: 'self',
       rejectedAt: null,
       isDefault: false,
       url: input.url ?? null,
@@ -175,32 +179,102 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
   update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<AggregatorOrg>> {
     const existing = this.byId.get(id);
     if (!existing) return Promise.resolve(err('NOT_FOUND', id));
+    if (patch.displayName !== undefined) {
+      // As in Postgres: names are unique (case-insensitively) among live orgs.
+      const key = patch.displayName.trim().toLowerCase();
+      const taken = [...this.byId.values()].some(
+        (o) =>
+          o.id !== id && o.displayName.trim().toLowerCase() === key && NON_TERMINAL.has(o.status),
+      );
+      if (taken) return Promise.resolve(err('DUPLICATE_NAME', 'organisation name already in use'));
+    }
     const next: AggregatorOrg = {
       ...existing,
       displayName: patch.displayName ?? existing.displayName,
+      url: patch.url !== undefined ? patch.url : existing.url,
+      locations: patch.locations ?? existing.locations,
+      legalName: patch.legalName !== undefined ? patch.legalName : existing.legalName,
+      gstNumber: patch.gstNumber !== undefined ? patch.gstNumber : existing.gstNumber,
       state: patch.state !== undefined ? patch.state : existing.state,
       // As in Postgres: a recorded login is only ever added, never cleared.
       ownerKcSub: patch.ownerKcSub ? patch.ownerKcSub : existing.ownerKcSub,
       kcGroupId: patch.kcGroupId !== undefined ? patch.kcGroupId : existing.kcGroupId,
       status: patch.status ?? existing.status,
       rejectedAt: patch.rejectedAt !== undefined ? patch.rejectedAt : existing.rejectedAt,
+      updatedBy: patch.updatedBy ?? existing.updatedBy,
       updatedAt: new Date(),
     };
     this.byId.set(id, next);
     return Promise.resolve({ ok: true, value: next });
   }
 
-  async approve(id: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
-    return this.casFromPending(id, 'active');
+  async approve(id: string, updatedBy: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+    return this.casFromPending(id, 'active', updatedBy);
   }
 
-  async reject(id: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
-    return this.casFromPending(id, 'inactive');
+  async reject(id: string, updatedBy: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+    return this.casFromPending(id, 'inactive', updatedBy);
+  }
+
+  listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<AggregatorOrg[]>> {
+    const rows = [...this.byId.values()].filter((o) => o.ownerUserId === ownerUserId).sort(byName);
+    return Promise.resolve({ ok: true, value: rows });
+  }
+
+  search(filter: SearchOrgsFilter): Promise<OrgStoreResult<SearchOrgsPage>> {
+    const limit = Math.max(1, Math.min(100, filter.limit ?? 20));
+    let rows = [...this.byId.values()];
+    if (filter.orgIds !== null) {
+      const scope = new Set(filter.orgIds);
+      rows = rows.filter((o) => scope.has(o.id));
+    }
+    if (filter.status) rows = rows.filter((o) => o.status === filter.status);
+    if (filter.namePrefix) {
+      const p = filter.namePrefix.toLowerCase();
+      rows = rows.filter((o) => o.displayName.toLowerCase().startsWith(p));
+    }
+    rows.sort(byName);
+    if (filter.cursor) {
+      const c = { name: filter.cursor.name.toLowerCase(), id: filter.cursor.id };
+      rows = rows.filter((o) => {
+        const n = o.displayName.toLowerCase();
+        return n > c.name || (n === c.name && o.id > c.id);
+      });
+    }
+    const page = rows.slice(0, limit);
+    const last = page.at(-1);
+    return Promise.resolve({
+      ok: true,
+      value: {
+        rows: page,
+        nextCursor: rows.length > limit && last ? { name: last.displayName, id: last.id } : null,
+      },
+    });
+  }
+
+  async deleteIfPending(
+    id: string,
+    cutoff: Date,
+    beforeCommit: () => Promise<boolean>,
+  ): Promise<OrgStoreResult<OrgDeleteIfPendingOutcome>> {
+    const row = this.byId.get(id);
+    if (
+      !row ||
+      row.status !== 'pending' ||
+      row.isDefault ||
+      row.updatedAt.getTime() >= cutoff.getTime()
+    ) {
+      return { ok: true, value: 'not_pending' };
+    }
+    if (!(await beforeCommit())) return { ok: true, value: 'aborted' };
+    this.byId.delete(id);
+    return { ok: true, value: 'deleted' };
   }
 
   private casFromPending(
     id: string,
     next: AggregatorOrg['status'],
+    updatedBy: string,
   ): Promise<OrgStoreResult<AggregatorOrg | null>> {
     const existing = this.byId.get(id);
     if (!existing) return Promise.resolve(err('NOT_FOUND', id));
@@ -209,6 +283,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       ...existing,
       status: next,
       updatedAt: new Date(),
+      updatedBy,
       // Stamp rejected_at (write-once) on reject only (#726).
       ...(next === 'inactive' ? { rejectedAt: new Date() } : {}),
     };
@@ -234,4 +309,12 @@ function pickOwned(
 
 function err<T>(code: OrgStoreError['code'], message: string): OrgStoreResult<T> {
   return { ok: false, error: { code, message } };
+}
+
+/** Orders orgs as Postgres does: lower(name), then id. */
+function byName(a: AggregatorOrg, b: AggregatorOrg): number {
+  const an = a.displayName.toLowerCase();
+  const bn = b.displayName.toLowerCase();
+  if (an !== bn) return an < bn ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }

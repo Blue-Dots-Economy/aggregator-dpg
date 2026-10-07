@@ -12,6 +12,11 @@ import {
   RegistrationInvitesStoreFake,
   _setRegistrationInvitesStore,
 } from '../services/registration-invites-store/index.js';
+import {
+  AggregatorStoreFake,
+  buildAggregator,
+  _setAggregatorStore,
+} from '../services/aggregator-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { mintGrantToken, _resetGrantTokenKey } from '../services/grant-token.js';
 import {
@@ -26,6 +31,7 @@ describe('invite mint routes', () => {
   let orgStore: AggregatorOrgStoreFake;
   let invites: RegistrationInvitesStoreFake;
   let mailer: FakeMailer;
+  let coordinators: AggregatorStoreFake;
 
   beforeEach(async () => {
     _resetGrantTokenKey();
@@ -47,6 +53,8 @@ describe('invite mint routes', () => {
       }),
     ]);
 
+    coordinators = new AggregatorStoreFake();
+    _setAggregatorStore(coordinators);
     _setAggregatorOrgStore(orgStore);
     _setRegistrationInvitesStore(invites);
     _setMailer(mailer);
@@ -58,6 +66,7 @@ describe('invite mint routes', () => {
 
   afterAll(async () => {
     await app?.close();
+    _setAggregatorStore(null);
     _setAggregatorOrgStore(null);
     _setRegistrationInvitesStore(null);
     _setMailer(null);
@@ -119,7 +128,53 @@ describe('invite mint routes', () => {
     expect(body.invalid[0]?.reason).toBe('duplicate_in_batch');
   });
 
-  it('recovers an expired grant: re-mails a fresh link to the registered owner, mints nothing', async () => {
+  it('reports an own-org coordinator as existing and mails nothing (C9)', async () => {
+    coordinators.seed([
+      buildAggregator({
+        id: '00000000-0000-4000-8000-00000000c001',
+        orgSlug: 'own-c',
+        parentOrgId: ORG_ID,
+        status: 'pending',
+        contact: { name: 'Own', phone: '+919000000101', email: 'own@x.org' },
+        contactPhone: '+919000000101',
+        contactEmail: 'own@x.org',
+      }),
+    ]);
+    const res = await mint({ grant: await grantFor(), recipients: [{ email: 'own@x.org' }] });
+    const body = res.json() as { sent: number; existing: Array<{ status: string }> };
+    expect(body.sent).toBe(0);
+    expect(body.existing).toEqual([{ email: 'own@x.org', status: 'pending' }]);
+    expect(mailer.outbox.length).toBe(0);
+  });
+
+  it('answers another account as sent and mails "already have an account", no invite (C9)', async () => {
+    coordinators.seed([
+      buildAggregator({
+        id: '00000000-0000-4000-8000-00000000c002',
+        orgSlug: 'other-c',
+        parentOrgId: '00000000-0000-0000-0000-0000000000d2',
+        status: 'active',
+        contact: { name: 'Other', phone: '+919000000102', email: 'other@x.org' },
+        contactPhone: '+919000000102',
+        contactEmail: 'other@x.org',
+      }),
+    ]);
+    const grant = await grantFor();
+    const res = await mint({ grant, recipients: [{ email: 'other@x.org' }] });
+    const body = res.json() as { sent: number; existing: unknown[] };
+    expect(body.sent).toBe(1);
+    expect(body.existing).toEqual([]);
+    expect(mailer.outbox[0]?.html).toContain('already have an account');
+    expect(mailer.outbox[0]?.html).not.toContain('invite=');
+    // A repeat reads exactly like a repeat to a fresh address: `resent`.
+    const again = (await mint({ grant, recipients: [{ email: 'other@x.org' }] })).json() as {
+      sent: number;
+      resent: number;
+    };
+    expect(again).toMatchObject({ sent: 0, resent: 1 });
+  });
+
+  it('recovers an expired grant: mails a sign-in link to the registered owner, mints nothing', async () => {
     const grant = await grantFor(ORG_ID, -1);
     const res = await mint({ grant, recipients: [{ email: 'a@x.org' }] });
     expect(res.statusCode).toBe(200);
@@ -131,7 +186,9 @@ describe('invite mint routes', () => {
     expect(a.ok && a.value).toBeNull();
     expect(mailer.outbox.length).toBe(1);
     expect(mailer.outbox[0]?.to).toBe('owner@jfc.org');
-    expect(mailer.outbox[0]?.html).toContain('/register/invite?grant=');
+    // Phase 5: a console sign-in link, never a fresh grant.
+    expect(mailer.outbox[0]?.html).toContain('/login');
+    expect(mailer.outbox[0]?.html).not.toContain('grant=');
   });
 
   it('rejects an invalid grant (400)', async () => {

@@ -7,12 +7,14 @@
  *   node dist/tools/train.js check [--fix <name> [--id <uuid> | --org-id <uuid>] [--dry-run]]
  *   node dist/tools/train.js run (--snapshot-taken <id> | --dry-run)
  *   node dist/tools/train.js enrich [--dry-run] [--rate <n per second>]
+ *   node dist/tools/train.js enable-owners [--dry-run] [--rate <n per second>]
  *
  * `check` is read-only (fixes excepted). `run` takes a database from 0022 to
  * the latest shipped migration in ONE transaction that also runs every verify
  * gate and commits only when all pass. `check` and `run` need only
- * `DATABASE_URL` and `AGGREGATOR_NETWORK` (+ `AGGREGATOR_BRAND`); `enrich`
- * needs the full API environment. Output is counts, check ids, error codes and
+ * `DATABASE_URL` and `AGGREGATOR_NETWORK` (+ `AGGREGATOR_BRAND`); `enrich` and
+ * `enable-owners` (Phase 5: existing org owners sign in) need the full API
+ * environment. Output is counts, check ids, error codes and
  * database ids — never row data. Exit codes: 0 ok, 1 refused / failed, 2 usage.
  */
 
@@ -577,26 +579,27 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> {
  */
 async function main(argv: string[]): Promise<number> {
   const [command, ...args] = argv;
-  if (command === 'enrich') {
+  if (command === 'enrich' || command === 'enable-owners') {
     const pool = openPool();
     try {
       const level = await levelOf(pool);
       if (level.state !== 'done') {
         throw new Refusal(
-          `enrich runs after the train (the database is at ${level.appliedTag ?? 'nothing'})`,
+          `${command} runs after the train (the database is at ${level.appliedTag ?? 'nothing'})`,
         );
       }
     } finally {
       await pool.end();
     }
     const rate = Number(flag(args, '--rate') ?? 5);
+    const opts = { dryRun: args.includes('--dry-run'), ratePerSecond: rate };
     // Loaded lazily: it needs the API's full environment (Keycloak).
     const online = await import('./train-online.js');
-    return online.enrich({ dryRun: args.includes('--dry-run'), ratePerSecond: rate }, out);
+    return command === 'enrich' ? online.enrich(opts, out) : online.enableOwners(opts, out);
   }
   if (command !== 'check' && command !== 'run') {
     out(
-      'usage: train check [--fix <name> …] | run (--snapshot-taken <id> | --dry-run) | enrich [--dry-run] [--rate n]',
+      'usage: train check [--fix <name> …] | run (--snapshot-taken <id> | --dry-run) | enrich [--dry-run] [--rate n] | enable-owners [--dry-run] [--rate n]',
     );
     return 2;
   }

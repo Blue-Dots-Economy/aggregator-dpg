@@ -64,8 +64,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     _setSubmitRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
 
     _setAggregatorStore(aggregatorStore);
-    // These bodies carry no org_id: for one release they register under the
-    // Default org (0028), so the org store holds it.
+    // These bodies register under the Default org (the only active org here).
     const orgStore = new AggregatorOrgStoreFake();
     orgStore.seed([buildDefaultOrg()]);
     _setAggregatorOrgStore(orgStore);
@@ -94,6 +93,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
   });
 
   const validBody = {
+    org_id: buildDefaultOrg().id,
     name: 'TRRAIN',
     type: 'seeker',
     contact: {

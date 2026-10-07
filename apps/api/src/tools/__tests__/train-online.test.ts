@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { IdpAdminFake } from '../../services/idp-admin/testing.js';
 import { IdentityStoreFake } from '../../services/identity-store/testing.js';
 import { IDP_PROVIDER } from '../../services/idp-admin/provider.js';
-import { enrichExitCode, enrichIdentities } from '../train-online.js';
+import { enableOwnersStep, enrichExitCode, enrichIdentities } from '../train-online.js';
+import { buildAggregatorOrg, buildDefaultOrg } from '../../services/aggregator-org-store/index.js';
+import type { AggregatorOrg } from '../../services/aggregator-org-store/index.js';
+import { PLACEHOLDER_OWNER_EMAIL } from '../../services/organisation-root.js';
 
 const C1 = '11111111-1111-4111-8111-111111111111';
 const C2 = '22222222-2222-4222-8222-222222222222';
@@ -106,5 +109,89 @@ describe('enrichExitCode', () => {
     expect(enrichExitCode({ failed: 1, conflicts: 0 }, { failed: 0 })).toBe(1);
     expect(enrichExitCode({ failed: 0, conflicts: 1 }, { failed: 0 })).toBe(1);
     expect(enrichExitCode({ failed: 0, conflicts: 0 }, { failed: 1 })).toBe(1);
+  });
+});
+
+describe('enableOwnersStep', () => {
+  let idp: IdpAdminFake;
+  const granted: string[] = [];
+
+  const org = (id: string, over: Partial<AggregatorOrg> = {}) =>
+    buildAggregatorOrg({ id, slug: `o-${id.slice(0, 4)}`, status: 'active', ...over });
+
+  const deps = (orgs: AggregatorOrg[], status: 'granted' | 'partial' = 'granted') => ({
+    idp,
+    listActiveOrgs: () => Promise.resolve(orgs),
+    grant: (o: AggregatorOrg) => {
+      granted.push(o.id);
+      return Promise.resolve({ status });
+    },
+    pause: () => Promise.resolve(),
+  });
+
+  beforeEach(() => {
+    idp = new IdpAdminFake();
+    granted.length = 0;
+  });
+
+  async function owner(n: number): Promise<string> {
+    const r = await idp.createUser({ email: `o${n}@x.test`, enabled: false });
+    if (!r.ok) throw new Error('seed failed');
+    return r.value.id;
+  }
+
+  it('grants each owner with a login; lists those without one or with a deleted user', async () => {
+    const sub = await owner(1);
+    const report = await enableOwnersStep(
+      deps([
+        org(C1, { ownerKcSub: sub }),
+        org(C2, { ownerKcSub: null }),
+        org(C3, { ownerKcSub: 'gone' }),
+      ]),
+      { dryRun: false, ratePerSecond: 100 },
+    );
+    expect(report).toMatchObject({ orgs: 3, granted: 1, noLogin: 1, missingUser: 1, failed: 0 });
+    expect(report.noLoginIds).toEqual([C2]);
+    expect(report.missingIds).toEqual([C3]);
+    expect(granted).toEqual([C1]);
+  });
+
+  it('skips the Default org and placeholder owners', async () => {
+    const report = await enableOwnersStep(
+      deps([buildDefaultOrg(), org(C1, { ownerEmail: PLACEHOLDER_OWNER_EMAIL })]),
+      { dryRun: false, ratePerSecond: 100 },
+    );
+    expect(report.orgs).toBe(0);
+  });
+
+  it('changes nothing on a dry run', async () => {
+    const sub = await owner(2);
+    const report = await enableOwnersStep(deps([org(C1, { ownerKcSub: sub })]), {
+      dryRun: true,
+      ratePerSecond: 100,
+    });
+    expect(report.granted).toBe(1);
+    expect(granted).toEqual([]);
+  });
+
+  it('counts a partial grant or a lookup error as failed', async () => {
+    const sub = await owner(3);
+    const partial = await enableOwnersStep(deps([org(C1, { ownerKcSub: sub })], 'partial'), {
+      dryRun: false,
+      ratePerSecond: 100,
+    });
+    expect(partial.failedIds).toEqual([C1]);
+    idp.failOnce({ code: 'IDP_UNAVAILABLE', message: 'down' });
+    const down = await enableOwnersStep(deps([org(C2, { ownerKcSub: sub })]), {
+      dryRun: false,
+      ratePerSecond: 100,
+    });
+    expect(down.failedIds).toEqual([C2]);
+  });
+
+  it('refuses a non-positive rate', async () => {
+    await expect(enableOwnersStep(deps([]), { dryRun: true, ratePerSecond: 0 })).rejects.toThrow(
+      RangeError,
+    );
   });
 });

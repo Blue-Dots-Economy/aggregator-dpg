@@ -183,6 +183,20 @@ export const ERR = {
       'Your aggregator account has not been approved yet. An admin must approve the registration before this action is available.',
     hint: 'JWT `decision_made` claim is missing, "pending", or "rejected". See requireApproved().',
   },
+  USER_NOT_PROVISIONED: {
+    code: 'USER_NOT_PROVISIONED',
+    status: 403,
+    title: 'Account not set up',
+    detail: 'Your sign-in is not linked to an account here yet. Contact the network administrator.',
+    hint: 'No aggregator_id claim and no user_identities row for (IDP_PROVIDER, sub). The boot reconcile (root / Default owners) or org create links admins; nothing links by email.',
+  },
+  NOT_ORG_ADMIN: {
+    code: 'NOT_ORG_ADMIN',
+    status: 403,
+    title: 'No active organisation',
+    detail: 'Your account does not manage an active organisation.',
+    hint: 'Admin account resolved by subject but owns no active org (pending, rejected or released). See services/auth/actor.',
+  },
   AGGREGATOR_TYPE_MISMATCH: {
     code: 'AGGREGATOR_TYPE_MISMATCH',
     status: 403,
@@ -370,6 +384,14 @@ export const ERR = {
     title: 'Already processed',
     detail: 'This registration has already been approved or rejected.',
     hint: 'Decision row exists. Single-use token replayed.',
+  },
+
+  ALREADY_DECIDED: {
+    code: 'ALREADY_DECIDED',
+    status: 409,
+    title: 'Already decided',
+    detail: 'This registration has already been approved or rejected.',
+    hint: 'Decision compare-and-set lost (decided by an emailed link or another console session). `fields` carries status, decided_at, decided_by.',
   },
 
   // ── Generic resource ────────────────────────────────────────────────────

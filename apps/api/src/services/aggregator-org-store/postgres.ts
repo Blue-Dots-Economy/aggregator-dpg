@@ -17,7 +17,7 @@
  * once it owns no other org.
  */
 
-import { and, asc, desc, eq, lt, ne, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, ne, or, sql, type SQL } from 'drizzle-orm';
 import { organisations, contact, userIdentities, users } from '../../db/schema.js';
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getDb } from '../../db/client.js';
@@ -39,6 +39,9 @@ import {
   type OrgStoreError,
   type OrgStoreResult,
   type UpdateOrgPatch,
+  type OrgDeleteIfPendingOutcome,
+  type SearchOrgsFilter,
+  type SearchOrgsPage,
 } from './interface.js';
 
 /** Wraps a failure of the caller's `recordConsent` hook so `create` can tell it apart. */
@@ -235,17 +238,105 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     }
   }
 
-  async approve(id: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
-    return this.casFromPending(id, 'active');
+  async approve(id: string, updatedBy: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+    return this.casFromPending(id, 'active', updatedBy);
   }
 
-  async reject(id: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
-    return this.casFromPending(id, 'inactive');
+  async reject(id: string, updatedBy: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+    return this.casFromPending(id, 'inactive', updatedBy);
+  }
+
+  async listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<AggregatorOrg[]>> {
+    try {
+      const rows = await this.selectJoined()
+        .where(scoped(eq(organisations.orgOwner, ownerUserId)))
+        .orderBy(sql`lower(${organisations.name})`, asc(organisations.id));
+      return { ok: true, value: rows.map(toDomain) };
+    } catch (e) {
+      return mapDbError('orgStore.listOwnedBy', e);
+    }
+  }
+
+  async search(filter: SearchOrgsFilter): Promise<OrgStoreResult<SearchOrgsPage>> {
+    const limit = Math.max(1, Math.min(100, filter.limit ?? 20));
+    if (filter.orgIds !== null && filter.orgIds.length === 0) {
+      return { ok: true, value: { rows: [], nextCursor: null } };
+    }
+    const lname = sql`lower(${organisations.name})`;
+    try {
+      const conds: (SQL | undefined)[] = [];
+      if (filter.orgIds !== null) conds.push(inArray(organisations.id, filter.orgIds));
+      if (filter.status) conds.push(eq(organisations.status, filter.status));
+      if (filter.namePrefix) {
+        // A prefix match on the name; LIKE wildcards in the input are escaped.
+        const p = filter.namePrefix.toLowerCase().replace(/[\\%_]/g, (m) => `\\${m}`);
+        conds.push(sql`${lname} LIKE ${`${p}%`}`);
+      }
+      if (filter.cursor) {
+        const c = filter.cursor;
+        conds.push(
+          or(
+            sql`${lname} > ${c.name.toLowerCase()}`,
+            and(sql`${lname} = ${c.name.toLowerCase()}`, gt(organisations.id, c.id)),
+          ),
+        );
+      }
+      const rows = await this.selectJoined()
+        .where(scoped(and(...conds) ?? sql`true`))
+        .orderBy(lname, asc(organisations.id))
+        .limit(limit + 1);
+      const page = rows.slice(0, limit).map(toDomain);
+      const last = page.at(-1);
+      return {
+        ok: true,
+        value: {
+          rows: page,
+          nextCursor: rows.length > limit && last ? { name: last.displayName, id: last.id } : null,
+        },
+      };
+    } catch (e) {
+      return mapDbError('orgStore.search', e);
+    }
+  }
+
+  async deleteIfPending(
+    id: string,
+    cutoff: Date,
+    beforeCommit: () => Promise<boolean>,
+  ): Promise<OrgStoreResult<OrgDeleteIfPendingOutcome>> {
+    const ABORT = Symbol('abort');
+    try {
+      const outcome = await getDb().transaction(async (tx) => {
+        // The DELETE takes the row lock: a concurrent approval waits, then
+        // finds the row gone (or still pending if this aborts).
+        const rows = await tx
+          .delete(organisations)
+          .where(
+            scoped(
+              and(
+                eq(organisations.id, id),
+                eq(organisations.status, 'pending'),
+                lt(organisations.updatedAt, cutoff),
+                ne(organisations.slug, DEFAULT_ORG_SLUG),
+              ),
+            ),
+          )
+          .returning({ id: organisations.id });
+        if (!rows[0]) return 'not_pending' as const;
+        if (!(await beforeCommit())) throw ABORT;
+        return 'deleted' as const;
+      });
+      return { ok: true, value: outcome };
+    } catch (e) {
+      if (e === ABORT) return { ok: true, value: 'aborted' };
+      return mapDbError('orgStore.deleteIfPending', e);
+    }
   }
 
   private async casFromPending(
     id: string,
     next: 'active' | 'inactive',
+    updatedBy: string,
   ): Promise<OrgStoreResult<AggregatorOrg | null>> {
     try {
       const [row] = await getDb()
@@ -254,6 +345,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
         .set({
           status: next,
           updatedAt: new Date(),
+          updatedBy,
           ...(next === 'inactive' ? { rejectedAt: new Date() } : {}),
         })
         .where(scoped(and(eq(organisations.id, id), eq(organisations.status, 'pending'))))
@@ -352,6 +444,7 @@ function toDomain(row: JoinedRow): AggregatorOrg {
     status: o.status,
     createdAt: o.createdAt,
     updatedAt: o.updatedAt,
+    updatedBy: o.updatedBy,
     rejectedAt: o.rejectedAt,
     isDefault: o.orgType === 'aggregator' && o.slug === DEFAULT_ORG_SLUG,
     url: o.url,

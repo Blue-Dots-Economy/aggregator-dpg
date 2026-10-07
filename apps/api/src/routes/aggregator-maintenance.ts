@@ -18,11 +18,15 @@ import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 
-/** Minimal Result shape the prune helper needs from a store/idp delete. */
+/** Minimal Result shape the prune helper needs from an idp delete. */
 type DeleteResult = { ok: true } | { ok: false; error: { code: string } };
 /** Minimal Result shape for resolving the KC user (id or null) to delete. */
 type UserLookupResult =
   { ok: true; value: { id: string } | null } | { ok: false; error: { code: string } };
+/** Minimal Result shape of a store's `deleteIfPending`. */
+type DeleteIfPendingResult =
+  | { ok: true; value: 'deleted' | 'not_pending' | 'aborted' }
+  | { ok: false; error: { code: string } };
 
 /** Describes one entity's stale-prune: how to read it + how to delete its parts. */
 interface PruneSpec<T> {
@@ -34,12 +38,15 @@ interface PruneSpec<T> {
    * drift or be shared across the two tables and hit the wrong user.
    */
   resolveUser: (row: T) => Promise<UserLookupResult>;
-  /** Row id (for logs + the DB delete). */
+  /** Row id (for logs). */
   idOf: (row: T) => string;
   /** Optional KC cleanup after the user delete (e.g. the org's mirrored group). */
   afterUserDelete?: (row: T) => Promise<DeleteResult> | null;
-  /** Deletes the DB row. */
-  deleteRow: (row: T) => Promise<DeleteResult>;
+  /**
+   * Deletes the row only while it is still pending and stale, running
+   * `beforeCommit` (the Keycloak clean-up) with the row locked.
+   */
+  deleteIfPending: (row: T, beforeCommit: () => Promise<boolean>) => Promise<DeleteIfPendingResult>;
   /** Log id field name (`aggregator_id` | `org_id`). */
   logIdField: 'aggregator_id' | 'org_id';
   /** Log message kind (`stale-pending` | `stale-org`). */
@@ -47,10 +54,16 @@ interface PruneSpec<T> {
 }
 
 /**
- * Deletes each stale row's KC user (+ any extra KC objects) then its DB row,
+ * Deletes each stale row together with its KC user (+ any extra KC objects),
  * skipping (with a warning) any row whose KC/DB call fails so the next pass
  * retries it rather than orphaning objects. Shared by the coordinator and org
  * cleanup loops.
+ *
+ * Race-safe against a concurrent decision (design C3): the row is deleted
+ * first, inside a transaction, with a pending + stale predicate; the Keycloak
+ * delete runs while that transaction holds the row, and a Keycloak failure
+ * rolls the row back. A decision that lands first leaves nothing to prune
+ * (`not_pending`); one that lands during the prune waits and finds the row gone.
  *
  * @returns The ids that were fully pruned.
  */
@@ -68,37 +81,44 @@ async function pruneStale<T>(
         `skipped ${spec.kind} prune — ${step}`,
       );
 
-    // Delete the KC user first so a partial failure leaves the DB row for the
-    // next pass rather than an orphaned KC user. Resolved from the stored
-    // linkage (not email) so drift/shared-email can't hit the wrong user.
+    // Resolved from the stored linkage (not email) so drift/shared-email
+    // can't hit the wrong user.
     const kc = await spec.resolveUser(row);
     if (!kc.ok) {
       warn(kc.error.code, 'KC user lookup failed');
       continue;
     }
-    if (kc.value) {
-      const del = await idp.deleteUser(kc.value.id);
-      if (!del.ok) {
-        warn(del.error.code, 'KC user delete failed');
-        continue;
-      }
-    }
 
-    const extra = spec.afterUserDelete?.(row);
-    if (extra) {
-      const extraRes = await extra;
-      if (!extraRes.ok) {
-        warn(extraRes.error.code, 'KC group delete failed');
-        continue;
+    const deleted = await spec.deleteIfPending(row, async () => {
+      if (kc.value) {
+        const del = await idp.deleteUser(kc.value.id);
+        if (!del.ok) {
+          warn(del.error.code, 'KC user delete failed');
+          return false;
+        }
       }
-    }
-
-    const deleted = await spec.deleteRow(row);
+      const extra = spec.afterUserDelete?.(row);
+      if (extra) {
+        const extraRes = await extra;
+        if (!extraRes.ok) {
+          warn(extraRes.error.code, 'KC group delete failed');
+          return false;
+        }
+      }
+      return true;
+    });
     if (!deleted.ok) {
       warn(deleted.error.code, 'DB delete failed');
       continue;
     }
-    prunedIds.push(id);
+    if (deleted.value === 'not_pending') {
+      log.info(
+        { status: 'skipped', [spec.logIdField]: id },
+        `skipped ${spec.kind} prune — decided or touched meanwhile`,
+      );
+      continue;
+    }
+    if (deleted.value === 'deleted') prunedIds.push(id);
   }
   return prunedIds;
 }
@@ -183,7 +203,7 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
           // Key the KC user on the stored `aggregator_id` attribute, not email.
           resolveUser: (r) => idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, r.id),
           idOf: (r) => r.id,
-          deleteRow: (r) => store.deleteById(r.id),
+          deleteIfPending: (r, beforeCommit) => store.deleteIfPending(r.id, cutoff, beforeCommit),
           logIdField: 'aggregator_id',
           kind: 'stale-pending',
         },
@@ -226,7 +246,8 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
             },
             idOf: (o) => o.id,
             afterUserDelete: (o) => (o.kcGroupId ? idp.deleteGroup(o.kcGroupId) : null),
-            deleteRow: (o) => orgStore.deleteById(o.id),
+            deleteIfPending: (o, beforeCommit) =>
+              orgStore.deleteIfPending(o.id, cutoff, beforeCommit),
             logIdField: 'org_id',
             kind: 'stale-org',
           },

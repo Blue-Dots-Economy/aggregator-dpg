@@ -3,7 +3,7 @@
  *
  * Covers the two-card welcome surface, the sign-in/register navigation
  * (asserted via `window.location.href`), and each error-banner branch
- * (`session_expired`, `org_no_portal`, known OIDC error codes, and an
+ * (`session_expired`, the console refusals, known OIDC error codes, and an
  * unrecognised code falling back to the generic message).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -83,10 +83,14 @@ describe('<LoginView />', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(messages.auth.session_expired);
   });
 
-  it('renders the org_no_portal banner', () => {
-    renderView({ error: 'org_no_portal' });
-    expect(screen.getByRole('alert')).toHaveTextContent(messages.auth.org_no_portal);
-  });
+  it.each(['console_not_provisioned', 'console_no_org'] as const)(
+    'renders the %s banner with a switch-account link',
+    (code) => {
+      renderView({ error: code });
+      expect(screen.getByRole('alert')).toHaveTextContent(messages.auth[code]);
+      expect(screen.getByRole('link', { name: messages.auth.switch_account })).toBeInTheDocument();
+    },
+  );
 
   it('names the Signals account and offers a switch, for a cross-app rejection', () => {
     renderView({ error: 'signals_account_no_portal' });
@@ -103,10 +107,8 @@ describe('<LoginView />', () => {
     expect(screen.getByRole('link', { name: messages.auth.switch_account })).toBeInTheDocument();
   });
 
-  it('does NOT offer a switch to an org owner — the portal is not for them', () => {
-    // Unlike the other two, an org owner is not signed in as the wrong
-    // account; switching would send them round a loop with no valid answer.
-    renderView({ error: 'org_no_portal' });
+  it('does NOT offer the switch again after an account switch', () => {
+    renderView({ error: 'account_switch' });
     expect(screen.queryByRole('link', { name: messages.auth.switch_account })).toBeNull();
   });
 

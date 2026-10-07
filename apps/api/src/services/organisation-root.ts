@@ -13,10 +13,17 @@
  * - root owner ← the first `ADMIN_EMAILS` entry;
  * - Default owner ← `DEFAULT_ORG_OWNER_EMAIL`, else the root's owner.
  *
+ * A configured owner whose address is a coordinator's (one login is one
+ * account; P5-14), or a Default owner who already owns another org (C12), is
+ * refused: logged, and the current owner kept.
+ *
  * Then, best-effort, it mirrors both orgs and their configured owners into the
- * IdP the way org registration does (a group per org; a disabled user per owner
- * unless one already exists). Idempotent; counts-only logs; never throws — a
- * failure is logged and retried on the next boot.
+ * IdP the way org registration does (a group per org; a user per owner unless
+ * one already exists) and gives the owners sign-in access (Phase 5: enabled,
+ * the `org_owner` role, the org's group). A replaced owner leaves the group;
+ * once it owns nothing it also loses the role and its sessions, and is
+ * disabled when this app created it (C4). Idempotent; counts-only logs; never
+ * throws — a failure is logged and retried on the next boot.
  */
 
 import { sql } from 'drizzle-orm';
@@ -32,7 +39,7 @@ import { logger } from '../logger.js';
 import { pgErrorCode } from '../db/pg-error.js';
 import type { IdpAdminAdapter } from './idp-admin/interface.js';
 import { IDP_PROVIDER } from './idp-admin/provider.js';
-import { KC_ATTR } from './idp-admin/index.js';
+import { KC_ATTR, OWNER_CREATED_BY, OWNER_REALM_ROLE } from './idp-admin/index.js';
 
 /** The placeholder owner address 0028 seeds; never mirrored to the IdP. */
 export const PLACEHOLDER_OWNER_EMAIL = 'network-admin@nf.invalid';
@@ -71,6 +78,11 @@ export interface RootOrgState {
 export interface ReplacedOwner {
   orgId: string;
   subject: string;
+  /**
+   * The owner's account was released (it owns no org any more): its IdP user
+   * also loses the owner role and its sessions.
+   */
+  released: boolean;
 }
 
 /** What the database reconcile found and changed. */
@@ -127,12 +139,53 @@ async function adminAccountFor(tx: DbExecutor, email: string): Promise<string> {
  * Deletes an admin account that owns no org any more (the placeholder after
  * the configured owner took over); its contact is then collected by the
  * `users_contact_ad` trigger.
+ *
+ * @returns Whether the account was deleted.
  */
-async function releaseIfUnowned(tx: DbExecutor, userId: string): Promise<void> {
-  await tx.execute(sql`
+async function releaseIfUnowned(tx: DbExecutor, userId: string): Promise<boolean> {
+  const gone = await tx.execute<{ id: string }>(sql`
     DELETE FROM users u
      WHERE u.id = ${userId} AND u.user_type = 'admin'
-       AND NOT EXISTS (SELECT 1 FROM organisations o WHERE o.org_owner = ${userId})`);
+       AND NOT EXISTS (SELECT 1 FROM organisations o WHERE o.org_owner = ${userId})
+    RETURNING u.id`);
+  return gone.rows.length > 0;
+}
+
+/**
+ * Why a configured owner address may not own the root / Default org, or null.
+ *
+ * - `owner_is_coordinator`: the address is a coordinator's — one login is one
+ *   account, so it cannot also be an admin (P5-14).
+ * - `owner_owns_other_org`: (Default only) the address already owns an
+ *   aggregator org (C12).
+ */
+async function ownerConflict(
+  tx: DbExecutor,
+  email: string,
+  which: 'root' | 'default',
+): Promise<'owner_is_coordinator' | 'owner_owns_other_org' | null> {
+  const r = await tx.execute<{ coordinator: boolean; other_owner: boolean }>(sql`
+    SELECT EXISTS (SELECT 1 FROM users x JOIN contact c ON c.id = x.contact_id
+                    WHERE c.email = ${email} AND x.user_type = 'coordinator') AS coordinator,
+           EXISTS (SELECT 1 FROM organisations o
+                     JOIN users u ON u.id = o.org_owner
+                     JOIN contact c ON c.id = u.contact_id
+                    WHERE c.email = ${email} AND o.org_type = 'aggregator'
+                      AND o.slug <> 'default') AS other_owner`);
+  const row = r.rows[0];
+  if (row?.coordinator) return 'owner_is_coordinator';
+  if (which === 'default' && row?.other_owner) return 'owner_owns_other_org';
+  return null;
+}
+
+/** Logs a refused owner config (no address: the env var names it). */
+function warnRefused(which: 'root' | 'default', reason: string): void {
+  logger.warn(
+    { operation: 'ensureRootOrganisation', status: 'skipped', org: which, reason },
+    which === 'root'
+      ? 'the first ADMIN_EMAILS address cannot own the network root — keeping the current owner'
+      : 'DEFAULT_ORG_OWNER_EMAIL cannot own the Default org — keeping the current owner',
+  );
 }
 
 /** Reads the root or the Default org with its owner. */
@@ -230,32 +283,49 @@ async function applyOwners(
 ): Promise<ReplacedOwner[]> {
   let rootOwner = root.ownerUserId;
   if (cfg.nfOwnerEmail && cfg.nfOwnerEmail !== root.ownerEmail) {
-    rootOwner = await adminAccountFor(tx, cfg.nfOwnerEmail);
-    if (rootOwner !== root.ownerUserId) {
-      await tx.execute(
-        sql`UPDATE organisations SET org_owner = ${rootOwner} WHERE id = ${root.id}`,
-      );
-      changed.rootOwner = true;
+    const refused = await ownerConflict(tx, cfg.nfOwnerEmail, 'root');
+    if (refused) {
+      warnRefused('root', refused);
+    } else {
+      rootOwner = await adminAccountFor(tx, cfg.nfOwnerEmail);
+      if (rootOwner !== root.ownerUserId) {
+        await tx.execute(
+          sql`UPDATE organisations SET org_owner = ${rootOwner} WHERE id = ${root.id}`,
+        );
+        changed.rootOwner = true;
+      }
     }
   }
-  const defaultOwner = cfg.defaultOwnerEmail
-    ? await adminAccountFor(tx, cfg.defaultOwnerEmail)
-    : rootOwner;
+  let defaultOwner = rootOwner;
+  if (cfg.defaultOwnerEmail && cfg.defaultOwnerEmail !== dflt.ownerEmail) {
+    const refused = await ownerConflict(tx, cfg.defaultOwnerEmail, 'default');
+    if (refused) {
+      warnRefused('default', refused);
+      defaultOwner = dflt.ownerUserId;
+    } else {
+      defaultOwner = await adminAccountFor(tx, cfg.defaultOwnerEmail);
+    }
+  } else if (cfg.defaultOwnerEmail) {
+    defaultOwner = dflt.ownerUserId;
+  }
   if (defaultOwner !== dflt.ownerUserId) {
     await tx.execute(
       sql`UPDATE organisations SET org_owner = ${defaultOwner} WHERE id = ${dflt.id}`,
     );
     changed.defaultOwner = true;
   }
+  const released = new Set<string>();
+  if (changed.rootOwner && (await releaseIfUnowned(tx, root.ownerUserId))) {
+    released.add(root.ownerUserId);
+  }
+  if (changed.defaultOwner && (await releaseIfUnowned(tx, dflt.ownerUserId))) {
+    released.add(dflt.ownerUserId);
+  }
   const replaced = (org: RootOrgState, didChange: boolean): ReplacedOwner[] =>
-    didChange && org.ownerSubject ? [{ orgId: org.id, subject: org.ownerSubject }] : [];
-  const replacedOwners = [
-    ...replaced(root, changed.rootOwner),
-    ...replaced(dflt, changed.defaultOwner),
-  ];
-  if (changed.rootOwner) await releaseIfUnowned(tx, root.ownerUserId);
-  if (changed.defaultOwner) await releaseIfUnowned(tx, dflt.ownerUserId);
-  return replacedOwners;
+    didChange && org.ownerSubject
+      ? [{ orgId: org.id, subject: org.ownerSubject, released: released.has(org.ownerUserId) }]
+      : [];
+  return [...replaced(root, changed.rootOwner), ...replaced(dflt, changed.defaultOwner)];
 }
 
 /**
@@ -305,6 +375,10 @@ export interface RootIdpReport {
   usersReused: number;
   /** Replaced owners removed from their org's group. */
   ownersRemoved: number;
+  /** Configured owners given sign-in access (enabled, role, group). */
+  ownersGranted: number;
+  /** Released owners whose role and sessions were revoked. */
+  ownersRevoked: number;
   failures: number;
 }
 
@@ -365,7 +439,7 @@ async function mirrorOrg(
   ctx: MirrorContext,
   org: RootOrgState,
   replacedOwners: readonly ReplacedOwner[],
-): Promise<void> {
+): Promise<string | null> {
   let groupId = org.kcGroupId;
   if (!groupId) {
     groupId = await ensureGroup(ctx.idp, org, ctx.report, ctx.fail);
@@ -379,10 +453,58 @@ async function mirrorOrg(
     );
 
   const subject = await ownerSubject(ctx, org);
-  if (subject && groupId) {
-    const added = await ctx.idp.addUserToGroup(subject, groupId);
-    if (!added.ok) ctx.fail('addUserToGroup', added.error.code);
+  if (!subject) return null;
+  // Sign-in access (Phase 5): the configured owner is the operator's choice,
+  // so the reconcile enables it; each step soft-fails and is retried next boot.
+  const [enabled, role, added] = await Promise.all([
+    ctx.idp.enableUser(subject),
+    ctx.idp.assignRealmRole(subject, OWNER_REALM_ROLE),
+    groupId ? ctx.idp.addUserToGroup(subject, groupId) : Promise.resolve(null),
+  ]);
+  if (!enabled.ok) ctx.fail('enableUser', enabled.error.code);
+  if (!role.ok) ctx.fail('assignRealmRole', role.error.code);
+  if (added && !added.ok) ctx.fail('addUserToGroup', added.error.code);
+  if (enabled.ok && role.ok && (added === null || added.ok)) ctx.report.ownersGranted += 1;
+  return subject;
+}
+
+/** Roles every realm user holds; they do not mean another app uses the login. */
+function isDefaultRealmRole(role: string): boolean {
+  return (
+    role.startsWith('default-roles-') || role === 'offline_access' || role === 'uma_authorization'
+  );
+}
+
+/**
+ * Ends a released owner's access (design C4): the owner role and every
+ * session go; the user is disabled only when this app created it (a reused
+ * login may be a person's Signals account).
+ */
+async function revokeReleasedOwner(ctx: MirrorContext, subject: string): Promise<void> {
+  const [role, logout, found] = await Promise.all([
+    ctx.idp.removeRealmRole(subject, OWNER_REALM_ROLE),
+    ctx.idp.logoutSessions(subject),
+    ctx.idp.findById(subject),
+  ]);
+  if (!role.ok) ctx.fail('removeRealmRole', role.error.code);
+  if (!logout.ok) ctx.fail('logoutSessions', logout.error.code);
+  if (!found.ok) {
+    ctx.fail('findById', found.error.code);
+    return;
   }
+  const ours = (found.value?.attributes?.[KC_ATTR.CREATED_BY] ?? []).includes(OWNER_CREATED_BY);
+  if (ours) {
+    // Only a login that holds nothing else: another realm role means another
+    // app relies on this user.
+    const roles = await ctx.idp.listRealmRoles(subject);
+    if (!roles.ok) {
+      ctx.fail('listRealmRoles', roles.error.code);
+    } else if (roles.value.every(isDefaultRealmRole)) {
+      const disabled = await ctx.idp.disableUser(subject);
+      if (!disabled.ok) ctx.fail('disableUser', disabled.error.code);
+    }
+  }
+  if (role.ok && logout.ok) ctx.report.ownersRevoked += 1;
 }
 
 /**
@@ -449,7 +571,10 @@ async function findOrCreateOwner(ctx: MirrorContext, email: string): Promise<str
     email,
     username: email,
     enabled: false,
-    attributes: { [KC_ATTR.DECISION_MADE]: 'pending' },
+    attributes: {
+      [KC_ATTR.DECISION_MADE]: 'pending',
+      [KC_ATTR.CREATED_BY]: OWNER_CREATED_BY,
+    },
   });
   if (!created.ok) {
     ctx.fail('createUser', created.error.code);
@@ -461,9 +586,11 @@ async function findOrCreateOwner(ctx: MirrorContext, email: string): Promise<str
 
 /**
  * Mirrors the root and the Default org into the IdP, as org registration does:
- * a group per org (`org-<slug>`) and, for each configured owner, a disabled
- * user — or the existing user for that email, reused untouched. Owners stay
- * disabled and get no role (owner login is Phase 5). Never throws.
+ * a group per org (`org-<slug>`) and, for each configured owner, a user — the
+ * existing user for that email, reused, else a new one marked as created here.
+ * Each configured owner gets sign-in access (enabled, `org_owner`, the group);
+ * replaced owners leave the group, and released ones lose the role and their
+ * sessions (disabled only when created here). Never throws.
  *
  * @param idp - The IdP admin adapter.
  * @param state - The reconciled orgs.
@@ -481,6 +608,8 @@ export async function provisionRootIdp(
     usersCreated: 0,
     usersReused: 0,
     ownersRemoved: 0,
+    ownersGranted: 0,
+    ownersRevoked: 0,
     failures: 0,
   };
   const fail = (step: string, code: string) => {
@@ -492,8 +621,20 @@ export async function provisionRootIdp(
   };
 
   const ctx: MirrorContext = { idp, recorder, report, fail };
-  await mirrorOrg(ctx, state.root, state.replacedOwners ?? []);
-  await mirrorOrg(ctx, state.defaultOrg, state.replacedOwners ?? []);
+  const replaced = state.replacedOwners ?? [];
+  // The current owners' logins as actually resolved here (a newly configured
+  // owner has no recorded subject yet, and may resolve to the same IdP user as
+  // the owner it replaced): those are never revoked.
+  const current = new Set([
+    state.root.ownerSubject,
+    state.defaultOrg.ownerSubject,
+    await mirrorOrg(ctx, state.root, replaced),
+    await mirrorOrg(ctx, state.defaultOrg, replaced),
+  ]);
+  const revoke = new Set(
+    replaced.filter((r) => r.released && !current.has(r.subject)).map((r) => r.subject),
+  );
+  for (const subject of revoke) await revokeReleasedOwner(ctx, subject);
   return report;
 }
 

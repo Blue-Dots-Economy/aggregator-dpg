@@ -52,6 +52,10 @@ interface FakeState {
   takenSlugs: string[];
   /** Users the reconcile asked to release. */
   released: string[];
+  /** Addresses that belong to a coordinator. */
+  coordinatorEmails?: string[];
+  /** Addresses that own an aggregator org other than Default. */
+  orgOwnerEmails?: string[];
   sql: string[];
   /** When set, every statement rejects with it. */
   failWith?: unknown;
@@ -92,7 +96,17 @@ function fakeDb(state: FakeState) {
   const answer = (text: string, params: unknown[]): Array<Record<string, unknown>> => {
     if (/DELETE FROM users/.test(text)) {
       state.released.push(params[0] as string);
-      return [];
+      const owns = state.orgs.some((o) => o.owner === params[0]);
+      return owns ? [] : [{ id: params[0] }];
+    }
+    if (/AS other_owner/.test(text)) {
+      const email = params[0] as string;
+      return [
+        {
+          coordinator: (state.coordinatorEmails ?? []).includes(email),
+          other_owner: (state.orgOwnerEmails ?? []).includes(email),
+        },
+      ];
     }
     if (/to_regclass/.test(text)) return [{ t: state.hasTable ? 'organisations' : null }];
     if (/FROM organisations o\s+JOIN users u/.test(text)) {
@@ -274,11 +288,16 @@ describe('provisionRootIdp', () => {
       usersCreated: 2,
       usersReused: 0,
       ownersRemoved: 0,
+      ownersGranted: 2,
+      ownersRevoked: 0,
       failures: 0,
     });
     expect(idp.getGroup(groups.get('org-1')!)?.name).toBe('org-network-org-1');
+    // Phase 5: the configured owner can sign in, and is marked as created here.
     const owner = await idp.findById(subjects.get('u-1')!);
-    expect(owner.ok && owner.value?.enabled).toBe(false);
+    expect(owner.ok && owner.value?.enabled).toBe(true);
+    expect(owner.ok && owner.value?.attributes?.['created_by']).toEqual(['aggregator-owner']);
+    expect(idp.rolesOf(subjects.get('u-1')!)).toContain('org_owner');
     expect(idp.groupsOf(subjects.get('u-2')!)).toEqual([groups.get('org-2')]);
   });
 
@@ -328,9 +347,10 @@ describe('provisionRootIdp', () => {
       },
       r,
     );
-    // The root's group create fails, its owner link conflicts, and adding the
-    // Default owner to a group the IdP does not know fails.
-    expect(report.failures).toBe(3);
+    // The root's group create fails, its owner link conflicts, and the Default
+    // owner's subject is unknown to the IdP: enabling it, granting the role and
+    // adding it to the group all fail.
+    expect(report.failures).toBe(5);
   });
 
   it("adopts the org's own group after a 409, never another org's", async () => {
@@ -366,7 +386,7 @@ describe('provisionRootIdp', () => {
       {
         root: org({ kcGroupId: g.value.id }),
         defaultOrg: org({ id: 'org-2', slug: 'default', kcGroupId: 'g2', ownerSubject: 's' }),
-        replacedOwners: [{ orgId: 'org-1', subject: old.value.id }],
+        replacedOwners: [{ orgId: 'org-1', subject: old.value.id, released: false }],
       },
       r,
     );
@@ -374,6 +394,108 @@ describe('provisionRootIdp', () => {
     expect(idp.groupsOf(old.value.id)).toEqual([]);
     const still = await idp.findById(old.value.id);
     expect(still.ok && still.value).not.toBeNull();
+  });
+
+  it('revokes a released owner: role, sessions, and disables only a user created here', async () => {
+    const idp = new IdpAdminFake();
+    const ours = await idp.createUser({
+      email: 'old@example.org',
+      enabled: true,
+      attributes: { created_by: 'aggregator-owner' },
+    });
+    const shared = await idp.createUser({ email: 'shared@example.org', enabled: true });
+    if (!ours.ok || !shared.ok) throw new Error('seed');
+    await idp.assignRealmRole(ours.value.id, 'org_owner');
+    await idp.assignRealmRole(shared.value.id, 'org_owner');
+    const { r } = recorder();
+    const report = await provisionRootIdp(
+      idp,
+      {
+        root: org({ kcGroupId: 'g1', ownerSubject: 's-new' }),
+        defaultOrg: org({ id: 'org-2', slug: 'default', kcGroupId: 'g2', ownerSubject: 's-new' }),
+        replacedOwners: [
+          { orgId: 'org-1', subject: ours.value.id, released: true },
+          { orgId: 'org-2', subject: shared.value.id, released: true },
+        ],
+      },
+      r,
+    );
+    expect(report.ownersRevoked).toBe(2);
+    expect(idp.rolesOf(ours.value.id)).not.toContain('org_owner');
+    expect(idp.rolesOf(shared.value.id)).not.toContain('org_owner');
+    expect(idp.logouts.get(ours.value.id)).toBe(1);
+    const a = await idp.findById(ours.value.id);
+    const b = await idp.findById(shared.value.id);
+    expect(a.ok && a.value?.enabled).toBe(false);
+    expect(b.ok && b.value?.enabled).toBe(true);
+  });
+
+  it('never disables a released owner holding another realm role', async () => {
+    const idp = new IdpAdminFake();
+    const shared = await idp.createUser({
+      email: 'old@example.org',
+      enabled: true,
+      attributes: { created_by: 'aggregator-owner' },
+    });
+    if (!shared.ok) throw new Error('seed');
+    await idp.assignRealmRole(shared.value.id, 'org_owner');
+    await idp.assignRealmRole(shared.value.id, 'signals_admin');
+    const { r } = recorder();
+    await provisionRootIdp(
+      idp,
+      {
+        root: org({ kcGroupId: 'g1', ownerSubject: 's-new' }),
+        defaultOrg: org({ id: 'org-2', slug: 'default', kcGroupId: 'g2', ownerSubject: 's-new' }),
+        replacedOwners: [{ orgId: 'org-1', subject: shared.value.id, released: true }],
+      },
+      r,
+    );
+    const u = await idp.findById(shared.value.id);
+    expect(u.ok && u.value?.enabled).toBe(true);
+    expect(idp.rolesOf(shared.value.id)).toEqual(['signals_admin']);
+  });
+
+  it('never revokes the login a new owner resolves to (the same person, a new address)', async () => {
+    const idp = new IdpAdminFake();
+    const person = await idp.createUser({ email: 'ops@example.org', enabled: true });
+    if (!person.ok) throw new Error('seed');
+    const { r } = recorder();
+    const report = await provisionRootIdp(
+      idp,
+      {
+        // The new owner has no recorded subject yet; findByEmail reuses `person`.
+        root: org({ kcGroupId: 'g1', ownerSubject: null }),
+        defaultOrg: org({ id: 'org-2', slug: 'default', kcGroupId: 'g2', ownerSubject: null }),
+        replacedOwners: [{ orgId: 'org-1', subject: person.value.id, released: true }],
+      },
+      r,
+    );
+    expect(report.ownersRevoked).toBe(0);
+    expect(idp.rolesOf(person.value.id)).toContain('org_owner');
+  });
+
+  it('keeps the role of a replaced owner who still owns an org', async () => {
+    const idp = new IdpAdminFake();
+    const kept = await idp.createUser({ email: 'kept@example.org', enabled: true });
+    if (!kept.ok) throw new Error('seed');
+    await idp.assignRealmRole(kept.value.id, 'org_owner');
+    const { r } = recorder();
+    const report = await provisionRootIdp(
+      idp,
+      {
+        root: org({ kcGroupId: 'g1', ownerSubject: 's-new' }),
+        defaultOrg: org({
+          id: 'org-2',
+          slug: 'default',
+          kcGroupId: 'g2',
+          ownerSubject: kept.value.id,
+        }),
+        replacedOwners: [{ orgId: 'org-1', subject: kept.value.id, released: false }],
+      },
+      r,
+    );
+    expect(report.ownersRevoked).toBe(0);
+    expect(idp.rolesOf(kept.value.id)).toContain('org_owner');
   });
 
   it("never links a coordinator's IdP user to the admin account", async () => {
@@ -456,10 +578,42 @@ describe('reconcileRootOrganisations', () => {
     for (const o of h.state.orgs) o.owner = 'u-old';
     const state = await reconcileRootOrganisations(config());
     expect(state?.replacedOwners).toEqual([
-      { orgId: 'root-1', subject: 's-old' },
-      { orgId: 'dflt-1', subject: 's-old' },
+      { orgId: 'root-1', subject: 's-old', released: true },
+      { orgId: 'dflt-1', subject: 's-old', released: true },
     ]);
     expect(h.state.released).toEqual(['u-old', 'u-old']);
+  });
+
+  it('refuses a root owner address that is a coordinator’s (P5-14)', async () => {
+    h.state = migratedState({ coordinatorEmails: ['ops@example.org'] });
+    const warn = vi.spyOn(logger, 'warn');
+    const state = await reconcileRootOrganisations(config());
+    expect(state?.changed.rootOwner).toBe(false);
+    expect(state?.root.ownerEmail).toBe(PLACEHOLDER_OWNER_EMAIL);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ org: 'root', reason: 'owner_is_coordinator' }),
+      expect.any(String),
+    );
+  });
+
+  it('refuses a Default owner who already owns another org (C12)', async () => {
+    h.state = migratedState({
+      orgOwnerEmails: ['def@example.org'],
+      contacts: new Map([
+        ['ops@example.org', 'c-ops'],
+        ['def@example.org', 'c-def'],
+      ]),
+    });
+    const warn = vi.spyOn(logger, 'warn');
+    const state = await reconcileRootOrganisations(
+      config({ defaultOwnerEmail: 'def@example.org' }),
+    );
+    expect(state?.changed.rootOwner).toBe(true);
+    expect(state?.defaultOrg.ownerEmail).not.toBe('def@example.org');
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ org: 'default', reason: 'owner_owns_other_org' }),
+      expect.any(String),
+    );
   });
 
   it('keeps the owners when no admin email is configured', async () => {

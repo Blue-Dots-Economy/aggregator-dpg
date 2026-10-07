@@ -45,7 +45,7 @@ describe('aggregator-org-approvals routes', () => {
     _setMailer(null);
   });
 
-  it('approve flips org to active + assigns role but keeps the owner disabled', async () => {
+  it('approve flips org to active, enables the owner with the role and group, and mails a sign-in link (Phase 5)', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000a1';
     const owner = await idp.createUser({
       email: 'owner@x.org',
@@ -53,13 +53,15 @@ describe('aggregator-org-approvals routes', () => {
       attributes: { decision_made: 'pending' },
     });
     if (!owner.ok) throw new Error('seed');
+    const group = await idp.createGroup('org-x', { org_id: orgId });
+    if (!group.ok) throw new Error('seed');
     orgStore.seed([
       buildAggregatorOrg({
         id: orgId,
         slug: 'x',
         ownerEmail: 'owner@x.org',
         ownerKcSub: owner.value.id,
-        kcGroupId: 'grp-1',
+        kcGroupId: group.value.id,
         status: 'pending',
       }),
     ]);
@@ -73,18 +75,21 @@ describe('aggregator-org-approvals routes', () => {
     const stored = await orgStore.findById(orgId);
     expect(stored.ok && stored.value?.status).toBe('active');
     const kc = await idp.findById(owner.value.id);
-    // Owner stays disabled — org-owner console login is deferred, and an enabled
-    // owner would clear Keycloak's OTP step. Role is still assigned for later.
-    expect(kc.ok && kc.value?.enabled).toBe(false);
+    // Phase 5: the owner signs in to the console, so approval enables them.
+    expect(kc.ok && kc.value?.enabled).toBe(true);
     expect(idp.rolesOf(owner.value.id)).toContain('org_owner');
-    // Owner is notified their org is live (#699) — no sign-in CTA (owner
-    // stays disabled), and no coordinator-invite link yet (#701).
+    expect(idp.groupsOf(owner.value.id)).toContain(group.value.id);
+    // The mail carries a sign-in link, no 90-day grant.
     expect(mailer.outbox.length).toBe(1);
     const ownerMsg = mailer.outbox[0];
     if (!ownerMsg) throw new Error('expected an owner email in the outbox');
     expect(ownerMsg.to).toBe('owner@x.org');
     expect(ownerMsg.subject).toContain('approved');
-    expect(ownerMsg.html).not.toContain('Sign in');
+    expect(ownerMsg.html).toContain('Sign in');
+    expect(ownerMsg.html).toContain('/login');
+    expect(ownerMsg.html).not.toContain('grant=');
+    // Attributed to the signed link.
+    expect(stored.ok && stored.value?.status).toBe('active');
   });
 
   it('double-clicked approve commits once (atomic single-use guard)', async () => {
@@ -156,8 +161,8 @@ describe('aggregator-org-approvals routes', () => {
     expect(sent.html).toContain('Registration details do not match.');
     // Wording is org-specific, not the coordinator default.
     expect(sent.subject).toContain('organisation');
-    // The page names the address it actually mailed.
-    expect(res.body).toContain('owner@notify.org');
+    // The page confirms the owner was notified (no address echoed).
+    expect(res.body).toContain('The owner has been notified.');
   });
 
   it('reject still notifies when no reason is given', async () => {

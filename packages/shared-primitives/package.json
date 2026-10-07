@@ -43,6 +43,10 @@
     "./contact": {
       "import": "./dist/contact/index.js",
       "types": "./dist/contact/index.d.ts"
+    },
+    "./user-org": {
+      "import": "./dist/user-org/index.js",
+      "types": "./dist/user-org/index.d.ts"
     }
   },
   "scripts": {

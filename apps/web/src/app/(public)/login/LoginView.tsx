@@ -89,7 +89,8 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
                 >
                   {t('session_expired')}
                 </div>
-              ) : error === 'org_no_portal' ||
+              ) : error === 'console_not_provisioned' ||
+                error === 'console_no_org' ||
                 error === 'signals_account_no_portal' ||
                 error === 'no_portal_access' ||
                 error === 'account_switch' ? (
@@ -98,14 +99,13 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
                   className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
                 >
                   {t(error)}
-                  {/* An org owner has nowhere else to go — the portal genuinely
-                      is not for them. The other two are signed in as the wrong
-                      account, so they need a way to switch; a plain link back to
-                      /login would silently reuse the same realm SSO session and
-                      return them here, which is why this ends the realm session
-                      first. `account_switch` is the landing state AFTER that
-                      logout, so it must not offer the link again. */}
-                  {error !== 'org_no_portal' && error !== 'account_switch' ? (
+                  {/* Every refused account may be the wrong one, so offer a
+                      switch; a plain link back to /login would silently reuse
+                      the same realm SSO session and return them here, which is
+                      why this ends the realm session first. `account_switch` is
+                      the landing state AFTER that logout, so it must not offer
+                      the link again. */}
+                  {error !== 'account_switch' ? (
                     <a
                       href="/api/auth/login?switch=1"
                       className="mt-2 block font-semibold underline underline-offset-2"

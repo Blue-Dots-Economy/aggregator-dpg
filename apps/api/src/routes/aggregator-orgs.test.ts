@@ -487,7 +487,7 @@ describe('aggregator-orgs routes', () => {
     expect(mailer.outbox.length).toBe(1);
   });
 
-  it('re-sends the coordinator invite link when the org is already ACTIVE', async () => {
+  it('sends the owner a sign-in link when the org is already ACTIVE', async () => {
     orgStore.seed([
       buildAggregatorOrg({
         id: 'o-active-owner',
@@ -511,7 +511,9 @@ describe('aggregator-orgs routes', () => {
     // The invite link is the whole point of the mail.
     expect(mailer.outbox.length).toBe(1);
     expect(mailer.outbox[0]?.subject).toMatch(/already registered/i);
-    expect(mailer.outbox[0]?.html).toContain('/register/invite?grant=');
+    // Phase 5: a console sign-in link, never a fresh grant.
+    expect(mailer.outbox[0]?.html).toContain('/login');
+    expect(mailer.outbox[0]?.html).not.toContain('grant=');
     // Nothing about the row changes — no takeover via an anonymous resubmit.
     const stored = await orgStore.findById('o-active-owner');
     expect(stored.ok && stored.value?.displayName).toBe('Old Name');
@@ -754,6 +756,15 @@ describe('aggregator-orgs routes', () => {
       }
       async reject(): Promise<OrgStoreResult<AggregatorOrg | null>> {
         return { ok: true, value: null };
+      }
+      async listOwnedBy(): Promise<OrgStoreResult<AggregatorOrg[]>> {
+        return { ok: true, value: [] };
+      }
+      async search(): Promise<OrgStoreResult<{ rows: AggregatorOrg[]; nextCursor: null }>> {
+        return { ok: true, value: { rows: [], nextCursor: null } };
+      }
+      async deleteIfPending(): Promise<OrgStoreResult<'not_pending'>> {
+        return { ok: true, value: 'not_pending' };
       }
     }
     _setAggregatorOrgStore(new DupSlugStore());

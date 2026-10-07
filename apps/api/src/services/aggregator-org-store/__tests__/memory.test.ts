@@ -59,7 +59,7 @@ describe('InMemoryAggregatorOrgStore', () => {
       displayName: 'A',
       ownerEmail: 'a@x.org',
     });
-    if (first.ok) await store.reject(first.value.id);
+    if (first.ok) await store.reject(first.value.id, 'admin');
     const second = await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 'reusable',
@@ -83,7 +83,7 @@ describe('InMemoryAggregatorOrgStore', () => {
       displayName: 'B',
       ownerEmail: 'b@x.org',
     });
-    if (a.ok) await store.approve(a.value.id);
+    if (a.ok) await store.approve(a.value.id, 'admin');
     const active = await store.listActive();
     expect(active.ok && active.value.map((o) => o.slug)).toEqual(['a']);
   });
@@ -97,8 +97,8 @@ describe('InMemoryAggregatorOrgStore', () => {
       ownerEmail: 'a@x.org',
     });
     if (!a.ok) return;
-    const first = await store.approve(a.value.id);
-    const second = await store.approve(a.value.id);
+    const first = await store.approve(a.value.id, 'admin');
+    const second = await store.approve(a.value.id, 'admin');
     expect(first.ok && first.value?.status).toBe('active');
     expect(second.ok && second.value).toBeNull();
   });
@@ -134,11 +134,11 @@ describe('InMemoryAggregatorOrgStore', () => {
     if (!rej.ok || !app.ok) return;
     expect(rej.value.rejectedAt).toBeNull();
 
-    const rejected = await store.reject(rej.value.id);
+    const rejected = await store.reject(rej.value.id, 'admin');
     expect(rejected.ok && rejected.value?.status).toBe('inactive');
     expect(rejected.ok && rejected.value?.rejectedAt).toBeInstanceOf(Date);
 
-    const approved = await store.approve(app.value.id);
+    const approved = await store.approve(app.value.id, 'admin');
     expect(approved.ok && approved.value?.status).toBe('active');
     expect(approved.ok && approved.value?.rejectedAt).toBeNull();
   });
@@ -152,7 +152,7 @@ describe('InMemoryAggregatorOrgStore', () => {
       ownerEmail: 'a@x.org',
     });
     if (!a.ok) return;
-    await store.reject(a.value.id);
+    await store.reject(a.value.id, 'admin');
     const revived = await store.update(a.value.id, { status: 'pending', rejectedAt: null });
     expect(revived.ok && revived.value.status).toBe('pending');
     expect(revived.ok && revived.value.rejectedAt).toBeNull();
@@ -190,8 +190,8 @@ describe('InMemoryAggregatorOrgStore contact rules', () => {
     const store = new InMemoryAggregatorOrgStore();
     const results = [
       await store.update('missing', { status: 'active' }),
-      await store.approve('missing'),
-      await store.reject('missing'),
+      await store.approve('missing', 'admin'),
+      await store.reject('missing', 'admin'),
     ];
     for (const r of results) expect(r.ok || r.error.code).toBe('NOT_FOUND');
   });
@@ -238,7 +238,7 @@ describe('InMemoryAggregatorOrgStore owners (0027)', () => {
       ownerPhone: '+919000000001',
     });
     if (!old.ok) throw new Error('seed');
-    await store.reject(old.value.id);
+    await store.reject(old.value.id, 'admin');
     const fresh = await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 'new',

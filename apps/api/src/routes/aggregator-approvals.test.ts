@@ -756,9 +756,12 @@ describe('admin approval routes', () => {
    * Mints an approve token with iat/exp in the past (expired but valid signature)
    * for the given aggregatorId. Mirrors the pattern used in approval-token.test.ts.
    */
-  async function mintExpiredApproveToken(aggregatorId: string): Promise<string> {
+  async function mintExpiredApproveToken(
+    aggregatorId: string,
+    org: string | null = DEFAULT_ORG,
+  ): Promise<string> {
     const key = new TextEncoder().encode(process.env.APPROVAL_TOKEN_SECRET);
-    return new SignJWT({ intent: 'approve' })
+    return new SignJWT({ intent: 'approve', ...(org ? { org } : {}) })
       .setProtectedHeader({ alg: 'HS256' })
       .setSubject(aggregatorId)
       .setIssuer('aggregator-api')
@@ -786,7 +789,7 @@ describe('admin approval routes', () => {
     expect(mailer.outbox.length).toBe(0);
   });
 
-  it('renew binds a legacy org-less link of a Default-org coordinator to the Default org (0028)', async () => {
+  it('renew keeps the org binding of the expired link', async () => {
     const { id } = await seedPendingAggregator();
     const expired = await mintExpiredApproveToken(id);
     const res = await app.inject({
@@ -798,6 +801,18 @@ describe('admin approval routes', () => {
     const fresh = /name="token" value="([^"]+)"/.exec(res.body)?.[1] ?? '';
     const v = await verifyApprovalToken(fresh);
     expect(v.ok && v.org).toBe(DEFAULT_ORG);
+  });
+
+  it('renew refuses an org-less link (the one-release pre-0028 path is gone, Phase 5)', async () => {
+    const { id } = await seedPendingAggregator();
+    const expired = await mintExpiredApproveToken(id, null);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/renew/${id}`,
+      payload: { token: expired },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Token does not match this organisation.');
   });
 
   it('renew never re-binds a link minted for another org', async () => {
@@ -820,16 +835,14 @@ describe('admin approval routes', () => {
     expect(res.body).toContain('Token does not match this organisation.');
   });
 
-  it('serves the review page for a pre-0028 org-less link with a token bound to the Default org', async () => {
+  it('refuses the review page for an org-less link (Phase 5)', async () => {
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
     const res = await app.inject({
       method: 'GET',
       url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}&intent=approve`,
     });
-    expect(res.statusCode).toBe(200);
-    const pageToken = /name="token" value="([^"]+)"/.exec(res.body)?.[1] ?? '';
-    const v = await verifyApprovalToken(pageToken);
-    expect(v.ok && v.org).toBe(DEFAULT_ORG);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Token does not match this organisation.');
   });
 
   it('refuses the review page for a link bound to another org', async () => {
@@ -842,7 +855,7 @@ describe('admin approval routes', () => {
     expect(res.body).toContain('Token does not match this organisation.');
   });
 
-  it('rejects a decision with a pre-0028 org-less link and offers to regenerate it', async () => {
+  it('refuses a decision with an org-less link (Phase 5)', async () => {
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
     const res = await app.inject({
       method: 'POST',
@@ -850,8 +863,7 @@ describe('admin approval routes', () => {
       payload: { token, decision: 'approve' },
     });
     expect(res.statusCode).toBe(400);
-    expect(res.body).toContain('Regenerate &amp; review');
-    expect(res.body).toContain(`/admin/v1/aggregator-registrations/renew/${aggregatorId}`);
+    expect(res.body).toContain('Token does not match this organisation.');
     const stored = await aggregatorStore.findById(aggregatorId);
     expect(stored.ok && stored.value?.status).toBe('pending');
   });

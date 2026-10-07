@@ -18,17 +18,16 @@
 
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { config } from '../config.js';
 import { coolingRetryAfter } from '../services/registration-cooling.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import type { AggregatorOrg } from '../services/aggregator-org-store/interface.js';
 import { resolveProfileRef } from '../services/schema-ref.js';
-import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
+import { getIdpAdmin, KC_ATTR, OWNER_CREATED_BY } from '../services/idp-admin/index.js';
 import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
 import { getMailer } from '@aggregator-dpg/mailer';
 import { renderOrgAlreadyRegistered } from '../services/email-templates/index.js';
-import { mintGrantToken } from '../services/grant-token.js';
+import { ownerSignInUrl } from '../services/decisions/org.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
@@ -250,13 +249,10 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           });
         }
 
-        const grant = await mintGrantToken({
-          org: row.id,
-          ttlSec: config.GRANT_TOKEN_TTL_SECONDS,
-        });
+        // Phase 5: a console sign-in link, never a fresh 90-day grant.
         const mail = renderOrgAlreadyRegistered({
           orgName: row.displayName,
-          inviteUrl: `${config.PUBLIC_PORTAL_URL}/register/invite?grant=${encodeURIComponent(grant.token)}`,
+          inviteUrl: ownerSignInUrl(),
         });
         const send = await getMailer().send({
           to: row.ownerEmail,
@@ -284,7 +280,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
             already_registered: true,
             mail_sent: send.ok,
           },
-          'org already active — coordinator invite link re-sent to the owner on file',
+          'org already active — sign-in link sent to the owner on file',
         );
         // Never claim delivery that did not happen: the whole point of this
         // branch is an owner who never received the first email, so telling
@@ -505,6 +501,9 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         attributes: {
           [KC_ATTR.PHONE_NUMBER]: phoneE164,
           [KC_ATTR.DECISION_MADE]: 'pending',
+          // Marks a user this app created, so a replaced owner may be disabled
+          // without touching a login shared with Signals (design C4).
+          [KC_ATTR.CREATED_BY]: OWNER_CREATED_BY,
         },
       });
       if (!ownerUser.ok) {

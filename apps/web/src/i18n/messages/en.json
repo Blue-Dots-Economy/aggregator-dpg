@@ -555,7 +555,8 @@
     "register_sub": "Register your organisation with {brand}",
     "review_notice": "New registrations are reviewed by the {brand} team.",
     "session_expired": "Your session expired. Sign in again to continue.",
-    "org_no_portal": "Organisation accounts can't sign in to the portal yet. Organisation owners manage approvals through the links emailed to them. Only coordinators can sign in here.",
+    "console_not_provisioned": "Your sign-in isn't linked to an account here yet. Contact the network administrator.",
+    "console_no_org": "Your account doesn't manage an active organisation, so there is nothing to show yet.",
     "signals_account_no_portal": "You're signed in as a Signals account. The coordinator portal needs a coordinator account.",
     "account_switch": "You've been signed out. Sign in with the coordinator account you want to use.",
     "no_portal_access": "This account can't access the coordinator portal. If you have a coordinator account, sign in with that instead.",
@@ -631,5 +632,107 @@
     "back_to_sign_in": "Back to sign in",
     "contents_label": "Contents",
     "agree_sentence": "By continuing you agree to the <privacy>Privacy Policy</privacy> and <terms>Terms</terms>."
+  },
+  "console": {
+    "title": "Organisation console",
+    "nav": {
+      "home": "Home",
+      "organisations": "Organisations",
+      "coordinators": "Coordinators",
+      "invite": "Invite coordinators",
+      "account": "My account",
+      "sign_out": "Sign out"
+    },
+    "home": {
+      "heading": "Your organisations",
+      "network_heading": "Network",
+      "pending_orgs": "Organisations waiting for review",
+      "none_pending": "Nothing is waiting for review.",
+      "coordinators": "{count} coordinators",
+      "pending": "{count} pending",
+      "open": "Open",
+      "no_orgs": "You don't manage an active organisation."
+    },
+    "org": {
+      "details": "Organisation details",
+      "name": "Name",
+      "url": "Website",
+      "locations": "Locations",
+      "no_locations": "No locations recorded.",
+      "legal_name": "Legal name",
+      "gst_number": "GST number",
+      "save": "Save",
+      "saved": "Saved.",
+      "read_only": "The Default organisation's details can't be edited here.",
+      "name_admin_only": "Only the network administrator can rename an organisation.",
+      "owner": "Owner",
+      "status": "Status",
+      "view_coordinators": "View coordinators"
+    },
+    "orgs": {
+      "heading": "Organisations",
+      "status_filter": "Status",
+      "all": "All",
+      "approve": "Approve",
+      "reject": "Reject",
+      "repair": "Repair access",
+      "repaired": "Owner access: {status}",
+      "empty": "No organisations match."
+    },
+    "coordinators": {
+      "heading": "Coordinators",
+      "status_filter": "Status",
+      "all": "All",
+      "empty": "No coordinators match.",
+      "next": "Next page",
+      "name": "Name",
+      "contact": "Contact",
+      "status": "Status",
+      "serves": "Domains",
+      "every_domain": "Every domain",
+      "open": "Open"
+    },
+    "coordinator": {
+      "approve": "Approve",
+      "reject": "Reject",
+      "reason": "Reason (optional, sent to the applicant)",
+      "decided": "Decision saved.",
+      "already": "Already decided elsewhere — now {status}.",
+      "domains": "Domains served",
+      "domains_hint": "Select none to serve every domain.",
+      "save_domains": "Save domains",
+      "saved": "Saved.",
+      "back": "Back to coordinators"
+    },
+    "invite": {
+      "heading": "Invite coordinators",
+      "org": "Organisation",
+      "recipients": "Email addresses",
+      "recipients_hint": "One address per line.",
+      "send": "Send invites",
+      "result": "Sent {sent}, resent {resent}.",
+      "invalid": "Not sent:",
+      "existing": "Already in this organisation:",
+      "no_orgs": "None of your organisations accepts invites."
+    },
+    "account": {
+      "heading": "My account",
+      "name": "Name",
+      "email": "Email",
+      "phone": "Phone",
+      "read_only": "Contact details can't be changed here yet."
+    },
+    "status": {
+      "pending": "Pending",
+      "active": "Active",
+      "inactive": "Rejected",
+      "retired": "Retired"
+    },
+    "errors": {
+      "generic": "Something went wrong. Please try again.",
+      "rate_limited": "Too many changes in a short time. Wait a moment and try again.",
+      "not_found": "Not found.",
+      "name_taken": "That name is already taken."
+    }
   }
 }
