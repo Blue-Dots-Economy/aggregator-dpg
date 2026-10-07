@@ -10,12 +10,16 @@
  *
  *       body.aggregator.contact    → Keycloak FIRST (mirror is authoritative
  *                                    for phone+email), then DB
- *       body.aggregator.*          → DB only (name / consent)
+ *       body.aggregator.*          → DB only (name)
  *
  *     Org details (`url`, `locations`, `contact.company`, `contact.gstNumber`)
  *     belong to the coordinator's org since migration 0028: they are rendered
  *     from it on GET, and a PATCH carrying any of them is refused with
  *     `409 ORG_DETAILS_READ_ONLY` before anything is written.
+ *
+ *     `consent` is read-only: it is recorded once, at registration, in the
+ *     append-only consent ledger, and a coordinator cannot rewrite it. A body
+ *     that sends it is refused as `SCHEMA_VALIDATION` (the schema is strict).
  *
  *     `org_slug` is rejected (immutable; DB trigger enforces too).
  *

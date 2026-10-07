@@ -24,12 +24,12 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@aws-sdk/client-sesv2": "^3.1126.0",
+    "@aws-sdk/client-sesv2": "^3.1141.0",
     "nodemailer": "^9.1.1"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
-    "@types/node": "^26.4.1",
+    "@types/node": "^26.6.3",
     "@types/nodemailer": "^8.0.1",
     "@vitest/coverage-v8": "^4.1.11",
     "typescript": "^6.0.3",
