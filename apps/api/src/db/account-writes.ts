@@ -29,12 +29,12 @@ import type { DbExecutor } from './contact-writes.js';
  */
 export async function linkAdminAccount(db: DbExecutor, contactId: string): Promise<string> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    // Explicit NULLs: the coordinator columns keep their defaults for
-    // coordinator inserts, and the role CHECK requires NULL on admin rows.
+    // Explicit NULLs: `status` and `profile` keep their defaults for
+    // coordinator inserts, and the role CHECK requires NULL on admin rows
+    // (`serves` defaults to '{}', which the CHECK requires too; 0029).
     await db.execute(sql`
-      INSERT INTO users (user_type, contact_id, status, profile, contact_extra,
-                         created_by, updated_by)
-      VALUES ('admin', ${contactId}, NULL, NULL, NULL, 'self', 'self')
+      INSERT INTO users (user_type, contact_id, status, profile, created_by, updated_by)
+      VALUES ('admin', ${contactId}, NULL, NULL, 'self', 'self')
       ON CONFLICT (contact_id, user_type) DO NOTHING`);
     const held = await db.execute<{ id: string }>(sql`
       SELECT id FROM users

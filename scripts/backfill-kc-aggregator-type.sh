@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Backfill the Keycloak `aggregator_type` user attribute from the Postgres
-# `aggregators.type` column for any approved aggregator whose KC user is
+# `users.serves` column (its first domain; `type` before migration 0029) for
+# any approved aggregator whose KC user is
 # missing the attribute. One-shot helper — run once per environment.
 #
 # Auto-reads the project `.env` (repo root or CWD) so the same vars the API
@@ -74,7 +75,7 @@ PG_USER="${PG_USER:-${POSTGRES_USER:-aggregator}}"
 PG_DB="${PG_DB:-${POSTGRES_DB:-aggregator}}"
 
 # Coordinators are `users` rows since migration 0027 (was `aggregators`).
-SQL="SELECT id, type::text FROM users WHERE user_type = 'coordinator' AND type IS NOT NULL AND type IN ('seeker','provider');"
+SQL="SELECT id, serves[1] FROM users WHERE user_type = 'coordinator' AND serves[1] IN ('seeker','provider');"
 
 # ─── Read aggregators from Postgres ─────────────────────────────────────────
 if [[ -n "${DATABASE_URL:-}" ]]; then

@@ -9,6 +9,9 @@ import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import { InMemoryAggregatorStore, MEMORY_DEFAULT_ORG_ID } from './memory.js';
 import type { OrgDetailColumns } from './org-details.js';
 import type { Aggregator, CreateAggregatorInput } from './interface.js';
+import { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
+
+export { NO_CONSENT_WRITE };
 import type { BecknContact, ConsentRecord } from '@aggregator-dpg/shared-primitives/aggregator';
 
 export class AggregatorStoreFake extends InMemoryAggregatorStore {
@@ -36,6 +39,18 @@ export class AggregatorStoreFake extends InMemoryAggregatorStore {
       gstNumber: null,
       ...details,
     });
+  }
+
+  /**
+   * Seeds an invite's address, read back as `inviteEmail` by coordinators
+   * created with that `inviteId` (the Postgres store joins
+   * `registration_invites`).
+   *
+   * @param jti - The invite id.
+   * @param email - The invited address.
+   */
+  seedInviteEmail(jti: string, email: string): void {
+    this.inviteEmails.set(jti, email);
   }
 
   /**
@@ -108,7 +123,8 @@ export function buildAggregator(overrides: Partial<Aggregator> = {}): Aggregator
     orgSlug: 'test-org-0001',
     actorType: 'aggregator',
     name: 'Test Org',
-    type: null,
+    type: overrides.type ?? null,
+    serves: overrides.serves ?? (overrides.type ? [overrides.type] : []),
     url: null,
     contactId: contactId(contact.email, contact.phone),
     contact,
@@ -127,6 +143,7 @@ export function buildAggregator(overrides: Partial<Aggregator> = {}): Aggregator
     parentOrgId: MEMORY_DEFAULT_ORG_ID,
     isDefaultOrg: true,
     inviteEmail: null,
+    inviteId: null,
     rejectedAt: null,
     ...overrides,
   };
@@ -137,10 +154,10 @@ export function buildCreateAggregatorInput(
 ): CreateAggregatorInput {
   return {
     orgSlug: 'test-org-0001',
-    actorType: 'aggregator',
     name: 'Test Org',
     type: null,
     contact: DEFAULT_CONTACT,
+    recordConsent: NO_CONSENT_WRITE,
     consent: DEFAULT_CONSENT,
     createdBy: 'system',
     updatedBy: 'system',

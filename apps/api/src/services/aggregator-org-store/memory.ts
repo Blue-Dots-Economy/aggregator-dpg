@@ -32,7 +32,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
   /** The network-facilitator root, when a test seeds one. */
   protected root: AggregatorOrg | null = null;
 
-  create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
+  async create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
     const slugTaken = [...this.byId.values()].some(
       (o) => o.slug === input.slug && NON_TERMINAL.has(o.status),
     );
@@ -52,6 +52,16 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       // Postgres fails the same write (contactId() runs before any SQL).
       return Promise.resolve(err('DB_UNAVAILABLE', 'TypeError'));
     }
+    const orgId = randomUUID();
+    // Fail-closed like the Postgres transaction: nothing is stored when the
+    // consent write fails.
+    if (input.recordConsent) {
+      try {
+        await input.recordConsent(undefined, orgId);
+      } catch {
+        return err('CONSENT_WRITE_FAILED', 'consent could not be recorded');
+      }
+    }
     const now = new Date();
     let ownerUserId = this.adminByContact.get(id);
     if (!ownerUserId) {
@@ -59,7 +69,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       this.adminByContact.set(id, ownerUserId);
     }
     const row: AggregatorOrg = {
-      id: randomUUID(),
+      id: orgId,
       slug: input.slug,
       displayName: input.displayName,
       state: input.state ?? null,
@@ -83,7 +93,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       gstNumber: null,
     };
     this.byId.set(row.id, row);
-    return Promise.resolve({ ok: true, value: row });
+    return { ok: true, value: row };
   }
 
   findById(id: string): Promise<OrgStoreResult<AggregatorOrg | null>> {

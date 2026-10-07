@@ -53,10 +53,21 @@ export class InMemoryConsentLedger extends ConsentLedgerBase {
       brand: input.brand ?? null,
       source: input.source ?? 'registration',
       acceptedAt: FIXED_NOW,
+      validTill: input.validTill ?? null,
       createdAt: FIXED_NOW,
     };
     this.rows.set(id, record);
     return Promise.resolve(ok(record));
+  }
+
+  /**
+   * Returns this ledger: in memory there is no transaction to bind to.
+   *
+   * @param _executor - Ignored.
+   * @returns This ledger.
+   */
+  override withExecutor(_executor: unknown): this {
+    return this;
   }
 
   /**

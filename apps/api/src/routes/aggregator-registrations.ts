@@ -12,9 +12,10 @@
  *      that then has to be rolled back.
  *   4. Generate `org_slug = slugFromName(body.name)` with retry on the
  *      (statistically tiny) suffix collision.
- *   5. INSERT `aggregators` (status='pending', actor_type='aggregator',
- *      type=null). Schema-declared fields with no column of their own go
- *      into the `profile` jsonb, tagged by `profile_ref`.
+ *   5. INSERT the coordinator into `users` (status='pending', `serves` from
+ *      `type`) and its registration consent row into `consent_record`, in one
+ *      transaction (0029). Schema-declared fields with no column of their own
+ *      go into the `profile` jsonb, tagged by `profile_ref`.
  *   6. Create the Keycloak user with attributes
  *      { aggregator_id, aggregator_type, phoneNumber, decision_made: 'pending' }.
  *      Email is a built-in field. The user is created disabled — login is
@@ -24,8 +25,9 @@
  *      bulk uploads and public registration links.
  *   7. Mint approve / reject JWTs and email the configured admins.
  *
- * Failures throw `httpError(<CODE>)`. A consent-ledger or KC failure after the
- * DB write rolls back the aggregator row (FK cascades its children).
+ * Failures throw `httpError(<CODE>)`. A consent-ledger failure rolls the whole
+ * insert back inside its transaction; a KC failure after the commit deletes the
+ * coordinator row (its consent row stays, unlinked).
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -34,7 +36,12 @@ import { RegistrationPayloadSchema } from '@aggregator-dpg/shared-primitives/agg
 import type { BecknContact, BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getRegistrationValidator } from '../services/registration-validator.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
-import type { Aggregator, LegacyOrgDetails } from '../services/aggregator-store/interface.js';
+import { stampConsent } from '../services/registration-consent.js';
+import type {
+  Aggregator,
+  LegacyOrgDetails,
+  RecordConsentHook,
+} from '../services/aggregator-store/interface.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { verifyInviteToken } from '../services/invite-token.js';
@@ -249,6 +256,12 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         // 1000-year consent window. Computed early so it is in scope for both
         // the reclaim path and the new-registration path below.
         const serverConsent = stampConsent(body.consent);
+        if (!serverConsent) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: 'consent.valid_till must be in the future.',
+            fields: { 'consent.valid_till': 'invalid' },
+          });
+        }
 
         // Rate limit per (ip, email) (spec A6). This bounds submission volume on
         // an endpoint that provisions a Keycloak user and sends mail, so it has
@@ -525,41 +538,39 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
         }
 
+        // Registration consent is written in the SAME transaction as the
+        // coordinator row (0029): a ledger failure leaves no row, contact or
+        // consent behind, and nothing has reached Keycloak yet. Fail-closed:
+        // never an aggregator without a consent record. Network/brand come from
+        // resolveActiveNetwork() so the recorded version matches what the web
+        // layer displayed; the config is read before the transaction opens.
+        const recordConsent = await aggregatorConsentWriter({
+          consent: serverConsent,
+          log,
+        });
+
         const aggregator = await createAggregatorWithSlug(aggregatorStore, body.name, {
           type: body.type,
           contact,
           consent: serverConsent,
+          recordConsent,
           orgId: parentOrgId,
           legacyOrgDetails:
             orgIsDefault && Object.keys(ownOrgDetails).length > 0 ? ownOrgDetails : null,
-          inviteEmail: inviteEmailClaim,
+          inviteId: inviteJti,
           profile: buildAggregatorProfile(body as unknown as Record<string, unknown>),
           profileRef: resolveProfileRef('registration.v1.json'),
         });
         if (!aggregator.ok) {
           const code = mapStoreCreateError(aggregator.error.code);
-          throw httpError(code, { cause: new Error(aggregator.error.message) });
-        }
-        const { id: aggregatorId, orgSlug } = aggregator.value;
-
-        // Record registration consent BEFORE provisioning the profile + Keycloak
-        // user, so a consent-write failure rolls back cleanly (just the aggregator
-        // row, no external side effects). Fail-closed: never leave an aggregator
-        // without a consent record. Network/brand come from resolveActiveNetwork()
-        // so the recorded version matches what the web layer displayed.
-        const { network: activeNetwork, brand: activeBrand } = resolveActiveNetwork();
-        const consentRecorded = await recordAggregatorConsent({
-          aggregatorId,
-          network: activeNetwork,
-          brand: activeBrand,
-          log,
-        });
-        if (!consentRecorded) {
-          await aggregatorStore.deleteById(aggregatorId);
-          throw httpError('CONSENT_WRITE_FAILED', {
-            fields: { sub_operation: 'recordAggregatorConsent', rolled_back: true },
+          throw httpError(code, {
+            cause: new Error(aggregator.error.message),
+            ...(code === 'CONSENT_WRITE_FAILED'
+              ? { fields: { sub_operation: 'recordAggregatorConsent', rolled_back: true } }
+              : {}),
           });
         }
+        const { id: aggregatorId, orgSlug } = aggregator.value;
 
         // Keycloak carries four attributes:
         //   - aggregator_id    reverse pointer to Postgres
@@ -656,34 +667,31 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
 }
 
 /**
- * Loads the consent config for the given network/brand and records an
- * aggregator registration-consent row in the append-only ledger.
+ * Builds the coordinator's consent-ledger write for `store.create`, which runs
+ * it inside the create transaction (0029). The consent config is read here,
+ * BEFORE the transaction opens, so no file I/O happens inside it.
  *
- * Fail-closed: returns `false` if the consent config cannot be read or the
- * ledger write fails, so the caller can roll the registration back rather than
- * leave an aggregator with no consent record. Failures are logged at `error`
- * with the network + both versions so a missed write is reconstructable.
+ * Fail-closed: a config that cannot be read refuses the registration up front;
+ * a ledger write that fails throws inside the transaction, so the store rolls
+ * the row and its contact back and answers `CONSENT_WRITE_FAILED`. Failures
+ * are logged at `error` with the network and both versions so a missed write
+ * is reconstructable.
  *
- * @param aggregatorId - The newly-created `aggregators.id`.
- * @param network - Signal Stack network identifier (e.g. `blue_dot`).
- * @param brand - Optional per-brand variant; undefined for the network default.
+ * @param consent - The server-stamped registration consent (`valid_till` is stored).
  * @param log - Request-scoped child logger.
- * @returns `true` when the consent row was written, `false` otherwise.
+ * @returns The hook to pass as `recordConsent`.
+ * @throws {HttpError} CONSENT_WRITE_FAILED when the consent config cannot be read.
  */
-async function recordAggregatorConsent({
-  aggregatorId,
-  network,
-  brand,
+async function aggregatorConsentWriter({
+  consent,
   log,
 }: {
-  aggregatorId: string;
-  network: string;
-  brand: string | undefined;
+  consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
   log: ReturnType<FastifyRequest['log']['child']>;
-}): Promise<boolean> {
+}): Promise<RecordConsentHook> {
+  const { network, brand } = resolveActiveNetwork();
   let termsVersion: number;
   let privacyVersion: number;
-
   try {
     const consentCfg = await loadConsentConfig(network, brand);
     termsVersion = consentCfg.audiences.aggregator.documents.terms.current_version;
@@ -694,43 +702,47 @@ async function recordAggregatorConsent({
         operation: 'consentLedger.recordAggregatorConsent',
         status: 'failure',
         error: e instanceof Error ? e.message : String(e),
-        aggregator_id: aggregatorId,
         network,
         brand: brand ?? null,
       },
-      'consent config load failed — registration rolled back',
+      'consent config load failed — registration refused',
     );
-    return false;
+    throw httpError('CONSENT_WRITE_FAILED', {
+      fields: { sub_operation: 'loadConsentConfig', rolled_back: true },
+    });
   }
 
-  const result = await getConsentLedger().recordRegistrationConsent({
-    subjectType: 'aggregator',
-    subjectId: aggregatorId,
-    network,
-    brand: brand ?? null,
-    termsVersion,
-    privacyVersion,
-  });
-
-  if (!result.success) {
-    log.error(
-      {
-        operation: 'consentLedger.recordAggregatorConsent',
-        status: 'failure',
-        error: result.error.message,
-        error_type: result.error.name,
-        aggregator_id: aggregatorId,
+  return async (executor, aggregatorId) => {
+    const result = await getConsentLedger()
+      .withExecutor(executor)
+      .recordRegistrationConsent({
+        subjectType: 'user',
+        subjectId: aggregatorId,
         network,
         brand: brand ?? null,
-        terms_version: termsVersion,
-        privacy_version: privacyVersion,
-      },
-      'consent ledger write failed — registration rolled back',
-    );
-    return false;
-  }
-
-  return true;
+        termsVersion,
+        privacyVersion,
+        validTill: new Date(consent.valid_till),
+      });
+    if (!result.success) {
+      log.error(
+        {
+          operation: 'consentLedger.recordAggregatorConsent',
+          status: 'failure',
+          error: result.error.message,
+          error_type: result.error.name,
+          aggregator_id: aggregatorId,
+          network,
+          brand: brand ?? null,
+          terms_version: termsVersion,
+          privacy_version: privacyVersion,
+        },
+        'consent ledger write failed — registration rolled back',
+      );
+      // Throwing inside the store's transaction rolls the registration back.
+      throw result.error;
+    }
+  };
 }
 
 /**
@@ -746,12 +758,14 @@ async function createAggregatorWithSlug(
     type: ReturnType<typeof RegistrationPayloadSchema.parse>['type'];
     contact: BecknContact;
     consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
+    /** Writes the consent ledger row inside the create transaction. */
+    recordConsent: RecordConsentHook;
     /** The coordinator's org (`users.org_id`). */
     orgId: string;
     /** The coordinator's own org details (Default-org registrations only). */
     legacyOrgDetails: LegacyOrgDetails | null;
-    /** Invited email (#701) — provenance when registered via an invite. */
-    inviteEmail: string | null;
+    /** The consumed invite (#701; `registration_invites.jti`), when registered via one. */
+    inviteId: string | null;
     profile: Record<string, unknown>;
     /** `null` when no registration schema resolved — variant unknown. */
     profileRef: string | null;
@@ -762,16 +776,16 @@ async function createAggregatorWithSlug(
     const orgSlug = slugFromName(name);
     last = await store.create({
       orgSlug,
-      actorType: 'aggregator',
       name,
       type: extras.type,
       contact: extras.contact,
       consent: extras.consent,
+      recordConsent: extras.recordConsent,
       createdBy: 'self',
       updatedBy: 'self',
       orgId: extras.orgId,
       legacyOrgDetails: extras.legacyOrgDetails,
-      inviteEmail: extras.inviteEmail,
+      inviteId: extras.inviteId,
       profile: extras.profile,
       profileRef: extras.profileRef,
     });
@@ -786,39 +800,6 @@ async function createAggregatorWithSlug(
   );
 }
 
-/**
- * Maximum consent validity window. Hard ceiling so a buggy or hostile
- * client cannot persist a consent record that is effectively permanent.
- * Five years lines up with typical regulatory retention envelopes; tune
- * via config if a deployment needs something different.
- */
-const MAX_CONSENT_VALIDITY_MS = 5 * 365 * 24 * 60 * 60 * 1000;
-
-/**
- * Server-stamp `given_at` to the current instant and clamp `valid_till` to
- * at most {@link MAX_CONSENT_VALIDITY_MS} after that instant. The client is
- * allowed to ask for a shorter window but never a longer one.
- *
- * @param incoming - Consent block as it arrived from the registration form.
- * @returns Consent record with server-authoritative timestamps.
- */
-function stampConsent(
-  incoming: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'],
-): ReturnType<typeof RegistrationPayloadSchema.parse>['consent'] {
-  const now = new Date();
-  const maxValidTill = new Date(now.getTime() + MAX_CONSENT_VALIDITY_MS);
-  const requestedValidTill = new Date(incoming.valid_till);
-  const validTill =
-    Number.isFinite(requestedValidTill.getTime()) && requestedValidTill < maxValidTill
-      ? requestedValidTill
-      : maxValidTill;
-  return {
-    ...incoming,
-    given_at: now.toISOString(),
-    valid_till: validTill.toISOString(),
-  };
-}
-
 function mapStoreCreateError(
   code:
     | 'NOT_FOUND'
@@ -827,11 +808,15 @@ function mapStoreCreateError(
     | 'DUPLICATE_EMAIL'
     | 'DUPLICATE'
     | 'CHECK_VIOLATION'
+    | 'CONSENT_WRITE_FAILED'
     | 'DB_UNAVAILABLE',
 ): ErrorCode {
   switch (code) {
     case 'DUPLICATE_SLUG':
       return 'DUPLICATE_SLUG';
+    // The ledger write failed inside the create transaction: nothing exists.
+    case 'CONSENT_WRITE_FAILED':
+      return 'CONSENT_WRITE_FAILED';
     // An unrecognised unique violation is a real conflict, but not one this
     // layer can name — don't dress it up as a taken slug (#718 review).
     case 'DUPLICATE':

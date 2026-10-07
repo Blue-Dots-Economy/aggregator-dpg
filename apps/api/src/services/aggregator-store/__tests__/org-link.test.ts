@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { InMemoryAggregatorStore, MEMORY_DEFAULT_ORG_ID } from '../memory.js';
 import { AggregatorStoreFake, buildAggregator, buildCreateAggregatorInput } from '../testing.js';
+import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
 
 const CONSENT = {
   value: true,
@@ -17,8 +18,8 @@ describe('aggregator store org link (0028)', () => {
   it('persists the org on create and returns it as parentOrgId', async () => {
     const store = new InMemoryAggregatorStore();
     const r = await store.create({
+      recordConsent: NO_CONSENT_WRITE,
       orgSlug: 'c1',
-      actorType: 'aggregator',
       name: 'Coord 1',
       type: 'seeker',
       contact: { name: 'A', phone: '+919000000001', email: 'c1@x.org' },

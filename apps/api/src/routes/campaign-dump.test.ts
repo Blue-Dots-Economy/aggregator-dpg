@@ -445,7 +445,7 @@ describe('GET /v1/campaign/dump', () => {
       expect(row.kind).toBe('dump');
       // A dump is synchronous and whole-network: one row, and the absent org is
       // the signature of that.
-      expect((row as { actorOrgId?: string }).actorOrgId).toBeUndefined();
+      expect((row as { actorSignalstackOrgId?: string }).actorSignalstackOrgId).toBeUndefined();
       expect((row as { outcome?: string }).outcome).toBe('succeeded');
       expect((row as { actorUserId?: string }).actorUserId).toBe('sa-uuid');
     });

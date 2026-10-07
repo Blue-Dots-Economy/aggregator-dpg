@@ -19,6 +19,7 @@ import { getDb, getPool, closeDb, _setDbClients } from '../client.js';
 import { PostgresAggregatorStore } from '../../services/aggregator-store/postgres.js';
 import { PostgresAggregatorOrgStore } from '../../services/aggregator-org-store/postgres.js';
 import { PostgresIdentityStore } from '../../services/identity-store/postgres.js';
+import { NO_CONSENT_WRITE } from '../../services/consent-ledger/hook.js';
 
 const realUrl = process.env.INTEGRATION_DATABASE_URL;
 const suite = realUrl ? describe : describe.skip;
@@ -64,8 +65,8 @@ suite('users (migration 0027) — integration', () => {
 
   async function newCoordinator(e = email(), p = phone()) {
     const r = await aggStore.create({
+      recordConsent: NO_CONSENT_WRITE,
       orgSlug: `it-${randomUUID().slice(0, 8)}`,
-      actorType: 'aggregator',
       name: 'IT Coordinator',
       type: null,
       contact: { name: 'Coord', email: e, phone: p },
@@ -80,6 +81,7 @@ suite('users (migration 0027) — integration', () => {
 
   async function newOrg(ownerEmail = email(), ownerPhone = phone()) {
     const r = await orgStore.create({
+      recordConsent: NO_CONSENT_WRITE,
       slug: `it-org-${randomUUID().slice(0, 8)}`,
       displayName: `IT Org ${randomUUID().slice(0, 8)}`,
       ownerEmail,
@@ -96,7 +98,8 @@ suite('users (migration 0027) — integration', () => {
   it('creates an org with an identity-only admin owner (explicit NULLs satisfy the role CHECK)', async () => {
     const org = await newOrg();
     const admin = await pool.query(
-      `SELECT user_type, status, org_id, legacy_org_details, profile, contact_extra, signalstack_org_slug
+      `SELECT user_type, status, org_id, legacy_org_details, profile, serves, alternate_phone,
+              invite_id, signalstack_org_slug
          FROM users WHERE id = $1`,
       [org.ownerUserId],
     );
@@ -106,7 +109,9 @@ suite('users (migration 0027) — integration', () => {
       org_id: null,
       legacy_org_details: null,
       profile: null,
-      contact_extra: null,
+      serves: [],
+      alternate_phone: null,
+      invite_id: null,
       signalstack_org_slug: null,
     });
     await orgStore.deleteById(org.id);

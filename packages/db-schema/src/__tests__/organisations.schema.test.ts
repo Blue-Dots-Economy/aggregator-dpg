@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { getTableConfig } from 'drizzle-orm/pg-core';
-import { aggregatorOrgs, organisations, orgTypeEnum, users } from '../schema.js';
+import { organisations, orgTypeEnum, users } from '../schema.js';
 
 describe('organisations schema (migration 0028)', () => {
   it('declares the org columns with snake_case SQL names', () => {
@@ -37,8 +37,10 @@ describe('organisations schema (migration 0028)', () => {
     expect(orgTypeEnum.enumValues).toEqual(['network_facilitator', 'aggregator']);
   });
 
-  it('keeps aggregatorOrgs as an alias until the naming commit', () => {
-    expect(aggregatorOrgs).toBe(organisations);
+  it('no longer exports the pre-0028 aliases (Phase 4 naming commit)', async () => {
+    const schema = (await import('../schema.js')) as Record<string, unknown>;
+    expect(schema['aggregatorOrgs']).toBeUndefined();
+    expect(schema['aggregators']).toBeUndefined();
   });
 
   it('owner and parent FKs are RESTRICT', () => {

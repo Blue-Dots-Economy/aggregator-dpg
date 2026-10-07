@@ -438,7 +438,7 @@ describe('runCampaignJob completed audit (#617)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.correlationId).toBe('job-1');
     expect(rows[0]!.outcome).toBe('succeeded');
-    expect(rows[0]!.actorOrgId).toBe('org-1');
+    expect(rows[0]!.actorSignalstackOrgId).toBe('org-1');
   });
 
   it('populates the outcome counts, recipientRef and destination on the export success row (#617 follow-up)', async () => {

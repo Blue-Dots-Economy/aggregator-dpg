@@ -18,7 +18,7 @@
  */
 
 import { and, asc, desc, eq, lt, ne, sql, type SQL } from 'drizzle-orm';
-import { aggregatorOrgs, contact, userIdentities, users } from '../../db/schema.js';
+import { organisations, contact, userIdentities, users } from '../../db/schema.js';
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
@@ -41,8 +41,17 @@ import {
   type UpdateOrgPatch,
 } from './interface.js';
 
+/** Wraps a failure of the caller's `recordConsent` hook so `create` can tell it apart. */
+class ConsentHookError extends Error {
+  constructor(cause: unknown) {
+    super('recordConsent failed', { cause });
+    this.name = 'ConsentHookError';
+  }
+}
+
 export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   async create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
+    const start = Date.now();
     try {
       const created = await getDb().transaction(async (tx) => {
         // The owner's contact, the owner's admin account and the org row are
@@ -57,13 +66,13 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
           await linkIdentity(tx, ownerUserId, IDP_PROVIDER, input.ownerKcSub, 'admin');
         // Every aggregator org sits under the network-facilitator root (0028).
         const [root] = await tx
-          .select({ id: aggregatorOrgs.id })
-          .from(aggregatorOrgs)
-          .where(eq(aggregatorOrgs.orgType, 'network_facilitator'))
+          .select({ id: organisations.id })
+          .from(organisations)
+          .where(eq(organisations.orgType, 'network_facilitator'))
           .limit(1);
         if (!root) throw new Error('network-facilitator root missing');
         const [row] = await tx
-          .insert(aggregatorOrgs)
+          .insert(organisations)
           .values({
             slug: input.slug,
             name: input.displayName,
@@ -79,23 +88,41 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
             createdBy: 'self',
             updatedBy: 'self',
           })
-          .returning({ id: aggregatorOrgs.id });
+          .returning({ id: organisations.id });
         if (!row) throw new Error('insert returned no row');
+        // The consent row commits with the org, or neither does (0029).
+        if (input.recordConsent) {
+          try {
+            await input.recordConsent(tx, row.id);
+          } catch (hookErr: unknown) {
+            throw new ConsentHookError(hookErr);
+          }
+        }
         return this.readIn(tx, row.id);
       });
       if (!created) return errResult('DB_UNAVAILABLE', 'org row not readable after insert');
       return { ok: true, value: created };
     } catch (e) {
+      if (e instanceof ConsentHookError) {
+        logger.error({
+          operation: 'orgStore.create',
+          status: 'failure',
+          error: 'CONSENT_WRITE_FAILED',
+          error_type: (e.cause as Error | undefined)?.name ?? 'unknown',
+          latency_ms: Date.now() - start,
+        });
+        return errResult('CONSENT_WRITE_FAILED', 'consent could not be recorded');
+      }
       return mapDbError('orgStore.create', e);
     }
   }
 
   async findById(id: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
-    return this.findOne(eq(aggregatorOrgs.id, id));
+    return this.findOne(eq(organisations.id, id));
   }
 
   async findBySlug(slug: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
-    return this.findOne(eq(aggregatorOrgs.slug, slug));
+    return this.findOne(eq(organisations.slug, slug));
   }
 
   async findByOwnerEmail(email: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
@@ -120,10 +147,10 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
       const rows = await getDb().execute<{ shared: boolean }>(sql`
         WITH me AS (
           SELECT o.org_owner, u.contact_id
-            FROM ${aggregatorOrgs} o JOIN ${users} u ON u.id = o.org_owner
+            FROM ${organisations} o JOIN ${users} u ON u.id = o.org_owner
            WHERE o.id = ${id})
         SELECT EXISTS (
-                 SELECT 1 FROM ${aggregatorOrgs} other, me
+                 SELECT 1 FROM ${organisations} other, me
                   WHERE other.org_owner = me.org_owner AND other.id <> ${id})
             OR EXISTS (
                  SELECT 1 FROM ${users} c, me
@@ -137,8 +164,8 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   async listActive(): Promise<OrgStoreResult<AggregatorOrg[]>> {
     try {
       const rows = await this.selectJoined()
-        .where(scoped(eq(aggregatorOrgs.status, 'active')))
-        .orderBy(sql`lower(${aggregatorOrgs.name})`);
+        .where(scoped(eq(organisations.status, 'active')))
+        .orderBy(sql`lower(${organisations.name})`);
       return { ok: true, value: rows.map(toDomain) };
     } catch (e) {
       return mapDbError('orgStore.listActive', e);
@@ -148,8 +175,8 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   async listPending(updatedBefore?: Date): Promise<OrgStoreResult<AggregatorOrg[]>> {
     try {
       const where = updatedBefore
-        ? and(eq(aggregatorOrgs.status, 'pending'), lt(aggregatorOrgs.updatedAt, updatedBefore))
-        : eq(aggregatorOrgs.status, 'pending');
+        ? and(eq(organisations.status, 'pending'), lt(organisations.updatedAt, updatedBefore))
+        : eq(organisations.status, 'pending');
       const rows = await this.selectJoined().where(scoped(where));
       return { ok: true, value: rows.map(toDomain) };
     } catch (e) {
@@ -158,13 +185,13 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   }
 
   async findDefault(): Promise<OrgStoreResult<AggregatorOrg | null>> {
-    return this.findOne(eq(aggregatorOrgs.slug, DEFAULT_ORG_SLUG));
+    return this.findOne(eq(organisations.slug, DEFAULT_ORG_SLUG));
   }
 
   async findRoot(): Promise<OrgStoreResult<AggregatorOrg | null>> {
     try {
       const [row] = await this.selectJoined()
-        .where(eq(aggregatorOrgs.orgType, 'network_facilitator'))
+        .where(eq(organisations.orgType, 'network_facilitator'))
         .limit(1);
       return { ok: true, value: row ? toDomain(row) : null };
     } catch (e) {
@@ -179,10 +206,10 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     try {
       const updated = await getDb().transaction(async (tx) => {
         const rows = await tx
-          .update(aggregatorOrgs)
+          .update(organisations)
           .set({ ...columns, updatedAt: new Date() })
-          .where(scoped(eq(aggregatorOrgs.id, id)))
-          .returning({ id: aggregatorOrgs.id, orgOwner: aggregatorOrgs.orgOwner });
+          .where(scoped(eq(organisations.id, id)))
+          .returning({ id: organisations.id, orgOwner: organisations.orgOwner });
         const [row] = rows;
         if (!row) return null;
         // A null subject never unlinks: a recorded login is only ever added.
@@ -200,8 +227,8 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     try {
       // Never the root or the Default org: they are not removable here.
       await getDb()
-        .delete(aggregatorOrgs)
-        .where(scoped(and(eq(aggregatorOrgs.id, id), ne(aggregatorOrgs.slug, DEFAULT_ORG_SLUG))));
+        .delete(organisations)
+        .where(scoped(and(eq(organisations.id, id), ne(organisations.slug, DEFAULT_ORG_SLUG))));
       return { ok: true, value: undefined };
     } catch (e) {
       return mapDbError('orgStore.deleteById', e);
@@ -222,20 +249,20 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   ): Promise<OrgStoreResult<AggregatorOrg | null>> {
     try {
       const [row] = await getDb()
-        .update(aggregatorOrgs)
+        .update(organisations)
         // Stamp rejected_at (write-once) on the reject transition only (#726).
         .set({
           status: next,
           updatedAt: new Date(),
           ...(next === 'inactive' ? { rejectedAt: new Date() } : {}),
         })
-        .where(scoped(and(eq(aggregatorOrgs.id, id), eq(aggregatorOrgs.status, 'pending'))))
-        .returning({ id: aggregatorOrgs.id });
+        .where(scoped(and(eq(organisations.id, id), eq(organisations.status, 'pending'))))
+        .returning({ id: organisations.id });
       if (!row) return { ok: true, value: null };
     } catch (e) {
       return mapDbError('orgStore.casFromPending', e);
     }
-    return this.findOne(eq(aggregatorOrgs.id, id));
+    return this.findOne(eq(organisations.id, id));
   }
 
   /**
@@ -247,9 +274,9 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
    */
   private selectJoined(db: DbExecutor = getDb()) {
     return db
-      .select({ o: aggregatorOrgs, c: contact, ownerKcSub: userIdentities.subject })
-      .from(aggregatorOrgs)
-      .innerJoin(users, eq(users.id, aggregatorOrgs.orgOwner))
+      .select({ o: organisations, c: contact, ownerKcSub: userIdentities.subject })
+      .from(organisations)
+      .innerJoin(users, eq(users.id, organisations.orgOwner))
       .innerJoin(contact, eq(contact.id, users.contactId))
       .leftJoin(
         userIdentities,
@@ -260,7 +287,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   /** Reads one joined row through `db` (used inside write transactions). */
   private async readIn(db: DbExecutor, id: string): Promise<AggregatorOrg | null> {
     const [row] = await this.selectJoined(db)
-      .where(scoped(eq(aggregatorOrgs.id, id)))
+      .where(scoped(eq(organisations.id, id)))
       .limit(1);
     return row ? toDomain(row) : null;
   }
@@ -281,21 +308,15 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
       const q = this.selectJoined().where(
         scoped(
           byOwner
-            ? and(
-                predicate,
-                eq(users.userType, 'admin'),
-                ne(aggregatorOrgs.slug, DEFAULT_ORG_SLUG),
-              )!
+            ? and(predicate, eq(users.userType, 'admin'), ne(organisations.slug, DEFAULT_ORG_SLUG))!
             : predicate,
         ),
       );
       const [row] = await (byOwner
         ? q
             .orderBy(
-              asc(
-                sql`CASE WHEN ${aggregatorOrgs.status} IN ('pending','active') THEN 0 ELSE 1 END`,
-              ),
-              desc(aggregatorOrgs.createdAt),
+              asc(sql`CASE WHEN ${organisations.status} IN ('pending','active') THEN 0 ELSE 1 END`),
+              desc(organisations.createdAt),
             )
             .limit(1)
         : q.limit(1));
@@ -307,7 +328,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
 }
 
 type JoinedRow = {
-  o: typeof aggregatorOrgs.$inferSelect;
+  o: typeof organisations.$inferSelect;
   c: typeof contact.$inferSelect;
   ownerKcSub: string | null;
 };
@@ -349,7 +370,7 @@ function toDomain(row: JoinedRow): AggregatorOrg {
  * @returns The scoped filter.
  */
 function scoped(predicate: SQL | undefined): SQL {
-  return and(eq(aggregatorOrgs.orgType, 'aggregator'), predicate)!;
+  return and(eq(organisations.orgType, 'aggregator'), predicate)!;
 }
 
 /**

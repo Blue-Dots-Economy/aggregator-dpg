@@ -446,7 +446,8 @@ describe('aggregator profile routes', () => {
     expect(kcWrites).toBe(0);
   });
 
-  it('PATCH updates aggregator name/consent successfully', async () => {
+  it('PATCH refuses consent: read-only after registration (#836, 0029)', async () => {
+    const before = await aggregatorStore.findById(aggregatorId);
     const res = await app.inject({
       method: 'PATCH',
       url: '/v1/aggregators/profile/me',
@@ -455,10 +456,28 @@ describe('aggregator profile routes', () => {
         aggregator: {
           name: 'TRRAIN Renamed',
           consent: {
-            value: true,
-            given_at: '2026-01-15T10:00:00Z',
-            valid_till: '2027-01-15T10:00:00Z',
+            value: false,
+            given_at: '2020-01-15T10:00:00Z',
+            valid_till: '2099-01-15T10:00:00Z',
           },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
+    const after = await aggregatorStore.findById(aggregatorId);
+    expect(after.ok && after.value?.name).toBe(before.ok ? before.value?.name : undefined);
+    expect(after.ok && after.value?.consent).toEqual(before.ok ? before.value?.consent : undefined);
+  });
+
+  it('PATCH updates the aggregator name successfully', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          name: 'TRRAIN Renamed',
         },
       },
     });

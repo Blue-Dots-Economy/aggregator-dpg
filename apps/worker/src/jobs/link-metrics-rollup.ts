@@ -50,13 +50,13 @@ export async function rollupLinkMetrics(_job: LinkMetricsRollupJob): Promise<Rol
     .select({
       id: schema.linkSubmissions.id,
       linkId: schema.linkSubmissions.linkId,
-      aggregatorId: schema.linkSubmissions.aggregatorId,
-      orgSlug: schema.users.orgSlug,
+      aggregatorId: schema.linkSubmissions.userId,
+      orgSlug: schema.users.signalstackOrgSlug,
       outcome: schema.linkSubmissions.outcome,
       createdAt: schema.linkSubmissions.createdAt,
     })
     .from(schema.linkSubmissions)
-    .innerJoin(schema.users, eq(schema.linkSubmissions.aggregatorId, schema.users.id))
+    .innerJoin(schema.users, eq(schema.linkSubmissions.userId, schema.users.id))
     .where(isNull(schema.linkSubmissions.rolledUpAt))
     .orderBy(schema.linkSubmissions.createdAt)
     .limit(BATCH_SIZE);
@@ -99,8 +99,8 @@ export async function rollupLinkMetrics(_job: LinkMetricsRollupJob): Promise<Rol
     await getDb()
       .insert(schema.onboarding)
       .values({
-        aggregatorId: key.aggregatorId,
-        orgSlug: key.orgSlug,
+        userId: key.aggregatorId,
+        signalstackOrgSlug: key.orgSlug,
         source: 'link',
         batchId: null,
         linkId: key.linkId,
@@ -112,11 +112,7 @@ export async function rollupLinkMetrics(_job: LinkMetricsRollupJob): Promise<Rol
         skipped: totals.skipped,
       })
       .onConflictDoUpdate({
-        target: [
-          schema.onboarding.aggregatorId,
-          schema.onboarding.linkId,
-          schema.onboarding.periodStart,
-        ],
+        target: [schema.onboarding.userId, schema.onboarding.linkId, schema.onboarding.periodStart],
         targetWhere: sql`source = 'link'`,
         set: {
           total: sql`${schema.onboarding.total} + ${totals.total}`,

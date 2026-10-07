@@ -16,6 +16,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { PostgresAggregatorOrgStore } from '../postgres.js';
 import { _setDbClients } from '../../../db/client.js';
+import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
 import type { AggregatorOrg, CreateOrgInput } from '../interface.js';
 
 // ─── Fake Drizzle chain ─────────────────────────────────────────────────────
@@ -142,6 +143,7 @@ function makeInput(overrides: Partial<CreateOrgInput> = {}): CreateOrgInput {
     slug: 'test-org',
     displayName: 'Test Org',
     ownerEmail: 'owner@test.local',
+    recordConsent: NO_CONSENT_WRITE,
     ...overrides,
   };
 }
@@ -621,5 +623,39 @@ describe('PostgresAggregatorOrgStore.approve / reject', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DB_UNAVAILABLE');
+  });
+});
+
+describe('PostgresAggregatorOrgStore — consent in the create transaction (0029)', () => {
+  it('runs recordConsent inside the transaction with the new org id', async () => {
+    const db = makeFakeDb(() => [makeRow({ id: 'org-7', ownerEmail: 'owner@test.local' })]);
+    _setDbClients(null, db as never);
+    const calls: { tx: unknown; id: string }[] = [];
+    const result = await new PostgresAggregatorOrgStore().create(
+      makeInput({
+        recordConsent: async (tx, id) => {
+          calls.push({ tx, id });
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.tx).toBeDefined();
+  });
+
+  it('answers CONSENT_WRITE_FAILED when the hook throws (the transaction rolls back)', async () => {
+    const db = makeFakeDb(() => [makeRow({ id: 'org-8', ownerEmail: 'owner@test.local' })]);
+    _setDbClients(null, db as never);
+    const result = await new PostgresAggregatorOrgStore().create(
+      makeInput({
+        recordConsent: async () => {
+          throw new Error('ledger down');
+        },
+      }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'CONSENT_WRITE_FAILED', message: 'consent could not be recorded' },
+    });
   });
 });

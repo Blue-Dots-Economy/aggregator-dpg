@@ -97,3 +97,57 @@ describe('InMemoryAggregatorStore.update', () => {
     }
   });
 });
+
+describe('InMemoryAggregatorStore — consent hook and serves (0029)', () => {
+  it('runs recordConsent with the new id and stores the row', async () => {
+    const store = new InMemoryAggregatorStore();
+    const seen: string[] = [];
+    const r = await store.create(
+      buildCreateAggregatorInput({
+        recordConsent: async (_tx, id) => {
+          seen.push(id);
+        },
+      }),
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(seen).toEqual([r.value.id]);
+  });
+
+  it('stores nothing and answers CONSENT_WRITE_FAILED when the hook throws', async () => {
+    const store = new InMemoryAggregatorStore();
+    const input = buildCreateAggregatorInput({
+      recordConsent: async () => {
+        throw new Error('ledger down');
+      },
+    });
+    const r = await store.create(input);
+    expect(r).toEqual({
+      ok: false,
+      error: { code: 'CONSENT_WRITE_FAILED', message: 'consent could not be recorded' },
+    });
+    const found = await store.findBySlug(input.orgSlug);
+    expect(found.ok && found.value).toBeNull();
+  });
+
+  it.each([
+    ['seeker', ['seeker'], 'seeker'],
+    [null, [], null],
+    ['both', [], null],
+  ] as const)('type %s → serves %j, type %s', async (type, serves, readType) => {
+    const store = new InMemoryAggregatorStore();
+    const r = await store.create(buildCreateAggregatorInput({ type }));
+    expect(r.ok && r.value.serves).toEqual(serves);
+    expect(r.ok && r.value.type).toBe(readType);
+    expect(r.ok && r.value.actorType).toBe('aggregator');
+  });
+
+  it('a type patch rewrites serves', async () => {
+    const store = new InMemoryAggregatorStore();
+    const r = await store.create(buildCreateAggregatorInput());
+    if (!r.ok) throw new Error('seed');
+    const u = await store.update(r.value.id, { type: 'provider', updatedBy: 't' });
+    expect(u.ok && u.value.serves).toEqual(['provider']);
+    expect(u.ok && u.value.type).toBe('provider');
+  });
+});

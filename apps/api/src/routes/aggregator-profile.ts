@@ -52,8 +52,9 @@ const AggregatorPatchSchema = z
     url: z.string().url().max(2048).nullable().optional(),
     contact: BecknContactSchema.optional(),
     locations: z.array(BecknLocationSchema).optional(),
-    consent: ConsentRecordSchema.optional(),
   })
+  // Consent is read-only after registration (#836; since 0029 it lives only in
+  // the consent ledger): a body carrying it is refused, 400 SCHEMA_VALIDATION.
   .strict();
 
 const ProfileUpdateBodySchema = z
@@ -89,7 +90,9 @@ const ProfileCommonResponseShape = {
   url: z.string().nullable(),
   contact: BecknContactSchema,
   locations: z.array(BecknLocationSchema),
-  consent: ConsentRecordSchema,
+  // The newest registration consent from the ledger; null only when the
+  // ledger holds none (never after the 0029 verify).
+  consent: ConsentRecordSchema.nullable(),
   status: z.string(),
   updated_at: z.string(),
 };
@@ -188,7 +191,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         tags: ['aggregator-profile'],
         summary: 'Update the caller aggregator profile',
         description:
-          "Partial update of the caller aggregator (name / contact / consent). Contact phone + email are mirrored to Keycloak before the DB write. Org details (url, locations, contact.company, contact.gstNumber) belong to the coordinator's organisation and are refused with 409 ORG_DETAILS_READ_ONLY.",
+          "Partial update of the caller aggregator (name / contact). Consent is read-only after registration: a body carrying `consent` is refused with 400 SCHEMA_VALIDATION. Contact phone + email are mirrored to Keycloak before the DB write. Org details (url, locations, contact.company, contact.gstNumber) belong to the coordinator's organisation and are refused with 409 ORG_DETAILS_READ_ONLY.",
         security: [{ bearerAuth: [] }],
         body: ProfileUpdateBodySchema,
         response: {
@@ -303,7 +306,6 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
       };
       if (body.aggregator.name !== undefined) patch.name = body.aggregator.name;
       if (normalisedContact !== undefined) patch.contact = normalisedContact;
-      if (body.aggregator.consent !== undefined) patch.consent = body.aggregator.consent;
 
       const result = await aggregatorStore.update(auth.aggregatorId, patch);
       if (!result.ok && normalisedContact && previousPhone !== undefined) {
@@ -406,6 +408,7 @@ function mapAggregatorUpdateError(
     | 'DUPLICATE_EMAIL'
     | 'DUPLICATE'
     | 'CHECK_VIOLATION'
+    | 'CONSENT_WRITE_FAILED'
     | 'DB_UNAVAILABLE',
 ): Parameters<typeof httpError>[0] {
   switch (code) {

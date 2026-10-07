@@ -20,6 +20,7 @@ import { _setConsentLedger } from '../services/consent-ledger/index.js';
 import { _setSubmitRateChecker } from '../services/submit-rate.js';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type * as ConfigLoaderFs from '@aggregator-dpg/config-loader/fs';
+import { NO_CONSENT_WRITE } from '../services/consent-ledger/hook.js';
 
 const { loadConsentConfigMock } = vi.hoisted(() => ({ loadConsentConfigMock: vi.fn() }));
 vi.mock('@aggregator-dpg/config-loader/fs', async (importOriginal) => {
@@ -103,7 +104,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     consent: {
       value: true,
       given_at: '2026-01-15T10:00:00Z',
-      valid_till: '2027-01-15T10:00:00Z',
+      valid_till: '2099-01-15T10:00:00Z',
     },
   };
 
@@ -153,7 +154,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     const ledgerRows = consentLedger.list();
     expect(ledgerRows).toHaveLength(1);
     const consentRow = ledgerRows[0];
-    expect(consentRow?.subjectType).toBe('aggregator');
+    expect(consentRow?.subjectType).toBe('user');
     expect(consentRow?.subjectId).toBe(body.aggregator_id);
     expect(consentRow?.termsVersion).toBeGreaterThanOrEqual(1);
     expect(consentRow?.privacyVersion).toBeGreaterThanOrEqual(1);
@@ -176,7 +177,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
 
     const ledgerRows = consentLedger.list();
     expect(ledgerRows).toHaveLength(1);
-    expect(ledgerRows[0]?.subjectType).toBe('aggregator');
+    expect(ledgerRows[0]?.subjectType).toBe('user');
     expect(ledgerRows[0]?.subjectId).toBe(aggregator_id);
   });
 
@@ -224,6 +225,9 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(res.statusCode).toBe(500);
     const body = res.json() as { error: { code: string } };
     expect(body.error.code).toBe('CONSENT_WRITE_FAILED');
+    // One transaction (0029): the row never existed, so nothing is left behind.
+    const found = await aggregatorStore.findByContactEmail('ledger-fail@trrain.org');
+    expect(found.ok && found.value).toBeNull();
   });
 
   it('returns 401 when Bearer is missing', async () => {
@@ -340,8 +344,8 @@ describe('POST /v1/aggregator-registrations/create', () => {
     rejectedAt?: Date;
   }) {
     const created = await aggregatorStore.create({
+      recordConsent: NO_CONSENT_WRITE,
       orgSlug: 'trrain-aaaa',
-      actorType: 'aggregator',
       name: 'TRRAIN',
       type: 'seeker',
       orgId: '00000000-0000-0000-0000-0000000000d0',
@@ -652,13 +656,42 @@ describe('POST /v1/aggregator-registrations/create', () => {
     const { aggregator_id } = res.json() as { aggregator_id: string };
     const stored = await aggregatorStore.findById(aggregator_id);
     if (stored.ok && stored.value) {
-      const validTill = new Date(stored.value.consent.valid_till).getTime();
+      const validTill = new Date(stored.value.consent?.valid_till ?? 0).getTime();
       const now = Date.now();
       const fiveYearsMs = 5 * 365 * 24 * 60 * 60 * 1000;
       // Clamped well under the requested 2099 date, at ~5 years from now.
       expect(validTill).toBeLessThan(now + fiveYearsMs + 60_000);
       expect(validTill).toBeGreaterThan(now + fiveYearsMs - 60_000);
     }
+    // What the ledger row itself stores (0029: the only home of consent).
+    const row = consentLedger.list().find((r) => r.subjectId === aggregator_id);
+    const ledgerTill = row?.validTill?.getTime() ?? 0;
+    const fiveYears = 5 * 365 * 24 * 60 * 60 * 1000;
+    expect(ledgerTill).toBeGreaterThan(Date.now() + fiveYears - 60_000);
+    expect(ledgerTill).toBeLessThan(Date.now() + fiveYears + 60_000);
+  });
+
+  it('400 SCHEMA_VALIDATION for a consent that is already expired; nothing is created', async () => {
+    const before = consentLedger.list().length;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...validBody,
+        contact: { ...validBody.contact, email: 'expired-consent@trrain.org' },
+        consent: {
+          value: true,
+          given_at: '2020-01-15T10:00:00Z',
+          valid_till: '2020-02-15T10:00:00Z',
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
+    const found = await aggregatorStore.findByContactEmail('expired-consent@trrain.org');
+    expect(found.ok && found.value).toBeNull();
+    expect(consentLedger.list()).toHaveLength(before);
   });
   it('throttles a submit when the rate checker denies, with the org hierarchy off (429)', async () => {
     // The limiter used to sit inside the `orgHierarchyEnabled()` branch, so a

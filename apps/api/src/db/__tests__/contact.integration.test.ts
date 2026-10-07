@@ -36,6 +36,7 @@ import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import { getDb, getPool, closeDb, _setDbClients } from '../client.js';
 import { PostgresAggregatorStore } from '../../services/aggregator-store/postgres.js';
 import { PostgresAggregatorOrgStore } from '../../services/aggregator-org-store/postgres.js';
+import { NO_CONSENT_WRITE } from '../../services/consent-ledger/hook.js';
 
 const realUrl = process.env.INTEGRATION_DATABASE_URL;
 const suite = realUrl ? describe : describe.skip;
@@ -318,8 +319,8 @@ suite('contact (migration 0025) — integration', () => {
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const p = phone();
       const created = await store.create({
+        recordConsent: NO_CONSENT_WRITE,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
-        actorType: 'aggregator',
         name: 'IT Org',
         type: null,
         contact: { name: 'Store Test', email, phone: p, gstNumber: 'GST1' },
@@ -363,6 +364,7 @@ suite('contact (migration 0025) — integration', () => {
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const p = phone();
       const created = await store.create({
+        recordConsent: NO_CONSENT_WRITE,
         slug: `it-org-${randomUUID().slice(0, 8)}`,
         displayName: `IT Org ${randomUUID().slice(0, 8)}`,
         ownerEmail: email.toUpperCase(),
@@ -482,8 +484,8 @@ suite('contact (migration 0025) — integration', () => {
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const input = { name: 'Asha', email, phone: phone(), gstNumber: 'G1', company: 'Acme' };
       const created = await store.create({
+        recordConsent: NO_CONSENT_WRITE,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
-        actorType: 'aggregator',
         name: 'IT Org',
         type: null,
         contact: input,
@@ -525,12 +527,14 @@ suite('contact (migration 0025) — integration', () => {
         updatedBy: 'it',
       };
       const first = await store.create({
+        recordConsent: NO_CONSENT_WRITE,
         ...base,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
         contact: { name: 'A', email, phone: phone() },
       });
       expect(first.ok).toBe(true);
       const second = await store.create({
+        recordConsent: NO_CONSENT_WRITE,
         ...base,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
         contact: { name: 'B', email, phone: phone() },
@@ -562,8 +566,18 @@ suite('contact (migration 0025) — integration', () => {
         updatedBy: 'it',
       };
       const [a, b] = await Promise.all([
-        store.create({ ...base, orgSlug: `it-${randomUUID().slice(0, 8)}`, contact: person }),
-        store.create({ ...base, orgSlug: `it-${randomUUID().slice(0, 8)}`, contact: person }),
+        store.create({
+          recordConsent: NO_CONSENT_WRITE,
+          ...base,
+          orgSlug: `it-${randomUUID().slice(0, 8)}`,
+          contact: person,
+        }),
+        store.create({
+          recordConsent: NO_CONSENT_WRITE,
+          ...base,
+          orgSlug: `it-${randomUUID().slice(0, 8)}`,
+          contact: person,
+        }),
       ]);
       try {
         expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
@@ -583,8 +597,8 @@ suite('contact (migration 0025) — integration', () => {
       const aggStore = new PostgresAggregatorStore();
       const orgStore = new PostgresAggregatorOrgStore();
       const coord = await aggStore.create({
+        recordConsent: NO_CONSENT_WRITE,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
-        actorType: 'aggregator',
         name: 'IT Org',
         type: null,
         contact: { name: 'Both', email, phone: p },
@@ -594,6 +608,7 @@ suite('contact (migration 0025) — integration', () => {
         updatedBy: 'it',
       });
       const org = await orgStore.create({
+        recordConsent: NO_CONSENT_WRITE,
         slug: `it-org-${randomUUID().slice(0, 8)}`,
         displayName: `IT Org ${randomUUID().slice(0, 8)}`,
         ownerEmail: email,
@@ -641,6 +656,7 @@ suite('contact (migration 0025) — integration', () => {
       const store = new PostgresAggregatorOrgStore();
       const p = phone();
       const created = await store.create({
+        recordConsent: NO_CONSENT_WRITE,
         slug: `it-org-${randomUUID().slice(0, 8)}`,
         displayName: `IT Org ${randomUUID().slice(0, 8)}`,
         ownerEmail: `it-${randomUUID().slice(0, 8)}@example.org`,
@@ -748,9 +764,9 @@ suite('contact (migration 0025) — integration', () => {
       ]);
     });
 
-    it('is idempotent: re-applying 0028 (the current head) is a no-op', async (ctx) => {
+    it('is idempotent: re-applying 0029 (the current head) is a no-op', async (ctx) => {
       if (legacy) ctx.skip();
-      const head = await readFile(path.join(MIGRATIONS_DIR, '0028_organisations.sql'), 'utf8');
+      const head = await readFile(path.join(MIGRATIONS_DIR, '0029_cleanup.sql'), 'utf8');
       const c = await pool.connect();
       try {
         await c.query('BEGIN');
@@ -766,8 +782,8 @@ suite('contact (migration 0025) — integration', () => {
       const store = new PostgresAggregatorStore();
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const created = await store.create({
+        recordConsent: NO_CONSENT_WRITE,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
-        actorType: 'aggregator',
         name: 'IT Org',
         type: null,
         contact: { name: 'Gc', email, phone: phone() },
@@ -791,6 +807,7 @@ suite('contact (migration 0025) — integration', () => {
       const ownerEmail = `it-${randomUUID().slice(0, 8)}@example.org`;
       const ownerPhone = phone();
       const org = await orgStore.create({
+        recordConsent: NO_CONSENT_WRITE,
         slug: `it-org-${randomUUID().slice(0, 8)}`,
         displayName: `IT Org ${randomUUID().slice(0, 8)}`,
         ownerEmail,
@@ -798,8 +815,8 @@ suite('contact (migration 0025) — integration', () => {
         ownerName: 'Owner Name',
       });
       const coord = await aggStore.create({
+        recordConsent: NO_CONSENT_WRITE,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
-        actorType: 'aggregator',
         name: 'IT Org',
         type: null,
         contact: {

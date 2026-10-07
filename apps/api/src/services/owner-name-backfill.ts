@@ -13,7 +13,7 @@
  */
 
 import { and, eq, isNull } from 'drizzle-orm';
-import { aggregatorOrgs, contact, userIdentities, users } from '../db/schema.js';
+import { organisations, contact, userIdentities, users } from '../db/schema.js';
 import { IDP_PROVIDER } from './idp-admin/provider.js';
 import { getDb } from '../db/client.js';
 import { logger } from '../logger.js';
@@ -185,12 +185,12 @@ export async function listOwnerNameCandidatesFromDb(): Promise<OwnerNameCandidat
   // Owner account → its contact (nameless) and its IdP login (required).
   const rows = await getDb()
     .select({
-      orgId: aggregatorOrgs.id,
+      orgId: organisations.id,
       contactId: users.contactId,
       ownerKcSub: userIdentities.subject,
     })
-    .from(aggregatorOrgs)
-    .innerJoin(users, eq(users.id, aggregatorOrgs.orgOwner))
+    .from(organisations)
+    .innerJoin(users, eq(users.id, organisations.orgOwner))
     .innerJoin(contact, eq(contact.id, users.contactId))
     .innerJoin(
       userIdentities,
@@ -198,7 +198,7 @@ export async function listOwnerNameCandidatesFromDb(): Promise<OwnerNameCandidat
     )
     // Aggregator orgs only: the network admin's root / Default orgs have no
     // Keycloak owner to read a name from.
-    .where(and(isNull(contact.name), eq(aggregatorOrgs.orgType, 'aggregator')));
+    .where(and(isNull(contact.name), eq(organisations.orgType, 'aggregator')));
   return rows.flatMap((r) =>
     r.ownerKcSub ? [{ orgId: r.orgId, contactId: r.contactId, ownerKcSub: r.ownerKcSub }] : [],
   );

@@ -11,7 +11,8 @@ export interface ProfileService {
  * Wire shape of `contact` on `GET /v1/aggregators/profile/me` — mirrors
  * `BecknContactSchema` in `@aggregator-dpg/shared-primitives/beckn`. Since
  * migration 0025 the API composes it from the `contact` table (name / email /
- * phone) plus `aggregators.contact_extra` (the optional keys below); the shape
+ * phone) plus `users.alternate_phone` and the org's company / GST (the optional
+ * keys below, migrations 0028 / 0029); the shape
  * the web receives is unchanged.
  */
 interface BecknContact {
@@ -44,7 +45,8 @@ export interface ProfileApiResponse {
   url: string | null;
   contact: BecknContact;
   locations: BecknLocation[];
-  consent: { value: boolean; given_at: string; valid_till: string };
+  // From the consent ledger (0029); null only when the ledger holds no registration row.
+  consent: { value: boolean; given_at: string; valid_till: string } | null;
   status: 'pending' | 'active' | 'inactive' | 'retired';
   identity?: {
     first_name: string | null;

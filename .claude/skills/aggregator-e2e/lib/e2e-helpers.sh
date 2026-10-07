@@ -253,9 +253,8 @@ seed_active_org() {
             ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email
             RETURNING id),
           u AS (
-            INSERT INTO users (user_type, contact_id, status, profile, contact_extra,
-                               created_by, updated_by)
-            SELECT 'admin', c.id, NULL, NULL, NULL, 'e2e', 'e2e' FROM c
+            INSERT INTO users (user_type, contact_id, status, profile, created_by, updated_by)
+            SELECT 'admin', c.id, NULL, NULL, 'e2e', 'e2e' FROM c
             ON CONFLICT (contact_id, user_type) DO UPDATE SET updated_by = EXCLUDED.updated_by
             RETURNING id)
           INSERT INTO organisations (slug, name, org_type, parent_id, org_owner, status)

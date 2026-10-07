@@ -228,8 +228,8 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           applicantEmail: lookup.kcUser.email,
           ...(lookup.aggregator.inviteEmail ? { invitedEmail: lookup.aggregator.inviteEmail } : {}),
           association: lookup.aggregator.name,
-          // For aggregator actors `type` is null. Surface `actor_type`
-          // instead so the admin page always shows something meaningful.
+          // `type` is null when the coordinator serves every domain. Surface
+          // `actor_type` instead so the admin page always shows something.
           aggregatorType: lookup.aggregator.type ?? lookup.aggregator.actorType,
           postUrl: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
           expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),

@@ -6,7 +6,7 @@
  * pg error fields.
  *
  * Person-contact data is read from the `contact` table through
- * `aggregators.contact_id` (migrations 0025/0026) and composed back into the
+ * `users.contact_id` (migrations 0025/0026) and composed back into the
  * Beckn `contact` shape, so callers and the API contract are unchanged. Writes
  * go to `contact` in the same transaction as the row (`db/contact-writes.ts`),
  * and every write re-reads the joined row, because `RETURNING` cannot include
@@ -14,14 +14,25 @@
  *
  * Org details (`url`, `locations`, company / GST) are rendered from the joined
  * org with the `legacy_org_details` fallback (`org-details.ts`, migration 0028).
+ *
+ * Consent is read from the `consent_record` ledger (newest registration row)
+ * and written by the caller's `recordConsent` hook inside the create
+ * transaction (migration 0029).
  */
 
 import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import type { AggregatorStatus, BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { logger } from '../../logger.js';
-import { users, contact, organisations } from '../../db/schema.js';
+import {
+  users,
+  contact,
+  organisations,
+  consentRecord,
+  registrationInvites,
+} from '../../db/schema.js';
 import { DEFAULT_ORG_SLUG } from '../aggregator-org-store/interface.js';
 import { renderOrgDetails } from './org-details.js';
+import { servesOf } from './serves.js';
 import {
   changeContact,
   ContactTakenError,
@@ -48,6 +59,17 @@ import {
   type UpdateAggregatorPatch,
 } from './interface.js';
 
+/** Ledger sources that record a registration consent (the others are attestations). */
+const REGISTRATION_CONSENT_SOURCES = sql`('registration', 'registration-backfill')`;
+
+/** Wraps a failure of the caller's `recordConsent` hook so `create` can tell it apart. */
+class ConsentHookError extends Error {
+  constructor(cause: unknown) {
+    super('recordConsent failed', { cause });
+    this.name = 'ConsentHookError';
+  }
+}
+
 export class PostgresAggregatorStore extends AggregatorStoreBase {
   async create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
     const start = Date.now();
@@ -61,25 +83,46 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           .insert(users)
           .values({
             userType: 'coordinator',
-            orgSlug: input.orgSlug,
-            actorType: input.actorType,
-            name: input.name,
-            type: input.type ?? null,
+            signalstackOrgSlug: input.orgSlug,
+            signalstackOrgName: input.name,
+            serves: servesOf(input.type),
             contactId,
-            contactExtra: onlyAlternatePhone(extra),
-            consent: input.consent,
+            alternatePhone: extra.alternatePhone ?? null,
             createdBy: input.createdBy,
             updatedBy: input.updatedBy,
             orgId: input.orgId,
             legacyOrgDetails: input.legacyOrgDetails ?? null,
-            inviteEmail: input.inviteEmail ?? null,
+            inviteId: input.inviteId ?? null,
             profile: input.profile ?? {},
             profileRef: input.profileRef ?? null,
           })
           .returning({ id: users.id });
-        return rows[0] ? this.readIn(tx, rows[0].id) : null;
+        const id = rows[0]?.id;
+        if (!id) return null;
+        // The consent row commits with the account, or neither does.
+        if (input.recordConsent) {
+          try {
+            await input.recordConsent(tx, id);
+          } catch (hookErr: unknown) {
+            throw new ConsentHookError(hookErr);
+          }
+        }
+        return this.readIn(tx, id);
       });
     } catch (err: unknown) {
+      if (err instanceof ConsentHookError) {
+        logger.error({
+          operation: 'aggregatorStore.create',
+          status: 'failure',
+          error: 'CONSENT_WRITE_FAILED',
+          error_type: (err.cause as Error | undefined)?.name ?? 'unknown',
+          latency_ms: Date.now() - start,
+        });
+        return {
+          ok: false,
+          error: { code: 'CONSENT_WRITE_FAILED', message: 'consent could not be recorded' },
+        };
+      }
       return this.mapWriteError('aggregatorStore.create', err, input.orgSlug, start);
     }
     if (!created) {
@@ -99,7 +142,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
   }
 
   async findBySlug(orgSlug: string): Promise<StoreResult<Aggregator | null>> {
-    return this.findOne('aggregatorStore.findBySlug', eq(users.orgSlug, orgSlug));
+    return this.findOne('aggregatorStore.findBySlug', eq(users.signalstackOrgSlug, orgSlug));
   }
 
   async findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>> {
@@ -139,7 +182,6 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     try {
       const conds = [];
       if (filter.status) conds.push(eq(users.status, filter.status));
-      if (filter.actorType) conds.push(eq(users.actorType, filter.actorType));
       if (filter.updatedBefore) conds.push(lt(users.updatedAt, filter.updatedBefore));
       const where = coordinator(...conds);
 
@@ -161,15 +203,15 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
   }
 
   async update(id: string, patch: UpdateAggregatorPatch): Promise<StoreResult<Aggregator>> {
-    const updates: Record<string, unknown> = {
+    // Typed, so a renamed column can never be dropped silently by `.set()`.
+    const updates: Partial<typeof users.$inferInsert> = {
       updatedBy: patch.updatedBy,
       updatedAt: new Date(),
     };
-    if (patch.name !== undefined) updates['name'] = patch.name;
-    if (patch.type !== undefined) updates['type'] = patch.type;
-    if (patch.consent !== undefined) updates['consent'] = patch.consent;
-    if (patch.status !== undefined) updates['status'] = patch.status;
-    if (patch.rejectedAt !== undefined) updates['rejectedAt'] = patch.rejectedAt;
+    if (patch.name !== undefined) updates.signalstackOrgName = patch.name;
+    if (patch.type !== undefined) updates.serves = servesOf(patch.type);
+    if (patch.status !== undefined) updates.status = patch.status;
+    if (patch.rejectedAt !== undefined) updates.rejectedAt = patch.rejectedAt;
 
     let updated: Aggregator | null;
     try {
@@ -184,8 +226,8 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
             .for('update');
           if (!current) return null;
           const { identity, extra } = splitBecknContact(patch.contact);
-          updates['contactId'] = await changeContact(tx, current.contactId, identity);
-          updates['contactExtra'] = onlyAlternatePhone(extra);
+          updates.contactId = await changeContact(tx, current.contactId, identity);
+          updates.alternatePhone = extra.alternatePhone ?? null;
         }
         const rows = await tx
           .update(users)
@@ -312,6 +354,22 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           legalName: organisations.legalName,
           gstNumber: organisations.gstNumber,
         },
+        // Newest registration consent (epoch ms; the API composes ISO strings).
+        consent: sql<{ at: number; till: number | null } | null>`(
+          SELECT json_build_object(
+                   'at', (extract(epoch FROM ${consentRecord.acceptedAt}) * 1000)::bigint,
+                   'till', (extract(epoch FROM ${consentRecord.validTill}) * 1000)::bigint)
+            FROM ${consentRecord}
+           WHERE ${consentRecord.userId} = ${users.id}
+             AND ${consentRecord.source} IN ${REGISTRATION_CONSENT_SOURCES}
+           ORDER BY ${consentRecord.acceptedAt} DESC, ${consentRecord.createdAt} DESC
+           LIMIT 1)`,
+        // The invited address: the one 0029 kept on the row (no invite left, or
+        // spelled differently there), else the invite's.
+        inviteEmail: sql<string | null>`coalesce(
+          ${users.profile} ->> 'legacy_invite_email',
+          (SELECT ${registrationInvites.email} FROM ${registrationInvites}
+            WHERE ${registrationInvites.jti} = ${users.inviteId}))`,
       })
       .from(users)
       .innerJoin(contact, eq(contact.id, users.contactId))
@@ -439,6 +497,8 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
 type JoinedRow = {
   a: typeof users.$inferSelect;
   c: typeof contact.$inferSelect;
+  consent: { at: number | string; till: number | string | null } | null;
+  inviteEmail: string | null;
   o: {
     slug: string;
     url: string | null;
@@ -450,7 +510,7 @@ type JoinedRow = {
 
 /**
  * Builds the Beckn `contact` the API has always returned, from the linked
- * `contact` row, the org's company / GST (rendered) and `contact_extra`. Keys
+ * `contact` row, the org's company / GST (rendered) and `alternate_phone`. Keys
  * are emitted in the order the legacy jsonb column produced them (Postgres
  * orders jsonb keys by length, then bytes), so a serialised response stays
  * byte-identical.
@@ -461,49 +521,48 @@ function composeContact(
   gstNumber: string | undefined,
 ): BecknContact {
   const { a, c } = row;
-  const extra = a.contactExtra ?? {};
   return {
     name: c.name ?? '',
     email: c.email,
     phone: c.phone ?? '',
     ...(company !== undefined ? { company } : {}),
     ...(gstNumber !== undefined ? { gstNumber } : {}),
-    ...(extra.alternatePhone !== undefined ? { alternatePhone: extra.alternatePhone } : {}),
+    ...(a.alternatePhone != null ? { alternatePhone: a.alternatePhone } : {}),
   };
 }
 
 /**
- * Keeps only `alternatePhone` of a contact's extras: company / GST belong to
- * the org since 0028 and are never stored on the coordinator.
- *
- * @param extra - The extras split off a Beckn contact.
- * @returns The `contact_extra` value to store.
+ * Composes the API's consent object from the newest ledger row: `given_at` is
+ * the row's `accepted_at` (G14). `null` when there is no registration row or
+ * it has no `valid_till`.
  */
-function onlyAlternatePhone(extra: { alternatePhone?: string }): { alternatePhone?: string } {
-  return extra.alternatePhone !== undefined ? { alternatePhone: extra.alternatePhone } : {};
+function composeConsent(c: JoinedRow['consent']): Aggregator['consent'] {
+  if (!c || c.till === null) return null;
+  return {
+    value: true,
+    given_at: new Date(Number(c.at)).toISOString(),
+    valid_till: new Date(Number(c.till)).toISOString(),
+  };
 }
 
 function toDomain(row: JoinedRow): Aggregator {
   const { a, o } = row;
   const details = renderOrgDetails(o, a.legacyOrgDetails);
-  // Legacy `'both'` rows are coerced to null at the boundary — the app no
-  // longer treats `both` as a first-class participant focus. Backfill the
-  // column to a single value before dropping the DB enum entry.
-  const type = a.type === 'both' ? null : a.type;
   const composed = composeContact(row, details.company, details.gstNumber);
   return {
     id: a.id,
-    orgSlug: a.orgSlug,
-    actorType: a.actorType,
-    name: a.name,
-    type,
+    orgSlug: a.signalstackOrgSlug,
+    actorType: 'aggregator',
+    name: a.signalstackOrgName,
+    type: a.serves[0] ?? null,
+    serves: a.serves,
     url: details.url,
     contactId: a.contactId,
     contact: composed,
     contactPhone: composed.phone,
     contactEmail: composed.email,
     locations: details.locations,
-    consent: a.consent,
+    consent: composeConsent(row.consent),
     profile: a.profile ?? {},
     profileRef: a.profileRef,
     status: a.status,
@@ -514,7 +573,8 @@ function toDomain(row: JoinedRow): Aggregator {
     signalstackOrgId: a.signalstackOrgId,
     parentOrgId: a.orgId,
     isDefaultOrg: o?.slug === DEFAULT_ORG_SLUG,
-    inviteEmail: a.inviteEmail,
+    inviteEmail: row.inviteEmail,
+    inviteId: a.inviteId,
     rejectedAt: a.rejectedAt,
   };
 }

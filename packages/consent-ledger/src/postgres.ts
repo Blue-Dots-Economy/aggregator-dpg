@@ -1,8 +1,8 @@
 /**
  * Drizzle-backed ConsentLedger — real production implementation.
  *
- * Inserts one row into `aggregator_consent_record` with `source = 'registration'`
- * and a server-stamped `acceptedAt`. Any Drizzle / database error is mapped to
+ * Inserts one row into `consent_record` (default `source = 'registration'`)
+ * with a server-stamped `acceptedAt` and the typed `user_id` / `org_id` link. Any Drizzle / database error is mapped to
  * a typed `UpstreamError` so the caller never sees a thrown exception.
  *
  * Structured log entries are emitted on every call (success and failure) with
@@ -13,7 +13,7 @@
  */
 
 import type { PgDatabase } from 'drizzle-orm/pg-core';
-import { aggregatorConsentRecord } from '@aggregator-dpg/db-schema/schema';
+import { consentRecord } from '@aggregator-dpg/db-schema/schema';
 import {
   UpstreamError,
   DomainError,
@@ -53,9 +53,21 @@ export class PostgresConsentLedger extends ConsentLedgerBase {
   }
 
   /**
-   * Inserts one registration-consent record into `aggregator_consent_record`.
+   * Returns a ledger writing through `executor` (a Drizzle transaction).
    *
-   * Sets `source = 'registration'` and `acceptedAt = now()` on every call.
+   * @param executor - The caller's Drizzle transaction, or nothing.
+   * @returns A ledger bound to it (this ledger when none is given).
+   */
+  override withExecutor(executor: unknown): PostgresConsentLedger {
+    // No executor (a caller without a transaction): keep the bound handle.
+    if (executor === undefined || executor === null) return this;
+    return new PostgresConsentLedger(executor as DbHandle);
+  }
+
+  /**
+   * Inserts one consent record into `consent_record`.
+   *
+   * `source` defaults to `'registration'`; `acceptedAt = now()` on every call.
    * On DB failure returns `err(UpstreamError)`; if Drizzle returns no row
    * returns `err(DomainError)`. Never throws.
    *
@@ -97,16 +109,19 @@ export class PostgresConsentLedger extends ConsentLedgerBase {
       const now = new Date();
 
       const inserted = await this.db
-        .insert(aggregatorConsentRecord)
+        .insert(consentRecord)
         .values({
           subjectType: validInput.subjectType,
           subjectId: validInput.subjectId,
+          userId: validInput.subjectType === 'user' ? validInput.subjectId : null,
+          orgId: validInput.subjectType === 'organisation' ? validInput.subjectId : null,
           termsVersion: validInput.termsVersion,
           privacyVersion: validInput.privacyVersion,
           network: validInput.network,
           brand: validInput.brand ?? null,
-          source: input.source ?? 'registration',
+          source: validInput.source ?? 'registration',
           acceptedAt: now,
+          validTill: validInput.validTill ?? null,
         })
         .returning();
 
@@ -144,6 +159,7 @@ export class PostgresConsentLedger extends ConsentLedgerBase {
         brand: row.brand ?? null,
         source: row.source,
         acceptedAt: row.acceptedAt,
+        validTill: row.validTill ?? null,
         createdAt: row.createdAt,
       };
 

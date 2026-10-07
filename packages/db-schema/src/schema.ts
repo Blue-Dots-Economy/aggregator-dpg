@@ -5,12 +5,14 @@
  *   - `contact`: one row per person (name, email, phone), keyed by the
  *     deterministic `contactId()` hash of `lower(email):phone`. Every row that
  *     belongs to a person references it by FK `contact_id` (migration 0025).
- *   - `aggregators`: registration-essential identity of a coordinator. Holds
- *     id, slug, actor_type, name (the ORGANISATION name the coordinator
- *     registered under) / type, url, `contact_id` → `contact` (+ `contact_extra`
- *     for the optional Beckn contact keys), Beckn `locations`, `consent`,
- *     lifecycle `status`, and audit fields. `org_slug` is derived from `name`
- *     at INSERT and is immutable (trigger lives in the migration).
+ *   - `users` (was `aggregators`): one row per account. A `coordinator` row
+ *     is a coordinator's registration and its own Signals org
+ *     (`signalstack_org_slug` / `_name` / `_id`), the domains it `serves`, its
+ *     org (`org_id`) and lifecycle `status`; an `admin` row is an org owner's
+ *     identity only. Person details live on `contact` (`contact_id`);
+ *     consent lives only in `consent_record` (migration 0029).
+ *   - `organisations` (was `aggregator_orgs`): the network-facilitator root,
+ *     the Default org and every registered aggregator org (migration 0028).
  *   - `bulk_uploads`: parent record per CSV upload. Tracks lifecycle
  *     (pending → uploaded → file_validating → row_processing → completed/failed)
  *     plus counters (passed/failed/skipped). Per-row state lives transiently
@@ -21,10 +23,11 @@
  * the application's copy; the two are not yet re-synced after registration
  * (a later phase adds a single sync point).
  *
- * CHECK constraints (shape guards on jsonb, conditional integrity on
- * actor_type ↔ type, the `contact` id/email/phone format checks), the
- * `contact` sync + GC triggers, and the immutability trigger on `org_slug` are
- * declared in the migrations, not here.
+ * CHECK constraints (jsonb shape guards, the per-role row shape
+ * `users_role_shape_chk`, the `contact` id/email/phone format checks), the
+ * `contact` GC trigger, the slug immutability triggers and the
+ * `consent_record` append-only trigger are declared in the migrations, not
+ * here.
  */
 
 import { sql } from 'drizzle-orm';
@@ -70,12 +73,6 @@ export interface LegacyOrgDetails {
  */
 export const userTypeEnum = pgEnum('user_type', ['admin', 'coordinator']);
 
-export const aggregatorActorTypeEnum = pgEnum('aggregator_actor_type', [
-  'aggregator',
-  'seeker',
-  'provider',
-]);
-
 // `participant_type` + `aggregator_type` Postgres enums were dropped in
 // migration 0011 — the aggregator is generic across signalstack networks
 // (blue_dot has seeker/provider, yellow_dot has learner/tutor, …) so the
@@ -83,7 +80,8 @@ export const aggregatorActorTypeEnum = pgEnum('aggregator_actor_type', [
 // `text`; validation against the live network's `domainIds` happens at
 // the application layer.
 
-export const aggregatorStatusEnum = pgEnum('aggregator_status', [
+/** Registration status of a coordinator or an org (`aggregator_status` before 0029). */
+export const registrationStatusEnum = pgEnum('registration_status', [
   'pending',
   'active',
   'inactive',
@@ -240,9 +238,7 @@ export const contact = pgTable(
 //
 // The TypeScript types below describe COORDINATOR rows: the aggregator store
 // reads them with `user_type = 'coordinator'`, and admin rows are written only
-// by `db/account-writes.ts` and read through narrow column selects. Property
-// names keep their pre-0027 spelling (`orgSlug`, `name`) until the Phase 4
-// naming commit.
+// by `db/account-writes.ts` and read through narrow column selects.
 //
 // Migrations are hand-written SQL (apps/api/drizzle/migrations) — do NOT use
 // `drizzle-kit generate` against this file: the coordinator-only columns are
@@ -257,14 +253,18 @@ export const users = pgTable(
     /** Account role (0027). */
     userType: userTypeEnum('user_type').notNull(),
     /** The coordinator's Signals org slug (was `org_slug`): also the `[org]` segment of public links. Immutable. */
-    orgSlug: text('signalstack_org_slug').notNull().unique('users_signalstack_org_slug_unique'),
-    actorType: aggregatorActorTypeEnum('actor_type').notNull(),
+    signalstackOrgSlug: text('signalstack_org_slug')
+      .notNull()
+      .unique('users_signalstack_org_slug_unique'),
     /** The coordinator's Signals org name (was `name`). */
-    name: text('signalstack_org_name').notNull(),
-    // `type` is NULL when actor_type='aggregator' (enforced by CHECK).
-    // Stored as text since 0011 — the network config decides which
-    // domain ids are valid for the active deployment.
-    type: text('type'),
+    signalstackOrgName: text('signalstack_org_name').notNull(),
+    // The network domain ids the coordinator serves (0029; was `type`), e.g.
+    // `{seeker}`. Empty = every domain of the network. The network config
+    // decides which ids are valid; `'{}'` for admin accounts.
+    serves: text('serves')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
 
     // The person behind this coordinator (migration 0025; NOT NULL since 0026).
     contactId: text('contact_id')
@@ -273,14 +273,10 @@ export const users = pgTable(
         onDelete: 'restrict',
         onUpdate: 'cascade',
       }),
-    // Optional Beckn contact key `alternatePhone` — part of the API's
-    // `contact` object but not identity, so not on `contact`. (`company` /
-    // `gstNumber` moved to the org in 0028: `organisations.legal_name` /
-    // `gst_number`.)
-    contactExtra: jsonb('contact_extra')
-      .$type<Partial<Pick<BecknContact, 'alternatePhone'>>>()
-      .notNull()
-      .default(sql`'{}'::jsonb`),
+    // Optional Beckn contact key `alternatePhone` (0029; was in
+    // `contact_extra`) — part of the API's `contact` object but not identity,
+    // so not on `contact`. (`company` / `gstNumber` are the org's since 0028.)
+    alternatePhone: text('alternate_phone'),
 
     // The legacy Beckn `contact` jsonb and its generated `contact_phone` /
     // `contact_email` columns were dropped by migration 0026.
@@ -290,9 +286,8 @@ export const users = pgTable(
     // rendered when the org's field is empty (target model §4.2–4.3).
     legacyOrgDetails: jsonb('legacy_org_details').$type<LegacyOrgDetails>(),
 
-    // Onboarding consent (snapshot at signup; aggregator must accept T&C
-    // before the row is created). Refreshable via PATCH.
-    consent: jsonb('consent').$type<ConsentRecord>().notNull(),
+    // Consent lives only in `consent_record` since 0029 (the API composes
+    // `consent` from the newest registration row).
 
     // Schema-driven registration payload (0018). Holds ONLY fields that have
     // no column of their own — the typed columns above stay authoritative for
@@ -309,7 +304,7 @@ export const users = pgTable(
     profileRef: text('profile_ref'),
 
     // Lifecycle
-    status: aggregatorStatusEnum('status').notNull().default('pending'),
+    status: registrationStatusEnum('status').notNull().default('pending'),
     createdBy: text('created_by').notNull(),
     updatedBy: text('updated_by').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -330,11 +325,13 @@ export const users = pgTable(
       .notNull()
       .references((): AnyPgColumn => organisations.id, { onDelete: 'restrict' }),
 
-    // The email a coordinator was INVITED at (#701), when they registered via an
-    // invite. May differ from `contact_email` (they can register with their own
-    // address) — kept for provenance so the approving owner can see who was
-    // originally targeted. NULL for non-invite / flat registrations.
-    inviteEmail: text('invite_email'),
+    // The invite a coordinator registered with (#701; 0029, was the invited
+    // email). The invited address may differ from the person's contact email;
+    // it is read through the invite. A pre-0029 address whose invite was not
+    // found is kept in `profile.legacy_invite_email`. NULL otherwise.
+    inviteId: uuid('invite_id').references((): AnyPgColumn => registrationInvites.jti, {
+      onDelete: 'set null',
+    }),
 
     // Write-once timestamp of rejection (#726). Set exactly once when a
     // pending registration is rejected (status → inactive); never mutated
@@ -347,18 +344,14 @@ export const users = pgTable(
     // contact_phone_unique) — one person per email and per phone across roles.
     // Approval queue + tenant-classification filters.
     index('users_status_idx').on(table.status),
-    index('users_actor_type_idx').on(table.actorType),
     // One account per person per role (0027; was one coordinator row per person).
     uniqueIndex('users_contact_type_unique').on(table.contactId, table.userType),
     index('users_org_idx').on(table.orgId),
+    index('users_invite_idx')
+      .on(table.inviteId)
+      .where(sql`invite_id IS NOT NULL`),
   ],
 );
-
-/**
- * Phase 2 alias for {@link users}, kept for callers not yet renamed; removed
- * by the Phase 4 naming commit. New code should import `users`.
- */
-export const aggregators = users;
 
 // ─── user_identities ─────────────────────────────────────────────────────────
 // Provider-neutral login identities on the ACCOUNT (0027): one login per
@@ -426,7 +419,7 @@ export const organisations = pgTable(
       .default(sql`'{}'::jsonb`),
     /** Which schema variant produced `profile`, e.g. `blue_dot/org-registration.v1`. */
     profileRef: text('profile_ref'),
-    status: aggregatorStatusEnum('status').notNull().default('pending'),
+    status: registrationStatusEnum('status').notNull().default('pending'),
     createdBy: text('created_by'),
     updatedBy: text('updated_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -452,12 +445,6 @@ export const organisations = pgTable(
       .where(sql`org_type = 'network_facilitator'`),
   ],
 );
-
-/**
- * Pre-0028 name of {@link organisations}, kept for callers not yet renamed;
- * removed by the Phase 4 naming commit. New code should import `organisations`.
- */
-export const aggregatorOrgs = organisations;
 
 // ─── registration_invites (#700) ─────────────────────────────────────────────
 // Targeted coordinator invites. A row is required (unlike approval tokens,
@@ -504,7 +491,7 @@ export const bulkUploads = pgTable(
   'bulk_uploads',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     // The user's org at insert time (0028). Filled by the `*_set_org_id`
@@ -539,7 +526,7 @@ export const bulkUploads = pgTable(
       table.lastProgressAt,
     ),
     // Per-aggregator concurrent cap + tenant isolation queries.
-    aggregatorStatusIdx: index('bulk_uploads_user_status_idx').on(table.aggregatorId, table.status),
+    userStatusIdx: index('bulk_uploads_user_status_idx').on(table.userId, table.status),
   }),
 );
 
@@ -549,7 +536,7 @@ export const registrationLinks = pgTable(
   'registration_links',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     // The user's org at insert time (0028). Filled by the `*_set_org_id`
@@ -576,13 +563,10 @@ export const registrationLinks = pgTable(
     // Per-aggregator slug uniqueness — two aggregators may pick the same
     // human-readable slug since the public URL is `/<org_slug>/<slug>`.
     aggregatorSlugUnique: uniqueIndex('registration_links_user_slug_unique').on(
-      table.aggregatorId,
+      table.userId,
       table.slug,
     ),
-    aggregatorStatusIdx: index('registration_links_user_status_idx').on(
-      table.aggregatorId,
-      table.status,
-    ),
+    userStatusIdx: index('registration_links_user_status_idx').on(table.userId, table.status),
   }),
 );
 
@@ -595,7 +579,7 @@ export const linkSubmissions = pgTable(
     linkId: uuid('link_id')
       .notNull()
       .references(() => registrationLinks.id, { onDelete: 'cascade' }),
-    aggregatorId: uuid('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     // The user's org at insert time (0028). Filled by the `*_set_org_id`
@@ -620,38 +604,37 @@ export const linkSubmissions = pgTable(
       table.createdAt,
     ),
     linkIdx: index('link_submissions_link_idx').on(table.linkId),
-    aggregatorCreatedIdx: index('link_submissions_user_created_idx').on(
-      table.aggregatorId,
-      table.createdAt,
-    ),
+    userCreatedIdx: index('link_submissions_user_created_idx').on(table.userId, table.createdAt),
   }),
 );
 
-// ─── aggregator_consent_record ───────────────────────────────────────────────
-// Append-only ledger of registration consent acceptances, keyed by a
-// subject_type + subject_id so one table serves both org and coordinator
-// registration flows. One row per acceptance; both document versions stored
-// in-row (terms_version + privacy_version) so re-consent or version audits
-// only need this table. No FK on subject_id — polymorphic at app level.
+// ─── consent_record ──────────────────────────────────────────────────────────
+// Append-only ledger of consent acceptances (`aggregator_consent_record`
+// before 0029): the only home of consent. One row per acceptance, both
+// document versions in-row. `subject_type` + `subject_id` is the permanent
+// audit key; `user_id` / `org_id` are typed links that drop to NULL when the
+// subject is deleted (the row stays). A database trigger refuses any other
+// UPDATE and every DELETE (`consent_record_append_only`).
 
-export const aggregatorConsentRecord = pgTable(
-  'aggregator_consent_record',
+export const consentRecord = pgTable(
+  'consent_record',
   {
     /** Surrogate primary key; generated randomly by Postgres. */
     id: uuid('id').primaryKey().defaultRandom(),
 
-    /**
-     * Discriminator for the subject: `'org'` = `organisations.id`;
-     * `'aggregator'` = `users.id` (a coordinator).
-     */
+    /** Discriminator for the subject: `'user'` = `users.id`; `'organisation'` = `organisations.id`. */
     subjectType: text('subject_type').notNull(),
 
-    /**
-     * The id of the subject row that accepted the terms.
-     * No cross-table FK (polymorphic); app-layer integrity is sufficient
-     * because the route already owns the subject row at write time.
-     */
+    /** The id of the subject that accepted the terms (kept after the subject is deleted). */
     subjectId: uuid('subject_id').notNull(),
+
+    /** The consenting user while it exists (`subject_type = 'user'`). */
+    userId: uuid('user_id').references((): AnyPgColumn => users.id, { onDelete: 'set null' }),
+
+    /** The consenting organisation while it exists (`subject_type = 'organisation'`). */
+    orgId: uuid('org_id').references((): AnyPgColumn => organisations.id, {
+      onDelete: 'set null',
+    }),
 
     /** Version of the Terms of Service document accepted (= config `current_version`). */
     termsVersion: integer('terms_version').notNull(),
@@ -666,22 +649,29 @@ export const aggregatorConsentRecord = pgTable(
     brand: text('brand'),
 
     /**
-     * How consent was captured — `'registration'` in v1 (future: `'re-consent'`).
+     * How consent was captured: `'registration'`, `'registration-backfill'`
+     * (0029, from the old `users.consent` column) or
+     * `` `bulk_upload:<id>:v<n>` `` (a bulk-upload attestation).
      */
     source: text('source').notNull(),
 
-    /** Server-stamped moment the registrant checked the consent checkbox. */
+    /** Server-stamped moment the registrant accepted. */
     acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull(),
+
+    /** Until when the registration consent is valid; NULL when not recorded. */
+    validTill: timestamp('valid_till', { withTimezone: true }),
 
     /** Row-creation timestamp; set automatically by Postgres on INSERT. */
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    // Ledger lookup: all consent records for a given subject (org or aggregator).
-    subjectIdx: index('aggregator_consent_record_subject_idx').on(
-      table.subjectType,
-      table.subjectId,
-    ),
+    subjectIdx: index('consent_record_subject_idx').on(table.subjectType, table.subjectId),
+    userIdx: index('consent_record_user_idx')
+      .on(table.userId, table.acceptedAt.desc())
+      .where(sql`user_id IS NOT NULL`),
+    orgIdx: index('consent_record_org_idx')
+      .on(table.orgId)
+      .where(sql`org_id IS NOT NULL`),
   }),
 );
 
@@ -691,7 +681,7 @@ export const onboarding = pgTable(
   'onboarding',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     // The user's org at insert time (0028). Filled by the `*_set_org_id`
@@ -700,7 +690,7 @@ export const onboarding = pgTable(
       .notNull()
       .references(() => organisations.id, { onDelete: 'restrict' })
       .$defaultFn(() => sql`NULL`),
-    orgSlug: text('org_slug').notNull(),
+    signalstackOrgSlug: text('signalstack_org_slug').notNull(),
     source: onboardingSourceEnum('source').notNull(),
     // For source='bulk': bulk_uploads.id. For source='link': NULL.
     batchId: uuid('batch_id'),
@@ -723,10 +713,10 @@ export const onboarding = pgTable(
     // Link: one row per (aggregator, link, period). UPSERT target for
     // Metrics Aggregator hour-bucket rollups.
     linkRollupUnique: uniqueIndex('onboarding_link_rollup_unique')
-      .on(table.aggregatorId, table.linkId, table.periodStart)
+      .on(table.userId, table.linkId, table.periodStart)
       .where(sql`${table.source} = 'link'`),
-    aggregatorSourceIdx: index('onboarding_user_source_idx').on(
-      table.aggregatorId,
+    userSourceIdx: index('onboarding_user_source_idx').on(
+      table.userId,
       table.source,
       table.periodStart,
     ),
@@ -750,7 +740,7 @@ export const campaignJob = pgTable(
   'campaign_job',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('user_id')
+    userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     // The user's org at insert time (0028). Filled by the `*_set_org_id`
@@ -887,7 +877,7 @@ export const campaignPiiAudit = pgTable(
     actorUserId: text('actor_user_id'),
     // NULL for a dump, and that null is MEANINGFUL: it is the signature of a
     // whole-network access by the system account, which has no org.
-    actorOrgId: text('actor_org_id'),
+    actorSignalstackOrgId: text('actor_signalstack_org_id'),
     actorAzp: text('actor_azp'),
     // Export-link recipient — an operator address, never a participant's.
     recipientRef: text('recipient_ref'),
@@ -932,7 +922,7 @@ export const campaignPiiAudit = pgTable(
     details: jsonb('details').$type<Record<string, unknown>>(),
   },
   (table) => [
-    index('campaign_pii_audit_org_created_idx').on(table.actorOrgId, table.createdAt),
+    index('campaign_pii_audit_org_created_idx').on(table.actorSignalstackOrgId, table.createdAt),
     index('campaign_pii_audit_correlation_idx').on(table.correlationId),
     index('campaign_pii_audit_channel_created_idx').on(table.channel, table.createdAt),
   ],
@@ -942,13 +932,10 @@ export const campaignPiiAudit = pgTable(
 
 export type ContactRow = typeof contact.$inferSelect;
 export type NewContactRow = typeof contact.$inferInsert;
-export type AggregatorRow = typeof users.$inferSelect;
-export type NewAggregatorRow = typeof users.$inferInsert;
+export type UserRow = typeof users.$inferSelect;
+export type NewUserRow = typeof users.$inferInsert;
 export type OrganisationRow = typeof organisations.$inferSelect;
 export type NewOrganisationRow = typeof organisations.$inferInsert;
-/** Pre-0028 names of {@link OrganisationRow} / {@link NewOrganisationRow}. */
-export type AggregatorOrgRow = OrganisationRow;
-export type NewAggregatorOrgRow = NewOrganisationRow;
 export type BulkUploadRow = typeof bulkUploads.$inferSelect;
 export type NewBulkUploadRow = typeof bulkUploads.$inferInsert;
 export type RegistrationLinkRow = typeof registrationLinks.$inferSelect;
@@ -963,12 +950,12 @@ export type CampaignJobItem = typeof campaignJobItem.$inferSelect;
 export type NewCampaignJobItem = typeof campaignJobItem.$inferInsert;
 
 /**
- * Inferred select type for a single `aggregator_consent_record` row.
+ * Inferred select type for a single `consent_record` row.
  *
  * Used by the consent-ledger service and any query helper that reads
  * from the table — import from `@aggregator-dpg/db-schema`.
  */
-export type AggregatorConsentRecord = typeof aggregatorConsentRecord.$inferSelect;
+export type ConsentRecordRow = typeof consentRecord.$inferSelect;
 
-/** Inferred insert type for `aggregator_consent_record` (all required fields; `id` and `created_at` have DB defaults). */
-export type NewAggregatorConsentRecord = typeof aggregatorConsentRecord.$inferInsert;
+/** Inferred insert type for `consent_record` (all required fields; `id` and `created_at` have DB defaults). */
+export type NewConsentRecordRow = typeof consentRecord.$inferInsert;

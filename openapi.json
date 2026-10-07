@@ -2114,7 +2114,8 @@
                         "given_at",
                         "valid_till"
                       ],
-                      "additionalProperties": false
+                      "additionalProperties": false,
+                      "nullable": true
                     },
                     "status": {
                       "type": "string"
@@ -2400,7 +2401,7 @@
         "tags": [
           "aggregator-profile"
         ],
-        "description": "Partial update of the caller aggregator (name / contact / consent). Contact phone + email are mirrored to Keycloak before the DB write. Org details (url, locations, contact.company, contact.gstNumber) belong to the coordinator's organisation and are refused with 409 ORG_DETAILS_READ_ONLY.",
+        "description": "Partial update of the caller aggregator (name / contact). Consent is read-only after registration: a body carrying `consent` is refused with 400 SCHEMA_VALIDATION. Contact phone + email are mirrored to Keycloak before the DB write. Org details (url, locations, contact.company, contact.gstNumber) belong to the coordinator's organisation and are refused with 409 ORG_DETAILS_READ_ONLY.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2531,28 +2532,6 @@
                           ],
                           "additionalProperties": false
                         }
-                      },
-                      "consent": {
-                        "type": "object",
-                        "properties": {
-                          "value": {
-                            "type": "boolean"
-                          },
-                          "given_at": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "valid_till": {
-                            "type": "string",
-                            "format": "date-time"
-                          }
-                        },
-                        "required": [
-                          "value",
-                          "given_at",
-                          "valid_till"
-                        ],
-                        "additionalProperties": false
                       }
                     },
                     "additionalProperties": false
@@ -2726,7 +2705,8 @@
                         "given_at",
                         "valid_till"
                       ],
-                      "additionalProperties": false
+                      "additionalProperties": false,
+                      "nullable": true
                     },
                     "status": {
                       "type": "string"

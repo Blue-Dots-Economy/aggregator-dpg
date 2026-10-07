@@ -134,7 +134,13 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
     created.push(name);
     const url = new URL(adminUrl!);
     url.pathname = `/${name}`;
-    const pool = new pg.Pool({ connectionString: url.toString(), max: 4 });
+    // The network the 0029 consent backfill records when the ledger is empty
+    // (the migration tool passes it the same way).
+    const pool = new pg.Pool({
+      connectionString: url.toString(),
+      max: 4,
+      options: '-c aggregator_dpg.network=blue_dot',
+    });
     pools.push(pool);
     urlOf.set(pool, url.toString());
     return pool;
@@ -221,11 +227,11 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
           name: string | null;
           email: string;
           phone: string;
-          contact_extra: unknown;
+          alternate_phone: string | null;
           legacy_org_details: unknown;
         }>(
           pool,
-          `SELECT c.name, c.email, c.phone, a.contact_extra, a.legacy_org_details
+          `SELECT c.name, c.email, c.phone, a.alternate_phone, a.legacy_org_details
              FROM users a JOIN contact c ON c.id = a.contact_id WHERE a.id = $1`,
           [id],
         );
@@ -235,14 +241,14 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
         phone: '+919000000001',
         // Company belongs to the org since 0028; a flat coordinator lands in
         // the Default org, which never adopts, so it is kept on the row.
-        contact_extra: {},
+        alternate_phone: null,
         legacy_org_details: { company: 'Acme Test Co' },
       });
       expect(await coord(coordB)).toEqual({
         name: 'Coordinator B',
         email: 'coord.b@example.test',
         phone: '+919000000002',
-        contact_extra: {},
+        alternate_phone: null,
         legacy_org_details: null,
       });
 
@@ -286,6 +292,14 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
       );
       // Two owners plus the network admin (0028).
       expect(roles).toEqual({ admins: 3, coordinators: 2, both: 1 });
+      // 0029: consent that lived only in the column is backfilled into the
+      // ledger (network from the session GUC), linked to each coordinator.
+      const ledger = await one<{ backfilled: number; linked: number; network: string }>(
+        pool,
+        `SELECT count(*)::int AS backfilled, count(user_id)::int AS linked, min(network) AS network
+           FROM consent_record WHERE source = 'registration-backfill'`,
+      );
+      expect(ledger).toEqual({ backfilled: 2, linked: 2, network: 'blue_dot' });
     },
     TIMEOUT_MS,
   );

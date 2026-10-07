@@ -16,9 +16,8 @@
 import { afterAll, beforeAll, describe } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
-import type { ConsentRecord } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getDb, getPool, closeDb, _setDbClients } from '../../../db/client.js';
-import { aggregators, campaignJob } from '../../../db/schema.js';
+import { users, campaignJob } from '../../../db/schema.js';
 import { PostgresCampaignJobStore } from '../postgres.js';
 import { linkContact } from '../../../db/contact-writes.js';
 import { runStoreConformance } from './conformance.js';
@@ -44,27 +43,25 @@ suite('PostgresCampaignJobStore (integration)', () => {
       email: `cjs-${suffix}@x.example`,
     });
     const rows = await getDb()
-      .insert(aggregators)
+      .insert(users)
       .values({
         userType: 'coordinator',
-        orgSlug: `cjs-test-${suffix}`,
-        actorType: 'aggregator',
-        name: 'Campaign Job Store Test',
+        signalstackOrgSlug: `cjs-test-${suffix}`,
+        signalstackOrgName: 'Campaign Job Store Test',
         contactId,
         // Every coordinator has an org since 0028: the Default org.
         orgId: sql`(SELECT id FROM organisations WHERE slug = 'default')`,
-        consent: {} as unknown as ConsentRecord,
         createdBy: 'integration-test',
         updatedBy: 'integration-test',
       })
-      .returning({ id: aggregators.id });
+      .returning({ id: users.id });
     aggregatorId = rows[0]!.id;
   });
 
   afterAll(async () => {
     // campaign_job_item cascades on the job delete; then remove the test aggregator.
-    await getDb().delete(campaignJob).where(eq(campaignJob.aggregatorId, aggregatorId));
-    await getDb().delete(aggregators).where(eq(aggregators.id, aggregatorId));
+    await getDb().delete(campaignJob).where(eq(campaignJob.userId, aggregatorId));
+    await getDb().delete(users).where(eq(users.id, aggregatorId));
     await closeDb();
   });
 

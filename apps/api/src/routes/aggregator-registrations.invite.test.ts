@@ -42,7 +42,7 @@ describe('coordinator submit with an invite token (#700)', () => {
     name: 'TRRAIN',
     type: 'seeker',
     contact: { name: 'Asha Kumari', phone: '+919876543210', email: INVITE_EMAIL },
-    consent: { value: true, given_at: '2026-01-15T10:00:00Z', valid_till: '2027-01-15T10:00:00Z' },
+    consent: { value: true, given_at: '2026-01-15T10:00:00Z', valid_till: '2099-01-15T10:00:00Z' },
   };
 
   /** Seed a pending invite for (ORG_ID, INVITE_EMAIL) and mint a token for it. */
@@ -125,11 +125,15 @@ describe('coordinator submit with an invite token (#700)', () => {
 
   it('accepts a valid invite: stamps parent_org_id from the claim and consumes the invite', async () => {
     const token = await seedInviteAndToken();
+    aggregatorStore.seedInviteEmail('inv-1', INVITE_EMAIL);
     const res = await post({ ...validBody, invite: token });
     expect(res.statusCode).toBe(201);
     const id = (res.json() as { aggregator_id: string }).aggregator_id;
     const stored = await aggregatorStore.findById(id);
     expect(stored.ok && stored.value?.parentOrgId).toBe(ORG_ID);
+    // The row links the consumed invite (0029); the invited address is read
+    // through it (the fake mirrors the Postgres join).
+    expect(stored.ok && stored.value?.inviteId).toBe('inv-1');
     expect(stored.ok && stored.value?.inviteEmail).toBe(INVITE_EMAIL);
     // Invite is now consumed (single-use).
     const inv = await invites.findByJti('inv-1');
@@ -138,6 +142,7 @@ describe('coordinator submit with an invite token (#700)', () => {
 
   it('allows registering with a different email and records the invited one (#701)', async () => {
     const token = await seedInviteAndToken();
+    aggregatorStore.seedInviteEmail('inv-1', INVITE_EMAIL);
     const res = await post({
       ...validBody,
       contact: { ...validBody.contact, email: 'my-own@trrain.org' },
@@ -148,6 +153,9 @@ describe('coordinator submit with an invite token (#700)', () => {
     const stored = await aggregatorStore.findById(id);
     // Registered with the entered email; invited email kept as provenance.
     expect(stored.ok && stored.value?.contact.email).toBe('my-own@trrain.org');
+    // The row links the consumed invite (0029); the invited address is read
+    // through it (the fake mirrors the Postgres join).
+    expect(stored.ok && stored.value?.inviteId).toBe('inv-1');
     expect(stored.ok && stored.value?.inviteEmail).toBe(INVITE_EMAIL);
     // Invite still consumed (single-use holds).
     const inv = await invites.findByJti('inv-1');

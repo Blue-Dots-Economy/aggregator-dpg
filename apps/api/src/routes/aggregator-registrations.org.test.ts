@@ -33,7 +33,7 @@ describe('coordinator submit with an org', () => {
     name: 'TRRAIN',
     type: 'seeker',
     contact: { name: 'Asha Kumari', phone: '+919876543210', email: 'asha@trrain.org' },
-    consent: { value: true, given_at: '2026-01-15T10:00:00Z', valid_till: '2027-01-15T10:00:00Z' },
+    consent: { value: true, given_at: '2026-01-15T10:00:00Z', valid_till: '2099-01-15T10:00:00Z' },
   };
 
   beforeEach(async () => {

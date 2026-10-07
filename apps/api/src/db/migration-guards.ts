@@ -33,8 +33,8 @@ import { logger } from '../logger.js';
 
 /** Journal `when` of the first train migration (0023). */
 export const TRAIN_FIRST_WHEN = 1790600000000;
-/** Journal `when` of the last train migration shipped so far (0028). */
-export const TRAIN_LAST_WHEN = 1791300000000;
+/** Journal `when` of the last train migration (0029, the end of the train). */
+export const TRAIN_LAST_WHEN = 1791400000000;
 
 /** One journal entry (the fields the guards need). */
 export interface JournalEntry {

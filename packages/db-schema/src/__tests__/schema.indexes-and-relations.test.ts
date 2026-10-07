@@ -22,17 +22,15 @@ import { describe, it, expect } from 'vitest';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import {
   contact,
-  aggregators,
   users,
   userIdentities,
-  aggregatorOrgs,
+  organisations,
   bulkUploads,
   registrationLinks,
   linkSubmissions,
-  aggregatorConsentRecord,
+  consentRecord,
   onboarding,
   campaignJob,
-  organisations,
 } from '../schema.js';
 
 /** Extracts the SQL column name for an index-column entry that is a plain column (not a SQL expression like `lower(x)`). */
@@ -43,20 +41,19 @@ function colName(entry: unknown): string | undefined {
 }
 
 describe('aggregators: indexes + foreign key', () => {
-  const cfg = getTableConfig(aggregators);
+  const cfg = getTableConfig(users);
 
   it('table name is snake_case', () => {
     expect(cfg.name).toBe('users');
   });
 
-  it('has the two filter indexes and the contact_id index (uniqueness lives on contact)', () => {
+  it('has the status filter index and the contact_id index (uniqueness lives on contact)', () => {
     const byName = Object.fromEntries(cfg.indexes.map((i) => [i.config.name, i]));
 
     expect(byName['users_status_idx'].config.unique).toBe(false);
     expect(byName['users_status_idx'].config.columns.map(colName)).toEqual(['status']);
 
-    expect(byName['users_actor_type_idx'].config.unique).toBe(false);
-    expect(byName['users_actor_type_idx'].config.columns.map(colName)).toEqual(['actor_type']);
+    expect(byName['users_actor_type_idx']).toBeUndefined(); // dropped with actor_type (0029)
 
     expect(byName['users_contact_type_unique'].config.unique).toBe(true);
     expect(byName['users_contact_type_unique'].config.columns.map(colName)).toEqual([
@@ -64,11 +61,12 @@ describe('aggregators: indexes + foreign key', () => {
       'user_type',
     ]);
 
+    expect(byName['users_invite_idx'].config.columns.map(colName)).toEqual(['invite_id']); // 0029
     expect(cfg.indexes).toHaveLength(4);
   });
 
   it('contact_id FK points at contact.id — RESTRICT on delete, CASCADE on update (re-key)', () => {
-    const fk = cfg.foreignKeys.find((f) => f.reference().columns[0] === aggregators.contactId)!;
+    const fk = cfg.foreignKeys.find((f) => f.reference().columns[0] === users.contactId)!;
     expect(fk.reference().foreignTable).toBe(contact);
     expect(fk.reference().foreignColumns[0]).toBe(contact.id);
     expect(fk.onDelete).toBe('restrict');
@@ -76,11 +74,17 @@ describe('aggregators: indexes + foreign key', () => {
   });
 
   it('org_id FK points at organisations.id — RESTRICT on delete', () => {
-    expect(cfg.foreignKeys).toHaveLength(2);
-    const fk = cfg.foreignKeys.find((f) => f.reference().columns[0] === aggregators.orgId)!;
-    expect(fk.reference().foreignTable).toBe(aggregatorOrgs);
-    expect(fk.reference().foreignColumns[0]).toBe(aggregatorOrgs.id);
+    expect(cfg.foreignKeys).toHaveLength(3);
+    const fk = cfg.foreignKeys.find((f) => f.reference().columns[0] === users.orgId)!;
+    expect(fk.reference().foreignTable).toBe(organisations);
+    expect(fk.reference().foreignColumns[0]).toBe(organisations.id);
     expect(fk.onDelete).toBe('restrict');
+  });
+
+  it('invite_id FK points at registration_invites.jti — SET NULL on delete (0029)', () => {
+    const fk = cfg.foreignKeys.find((f) => f.reference().columns[0] === users.inviteId)!;
+    expect(fk.reference().foreignColumns[0]!.name).toBe('jti');
+    expect(fk.onDelete).toBe('set null');
   });
 });
 
@@ -108,9 +112,9 @@ describe('bulk_uploads: indexes + foreign key', () => {
   it('aggregator_id FK cascades on delete of the parent aggregator', () => {
     const fk = cfg.foreignKeys[0]!;
     const ref = fk.reference();
-    expect(ref.columns[0]).toBe(bulkUploads.aggregatorId);
-    expect(ref.foreignTable).toBe(aggregators);
-    expect(ref.foreignColumns[0]).toBe(aggregators.id);
+    expect(ref.columns[0]).toBe(bulkUploads.userId);
+    expect(ref.foreignTable).toBe(users);
+    expect(ref.foreignColumns[0]).toBe(users.id);
     expect(fk.onDelete).toBe('cascade');
   });
 });
@@ -122,7 +126,7 @@ describe('registration_links: indexes + foreign key', () => {
     expect(cfg.name).toBe('registration_links');
   });
 
-  it('slug uniqueness is scoped per aggregator (two aggregators may share a slug)', () => {
+  it('slug uniqueness is scoped per aggregator (two users may share a slug)', () => {
     const idx = cfg.indexes.find((i) => i.config.name === 'registration_links_user_slug_unique');
     expect(idx?.config.unique).toBe(true);
     expect(idx?.config.columns.map(colName)).toEqual(['user_id', 'slug']);
@@ -138,9 +142,9 @@ describe('registration_links: indexes + foreign key', () => {
   it('aggregator_id FK cascades on delete of the parent aggregator', () => {
     const fk = cfg.foreignKeys[0]!;
     const ref = fk.reference();
-    expect(ref.columns[0]).toBe(registrationLinks.aggregatorId);
-    expect(ref.foreignTable).toBe(aggregators);
-    expect(ref.foreignColumns[0]).toBe(aggregators.id);
+    expect(ref.columns[0]).toBe(registrationLinks.userId);
+    expect(ref.foreignTable).toBe(users);
+    expect(ref.foreignColumns[0]).toBe(users.id);
     expect(fk.onDelete).toBe('cascade');
   });
 });
@@ -176,26 +180,30 @@ describe('link_submissions: indexes + foreign keys', () => {
     expect(linkRef?.foreignColumns[0]).toBe(registrationLinks.id);
     expect(linkFk?.onDelete).toBe('cascade');
 
-    const aggregatorFk = byColumn.get(linkSubmissions.aggregatorId);
+    const aggregatorFk = byColumn.get(linkSubmissions.userId);
     const aggregatorRef = aggregatorFk?.reference();
-    expect(aggregatorRef?.foreignTable).toBe(aggregators);
-    expect(aggregatorRef?.foreignColumns[0]).toBe(aggregators.id);
+    expect(aggregatorRef?.foreignTable).toBe(users);
+    expect(aggregatorRef?.foreignColumns[0]).toBe(users.id);
     expect(aggregatorFk?.onDelete).toBe('cascade');
   });
 });
 
-describe('aggregator_consent_record: index', () => {
-  const cfg = getTableConfig(aggregatorConsentRecord);
+describe('consent_record: indexes and links', () => {
+  const cfg = getTableConfig(consentRecord);
 
-  it('table name is snake_case and has no foreign keys (polymorphic subject)', () => {
-    expect(cfg.name).toBe('aggregator_consent_record');
-    expect(cfg.foreignKeys).toHaveLength(0);
+  it('is consent_record with typed links that never delete the row (ON DELETE SET NULL)', () => {
+    expect(cfg.name).toBe('consent_record');
+    expect(cfg.foreignKeys).toHaveLength(2);
+    for (const fk of cfg.foreignKeys) expect(fk.onDelete).toBe('set null');
   });
 
-  it('has the ledger lookup index on (subject_type, subject_id)', () => {
-    expect(cfg.indexes).toHaveLength(1);
-    const idx = cfg.indexes[0]!;
-    expect(idx.config.name).toBe('aggregator_consent_record_subject_idx');
+  it('has the audit-key index and the two partial link indexes', () => {
+    expect(cfg.indexes.map((i) => i.config.name).sort()).toEqual([
+      'consent_record_org_idx',
+      'consent_record_subject_idx',
+      'consent_record_user_idx',
+    ]);
+    const idx = cfg.indexes.find((i) => i.config.name === 'consent_record_subject_idx')!;
     expect(idx.config.unique).toBe(false);
     expect(idx.config.columns.map(colName)).toEqual(['subject_type', 'subject_id']);
   });
@@ -238,10 +246,10 @@ describe('onboarding: indexes + foreign keys', () => {
     expect(cfg.foreignKeys).toHaveLength(3);
     const byColumn = new Map(cfg.foreignKeys.map((fk) => [fk.reference().columns[0], fk]));
 
-    const aggregatorFk = byColumn.get(onboarding.aggregatorId);
+    const aggregatorFk = byColumn.get(onboarding.userId);
     const aggregatorRef = aggregatorFk?.reference();
-    expect(aggregatorRef?.foreignTable).toBe(aggregators);
-    expect(aggregatorRef?.foreignColumns[0]).toBe(aggregators.id);
+    expect(aggregatorRef?.foreignTable).toBe(users);
+    expect(aggregatorRef?.foreignColumns[0]).toBe(users.id);
     expect(aggregatorFk?.onDelete).toBe('cascade');
 
     const linkFk = byColumn.get(onboarding.linkId);

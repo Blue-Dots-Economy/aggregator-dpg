@@ -51,10 +51,10 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
   const found = await getDb()
     .select({
       upload: schema.bulkUploads,
-      orgSlug: schema.users.orgSlug,
+      orgSlug: schema.users.signalstackOrgSlug,
     })
     .from(schema.bulkUploads)
-    .innerJoin(schema.users, eq(schema.bulkUploads.aggregatorId, schema.users.id))
+    .innerJoin(schema.users, eq(schema.bulkUploads.userId, schema.users.id))
     .where(eq(schema.bulkUploads.id, job.uploadId))
     .limit(1);
   const row = found[0];
@@ -158,8 +158,8 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
       .limit(1);
     if (existing.length === 0) {
       await tx.insert(schema.onboarding).values({
-        aggregatorId: upload.aggregatorId,
-        orgSlug,
+        userId: upload.userId,
+        signalstackOrgSlug: orgSlug,
         source: 'bulk',
         batchId: job.uploadId,
         linkId: null,

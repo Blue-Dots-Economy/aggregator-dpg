@@ -20,6 +20,7 @@ import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
 import { PostgresAggregatorStore } from '../postgres.js';
 import { _setDbClients } from '../../../db/client.js';
+import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
 import type { Aggregator, CreateAggregatorInput } from '../interface.js';
 
 // ─── Fake Drizzle chain ─────────────────────────────────────────────────────
@@ -56,7 +57,21 @@ function makeFakeDb(
       return {
         // The fixture is a domain row; the columns follow 0028 (the org link is
         // `org_id`, org details come from the joined org).
-        a: { ...r, orgId: r['parentOrgId'], legacyOrgDetails: null },
+        a: {
+          ...r,
+          signalstackOrgSlug: r['orgSlug'],
+          signalstackOrgName: r['name'],
+          orgId: r['parentOrgId'],
+          legacyOrgDetails: null,
+        },
+        // The newest ledger consent (0029), as the correlated subquery returns it.
+        consent: r['consent']
+          ? {
+              at: Date.parse((r['consent'] as { given_at: string }).given_at),
+              till: Date.parse((r['consent'] as { valid_till: string }).valid_till),
+            }
+          : null,
+        inviteEmail: r['inviteEmail'] ?? null,
         o: {
           slug: 'org',
           url: r['url'] ?? null,
@@ -118,7 +133,7 @@ function callArgs(chain: ChainCall[], method: string): unknown[] | undefined {
 function isAggregatorWrite(chain: ChainCall[]): boolean {
   const values = callArgs(chain, 'values')?.[0] as Record<string, unknown> | undefined;
   const set = callArgs(chain, 'set')?.[0] as Record<string, unknown> | undefined;
-  return values?.['orgSlug'] !== undefined || set?.['updatedBy'] !== undefined;
+  return values?.['signalstackOrgSlug'] !== undefined || set?.['updatedBy'] !== undefined;
 }
 
 function hasCall(chain: ChainCall[], method: string): boolean {
@@ -139,6 +154,7 @@ function makeRow(overrides: Partial<Aggregator> = {}): Aggregator {
     actorType: 'aggregator',
     name: 'Test Org',
     type: null,
+    serves: [],
     url: null,
     contactId: contactId('a@x.org', '+919000000001'),
     contact: { name: 'A', phone: '+919000000001', email: 'a@x.org' },
@@ -157,6 +173,7 @@ function makeRow(overrides: Partial<Aggregator> = {}): Aggregator {
     parentOrgId: 'org-0',
     isDefaultOrg: false,
     inviteEmail: null,
+    inviteId: null,
     rejectedAt: null,
     ...overrides,
   };
@@ -165,7 +182,6 @@ function makeRow(overrides: Partial<Aggregator> = {}): Aggregator {
 function makeInput(overrides: Partial<CreateAggregatorInput> = {}): CreateAggregatorInput {
   return {
     orgSlug: 'test-org',
-    actorType: 'aggregator',
     name: 'Test Org',
     type: null,
     contact: { name: 'A', phone: '+919000000001', email: 'a@x.org' },
@@ -173,6 +189,7 @@ function makeInput(overrides: Partial<CreateAggregatorInput> = {}): CreateAggreg
     createdBy: 'system',
     updatedBy: 'system',
     orgId: 'org-0',
+    recordConsent: NO_CONSENT_WRITE,
     ...overrides,
   };
 }
@@ -197,10 +214,11 @@ describe('PostgresAggregatorStore.create', () => {
     if (!result.ok) return;
     expect(result.value.id).toBe('agg-1');
     expect(callArgs(captured, 'values')?.[0]).toMatchObject({
-      orgSlug: 'test-org',
-      actorType: 'aggregator',
+      signalstackOrgSlug: 'test-org',
+      serves: [],
       orgId: 'org-9',
     });
+    expect(callArgs(captured, 'values')?.[0]).not.toHaveProperty('actorType');
   });
 
   it('stores no org details on the coordinator (0028): legacy values only when given', async () => {
@@ -327,7 +345,7 @@ describe('PostgresAggregatorStore.create', () => {
     const db = makeFakeDb(() => {
       throw Object.assign(new Error('check failed'), {
         code: '23514',
-        constraint: 'aggregators_actor_type_check',
+        constraint: 'users_role_shape_chk',
       });
     });
     _setDbClients(null, db as never);
@@ -560,7 +578,7 @@ describe('PostgresAggregatorStore.list', () => {
     _setDbClients(null, db as never);
     const store = new PostgresAggregatorStore();
 
-    await store.list({ status: 'active', actorType: 'aggregator', updatedBefore: new Date() });
+    await store.list({ status: 'active', updatedBefore: new Date() });
     expect(sawWhereWithFilters).toBe(true);
   });
 
@@ -623,7 +641,7 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
     await store.update('agg-1', { name: 'New Name', updatedBy: 'tester' });
 
     const set = callArgs(captured, 'set')?.[0] as Record<string, unknown>;
-    expect(set).toMatchObject({ name: 'New Name', updatedBy: 'tester' });
+    expect(set).toMatchObject({ signalstackOrgName: 'New Name', updatedBy: 'tester' });
     expect(set).not.toHaveProperty('status');
     expect(set).not.toHaveProperty('contact');
     expect(set).toHaveProperty('updatedAt');
@@ -644,11 +662,6 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
       name: 'N',
       type: 'seeker',
       contact: { name: 'A', phone: '+919000000001', email: 'a@x.org' },
-      consent: {
-        value: true,
-        given_at: '2026-01-01T00:00:00Z',
-        valid_till: '2027-01-01T00:00:00Z',
-      },
       status: 'active',
       updatedBy: 'tester',
     });
@@ -656,11 +669,10 @@ describe('PostgresAggregatorStore.update / updateStatus', () => {
     const set = callArgs(captured, 'set')?.[0] as Record<string, unknown>;
     expect(Object.keys(set).sort()).toEqual(
       [
-        'name',
-        'type',
+        'signalstackOrgName',
+        'serves',
         'contactId',
-        'contactExtra',
-        'consent',
+        'alternatePhone',
         'status',
         'updatedBy',
         'updatedAt',
@@ -870,16 +882,45 @@ describe('PostgresAggregatorStore.deleteById', () => {
 
 // ─── toDomain mapping ───────────────────────────────────────────────────────
 
-describe('PostgresAggregatorStore row → domain mapping', () => {
-  it('coerces a legacy type="both" row to type=null', async () => {
-    const db = makeFakeDb(() => [makeRow({ type: 'both' as never })]);
+describe('PostgresAggregatorStore serves on write (0029)', () => {
+  it.each([
+    ['seeker', ['seeker']],
+    [null, []],
+    ['both', []],
+  ] as const)('create with type %s stores serves %j', async (type, serves) => {
+    let captured: ChainCall[] = [];
+    const db = makeFakeDb((chain) => {
+      if (isAggregatorWrite(chain)) captured = chain;
+      return [makeRow({ id: 'agg-1' })];
+    });
     _setDbClients(null, db as never);
-    const store = new PostgresAggregatorStore();
+    await new PostgresAggregatorStore().create(makeInput({ type }));
+    expect((callArgs(captured, 'values')?.[0] as { serves: string[] }).serves).toEqual(serves);
+  });
 
-    const result = await store.findById('agg-1');
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value?.type).toBeNull();
+  it("an update to type 'both' stores every domain ([])", async () => {
+    let captured: ChainCall[] = [];
+    const db = makeFakeDb((chain) => {
+      if (callArgs(chain, 'set')) captured = chain;
+      return [makeRow()];
+    });
+    _setDbClients(null, db as never);
+    await new PostgresAggregatorStore().update('agg-1', { type: 'both', updatedBy: 't' });
+    expect((callArgs(captured, 'set')?.[0] as { serves: string[] }).serves).toEqual([]);
+  });
+
+  it('reads the alternate phone back into the Beckn contact, and omits a NULL one', async () => {
+    _setDbClients(
+      null,
+      makeFakeDb(() => [makeRow({ alternatePhone: '+919811122233' } as never)]) as never,
+    );
+    const withPhone = await new PostgresAggregatorStore().findById('agg-1');
+    expect(withPhone.ok && withPhone.value?.contact.alternatePhone).toBe('+919811122233');
+    _setDbClients(null, makeFakeDb(() => [makeRow({ alternatePhone: null } as never)]) as never);
+    const without = await new PostgresAggregatorStore().findById('agg-1');
+    expect(without.ok && without.value ? 'alternatePhone' in without.value.contact : true).toBe(
+      false,
+    );
   });
 });
 
@@ -899,7 +940,7 @@ describe('PostgresAggregatorStore contact composition', () => {
     const a = {
       ...makeRow({ contactId: 'c'.repeat(64) }),
       contact: { name: 'STALE', phone: '+910000000000', email: 'stale@x.org' },
-      contactExtra: {},
+      alternatePhone: null,
       orgId: 'org-0',
       legacyOrgDetails: null,
     };
@@ -929,7 +970,7 @@ describe('PostgresAggregatorStore contact composition', () => {
   });
 
   it('maps a NULL contact name to an empty string (the wire field is required)', async () => {
-    const a = { ...makeRow({ contactId: 'c'.repeat(64) }), contactExtra: {}, orgId: 'org-0' };
+    const a = { ...makeRow({ contactId: 'c'.repeat(64) }), alternatePhone: null, orgId: 'org-0' };
     _setDbClients(
       null,
       makeFakeDb(() => [{ a, o: null, c: linked(null, '+919000000009') }]) as never,
@@ -969,5 +1010,78 @@ describe('PostgresAggregatorStore — coordinator accounts only (0027)', () => {
     const wheres = await wheresOf(run);
     expect(wheres.length).toBeGreaterThan(0);
     for (const w of wheres) expect(w).toContain('"user_type" = $');
+  });
+});
+
+describe('PostgresAggregatorStore — consent in the create transaction (0029)', () => {
+  it('runs recordConsent inside the transaction with the new id', async () => {
+    const db = makeFakeDb((chain) =>
+      hasCall(chain, 'returning') ? [{ id: 'agg-7' }] : [makeRow({ id: 'agg-7' })],
+    );
+    _setDbClients(null, db as never);
+    const calls: { tx: unknown; id: string }[] = [];
+    const result = await new PostgresAggregatorStore().create(
+      makeInput({
+        recordConsent: async (tx, id) => {
+          calls.push({ tx, id });
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.id).toBe('agg-7');
+    expect(calls[0]?.tx).toBeDefined();
+  });
+
+  it('answers CONSENT_WRITE_FAILED when the hook throws (the transaction rolls back)', async () => {
+    const db = makeFakeDb((chain) =>
+      hasCall(chain, 'returning') ? [{ id: 'agg-8' }] : [makeRow({ id: 'agg-8' })],
+    );
+    _setDbClients(null, db as never);
+    const result = await new PostgresAggregatorStore().create(
+      makeInput({
+        recordConsent: async () => {
+          throw new Error('ledger down');
+        },
+      }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'CONSENT_WRITE_FAILED', message: 'consent could not be recorded' },
+    });
+  });
+
+  it('composes consent from the newest ledger row (given_at = accepted_at, G14)', async () => {
+    const db = makeFakeDb(() => [
+      makeRow({
+        consent: {
+          value: true,
+          given_at: '2026-02-03T04:05:06.789Z',
+          valid_till: '2027-02-03T04:05:06.789Z',
+        },
+      }),
+    ]);
+    _setDbClients(null, db as never);
+    const found = await new PostgresAggregatorStore().findById('agg-1');
+    expect(found.ok && found.value?.consent).toEqual({
+      value: true,
+      given_at: '2026-02-03T04:05:06.789Z',
+      valid_till: '2027-02-03T04:05:06.789Z',
+    });
+  });
+
+  it('reads consent as null when the ledger holds no registration row', async () => {
+    const db = makeFakeDb(() => [makeRow({ consent: null })]);
+    _setDbClients(null, db as never);
+    const found = await new PostgresAggregatorStore().findById('agg-1');
+    expect(found.ok && found.value?.consent).toBeNull();
+  });
+
+  it('derives type and actorType from serves', async () => {
+    const db = makeFakeDb(() => [makeRow({ serves: ['provider'] })]);
+    _setDbClients(null, db as never);
+    const found = await new PostgresAggregatorStore().findById('agg-1');
+    expect(found.ok && found.value?.type).toBe('provider');
+    expect(found.ok && found.value?.actorType).toBe('aggregator');
   });
 });

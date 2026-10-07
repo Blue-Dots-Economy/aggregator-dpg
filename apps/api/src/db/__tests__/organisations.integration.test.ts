@@ -35,6 +35,8 @@ const MIGRATIONS_DIR = path.resolve(
 );
 /** 0027 `users`: the state before this phase. */
 const LAST_BEFORE_IDX = 27;
+/** 0028 is the migration under test; later ones run in their own suites. */
+const LAST_UNDER_TEST_IDX = 28;
 const TIMEOUT_MS = 120_000;
 const CONSENT = JSON.stringify({
   value: true,
@@ -141,6 +143,7 @@ suite('organisations (migration 0028) — integration', () => {
   let admin: pg.Client;
   let tmpDir: string;
   let beforeFolder: string;
+  let upToFolder: string;
   const created: string[] = [];
   const pools: pg.Pool[] = [];
   let pool: pg.Pool;
@@ -169,7 +172,12 @@ suite('organisations (migration 0028) — integration', () => {
     created.push(name);
     const url = new URL(adminUrl!);
     url.pathname = `/${name}`;
-    const p = new pg.Pool({ connectionString: url.toString(), max: 4 });
+    // The network the 0029 consent backfill records when the ledger is empty.
+    const p = new pg.Pool({
+      connectionString: url.toString(),
+      max: 4,
+      options: '-c aggregator_dpg.network=blue_dot',
+    });
     pools.push(p);
     return { pool: p, url: url.toString() };
   }
@@ -193,6 +201,21 @@ suite('organisations (migration 0028) — integration', () => {
     await writeFile(
       path.join(beforeFolder, 'meta/_journal.json'),
       JSON.stringify({ ...journal, entries: before }, null, 2),
+    );
+    // The same folder pattern up to 0028, so this suite keeps asserting the
+    // 0028 result (0029 has its own suite).
+    upToFolder = path.join(tmpDir, 'migrations-0028');
+    await mkdir(path.join(upToFolder, 'meta'), { recursive: true });
+    const upTo = journal.entries.filter((e) => e.idx <= LAST_UNDER_TEST_IDX);
+    for (const e of upTo) {
+      await copyFile(
+        path.join(MIGRATIONS_DIR, `${e.tag}.sql`),
+        path.join(upToFolder, `${e.tag}.sql`),
+      );
+    }
+    await writeFile(
+      path.join(upToFolder, 'meta/_journal.json'),
+      JSON.stringify({ ...journal, entries: upTo }, null, 2),
     );
 
     ({ pool, url: poolUrl } = await scratchDb('upgrade'));
@@ -286,7 +309,7 @@ suite('organisations (migration 0028) — integration', () => {
       [ids.flat],
     );
 
-    await migrate(drizzle(pool), { migrationsFolder: MIGRATIONS_DIR });
+    await migrate(drizzle(pool), { migrationsFolder: upToFolder });
   }, TIMEOUT_MS);
 
   afterAll(async () => {
@@ -508,79 +531,94 @@ suite('organisations (migration 0028) — integration', () => {
     expect(ins.org_id).toBe(ids.orgC);
   });
 
-  it('reconciles the root from config, and the probe still sees real data', async () => {
-    _setDbClients(null, null);
-    getPool({ url: poolUrl });
-    const state = await reconcileRootOrganisations(
-      {
-        nfSlug: 'blue-dots',
-        nfName: 'Blue Dots Network',
-        nfLegalName: 'Blue Dots Foundation',
-        nfOwnerEmail: 'ops@x.test',
-        defaultOwnerEmail: 'default.owner@x.test',
-      },
-      getDb(),
-    );
-    expect(state?.root.slug).toBe('blue-dots');
-    expect(state?.root.ownerEmail).toBe('ops@x.test');
-    expect(state?.defaultOrg.ownerEmail).toBe('default.owner@x.test');
-    // The placeholder owner and its contact are gone.
-    const ph = await one<{ n: number }>(
-      pool,
-      `SELECT count(*)::int AS n FROM contact WHERE email = 'network-admin@nf.invalid'`,
-    );
-    expect(ph.n).toBe(0);
-    // Idempotent.
-    const again = await reconcileRootOrganisations(
-      {
-        nfSlug: 'blue-dots',
-        nfName: 'Blue Dots Network',
-        nfLegalName: 'Blue Dots Foundation',
-        nfOwnerEmail: 'ops@x.test',
-        defaultOwnerEmail: 'default.owner@x.test',
-      },
-      getDb(),
-    );
-    expect(again?.changed).toEqual({
-      slug: false,
-      name: false,
-      rootOwner: false,
-      defaultOwner: false,
-    });
-    expect(await hasRegistrationData(pool as never)).toBe(true);
-  });
+  describe("at the current head (the boot reconcile is today's app code)", () => {
+    beforeAll(async () => {
+      await migrate(drizzle(pool), { migrationsFolder: MIGRATIONS_DIR });
+    }, TIMEOUT_MS);
 
-  it('hands the root to an existing org owner and releases the previous owner', async () => {
-    const before = await one<{ owner: string }>(
-      pool,
-      'SELECT org_owner AS owner FROM organisations WHERE id = $1',
-      [ids.orgC],
-    );
-    const state = await reconcileRootOrganisations(
-      {
-        nfSlug: 'blue-dots',
-        nfName: 'Blue Dots Network',
-        nfLegalName: 'Blue Dots Foundation',
-        nfOwnerEmail: 'owner.c@x.test',
-        defaultOwnerEmail: 'default.owner@x.test',
-      },
-      getDb(),
-    );
-    // The existing admin account is reused, not duplicated; it keeps its org.
-    expect(state?.root.ownerUserId).toBe(before.owner);
-    expect(state?.changed.rootOwner).toBe(true);
-    const after = await one<{ owner: string }>(
-      pool,
-      'SELECT org_owner AS owner FROM organisations WHERE id = $1',
-      [ids.orgC],
-    );
-    expect(after.owner).toBe(before.owner);
-    // ops@x.test owned only the root: its account and contact are released.
-    const ops = await one<{ n: number }>(
-      pool,
-      `SELECT count(*)::int AS n FROM contact WHERE email = 'ops@x.test'`,
-    );
-    expect(ops.n).toBe(0);
+    it('is at the head schema', async () => {
+      const head = await one<{ n: number }>(
+        pool,
+        `SELECT count(*)::int AS n FROM information_schema.columns
+          WHERE table_name = 'users' AND column_name = 'serves'`,
+      );
+      expect(head.n).toBe(1);
+    });
+
+    it('reconciles the root from config, and the probe still sees real data', async () => {
+      _setDbClients(null, null);
+      getPool({ url: poolUrl });
+      const state = await reconcileRootOrganisations(
+        {
+          nfSlug: 'blue-dots',
+          nfName: 'Blue Dots Network',
+          nfLegalName: 'Blue Dots Foundation',
+          nfOwnerEmail: 'ops@x.test',
+          defaultOwnerEmail: 'default.owner@x.test',
+        },
+        getDb(),
+      );
+      expect(state?.root.slug).toBe('blue-dots');
+      expect(state?.root.ownerEmail).toBe('ops@x.test');
+      expect(state?.defaultOrg.ownerEmail).toBe('default.owner@x.test');
+      // The placeholder owner and its contact are gone.
+      const ph = await one<{ n: number }>(
+        pool,
+        `SELECT count(*)::int AS n FROM contact WHERE email = 'network-admin@nf.invalid'`,
+      );
+      expect(ph.n).toBe(0);
+      // Idempotent.
+      const again = await reconcileRootOrganisations(
+        {
+          nfSlug: 'blue-dots',
+          nfName: 'Blue Dots Network',
+          nfLegalName: 'Blue Dots Foundation',
+          nfOwnerEmail: 'ops@x.test',
+          defaultOwnerEmail: 'default.owner@x.test',
+        },
+        getDb(),
+      );
+      expect(again?.changed).toEqual({
+        slug: false,
+        name: false,
+        rootOwner: false,
+        defaultOwner: false,
+      });
+      expect(await hasRegistrationData(pool as never)).toBe(true);
+    });
+
+    it('hands the root to an existing org owner and releases the previous owner', async () => {
+      const before = await one<{ owner: string }>(
+        pool,
+        'SELECT org_owner AS owner FROM organisations WHERE id = $1',
+        [ids.orgC],
+      );
+      const state = await reconcileRootOrganisations(
+        {
+          nfSlug: 'blue-dots',
+          nfName: 'Blue Dots Network',
+          nfLegalName: 'Blue Dots Foundation',
+          nfOwnerEmail: 'owner.c@x.test',
+          defaultOwnerEmail: 'default.owner@x.test',
+        },
+        getDb(),
+      );
+      // The existing admin account is reused, not duplicated; it keeps its org.
+      expect(state?.root.ownerUserId).toBe(before.owner);
+      expect(state?.changed.rootOwner).toBe(true);
+      const after = await one<{ owner: string }>(
+        pool,
+        'SELECT org_owner AS owner FROM organisations WHERE id = $1',
+        [ids.orgC],
+      );
+      expect(after.owner).toBe(before.owner);
+      // ops@x.test owned only the root: its account and contact are released.
+      const ops = await one<{ n: number }>(
+        pool,
+        `SELECT count(*)::int AS n FROM contact WHERE email = 'ops@x.test'`,
+      );
+      expect(ops.n).toBe(0);
+    });
   });
 
   it('a fresh database reads as empty after 0028 and the root reconcile', async () => {

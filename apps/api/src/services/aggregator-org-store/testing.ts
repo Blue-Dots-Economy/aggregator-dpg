@@ -8,6 +8,9 @@
 import { InMemoryAggregatorOrgStore } from './memory.js';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import { DEFAULT_ORG_SLUG, type AggregatorOrg } from './interface.js';
+import { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
+
+export { NO_CONSENT_WRITE };
 
 export class AggregatorOrgStoreFake extends InMemoryAggregatorOrgStore {
   /**

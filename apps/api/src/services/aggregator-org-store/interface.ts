@@ -14,6 +14,7 @@
  */
 
 import type { AggregatorStatus, BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
+import type { RecordConsentHook } from '../consent-ledger/hook.js';
 
 /** Slug of the fixed Default org that holds formerly-flat coordinators (0028). */
 export const DEFAULT_ORG_SLUG = 'default';
@@ -80,6 +81,11 @@ export interface CreateOrgInput {
   /** Org details (0028) from the registration form's website / address. */
   url?: string | null;
   locations?: BecknLocation[];
+  /**
+   * Writes the org's consent ledger row in the create transaction (0029).
+   * Required, so no caller can create an org without a consent record.
+   */
+  recordConsent: RecordConsentHook;
 }
 
 export interface UpdateOrgPatch {
@@ -100,6 +106,8 @@ export type OrgStoreError =
   | { code: 'DUPLICATE_EMAIL'; message: string }
   /** The owner's phone already belongs to another person (`contact`, 0025). */
   | { code: 'DUPLICATE_PHONE'; message: string }
+  /** The `recordConsent` hook failed: nothing was created (0029). */
+  | { code: 'CONSENT_WRITE_FAILED'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
 
 export type OrgStoreResult<T> = { ok: true; value: T } | { ok: false; error: OrgStoreError };

@@ -103,7 +103,7 @@ describe('aggregator-orgs routes', () => {
     display_name: 'Enable India',
     state: 'Karnataka',
     owner: { name: 'Ravi Kumar', email: 'ravi@enable.org', phone: '+919876500000' },
-    consent: { value: true, given_at: '2026-01-15T10:00:00Z', valid_till: '2027-01-15T10:00:00Z' },
+    consent: { value: true, given_at: '2026-01-15T10:00:00Z', valid_till: '2099-01-15T10:00:00Z' },
   };
 
   describe('one person per email/phone across coordinators and org owners (contact, 0025)', () => {
@@ -208,7 +208,7 @@ describe('aggregator-orgs routes', () => {
     const ledgerRows = consentLedger.list();
     expect(ledgerRows).toHaveLength(1);
     const consentRow = ledgerRows[0];
-    expect(consentRow?.subjectType).toBe('org');
+    expect(consentRow?.subjectType).toBe('organisation');
     expect(consentRow?.subjectId).toBe(body.org_id);
     expect(consentRow?.termsVersion).toBeGreaterThanOrEqual(1);
     expect(consentRow?.privacyVersion).toBeGreaterThanOrEqual(1);
@@ -231,7 +231,7 @@ describe('aggregator-orgs routes', () => {
 
     const ledgerRows = consentLedger.list();
     expect(ledgerRows).toHaveLength(1);
-    expect(ledgerRows[0]?.subjectType).toBe('org');
+    expect(ledgerRows[0]?.subjectType).toBe('organisation');
     expect(ledgerRows[0]?.subjectId).toBe(org_id);
   });
 
@@ -256,6 +256,66 @@ describe('aggregator-orgs routes', () => {
     expect(res.statusCode).toBe(500);
     const body = res.json() as { error: { code: string } };
     expect(body.error.code).toBe('CONSENT_WRITE_FAILED');
+    // One transaction (0029): no org and no owner remain, and Keycloak was
+    // never reached.
+    const owner = await orgStore.findByOwnerEmail('ledger-fail@enable.org');
+    expect(owner.ok && owner.value).toBeNull();
+    const kc = await idp.findByEmail('ledger-fail@enable.org');
+    expect(kc.ok && kc.value).toBeNull();
+  });
+
+  it.each([
+    // A month from now: always inside the window, whatever the run date.
+    ['a date within the window', new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(), false],
+    ['a date beyond the ceiling', '2099-01-01T00:00:00Z', true],
+    ['an unparseable value', 'not-a-date', true],
+  ])(
+    'stores the org consent valid_till on the ledger row: %s',
+    async (_label, validTill, clamped) => {
+      const email = `till-${validTill.slice(0, 4)}@enable.org`;
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/orgs/create',
+        headers: AUTH_HEADER,
+        payload: {
+          ...orgBody,
+          display_name: `Till ${validTill.slice(0, 7)}`,
+          owner: {
+            ...orgBody.owner,
+            email,
+            phone: `+9198765${String(validTill.length).padStart(5, '0')}`,
+          },
+          consent: { ...orgBody.consent, valid_till: validTill },
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      const { org_id } = res.json() as { org_id: string };
+      const row = consentLedger.list().find((r) => r.subjectId === org_id);
+      expect(row?.subjectType).toBe('organisation');
+      const stored = row?.validTill?.getTime() ?? 0;
+      if (clamped) {
+        const ceiling = Date.now() + 5 * 365 * 24 * 60 * 60 * 1000;
+        expect(Math.abs(stored - ceiling)).toBeLessThan(60_000);
+      } else {
+        expect(stored).toBe(new Date(validTill).getTime());
+      }
+    },
+  );
+
+  it('400 SCHEMA_VALIDATION for an org consent that is already expired', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...orgBody,
+        owner: { ...orgBody.owner, email: 'expired@enable.org' },
+        consent: { ...orgBody.consent, valid_till: '2020-01-01T00:00:00Z' },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    const owner = await orgStore.findByOwnerEmail('expired@enable.org');
+    expect(owner.ok && owner.value).toBeNull();
   });
 
   it('GET /v1/orgs lists only active orgs', async () => {
