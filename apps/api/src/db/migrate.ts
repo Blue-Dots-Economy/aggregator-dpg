@@ -20,23 +20,20 @@
 import '../env.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Pool } from 'pg';
 import { closeDb, getDb, getPool } from './client.js';
 import { logger } from '../logger.js';
 import { runMigrationGuards } from './migration-guards.js';
+import { MIGRATION_LOCK_SQL_KEY, migrateWithLock as migrateWithLockCore } from './migrate-core.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** Advisory-lock key shared by every migration runner of this app. */
-export const MIGRATION_LOCK_SQL_KEY = "hashtext('aggregator-dpg:migrations')";
+export { MIGRATION_LOCK_SQL_KEY };
 
 /**
- * Applies all pending migrations in `migrationsFolder` while holding the
- * session-level migration advisory lock on a dedicated connection from
- * `pool`. The lock is released (and the connection returned) whether or not
- * the migrations succeed.
+ * Applies all pending migrations in `migrationsFolder` under the migration
+ * advisory lock (`migrate-core.ts`), logging through the app logger.
  *
  * @param db - Drizzle client the migrations run through.
  * @param pool - Pool the lock connection is taken from (normally the one `db` wraps).
@@ -47,32 +44,7 @@ export async function migrateWithLock<TSchema extends Record<string, unknown>>(
   pool: Pool,
   migrationsFolder: string,
 ): Promise<void> {
-  const lockClient = await pool.connect();
-  let broken: Error | undefined;
-  try {
-    const started = Date.now();
-    try {
-      await lockClient.query(`SELECT pg_advisory_lock(${MIGRATION_LOCK_SQL_KEY})`);
-    } catch (err) {
-      broken = err as Error;
-      throw err;
-    }
-    logger.info({ waitedMs: Date.now() - started }, 'migration lock acquired');
-    try {
-      await migrate(db, { migrationsFolder });
-    } finally {
-      try {
-        await lockClient.query(`SELECT pg_advisory_unlock(${MIGRATION_LOCK_SQL_KEY})`);
-      } catch (err) {
-        // The server drops a session lock with its connection; destroy this
-        // one rather than return a connection in an unknown state.
-        broken = err as Error;
-        logger.warn({ err }, 'migration lock release failed; discarding the connection');
-      }
-    }
-  } finally {
-    lockClient.release(broken);
-  }
+  await migrateWithLockCore(db, pool, migrationsFolder, logger);
 }
 
 /**
@@ -82,7 +54,7 @@ export async function migrateWithLock<TSchema extends Record<string, unknown>>(
 export async function runMigrations(): Promise<void> {
   const migrationsFolder = path.resolve(__dirname, '../../drizzle/migrations');
   logger.info({ migrationsFolder }, 'running database migrations');
-  // Refuse foreign migrations, and the user & org release train on a
+  // Refuse foreign migrations, and the user & org instance upgrade on a
   // database with data (that path is the migration tool's; see
   // migration-guards.ts). Read once here, at startup.
   await runMigrationGuards(getPool(), migrationsFolder, process.env.ALLOW_TRAIN_ON_BOOT === 'true');
