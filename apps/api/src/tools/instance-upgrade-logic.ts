@@ -1,6 +1,6 @@
 /**
  * Pure logic of the instance-upgrade operator tool (`@aggregator-dpg/api`,
- * `tools/train.ts`): where a database stands relative to the train. The tool
+ * `tools/instance-upgrade.ts`): where a database stands relative to the instance upgrade. The tool
  * takes 0022 — or a database part-way through the train, such as a rehearsal
  * copy migrated by an earlier release — to the latest shipped migration; any
  * other level is refused (design: docs/plans/user-org-migrate-tool-simplification.md).

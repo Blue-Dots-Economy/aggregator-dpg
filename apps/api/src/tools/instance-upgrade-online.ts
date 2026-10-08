@@ -3,7 +3,7 @@
  * run in the window after the database commit and before scale-up (design:
  * docs/plans/user-org-migrate-tool-simplification.md §6). It talks to
  * Keycloak through the API's own adapter, so it needs the API's full
- * environment (the Job has it); `train.ts` loads this module lazily so `check`
+ * environment (the Job has it); `instance-upgrade.ts` loads this module lazily so `check`
  * and `run` never depend on it. Counts and ids only in the output.
  */
 

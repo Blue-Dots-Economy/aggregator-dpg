@@ -1,6 +1,6 @@
 /**
  * Integration test for the instance-upgrade operator tool (`@aggregator-dpg/api`,
- * `tools/train.ts`) against a live Postgres: a database at 0022 holding an
+ * `tools/instance-upgrade.ts`) against a live Postgres: a database at 0022 holding an
  * org, coordinators with and without an org, consent in both homes and a
  * consumed invite is taken through the whole train by `run` — one transaction
  * that applies every migration and runs every verify gate. Covers `--dry-run`
