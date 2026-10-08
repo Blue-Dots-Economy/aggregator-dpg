@@ -1,5 +1,5 @@
--- Completeness counts BEFORE the train (0022 shape), read-only. `train run`
--- compares them, inside its transaction, with train-counts-after.sql: every
+-- Completeness counts BEFORE the train (0022 shape), read-only. `instance-upgrade run`
+-- compares them, inside its transaction, with instance-upgrade-counts-after.sql: every
 -- key must agree. Counts and fingerprints only. Rows are `key | n`.
 SELECT 'coordinators' AS key, count(*) AS n FROM aggregators;
 SELECT 'orgs' AS key, count(*) AS n FROM aggregator_orgs;

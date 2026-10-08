@@ -1,12 +1,12 @@
 -- fix choose-owner-subject (F15) — at the 0022 shape, one owner (same email +
 -- phone) whose orgs record different Keycloak subjects: keep the subject of
 -- the given org (normally the live one) on every org of that owner.
--- Parameter: `train_fix.org_id` (set by `train fix`) — the `aggregator_orgs.id` whose subject wins.
+-- Parameter: `upgrade_fix.org_id` (set by `train fix`) — the `aggregator_orgs.id` whose subject wins.
 -- Prints counts only.
 
 DO $$
 DECLARE
-  v_org uuid := current_setting('train_fix.org_id')::uuid;
+  v_org uuid := current_setting('upgrade_fix.org_id')::uuid;
   v_sub text;
   v_email text;
   v_phone text;

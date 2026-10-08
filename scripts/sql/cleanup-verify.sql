@@ -1,5 +1,5 @@
 -- Verify after migration 0029 (`cleanup`), read-only. Counts only — never
--- PII. Run by the release-train tool (`train run` inside its transaction, `train check`).
+-- PII. Run by the instance-upgrade tool (`instance-upgrade run` inside its transaction, `instance-upgrade check`).
 --
 -- Gates (must be 0): V1, V2, V3, V5, V6, V7. Informational: V4.
 -- Rows: `check_id | category | n` (`gate` must be 0; `info` is reported).

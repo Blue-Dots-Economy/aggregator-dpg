@@ -1,5 +1,5 @@
 /**
- * Integration test for the release-train operator tool (`@aggregator-dpg/api`,
+ * Integration test for the instance-upgrade operator tool (`@aggregator-dpg/api`,
  * `tools/train.ts`) against a live Postgres: a database at 0022 holding an
  * org, coordinators with and without an org, consent in both homes and a
  * consumed invite is taken through the whole train by `run` — one transaction
@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { _main } from '../train.js';
+import { _main } from '../instance-upgrade.js';
 
 const adminUrl = process.env.INTEGRATION_DATABASE_URL;
 const suite = adminUrl ? describe : describe.skip;
@@ -151,7 +151,7 @@ async function seedCoordinator(
   return r.id;
 }
 
-suite('release train from 0022 (train run) — integration', () => {
+suite('instance upgrade from 0022 (instance-upgrade run) — integration', () => {
   let admin: pg.Client;
   let tmpDir: string;
   const created: string[] = [];
@@ -521,7 +521,7 @@ suite('release train from 0022 (train run) — integration', () => {
       const sql = path.join(tmpDir, `sql-${randomBytes(3).toString('hex')}`);
       await cp(SQL_DIR, sql, { recursive: true });
       await appendFile(
-        path.join(sql, 'train-counts-after.sql'),
+        path.join(sql, 'instance-upgrade-counts-after.sql'),
         `\nSELECT 'coordinators' AS key, 99 AS n;\n`,
       );
       const r = await cli(url, ['run', '--snapshot-taken', 's'], { TRAIN_SQL_DIR: sql });

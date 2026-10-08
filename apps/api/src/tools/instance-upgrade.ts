@@ -4,9 +4,9 @@
  * docs/user-org-migration-runbook.md). Shipped in the API image and run as a
  * one-off Job with the API's own ConfigMap and Secret:
  *
- *   node dist/tools/train.js check [--fix <name> [--id <uuid> | --org-id <uuid>] [--dry-run]]
- *   node dist/tools/train.js run (--snapshot-taken <id> | --dry-run)
- *   node dist/tools/train.js enrich [--dry-run] [--rate <n per second>]
+ *   node dist/tools/instance-upgrade.js check [--fix <name> [--id <uuid> | --org-id <uuid>] [--dry-run]]
+ *   node dist/tools/instance-upgrade.js run (--snapshot-taken <id> | --dry-run)
+ *   node dist/tools/instance-upgrade.js enrich [--dry-run] [--rate <n per second>]
  *
  * `check` is read-only (fixes excepted). `run` takes a database from 0022 to
  * the latest shipped migration in ONE transaction that also runs every verify
@@ -31,7 +31,7 @@ import {
   shippedFileHashes,
   type Queryable,
 } from '../db/migrate-core.js';
-import { trainLevel, type TrainLevel } from './train-logic.js';
+import { upgradeLevel, type UpgradeLevel } from './instance-upgrade-logic.js';
 import {
   canActAsOwner,
   isFailing,
@@ -40,7 +40,7 @@ import {
   runChecks,
   sqlStatements,
   type CheckRow,
-} from './train-db.js';
+} from './instance-upgrade-db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const log = pino({ base: { service: 'train' } });
@@ -55,11 +55,11 @@ export const VERIFY_FILES = ['users-verify.sql', 'organisation-verify.sql', 'cle
 const FIXES: Record<string, { file: string; param?: { flag: string; setting: string } }> = {
   'retire-registration': {
     file: 'retire-registration.sql',
-    param: { flag: '--id', setting: 'train_fix.id' },
+    param: { flag: '--id', setting: 'upgrade_fix.id' },
   },
   'choose-owner-subject': {
     file: 'choose-owner-subject.sql',
-    param: { flag: '--org-id', setting: 'train_fix.org_id' },
+    param: { flag: '--org-id', setting: 'upgrade_fix.org_id' },
   },
   'expire-stale-presigns': { file: 'expire-stale-presigns.sql' },
 };
@@ -100,7 +100,7 @@ function required(name: string): string {
 function openPool(): pg.Pool {
   const network = env('AGGREGATOR_NETWORK') ?? '';
   const brand = env('AGGREGATOR_BRAND') ?? '';
-  class TrainClient extends pg.Client {
+  class UpgradeClient extends pg.Client {
     override connect(): Promise<pg.Client>;
     override connect(callback: ((err: Error) => void) | ((err: null, c: pg.Client) => void)): void;
     override connect(
@@ -130,12 +130,12 @@ function openPool(): pg.Pool {
     // A dropped connection must surface, not hang with the locks held.
     keepAlive: true,
     connectionTimeoutMillis: 10_000,
-    Client: TrainClient,
+    Client: UpgradeClient,
   });
 }
 
 /** Reads the level and refuses foreign rows (an applied migration not shipped). */
-async function levelOf(db: Queryable): Promise<TrainLevel> {
+async function levelOf(db: Queryable): Promise<UpgradeLevel> {
   const journal = await readJournal(MIGRATIONS);
   const applied = await readApplied(db);
   const foreign = checkForeign(
@@ -148,7 +148,7 @@ async function levelOf(db: Queryable): Promise<TrainLevel> {
       `${foreign.unknown.length} applied migration(s) are not in this release — not an instance at 0022`,
     );
   }
-  return trainLevel(journal, applied);
+  return upgradeLevel(journal, applied);
 }
 
 /** Prints rows and returns the failing ones. */
@@ -178,7 +178,7 @@ async function counts(db: Queryable, file: string): Promise<Map<string, number>>
 }
 
 /** Prints the facts the operator must check before anything is written. */
-async function banner(pool: pg.Pool, command: string, level: TrainLevel): Promise<void> {
+async function banner(pool: pg.Pool, command: string, level: UpgradeLevel): Promise<void> {
   const f = await readInstanceFacts(pool);
   out(`train ${command}`);
   out(
@@ -381,7 +381,7 @@ async function check(pool: pg.Pool, args: string[]): Promise<number> {
   }
   const failing = report(
     'train-check (0022)',
-    await runChecks(pool, path.join(sqlDir(), 'train-check.sql')),
+    await runChecks(pool, path.join(sqlDir(), 'instance-upgrade-check.sql')),
   );
   const kcOk = await keycloakCheck();
   const ok = failing.length === 0 && kcOk;
@@ -398,7 +398,7 @@ async function check(pool: pg.Pool, args: string[]): Promise<number> {
  * migration lock until it commits or aborts, so taking that lock first waits
  * for the real outcome instead of reading a level that is about to change.
  */
-async function levelAfterCommit(pool: pg.Pool): Promise<TrainLevel | null> {
+async function levelAfterCommit(pool: pg.Pool): Promise<UpgradeLevel | null> {
   try {
     const c = await pool.connect();
     try {
@@ -424,7 +424,7 @@ async function gatesInside(
   const failing = await verifyGates(client);
   for (const f of failing) out(`  FAILING ${f.checkId} = ${f.n}`);
   if (!before) return failing.length === 0;
-  const after = await counts(client, 'train-counts-after.sql');
+  const after = await counts(client, 'instance-upgrade-counts-after.sql');
   const differ = [...before.keys()].filter((k) => before.get(k) !== after.get(k));
   out(
     `== completeness: ${differ.length === 0 ? 'every count equal' : `differ: ${differ.join(', ')}`}`,
@@ -488,10 +488,10 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> {
     if (inside.state === 'start') {
       const blockers = report(
         'train-check (0022)',
-        await runChecks(client, path.join(sqlDir(), 'train-check.sql')),
+        await runChecks(client, path.join(sqlDir(), 'instance-upgrade-check.sql')),
       );
       if (blockers.length > 0) throw new Refusal(`${blockers.length} blocker(s) — see above`);
-      before = await counts(client, 'train-counts-before.sql');
+      before = await counts(client, 'instance-upgrade-counts-before.sql');
     } else {
       out('  part-way through the train: no 0022 drain / pre-flight / counts; verify gates only');
     }
@@ -591,12 +591,12 @@ async function main(argv: string[]): Promise<number> {
     }
     const rate = Number(flag(args, '--rate') ?? 5);
     // Loaded lazily: it needs the API's full environment (Keycloak).
-    const online = await import('./train-online.js');
+    const online = await import('./instance-upgrade-online.js');
     return online.enrich({ dryRun: args.includes('--dry-run'), ratePerSecond: rate }, out);
   }
   if (command !== 'check' && command !== 'run') {
     out(
-      'usage: train check [--fix <name> …] | run (--snapshot-taken <id> | --dry-run) | enrich [--dry-run] [--rate n]',
+      'usage: instance-upgrade check [--fix <name> …] | run (--snapshot-taken <id> | --dry-run) | enrich [--dry-run] [--rate n]',
     );
     return 2;
   }

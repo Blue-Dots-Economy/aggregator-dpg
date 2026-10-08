@@ -1,5 +1,5 @@
 /**
- * The online step of the release-train tool (`@aggregator-dpg/api`): `enrich`,
+ * The online step of the instance-upgrade tool (`@aggregator-dpg/api`): `enrich`,
  * run in the window after the database commit and before scale-up (design:
  * docs/plans/user-org-migrate-tool-simplification.md §6). It talks to
  * Keycloak through the API's own adapter, so it needs the API's full

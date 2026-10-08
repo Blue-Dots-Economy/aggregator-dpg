@@ -1,5 +1,5 @@
 /**
- * Database IO of the release-train operator tool (`@aggregator-dpg/api`,
+ * Database IO of the instance-upgrade operator tool (`@aggregator-dpg/api`,
  * `tools/train.ts`): instance facts, the role and session checks, and the
  * runner for the operator SQL (`check_id | category | n` rows). Config-free:
  * only the pool / connection it is given.
@@ -159,7 +159,7 @@ export function sqlStatements(script: string): string[] {
 }
 
 /**
- * Runs an operator check script (`train-check.sql`, the verify files) and
+ * Runs an operator check script (`instance-upgrade-check.sql`, the verify files) and
  * returns its `check_id | category | n` rows; statements without a
  * `check_id` (setup such as TEMP views) are run and skipped.
  *
