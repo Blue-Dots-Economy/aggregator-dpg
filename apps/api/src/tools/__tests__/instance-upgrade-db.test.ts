@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isFailing, sqlStatements } from '../train-db.js';
+import { isFailing, sqlStatements } from '../instance-upgrade-db.js';
 
 describe('sqlStatements', () => {
   it('drops psql meta lines and comments and splits on line-ending semicolons', () => {
@@ -65,7 +65,7 @@ describe('VERIFY_FILES', () => {
     const onDisk = (await readdir(dir)).filter(
       (f) => f.endsWith('-verify.sql') && !f.startsWith('contact-'),
     );
-    const { VERIFY_FILES } = await import('../train.js');
+    const { VERIFY_FILES } = await import('../instance-upgrade.js');
     expect([...VERIFY_FILES].sort()).toEqual(onDisk.sort());
   });
 });

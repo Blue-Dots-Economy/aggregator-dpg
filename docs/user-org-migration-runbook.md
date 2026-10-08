@@ -1,7 +1,7 @@
 # Runbook: the user & org release (Phases 1–5) on an existing instance
 
 **Applies to:** every deployed instance at migration `0022_campaign_pii_audit`, moving to the release that carries the whole user & org train.
-**Tool:** `node dist/tools/train.js` in the **release's own API image** (source `apps/api/src/tools/train.ts`).
+**Tool:** `node dist/tools/instance-upgrade.js` in the **release's own API image** (source `apps/api/src/tools/instance-upgrade.ts`).
 **Design:** `docs/plans/user-org-migrate-tool-simplification.md`.
 
 One window per environment, app down. One transaction applies every migration **and** runs every verify gate; it commits only when all gates are 0, so a failure always leaves the database where it was. The API refuses to apply this train at boot on a database with data — the instance only moves when you run `run`.
@@ -37,7 +37,7 @@ spec:
       containers:
         - name: train
           image: ghcr.io/<org>/aggregator-dpg/api:<release tag>
-          command: ['node', 'dist/tools/train.js', 'check'] # the step
+          command: ['node', 'dist/tools/instance-upgrade.js', 'check'] # the step
           envFrom:
             - configMapRef: { name: <api configmap> }
             - secretRef: { name: <api secret> }
@@ -78,7 +78,7 @@ Why read-only before go / no-go: a submit, upload, registration or approval crea
 
 ## 4. When something fails
 
-- **`RUN FAILED … nothing was applied`** — a migration error (`P0001` messages are printed in full), a verify gate or count that is not equal, or a session that connected during the run: the database is unchanged. Scale the old images back up and end the window; reproduce with `run --dry-run` on staging. A migration message that names `users-preflight.sql`, `organisation-preflight.sql` or `cleanup-preflight.sql` (deleted) means: run `check` — the same finding is in `train-check.sql`.
+- **`RUN FAILED … nothing was applied`** — a migration error (`P0001` messages are printed in full), a verify gate or count that is not equal, or a session that connected during the run: the database is unchanged. Scale the old images back up and end the window; reproduce with `run --dry-run` on staging. A migration message that names `users-preflight.sql`, `organisation-preflight.sql` or `cleanup-preflight.sql` (deleted) means: run `check` — the same finding is in `instance-upgrade-check.sql`.
 - **`REFUSED: …`** — nothing was changed; the message names what is missing: snapshot id, network, sessions still connected, the wrong level, a pooler that dropped the session settings, or `N blocker(s)` (the rows above it say which).
 - **`RUN FAILED (55P03)`** — the migration lock or a table lock was not free within 10 s: something still holds it (a boot pod, an orphaned run). `check` says `MIGRATION IN PROGRESS` while a run holds the lock.
 - **The Job died or the log stopped mid-run** — do not guess. Run `check`: `MIGRATION IN PROGRESS` → wait and `check` again; `state=done` → the train is applied, continue with `enrich`; `state=start` → nothing was applied.
@@ -99,10 +99,10 @@ Rows are `check_id`, `category`, `n`. A `blocker` (or a verify `gate`) above 0 s
 | D5 `invites_pending`                                                           | blocker      | Revoke them (owners re-invite after the window) or let them be used. Expired ones are not counted.                                                                                                           |
 | D6 `bulk_presigns_never_uploaded`                                              | info         | `check --fix expire-stale-presigns` marks them `failed`.                                                                                                                                                     |
 | T0d `server_older_than_14` / T0e `no_temp_privilege`                           | blocker      | Upgrade Postgres / grant `TEMP` on the database to the role.                                                                                                                                                 |
-| T0b `role_cannot_act_as_owner` / T0c `train_names_taken`                       | blocker      | Use the table owner's role / find and drop the stray object.                                                                                                                                                 |
+| T0b `role_cannot_act_as_owner` / T0c `names_taken`                             | blocker      | Use the table owner's role / find and drop the stray object.                                                                                                                                                 |
 | F1 / F2 (contact pairs, phone format, blank email)                             | blocker      | Correct the contact by hand, or retire a never-approved duplicate.                                                                                                                                           |
 | F4 `rename_target_taken`                                                       | blocker      | Rename one of the orgs by hand first.                                                                                                                                                                        |
-| F8 / F10b / F10c / F10d / F16 / F16b / F22                                     | blocker      | Investigate (they are expected 0); see the comment above each check in `scripts/sql/train-check.sql`. F16b: objects in other schemas (views, foreign keys, functions) on the renamed tables.                 |
+| F8 / F10b / F10c / F10d / F16 / F16b / F22                                     | blocker      | Investigate (they are expected 0); see the comment above each check in `scripts/sql/instance-upgrade-check.sql`. F16b: objects in other schemas (views, foreign keys, functions) on the renamed tables.      |
 | F10 `backfill_network_unknown`                                                 | blocker      | Run the tool with the API's config (`AGGREGATOR_NETWORK`).                                                                                                                                                   |
 | F15 / F15b (owner Keycloak subjects)                                           | blocker      | `check --fix choose-owner-subject --org-id <the live org>`; F15b needs a human.                                                                                                                              |
 | F3, F4 renames, F5, F6, F7, F10 backfilled, F11, F12, F12b, F13, F14, F18, F23 | info         | Tell the coordinators counted by F13 that they will see their org's url / locations / company / GST; tell owners renamed by F4; size the disk by F12b; review F23.                                           |

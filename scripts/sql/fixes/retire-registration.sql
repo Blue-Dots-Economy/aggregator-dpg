@@ -3,11 +3,11 @@
 -- Only a `pending` or `inactive` row with no tenant data is removed; anything
 -- else is refused (nothing changes). The Keycloak user of that registration,
 -- if any, is disabled already (never approved) and can be deleted by hand.
--- Parameter: `train_fix.id` (set by `train fix`) — the `aggregators.id` to remove. Prints counts only.
+-- Parameter: `upgrade_fix.id` (set by `train fix`) — the `aggregators.id` to remove. Prints counts only.
 
 DO $$
 DECLARE
-  v_id uuid := current_setting('train_fix.id')::uuid;
+  v_id uuid := current_setting('upgrade_fix.id')::uuid;
   v_status text;
   v_tenant int;
 BEGIN

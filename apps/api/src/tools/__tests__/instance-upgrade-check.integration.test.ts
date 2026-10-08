@@ -1,6 +1,6 @@
 /**
- * Integration test for `scripts/sql/train-check.sql` (`@aggregator-dpg/api`,
- * the release-train operator tool): on a database at 0022, every drain and
+ * Integration test for `scripts/sql/instance-upgrade-check.sql` (`@aggregator-dpg/api`,
+ * the instance-upgrade operator tool): on a database at 0022, every drain and
  * pre-flight finding is seeded on its own — inside a transaction that is
  * rolled back — and the script must report exactly it. A clean 0022 database
  * has no blocker, and every check carries the category the runbook gives it.
@@ -18,14 +18,14 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { runChecks, type CheckRow } from '../train-db.js';
+import { runChecks, type CheckRow } from '../instance-upgrade-db.js';
 
 const adminUrl = process.env.INTEGRATION_DATABASE_URL;
 const suite = adminUrl ? describe : describe.skip;
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.resolve(HERE, '../../../drizzle/migrations');
-const CHECK_SQL = path.resolve(HERE, '../../../../../scripts/sql/train-check.sql');
+const CHECK_SQL = path.resolve(HERE, '../../../../../scripts/sql/instance-upgrade-check.sql');
 const LAST_BEFORE_IDX = 22;
 const TIMEOUT_MS = 120_000;
 
@@ -92,7 +92,7 @@ const CATEGORIES: Record<string, 'blocker' | 'info'> = {
   'T0d server_older_than_14': 'blocker',
   'T0e no_temp_privilege': 'blocker',
   'T0b role_cannot_act_as_owner': 'blocker',
-  'T0c train_names_taken': 'blocker',
+  'T0c names_taken': 'blocker',
   'F1 email_with_many_phones': 'blocker',
   'F1 phone_with_many_emails': 'blocker',
   'F2 non_canonical_phone': 'blocker',
@@ -197,7 +197,7 @@ const CASES: Case[] = [
     seed: [...C_OK(), upload('pending'), upload('completed')],
     n: 1,
   },
-  { check: 'T0c train_names_taken', seed: ['CREATE TABLE contact (x int)'], n: 1 },
+  { check: 'T0c names_taken', seed: ['CREATE TABLE contact (x int)'], n: 1 },
   {
     check: 'F1 email_with_many_phones',
     seed: [...C_OK(), org(O1, 'o1', { email: 'c1@x.test', phone: '+919300000001' })],
@@ -381,7 +381,7 @@ const CASES: Case[] = [
   },
   {
     check: 'F23 replication_or_cron_objects',
-    seed: ['CREATE PUBLICATION train_it_pub FOR TABLE aggregators'],
+    seed: ['CREATE PUBLICATION iu_it_pub FOR TABLE aggregators'],
     n: 1,
   },
   {
@@ -407,7 +407,7 @@ const CASES: Case[] = [
   },
 ];
 
-suite('train-check.sql at 0022 — integration', () => {
+suite('instance-upgrade-check.sql at 0022 — integration', () => {
   let admin: pg.Client;
   let tmpDir: string;
   let dbName: string;

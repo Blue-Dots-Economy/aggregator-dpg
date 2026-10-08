@@ -1,5 +1,5 @@
 -- Completeness counts AFTER the train (0029 shape), read-only; the keys match
--- train-counts-before.sql. Counts only. Rows are `key | n`.
+-- instance-upgrade-counts-before.sql. Counts only. Rows are `key | n`.
 SELECT 'coordinators' AS key, count(*) AS n FROM users WHERE user_type = 'coordinator';
 SELECT 'orgs' AS key, count(*) AS n
   FROM organisations WHERE org_type = 'aggregator' AND slug <> 'default';
@@ -17,7 +17,7 @@ SELECT 'onboarding' AS key, count(*) AS n FROM onboarding WHERE org_id IS NOT NU
 SELECT 'campaign_job' AS key, count(*) AS n FROM campaign_job WHERE org_id IS NOT NULL;
 SELECT 'registration_invites' AS key, count(*) AS n FROM registration_invites;
 
--- Fingerprints of `updated_at` / `rejected_at` (keys of train-counts-before.sql).
+-- Fingerprints of `updated_at` / `rejected_at` (keys of instance-upgrade-counts-before.sql).
 SELECT 'coordinators_timestamps' AS key, ('x' || left(md5(coalesce(string_agg(id::text || ':' || coalesce(extract(epoch FROM updated_at)::text, '-') || ':' || coalesce(extract(epoch FROM rejected_at)::text, '-'), ',' ORDER BY id), '')), 12))::bit(48)::bigint AS n
   FROM users WHERE user_type = 'coordinator';
 SELECT 'orgs_timestamps' AS key, ('x' || left(md5(coalesce(string_agg(id::text || ':' || coalesce(extract(epoch FROM updated_at)::text, '-') || ':' || coalesce(extract(epoch FROM rejected_at)::text, '-'), ',' ORDER BY id), '')), 12))::bit(48)::bigint AS n

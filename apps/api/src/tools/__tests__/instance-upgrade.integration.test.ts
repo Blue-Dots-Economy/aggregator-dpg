@@ -1,6 +1,6 @@
 /**
- * Integration test for the release-train operator tool (`@aggregator-dpg/api`,
- * `tools/train.ts`) against a live Postgres: a database at 0022 holding an
+ * Integration test for the instance-upgrade operator tool (`@aggregator-dpg/api`,
+ * `tools/instance-upgrade.ts`) against a live Postgres: a database at 0022 holding an
  * org, coordinators with and without an org, consent in both homes and a
  * consumed invite is taken through the whole train by `run` — one transaction
  * that applies every migration and runs every verify gate. Covers `--dry-run`
@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { _main } from '../train.js';
+import { _main } from '../instance-upgrade.js';
 
 const adminUrl = process.env.INTEGRATION_DATABASE_URL;
 const suite = adminUrl ? describe : describe.skip;
@@ -151,7 +151,7 @@ async function seedCoordinator(
   return r.id;
 }
 
-suite('release train from 0022 (train run) — integration', () => {
+suite('instance upgrade from 0022 (instance-upgrade run) — integration', () => {
   let admin: pg.Client;
   let tmpDir: string;
   const created: string[] = [];
@@ -342,7 +342,7 @@ suite('release train from 0022 (train run) — integration', () => {
     async () => {
       const fresh = await dbAt(null);
       expect((await cli(fresh.url, ['run', '--dry-run'])).out).toMatch(
-        /REFUSED: the database is at nothing; the train starts from 0022/,
+        /REFUSED: the database is at nothing; the instance upgrade starts from 0022/,
       );
       const older = await dbAt(LAST_BEFORE_IDX - 1);
       expect((await cli(older.url, ['check'])).out).toMatch(
@@ -478,7 +478,7 @@ suite('release train from 0022 (train run) — integration', () => {
   );
 
   it(
-    'takes a rehearsal database part-way through the train to the end (gates only)',
+    'takes a rehearsal database part-way through the instance upgrade to the end (gates only)',
     async () => {
       const { pool, url } = await dbAt(25);
       const checked = await cli(url, ['check']);
@@ -521,7 +521,7 @@ suite('release train from 0022 (train run) — integration', () => {
       const sql = path.join(tmpDir, `sql-${randomBytes(3).toString('hex')}`);
       await cp(SQL_DIR, sql, { recursive: true });
       await appendFile(
-        path.join(sql, 'train-counts-after.sql'),
+        path.join(sql, 'instance-upgrade-counts-after.sql'),
         `\nSELECT 'coordinators' AS key, 99 AS n;\n`,
       );
       const r = await cli(url, ['run', '--snapshot-taken', 's'], { TRAIN_SQL_DIR: sql });
@@ -573,11 +573,11 @@ suite('release train from 0022 (train run) — integration', () => {
   );
 
   it(
-    'refuses enrich before the train is applied',
+    'refuses enrich before the instance upgrade is applied',
     async () => {
       const { url } = await dbAt();
       expect((await cli(url, ['enrich', '--dry-run'])).out).toMatch(
-        /REFUSED: enrich runs after the train \(the database is at 0022_/,
+        /REFUSED: enrich runs after the instance upgrade \(the database is at 0022_/,
       );
     },
     TIMEOUT_MS,

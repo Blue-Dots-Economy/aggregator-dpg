@@ -1,6 +1,6 @@
--- Checks before the user & org release train (0023 → the latest migration), read-only, against
--- a database at migration 0022. Run by `train check` (app up: what is still to
--- clear) and again by `train run` inside its transaction (app down: nothing
+-- Checks before the user & org instance upgrade (0023 → the latest migration), read-only, against
+-- a database at migration 0022. Run by `instance-upgrade check` (app up: what is still to
+-- clear) and again by `instance-upgrade run` inside its transaction (app down: nothing
 -- may have changed). Design: docs/plans/user-org-migrate-tool-simplification.md §5.
 --
 -- Every row is `check_id | category | n`; a `blocker` with n > 0 stops `run`.
@@ -52,7 +52,7 @@ SELECT 'T0b role_cannot_act_as_owner' AS check_id, 'blocker' AS category,
 
 -- T0c names the train creates must be free (0025–0029 detect their first run
 -- by them; a stray object would silently skip their blockers)
-SELECT 'T0c train_names_taken' AS check_id, 'blocker' AS category,
+SELECT 'T0c names_taken' AS check_id, 'blocker' AS category,
        (SELECT count(*) FROM unnest(ARRAY['public.contact', 'public.users', 'public.user_identities',
                                           'public.organisations', 'public.consent_record']) t
          WHERE to_regclass(t) IS NOT NULL)

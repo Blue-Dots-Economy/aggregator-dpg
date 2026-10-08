@@ -491,8 +491,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-dpg}:${POSTGRES_PASSWORD}@postgres:5432/${AGGREGATOR_DB:-aggregator}
       RUN_MIGRATIONS_ON_BOOT: "true"
       # Dev / e2e only: lets a local database WITH data apply the user & org
-      # release train at boot (apps/api/src/db/migration-guards.ts). Never set
-      # in a deployment; existing instances use the release-train tool.
+      # instance upgrade at boot (apps/api/src/db/migration-guards.ts). Never set
+      # in a deployment; existing instances use the instance-upgrade tool.
       ALLOW_TRAIN_ON_BOOT: ${ALLOW_TRAIN_ON_BOOT:-false}
       REDIS_URL: redis://aggregator-redis:6379
       # Keycloak (root path, localhost mode)

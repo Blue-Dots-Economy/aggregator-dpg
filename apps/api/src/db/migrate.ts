@@ -54,7 +54,7 @@ export async function migrateWithLock<TSchema extends Record<string, unknown>>(
 export async function runMigrations(): Promise<void> {
   const migrationsFolder = path.resolve(__dirname, '../../drizzle/migrations');
   logger.info({ migrationsFolder }, 'running database migrations');
-  // Refuse foreign migrations, and the user & org release train on a
+  // Refuse foreign migrations, and the user & org instance upgrade on a
   // database with data (that path is the migration tool's; see
   // migration-guards.ts). Read once here, at startup.
   await runMigrationGuards(getPool(), migrationsFolder, process.env.ALLOW_TRAIN_ON_BOOT === 'true');

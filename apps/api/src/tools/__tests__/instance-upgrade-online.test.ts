@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { IdpAdminFake } from '../../services/idp-admin/testing.js';
 import { IdentityStoreFake } from '../../services/identity-store/testing.js';
 import { IDP_PROVIDER } from '../../services/idp-admin/provider.js';
-import { enableOwnersStep, enrichExitCode, enrichIdentities } from '../train-online.js';
+import { enableOwnersStep, enrichExitCode, enrichIdentities } from '../instance-upgrade-online.js';
 import { buildAggregatorOrg, buildDefaultOrg } from '../../services/aggregator-org-store/index.js';
 import type { AggregatorOrg } from '../../services/aggregator-org-store/index.js';
 import { PLACEHOLDER_OWNER_EMAIL } from '../../services/organisation-root.js';

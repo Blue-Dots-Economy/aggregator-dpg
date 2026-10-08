@@ -1,8 +1,8 @@
 /**
  * Config-free migration core (`@aggregator-dpg/api`): the advisory-locked
  * migration runner and the journal / applied-row readers, shared by the API's
- * boot path (`migrate.ts`, `migration-guards.ts`) and the release-train
- * operator entry (`tools/train.ts`), which applies pending migrations inside
+ * boot path (`migrate.ts`, `migration-guards.ts`) and the instance-upgrade
+ * operator entry (`tools/instance-upgrade.ts`), which applies pending migrations inside
  * its own transaction with {@link applyPending}.
  *
  * Deliberately imports neither `config.ts` nor `env.ts` nor the app logger:
@@ -22,9 +22,9 @@ import type { Pool, PoolClient } from 'pg';
 export type Queryable = Pick<Pool | PoolClient, 'query'>;
 
 /** Journal `when` of the first train migration (0023). */
-export const TRAIN_FIRST_WHEN = 1790600000000;
+export const UPGRADE_FIRST_WHEN = 1790600000000;
 /** Journal `when` of the last train migration (0029, the end of the train). */
-export const TRAIN_LAST_WHEN = 1791400000000;
+export const UPGRADE_LAST_WHEN = 1791400000000;
 /** Journal `when` of 0022, the level every existing instance is at. */
 export const PRE_TRAIN_WHEN = 1788400000000;
 

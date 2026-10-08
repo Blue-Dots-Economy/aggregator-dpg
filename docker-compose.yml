@@ -436,7 +436,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-aggregator}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-aggregator}
       RUN_MIGRATIONS_ON_BOOT: "true"
       # Dev / e2e only: lets a database WITH data apply the user & org release
-      # train at boot. Deployments apply it with the release-train tool; leave
+      # train at boot. Deployments apply it with the instance-upgrade tool; leave
       # this false there (apps/api/src/db/migration-guards.ts).
       ALLOW_TRAIN_ON_BOOT: ${ALLOW_TRAIN_ON_BOOT:-false}
       # Keycloak admin (service account). Must equal the public issuer prefix

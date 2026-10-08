@@ -11,8 +11,8 @@
  *    only warns — several shipped migrations were edited after their first
  *    commit, so real instances hold older hashes.
  *
- * 2. **The user & org release train.** Migrations 0023 onwards (up to
- *    {@link TRAIN_LAST_WHEN}) restructure existing data and are applied on an
+ * 2. **The user & org instance upgrade.** Migrations 0023 onwards (up to
+ *    {@link UPGRADE_LAST_WHEN}) restructure existing data and are applied on an
  *    existing instance by the migration tool, with pods at zero, after its
  *    pre-flight and dry-run (docs/plans/existing-instance-migration.md). At
  *    boot (`RUN_MIGRATIONS_ON_BOOT`) or `pnpm db:migrate`, a pending train
@@ -32,14 +32,14 @@ import {
   readApplied,
   readJournal,
   shippedFileHashes,
-  TRAIN_FIRST_WHEN,
-  TRAIN_LAST_WHEN,
+  UPGRADE_FIRST_WHEN,
+  UPGRADE_LAST_WHEN,
   type AppliedMigration,
   type ForeignVerdict,
   type JournalEntry,
 } from './migrate-core.js';
 
-export { checkForeign, TRAIN_FIRST_WHEN, TRAIN_LAST_WHEN };
+export { checkForeign, UPGRADE_FIRST_WHEN, UPGRADE_LAST_WHEN };
 export type { AppliedMigration, ForeignVerdict, JournalEntry };
 
 /**
@@ -51,7 +51,7 @@ export type { AppliedMigration, ForeignVerdict, JournalEntry };
  * @param allowOverride - `ALLOW_TRAIN_ON_BOOT=true`.
  * @returns The pending train tags when refused, else an empty list.
  */
-export function trainRefusal(
+export function upgradeRefusal(
   journal: JournalEntry[],
   appliedWhens: number[],
   nonEmpty: boolean,
@@ -60,7 +60,9 @@ export function trainRefusal(
   if (!nonEmpty || allowOverride) return [];
   const highWater = appliedWhens.length > 0 ? Math.max(...appliedWhens) : -Infinity;
   return journal
-    .filter((e) => e.when > highWater && e.when >= TRAIN_FIRST_WHEN && e.when <= TRAIN_LAST_WHEN)
+    .filter(
+      (e) => e.when > highWater && e.when >= UPGRADE_FIRST_WHEN && e.when <= UPGRADE_LAST_WHEN,
+    )
     .map((e) => e.tag);
 }
 
@@ -120,7 +122,7 @@ export async function runMigrationGuards(
   }
 
   const nonEmpty = await hasRegistrationData(pool);
-  const refused = trainRefusal(
+  const refused = upgradeRefusal(
     entries,
     applied.map((a) => a.createdAt),
     nonEmpty,
@@ -128,9 +130,9 @@ export async function runMigrationGuards(
   );
   if (refused.length > 0) {
     throw new Error(
-      `refusing to apply the user & org release train at boot (${refused.join(', ')}) on a ` +
-        'database that holds data. Existing instances apply it with the release-train tool ' +
-        '(`node dist/tools/train.js run` from the API image) with pods at zero — see ' +
+      `refusing to apply the user & org instance upgrade at boot (${refused.join(', ')}) on a ` +
+        'database that holds data. Existing instances apply it with the instance-upgrade tool ' +
+        '(`node dist/tools/instance-upgrade.js run` from the API image) with pods at zero — see ' +
         'docs/user-org-migration-runbook.md. ' +
         'Dev / e2e only: ALLOW_TRAIN_ON_BOOT=true.',
     );

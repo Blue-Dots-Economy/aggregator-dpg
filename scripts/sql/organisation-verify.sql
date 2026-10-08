@@ -1,6 +1,6 @@
 -- Verify migration 0028 (`organisations`), read-only. Run AFTER the train.
 -- Gates (must be 0): V1–V5. Informational: V6–V8. Counts only — never PII.
--- Run by the release-train tool (`train run` inside its transaction, `train check`).
+-- Run by the instance-upgrade tool (`instance-upgrade run` inside its transaction, `instance-upgrade check`).
 -- Rows: `check_id | category | n` (`gate` must be 0; `info` is reported).
 \set ON_ERROR_STOP on
 
