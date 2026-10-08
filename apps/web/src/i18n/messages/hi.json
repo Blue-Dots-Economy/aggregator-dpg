@@ -675,7 +675,7 @@
       "all": "All",
       "approve": "Approve",
       "reject": "Reject",
-      "repair": "Repair access",
+      "repair": "Re-grant owner access",
       "repaired": "Owner access: {status}",
       "empty": "No organisations match."
     },
