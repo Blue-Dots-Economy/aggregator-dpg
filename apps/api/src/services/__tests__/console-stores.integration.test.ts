@@ -82,7 +82,9 @@ suite('console store methods (Postgres)', () => {
     pool.on('error', () => undefined);
     await migrate(drizzle(pool), { migrationsFolder: MIGRATIONS_DIR });
     _setDbClients(null, null);
-    getPool({ url: url.toString() });
+    // Same guard on the app singleton pool: closeDb() ends it in teardown, but
+    // the force-drop can still race a connection it holds.
+    getPool({ url: url.toString() }).on('error', () => undefined);
 
     ids.orgA = await org('alpha-1111', 'Alpha', 'owner.a@x.test', '+919100000101');
     ids.orgB = await org('beta-2222', 'Beta', 'owner.b@x.test', '+919100000102');
