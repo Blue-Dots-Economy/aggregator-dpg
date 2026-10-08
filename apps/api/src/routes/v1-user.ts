@@ -149,6 +149,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/user/read/me',
     {
+      config: { rbac: { access: 'signed_in' } },
       schema: {
         tags: ['console'],
         summary: 'The signed-in user: kind, organisations and network-admin flag',
@@ -164,6 +165,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/user/read/:id',
     {
+      config: { rbac: { capability: 'org.manage' } },
       schema: {
         tags: ['console'],
         summary: 'One coordinator within reach',
@@ -189,6 +191,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/user/search',
     {
+      config: { rbac: { capability: 'org.manage' } },
       schema: {
         tags: ['console'],
         summary: 'Coordinators within reach, newest first',
@@ -219,6 +222,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/user/create',
     {
+      config: { rbac: { capability: 'org.manage' } },
       schema: {
         tags: ['console'],
         summary: 'Invite coordinators into an organisation',
@@ -285,6 +289,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/user/decision/:id',
     {
+      config: { rbac: { capability: 'org.manage' } },
       schema: {
         tags: ['console'],
         summary: 'Approve or reject a pending coordinator',
@@ -337,6 +342,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.patch(
     '/v1/user/metadata/update/:id',
     {
+      config: { rbac: { capability: 'org.manage' } },
       schema: {
         tags: ['console'],
         summary: "Change a coordinator's served domains",
