@@ -9,8 +9,8 @@ The work to build [rbac-design-aggregator.md](rbac-design-aggregator.md) on bran
 | Item        | Value                                                                                                          |
 | ----------- | -------------------------------------------------------------------------------------------------------------- |
 | Base branch | `refactor/user-org-phase-5-wip` (contains `refactor/user-org-management`); retarget the PR when Phase 5 merges |
-| Done        | R0 foundation, R1 route declarations (incl. the 11 Phase 5 console routes)                                     |
-| Next        | R1.5: adopt Phase 5's resolver, guard and reach check                                                          |
+| Done        | R0 foundation, R1 route declarations (incl. the 11 Phase 5 console routes), R1.5 adoption of Phase 5           |
+| Next        | R2: capabilities for the portal, contact masking, retiring the emailed links, enforcing                        |
 | Safety      | `RBAC_MODE` (`off` / `log` / `enforce`) per instance; `off` by default                                         |
 | Decisions   | D1–D4 in the design's decision record; D3 and D4 can be revisited                                              |
 
@@ -24,7 +24,7 @@ flowchart LR
     R0["R0 · Foundation<br/>done"]
     R1["R1 · Declare routes<br/>done"]
     P5["Refactor P5<br/>phase-5-wip branch"]
-    R15["R1.5 · Adopt Phase 5"]
+    R15["R1.5 · Adopt Phase 5<br/>done"]
     R2["R2 · Enforce"]
     R3["R3 · Grants + pages"]
     P3 --> R0
@@ -37,15 +37,15 @@ flowchart LR
     classDef done fill:#eaf6ec,stroke:#3f9a52,color:#1a1a1a
     classDef todo fill:#e8f1fb,stroke:#3b78c4,color:#1a1a1a
     class P3,P5 ref
-    class R0,R1 done
-    class R15,R2,R3 todo
+    class R0,R1,R15 done
+    class R2,R3 todo
 ```
 
 | Step                | Status | Blocked by                                                      |
 | ------------------- | ------ | --------------------------------------------------------------- |
 | R0 Foundation       | Done   | -                                                               |
 | R1 Declare routes   | Done   | -                                                               |
-| R1.5 Adopt Phase 5  | Next   | - (works on the Phase 5 branch)                                 |
+| R1.5 Adopt Phase 5  | Done   | -                                                               |
 | R2 Enforce          | To do  | Deployment realm gate (bluedots-automation) and the OPA sidecar |
 | R3 Grants and pages | To do  | -                                                               |
 
@@ -97,16 +97,16 @@ flowchart TB
 
 Every route declares `config.rbac`; the API refuses to boot without it; a snapshot test lists all routes. The check runs inside each route file's auth wrapper. Service routes require a service-account token; `self` routes an active account. `cleanup-stale` checks `preferred_username`. The 11 Phase 5 console routes are declared (Appendix A).
 
-### R1.5 — Adopt Phase 5
+### R1.5 — Adopt Phase 5 (done)
 
-| Task                                                                                                            | Where                                                              | Done when                                       |
-| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------- |
-| Use Phase 5's resolver; add `grants` and `permissionSet` to its `Actor`; delete `services/authz/actor-resolver` | `services/auth/actor/`, `services/authz/`                          | One `ActorResolverBase` in the codebase         |
-| Check the route's capability inside `requireActor()`; the older wrappers call the same check                    | `services/auth/actor/require.ts`, `services/authz/route-access.ts` | The actor is resolved once per request          |
-| Take reach out of the policy: drop `target`, `orgChain` and the reach rules (decision D3)                       | `policy/rbac/`, `packages/rbac`, vectors                           | `opa test` and the TS mirror pass without reach |
-| `checkCapability()` for checks inside a handler (no throw)                                                      | `services/authz/`                                                  | Used by contact masking and org rename          |
-| Org rename needs `network.administer`; Default org refuses invite and edit (decision D4)                        | `routes/v1-org.ts`, `routes/v1-user.ts`                            | Tests for both                                  |
-| Catalogue: `org.manage` covers inviting and approving coordinators; `orgs.onboard` covers organisations only    | `docs/rbac/rbac-permissions-and-roles.md`                          | Done in docs                                    |
+| Task                                                                                                            | Where                                                                               | Done when                                       |
+| --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Use Phase 5's resolver; add `grants` and `permissionSet` to its `Actor`; delete `services/authz/actor-resolver` | `services/auth/actor/`, `services/authz/`                                           | One `ActorResolverBase` in the codebase         |
+| Check the route's capability inside `requireActor()`; the older wrappers call the same check                    | `services/auth/actor/require.ts`, `services/authz/route-access.ts`                  | The actor is resolved once per request          |
+| Take reach out of the policy: drop `target`, `orgChain` and the reach rules (decision D3)                       | `policy/rbac/`, `packages/rbac`, vectors                                            | `opa test` and the TS mirror pass without reach |
+| `checkCapability()` for checks inside a handler (no throw)                                                      | `services/authz/`                                                                   | Used by contact masking and org rename          |
+| Org rename needs `network.administer`; Default org refuses invite and edit (decision D4)                        | Already enforced by Phase 5 (`v1-org.ts`, `v1-user.ts`), independent of `RBAC_MODE` | Phase 5 tests; RBAC-enforced console tests      |
+| Catalogue: `org.manage` covers inviting and approving coordinators; `orgs.onboard` covers organisations only    | `docs/rbac/rbac-permissions-and-roles.md`                                           | Done in docs                                    |
 
 ### R2 — Enforce
 

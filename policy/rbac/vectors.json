@@ -1,53 +1,9 @@
 {
   "rbac_vectors": [
     {
-      "name": "coordinator views own tenant",
+      "name": "coordinator views profiles",
       "input": {
         "capability": "profiles.view",
-        "actor": {
-          "userId": "u-coord",
-          "userType": "coordinator",
-          "active": true,
-          "roleCapabilities": [
-            "profiles.view",
-            "profiles.onboard",
-            "profiles.verify",
-            "campaigns.run"
-          ],
-          "orgs": [
-            {
-              "id": "A",
-              "orgType": "aggregator",
-              "relation": "member",
-              "capabilities": [
-                "profiles.view",
-                "profiles.export",
-                "profiles.view_pii",
-                "profiles.onboard",
-                "profiles.retire",
-                "campaigns.run",
-                "org.manage",
-                "contact.unmask"
-              ]
-            }
-          ],
-          "grants": []
-        },
-        "now": 1800000000000,
-        "target": {
-          "tenantUserId": "u-coord",
-          "orgChain": ["A", "NF"]
-        }
-      },
-      "expected": {
-        "allow": true,
-        "reasons": []
-      }
-    },
-    {
-      "name": "coordinator with no target",
-      "input": {
-        "capability": "profiles.onboard",
         "actor": {
           "userId": "u-coord",
           "userType": "coordinator",
@@ -85,9 +41,9 @@
       }
     },
     {
-      "name": "coordinator cannot reach another tenant",
+      "name": "coordinator onboards",
       "input": {
-        "capability": "profiles.view",
+        "capability": "profiles.onboard",
         "actor": {
           "userId": "u-coord",
           "userType": "coordinator",
@@ -117,58 +73,11 @@
           ],
           "grants": []
         },
-        "now": 1800000000000,
-        "target": {
-          "tenantUserId": "u-other",
-          "orgChain": ["A", "NF"]
-        }
+        "now": 1800000000000
       },
       "expected": {
-        "allow": false,
-        "reasons": ["no_reach"]
-      }
-    },
-    {
-      "name": "coordinator cannot reach a sibling org",
-      "input": {
-        "capability": "profiles.view",
-        "actor": {
-          "userId": "u-coord",
-          "userType": "coordinator",
-          "active": true,
-          "roleCapabilities": [
-            "profiles.view",
-            "profiles.onboard",
-            "profiles.verify",
-            "campaigns.run"
-          ],
-          "orgs": [
-            {
-              "id": "A",
-              "orgType": "aggregator",
-              "relation": "member",
-              "capabilities": [
-                "profiles.view",
-                "profiles.export",
-                "profiles.view_pii",
-                "profiles.onboard",
-                "profiles.retire",
-                "campaigns.run",
-                "org.manage",
-                "contact.unmask"
-              ]
-            }
-          ],
-          "grants": []
-        },
-        "now": 1800000000000,
-        "target": {
-          "orgChain": ["B", "NF"]
-        }
-      },
-      "expected": {
-        "allow": false,
-        "reasons": ["no_reach"]
+        "allow": true,
+        "reasons": []
       }
     },
     {
@@ -342,6 +251,46 @@
       }
     },
     {
+      "name": "coordinator cannot manage the org",
+      "input": {
+        "capability": "org.manage",
+        "actor": {
+          "userId": "u-coord",
+          "userType": "coordinator",
+          "active": true,
+          "roleCapabilities": [
+            "profiles.view",
+            "profiles.onboard",
+            "profiles.verify",
+            "campaigns.run"
+          ],
+          "orgs": [
+            {
+              "id": "A",
+              "orgType": "aggregator",
+              "relation": "member",
+              "capabilities": [
+                "profiles.view",
+                "profiles.export",
+                "profiles.view_pii",
+                "profiles.onboard",
+                "profiles.retire",
+                "campaigns.run",
+                "org.manage",
+                "contact.unmask"
+              ]
+            }
+          ],
+          "grants": []
+        },
+        "now": 1800000000000
+      },
+      "expected": {
+        "allow": false,
+        "reasons": ["not_in_role"]
+      }
+    },
+    {
       "name": "inactive account holds nothing",
       "input": {
         "capability": "profiles.view",
@@ -382,9 +331,33 @@
       }
     },
     {
-      "name": "admin reaches a child org",
+      "name": "actor with no organisation",
       "input": {
         "capability": "profiles.view",
+        "actor": {
+          "userId": "u-x",
+          "userType": "coordinator",
+          "active": true,
+          "roleCapabilities": [
+            "profiles.view",
+            "profiles.onboard",
+            "profiles.verify",
+            "campaigns.run"
+          ],
+          "orgs": [],
+          "grants": []
+        },
+        "now": 1800000000000
+      },
+      "expected": {
+        "allow": false,
+        "reasons": ["no_organisation"]
+      }
+    },
+    {
+      "name": "aggregator admin manages its org",
+      "input": {
+        "capability": "org.manage",
         "actor": {
           "userId": "u-adm",
           "userType": "admin",
@@ -414,11 +387,8 @@
                 "profiles.export",
                 "profiles.view_pii",
                 "profiles.onboard",
-                "profiles.verify",
                 "profiles.retire",
-                "profiles.move",
                 "campaigns.run",
-                "orgs.onboard",
                 "org.manage",
                 "contact.unmask"
               ]
@@ -426,10 +396,7 @@
           ],
           "grants": []
         },
-        "now": 1800000000000,
-        "target": {
-          "orgChain": ["A1", "A", "NF"]
-        }
+        "now": 1800000000000
       },
       "expected": {
         "allow": true,
@@ -437,221 +404,7 @@
       }
     },
     {
-      "name": "admin reaches five levels down",
-      "input": {
-        "capability": "profiles.view",
-        "actor": {
-          "userId": "u-adm",
-          "userType": "admin",
-          "active": true,
-          "roleCapabilities": [
-            "profiles.view",
-            "profiles.export",
-            "profiles.onboard",
-            "profiles.verify",
-            "profiles.retire",
-            "profiles.move",
-            "campaigns.run",
-            "orgs.onboard",
-            "orgs.block",
-            "org.manage",
-            "contact.unmask",
-            "agreement.manage",
-            "network.administer"
-          ],
-          "orgs": [
-            {
-              "id": "L1",
-              "orgType": "aggregator",
-              "relation": "owner",
-              "capabilities": [
-                "profiles.view",
-                "profiles.export",
-                "profiles.view_pii",
-                "profiles.onboard",
-                "profiles.verify",
-                "profiles.retire",
-                "profiles.move",
-                "campaigns.run",
-                "orgs.onboard",
-                "org.manage",
-                "contact.unmask"
-              ]
-            }
-          ],
-          "grants": []
-        },
-        "now": 1800000000000,
-        "target": {
-          "orgChain": ["L5", "L4", "L3", "L2", "L1", "NF"]
-        }
-      },
-      "expected": {
-        "allow": true,
-        "reasons": []
-      }
-    },
-    {
-      "name": "admin of a child cannot reach the parent",
-      "input": {
-        "capability": "profiles.view",
-        "actor": {
-          "userId": "u-adm",
-          "userType": "admin",
-          "active": true,
-          "roleCapabilities": [
-            "profiles.view",
-            "profiles.export",
-            "profiles.onboard",
-            "profiles.verify",
-            "profiles.retire",
-            "profiles.move",
-            "campaigns.run",
-            "orgs.onboard",
-            "orgs.block",
-            "org.manage",
-            "contact.unmask",
-            "agreement.manage",
-            "network.administer"
-          ],
-          "orgs": [
-            {
-              "id": "A1",
-              "orgType": "aggregator",
-              "relation": "owner",
-              "capabilities": [
-                "profiles.view",
-                "profiles.export",
-                "profiles.view_pii",
-                "profiles.onboard",
-                "profiles.retire",
-                "campaigns.run",
-                "org.manage",
-                "contact.unmask"
-              ]
-            }
-          ],
-          "grants": []
-        },
-        "now": 1800000000000,
-        "target": {
-          "orgChain": ["A", "NF"]
-        }
-      },
-      "expected": {
-        "allow": false,
-        "reasons": ["no_reach"]
-      }
-    },
-    {
-      "name": "admin cannot reach a sibling",
-      "input": {
-        "capability": "profiles.view",
-        "actor": {
-          "userId": "u-adm",
-          "userType": "admin",
-          "active": true,
-          "roleCapabilities": [
-            "profiles.view",
-            "profiles.export",
-            "profiles.onboard",
-            "profiles.verify",
-            "profiles.retire",
-            "profiles.move",
-            "campaigns.run",
-            "orgs.onboard",
-            "orgs.block",
-            "org.manage",
-            "contact.unmask",
-            "agreement.manage",
-            "network.administer"
-          ],
-          "orgs": [
-            {
-              "id": "A1",
-              "orgType": "aggregator",
-              "relation": "owner",
-              "capabilities": [
-                "profiles.view",
-                "profiles.export",
-                "profiles.view_pii",
-                "profiles.onboard",
-                "profiles.retire",
-                "campaigns.run",
-                "org.manage",
-                "contact.unmask"
-              ]
-            }
-          ],
-          "grants": []
-        },
-        "now": 1800000000000,
-        "target": {
-          "orgChain": ["A2", "A", "NF"]
-        }
-      },
-      "expected": {
-        "allow": false,
-        "reasons": ["no_reach"]
-      }
-    },
-    {
-      "name": "admin loses reach when the parent is removed",
-      "input": {
-        "capability": "profiles.view",
-        "actor": {
-          "userId": "u-adm",
-          "userType": "admin",
-          "active": true,
-          "roleCapabilities": [
-            "profiles.view",
-            "profiles.export",
-            "profiles.onboard",
-            "profiles.verify",
-            "profiles.retire",
-            "profiles.move",
-            "campaigns.run",
-            "orgs.onboard",
-            "orgs.block",
-            "org.manage",
-            "contact.unmask",
-            "agreement.manage",
-            "network.administer"
-          ],
-          "orgs": [
-            {
-              "id": "P",
-              "orgType": "aggregator",
-              "relation": "owner",
-              "capabilities": [
-                "profiles.view",
-                "profiles.export",
-                "profiles.view_pii",
-                "profiles.onboard",
-                "profiles.verify",
-                "profiles.retire",
-                "profiles.move",
-                "campaigns.run",
-                "orgs.onboard",
-                "org.manage",
-                "contact.unmask"
-              ]
-            }
-          ],
-          "grants": []
-        },
-        "now": 1800000000000,
-        "target": {
-          "orgChain": ["X", "NF2"]
-        }
-      },
-      "expected": {
-        "allow": false,
-        "reasons": ["no_reach"]
-      }
-    },
-    {
-      "name": "admin in a flat tree",
+      "name": "aggregator admin exports",
       "input": {
         "capability": "profiles.export",
         "actor": {
@@ -692,66 +445,11 @@
           ],
           "grants": []
         },
-        "now": 1800000000000,
-        "target": {
-          "orgChain": ["A", "NF"]
-        }
+        "now": 1800000000000
       },
       "expected": {
         "allow": true,
         "reasons": []
-      }
-    },
-    {
-      "name": "admin needs a target chain for tenant data",
-      "input": {
-        "capability": "profiles.view",
-        "actor": {
-          "userId": "u-adm",
-          "userType": "admin",
-          "active": true,
-          "roleCapabilities": [
-            "profiles.view",
-            "profiles.export",
-            "profiles.onboard",
-            "profiles.verify",
-            "profiles.retire",
-            "profiles.move",
-            "campaigns.run",
-            "orgs.onboard",
-            "orgs.block",
-            "org.manage",
-            "contact.unmask",
-            "agreement.manage",
-            "network.administer"
-          ],
-          "orgs": [
-            {
-              "id": "A",
-              "orgType": "aggregator",
-              "relation": "owner",
-              "capabilities": [
-                "profiles.view",
-                "profiles.export",
-                "profiles.view_pii",
-                "profiles.onboard",
-                "profiles.retire",
-                "campaigns.run",
-                "org.manage",
-                "contact.unmask"
-              ]
-            }
-          ],
-          "grants": []
-        },
-        "now": 1800000000000,
-        "target": {
-          "tenantUserId": "u-coord"
-        }
-      },
-      "expected": {
-        "allow": false,
-        "reasons": ["no_reach"]
       }
     },
     {
@@ -796,10 +494,7 @@
           ],
           "grants": []
         },
-        "now": 1800000000000,
-        "target": {
-          "orgChain": ["A", "NF"]
-        }
+        "now": 1800000000000
       },
       "expected": {
         "allow": false,
@@ -848,10 +543,7 @@
           ],
           "grants": []
         },
-        "now": 1800000000000,
-        "target": {
-          "orgChain": ["A", "NF"]
-        }
+        "now": 1800000000000
       },
       "expected": {
         "allow": false,
@@ -859,7 +551,249 @@
       }
     },
     {
-      "name": "NF admin onboards organisations",
+      "name": "super aggregator admin onboards organisations",
+      "input": {
+        "capability": "orgs.onboard",
+        "actor": {
+          "userId": "u-adm",
+          "userType": "admin",
+          "active": true,
+          "roleCapabilities": [
+            "profiles.view",
+            "profiles.export",
+            "profiles.onboard",
+            "profiles.verify",
+            "profiles.retire",
+            "profiles.move",
+            "campaigns.run",
+            "orgs.onboard",
+            "orgs.block",
+            "org.manage",
+            "contact.unmask",
+            "agreement.manage",
+            "network.administer"
+          ],
+          "orgs": [
+            {
+              "id": "S",
+              "orgType": "aggregator",
+              "relation": "owner",
+              "capabilities": [
+                "profiles.view",
+                "profiles.export",
+                "profiles.view_pii",
+                "profiles.onboard",
+                "profiles.verify",
+                "profiles.retire",
+                "profiles.move",
+                "campaigns.run",
+                "orgs.onboard",
+                "org.manage",
+                "contact.unmask"
+              ]
+            }
+          ],
+          "grants": []
+        },
+        "now": 1800000000000
+      },
+      "expected": {
+        "allow": true,
+        "reasons": []
+      }
+    },
+    {
+      "name": "any owned org holding the capability is enough",
+      "input": {
+        "capability": "orgs.onboard",
+        "actor": {
+          "userId": "u-adm",
+          "userType": "admin",
+          "active": true,
+          "roleCapabilities": [
+            "profiles.view",
+            "profiles.export",
+            "profiles.onboard",
+            "profiles.verify",
+            "profiles.retire",
+            "profiles.move",
+            "campaigns.run",
+            "orgs.onboard",
+            "orgs.block",
+            "org.manage",
+            "contact.unmask",
+            "agreement.manage",
+            "network.administer"
+          ],
+          "orgs": [
+            {
+              "id": "A",
+              "orgType": "aggregator",
+              "relation": "owner",
+              "capabilities": [
+                "profiles.view",
+                "profiles.export",
+                "profiles.view_pii",
+                "profiles.onboard",
+                "profiles.retire",
+                "campaigns.run",
+                "org.manage",
+                "contact.unmask"
+              ]
+            },
+            {
+              "id": "S",
+              "orgType": "aggregator",
+              "relation": "owner",
+              "capabilities": [
+                "profiles.view",
+                "profiles.export",
+                "profiles.view_pii",
+                "profiles.onboard",
+                "profiles.verify",
+                "profiles.retire",
+                "profiles.move",
+                "campaigns.run",
+                "orgs.onboard",
+                "org.manage",
+                "contact.unmask"
+              ]
+            }
+          ],
+          "grants": []
+        },
+        "now": 1800000000000
+      },
+      "expected": {
+        "allow": true,
+        "reasons": []
+      }
+    },
+    {
+      "name": "aggregator admin cannot repair access",
+      "input": {
+        "capability": "network.administer",
+        "actor": {
+          "userId": "u-adm",
+          "userType": "admin",
+          "active": true,
+          "roleCapabilities": [
+            "profiles.view",
+            "profiles.export",
+            "profiles.onboard",
+            "profiles.verify",
+            "profiles.retire",
+            "profiles.move",
+            "campaigns.run",
+            "orgs.onboard",
+            "orgs.block",
+            "org.manage",
+            "contact.unmask",
+            "agreement.manage",
+            "network.administer"
+          ],
+          "orgs": [
+            {
+              "id": "S",
+              "orgType": "aggregator",
+              "relation": "owner",
+              "capabilities": [
+                "profiles.view",
+                "profiles.export",
+                "profiles.view_pii",
+                "profiles.onboard",
+                "profiles.verify",
+                "profiles.retire",
+                "profiles.move",
+                "campaigns.run",
+                "orgs.onboard",
+                "org.manage",
+                "contact.unmask"
+              ]
+            }
+          ],
+          "grants": []
+        },
+        "now": 1800000000000
+      },
+      "expected": {
+        "allow": false,
+        "reasons": ["not_in_org_set"]
+      }
+    },
+    {
+      "name": "network admin repairs access",
+      "input": {
+        "capability": "network.administer",
+        "actor": {
+          "userId": "u-nf",
+          "userType": "admin",
+          "active": true,
+          "roleCapabilities": [
+            "profiles.view",
+            "profiles.export",
+            "profiles.onboard",
+            "profiles.verify",
+            "profiles.retire",
+            "profiles.move",
+            "campaigns.run",
+            "orgs.onboard",
+            "orgs.block",
+            "org.manage",
+            "contact.unmask",
+            "agreement.manage",
+            "network.administer"
+          ],
+          "orgs": [
+            {
+              "id": "NF",
+              "orgType": "network_facilitator",
+              "relation": "owner",
+              "capabilities": [
+                "profiles.view",
+                "profiles.export",
+                "profiles.view_pii",
+                "profiles.onboard",
+                "profiles.verify",
+                "profiles.retire",
+                "profiles.move",
+                "profiles.act_on_behalf",
+                "campaigns.run",
+                "orgs.onboard",
+                "orgs.block",
+                "org.manage",
+                "contact.unmask",
+                "agreement.manage",
+                "network.administer"
+              ]
+            },
+            {
+              "id": "DEF",
+              "orgType": "aggregator",
+              "relation": "owner",
+              "capabilities": [
+                "profiles.view",
+                "profiles.export",
+                "profiles.view_pii",
+                "profiles.onboard",
+                "profiles.retire",
+                "campaigns.run",
+                "org.manage",
+                "contact.unmask"
+              ]
+            }
+          ],
+          "grants": []
+        },
+        "now": 1800000000000
+      },
+      "expected": {
+        "allow": true,
+        "reasons": []
+      }
+    },
+    {
+      "name": "network admin onboards organisations",
       "input": {
         "capability": "orgs.onboard",
         "actor": {
@@ -903,14 +837,26 @@
                 "agreement.manage",
                 "network.administer"
               ]
+            },
+            {
+              "id": "DEF",
+              "orgType": "aggregator",
+              "relation": "owner",
+              "capabilities": [
+                "profiles.view",
+                "profiles.export",
+                "profiles.view_pii",
+                "profiles.onboard",
+                "profiles.retire",
+                "campaigns.run",
+                "org.manage",
+                "contact.unmask"
+              ]
             }
           ],
           "grants": []
         },
-        "now": 1800000000000,
-        "target": {
-          "orgChain": ["A", "NF"]
-        }
+        "now": 1800000000000
       },
       "expected": {
         "allow": true,
@@ -971,10 +917,7 @@
             }
           ]
         },
-        "now": 1800000000000,
-        "target": {
-          "orgChain": ["A", "NF"]
-        }
+        "now": 1800000000000
       },
       "expected": {
         "allow": false,
@@ -1026,42 +969,30 @@
                 "agreement.manage",
                 "network.administer"
               ]
+            },
+            {
+              "id": "DEF",
+              "orgType": "aggregator",
+              "relation": "owner",
+              "capabilities": [
+                "profiles.view",
+                "profiles.export",
+                "profiles.view_pii",
+                "profiles.onboard",
+                "profiles.retire",
+                "campaigns.run",
+                "org.manage",
+                "contact.unmask"
+              ]
             }
           ],
-          "grants": []
-        },
-        "now": 1800000000000,
-        "target": {
-          "orgChain": ["A", "NF"]
-        }
-      },
-      "expected": {
-        "allow": false,
-        "reasons": ["not_grantable"]
-      }
-    },
-    {
-      "name": "actor with no organisation",
-      "input": {
-        "capability": "profiles.view",
-        "actor": {
-          "userId": "u-x",
-          "userType": "coordinator",
-          "active": true,
-          "roleCapabilities": [
-            "profiles.view",
-            "profiles.onboard",
-            "profiles.verify",
-            "campaigns.run"
-          ],
-          "orgs": [],
           "grants": []
         },
         "now": 1800000000000
       },
       "expected": {
         "allow": false,
-        "reasons": ["no_reach"]
+        "reasons": ["not_grantable"]
       }
     }
   ]

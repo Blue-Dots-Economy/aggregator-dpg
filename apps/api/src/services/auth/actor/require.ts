@@ -10,6 +10,7 @@ import type { FastifyRequest } from 'fastify';
 import { authenticateAny, type AnyAuthContext } from '../access-token.js';
 import { httpError } from '../../../errors/http-error.js';
 import { getActorResolver } from './index.js';
+import { enforceActorRouteAccess } from '../../authz/route-access.js';
 import type { Actor } from './interface.js';
 
 /** A verified, resolved caller. */
@@ -37,7 +38,9 @@ export interface RequireActorOptions {
  * @throws {HttpError} `UNAUTHORIZED` (no / bad token), `FORBIDDEN` (service
  *   account, wrong client, or a coordinator on an admin route),
  *   `USER_NOT_PROVISIONED`, `NOT_APPROVED` (coordinator not approved),
- *   `NOT_ORG_ADMIN` (admin without an active org), `DB_UNAVAILABLE`.
+ *   `NOT_ORG_ADMIN` (admin without an active org), `DB_UNAVAILABLE`, and
+ *   `FORBIDDEN` with `fields.permission` when RBAC enforces a missing
+ *   capability.
  */
 export async function requireActor(
   req: FastifyRequest,
@@ -72,5 +75,8 @@ export async function requireActor(
   } else if (!actor.active) {
     throw httpError('NOT_ORG_ADMIN');
   }
+  // RBAC: the route's declared capability (`config.rbac`), on the actor just
+  // resolved. A no-op with RBAC_MODE=off; logs in `log`; 403 in `enforce`.
+  await enforceActorRouteAccess(req, actor);
   return { actor, auth: auth.context };
 }

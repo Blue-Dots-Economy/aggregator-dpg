@@ -3,7 +3,9 @@
  *
  * Defines the fixed capability catalogue, the shape of an access question
  * ({@link DecisionInput}) and the {@link AuthorizerBase} every decision
- * engine implements. The OPA-backed engine and the in-memory fake both extend
+ * engine implements. The question is "does the actor hold this capability";
+ * which targets the actor reaches is answered outside the policy (design
+ * decision D3). The OPA-backed engine and the in-memory fake both extend
  * it, so callers depend only on this file.
  *
  * Design: `docs/rbac/rbac-design-aggregator.md`; catalogue:
@@ -56,7 +58,7 @@ export type OrgType = z.infer<typeof OrgTypeSchema>;
 /** How the actor relates to an organisation it may act through. */
 export const OrgRelationSchema = z.enum(['owner', 'member']);
 
-/** `owner` = the actor is the organisation's `org_owner`; `member` = coordinator of it. */
+/** `owner` = the actor is the organisation's `org_owner`; `member` = coordinator of it. Informational: reach is decided outside the policy. */
 export type OrgRelation = z.infer<typeof OrgRelationSchema>;
 
 /** An organisation the actor may act through, with the PermissionSet that caps it. */
@@ -96,22 +98,10 @@ export const ActorSchema = z.object({
 /** The caller of one request. */
 export type Actor = z.infer<typeof ActorSchema>;
 
-/** What the request touches. Omit for requests on the actor's own data. */
-export const TargetSchema = z.object({
-  /** Organisation ids from the target organisation up to the root, target first. */
-  orgChain: z.array(z.string().min(1)).optional(),
-  /** Owner of tenant data (`user_id` on uploads, links, campaigns). */
-  tenantUserId: z.string().min(1).optional(),
-});
-
-/** The data a request touches. */
-export type Target = z.infer<typeof TargetSchema>;
-
 /** One access question. */
 export const DecisionInputSchema = z.object({
   capability: CapabilitySchema,
   actor: ActorSchema,
-  target: TargetSchema.optional(),
   /** Epoch milliseconds, for grant expiry. */
   now: z.number().int().nonnegative(),
 });
@@ -138,7 +128,7 @@ export abstract class AuthorizerBase {
   /**
    * Answers one access question.
    *
-   * @param input - The capability, the actor and the target.
+   * @param input - The capability, the actor and the current time.
    * @returns Ok with the decision, or Err when the engine cannot answer
    *   (unreachable, timed out, malformed reply). Callers treat Err as a deny.
    */

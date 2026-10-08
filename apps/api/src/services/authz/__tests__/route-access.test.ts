@@ -10,6 +10,7 @@ import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
 import { buildApp } from '../../../app.js';
 import {
   assertRouteDeclared,
+  enforceActorRouteAccess,
   enforceRouteAccess,
   isServiceAccount,
   listDeclaredRoutes,
@@ -17,7 +18,7 @@ import {
   type RouteAccess,
 } from '../route-access.js';
 import { _setRbacRuntime } from '../runtime.js';
-import { InMemoryActorResolver, _setActorResolver } from '../actor-resolver/index.js';
+import { ActorResolverFake, _setActorResolver, buildAdminActor } from '../../auth/actor/index.js';
 
 const { config: cfg } = await loadRbacConfig([join(process.env.CONFIG_ROOT ?? '', 'rbac.yaml')]);
 
@@ -53,13 +54,12 @@ function req(rbac: RouteAccess) {
 
 function setup(mode: 'log' | 'enforce', active = true) {
   _setRbacRuntime({ mode, config: cfg, authorizer: new AuthorizerFake() });
-  const resolver = new InMemoryActorResolver();
-  resolver.seed({
+  const resolver = new ActorResolverFake();
+  resolver.seed('u1', {
     userId: 'u1',
     userType: 'coordinator',
     active,
-    orgs: [{ id: 'org-a', orgType: 'aggregator', relation: 'member', permissionSet: null }],
-    grants: [],
+    orgs: [{ id: 'org-a', orgType: 'aggregator', relation: 'member', isDefault: false }],
   });
   _setActorResolver(resolver);
 }
@@ -183,6 +183,41 @@ describe('enforceRouteAccess', () => {
     await expect(
       enforceRouteAccess(req({ access: 'public' }).r, { subject: 'x' }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('enforceActorRouteAccess', () => {
+  it('does nothing when RBAC is off', async () => {
+    await expect(
+      enforceActorRouteAccess(req({ capability: 'network.administer' }).r, buildAdminActor()),
+    ).resolves.toBeUndefined();
+  });
+
+  it('checks a console route capability on the resolved actor', async () => {
+    setup('enforce');
+    await expect(
+      enforceActorRouteAccess(req({ capability: 'org.manage' }).r, buildAdminActor()),
+    ).resolves.toBeUndefined();
+    await expect(
+      enforceActorRouteAccess(req({ capability: 'network.administer' }).r, buildAdminActor()),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN', fields: { permission: 'network.administer' } });
+  });
+
+  it('only logs a missing console capability in log mode', async () => {
+    setup('log');
+    await expect(
+      enforceActorRouteAccess(req({ capability: 'network.administer' }).r, buildAdminActor()),
+    ).resolves.toBeUndefined();
+  });
+
+  it('accepts a signed-in actor and refuses an inactive one on self routes', async () => {
+    setup('enforce');
+    await expect(
+      enforceActorRouteAccess(req({ access: 'signed_in' }).r, buildAdminActor({ active: false })),
+    ).resolves.toBeUndefined();
+    await expect(
+      enforceActorRouteAccess(req({ access: 'self' }).r, buildAdminActor({ active: false })),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 });
 

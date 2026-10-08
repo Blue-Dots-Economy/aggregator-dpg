@@ -1,7 +1,11 @@
 // Console routes /v1/user/* and /v1/org/* (user & org Phase 5): who may do
 // what, reach (out of reach → 404), and the decision / edit flows.
 
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, afterEach } from 'vitest';
+import { join } from 'node:path';
+import { loadRbacConfig } from '@aggregator-dpg/rbac';
+import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
+import { _setRbacRuntime } from '../services/authz/runtime.js';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import {
@@ -519,6 +523,41 @@ describe('console routes /v1/user, /v1/org', () => {
       const res = await post(`/v1/org/access/repair/${ORG_A}`, 'na', {});
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ id: ORG_A });
+    });
+  });
+  // RBAC on top of Phase 5's checks: the capability each console route
+  // declares (route-access snapshot), decided per request.
+  describe('with RBAC enforced', () => {
+    beforeEach(async () => {
+      const { config } = await loadRbacConfig([join(process.env.CONFIG_ROOT ?? '', 'rbac.yaml')]);
+      _setRbacRuntime({ mode: 'enforce', config, authorizer: new AuthorizerFake() });
+    });
+    afterEach(() => _setRbacRuntime(null));
+
+    const permissionOf = (res: { json(): unknown }) =>
+      (res.json() as { error: { fields?: { permission?: string } } }).error.fields?.permission;
+
+    it('lets an aggregator owner approve its coordinator (org.manage)', async () => {
+      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('refuses an aggregator owner the network admin capabilities', async () => {
+      const repair = await post(`/v1/org/access/repair/${ORG_A}`, 'a', {});
+      expect(repair.statusCode).toBe(403);
+      expect(permissionOf(repair)).toBe('network.administer');
+      const decide = await post(`/v1/org/decision/${ORG_P}`, 'a', { decision: 'approve' });
+      expect(decide.statusCode).toBe(403);
+      expect(permissionOf(decide)).toBe('orgs.onboard');
+    });
+
+    it('lets the network admin repair access', async () => {
+      await idp.createUser({ email: 'a@a.org', enabled: false, attributes: {} });
+      expect((await post(`/v1/org/access/repair/${ORG_A}`, 'na', {})).statusCode).toBe(200);
+    });
+
+    it('lets a signed-in coordinator read itself', async () => {
+      expect((await get('/v1/user/read/me', 'coord')).statusCode).toBe(200);
     });
   });
 });

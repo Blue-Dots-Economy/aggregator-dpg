@@ -1,15 +1,19 @@
 /**
- * Unit tests for the RBAC route guard (`@aggregator-dpg/api`, R0): modes,
- * deny paths, and the decision input it builds.
+ * Unit tests for the RBAC capability checks (`@aggregator-dpg/api`): modes,
+ * deny paths, and the decision input built from a Phase 5 actor.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
 import { loadRbacConfig } from '@aggregator-dpg/rbac';
 import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
-import { join } from 'node:path';
-import { requirePermission } from '../guard.js';
+import { checkCapability, decisionInput, requirePermission } from '../guard.js';
 import { _setRbacRuntime } from '../runtime.js';
-import { InMemoryActorResolver, _setActorResolver } from '../actor-resolver/index.js';
-import type { ResolvedActor } from '../actor-resolver/index.js';
+import {
+  ActorResolverFake,
+  _setActorResolver,
+  buildAdminActor,
+  type Actor,
+} from '../../auth/actor/index.js';
 
 const { config: cfg } = await loadRbacConfig([join(process.env.CONFIG_ROOT ?? '', 'rbac.yaml')]);
 
@@ -18,81 +22,85 @@ function req() {
   return { log: log as never, method: 'GET', routeOptions: { url: '/v1/x' }, spy: log };
 }
 
-const coordinator: ResolvedActor = {
+const coordinator: Actor = {
   userId: 'u-coord',
   userType: 'coordinator',
   active: true,
-  orgs: [{ id: 'org-a', orgType: 'aggregator', relation: 'member', permissionSet: null }],
-  grants: [],
+  orgs: [{ id: 'org-a', orgType: 'aggregator', relation: 'member', isDefault: false }],
 };
 
-function setup(mode: 'log' | 'enforce', actor: ResolvedActor | null = coordinator) {
+function setup(mode: 'log' | 'enforce', actor: Actor | null = coordinator) {
   const authorizer = new AuthorizerFake();
   _setRbacRuntime({ mode, config: cfg, authorizer });
-  const resolver = new InMemoryActorResolver();
-  if (actor) resolver.seed(actor);
+  const resolver = new ActorResolverFake();
+  if (actor) resolver.seed('u-coord', actor);
   _setActorResolver(resolver);
-  return authorizer;
+  return { authorizer, resolver };
 }
+
+const caller = { subject: 's', aggregatorId: 'u-coord' };
 
 afterEach(() => {
   _setRbacRuntime(null);
   _setActorResolver(null);
 });
 
+describe('decisionInput', () => {
+  it('builds role and organisation capabilities from rbac.yaml', () => {
+    const input = decisionInput(cfg, coordinator, 'profiles.view', 42);
+    expect(input).toMatchObject({ capability: 'profiles.view', now: 42 });
+    expect(input.actor.roleCapabilities).toEqual(cfg.roles.coordinator);
+    expect(input.actor.orgs[0]?.capabilities).toEqual(cfg.permission_sets.aggregator);
+    expect(input.actor.grants).toEqual([]);
+  });
+
+  it('uses an organisation override and the actor grants', () => {
+    const input = decisionInput(
+      cfg,
+      {
+        ...coordinator,
+        orgs: [
+          {
+            id: 'o',
+            orgType: 'aggregator',
+            relation: 'member',
+            isDefault: false,
+            permissionSet: 'super_aggregator',
+          },
+        ],
+        grants: [{ capability: 'profiles.view_pii', expiresAt: 9 }],
+      },
+      'profiles.view',
+      0,
+    );
+    expect(input.actor.orgs[0]?.capabilities).toEqual(cfg.permission_sets.super_aggregator);
+    expect(input.actor.grants).toHaveLength(1);
+  });
+});
+
 describe('requirePermission', () => {
   it('does nothing when RBAC is off', async () => {
     const r = req();
-    expect(
-      await requirePermission(r, { subject: 's', aggregatorId: 'u-coord' }, 'profiles.view'),
-    ).toEqual({
+    expect(await requirePermission(r, caller, 'profiles.view')).toEqual({
       allowed: true,
       mode: 'off',
     });
     expect(r.spy.warn).not.toHaveBeenCalled();
   });
 
-  it('allows a coordinator to view its own tenant', async () => {
+  it('allows what the role and the organisation set hold', async () => {
     setup('enforce');
-    const out = await requirePermission(
-      req(),
-      { subject: 's', aggregatorId: 'u-coord' },
-      'profiles.view',
-      {
-        tenantUserId: 'u-coord',
-      },
-    );
-    expect(out).toMatchObject({ allowed: true, mode: 'enforce', decision: { allow: true } });
-  });
-
-  it('builds the input from rbac.yaml', async () => {
-    const authz = setup('log');
-    await requirePermission(
-      req(),
-      { subject: 's', aggregatorId: 'u-coord' },
-      'profiles.view',
-      undefined,
-      42,
-    );
-    const input = authz.calls[0];
-    expect(input?.now).toBe(42);
-    expect(input?.target).toBeUndefined();
-    expect(input?.actor.roleCapabilities).toEqual(cfg.roles.coordinator);
-    expect(input?.actor.orgs[0]?.capabilities).toEqual(cfg.permission_sets.aggregator);
+    expect(await requirePermission(req(), caller, 'profiles.view')).toMatchObject({
+      allowed: true,
+      decision: { allow: true },
+    });
   });
 
   it('denies in enforce mode and logs a failure', async () => {
     setup('enforce');
     const r = req();
-    const out = await requirePermission(
-      r,
-      { subject: 's', aggregatorId: 'u-coord' },
-      'profiles.view_pii',
-    );
-    expect(out).toMatchObject({
-      allowed: false,
-      decision: { allow: false, reasons: ['not_in_role'] },
-    });
+    const out = await requirePermission(r, caller, 'profiles.view_pii');
+    expect(out).toMatchObject({ allowed: false, decision: { reasons: ['not_in_role'] } });
     expect(r.spy.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         operation: 'rbac.decide',
@@ -105,67 +113,54 @@ describe('requirePermission', () => {
   it('only logs a deny in log mode', async () => {
     setup('log');
     const r = req();
-    const out = await requirePermission(
-      r,
-      { subject: 's', aggregatorId: 'u-coord' },
-      'profiles.view_pii',
-    );
-    expect(out.allowed).toBe(true);
-    expect(out.decision?.allow).toBe(false);
+    const out = await requirePermission(r, caller, 'profiles.view_pii');
+    expect(out).toMatchObject({ allowed: true, decision: { allow: false } });
     expect(r.spy.warn).toHaveBeenCalledWith(expect.objectContaining({ status: 'skipped' }));
   });
 
   it('denies an unknown caller', async () => {
     setup('enforce', null);
     const out = await requirePermission(req(), { subject: 'nobody' }, 'profiles.view');
-    expect(out.decision).toEqual({ allow: false, reasons: ['unknown_actor'] });
-    expect(out.allowed).toBe(false);
+    expect(out).toMatchObject({ allowed: false, decision: { reasons: ['unknown_actor'] } });
   });
 
-  it('denies when the engine is unreachable', async () => {
-    setup('enforce').failWith();
-    const out = await requirePermission(
-      req(),
-      { subject: 's', aggregatorId: 'u-coord' },
-      'profiles.view',
-    );
-    expect(out.decision).toEqual({ allow: false, reasons: ['engine_unavailable'] });
-  });
-
-  it('denies when the database is unavailable', async () => {
-    setup('enforce');
-    _setActorResolver({
-      resolve: async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'x' } }),
-      orgChain: async () => ({ ok: true, value: [] }),
-    } as never);
-    const out = await requirePermission(
-      req(),
-      { subject: 's', aggregatorId: 'u-coord' },
-      'profiles.view',
-    );
+  it('denies when the resolver is unavailable', async () => {
+    setup('enforce').resolver.failWith = 'db down';
+    const out = await requirePermission(req(), caller, 'profiles.view');
     expect(out.decision).toEqual({ allow: false, reasons: ['actor_unavailable'] });
   });
 
-  it('honours an unexpired grant', async () => {
-    setup('enforce', {
+  it('denies when the engine is unreachable', async () => {
+    setup('enforce').authorizer.failWith();
+    const out = await requirePermission(req(), caller, 'profiles.view');
+    expect(out.decision).toEqual({ allow: false, reasons: ['engine_unavailable'] });
+  });
+});
+
+describe('checkCapability', () => {
+  it('honours an unexpired grant on a resolved actor', async () => {
+    setup('enforce');
+    const actor = {
       ...coordinator,
-      grants: [{ capability: 'profiles.view_pii', expiresAt: 100 }],
+      grants: [{ capability: 'profiles.view_pii' as const, expiresAt: 100 }],
+    };
+    expect((await checkCapability(req(), actor, 'profiles.view_pii', 99)).allowed).toBe(true);
+    expect((await checkCapability(req(), actor, 'profiles.view_pii', 100)).allowed).toBe(false);
+  });
+
+  it('lets a network admin repair access but not an aggregator admin', async () => {
+    setup('enforce');
+    const nf = buildAdminActor({
+      orgs: [{ id: 'nf', orgType: 'network_facilitator', relation: 'owner', isDefault: false }],
     });
-    const ok = await requirePermission(
-      req(),
-      { subject: 's', aggregatorId: 'u-coord' },
-      'profiles.view_pii',
-      undefined,
-      99,
+    expect((await checkCapability(req(), nf, 'network.administer')).allowed).toBe(true);
+    expect((await checkCapability(req(), buildAdminActor(), 'network.administer')).allowed).toBe(
+      false,
     );
-    const late = await requirePermission(
-      req(),
-      { subject: 's', aggregatorId: 'u-coord' },
-      'profiles.view_pii',
-      undefined,
-      100,
-    );
-    expect(ok.allowed).toBe(true);
-    expect(late.allowed).toBe(false);
+  });
+
+  it('lets an aggregator admin manage its organisation', async () => {
+    setup('enforce');
+    expect((await checkCapability(req(), buildAdminActor(), 'org.manage')).allowed).toBe(true);
   });
 });
