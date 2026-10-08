@@ -11,8 +11,8 @@ import type { FastifyRequest, RouteOptions } from 'fastify';
 import { CapabilitySchema, type Capability } from '@aggregator-dpg/rbac';
 import { httpError } from '../../errors/http-error.js';
 import type { AnyAuthContext, AuthContext } from '../auth/access-token.js';
-import { getActorResolver, type TokenIdentity } from './actor-resolver/index.js';
-import { requirePermission } from './guard.js';
+import type { Actor } from '../auth/actor/interface.js';
+import { checkCapability, requirePermission, resolveCaller, type TokenIdentity } from './guard.js';
 import { getRbacRuntime } from './runtime.js';
 
 /**
@@ -50,7 +50,7 @@ export interface RouteCaller extends TokenIdentity {
  */
 export function callerFromAuth(ctx: AuthContext): RouteCaller {
   return {
-    aggregatorId: ctx.aggregatorId || undefined,
+    ...(ctx.aggregatorId ? { aggregatorId: ctx.aggregatorId } : {}),
     subject: ctx.userId,
     preferredUsername: ctx.preferredUsername,
   };
@@ -64,7 +64,7 @@ export function callerFromAuth(ctx: AuthContext): RouteCaller {
  */
 export function callerFromAny(ctx: AnyAuthContext): RouteCaller {
   return {
-    aggregatorId: ctx.aggregatorId,
+    ...(ctx.aggregatorId ? { aggregatorId: ctx.aggregatorId } : {}),
     subject: ctx.subject,
     preferredUsername: ctx.preferredUsername,
   };
@@ -126,8 +126,30 @@ export function assertRouteDeclared(route: RouteOptions): void {
   for (const m of methods) if (m !== 'HEAD') declared.set(`${m} ${url}`, decl);
 }
 
+/** Logs an access failure and throws in `enforce` mode. */
+function refuse(
+  req: FastifyRequest,
+  access: string,
+  reason: string,
+  userId: string | undefined,
+  mode: 'log' | 'enforce',
+): void {
+  req.log.warn({
+    operation: 'rbac.access',
+    status: mode === 'enforce' ? 'failure' : 'skipped',
+    access,
+    route: req.routeOptions.url,
+    method: req.method,
+    user_id: userId,
+    mode,
+    reasons: [reason],
+  });
+  if (mode === 'enforce') throw httpError('FORBIDDEN', { fields: { permission: access } });
+}
+
 /**
- * Applies the route's declaration to an authenticated caller.
+ * Applies the route's declaration to an authenticated caller of a route file's
+ * own auth wrapper.
  *
  * Does nothing when RBAC is off. In `log` mode a failure is logged and the
  * request continues; in `enforce` mode it becomes `403 FORBIDDEN`.
@@ -147,27 +169,40 @@ export async function enforceRouteAccess(req: FastifyRequest, caller: RouteCalle
     if (!out.allowed) throw httpError('FORBIDDEN', { fields: { permission: decl.capability } });
     return;
   }
-
-  let reason: string | null = null;
   if (decl.access === 'service') {
-    if (!isServiceAccount(caller.preferredUsername)) reason = 'not_service_account';
-  } else if (decl.access === 'self' || decl.access === 'signed_in') {
-    const res = await getActorResolver().resolve(caller);
-    if (!res.ok) reason = 'actor_unavailable';
-    else if (!res.value) reason = 'unknown_actor';
-    else if (decl.access === 'self' && !res.value.active) reason = 'inactive';
+    if (!isServiceAccount(caller.preferredUsername)) {
+      refuse(req, decl.access, 'not_service_account', caller.aggregatorId, rt.mode);
+    }
+    return;
   }
-  if (reason === null) return;
+  if (decl.access === 'self' || decl.access === 'signed_in') {
+    const resolved = await resolveCaller(caller);
+    if ('reason' in resolved) {
+      refuse(req, decl.access, resolved.reason, caller.aggregatorId, rt.mode);
+    } else if (decl.access === 'self' && !resolved.actor.active) {
+      refuse(req, decl.access, 'inactive', caller.aggregatorId, rt.mode);
+    }
+  }
+}
 
-  req.log.warn({
-    operation: 'rbac.access',
-    status: rt.mode === 'enforce' ? 'failure' : 'skipped',
-    access: decl.access,
-    route: req.routeOptions.url,
-    method: req.method,
-    user_id: caller.aggregatorId,
-    mode: rt.mode,
-    reasons: [reason],
-  });
-  if (rt.mode === 'enforce') throw httpError('FORBIDDEN', { fields: { permission: decl.access } });
+/**
+ * Applies the route's declaration to a caller already resolved by
+ * `requireActor()` (the console routes), so the actor is read once.
+ *
+ * @param req - The request; its route's `config.rbac` is read.
+ * @param actor - The resolved actor.
+ * @throws {HttpError} `FORBIDDEN` in `enforce` mode when the check fails.
+ */
+export async function enforceActorRouteAccess(req: FastifyRequest, actor: Actor): Promise<void> {
+  const rt = getRbacRuntime();
+  if (!rt) return;
+  const decl = req.routeOptions.config.rbac;
+  if (!decl) return;
+  if ('capability' in decl) {
+    const out = await checkCapability(req, actor, decl.capability);
+    if (!out.allowed) throw httpError('FORBIDDEN', { fields: { permission: decl.capability } });
+    return;
+  }
+  if (decl.access === 'self' && !actor.active)
+    refuse(req, decl.access, 'inactive', actor.userId, rt.mode);
 }

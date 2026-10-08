@@ -1,10 +1,11 @@
 /**
- * Route guard for capability checks (`@aggregator-dpg/api`, RBAC R0).
+ * Capability checks for the API (`@aggregator-dpg/api`, RBAC).
  *
- * Each route file's auth wrapper calls {@link requirePermission} after the
- * token is verified. It resolves the caller from the database, asks the
- * decision engine, and logs the outcome. In `log` mode a deny is only logged;
- * in `enforce` mode the caller turns `allowed: false` into a 403.
+ * Builds the decision input from a resolved actor (Phase 5's actor resolver)
+ * and `config/rbac.yaml`, asks the decision engine, and logs the outcome. In
+ * `log` mode a deny is only logged; in `enforce` mode the caller turns
+ * `allowed: false` into a 403. Reach (which targets) is not decided here:
+ * `scope.ts` answers it with 404 (design decision D3).
  */
 
 import type { FastifyBaseLogger } from 'fastify';
@@ -16,9 +17,8 @@ import {
   type Decision,
   type DecisionInput,
   type RbacConfig,
-  type Target,
 } from '@aggregator-dpg/rbac';
-import { getActorResolver, type TokenIdentity } from './actor-resolver/index.js';
+import { getActorResolver, type Actor } from '../auth/actor/index.js';
 import { getRbacRuntime, type RbacMode } from './runtime.js';
 
 /** What the caller should do with the request. */
@@ -37,16 +37,132 @@ export interface GuardRequest {
   method?: string | undefined;
 }
 
+/** Who the token says the caller is. */
+export interface TokenIdentity {
+  /** `aggregator_id` claim, when present. */
+  aggregatorId?: string | undefined;
+  /** Keycloak `sub`. */
+  subject: string;
+}
+
 /**
- * Checks whether the caller holds `capability` on `target`.
+ * Resolves the caller through Phase 5's actor resolver.
  *
- * Never throws. An unknown caller, a database failure or an unreachable
- * engine count as a deny.
+ * @param identity - Claims from the verified token.
+ * @returns The actor, or a deny reason (`actor_unavailable`, `unknown_actor`).
+ */
+export async function resolveCaller(
+  identity: TokenIdentity,
+): Promise<{ actor: Actor } | { reason: string }> {
+  const res = await getActorResolver().resolve({
+    subject: identity.subject,
+    ...(identity.aggregatorId ? { aggregatorId: identity.aggregatorId } : {}),
+  });
+  if (!res.ok) return { reason: 'actor_unavailable' };
+  if (!res.value) return { reason: 'unknown_actor' };
+  return { actor: res.value };
+}
+
+/**
+ * Builds the policy input for an actor.
  *
- * @param req - The Fastify request (for its logger and route).
+ * @param cfg - The validated `rbac.yaml`.
+ * @param actor - The resolved actor.
+ * @param capability - The capability asked for.
+ * @param now - Clock, for grant expiry.
+ * @returns The decision input.
+ */
+export function decisionInput(
+  cfg: RbacConfig,
+  actor: Actor,
+  capability: Capability,
+  now: number,
+): DecisionInput {
+  return {
+    capability,
+    now,
+    actor: {
+      userId: actor.userId,
+      userType: actor.userType,
+      active: actor.active,
+      roleCapabilities: roleCapabilities(cfg, actor.userType),
+      grants: actor.grants ?? [],
+      orgs: actor.orgs.map((o) => ({
+        id: o.id,
+        orgType: o.orgType,
+        relation: o.relation,
+        capabilities: orgCapabilities(cfg, o.orgType, o.permissionSet ?? null),
+      })),
+    },
+  };
+}
+
+/** Asks the engine; an engine failure becomes a deny. */
+async function decide(authorizer: AuthorizerBase, input: DecisionInput): Promise<Decision> {
+  const result = await authorizer.decide(input);
+  return result.success ? result.value : { allow: false, reasons: ['engine_unavailable'] };
+}
+
+/** Logs a decision and turns it into an outcome for the mode. */
+function outcome(
+  req: GuardRequest,
+  mode: Exclude<RbacMode, 'off'>,
+  capability: Capability,
+  userId: string | undefined,
+  decision: Decision,
+  start: number,
+): GuardOutcome {
+  const entry = {
+    operation: 'rbac.decide',
+    capability,
+    route: req.routeOptions?.url,
+    method: req.method,
+    user_id: userId,
+    mode,
+    allow: decision.allow,
+    reasons: decision.reasons,
+    latency_ms: Date.now() - start,
+  };
+  if (decision.allow) {
+    req.log.debug({ ...entry, status: 'success' });
+    return { allowed: true, mode, decision };
+  }
+  req.log.warn({ ...entry, status: mode === 'enforce' ? 'failure' : 'skipped' });
+  return { allowed: mode !== 'enforce', mode, decision };
+}
+
+/**
+ * Checks whether a resolved actor holds `capability`. Never throws.
+ *
+ * Use it inside a handler for checks that do not fail the whole route, such
+ * as unmasking contact details.
+ *
+ * @param req - The request (for its logger and route).
+ * @param actor - The resolved actor.
+ * @param capability - The capability asked for.
+ * @param now - Clock, for grant expiry. Injectable for tests.
+ * @returns Whether to continue, the mode, and the decision.
+ */
+export async function checkCapability(
+  req: GuardRequest,
+  actor: Actor,
+  capability: Capability,
+  now: number = Date.now(),
+): Promise<GuardOutcome> {
+  const rt = getRbacRuntime();
+  if (!rt) return { allowed: true, mode: 'off' };
+  const start = Date.now();
+  const decision = await decide(rt.authorizer, decisionInput(rt.config, actor, capability, now));
+  return outcome(req, rt.mode, capability, actor.userId, decision, start);
+}
+
+/**
+ * Resolves the caller, then checks `capability`. Never throws: an unknown
+ * caller, a database failure or an unreachable engine count as a deny.
+ *
+ * @param req - The request (for its logger and route).
  * @param identity - Claims from the verified token.
  * @param capability - The capability the route declares.
- * @param target - What the request touches; omit for the caller's own data.
  * @param now - Clock, for grant expiry. Injectable for tests.
  * @returns Whether to continue, the mode, and the decision.
  */
@@ -54,66 +170,21 @@ export async function requirePermission(
   req: GuardRequest,
   identity: TokenIdentity,
   capability: Capability,
-  target?: Target,
   now: number = Date.now(),
 ): Promise<GuardOutcome> {
   const rt = getRbacRuntime();
   if (!rt) return { allowed: true, mode: 'off' };
-
   const start = Date.now();
-  const decision = await decide(rt.config, rt.authorizer, identity, capability, target, now);
-  const entry = {
-    operation: 'rbac.decide',
-    capability,
-    route: req.routeOptions?.url,
-    method: req.method,
-    user_id: identity.aggregatorId,
-    mode: rt.mode,
-    allow: decision.allow,
-    reasons: decision.reasons,
-    latency_ms: Date.now() - start,
-  };
-  if (decision.allow) {
-    req.log.debug({ ...entry, status: 'success' });
-    return { allowed: true, mode: rt.mode, decision };
+  const resolved = await resolveCaller(identity);
+  if ('reason' in resolved) {
+    return outcome(
+      req,
+      rt.mode,
+      capability,
+      identity.aggregatorId,
+      { allow: false, reasons: [resolved.reason] },
+      start,
+    );
   }
-  req.log.warn({ ...entry, status: rt.mode === 'enforce' ? 'failure' : 'skipped' });
-  return { allowed: rt.mode !== 'enforce', mode: rt.mode, decision };
-}
-
-/** Resolves the caller and asks the engine; every failure becomes a deny. */
-async function decide(
-  cfg: RbacConfig,
-  authorizer: AuthorizerBase,
-  identity: TokenIdentity,
-  capability: Capability,
-  target: Target | undefined,
-  now: number,
-): Promise<Decision> {
-  const resolved = await getActorResolver().resolve(identity);
-  if (!resolved.ok) return { allow: false, reasons: ['actor_unavailable'] };
-  const actor = resolved.value;
-  if (!actor) return { allow: false, reasons: ['unknown_actor'] };
-
-  const input: DecisionInput = {
-    capability,
-    now,
-    ...(target ? { target } : {}),
-    actor: {
-      userId: actor.userId,
-      userType: actor.userType,
-      active: actor.active,
-      roleCapabilities: roleCapabilities(cfg, actor.userType),
-      grants: actor.grants,
-      orgs: actor.orgs.map((o) => ({
-        id: o.id,
-        orgType: o.orgType,
-        relation: o.relation,
-        capabilities: orgCapabilities(cfg, o.orgType, o.permissionSet),
-      })),
-    },
-  };
-  const result = await authorizer.decide(input);
-  if (!result.success) return { allow: false, reasons: ['engine_unavailable'] };
-  return result.value;
+  return checkCapability(req, resolved.actor, capability, now);
 }
