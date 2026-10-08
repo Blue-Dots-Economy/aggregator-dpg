@@ -7,12 +7,14 @@
  *   node dist/tools/instance-upgrade.js check [--fix <name> [--id <uuid> | --org-id <uuid>] [--dry-run]]
  *   node dist/tools/instance-upgrade.js run (--snapshot-taken <id> | --dry-run)
  *   node dist/tools/instance-upgrade.js enrich [--dry-run] [--rate <n per second>]
+ *   node dist/tools/instance-upgrade.js enable-owners [--dry-run] [--rate <n per second>]
  *
  * `check` is read-only (fixes excepted). `run` takes a database from 0022 to
  * the latest shipped migration in ONE transaction that also runs every verify
  * gate and commits only when all pass. `check` and `run` need only
- * `DATABASE_URL` and `AGGREGATOR_NETWORK` (+ `AGGREGATOR_BRAND`); `enrich`
- * needs the full API environment. Output is counts, check ids, error codes and
+ * `DATABASE_URL` and `AGGREGATOR_NETWORK` (+ `AGGREGATOR_BRAND`); `enrich` and
+ * `enable-owners` (Phase 5: existing org owners sign in) need the full API
+ * environment. Output is counts, check ids, error codes and
  * database ids — never row data. Exit codes: 0 ok, 1 refused / failed, 2 usage.
  */
 
@@ -48,7 +50,7 @@ const log = pino({ base: { service: 'train' } });
 /** The shipped migrations: `<app>/drizzle/migrations` next to `dist/` / `src/`. */
 const MIGRATIONS = path.resolve(__dirname, '../../drizzle/migrations');
 
-/** The verify scripts of every phase in the train, in order (a test ties it to `scripts/sql`). */
+/** The verify scripts of every phase in the instance upgrade, in order (a test ties it to `scripts/sql`). */
 export const VERIFY_FILES = ['users-verify.sql', 'organisation-verify.sql', 'cleanup-verify.sql'];
 
 /** Documented fixes: script, and the parameter flag it takes (if any). */
@@ -349,7 +351,7 @@ async function check(pool: pg.Pool, args: string[]): Promise<number> {
   await banner(pool, 'check', level);
   if (level.state === 'fresh' || level.state === 'other') {
     throw new Refusal(
-      `the database is at ${level.appliedTag ?? 'nothing'}: this tool takes 0022 to the end of the train only`,
+      `the database is at ${level.appliedTag ?? 'nothing'}: this tool takes 0022 to the end of the instance upgrade only`,
     );
   }
   if (args.includes('--fix')) {
@@ -361,7 +363,7 @@ async function check(pool: pg.Pool, args: string[]): Promise<number> {
   out(`  role_can_act_as_owner=${await canActAsOwner(pool)}`);
   if (level.state === 'partial') {
     out(
-      `  part-way through the train (a rehearsal database): \`run\` applies the ${level.pending.length} ` +
+      `  part-way through the instance upgrade (a rehearsal database): \`run\` applies the ${level.pending.length} ` +
         'pending migration(s) and every verify gate; the 0022 drain and pre-flight do not apply here',
     );
     out('CHECK PASSED — ready for `run`');
@@ -441,12 +443,12 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> {
   const level = await levelOf(pool);
   await banner(pool, dryRun ? 'run --dry-run' : 'run', level);
   if (level.state === 'done') {
-    out('  nothing pending — the train is already applied');
+    out('  nothing pending — the instance upgrade is already applied');
     return 0;
   }
   if (level.state !== 'start' && level.state !== 'partial') {
     throw new Refusal(
-      `the database is at ${level.appliedTag ?? 'nothing'}; the train starts from 0022`,
+      `the database is at ${level.appliedTag ?? 'nothing'}; the instance upgrade starts from 0022`,
     );
   }
   const sessions = await foreignSessions(pool);
@@ -493,7 +495,7 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> {
       if (blockers.length > 0) throw new Refusal(`${blockers.length} blocker(s) — see above`);
       before = await counts(client, 'instance-upgrade-counts-before.sql');
     } else {
-      out('  part-way through the train: no 0022 drain / pre-flight / counts; verify gates only');
+      out('  part-way through the instance upgrade: no 0022 drain / pre-flight / counts; verify gates only');
     }
     out('== applying');
     const tags = new Map((await readJournal(MIGRATIONS)).map((e) => [e.when, e.tag]));
@@ -513,7 +515,7 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> {
       return 0;
     }
     // Last look before the point of no return: anything that connected while
-    // the train ran (a self-healing deployment, a restarted worker) would run
+    // the instance upgrade ran (a self-healing deployment, a restarted worker) would run
     // old code on the new schema.
     const late = await foreignSessions(client);
     if (late.length > 0) {
@@ -558,7 +560,7 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> {
     // The COMMIT itself failed: it may have landed before the connection dropped.
     const now = await levelAfterCommit(pool);
     if (now?.state === 'done')
-      out('COMMIT reported an error, but the train IS applied — continue with enrich');
+      out('COMMIT reported an error, but the instance upgrade IS applied — continue with enrich');
     else if (now?.state === 'start')
       out('COMMIT failed — nothing was applied, the database is unchanged');
     else out('COMMIT failed and the level cannot be read — run `check` before scaling anything up');
@@ -577,26 +579,27 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> {
  */
 async function main(argv: string[]): Promise<number> {
   const [command, ...args] = argv;
-  if (command === 'enrich') {
+  if (command === 'enrich' || command === 'enable-owners') {
     const pool = openPool();
     try {
       const level = await levelOf(pool);
       if (level.state !== 'done') {
         throw new Refusal(
-          `enrich runs after the train (the database is at ${level.appliedTag ?? 'nothing'})`,
+          `${command} runs after the instance upgrade (the database is at ${level.appliedTag ?? 'nothing'})`,
         );
       }
     } finally {
       await pool.end();
     }
     const rate = Number(flag(args, '--rate') ?? 5);
+    const opts = { dryRun: args.includes('--dry-run'), ratePerSecond: rate };
     // Loaded lazily: it needs the API's full environment (Keycloak).
     const online = await import('./instance-upgrade-online.js');
-    return online.enrich({ dryRun: args.includes('--dry-run'), ratePerSecond: rate }, out);
+    return command === 'enrich' ? online.enrich(opts, out) : online.enableOwners(opts, out);
   }
   if (command !== 'check' && command !== 'run') {
     out(
-      'usage: instance-upgrade check [--fix <name> …] | run (--snapshot-taken <id> | --dry-run) | enrich [--dry-run] [--rate n]',
+      'usage: instance-upgrade check [--fix <name> …] | run (--snapshot-taken <id> | --dry-run) | enrich [--dry-run] [--rate n] | enable-owners [--dry-run] [--rate n]',
     );
     return 2;
   }

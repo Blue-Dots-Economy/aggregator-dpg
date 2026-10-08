@@ -273,4 +273,45 @@ export class IdpAdminFake extends IdpAdminAdapter {
     this.roles.set(userId, set);
     return { ok: true, value: undefined };
   }
+  async listRealmRoles(userId: string): Promise<IdpResult<string[]>> {
+    if (this.failNext) {
+      const e = this.failNext;
+      this.failNext = null;
+      return { ok: false, error: e };
+    }
+    if (!this.users.has(userId)) {
+      return { ok: false, error: { code: 'USER_NOT_FOUND', message: userId } };
+    }
+    return { ok: true, value: this.rolesOf(userId) };
+  }
+
+  async removeRealmRole(userId: string, role: string): Promise<IdpResult<void>> {
+    if (this.failNext) {
+      const e = this.failNext;
+      this.failNext = null;
+      return { ok: false, error: e };
+    }
+    if (!this.users.has(userId)) {
+      return { ok: false, error: { code: 'USER_NOT_FOUND', message: userId } };
+    }
+    this.roles.get(userId)?.delete(role);
+    return { ok: true, value: undefined };
+  }
+
+  /** Test inspector — how many times each user's sessions were ended. */
+  readonly logouts = new Map<string, number>();
+
+  async logoutSessions(userId: string): Promise<IdpResult<void>> {
+    if (this.failNext) {
+      const e = this.failNext;
+      this.failNext = null;
+      return { ok: false, error: e };
+    }
+    if (!this.users.has(userId)) {
+      return { ok: false, error: { code: 'USER_NOT_FOUND', message: userId } };
+    }
+    this.logouts.set(userId, (this.logouts.get(userId) ?? 0) + 1);
+    return { ok: true, value: undefined };
+  }
+
 }

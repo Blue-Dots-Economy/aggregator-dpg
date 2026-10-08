@@ -2,7 +2,7 @@
  * Config-free migration core (`@aggregator-dpg/api`): the advisory-locked
  * migration runner and the journal / applied-row readers, shared by the API's
  * boot path (`migrate.ts`, `migration-guards.ts`) and the instance-upgrade
- * operator entry (`tools/train.ts`), which applies pending migrations inside
+ * operator entry (`tools/instance-upgrade.ts`), which applies pending migrations inside
  * its own transaction with {@link applyPending}.
  *
  * Deliberately imports neither `config.ts` nor `env.ts` nor the app logger:

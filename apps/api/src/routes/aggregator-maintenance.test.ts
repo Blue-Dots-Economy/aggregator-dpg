@@ -247,7 +247,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
       updatedAt: new Date('2020-01-01T00:00:00Z'),
     });
     aggregatorStore.seed([stale]);
-    aggregatorStore.deleteById = async () => ({
+    aggregatorStore.deleteIfPending = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db delete failed' },
     });
@@ -261,6 +261,43 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     const body = res.json() as { pruned: number; prunedIds: string[] };
     expect(body.pruned).toBe(0);
     expect(body.prunedIds).not.toContain(stale.id);
+  });
+
+  it('leaves a row decided during the prune, and its KC user, in place', async () => {
+    const stale = buildAggregator({
+      id: '77777777-7777-7777-7777-777777777777',
+      orgSlug: 'stale-gggg',
+      contact: { name: 'Raced', phone: '+919000000007', email: 'raced@x.org' },
+      contactPhone: '+919000000007',
+      contactEmail: 'raced@x.org',
+      status: 'pending',
+      updatedAt: new Date('2020-01-01T00:00:00Z'),
+    });
+    aggregatorStore.seed([stale]);
+    const user = await idp.createUser({
+      email: 'raced@x.org',
+      enabled: false,
+      attributes: { aggregator_id: stale.id },
+    });
+    if (!user.ok) throw new Error('seed failed');
+    // An approval lands between the page read and the delete.
+    const lookup = idp.findByAttribute.bind(idp);
+    idp.findByAttribute = async (key, value) => {
+      await aggregatorStore.approveFromPending(stale.id, 'admin-1');
+      return lookup(key, value);
+    };
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/aggregator-registrations/cleanup-stale',
+      headers: AUTH_HEADER,
+    });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { pruned: number }).pruned).toBe(0);
+    const row = await aggregatorStore.findById(stale.id);
+    expect(row.ok && row.value?.status).toBe('active');
+    const kc = await idp.findById(user.value.id);
+    expect(kc.ok && kc.value).toBeTruthy();
   });
 
   it('503s when the aggregator store list fails', async () => {

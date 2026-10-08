@@ -317,6 +317,10 @@ const ConfigSchema = z.object({
   // amplifier. Follows the PUBLIC_SUBMIT_RATE shape.
   INVITE_MINT_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
   INVITE_MINT_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(100),
+  // Per-actor limit on console decisions and edits (Phase 5, design R11).
+  // A coarse guard against a runaway client or a stolen session; fails open.
+  CONSOLE_WRITE_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  CONSOLE_WRITE_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(60),
   /** Max recipients per single mint request (#701). Default 10. */
   INVITE_MINT_MAX_RECIPIENTS: z.coerce.number().int().positive().default(10),
 
@@ -391,17 +395,6 @@ assertSignalStackClientIdentity(config);
 export const corsOrigins: string[] = config.CORS_ORIGINS.split(',')
   .map((s) => s.trim())
   .filter(Boolean);
-
-/**
- * Whether the removed `ORG_HIERARCHY_ENABLED` variable is still set. The org
- * hierarchy is always on since migration 0028; the variable is ignored, and
- * boot logs one warning while it is present (one release, then the check goes).
- *
- * @returns `true` when the variable is set to any value.
- */
-export function legacyHierarchyFlagSet(): boolean {
-  return process.env.ORG_HIERARCHY_ENABLED !== undefined;
-}
 
 /**
  * The configured owner of the Default org, or `null`.

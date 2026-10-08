@@ -1,6 +1,6 @@
 /**
  * Database IO of the instance-upgrade operator tool (`@aggregator-dpg/api`,
- * `tools/train.ts`): instance facts, the role and session checks, and the
+ * `tools/instance-upgrade.ts`): instance facts, the role and session checks, and the
  * runner for the operator SQL (`check_id | category | n` rows). Config-free:
  * only the pool / connection it is given.
  */
@@ -163,7 +163,7 @@ export function sqlStatements(script: string): string[] {
  * returns its `check_id | category | n` rows; statements without a
  * `check_id` (setup such as TEMP views) are run and skipped.
  *
- * @param client - The connection (the train's transaction, or a read session).
+ * @param client - The connection (the instance upgrade's transaction, or a read session).
  * @param file - Path to the script.
  * @returns The rows, in script order.
  */

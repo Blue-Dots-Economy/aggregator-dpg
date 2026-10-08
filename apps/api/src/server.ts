@@ -4,7 +4,7 @@
 
 import './env.js';
 import { buildApp } from './app.js';
-import { adminEmails, config, defaultOrgOwnerEmail, legacyHierarchyFlagSet } from './config.js';
+import { adminEmails, config, defaultOrgOwnerEmail } from './config.js';
 import { logger } from './logger.js';
 import { runMigrations } from './db/migrate.js';
 import { closeDb } from './db/client.js';
@@ -58,14 +58,6 @@ async function main(): Promise<void> {
     });
   } catch (err) {
     logger.warn({ err }, 'approval brand seed failed — falling back to default');
-  }
-
-  // The org hierarchy is always on since migration 0028.
-  if (legacyHierarchyFlagSet()) {
-    logger.warn(
-      { operation: 'config.orgHierarchy', status: 'skipped' },
-      'ORG_HIERARCHY_ENABLED is ignored — organisations are always on; remove it from the environment',
-    );
   }
 
   // Put the configured network root / Default-org values in place of the

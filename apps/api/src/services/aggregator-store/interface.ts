@@ -173,6 +173,11 @@ export interface CreateAggregatorInput {
 export interface UpdateAggregatorPatch {
   name?: string;
   type?: RoleType | null;
+  /**
+   * The domains served (`[]` = every domain), set by the Phase 5 console;
+   * wins over {@link type} when both are given.
+   */
+  serves?: RoleType[];
   /** `company` / `gstNumber` in it are ignored: they belong to the org. */
   contact?: BecknContact;
   status?: AggregatorStatus;
@@ -192,6 +197,41 @@ export interface ListAggregatorsFilter {
    */
   updatedBefore?: Date;
 }
+
+/** Keyset position in a {@link SearchCoordinatorsFilter} page (newest first). */
+export interface CoordinatorCursor {
+  createdAt: Date;
+  id: string;
+}
+
+/**
+ * A scoped coordinator search (Phase 5 console). `orgIds = null` means every
+ * org (the network admin); an empty array means none (returns no rows).
+ */
+export interface SearchCoordinatorsFilter {
+  orgIds: string[] | null;
+  status?: AggregatorStatus;
+  /** A network domain id the coordinator serves (`serves = '{}'` serves every domain). */
+  serves?: string;
+  cursor?: CoordinatorCursor;
+  /** 1..100, default 20. */
+  limit?: number;
+}
+
+/** One page of a coordinator search; `nextCursor` is null on the last page. */
+export interface SearchCoordinatorsPage {
+  rows: Aggregator[];
+  nextCursor: CoordinatorCursor | null;
+}
+
+/** Coordinator counts of one org. */
+export interface OrgCoordinatorCounts {
+  total: number;
+  pending: number;
+}
+
+/** Outcome of {@link AggregatorStoreBase.deleteIfPending}. */
+export type DeleteIfPendingOutcome = 'deleted' | 'not_pending' | 'aborted';
 
 export interface ListAggregatorsPage {
   rows: Aggregator[];
@@ -272,4 +312,48 @@ export abstract class AggregatorStoreBase {
     updatedBy: string,
   ): Promise<StoreResult<Aggregator>>;
   abstract deleteById(id: string): Promise<StoreResult<void>>;
+  /**
+   * Atomic compare-and-set `pending`→`inactive` with a write-once
+   * `rejected_at`. Returns the updated row, or `null` inside `ok` when the row
+   * was not `pending` (a concurrent decision already committed), so only the
+   * winner sends the rejection email.
+   *
+   * @param id - Coordinator id.
+   * @param updatedBy - The deciding actor (an admin user id, or `'admin'` for a signed link).
+   * @returns The rejected row, or `null` when it was not pending.
+   */
+  abstract rejectFromPending(
+    id: string,
+    updatedBy: string,
+  ): Promise<StoreResult<Aggregator | null>>;
+  /**
+   * Deletes a coordinator only while it is still `pending` and older than
+   * `cutoff`, holding the row until `beforeCommit` (the Keycloak user delete)
+   * has run: a concurrent approval waits, then finds the row gone; a failed
+   * `beforeCommit` keeps the row for the next pass.
+   *
+   * @param id - Coordinator id.
+   * @param cutoff - Only rows last updated before this instant.
+   * @param beforeCommit - Runs with the row locked; `false` aborts the delete.
+   * @returns `deleted`, `not_pending` (decided, fresh or gone), or `aborted`.
+   */
+  abstract deleteIfPending(
+    id: string,
+    cutoff: Date,
+    beforeCommit: () => Promise<boolean>,
+  ): Promise<StoreResult<DeleteIfPendingOutcome>>;
+  /**
+   * Scoped, keyset-paged coordinator search, newest first.
+   *
+   * @param filter - Scope (`orgIds`), filters and cursor.
+   * @returns One page; an empty scope returns no rows.
+   */
+  abstract search(filter: SearchCoordinatorsFilter): Promise<StoreResult<SearchCoordinatorsPage>>;
+  /**
+   * Coordinator counts per org.
+   *
+   * @param orgIds - The orgs to count (empty → empty result).
+   * @returns `orgId` → counts; an org without coordinators maps to zeros.
+   */
+  abstract countByOrg(orgIds: string[]): Promise<StoreResult<Record<string, OrgCoordinatorCounts>>>;
 }

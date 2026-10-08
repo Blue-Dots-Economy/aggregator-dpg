@@ -10,9 +10,9 @@ describe('renderCase — the one conversion', () => {
   it('renders subject, HTML and text from the same copy keys', () => {
     const out = renderCase('owner_grant_refreshed', {
       orgName: 'Acme Org',
-      inviteUrl: 'https://portal.test/register/invite?grant=xyz',
+      inviteUrl: 'https://portal.test/login',
     });
-    expect(out.subject).toBe('Your new invite link for Acme Org');
+    expect(out.subject).toBe('Manage Acme Org by signing in');
     expect(out.html).toContain('Acme Org');
     expect(out.text).toContain('Acme Org');
     // The text part is derived, so the HTML's <strong> must not leak into it.
@@ -22,10 +22,10 @@ describe('renderCase — the one conversion', () => {
   it('emits a CTA as a button in HTML and as "Label: url" in text', () => {
     const out = renderCase('owner_grant_refreshed', {
       orgName: 'Acme Org',
-      inviteUrl: 'https://portal.test/i?grant=xyz',
+      inviteUrl: 'https://portal.test/login',
     });
-    expect(out.html).toContain('href="https://portal.test/i?grant=xyz"');
-    expect(out.text).toContain('Open your invite page: https://portal.test/i?grant=xyz');
+    expect(out.html).toContain('href="https://portal.test/login"');
+    expect(out.text).toContain('Sign in: https://portal.test/login');
   });
 
   it('skips a `requires` block when its token is absent', () => {
@@ -53,16 +53,16 @@ describe('renderCase — the one conversion', () => {
     const withLink = renderCase('org_owner_approved', {
       orgName: 'Acme',
       ownerEmail: 'o@acme.test',
-      inviteUrl: 'https://portal.test/i?grant=z',
+      inviteUrl: 'https://portal.test/login',
     });
     const pending = renderCase('org_owner_approved', {
       orgName: 'Acme',
       ownerEmail: 'o@acme.test',
     });
-    expect(withLink.html).toContain('Invite your coordinators');
+    expect(withLink.html).toContain('Sign in to manage your organisation');
     expect(withLink.html).not.toContain('follow-up message');
     expect(pending.html).toContain('follow-up message');
-    expect(pending.html).not.toContain('Invite your coordinators');
+    expect(pending.html).not.toContain('Sign in to manage your organisation');
   });
 
   it('substitutes a derived token mid-sentence, already escaped', () => {

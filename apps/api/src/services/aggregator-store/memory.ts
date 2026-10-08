@@ -16,6 +16,10 @@ import {
   type CreateAggregatorInput,
   type ListAggregatorsFilter,
   type ListAggregatorsPage,
+  type DeleteIfPendingOutcome,
+  type OrgCoordinatorCounts,
+  type SearchCoordinatorsFilter,
+  type SearchCoordinatorsPage,
   type StoreError,
   type StoreResult,
   type LegacyOrgDetails,
@@ -242,6 +246,9 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       ...(patch.type !== undefined
         ? { serves: servesOf(patch.type), type: servesOf(patch.type)[0] ?? null }
         : {}),
+      ...(patch.serves !== undefined
+        ? { serves: [...new Set(patch.serves)], type: patch.serves[0] ?? null }
+        : {}),
       contactId: nextId,
       contact: nextContact,
       contactPhone: nextPhone,
@@ -295,6 +302,74 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     this.byPhone.delete(row.contactPhone);
     this.byEmail.delete(row.contactEmail);
     return Promise.resolve({ ok: true, value: undefined });
+  }
+
+  async rejectFromPending(id: string, updatedBy: string): Promise<StoreResult<Aggregator | null>> {
+    const existing = this.byId.get(id);
+    // Only pending → inactive; anything else means already decided.
+    if (!existing || existing.status !== 'pending') return { ok: true, value: null };
+    return this.update(id, { status: 'inactive', rejectedAt: new Date(), updatedBy });
+  }
+
+  async deleteIfPending(
+    id: string,
+    cutoff: Date,
+    beforeCommit: () => Promise<boolean>,
+  ): Promise<StoreResult<DeleteIfPendingOutcome>> {
+    const row = this.byId.get(id);
+    if (!row || row.status !== 'pending' || row.updatedAt.getTime() >= cutoff.getTime()) {
+      return { ok: true, value: 'not_pending' };
+    }
+    if (!(await beforeCommit())) return { ok: true, value: 'aborted' };
+    const deleted = await this.deleteById(id);
+    return deleted.ok ? { ok: true, value: 'deleted' } : deleted;
+  }
+
+  search(filter: SearchCoordinatorsFilter): Promise<StoreResult<SearchCoordinatorsPage>> {
+    const limit = Math.max(1, Math.min(100, filter.limit ?? 20));
+    let rows = [...this.byId.values()];
+    if (filter.orgIds !== null) {
+      const scope = new Set(filter.orgIds);
+      rows = rows.filter((r) => r.parentOrgId !== null && scope.has(r.parentOrgId));
+    }
+    if (filter.status) rows = rows.filter((r) => r.status === filter.status);
+    if (filter.serves) {
+      const d = filter.serves;
+      rows = rows.filter((r) => r.serves.length === 0 || r.serves.includes(d));
+    }
+    // Newest first, id as the tie-break (descending), as Postgres orders.
+    rows.sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : -1),
+    );
+    if (filter.cursor) {
+      const c = filter.cursor;
+      rows = rows.filter(
+        (r) =>
+          r.createdAt.getTime() < c.createdAt.getTime() ||
+          (r.createdAt.getTime() === c.createdAt.getTime() && r.id < c.id),
+      );
+    }
+    const page = rows.slice(0, limit);
+    const last = page.at(-1);
+    return Promise.resolve({
+      ok: true,
+      value: {
+        rows: page.map((r) => this.view(r)),
+        nextCursor: rows.length > limit && last ? { createdAt: last.createdAt, id: last.id } : null,
+      },
+    });
+  }
+
+  countByOrg(orgIds: string[]): Promise<StoreResult<Record<string, OrgCoordinatorCounts>>> {
+    const out: Record<string, OrgCoordinatorCounts> = {};
+    for (const id of orgIds) out[id] = { total: 0, pending: 0 };
+    for (const r of this.byId.values()) {
+      const counts = r.parentOrgId ? out[r.parentOrgId] : undefined;
+      if (!counts) continue;
+      counts.total += 1;
+      if (r.status === 'pending') counts.pending += 1;
+    }
+    return Promise.resolve({ ok: true, value: out });
   }
 
   // ─── Index maintenance ────────────────────────────────────────────────────

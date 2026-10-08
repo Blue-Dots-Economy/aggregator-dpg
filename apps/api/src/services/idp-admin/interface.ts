@@ -146,4 +146,29 @@ export abstract class IdpAdminAdapter {
    * @param role - Realm role name.
    */
   abstract assignRealmRole(userId: string, role: string): Promise<IdpResult<void>>;
+
+  /**
+   * Removes a realm role from a user. Removing a role the user does not hold
+   * succeeds (idempotent).
+   *
+   * @param userId - Keycloak user id.
+   * @param role - Realm role name.
+   */
+  abstract removeRealmRole(userId: string, role: string): Promise<IdpResult<void>>;
+
+  /**
+   * Lists the realm roles mapped directly to a user (not composites).
+   *
+   * @param userId - Keycloak user id.
+   * @returns Role names; `USER_NOT_FOUND` for an unknown user.
+   */
+  abstract listRealmRoles(userId: string): Promise<IdpResult<string[]>>;
+
+  /**
+   * Ends every session of a user now (their tokens stop refreshing), e.g.
+   * after losing the role a console needs.
+   *
+   * @param userId - Keycloak user id.
+   */
+  abstract logoutSessions(userId: string): Promise<IdpResult<void>>;
 }

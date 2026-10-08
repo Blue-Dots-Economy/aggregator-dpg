@@ -496,6 +496,96 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
     return { ok: true, value: undefined };
   }
 
+  async listRealmRoles(userId: string): Promise<IdpResult<string[]>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+    const res = await this.safeFetch(
+      `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/users/${userId}/role-mappings/realm`,
+      { headers: { Authorization: `Bearer ${tokenResult.value}` } },
+    );
+    if (!res.ok) return res;
+    if (!res.value.ok) {
+      return {
+        ok: false,
+        error: {
+          code: res.value.status === 404 ? 'USER_NOT_FOUND' : 'IDP_UNAVAILABLE',
+          message: `listRealmRoles HTTP ${res.value.status}`,
+        },
+      };
+    }
+    const roles = (await res.value.json()) as Array<{ name?: unknown }>;
+    return {
+      ok: true,
+      value: roles.map((r) => r.name).filter((n): n is string => typeof n === 'string'),
+    };
+  }
+
+  async removeRealmRole(userId: string, role: string): Promise<IdpResult<void>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+
+    const roleRes = await this.safeFetch(
+      `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/roles/${encodeURIComponent(role)}`,
+      { headers: { Authorization: `Bearer ${tokenResult.value}` } },
+    );
+    if (!roleRes.ok) return roleRes;
+    if (!roleRes.value.ok) {
+      return {
+        ok: false,
+        error: {
+          code: roleRes.value.status === 404 ? 'BAD_REQUEST' : 'IDP_UNAVAILABLE',
+          message: `removeRealmRole role lookup HTTP ${roleRes.value.status}`,
+        },
+      };
+    }
+    const roleRep = (await roleRes.value.json()) as { id: string; name: string };
+
+    // DELETE on role-mappings is a no-op for a role the user does not hold.
+    const mapRes = await this.safeFetch(
+      `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/users/${userId}/role-mappings/realm`,
+      {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${tokenResult.value}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify([{ id: roleRep.id, name: roleRep.name }]),
+      },
+    );
+    if (!mapRes.ok) return mapRes;
+    if (mapRes.value.status === 404) {
+      return { ok: false, error: { code: 'USER_NOT_FOUND', message: userId } };
+    }
+    if (!mapRes.value.ok) {
+      return {
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: `removeRealmRole HTTP ${mapRes.value.status}` },
+      };
+    }
+    return { ok: true, value: undefined };
+  }
+
+  async logoutSessions(userId: string): Promise<IdpResult<void>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+
+    const res = await this.safeFetch(
+      `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/users/${userId}/logout`,
+      { method: 'POST', headers: { Authorization: `Bearer ${tokenResult.value}` } },
+    );
+    if (!res.ok) return res;
+    if (res.value.status === 404) {
+      return { ok: false, error: { code: 'USER_NOT_FOUND', message: userId } };
+    }
+    if (!res.value.ok) {
+      return {
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: `logoutSessions HTTP ${res.value.status}` },
+      };
+    }
+    return { ok: true, value: undefined };
+  }
+
   // ─── private ───────────────────────────────────────────────────────────────
 
   private async setEnabled(userId: string, enabled: boolean): Promise<IdpResult<void>> {

@@ -36,6 +36,8 @@ import { registerAggregatorOrgApprovalRoutes } from './routes/aggregator-org-app
 import { registerInviteRoutes } from './routes/invites.js';
 import { registerAggregatorApprovalRoutes } from './routes/aggregator-approvals.js';
 import { registerAggregatorProfileRoutes } from './routes/aggregator-profile.js';
+import { registerV1UserRoutes } from './routes/v1-user.js';
+import { registerV1OrgRoutes } from './routes/v1-org.js';
 import { registerBulkUploadsRoutes } from './routes/bulk-uploads.js';
 import { registerRegistrationLinksRoutes } from './routes/registration-links.js';
 import { registerPublicRegistrationLinkRoutes } from './routes/public-registration-links.js';
@@ -182,6 +184,11 @@ export async function buildApp(): Promise<FastifyInstance> {
           { name: 'dashboard', description: 'Dashboard rollup + items proxy to signalstack.' },
           { name: 'support', description: 'Authenticated contact-support form submission.' },
           {
+            name: 'console',
+            description:
+              'Organisation console (/v1/user, /v1/org): org owners and the network admin manage coordinators and organisation details.',
+          },
+          {
             name: 'campaign',
             description:
               'Campaign integrations — participant PII export (#579) and the non-PII dump download (#692).',
@@ -224,6 +231,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerInviteRoutes(app);
   await registerAggregatorApprovalRoutes(app);
   registerAggregatorProfileRoutes(app);
+  registerV1UserRoutes(app);
+  registerV1OrgRoutes(app);
   await registerBulkUploadsRoutes(app);
   await registerRegistrationLinksRoutes(app);
   await registerPublicRegistrationLinkRoutes(app);

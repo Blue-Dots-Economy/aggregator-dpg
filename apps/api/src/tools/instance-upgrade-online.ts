@@ -1,13 +1,23 @@
 /**
- * The online step of the instance-upgrade tool (`@aggregator-dpg/api`): `enrich`,
+ * The online steps of the instance-upgrade tool (`@aggregator-dpg/api`): `enrich`,
  * run in the window after the database commit and before scale-up (design:
- * docs/plans/user-org-migrate-tool-simplification.md §6). It talks to
+ * docs/plans/user-org-migrate-tool-simplification.md §6), and `enable-owners`,
+ * the one-off Phase 5 step that lets existing org owners sign in (design
+ * the user & org Phase 5 PR, R6 / C15). They talk to
  * Keycloak through the API's own adapter, so it needs the API's full
- * environment (the Job has it); `train.ts` loads this module lazily so `check`
+ * environment (the Job has it); `instance-upgrade.ts` loads this module lazily so `check`
  * and `run` never depend on it. Counts and ids only in the output.
  */
 
 import { sql } from 'drizzle-orm';
+import type { FastifyBaseLogger } from 'fastify';
+import { logger } from '../logger.js';
+import {
+  getAggregatorOrgStore,
+  type AggregatorOrg,
+} from '../services/aggregator-org-store/index.js';
+import { grantOwnerAccess } from '../services/decisions/org.js';
+import { PLACEHOLDER_OWNER_EMAIL } from '../services/organisation-root.js';
 import { getDb } from '../db/client.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpAdminAdapter } from '../services/idp-admin/interface.js';
@@ -155,4 +165,144 @@ export function enrichExitCode(
   names: { failed: number },
 ): 0 | 1 {
   return identities.failed > 0 || identities.conflicts > 0 || names.failed > 0 ? 1 : 0;
+}
+
+/** Counts of `enable-owners`; ids name the orgs to follow up. */
+export interface EnableOwnersReport {
+  /** Active aggregator orgs considered (Default and placeholders excluded). */
+  orgs: number;
+  /** Owners given (or confirmed) sign-in access. */
+  granted: number;
+  /** Owners with no recorded Keycloak login (`user_identities`). */
+  noLogin: number;
+  /** Owners whose recorded Keycloak user no longer exists. */
+  missingUser: number;
+  /** Keycloak errors (lookup, enable, role or group). */
+  failed: number;
+  noLoginIds: string[];
+  missingIds: string[];
+  failedIds: string[];
+}
+
+/** What `enable-owners` needs (fakes in tests). */
+export interface EnableOwnersDeps {
+  idp: IdpAdminAdapter;
+  /** Active aggregator orgs. */
+  listActiveOrgs: () => Promise<AggregatorOrg[]>;
+  /** Grants access (enable, role, group); idempotent. */
+  grant: (org: AggregatorOrg) => Promise<{ status: 'granted' | 'partial' | 'no_login' }>;
+  pause?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Gives every active org's owner sign-in access, once, in the window (P5-13):
+ * enables the Keycloak user, grants `org_owner`, adds the org's group. Also
+ * repairs a missing role or group on owners already enabled. Idempotent and
+ * resumable; the Default org (the boot reconcile's) and placeholder owners
+ * are skipped.
+ *
+ * @param deps - Keycloak, the org list, the grant.
+ * @param opts - `dryRun` reads only; `ratePerSecond` (> 0) paces Keycloak calls.
+ * @returns Per-outcome counts and the org ids to follow up.
+ * @throws {RangeError} When `ratePerSecond` is not a positive number.
+ */
+export async function enableOwnersStep(
+  deps: EnableOwnersDeps,
+  opts: { dryRun: boolean; ratePerSecond: number },
+): Promise<EnableOwnersReport> {
+  if (!Number.isFinite(opts.ratePerSecond) || opts.ratePerSecond <= 0) {
+    throw new RangeError('--rate must be a positive number of calls per second');
+  }
+  const orgs = (await deps.listActiveOrgs()).filter(
+    (o) => !o.isDefault && o.ownerEmail !== PLACEHOLDER_OWNER_EMAIL,
+  );
+  const report: EnableOwnersReport = {
+    orgs: orgs.length,
+    granted: 0,
+    noLogin: 0,
+    missingUser: 0,
+    failed: 0,
+    noLoginIds: [],
+    missingIds: [],
+    failedIds: [],
+  };
+  const pause = deps.pause ?? sleep;
+  const gapMs = Math.ceil(1000 / opts.ratePerSecond);
+  for (const org of orgs) {
+    if (!org.ownerKcSub) {
+      report.noLogin += 1;
+      report.noLoginIds.push(org.id);
+      continue;
+    }
+    // Sequential on purpose: paced against Keycloak.
+    const found = await deps.idp.findById(org.ownerKcSub); // NOSONAR typescript:S9382
+    if (!found.ok) {
+      report.failed += 1;
+      report.failedIds.push(org.id);
+    } else if (!found.value) {
+      report.missingUser += 1;
+      report.missingIds.push(org.id);
+    } else if (opts.dryRun) {
+      report.granted += 1;
+    } else {
+      const result = await deps.grant(org); // NOSONAR typescript:S9382
+      if (result.status === 'granted') report.granted += 1;
+      else {
+        report.failed += 1;
+        report.failedIds.push(org.id);
+      }
+    }
+    await pause(gapMs); // NOSONAR typescript:S9382
+  }
+  return report;
+}
+
+/** Every active aggregator org, paged through the store. */
+async function activeOrgs(): Promise<AggregatorOrg[]> {
+  const store = getAggregatorOrgStore();
+  const all: AggregatorOrg[] = [];
+  let cursor: { name: string; id: string } | undefined;
+  for (;;) {
+    const page = await store.search({
+      // NOSONAR typescript:S9382
+      orgIds: null,
+      status: 'active',
+      limit: 100,
+      ...(cursor ? { cursor } : {}),
+    });
+    if (!page.ok) throw new Error(`org list failed (${page.error.code})`);
+    all.push(...page.value.rows);
+    if (!page.value.nextCursor) return all;
+    cursor = page.value.nextCursor;
+  }
+}
+
+/**
+ * `enable-owners`: lets every existing org owner sign in, once, in the window.
+ * Exit 1 on any Keycloak error (re-run to resume); owners without a login or
+ * with a deleted Keycloak user are listed by org id and do not fail it.
+ *
+ * @param opts - `dryRun` reads only; `ratePerSecond` paces Keycloak calls.
+ * @param out - Line printer.
+ * @returns 0 or 1.
+ */
+export async function enableOwners(
+  opts: { dryRun: boolean; ratePerSecond: number },
+  out: Out,
+): Promise<number> {
+  const log = logger as unknown as FastifyBaseLogger;
+  const report = await enableOwnersStep(
+    {
+      idp: getIdpAdmin(),
+      listActiveOrgs: activeOrgs,
+      grant: (org) => grantOwnerAccess(org, log),
+    },
+    opts,
+  );
+  const { noLoginIds, missingIds, failedIds, ...counts } = report;
+  out(`enable-owners ${JSON.stringify(counts)}${opts.dryRun ? ' (dry run)' : ''}`);
+  for (const id of noLoginIds) out(`  no recorded login: org ${id}`);
+  for (const id of missingIds) out(`  keycloak user missing: org ${id}`);
+  for (const id of failedIds) out(`  keycloak error: org ${id}`);
+  return report.failed > 0 ? 1 : 0;
 }

@@ -137,20 +137,20 @@ describe('org-owner-approved template', () => {
       orgName: 'Acme Org',
       ownerEmail: 'a@acme.org',
     });
-    expect(out.html).not.toContain('Invite your coordinators');
+    expect(out.html).not.toContain('Sign in to manage your organisation');
     expect(out.html).toContain('follow-up');
     expect(out.text).toContain('follow-up');
   });
 
-  it('renders the invite CTA when an invite link is provided (#701)', () => {
+  it('renders the sign-in CTA when a link is provided (Phase 5)', () => {
     const out = renderOrgOwnerApproved({
       orgName: 'Acme Org',
       ownerEmail: 'a@acme.org',
-      inviteUrl: 'https://portal.example.org/register/owner/invite?token=abc',
+      inviteUrl: 'https://portal.example.org/login',
     });
-    expect(out.html).toContain('Invite your coordinators');
-    expect(out.html).toContain('https://portal.example.org/register/owner/invite?token=abc');
-    expect(out.text).toContain('https://portal.example.org/register/owner/invite?token=abc');
+    expect(out.html).toContain('Sign in to manage your organisation');
+    expect(out.html).toContain('https://portal.example.org/login');
+    expect(out.text).toContain('https://portal.example.org/login');
   });
 
   it('escapes user-controlled fields', () => {
@@ -201,34 +201,33 @@ describe('coordinator-invite template', () => {
 });
 
 describe('owner-grant-refreshed template', () => {
-  it('reads as a fresh link (not a duplicate approval), no sign-in', () => {
+  it('points the owner to sign-in (not a duplicate approval, no new grant)', () => {
     const out = renderOwnerGrantRefreshed({
       orgName: 'Acme Org',
-      inviteUrl: 'https://portal.example.org/register/invite?grant=xyz',
+      inviteUrl: 'https://portal.example.org/login',
     });
-    expect(out.subject).toContain('new invite link');
+    expect(out.subject).toContain('signing in');
     expect(out.subject).toContain('Acme Org');
-    expect(out.html).toContain('previous link had expired');
-    expect(out.html).toContain('https://portal.example.org/register/invite?grant=xyz');
+    expect(out.html).toContain('moved to sign-in');
+    expect(out.html).toContain('https://portal.example.org/login');
     expect(out.html).not.toContain('is approved');
-    expect(out.html).not.toContain('Sign in');
+    expect(out.html).not.toContain('grant=');
   });
 });
 
 describe('org-already-registered template', () => {
-  it('acknowledges the re-registration attempt and carries the invite CTA', () => {
+  it('acknowledges the re-registration attempt and carries the sign-in CTA', () => {
     const out = renderOrgAlreadyRegistered({
       orgName: 'Acme Org',
-      inviteUrl: 'https://portal.example.org/register/invite?grant=xyz',
+      inviteUrl: 'https://portal.example.org/login',
     });
     expect(out.subject).toBe('Acme Org is already registered');
     // Must read as a reply to their own attempt, not as unprompted mail.
     expect(out.html).toContain('just tried to register');
-    expect(out.html).toContain('Invite coordinators');
-    expect(out.html).toContain('https://portal.example.org/register/invite?grant=xyz');
-    // No sign-in CTA — the owner has no account.
-    expect(out.html).not.toContain('Sign in');
-    expect(out.text).toContain('https://portal.example.org/register/invite?grant=xyz');
+    // Phase 5: owners sign in to manage their org.
+    expect(out.html).toContain('Sign in');
+    expect(out.html).toContain('https://portal.example.org/login');
+    expect(out.text).toContain('https://portal.example.org/login');
   });
 
   it('quotes no expiry — neither a date nor a duration', () => {

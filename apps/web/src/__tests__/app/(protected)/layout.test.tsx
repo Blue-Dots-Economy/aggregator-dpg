@@ -20,7 +20,6 @@ vi.mock('@/lib/jwt', () => ({
   classifyNonCoordinator: vi.fn(),
   PORTAL_GATE_REASON: {
     signals_participant: 'signals_account_no_portal',
-    org_owner: 'org_no_portal',
     unknown: 'no_portal_access',
   },
 }));
@@ -122,8 +121,17 @@ describe('<ProtectedLayout />', () => {
   // behaviour) — assert on the rejection + the exact target passed to the
   // mock rather than the stringified message (`.rejects.toThrow(<string>)`
   // mis-parses a URL containing `%2F`/`&` in this Vitest version).
+  it('sends an org owner to the console instead of signing them out (Phase 5)', async () => {
+    vi.mocked(getSession).mockResolvedValue(baseSession());
+    vi.mocked(tokenAggregatorId).mockReturnValue(null);
+    vi.mocked(classifyNonCoordinator).mockReturnValue('org_owner');
+
+    await expect(ProtectedLayout({ children: <div /> })).rejects.toThrow();
+    expect(redirect).toHaveBeenCalledWith('/console');
+    expect(callApi).not.toHaveBeenCalled();
+  });
+
   it.each([
-    ['org_owner', 'org_no_portal'],
     ['signals_participant', 'signals_account_no_portal'],
     ['unknown', 'no_portal_access'],
   ] as const)('signs a %s out with reason=%s', async (population, reason) => {

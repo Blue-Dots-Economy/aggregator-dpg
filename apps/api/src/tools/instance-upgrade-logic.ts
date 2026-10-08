@@ -1,7 +1,7 @@
 /**
  * Pure logic of the instance-upgrade operator tool (`@aggregator-dpg/api`,
- * `tools/train.ts`): where a database stands relative to the train. The tool
- * takes 0022 — or a database part-way through the train, such as a rehearsal
+ * `tools/instance-upgrade.ts`): where a database stands relative to the instance upgrade. The tool
+ * takes 0022 — or a database part-way through the instance upgrade, such as a rehearsal
  * copy migrated by an earlier release — to the latest shipped migration; any
  * other level is refused (design: docs/plans/user-org-migrate-tool-simplification.md).
  */
@@ -9,7 +9,7 @@
 import { PRE_TRAIN_WHEN, type AppliedMigration, type JournalEntry } from '../db/migrate-core.js';
 
 /**
- * `start`: exactly 0022, the train is pending. `partial`: at a shipped
+ * `start`: exactly 0022, the instance upgrade is pending. `partial`: at a shipped
  * migration after 0022, short of the latest. `done`: at the latest shipped
  * migration. `fresh`: nothing applied (boot migrates a fresh database).
  * `other`: below 0022, or a level this release does not ship — refused.

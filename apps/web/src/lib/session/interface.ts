@@ -5,6 +5,19 @@
  * depends only on this abstract surface so the storage backend stays swappable.
  */
 
+import type { MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
+
+/**
+ * The signed-in actor (`GET /v1/user/read/me`) cached in the session for a
+ * short time (user & org Phase 5, C14): the database stays the authority, so
+ * the cache only spares a call per page.
+ */
+export interface CachedActor {
+  me: MeResponse;
+  /** Epoch ms when it was read. */
+  at: number;
+}
+
 export interface SessionData {
   sub: string;
   email?: string;
@@ -17,6 +30,8 @@ export interface SessionData {
   refreshTokenExp: number;
   createdAt: number;
   lastSeenAt: number;
+  /** Console actor cache; absent until the console reads it. */
+  consoleActor?: CachedActor;
 }
 
 export type SessionResult<T> = { ok: true; value: T } | { ok: false; error: SessionError };
