@@ -147,10 +147,10 @@ Every route declares `config.rbac`; the API refuses to boot without it; a snapsh
 
 ## 5. Work outside this repo
 
-| Repo                  | Change                                                                                      | Step         |
-| --------------------- | ------------------------------------------------------------------------------------------- | ------------ |
-| `bluedots-automation` | OPA sidecar in the API pod, `OPA_URL`                                                       | before `log` |
-| `bluedots-automation` | Portal gate for admins and admin-only attributes in the deployment realm (handoff §1, H-11) | R2           |
+| Repo                  | Change                                                                                                                                                                  | Step         |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `bluedots-automation` | OPA sidecar in the API pod, `OPA_URL`: done on `feat/aggregator-opa-sidecar` (`docs/aggregator-rbac-opa-plan.md`); needs an api image with `/app/policy/rbac/rbac.rego` | before `log` |
+| `bluedots-automation` | Portal gate for admins and admin-only attributes in the deployment realm (handoff §1, H-11)                                                                             | R2           |
 
 ---
 
