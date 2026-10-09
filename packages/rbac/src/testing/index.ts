@@ -13,7 +13,14 @@ import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { InMemoryAuthorizer } from '../in-memory/index.js';
-import type { Actor, ActorOrg, Decision, DecisionInput } from '../interface.js';
+import type {
+  Actor,
+  ActorOrg,
+  Capability,
+  CapabilityListInput,
+  Decision,
+  DecisionInput,
+} from '../interface.js';
 
 /** In-process engine that records its inputs and can be made to fail. */
 export class AuthorizerFake extends InMemoryAuthorizer {
@@ -40,6 +47,19 @@ export class AuthorizerFake extends InMemoryAuthorizer {
     this.calls.push(input);
     if (this.failure) return err(this.failure);
     return super.decide(input);
+  }
+
+  /**
+   * Answers a capability list (or fails, after `failWith`).
+   *
+   * @param input - The actor, the candidates and the current time.
+   * @returns The held capabilities, or the configured failure.
+   */
+  override async listCapabilities(
+    input: CapabilityListInput,
+  ): Promise<Result<Capability[], BaseError>> {
+    if (this.failure) return err(this.failure);
+    return super.listCapabilities(input);
   }
 }
 

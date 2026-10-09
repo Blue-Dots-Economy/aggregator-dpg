@@ -71,12 +71,18 @@ export const MeOrgSchema = z.object({
 });
 export type MeOrg = z.infer<typeof MeOrgSchema>;
 
-/** `GET /v1/user/read/me`. RBAC adds `capabilities` later. */
+/** `GET /v1/user/read/me`. */
 export const MeResponseSchema = z.object({
   kind: z.enum(['admin', 'coordinator']),
   user: z.object({ id: z.string(), contact: PersonContactSchema }),
   orgs: z.array(MeOrgSchema),
   is_network_admin: z.boolean(),
+  /**
+   * The capabilities the caller holds (RBAC), for hiding what they cannot use.
+   * `null` when access control is off for the instance: show everything.
+   * The API decision, not this list, is the control.
+   */
+  capabilities: z.array(z.string()).nullable().optional(),
 });
 export type MeResponse = z.infer<typeof MeResponseSchema>;
 

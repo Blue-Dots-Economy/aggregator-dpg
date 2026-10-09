@@ -13,6 +13,7 @@
 
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
 import type { User } from '../types';
+import { can as canWith } from './capabilities';
 
 interface AuthContextValue {
   user: User | null;
@@ -20,6 +21,10 @@ interface AuthContextValue {
   isHydrated: boolean;
   signOut: () => Promise<void>;
   supportEnabled: boolean;
+  /** The caller's capabilities; null when access control is off (nothing hidden). */
+  capabilities: readonly string[] | null;
+  /** Whether a feature needing `capability` should be shown. */
+  can: (capability: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -34,6 +39,11 @@ export interface AuthProviderProps {
    * hidden until proven enabled.
    */
   supportEnabled?: boolean;
+  /**
+   * The caller's capabilities from `GET /v1/user/read/me` (RBAC). Null or
+   * absent: access control is off, so nothing is hidden.
+   */
+  capabilities?: readonly string[] | null;
 }
 
 /**
@@ -46,6 +56,7 @@ export function AuthProvider({
   children,
   initialUser = null,
   supportEnabled = false,
+  capabilities = null,
 }: AuthProviderProps) {
   const signOut = useCallback(async () => {
     window.location.href = '/api/auth/logout';
@@ -58,8 +69,10 @@ export function AuthProvider({
       isHydrated: true,
       signOut,
       supportEnabled,
+      capabilities,
+      can: (capability: string) => canWith(capabilities, capability),
     }),
-    [initialUser, signOut, supportEnabled],
+    [initialUser, signOut, supportEnabled, capabilities],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -77,4 +90,16 @@ export function useAuth(): AuthContextValue {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return ctx;
+}
+
+/**
+ * Returns the capability check for client components. Outside an
+ * `AuthProvider` (or with access control off) everything is allowed: hiding is
+ * a convenience, the API decides.
+ *
+ * @returns `can(capability)`.
+ */
+export function useCan(): (capability: string) => boolean {
+  const ctx = useContext(AuthContext);
+  return ctx ? ctx.can : () => true;
 }

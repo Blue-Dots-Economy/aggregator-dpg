@@ -27,6 +27,9 @@ vi.mock('@/lib/signals-roles', () => ({
   resolveSignalsRealmRoles: async () => ['signals_participant', 'signals_admin'],
 }));
 vi.mock('@/lib/upstream-client', () => ({ callApi: vi.fn() }));
+vi.mock('@/lib/console-actor', () => ({
+  getConsoleActor: vi.fn(async () => ({ ok: false, reason: 'unavailable' })),
+}));
 vi.mock('@/components/shell/Sidebar', () => ({
   Sidebar: () => <nav data-testid="sidebar" />,
 }));
@@ -47,16 +50,21 @@ import ProtectedLayout from '@/app/(protected)/layout';
 import { getSession } from '@/lib/server-session';
 import { classifyNonCoordinator, tokenAggregatorId } from '@/lib/jwt';
 import { callApi } from '@/lib/upstream-client';
+import { getConsoleActor } from '@/lib/console-actor';
 import { redirect } from 'next/navigation';
 
 function AuthProbe() {
-  const { user, supportEnabled, isAuthenticated } = useAuth();
+  const { user, supportEnabled, isAuthenticated, capabilities, can } = useAuth();
   return (
     <div>
       <span data-testid="user-name">{user?.name}</span>
       <span data-testid="user-org">{user?.org}</span>
       <span data-testid="support-enabled">{String(supportEnabled)}</span>
       <span data-testid="is-authenticated">{String(isAuthenticated)}</span>
+      <span data-testid="capabilities">
+        {capabilities === null ? 'null' : capabilities.join(',')}
+      </span>
+      <span data-testid="can-export-pii">{String(can('profiles.view_pii'))}</span>
     </div>
   );
 }
@@ -103,6 +111,38 @@ describe('<ProtectedLayout />', () => {
     expect(screen.getByTestId('is-authenticated')).toHaveTextContent('true');
     expect(screen.getByTestId('support-enabled')).toHaveTextContent('true');
     expect(screen.getByTestId('sidebar')).toBeInTheDocument();
+  });
+
+  it('passes the caller capabilities from read/me into AuthProvider', async () => {
+    vi.mocked(getSession).mockResolvedValue(baseSession({ name: 'Coord One' }));
+    vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+    vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
+    vi.mocked(getConsoleActor).mockResolvedValueOnce({
+      ok: true,
+      me: {
+        kind: 'coordinator',
+        user: { id: 'agg-1', contact: { name: 'C', email: 'c@x.org', phone: null } },
+        orgs: [],
+        is_network_admin: false,
+        capabilities: ['profiles.view', 'profiles.onboard'],
+      },
+    });
+
+    await renderLayout();
+
+    expect(screen.getByTestId('capabilities')).toHaveTextContent('profiles.view,profiles.onboard');
+    expect(screen.getByTestId('can-export-pii')).toHaveTextContent('false');
+  });
+
+  it('hides nothing when the actor cannot be read', async () => {
+    vi.mocked(getSession).mockResolvedValue(baseSession({ name: 'Coord One' }));
+    vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+    vi.mocked(callApi).mockResolvedValue(new Response('{}', { status: 200 }) as never);
+
+    await renderLayout();
+
+    expect(screen.getByTestId('capabilities')).toHaveTextContent('null');
+    expect(screen.getByTestId('can-export-pii')).toHaveTextContent('true');
   });
 
   it('falls back the display name to email, then phone, then sub when name is absent', async () => {

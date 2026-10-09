@@ -39,3 +39,30 @@ describe('AuthorizerFake', () => {
     expect(!res.success && res.error.code).toBe('OPA_UNAVAILABLE');
   });
 });
+
+describe('capability lists', () => {
+  it('lists what the in-memory engine allows', async () => {
+    const res = await new InMemoryAuthorizer().listCapabilities({
+      actor: buildActor(),
+      candidates: ['profiles.view', 'profiles.view_pii'],
+      now: 0,
+    });
+    expect(res).toEqual({ success: true, value: ['profiles.view'] });
+  });
+
+  it('rejects a malformed list input', async () => {
+    const res = await new InMemoryAuthorizer().listCapabilities({
+      actor: buildActor(),
+      candidates: ['nope'],
+      now: 0,
+    } as never);
+    expect(!res.success && res.error.code).toBe('RBAC_INPUT_INVALID');
+  });
+
+  it('fails the list after failWith', async () => {
+    const fake = new AuthorizerFake();
+    fake.failWith();
+    const res = await fake.listCapabilities({ actor: buildActor(), candidates: [], now: 0 });
+    expect(!res.success && res.error.code).toBe('OPA_UNAVAILABLE');
+  });
+});
