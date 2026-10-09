@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { loadRbacConfig } from '@aggregator-dpg/rbac';
 import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
 import { _setRbacRuntime } from '../services/authz/runtime.js';
+import { getGrantStore, type InMemoryGrantStore } from '../services/grant-store/index.js';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import {
@@ -595,6 +596,127 @@ describe('console routes /v1/user, /v1/org', () => {
       };
       expect(list.users.length).toBeGreaterThan(0);
       for (const u of list.users) expect(u.contact.email).toMatch(/^.\*\*\*@/);
+    });
+
+    describe('grants and PermissionSets (R3)', () => {
+      const capsOf = async (who: keyof typeof TOKENS) =>
+        ((await get('/v1/user/read/me', who)).json() as { capabilities: string[] }).capabilities;
+
+      it('grants PII Access to a coordinator in reach, then revokes it', async () => {
+        expect(await capsOf('coord')).not.toContain('profiles.view_pii');
+        const granted = await post(`/v1/user/grant/${C3}`, 'a', { grant_key: 'pii_access' });
+        expect(granted.statusCode).toBe(200);
+        expect(granted.json()).toMatchObject({
+          grant_key: 'pii_access',
+          capability: 'profiles.view_pii',
+          live: true,
+        });
+        expect(await capsOf('coord')).toContain('profiles.view_pii');
+
+        const list = (await get(`/v1/user/grants/${C3}`, 'a')).json() as {
+          grants: Array<{ live: boolean }>;
+          grantable: Array<{ grant_key: string; max_days: number }>;
+        };
+        expect(list.grants.filter((g) => g.live)).toHaveLength(1);
+        expect(list.grantable).toEqual([
+          { grant_key: 'pii_access', capability: 'profiles.view_pii', max_days: 90 },
+        ]);
+
+        const revoked = await post(`/v1/user/grant/revoke/${C3}`, 'a', { grant_key: 'pii_access' });
+        expect(revoked.json()).toEqual({ revoked: true });
+        expect(await capsOf('coord')).not.toContain('profiles.view_pii');
+
+        const audit = (getGrantStore() as InMemoryGrantStore).audit.map((e) => e.event);
+        expect(audit).toEqual(['grant.create', 'grant.revoke']);
+      });
+
+      it("answers 404 for another org's coordinator", async () => {
+        expect(
+          (await post(`/v1/user/grant/${C2}`, 'a', { grant_key: 'pii_access' })).statusCode,
+        ).toBe(404);
+        expect((await get(`/v1/user/grants/${C2}`, 'a')).statusCode).toBe(404);
+      });
+
+      it('refuses an unknown grant and a validity beyond the maximum', async () => {
+        const unknown = await post(`/v1/user/grant/${C3}`, 'a', { grant_key: 'superpowers' });
+        expect(unknown.statusCode).toBe(409);
+        expect(unknown.json()).toMatchObject({ error: { fields: { reason: 'unknown_grant' } } });
+        const long = await post(`/v1/user/grant/${C3}`, 'a', { grant_key: 'pii_access', days: 91 });
+        expect(long.json()).toMatchObject({ error: { fields: { reason: 'days_exceed_max' } } });
+      });
+
+      it('lets only the network admin set an organisation PermissionSet', async () => {
+        const byOwner = await patch(`/v1/org/permission-set/update/${ORG_A}`, 'a', {
+          permission_set: 'super_aggregator',
+        });
+        expect(byOwner.statusCode).toBe(403);
+        expect(permissionOf(byOwner)).toBe('orgs.onboard');
+
+        const unknown = await patch(`/v1/org/permission-set/update/${ORG_A}`, 'na', {
+          permission_set: 'nope',
+        });
+        expect(unknown.statusCode).toBe(400);
+
+        const set = await patch(`/v1/org/permission-set/update/${ORG_A}`, 'na', {
+          permission_set: 'super_aggregator',
+        });
+        expect(set.statusCode).toBe(200);
+        expect(set.json()).toMatchObject({ id: ORG_A, permission_set: 'super_aggregator' });
+        expect((set.json() as { capabilities: string[] }).capabilities).toContain('orgs.onboard');
+        expect(await capsOf('a')).toContain('orgs.onboard');
+
+        const reset = await patch(`/v1/org/permission-set/update/${ORG_A}`, 'na', {
+          permission_set: null,
+        });
+        expect(reset.json()).toMatchObject({ permission_set: null });
+      });
+
+      it('refuses a grant the organisation set does not hold (subset rule)', async () => {
+        const { config } = await loadRbacConfig([join(process.env.CONFIG_ROOT ?? '', 'rbac.yaml')]);
+        const withNoPii = {
+          ...config,
+          permission_sets: {
+            ...config.permission_sets,
+            no_pii: (config.permission_sets.aggregator ?? []).filter(
+              (c) => c !== 'profiles.view_pii',
+            ),
+          },
+        };
+        _setRbacRuntime({ mode: 'enforce', config: withNoPii, authorizer: new AuthorizerFake() });
+        expect(
+          (
+            await patch(`/v1/org/permission-set/update/${ORG_A}`, 'na', {
+              permission_set: 'no_pii',
+            })
+          ).statusCode,
+        ).toBe(200);
+        const res = await post(`/v1/user/grant/${C3}`, 'a', { grant_key: 'pii_access' });
+        expect(res.statusCode).toBe(409);
+        expect(res.json()).toMatchObject({ error: { code: 'PERMISSION_GRANT_EXCEEDS_ORG_SET' } });
+      });
+
+      it('lists the instance PermissionSets to the network admin', async () => {
+        const res = await get('/v1/org/permission-sets', 'na');
+        expect(res.statusCode).toBe(200);
+        const body = res.json() as {
+          sets: Array<{ name: string }>;
+          defaults: Record<string, string>;
+        };
+        expect(body.sets.map((s) => s.name)).toEqual(['aggregator', 'network', 'super_aggregator']);
+        expect(body.defaults).toEqual({ network_facilitator: 'network', aggregator: 'aggregator' });
+        expect((await get('/v1/org/permission-sets', 'a')).statusCode).toBe(403);
+        const org = (await get(`/v1/org/read/${ORG_A}`, 'na')).json() as {
+          org: { permission_set: unknown };
+        };
+        expect(org.org.permission_set).toBeNull();
+      });
+
+      it('answers 503 when access control is off', async () => {
+        _setRbacRuntime(null);
+        const res = await post(`/v1/user/grant/${C3}`, 'a', { grant_key: 'pii_access' });
+        expect(res.statusCode).toBe(503);
+        expect(res.json()).toMatchObject({ error: { code: 'RBAC_NOT_ENABLED' } });
+      });
     });
 
     it('shows contacts plain to a role with contact.unmask', async () => {

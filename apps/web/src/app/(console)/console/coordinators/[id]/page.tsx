@@ -5,8 +5,11 @@
 
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
-import type { User } from '@aggregator-dpg/shared-primitives/user-org';
-import { consoleRead } from '@/lib/console-api.server';
+import type { User, UserGrantsResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
+import { getConsoleActor } from '@/lib/console-actor';
+import { can } from '@/lib/capabilities';
+import { GrantsPanel } from '@/components/console/GrantsPanel';
 import { Card } from '@/components/ui/Card';
 import { CoordinatorActions } from '@/components/console/CoordinatorActions';
 
@@ -34,9 +37,15 @@ export default async function ConsoleCoordinatorPage({
 }) {
   const t = await getTranslations('console');
   const { id } = await params;
-  const [user, domainList] = await Promise.all([
+  const actor = await getConsoleActor();
+  const canManage = actor.ok && can(actor.me.capabilities, 'org.manage');
+  const [user, domainList, grants] = await Promise.all([
     consoleRead<User>(`/v1/user/read/${encodeURIComponent(id)}`),
     domains(),
+    // RBAC grants: absent when access control is off or not allowed.
+    canManage
+      ? consoleReadOptional<UserGrantsResponse>(`/v1/user/grants/${encodeURIComponent(id)}`)
+      : Promise.resolve(null),
   ]);
   return (
     <div className="flex flex-col gap-4">
@@ -56,6 +65,7 @@ export default async function ConsoleCoordinatorPage({
         </span>
       </Card>
       <CoordinatorActions user={user} domains={domainList} />
+      {grants ? <GrantsPanel userId={user.id} initial={grants} /> : null}
     </div>
   );
 }

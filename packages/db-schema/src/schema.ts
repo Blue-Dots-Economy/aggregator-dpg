@@ -411,6 +411,8 @@ export const organisations = pgTable(
       .default(sql`'[]'::jsonb`),
     legalName: text('legal_name'),
     gstNumber: text('gst_number'),
+    /** RBAC (0030): the org's own PermissionSet name from config/rbac.yaml; null = the org_type default. */
+    permissionSet: text('permission_set'),
     // Schema-driven registration payload (0018). Until Phase 4 it still holds
     // `website` / `address` / `coordinates`, copied into `url` / `locations`.
     profile: jsonb('profile')
@@ -959,3 +961,48 @@ export type ConsentRecordRow = typeof consentRecord.$inferSelect;
 
 /** Inferred insert type for `consent_record` (all required fields; `id` and `created_at` have DB defaults). */
 export type NewConsentRecordRow = typeof consentRecord.$inferInsert;
+
+// ─── user_permission_grant / iam_audit (RBAC, migration 0030) ───────────────
+// Capabilities granted to one user on top of their role (PII Access), with an
+// expiry; at most one live (unrevoked) grant per user and grant key. The
+// audit is append-only (trigger). See docs/rbac/rbac-design-aggregator.md.
+
+export const userPermissionGrant = pgTable(
+  'user_permission_grant',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    grantKey: text('grant_key').notNull(),
+    capability: text('capability').notNull(),
+    grantedBy: uuid('granted_by').references(() => users.id, { onDelete: 'set null' }),
+    grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    revokedBy: uuid('revoked_by').references(() => users.id, { onDelete: 'set null' }),
+  },
+  (table) => [
+    uniqueIndex('user_permission_grant_live_unique')
+      .on(table.userId, table.grantKey)
+      .where(sql`revoked_at IS NULL`),
+    index('user_permission_grant_user_idx').on(table.userId),
+  ],
+);
+
+export const iamAudit = pgTable(
+  'iam_audit',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+    event: text('event').notNull(),
+    actorUserId: uuid('actor_user_id'),
+    targetUserId: uuid('target_user_id'),
+    targetOrgId: uuid('target_org_id'),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+  },
+  (table) => [index('iam_audit_at_idx').on(table.at)],
+);
+
+export type UserPermissionGrantRow = typeof userPermissionGrant.$inferSelect;
+export type IamAuditRow = typeof iamAudit.$inferSelect;

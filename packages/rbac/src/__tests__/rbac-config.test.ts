@@ -129,6 +129,12 @@ describe('parseRbacConfig', () => {
     expectInvalid(raw, /cannot be granted per user/);
   });
 
+  it('rejects a grant with more than one capability', () => {
+    const raw = clone();
+    raw.grants.pii_access.capabilities = ['profiles.view_pii', 'profiles.view_pii'];
+    expectInvalid(raw, /exactly one capability|duplicate capability/);
+  });
+
   it('rejects an unknown version', () => {
     const raw = clone();
     raw.version = 2;

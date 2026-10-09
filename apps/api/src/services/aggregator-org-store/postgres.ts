@@ -451,6 +451,7 @@ function toDomain(row: JoinedRow): AggregatorOrg {
     locations: (o.locations ?? []) as BecknLocation[],
     legalName: o.legalName,
     gstNumber: o.gstNumber,
+    permissionSet: o.permissionSet,
   };
 }
 

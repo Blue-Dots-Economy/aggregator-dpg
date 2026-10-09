@@ -41,3 +41,21 @@ export async function consoleRead<T>(path: string, body?: unknown): Promise<T> {
   if (!res.ok) throw new Error(`console read failed (${res.status})`);
   return (await res.json()) as T;
 }
+
+/**
+ * Reads an optional console resource: the parsed body, or null on any failure.
+ * For panels that are simply left out when unavailable, e.g. RBAC grants when
+ * access control is off (503) or the caller lacks the capability (403).
+ *
+ * @param path - Upstream path.
+ * @returns The parsed JSON body, or null.
+ */
+export async function consoleReadOptional<T>(path: string): Promise<T | null> {
+  try {
+    const res = await callApi(path, { method: 'GET' });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}

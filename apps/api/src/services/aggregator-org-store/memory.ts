@@ -93,6 +93,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       locations: input.locations ?? [],
       legalName: null,
       gstNumber: null,
+      permissionSet: null,
     };
     this.byId.set(row.id, row);
     return { ok: true, value: row };
@@ -195,6 +196,8 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       locations: patch.locations ?? existing.locations,
       legalName: patch.legalName !== undefined ? patch.legalName : existing.legalName,
       gstNumber: patch.gstNumber !== undefined ? patch.gstNumber : existing.gstNumber,
+      permissionSet:
+        patch.permissionSet !== undefined ? patch.permissionSet : existing.permissionSet,
       state: patch.state !== undefined ? patch.state : existing.state,
       // As in Postgres: a recorded login is only ever added, never cleared.
       ownerKcSub: patch.ownerKcSub ? patch.ownerKcSub : existing.ownerKcSub,

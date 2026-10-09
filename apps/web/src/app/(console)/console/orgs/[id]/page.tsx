@@ -6,11 +6,15 @@
 
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
-import type { OrgReadResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import type {
+  OrgReadResponse,
+  PermissionSetsResponse,
+} from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
-import { consoleRead } from '@/lib/console-api.server';
+import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
 import { Card } from '@/components/ui/Card';
 import { OrgEditForm } from '@/components/console/OrgEditForm';
+import { PermissionSetForm } from '@/components/console/PermissionSetForm';
 import { can } from '@/lib/capabilities';
 
 export default async function ConsoleOrgPage({ params }: { params: Promise<{ id: string }> }) {
@@ -18,7 +22,14 @@ export default async function ConsoleOrgPage({ params }: { params: Promise<{ id:
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   const { id } = await params;
-  const data = await consoleRead<OrgReadResponse>(`/v1/org/read/${encodeURIComponent(id)}`);
+  const canSetAccess = actor.me.is_network_admin && can(actor.me.capabilities, 'orgs.onboard');
+  const [data, sets] = await Promise.all([
+    consoleRead<OrgReadResponse>(`/v1/org/read/${encodeURIComponent(id)}`),
+    // PermissionSets: absent when access control is off.
+    canSetAccess
+      ? consoleReadOptional<PermissionSetsResponse>('/v1/org/permission-sets')
+      : Promise.resolve(null),
+  ]);
   const { org, owner } = data;
   const editable = org.org_type === 'aggregator' && !org.is_default;
   return (
@@ -49,6 +60,14 @@ export default async function ConsoleOrgPage({ params }: { params: Promise<{ id:
         editable={editable}
         canRename={actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer')}
       />
+      {sets && org.org_type === 'aggregator' ? (
+        <PermissionSetForm
+          orgId={org.id}
+          current={org.permission_set ?? null}
+          sets={sets.sets.map((s) => s.name)}
+          defaultName={sets.defaults[org.org_type] ?? ''}
+        />
+      ) : null}
     </div>
   );
 }

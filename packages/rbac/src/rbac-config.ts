@@ -65,6 +65,13 @@ export const RbacConfigSchema = z
       });
     }
     for (const [key, grant] of Object.entries(cfg.grants)) {
+      if (grant.capabilities.length !== 1) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['grants', key],
+          message: 'a grant holds exactly one capability',
+        });
+      }
       for (const cap of grant.capabilities) {
         if (!USER_GRANTABLE.includes(cap)) {
           ctx.addIssue({
