@@ -12,9 +12,9 @@ import { ok, err } from '@aggregator-dpg/shared-primitives/result';
 import { ValidationError } from '@aggregator-dpg/shared-primitives/errors';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
-import { AuthorizerBase, DecisionInputSchema } from '../interface.js';
-import type { Decision, DecisionInput } from '../interface.js';
-import { evaluate } from '../evaluate.js';
+import { AuthorizerBase, CapabilityListInputSchema, DecisionInputSchema } from '../interface.js';
+import type { Capability, CapabilityListInput, Decision, DecisionInput } from '../interface.js';
+import { evaluate, listCapabilities } from '../evaluate.js';
 
 /** Decision engine that evaluates the policy in-process. */
 export class InMemoryAuthorizer extends AuthorizerBase {
@@ -35,5 +35,24 @@ export class InMemoryAuthorizer extends AuthorizerBase {
       );
     }
     return ok(evaluate(parsed.data));
+  }
+
+  /**
+   * Lists the held candidate capabilities in-process.
+   *
+   * @param input - The actor, the candidates and the current time.
+   * @returns Ok with the held capabilities, or Err `RBAC_INPUT_INVALID`.
+   */
+  async listCapabilities(input: CapabilityListInput): Promise<Result<Capability[], BaseError>> {
+    const parsed = CapabilityListInputSchema.safeParse(input);
+    if (!parsed.success) {
+      return err(
+        new ValidationError('Invalid capability-list input', {
+          code: 'RBAC_INPUT_INVALID',
+          details: { issues: parsed.error.issues },
+        }),
+      );
+    }
+    return ok(listCapabilities(parsed.data));
   }
 }

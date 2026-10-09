@@ -87,4 +87,21 @@ describe('OpaAuthorizer', () => {
     const res = await authz.decide(input);
     expect(!res.success && res.error.code).toBe('OPA_UNAVAILABLE');
   });
+
+  it('lists capabilities from the capabilities rule, sorted', async () => {
+    const { authz, seen } = engine([json({ result: ['profiles.view', 'org.manage'] })]);
+    const res = await authz.listCapabilities({
+      actor: buildActor(),
+      candidates: ['profiles.view'],
+      now: 0,
+    });
+    expect(res).toEqual({ success: true, value: ['org.manage', 'profiles.view'] });
+    expect(JSON.parse(String(seen[0]?.body)).input.candidates).toEqual(['profiles.view']);
+  });
+
+  it('rejects an unknown capability in the list', async () => {
+    const { authz } = engine([json({ result: ['profiles.teleport'] })]);
+    const res = await authz.listCapabilities({ actor: buildActor(), candidates: [], now: 0 });
+    expect(!res.success && res.error.code).toBe('OPA_BAD_RESPONSE');
+  });
 });

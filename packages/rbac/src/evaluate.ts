@@ -12,7 +12,13 @@
  */
 
 import { NOT_GRANTABLE } from './catalogue.js';
-import type { ActorOrg, Decision, DecisionInput } from './interface.js';
+import type {
+  ActorOrg,
+  Capability,
+  CapabilityListInput,
+  Decision,
+  DecisionInput,
+} from './interface.js';
 
 /** Whether personal data is being asked for through the Network Facilitator root. */
 function piiBlocked(org: ActorOrg, input: DecisionInput): boolean {
@@ -63,4 +69,17 @@ export function evaluate(input: DecisionInput): Decision {
     holding.some((o) => !piiBlocked(o, input));
 
   return { allow, reasons: allow ? [] : [...reasons].sort() };
+}
+
+/**
+ * Lists the candidate capabilities the actor holds, without any I/O.
+ *
+ * @param input - The actor, the candidates and the current time.
+ * @returns The held capabilities, sorted and without duplicates.
+ */
+export function listCapabilities(input: CapabilityListInput): Capability[] {
+  const held = input.candidates.filter(
+    (capability) => evaluate({ capability, actor: input.actor, now: input.now }).allow,
+  );
+  return [...new Set(held)].sort();
 }

@@ -1,19 +1,21 @@
 /**
  * OPA-backed decision engine (`@aggregator-dpg/rbac`).
  *
- * Asks the OPA sidecar `POST {baseUrl}/v1/data/rbac/decision`. Every call has
- * a timeout and one retry with backoff on transient failures. Any failure is
+ * Asks the OPA sidecar under `{baseUrl}/v1/data/rbac/`: `decision` for one
+ * capability, `capabilities` for the list the portal shows. Every call has a
+ * timeout and one retry with backoff on transient failures. Any failure is
  * returned as an `UpstreamError`, which callers treat as a deny.
  *
  * @module @aggregator-dpg/rbac/opa
  */
 
+import { z } from 'zod';
 import { ok, err } from '@aggregator-dpg/shared-primitives/result';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
-import { AuthorizerBase, DecisionSchema } from '../interface.js';
-import type { Decision, DecisionInput } from '../interface.js';
+import { AuthorizerBase, CapabilitySchema, DecisionSchema } from '../interface.js';
+import type { Capability, CapabilityListInput, Decision, DecisionInput } from '../interface.js';
 
 /** Settings for {@link OpaAuthorizer}. */
 export interface OpaAuthorizerOptions {
@@ -30,6 +32,8 @@ export interface OpaAuthorizerOptions {
 }
 
 const DECISION_PATH = '/v1/data/rbac/decision';
+const CAPABILITIES_PATH = '/v1/data/rbac/capabilities';
+const CapabilityListSchema = z.array(CapabilitySchema);
 
 /** Whether a failed attempt is worth retrying. */
 function isTransient(status: number | null): boolean {
@@ -38,7 +42,7 @@ function isTransient(status: number | null): boolean {
 
 /** Decision engine that queries the OPA sidecar. */
 export class OpaAuthorizer extends AuthorizerBase {
-  private readonly url: string;
+  private readonly base: string;
   private readonly fetchImpl: typeof fetch;
 
   /**
@@ -48,7 +52,7 @@ export class OpaAuthorizer extends AuthorizerBase {
    */
   constructor(private readonly options: OpaAuthorizerOptions) {
     super();
-    this.url = options.baseUrl.replace(/\/+$/, '') + DECISION_PATH;
+    this.base = options.baseUrl.replace(/\/+$/, '');
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -61,6 +65,27 @@ export class OpaAuthorizer extends AuthorizerBase {
    *   (no `result`, or a result of the wrong shape, e.g. policy not loaded).
    */
   async decide(input: DecisionInput): Promise<Result<Decision, BaseError>> {
+    return this.query(DECISION_PATH, input, DecisionSchema);
+  }
+
+  /**
+   * Lists the held candidate capabilities through OPA, in one call.
+   *
+   * @param input - The actor, the candidates and the current time.
+   * @returns Ok with the held capabilities (sorted); the same errors as {@link decide}.
+   */
+  async listCapabilities(input: CapabilityListInput): Promise<Result<Capability[], BaseError>> {
+    const res = await this.query(CAPABILITIES_PATH, input, CapabilityListSchema);
+    return res.success ? ok([...res.value].sort()) : res;
+  }
+
+  /** POSTs `{ input }` to a data path and validates `result` against `schema`. */
+  private async query<T>(
+    path: string,
+    input: unknown,
+    schema: z.ZodType<T>,
+  ): Promise<Result<T, BaseError>> {
+    const url = this.base + path;
     let lastStatus: number | null = null;
     let lastError = '';
     for (let attempt = 0; attempt <= this.options.retries; attempt++) {
@@ -69,7 +94,7 @@ export class OpaAuthorizer extends AuthorizerBase {
       }
       let res: Response;
       try {
-        res = await this.fetchImpl(this.url, {
+        res = await this.fetchImpl(url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ input }),
@@ -85,9 +110,9 @@ export class OpaAuthorizer extends AuthorizerBase {
         lastError = `HTTP ${res.status}`;
         if (isTransient(res.status)) continue;
         return err(
-          new UpstreamError('OPA rejected the decision request', {
+          new UpstreamError('OPA rejected the request', {
             code: 'OPA_REJECTED',
-            details: { status: res.status },
+            details: { status: res.status, path },
           }),
         );
       }
@@ -96,17 +121,15 @@ export class OpaAuthorizer extends AuthorizerBase {
         body = await res.json();
       } catch (e) {
         return err(
-          new UpstreamError('OPA returned invalid JSON', {
-            code: 'OPA_BAD_RESPONSE',
-            cause: e,
-          }),
+          new UpstreamError('OPA returned invalid JSON', { code: 'OPA_BAD_RESPONSE', cause: e }),
         );
       }
-      const parsed = DecisionSchema.safeParse((body as { result?: unknown } | null)?.result);
+      const parsed = schema.safeParse((body as { result?: unknown } | null)?.result);
       if (!parsed.success) {
         return err(
-          new UpstreamError('OPA returned no decision; is the rbac policy loaded?', {
+          new UpstreamError('OPA returned no result; is the rbac policy loaded?', {
             code: 'OPA_BAD_RESPONSE',
+            details: { path },
           }),
         );
       }
@@ -115,7 +138,7 @@ export class OpaAuthorizer extends AuthorizerBase {
     return err(
       new UpstreamError('OPA is unavailable', {
         code: 'OPA_UNAVAILABLE',
-        details: { status: lastStatus, error: lastError, attempts: this.options.retries + 1 },
+        details: { status: lastStatus, error: lastError, attempts: this.options.retries + 1, path },
       }),
     );
   }

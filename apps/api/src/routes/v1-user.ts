@@ -52,6 +52,7 @@ import {
   throwDecisionFailure,
   toWireUser,
 } from './console-shared.js';
+import { checkCapability, listActorCapabilities } from '../services/authz/index.js';
 
 const IdParamsSchema = z.object({ id: z.string().uuid() });
 type IdParams = z.infer<typeof IdParamsSchema>;
@@ -93,7 +94,16 @@ async function loadOrg(id: string): Promise<Organisation> {
  *
  * @throws {HttpError} DB_UNAVAILABLE.
  */
-async function meOf(actor: Actor): Promise<MeResponse> {
+/**
+ * Whether contact details are shown plain to this actor (RBAC
+ * `contact.unmask`; handoff H-6). True when access control is off or only
+ * logging, so behaviour changes only under `enforce`.
+ */
+async function showsContact(req: FastifyRequest, actor: Actor): Promise<boolean> {
+  return (await checkCapability(req, actor, 'contact.unmask')).allowed;
+}
+
+async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> {
   // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   const orgStore = getOrganisationStore();
   const orgs: MeOrg[] = [];
@@ -135,6 +145,7 @@ async function meOf(actor: Actor): Promise<MeResponse> {
     user: { id: actor.userId, contact: self },
     orgs,
     is_network_admin: isNetworkAdmin(actor),
+    capabilities: await listActorCapabilities(req, actor),
   };
 }
 
@@ -156,7 +167,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { actor } = await requireActor(req, { allowCoordinator: true });
-      return reply.status(200).send(await meOf(actor));
+      return reply.status(200).send(await meOf(req, actor));
     },
   );
 
@@ -175,14 +186,16 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
       const row = await coordinatorInReach(actor, id);
+      const plain = await showsContact(req, actor);
       // Contact read audit (design C8): ids only.
       req.log.info({
         operation: 'console.user.read',
         status: 'success',
         actor_id: actor.userId,
         target_id: row.id,
+        contact: plain ? 'plain' : 'masked',
       });
-      return reply.status(200).send(toWireUser(row));
+      return reply.status(200).send(toWireUser(row, { masked: !plain }));
     },
   );
 
@@ -210,8 +223,19 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         ...(body.limit ? { limit: body.limit } : {}),
       });
       if (!page.ok) dbDown('userStore.search', page.error.message);
+      const plain = await showsContact(req, actor);
+      if (plain && page.value.rows.length > 0) {
+        // Plain contact in a list: audited by count, never values (H-6).
+        req.log.info({
+          operation: 'console.user.search',
+          status: 'success',
+          actor_id: actor.userId,
+          contact: 'plain',
+          count: page.value.rows.length,
+        });
+      }
       return reply.status(200).send({
-        users: page.value.rows.map(toWireUser),
+        users: page.value.rows.map((row) => toWireUser(row, { masked: !plain })),
         next_cursor: page.value.nextCursor ? encodeUserCursor(page.value.nextCursor) : null,
       });
     },
@@ -422,7 +446,9 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
           );
         }
       }
-      return reply.status(200).send(toWireUser(updated.value));
+      return reply
+        .status(200)
+        .send(toWireUser(updated.value, { masked: !(await showsContact(req, actor)) }));
     },
   );
 }

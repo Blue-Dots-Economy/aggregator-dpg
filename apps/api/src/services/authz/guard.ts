@@ -10,6 +10,7 @@
 
 import type { FastifyBaseLogger } from 'fastify';
 import {
+  CAPABILITIES,
   orgCapabilities,
   roleCapabilities,
   type AuthorizerBase,
@@ -78,22 +79,30 @@ export function decisionInput(
   capability: Capability,
   now: number,
 ): DecisionInput {
+  return { capability, now, actor: actorInput(cfg, actor) };
+}
+
+/**
+ * The policy's view of an actor: role and organisation capabilities from
+ * `rbac.yaml`, and the actor's grants.
+ *
+ * @param cfg - The validated `rbac.yaml`.
+ * @param actor - The resolved actor.
+ * @returns The `actor` part of a policy input.
+ */
+export function actorInput(cfg: RbacConfig, actor: Actor): DecisionInput['actor'] {
   return {
-    capability,
-    now,
-    actor: {
-      userId: actor.userId,
-      userType: actor.userType,
-      active: actor.active,
-      roleCapabilities: roleCapabilities(cfg, actor.userType),
-      grants: actor.grants ?? [],
-      orgs: actor.orgs.map((o) => ({
-        id: o.id,
-        orgType: o.orgType,
-        relation: o.relation,
-        capabilities: orgCapabilities(cfg, o.orgType, o.permissionSet ?? null),
-      })),
-    },
+    userId: actor.userId,
+    userType: actor.userType,
+    active: actor.active,
+    roleCapabilities: roleCapabilities(cfg, actor.userType),
+    grants: actor.grants ?? [],
+    orgs: actor.orgs.map((o) => ({
+      id: o.id,
+      orgType: o.orgType,
+      relation: o.relation,
+      capabilities: orgCapabilities(cfg, o.orgType, o.permissionSet ?? null),
+    })),
   };
 }
 
@@ -187,4 +196,36 @@ export async function requirePermission(
     );
   }
   return checkCapability(req, resolved.actor, capability, now);
+}
+
+/**
+ * Lists the capabilities a resolved actor holds, for the portal. Never throws.
+ *
+ * @param req - The request (for its logger).
+ * @param actor - The resolved actor.
+ * @param now - Clock, for grant expiry. Injectable for tests.
+ * @returns The held capabilities; `null` when RBAC is off (no restriction);
+ *   an empty list when the engine cannot answer (the API still decides).
+ */
+export async function listActorCapabilities(
+  req: GuardRequest,
+  actor: Actor,
+  now: number = Date.now(),
+): Promise<Capability[] | null> {
+  const rt = getRbacRuntime();
+  if (!rt) return null;
+  const res = await rt.authorizer.listCapabilities({
+    actor: actorInput(rt.config, actor),
+    candidates: [...CAPABILITIES],
+    now,
+  });
+  if (res.success) return res.value;
+  req.log.warn({
+    operation: 'rbac.capabilities',
+    status: 'failure',
+    user_id: actor.userId,
+    error: res.error.message,
+    error_type: res.error.code,
+  });
+  return [];
 }

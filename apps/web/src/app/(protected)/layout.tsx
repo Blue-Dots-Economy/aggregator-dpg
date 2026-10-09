@@ -22,6 +22,7 @@ import { PORTAL_GATE_REASON, classifyNonCoordinator, tokenAggregatorId } from '.
 import { resolveSignalsRealmRoles } from '../../lib/signals-roles';
 import { callApi } from '../../lib/upstream-client';
 import type { User } from '../../types';
+import { getConsoleActor } from '../../lib/console-actor';
 
 /**
  * Fetches whether contact-support is enabled (`SUPPORT_EMAIL` configured
@@ -83,9 +84,14 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
     ...(session.phone ? { phone: session.phone } : {}),
   };
   const supportEnabled = await fetchSupportEnabled();
+  // RBAC: the coordinator's capabilities hide what it cannot use. Read from
+  // `read/me` (cached in the session for a minute); on any failure nothing is
+  // hidden — the API still decides every request.
+  const actor = await getConsoleActor();
+  const capabilities = actor.ok ? (actor.me.capabilities ?? null) : null;
 
   return (
-    <AuthProvider initialUser={user} supportEnabled={supportEnabled}>
+    <AuthProvider initialUser={user} supportEnabled={supportEnabled} capabilities={capabilities}>
       {/* Column below `lg` (slim menu bar stacked above the page), row from
           `lg` up (fixed sidebar beside it) — see Sidebar (#793). */}
       <div className="flex flex-col lg:flex-row min-h-dvh">
