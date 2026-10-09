@@ -47,6 +47,9 @@ COPY --from=builder --chown=node:node /app/apps/api/drizzle ./drizzle
 # Operator SQL for the release-train tool (dist/tools/train.js resolves it at
 # `../../sql`, i.e. /app/sql): the checks, verify gates, counts and fixes.
 COPY --from=builder --chown=node:node /app/scripts/sql ./sql
+# RBAC policy for the OPA sidecar: a deploy's init container copies it out of
+# this image (/app/policy/rbac/rbac.rego), so the policy matches this build.
+COPY --from=builder --chown=node:node /app/policy/rbac/rbac.rego ./policy/rbac/rbac.rego
 USER node
 EXPOSE 4000
 CMD ["node", "dist/server.js"]
