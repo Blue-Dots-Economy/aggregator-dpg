@@ -6,13 +6,13 @@ The work to build [rbac-design-aggregator.md](rbac-design-aggregator.md) on bran
 
 ## Highlights
 
-| Item        | Value                                                                                                          |
-| ----------- | -------------------------------------------------------------------------------------------------------------- |
-| Base branch | `refactor/user-org-phase-5-wip` (contains `refactor/user-org-management`); retarget the PR when Phase 5 merges |
-| Done        | R0 foundation, R1 route declarations (incl. the 11 Phase 5 console routes), R1.5 adoption of Phase 5           |
-| Next        | R3: grants and per-organisation PermissionSets                                                                 |
-| Safety      | `RBAC_MODE` (`off` / `log` / `enforce`) per instance; `off` by default                                         |
-| Decisions   | D1–D4 in the design's decision record; D3 and D4 can be revisited                                              |
+| Item        | Value                                                                                                           |
+| ----------- | --------------------------------------------------------------------------------------------------------------- |
+| Base branch | `refactor/user-org-phase-5-wip` (contains `refactor/user-org-management`); retarget the PR when Phase 5 merges  |
+| Done        | R0 foundation, R1 route declarations (incl. the 11 Phase 5 console routes), R1.5 adoption of Phase 5, R3 grants |
+| Next        | Switch instances on (R2 operations step); the deferred items in R2 and R3                                       |
+| Safety      | `RBAC_MODE` (`off` / `log` / `enforce`) per instance; `off` by default                                          |
+| Decisions   | D1–D4 in the design's decision record; D3 and D4 can be revisited                                               |
 
 ---
 
@@ -37,8 +37,8 @@ flowchart LR
     classDef done fill:#eaf6ec,stroke:#3f9a52,color:#1a1a1a
     classDef todo fill:#e8f1fb,stroke:#3b78c4,color:#1a1a1a
     class P3,P5 ref
-    class R0,R1,R15 done
-    class R2,R3 todo
+    class R0,R1,R15,R3 done
+    class R2 todo
 ```
 
 | Step                | Status    | Blocked by                                                                   |
@@ -47,7 +47,7 @@ flowchart LR
 | R1 Declare routes   | Done      | -                                                                            |
 | R1.5 Adopt Phase 5  | Done      | -                                                                            |
 | R2 Enforce          | Code done | Switching on: the OPA sidecar and the deployment realm (bluedots-automation) |
-| R3 Grants and pages | To do     | -                                                                            |
+| R3 Grants and pages | Code done | Revocation sign-out waits for #851                                           |
 
 ---
 
@@ -120,16 +120,16 @@ Every route declares `config.rbac`; the API refuses to boot without it; a snapsh
 | Worker re-checks the requester before PII jobs                                                                                                                                                  | `apps/worker`                                                          | Deferred: needs the actor resolver and OPA client in the worker. The API already checks at enqueue; revocation between enqueue and run is the remaining window.                                                              |
 | Resolve the coordinator export/PII gap (open item 1), then flip instances to `enforce`                                                                                                          | Instance config                                                        | Operations step; see open item 1                                                                                                                                                                                             |
 
-### R3 — Grants and pages
+### R3 — Grants and pages (code done)
 
-| Task                                                                                      | Where                                               | Done when                                       |
-| ----------------------------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------- |
-| Migration: `organisations.permission_set`, `user_permission_grant`, `iam_audit`           | `apps/api/drizzle/migrations`, `packages/db-schema` | Next free number at merge                       |
-| Grant and set APIs with the subset, separation-of-duties and owner rules                  | API                                                 | Each rule has a failing-then-passing test       |
-| Revocation removes the Keycloak role and calls `logoutSessions` (H-10, H-12)              | grant service                                       | A revoked owner cannot sign in                  |
-| PII Access expiry (90 days) and backfill for existing coordinators                        | `apps/worker`, migration or tool                    | Nobody loses today's access                     |
-| With per-organisation sets, check the target organisation's set after `scope.ts` picks it | guard                                               | Test with two owned orgs holding different sets |
-| Members and PermissionSet pages                                                           | `apps/web`                                          | An Admin grants and revokes PII Access          |
+| Task                                                                                      | Where                                               | Done when                                                                                                                                                                                                                                               |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Migration: `organisations.permission_set`, `user_permission_grant`, `iam_audit`           | `apps/api/drizzle/migrations`, `packages/db-schema` | Done: `0030_rbac`, additive, applied at boot after the train (renumber at merge if taken)                                                                                                                                                               |
+| Grant and set APIs with the subset, separation-of-duties and owner rules                  | API                                                 | Done: `routes/v1-iam.ts`, `services/authz/grants.ts`; each rule tested                                                                                                                                                                                  |
+| Revocation removes the Keycloak role and calls `logoutSessions` (H-10, H-12)              | grant service                                       | Deferred to #851. A revoked grant stops working on the next request (grants are read per request)                                                                                                                                                       |
+| PII Access expiry (90 days) and backfill for existing coordinators                        | `apps/worker`, migration or tool                    | Done: expiry checked per request (no job); `scripts/sql/rbac-backfill-pii-access.sql`, idempotent, audited                                                                                                                                              |
+| With per-organisation sets, check the target organisation's set after `scope.ts` picks it | guard                                               | Deferred: no route needs it yet. Owner routes check `org.manage` / `contact.unmask`, held by every set; the capabilities that differ are checked only on coordinator (one org) or network-admin routes. Do it before an owner route checks one of those |
+| Members and PermissionSet pages                                                           | `apps/web`                                          | Done: access grants on the coordinator page; PermissionSet on the org page (network admin)                                                                                                                                                              |
 
 ---
 

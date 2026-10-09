@@ -19,6 +19,9 @@ import {
   type JournalEntry,
 } from '../migration-guards.js';
 
+/** Migrations after the instance upgrade, each additive and safe to apply at boot. */
+const BOOT_SAFE_AFTER_UPGRADE = ['0030_rbac'];
+
 const journal: JournalEntry[] = [
   { when: 1788400000000, tag: '0022_campaign_pii_audit' },
   { when: UPGRADE_FIRST_WHEN, tag: '0023_drop_aggregator_profile' },
@@ -163,7 +166,7 @@ describe('runMigrationGuards (IO wrapper)', () => {
 });
 
 describe('train bounds vs the shipped journal', () => {
-  it('cover every migration from 0023 to the latest — bump UPGRADE_LAST_WHEN with each train migration', async () => {
+  it('cover every migration from 0023 to 0029, the end of the instance upgrade', async () => {
     const journalPath = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
       '../../../drizzle/migrations/meta/_journal.json',
@@ -171,9 +174,15 @@ describe('train bounds vs the shipped journal', () => {
     const real = JSON.parse(await readFile(journalPath, 'utf8')) as { entries: JournalEntry[] };
     const first = real.entries.find((e) => e.tag.startsWith('0023_'));
     expect(first?.when).toBe(UPGRADE_FIRST_WHEN);
-    // Until the train ships, the latest migration IS the last train migration:
-    // a new one (0028, 0029) must move UPGRADE_LAST_WHEN, or it would migrate at
-    // boot on databases that hold data.
-    expect(real.entries.at(-1)?.when).toBe(UPGRADE_LAST_WHEN);
+    // The instance upgrade ends at 0029 (0028 and 0029 each moved
+    // UPGRADE_LAST_WHEN). Later migrations (0030 RBAC) are additive and run at
+    // boot; the upgrade tool also applies them when they ship together. A new
+    // migration that restructures existing data must join the upgrade and move
+    // UPGRADE_LAST_WHEN instead.
+    const last = real.entries.find((e) => e.tag.startsWith('0029_'));
+    expect(last?.when).toBe(UPGRADE_LAST_WHEN);
+    for (const e of real.entries.filter((x) => x.when > UPGRADE_LAST_WHEN)) {
+      expect(BOOT_SAFE_AFTER_UPGRADE).toContain(e.tag);
+    }
   });
 });

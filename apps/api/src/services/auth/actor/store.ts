@@ -9,6 +9,7 @@
 import { getUserStore, type Coordinator } from '../../user-store/index.js';
 import { getOrganisationStore, type Organisation } from '../../organisation-store/index.js';
 import { getIdentityStore } from '../../identity-store/index.js';
+import { getGrantStore } from '../../grant-store/index.js';
 import { IDP_PROVIDER } from '../../idp-admin/provider.js';
 import {
   ActorResolverBase,
@@ -40,7 +41,33 @@ function coordinatorActor(row: Coordinator): Actor {
 
 /** An owned aggregator org as an actor org. */
 function ownedOrg(org: Organisation): ActorOrg {
-  return { id: org.id, orgType: 'aggregator', relation: 'owner', isDefault: org.isDefault };
+  return {
+    id: org.id,
+    orgType: 'aggregator',
+    relation: 'owner',
+    isDefault: org.isDefault,
+    permissionSet: org.permissionSet,
+  };
+}
+
+/**
+ * Adds the user's live grants (RBAC R3) to a resolved actor.
+ *
+ * @returns The actor with `grants`, or `UNAVAILABLE` when the store failed.
+ */
+async function withGrants(actor: Actor): Promise<ActorResult> {
+  const live = await getGrantStore().listLive(actor.userId, new Date());
+  if (!live.ok) return unavailable(live.error.message);
+  return {
+    ok: true,
+    value: {
+      ...actor,
+      grants: live.value.map((g) => ({
+        capability: g.capability,
+        expiresAt: g.expiresAt.getTime(),
+      })),
+    },
+  };
 }
 
 /** Resolves actors from the application's stores. */
@@ -74,10 +101,7 @@ export class StoreActorResolver extends ActorResolverBase {
       });
     }
     for (const org of owned.value) if (org.status === 'active') orgs.push(ownedOrg(org));
-    return {
-      ok: true,
-      value: { userId, userType: 'admin', active: orgs.length > 0, orgs },
-    };
+    return withGrants({ userId, userType: 'admin', active: orgs.length > 0, orgs });
   }
 
   /**
@@ -97,6 +121,14 @@ export class StoreActorResolver extends ActorResolverBase {
     const row = await getUserStore().findById(id);
     if (!row.ok) return unavailable(row.error.message);
     if (!row.value) return { ok: true, value: null };
-    return { ok: true, value: coordinatorActor(row.value) };
+    const actor = coordinatorActor(row.value);
+    // RBAC R3: the organisation's own PermissionSet caps the coordinator.
+    const memberOrg = actor.orgs[0];
+    if (memberOrg) {
+      const org = await getAggregatorOrgStore().findById(memberOrg.id);
+      if (!org.ok) return unavailable(org.error.message);
+      memberOrg.permissionSet = org.value?.permissionSet ?? null;
+    }
+    return withGrants(actor);
   }
 }
