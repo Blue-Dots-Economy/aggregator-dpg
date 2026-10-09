@@ -27,6 +27,7 @@ import { dashboardService, type LifecycleFilter } from '../../../services/dashbo
 import { mapDirectional } from '../../../services/row-mapping';
 import { resolveTiles } from '../../../services/tiles';
 import { DASHBOARD_BULK_ACTIONS, type BulkAction } from '../../../services/bulk-actions';
+import { useCan } from '../../../lib/auth-context';
 import type { DashboardTileDef } from '../../../hooks/useAggregatorConfig';
 import { useProfileRaw } from '../../../hooks/useProfile';
 import { useThemeMode } from '../../../lib/theme-mode';
@@ -717,6 +718,7 @@ function BulkActionBar({
   onClear: () => void;
 }) {
   const t = useTranslations('dashboard');
+  const can = useCan();
   const [runningId, setRunningId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
   const noticeTimer = useRef<number | null>(null);
@@ -753,7 +755,7 @@ function BulkActionBar({
         {t('bulk.selected', { count: selectedRows.length })}
       </span>
       <div className="flex flex-wrap items-center gap-2">
-        {DASHBOARD_BULK_ACTIONS.map((a) => {
+        {DASHBOARD_BULK_ACTIONS.filter((a) => can(a.capability)).map((a) => {
           const Ic = I[a.icon];
           return (
             <Button
@@ -2198,6 +2200,7 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
   // it fell through to the seeker view AND that view fetched `domains[0]` —
   // a service_provider coordinator saw a table headed "Seekers".
   const isProviderLike = (primaryDomainCfg?.item_type ?? '').startsWith('job_posting');
+  const canOnboard = useCan()('profiles.onboard');
 
   return (
     <div className="fade-up">
@@ -2206,9 +2209,11 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
         right={
           <div className="flex items-center gap-2">
-            <Button icon={<I.plus size={14} />} onClick={() => router.push('/onboarding')}>
-              {t('buttons.addParticipants')}
-            </Button>
+            {canOnboard && (
+              <Button icon={<I.plus size={14} />} onClick={() => router.push('/onboarding')}>
+                {t('buttons.addParticipants')}
+              </Button>
+            )}
           </div>
         }
       />

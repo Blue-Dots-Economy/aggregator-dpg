@@ -2,7 +2,8 @@
 
 /**
  * Console navigation (user & org Phase 5). The organisations list is the
- * network admin's only.
+ * network admin's only; coordinators and invites need `org.manage` (RBAC; the
+ * API also checks it).
  */
 
 import Link from 'next/link';
@@ -10,14 +11,24 @@ import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { cn } from '../../lib/cn';
 
-export function ConsoleNav({ isNetworkAdmin }: { isNetworkAdmin: boolean }) {
+export function ConsoleNav({
+  isNetworkAdmin,
+  canManage = true,
+}: {
+  isNetworkAdmin: boolean;
+  canManage?: boolean;
+}) {
   const t = useTranslations('console');
   const path = usePathname() ?? '';
   const items = [
     { to: '/console', label: t('nav.home') },
     ...(isNetworkAdmin ? [{ to: '/console/orgs', label: t('nav.organisations') }] : []),
-    { to: '/console/coordinators', label: t('nav.coordinators') },
-    { to: '/console/invite', label: t('nav.invite') },
+    ...(canManage
+      ? [
+          { to: '/console/coordinators', label: t('nav.coordinators') },
+          { to: '/console/invite', label: t('nav.invite') },
+        ]
+      : []),
     { to: '/console/account', label: t('nav.account') },
   ];
   const active = (to: string) => (to === '/console' ? path === to : path.startsWith(to));

@@ -13,6 +13,7 @@ import type { ReactNode } from 'react';
 import { getSession } from '@/lib/server-session';
 import { getConsoleActor } from '@/lib/console-actor';
 import { ConsoleNav } from '@/components/console/ConsoleNav';
+import { can } from '@/lib/capabilities';
 
 export default async function ConsoleLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
@@ -37,7 +38,10 @@ export default async function ConsoleLayout({ children }: { children: ReactNode 
 
   return (
     <div className="flex flex-col lg:flex-row min-h-dvh">
-      <ConsoleNav isNetworkAdmin={actor.me.is_network_admin} />
+      <ConsoleNav
+        isNetworkAdmin={actor.me.is_network_admin}
+        canManage={can(actor.me.capabilities, 'org.manage')}
+      />
       <main className="flex-1 min-w-0 overflow-x-hidden">
         <div className="max-w-[1200px] mx-auto px-4 py-5 sm:px-6 lg:px-8 lg:py-7">{children}</div>
       </main>

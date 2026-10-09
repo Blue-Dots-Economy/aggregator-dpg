@@ -109,6 +109,18 @@ export const DecisionInputSchema = z.object({
 /** One access question. */
 export type DecisionInput = z.infer<typeof DecisionInputSchema>;
 
+/** Which of the candidate capabilities an actor holds (for the portal). */
+export const CapabilityListInputSchema = z.object({
+  actor: ActorSchema,
+  /** Capabilities to test; normally every capability in the catalogue. */
+  candidates: z.array(CapabilitySchema),
+  /** Epoch milliseconds, for grant expiry. */
+  now: z.number().int().nonnegative(),
+});
+
+/** A capability-list question. */
+export type CapabilityListInput = z.infer<typeof CapabilityListInputSchema>;
+
 /** The answer: allowed or not, with machine-readable reasons for a deny. */
 export const DecisionSchema = z.object({
   allow: z.boolean(),
@@ -133,4 +145,14 @@ export abstract class AuthorizerBase {
    *   (unreachable, timed out, malformed reply). Callers treat Err as a deny.
    */
   abstract decide(input: DecisionInput): Promise<Result<Decision, BaseError>>;
+
+  /**
+   * Lists the candidate capabilities the actor holds, in one question. Each
+   * listed capability is one `decide` would allow.
+   *
+   * @param input - The actor, the candidates and the current time.
+   * @returns Ok with the held capabilities (sorted), or Err when the engine
+   *   cannot answer.
+   */
+  abstract listCapabilities(input: CapabilityListInput): Promise<Result<Capability[], BaseError>>;
 }

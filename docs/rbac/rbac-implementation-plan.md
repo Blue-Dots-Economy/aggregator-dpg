@@ -10,7 +10,7 @@ The work to build [rbac-design-aggregator.md](rbac-design-aggregator.md) on bran
 | ----------- | -------------------------------------------------------------------------------------------------------------- |
 | Base branch | `refactor/user-org-phase-5-wip` (contains `refactor/user-org-management`); retarget the PR when Phase 5 merges |
 | Done        | R0 foundation, R1 route declarations (incl. the 11 Phase 5 console routes), R1.5 adoption of Phase 5           |
-| Next        | R2: capabilities for the portal, contact masking, retiring the emailed links, enforcing                        |
+| Next        | R3: grants and per-organisation PermissionSets                                                                 |
 | Safety      | `RBAC_MODE` (`off` / `log` / `enforce`) per instance; `off` by default                                         |
 | Decisions   | D1–D4 in the design's decision record; D3 and D4 can be revisited                                              |
 
@@ -41,13 +41,13 @@ flowchart LR
     class R2,R3 todo
 ```
 
-| Step                | Status | Blocked by                                                      |
-| ------------------- | ------ | --------------------------------------------------------------- |
-| R0 Foundation       | Done   | -                                                               |
-| R1 Declare routes   | Done   | -                                                               |
-| R1.5 Adopt Phase 5  | Done   | -                                                               |
-| R2 Enforce          | To do  | Deployment realm gate (bluedots-automation) and the OPA sidecar |
-| R3 Grants and pages | To do  | -                                                               |
+| Step                | Status    | Blocked by                                                                   |
+| ------------------- | --------- | ---------------------------------------------------------------------------- |
+| R0 Foundation       | Done      | -                                                                            |
+| R1 Declare routes   | Done      | -                                                                            |
+| R1.5 Adopt Phase 5  | Done      | -                                                                            |
+| R2 Enforce          | Code done | Switching on: the OPA sidecar and the deployment realm (bluedots-automation) |
+| R3 Grants and pages | To do     | -                                                                            |
 
 ---
 
@@ -108,17 +108,17 @@ Every route declares `config.rbac`; the API refuses to boot without it; a snapsh
 | Org rename needs `network.administer`; Default org refuses invite and edit (decision D4)                        | Already enforced by Phase 5 (`v1-org.ts`, `v1-user.ts`), independent of `RBAC_MODE` | Phase 5 tests; RBAC-enforced console tests      |
 | Catalogue: `org.manage` covers inviting and approving coordinators; `orgs.onboard` covers organisations only    | `docs/rbac/rbac-permissions-and-roles.md`                                           | Done in docs                                    |
 
-### R2 — Enforce
+### R2 — Enforce (code done; switching on is an operations step)
 
-| Task                                                                                                                                        | Where                                                                  | Done when                                        |
-| ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------ |
-| `capabilities` in `GET /v1/user/read/me`                                                                                                    | `routes/v1-user.ts`                                                    | The portal receives the list                     |
-| Mask contacts in `user/search` and `user/read` unless `contact.unmask`; audit each unmasked read                                            | `routes/v1-user.ts`                                                    | Masked for a holder without the capability       |
-| Coordinator routes require the recorded login (`user_identities`), once the deployment realm makes the attributes admin-only (handoff H-11) | resolver                                                               | A token with a forged `aggregator_id` is refused |
-| Retire the emailed decision pages and `POST /admin/v1/invites` (H-7, H-8)                                                                   | `aggregator-approvals.ts`, `aggregator-org-approvals.ts`, `invites.ts` | Their `link_token` declarations are gone         |
-| Worker re-checks the requester before PII jobs                                                                                              | `apps/worker` campaign and bulk jobs                                   | A revoked user's job fails with an audit row     |
-| Portal hides what the user cannot use                                                                                                       | `apps/web`                                                             | Menus and buttons follow `capabilities`          |
-| Resolve the coordinator export/PII gap (open item 1), then flip instances to `enforce`                                                      | Instance config                                                        | No unexplained would-denies for one release      |
+| Task                                                                                                                                                                                            | Where                                                                  | Status                                                                                                                                                                                                                       |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `capabilities` in `GET /v1/user/read/me` (one OPA query, `data.rbac.capabilities`); `null` when RBAC is off                                                                                     | `routes/v1-user.ts`, `packages/rbac`, `policy/rbac`                    | Done                                                                                                                                                                                                                         |
+| Mask contacts in `user/read`, `user/search` and the metadata-update response unless `contact.unmask`; plain reads logged by id and count                                                        | `routes/v1-user.ts`, `routes/console-shared.ts`                        | Done                                                                                                                                                                                                                         |
+| Identity binding: the resolver accepts a coordinator only through its recorded login; the route guard records the login first (best effort) so `self` / `signed_in` routes work on a first call | `services/auth/actor`, `services/authz/route-access.ts`                | Done                                                                                                                                                                                                                         |
+| Portal and console hide what the user cannot use (`can()`, `useCan()`); export actions, onboarding entry, console invite and rename                                                             | `apps/web`                                                             | Done                                                                                                                                                                                                                         |
+| Retire the emailed decision pages and `POST /admin/v1/invites` (H-7, H-8)                                                                                                                       | `aggregator-approvals.ts`, `aggregator-org-approvals.ts`, `invites.ts` | Deferred: Phase 5 keeps the links on purpose, `ADMIN_EMAILS` reviewers still use them, and grant links stay valid for up to 90 days. Remove once the longest grant has expired and the console replaces every link reviewer. |
+| Worker re-checks the requester before PII jobs                                                                                                                                                  | `apps/worker`                                                          | Deferred: needs the actor resolver and OPA client in the worker. The API already checks at enqueue; revocation between enqueue and run is the remaining window.                                                              |
+| Resolve the coordinator export/PII gap (open item 1), then flip instances to `enforce`                                                                                                          | Instance config                                                        | Operations step; see open item 1                                                                                                                                                                                             |
 
 ### R3 — Grants and pages
 

@@ -14,6 +14,7 @@ import type { AnyAuthContext, AuthContext } from '../auth/access-token.js';
 import type { Actor } from '../auth/actor/interface.js';
 import { checkCapability, requirePermission, resolveCaller, type TokenIdentity } from './guard.js';
 import { getRbacRuntime } from './runtime.js';
+import { recordLoginIdentity } from '../identity-store/record.js';
 
 /**
  * Who may call a route.
@@ -163,6 +164,15 @@ export async function enforceRouteAccess(req: FastifyRequest, caller: RouteCalle
   if (!rt) return;
   const decl = req.routeOptions.config.rbac;
   if (!decl) return;
+
+  // The actor resolver accepts a coordinator only through its recorded login
+  // (handoff H-11). Logins are recorded lazily on the first approved request;
+  // record it here too, so a coordinator whose first call is a `self` or
+  // `signed_in` route is not mistaken for an unknown caller. Best effort,
+  // once per process, never overwrites a different link.
+  if (caller.aggregatorId && !('access' in decl && decl.access === 'service')) {
+    await recordLoginIdentity(caller.aggregatorId, caller.subject, 'rbac.recordIdentity');
+  }
 
   if ('capability' in decl) {
     const out = await requirePermission(req, caller, decl.capability);

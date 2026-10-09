@@ -76,6 +76,13 @@ reasons contains "pii_blocked_at_root" if {
 	}
 }
 
+# The candidate capabilities the actor holds (input.candidates), each one
+# that `decision` would allow. One call for the portal's menus and buttons.
+capabilities contains c if {
+	some c in input.candidates
+	allow with input.capability as c
+}
+
 decision := {"allow": true, "reasons": []} if allow
 
 decision := {"allow": false, "reasons": sort(reasons)} if not allow

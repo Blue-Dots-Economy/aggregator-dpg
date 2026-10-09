@@ -559,5 +559,47 @@ describe('console routes /v1/user, /v1/org', () => {
     it('lets a signed-in coordinator read itself', async () => {
       expect((await get('/v1/user/read/me', 'coord')).statusCode).toBe(200);
     });
+
+    it('lists the caller capabilities on read/me', async () => {
+      const me = (await get('/v1/user/read/me', 'a')).json() as { capabilities: string[] };
+      expect(me.capabilities).toContain('org.manage');
+      expect(me.capabilities).toContain('contact.unmask');
+      expect(me.capabilities).not.toContain('network.administer');
+      expect(me.capabilities).not.toContain('profiles.view_pii');
+      const na = (await get('/v1/user/read/me', 'na')).json() as { capabilities: string[] };
+      expect(na.capabilities).toContain('network.administer');
+    });
+
+    it('returns null capabilities when RBAC is off', async () => {
+      _setRbacRuntime(null);
+      const me = (await get('/v1/user/read/me', 'a')).json() as { capabilities: unknown };
+      expect(me.capabilities).toBeNull();
+    });
+
+    it('masks contacts for a role without contact.unmask', async () => {
+      const { config } = await loadRbacConfig([join(process.env.CONFIG_ROOT ?? '', 'rbac.yaml')]);
+      const noUnmask = {
+        ...config,
+        roles: {
+          ...config.roles,
+          admin: (config.roles.admin ?? []).filter((c) => c !== 'contact.unmask'),
+        },
+      };
+      _setRbacRuntime({ mode: 'enforce', config: noUnmask, authorizer: new AuthorizerFake() });
+      const one = (await get(`/v1/user/read/${C1}`, 'a')).json() as {
+        contact: { email: string; phone: string | null };
+      };
+      expect(one.contact.email).toMatch(/^.\*\*\*@/);
+      const list = (await post('/v1/user/search', 'a', { filter: {} })).json() as {
+        users: Array<{ contact: { email: string } }>;
+      };
+      expect(list.users.length).toBeGreaterThan(0);
+      for (const u of list.users) expect(u.contact.email).toMatch(/^.\*\*\*@/);
+    });
+
+    it('shows contacts plain to a role with contact.unmask', async () => {
+      const one = (await get(`/v1/user/read/${C1}`, 'a')).json() as { contact: { email: string } };
+      expect(one.contact.email).toBe('c1@x.org');
+    });
   });
 });

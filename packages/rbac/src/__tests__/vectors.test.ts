@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { evaluate } from '../evaluate.js';
+import { evaluate, listCapabilities } from '../evaluate.js';
+import { CAPABILITIES } from '../interface.js';
 import type { Decision, DecisionInput } from '../interface.js';
 
 // The same vectors run against policy/rbac/rbac.rego in `opa test`.
@@ -17,5 +18,25 @@ describe('shared policy vectors', () => {
 
   it.each(vectors.map((v) => [v.name, v] as const))('%s', (_name, v) => {
     expect(evaluate(v.input)).toEqual(v.expected);
+  });
+});
+
+describe('capability lists agree with single decisions', () => {
+  const all = [...CAPABILITIES];
+  it.each(vectors.map((v) => [v.name, v] as const))('%s', (_name, v) => {
+    const listed = listCapabilities({ actor: v.input.actor, candidates: all, now: v.input.now });
+    const allowed = all.filter((c) => evaluate({ ...v.input, capability: c }).allow).sort();
+    expect(listed).toEqual(allowed);
+  });
+
+  it('drops duplicates and sorts', () => {
+    const actor = vectors[0]!.input.actor;
+    expect(
+      listCapabilities({
+        actor,
+        candidates: ['profiles.view', 'profiles.onboard', 'profiles.view'],
+        now: 0,
+      }),
+    ).toEqual(['profiles.onboard', 'profiles.view']);
   });
 });

@@ -6,7 +6,14 @@
 
 export { initRbac, getRbacRuntime, rbacConfigCandidates, _setRbacRuntime } from './runtime.js';
 export type { RbacMode, RbacRuntime } from './runtime.js';
-export { checkCapability, decisionInput, requirePermission, resolveCaller } from './guard.js';
+export {
+  actorInput,
+  checkCapability,
+  decisionInput,
+  listActorCapabilities,
+  requirePermission,
+  resolveCaller,
+} from './guard.js';
 export type { GuardOutcome, GuardRequest, TokenIdentity } from './guard.js';
 export {
   assertRouteDeclared,

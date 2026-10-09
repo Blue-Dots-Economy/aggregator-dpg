@@ -34,6 +34,8 @@ export interface BulkAction {
   labelKey: string;
   icon: IconName;
   kind: 'client' | 'server';
+  /** The capability needed to see the action (RBAC); the API also checks it. */
+  capability: string;
   /**
    * Executes the action against the selected rows.
    *
@@ -57,6 +59,7 @@ export const DASHBOARD_BULK_ACTIONS: BulkAction[] = [
     labelKey: 'bulk.exportSelected',
     icon: 'download',
     kind: 'client',
+    capability: 'profiles.export',
     run: async (rows, ctx) => {
       const csv = buildParticipantCsv(rows);
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -69,6 +72,7 @@ export const DASHBOARD_BULK_ACTIONS: BulkAction[] = [
     labelKey: 'bulk.exportProfileData',
     icon: 'download',
     kind: 'server',
+    capability: 'profiles.view_pii',
     run: async (rows, ctx) => {
       const itemIds = rows.map((r) => r.id).filter((id) => !id.startsWith('row-'));
       if (itemIds.length === 0) return;

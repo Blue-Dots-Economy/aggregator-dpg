@@ -11,6 +11,7 @@ import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
 import { Card } from '@/components/ui/Card';
 import { OrgEditForm } from '@/components/console/OrgEditForm';
+import { can } from '@/lib/capabilities';
 
 export default async function ConsoleOrgPage({ params }: { params: Promise<{ id: string }> }) {
   const t = await getTranslations('console');
@@ -43,7 +44,11 @@ export default async function ConsoleOrgPage({ params }: { params: Promise<{ id:
           </Link>
         ) : null}
       </Card>
-      <OrgEditForm org={org} editable={editable} canRename={actor.me.is_network_admin} />
+      <OrgEditForm
+        org={org}
+        editable={editable}
+        canRename={actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer')}
+      />
     </div>
   );
 }
