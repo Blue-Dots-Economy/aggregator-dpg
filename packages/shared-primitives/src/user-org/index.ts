@@ -174,6 +174,8 @@ export const OrgSchema = z.object({
   locations: z.array(BecknLocationSchema),
   legal_name: z.string().nullable(),
   gst_number: z.string().nullable(),
+  /** RBAC: the org's own PermissionSet name; null = the org_type default. */
+  permission_set: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -243,3 +245,73 @@ export const OwnerAccessResponseSchema = z.object({
   group: z.enum(['ok', 'failed', 'skipped']),
 });
 export type OwnerAccessResponse = z.infer<typeof OwnerAccessResponseSchema>;
+
+// ─── RBAC grants and PermissionSets (R3) ────────────────────────────────────
+
+/** One per-user grant on the wire (e.g. PII Access). */
+export const PermissionGrantSchema = z.object({
+  grant_key: z.string(),
+  capability: z.string(),
+  granted_at: z.string(),
+  expires_at: z.string(),
+  granted_by: z.string().nullable(),
+  revoked_at: z.string().nullable(),
+  /** Not revoked and not expired. */
+  live: z.boolean(),
+});
+export type PermissionGrant = z.infer<typeof PermissionGrantSchema>;
+
+/** A grant the caller may give this user, from `rbac.yaml`. */
+export const GrantableSchema = z.object({
+  grant_key: z.string(),
+  capability: z.string(),
+  max_days: z.number().int().positive(),
+});
+export type Grantable = z.infer<typeof GrantableSchema>;
+
+/** `GET /v1/user/grants/:id`. */
+export const UserGrantsResponseSchema = z.object({
+  grants: z.array(PermissionGrantSchema),
+  grantable: z.array(GrantableSchema),
+});
+export type UserGrantsResponse = z.infer<typeof UserGrantsResponseSchema>;
+
+/** `POST /v1/user/grant/:id`. Omit `days` for the grant's longest validity. */
+export const GrantRequestSchema = z
+  .object({
+    grant_key: z.string().min(1),
+    days: z.number().int().min(1).optional(),
+  })
+  .strict();
+export type GrantRequest = z.infer<typeof GrantRequestSchema>;
+
+/** `POST /v1/user/grant/revoke/:id`. */
+export const RevokeGrantRequestSchema = z.object({ grant_key: z.string().min(1) }).strict();
+export type RevokeGrantRequest = z.infer<typeof RevokeGrantRequestSchema>;
+
+/** `POST /v1/user/grant/revoke/:id` response. */
+export const RevokeGrantResponseSchema = z.object({ revoked: z.boolean() });
+export type RevokeGrantResponse = z.infer<typeof RevokeGrantResponseSchema>;
+
+/** `PATCH /v1/org/permission-set/update/:id`. `null` restores the org_type default. */
+export const OrgPermissionSetRequestSchema = z
+  .object({ permission_set: z.string().min(1).nullable() })
+  .strict();
+export type OrgPermissionSetRequest = z.infer<typeof OrgPermissionSetRequestSchema>;
+
+/** `PATCH /v1/org/permission-set/update/:id` response. */
+export const OrgPermissionSetResponseSchema = z.object({
+  id: z.string(),
+  permission_set: z.string().nullable(),
+  /** The capabilities the organisation now holds. */
+  capabilities: z.array(z.string()),
+});
+export type OrgPermissionSetResponse = z.infer<typeof OrgPermissionSetResponseSchema>;
+
+/** `GET /v1/org/permission-sets`: the PermissionSets of this instance (rbac.yaml). */
+export const PermissionSetsResponseSchema = z.object({
+  sets: z.array(z.object({ name: z.string(), capabilities: z.array(z.string()) })),
+  /** The set each org_type holds when an organisation has none of its own. */
+  defaults: z.record(z.string(), z.string()),
+});
+export type PermissionSetsResponse = z.infer<typeof PermissionSetsResponseSchema>;

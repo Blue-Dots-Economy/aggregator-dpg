@@ -552,6 +552,35 @@ export const ERR = {
     detail: 'The combination of fields supplied is not allowed by the API.',
     hint: 'A field combination violates a business invariant (e.g. profile fields on an account_only link). Inspect detail for the specific rule.',
   },
+  RBAC_NOT_ENABLED: {
+    code: 'RBAC_NOT_ENABLED',
+    status: 503,
+    title: 'Access control is off',
+    detail:
+      'Access control is not enabled on this instance, so roles and grants cannot be changed.',
+    hint: 'RBAC_MODE=off: rbac.yaml is not loaded. Set RBAC_MODE=log or enforce (docs/rbac/).',
+  },
+  PERMISSION_GRANT_NOT_ALLOWED: {
+    code: 'PERMISSION_GRANT_NOT_ALLOWED',
+    status: 409,
+    title: 'Grant not allowed',
+    detail: 'This grant cannot be given to this user.',
+    hint: 'Self-grant, a grantee that is not a coordinator, or an unknown grant key (rbac.yaml grants). See fields.reason.',
+  },
+  PERMISSION_GRANT_EXCEEDS_ORG_SET: {
+    code: 'PERMISSION_GRANT_EXCEEDS_ORG_SET',
+    status: 409,
+    title: 'Not allowed for this organisation',
+    detail: "The user's organisation is not allowed this capability, so it cannot be granted.",
+    hint: "Subset rule: the grantee's organisation PermissionSet does not hold the granted capability.",
+  },
+  PERMISSION_SET_UNKNOWN: {
+    code: 'PERMISSION_SET_UNKNOWN',
+    status: 400,
+    title: 'Unknown PermissionSet',
+    detail: 'That PermissionSet does not exist on this instance.',
+    hint: 'permission_set is not a key of rbac.yaml permission_sets.',
+  },
 } as const satisfies Record<string, ErrorCatalogueEntry>;
 
 export type ErrorCode = keyof typeof ERR;

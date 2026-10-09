@@ -73,6 +73,7 @@ export function buildAggregatorOrg(overrides: Partial<AggregatorOrg> = {}): Aggr
     locations: [],
     legalName: null,
     gstNumber: null,
+    permissionSet: null,
     ...overrides,
   };
 }

@@ -57,5 +57,6 @@ export function errorKey(r: { status: number; error: ConsoleError }): string {
   if (r.status === 429) return 'errors.rate_limited';
   if (r.status === 404) return 'errors.not_found';
   if (r.error.code === 'ORG_NAME_TAKEN') return 'errors.name_taken';
+  if (r.error.code?.startsWith('PERMISSION_GRANT_')) return 'errors.grant_not_allowed';
   return 'errors.generic';
 }

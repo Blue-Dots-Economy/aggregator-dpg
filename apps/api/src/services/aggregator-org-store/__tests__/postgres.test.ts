@@ -135,6 +135,7 @@ function makeRow(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
     locations: [],
     legalName: null,
     gstNumber: null,
+    permissionSet: null,
     ...overrides,
   };
 }

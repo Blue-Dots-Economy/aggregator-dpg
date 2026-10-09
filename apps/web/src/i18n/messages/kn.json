@@ -667,7 +667,11 @@
       "name_admin_only": "Only the network administrator can rename an organisation.",
       "owner": "Owner",
       "status": "Status",
-      "view_coordinators": "View coordinators"
+      "view_coordinators": "View coordinators",
+      "permission_set": "PermissionSet",
+      "permission_set_default": "Default ({name})",
+      "permission_set_save": "Save PermissionSet",
+      "permission_set_saved": "Saved."
     },
     "orgs": {
       "heading": "Organisations",
@@ -732,7 +736,18 @@
       "generic": "Something went wrong. Please try again.",
       "rate_limited": "Too many changes in a short time. Wait a moment and try again.",
       "not_found": "Not found.",
-      "name_taken": "That name is already taken."
+      "name_taken": "That name is already taken.",
+      "grant_not_allowed": "This organisation cannot give that access, or the user cannot receive it."
+    },
+    "grants": {
+      "title": "Access grants",
+      "pii_access": "Personal data (PII Access)",
+      "active_until": "Active until {date}",
+      "none": "Not granted",
+      "grant": "Grant for {days} days",
+      "revoke": "Revoke",
+      "saved": "Saved.",
+      "hint": "Grants add to the coordinator's role, within what the organisation allows. Every change is recorded."
     }
   }
 }
