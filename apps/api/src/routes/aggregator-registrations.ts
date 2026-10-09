@@ -53,6 +53,7 @@ import { checkSubmitRate } from '../services/submit-rate.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
+import { getNetworkConfig } from '../services/network-config.js';
 import { resolveProfileRef } from '../services/schema-ref.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
@@ -209,6 +210,17 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         // (the zod validator compiler replaces `req.body` with the parse
         // output), so the typed body can be consumed directly here.
         const body = req.body as z.infer<typeof RegistrationPayloadSchema>;
+
+        // `type` is the coordinator's domain focus and must be one of the
+        // network's domains. Reject anything else here (typos, or the removed
+        // `'both'` sentinel) so only real domain ids reach `serves`.
+        const networkCfg = await getNetworkConfig();
+        if (!networkCfg.domainIds.includes(body.type)) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: `unknown type '${body.type}' — valid: ${networkCfg.domainIds.join(', ')}`,
+            fields: { type: 'invalid' },
+          });
+        }
 
         // `org_id` is an org-hierarchy field outside the form's JSON Schema
         // contract; strip it before Ajv so the schema in `config/` stays the

@@ -133,7 +133,6 @@ describe('InMemoryAggregatorStore — consent hook and serves (0029)', () => {
   it.each([
     ['seeker', ['seeker'], 'seeker'],
     [null, [], null],
-    ['both', [], null],
   ] as const)('type %s → serves %j, type %s', async (type, serves, readType) => {
     const store = new InMemoryAggregatorStore();
     const r = await store.create(buildCreateAggregatorInput({ type }));

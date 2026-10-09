@@ -124,7 +124,7 @@ export interface Aggregator {
 export interface CreateAggregatorInput {
   orgSlug: string;
   name: string;
-  /** The domain served; `null` or `'both'` = every domain (stored as `serves = '{}'`). */
+  /** The domain served; `null` = every domain (stored as `serves = '{}'`). */
   type: RoleType | null;
   /** `contact.company` / `contact.gstNumber` are not stored (they belong to the org). */
   contact: BecknContact;

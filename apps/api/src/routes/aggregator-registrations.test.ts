@@ -18,6 +18,8 @@ import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-tok
 import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
 import { _setSubmitRateChecker } from '../services/submit-rate.js';
+import { _setNetworkConfig } from '../services/network-config.js';
+import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type * as ConfigLoaderFs from '@aggregator-dpg/config-loader/fs';
 import { NO_CONSENT_WRITE } from '../services/consent-ledger/hook.js';
@@ -62,6 +64,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     // the one `(ip, email)` bucket and exhausts it mid-run. Cases that DO
     // assert a 429 override this per test.
     _setSubmitRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
+    _setNetworkConfig(buildBlueDotConfig());
 
     _setAggregatorStore(aggregatorStore);
     // These bodies register under the Default org (the only active org here).
@@ -84,6 +87,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
   afterAll(async () => {
     await app?.close();
     _setSubmitRateChecker(null);
+    _setNetworkConfig(null);
     _setAggregatorStore(null);
     _setAggregatorOrgStore(null);
     _setIdpAdmin(null);
@@ -163,6 +167,22 @@ describe('POST /v1/aggregator-registrations/create', () => {
     // different config var) so the recorded version matches what the web layer displayed.
     expect(consentRow?.network).toBe('blue_dot'); // default when AGGREGATOR_NETWORK unset
     expect(consentRow?.brand).toBeNull(); // default when AGGREGATOR_BRAND unset
+  });
+
+  it('rejects a type that is not one of the network domains (400)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: { ...validBody, type: 'both' },
+    });
+    expect(res.statusCode).toBe(400);
+    const body = res.json() as { error: { code: string; fields?: Record<string, unknown> } };
+    expect(body.error.code).toBe('SCHEMA_VALIDATION');
+    expect(body.error.fields).toMatchObject({ type: 'invalid' });
+    // Nothing was created.
+    const all = await aggregatorStore.list({ status: 'pending', limit: 10, offset: 0 });
+    expect(all.ok && all.value.rows.length).toBe(0);
   });
 
   it('records aggregator consent in the ledger on successful registration', async () => {
