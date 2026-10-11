@@ -358,7 +358,7 @@ apps/
       routes/
         aggregator-registrations.ts   POST /v1/aggregator-registrations/create
         aggregator-approvals.ts       Admin-side review pages + decision POST
-        aggregator-profile.ts         GET/PUT /v1/aggregators/profile/me
+        aggregator-profile.ts         GET/PATCH /v1/aggregators/profile/me
         health.ts
       services/
         aggregator-store/             Postgres + in-memory + fake (per the rules)
@@ -379,7 +379,7 @@ apps/
       app/
         api/auth/                     OIDC login / callback / logout / me
         api/aggregator/register       Anonymous registration proxy (service token)
-        api/aggregator/profile/me     GET/PUT proxy (user token via callApi)
+        api/aggregator/profile/me     GET/PATCH proxy (user token via callApi)
         (public)/login                Login page
         (public)/register             Registration form (RJSF)
         (protected)/profile/complete  First-login profile completion form (RJSF)

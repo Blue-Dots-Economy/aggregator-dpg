@@ -22,6 +22,8 @@ Service-account-only endpoints additionally gate on `subject.startsWith('service
 
 `recordAggregatorConsent()` (`routes/aggregator-registrations.ts:310`) calls `getConsentLedger().recordRegistrationConsent(...)` (line 456) **before** Keycloak/profile provisioning. On failure (config load throws, or the ledger write returns `!success`), the caller (`:315-319`) **deletes the just-created aggregator row** (`aggregatorStore.deleteById`) and throws `CONSENT_WRITE_FAILED` — a real rollback, not a log-and-continue. Same pattern in `aggregator-orgs.ts:375`. **Do not reorder this** — provisioning before consent would let a subject exist without a consent record, which is exactly what "fail-closed" is designed to prevent.
 
+**Consent is recorded once, at registration — the profile PATCH cannot change it (ae842508, breaking).** `PATCH /v1/aggregators/profile/me` has no `consent` key and its body schema is `.strict()`, so a body that sends `consent` is refused with `400 SCHEMA_VALIDATION`; the store's update path no longer writes `aggregators.consent`. Do not re-add it — a client-supplied consent object would let the stored record and the append-only ledger disagree.
+
 ## Known gap: Keycloak calls have timeout but no retry — flagged, not fixed here
 
 `.claude/rules/error-handling.md` requires "retry transient failures at least once with exponential backoff" on every external call. `services/idp-admin/keycloak.ts` (582 lines) routes every admin call through `safeFetch` (`:530`), which applies `AbortSignal.timeout(HTTP_TIMEOUT_MS)` uniformly — but **there is no retry loop anywhere in this file**. This is a real, verified deviation from the repo-wide rule, not a doc gap. If you're touching this file for an unrelated reason, don't assume retry exists; if you're adding retry, be aware Keycloak admin calls (user enable, role assign) are not all naturally idempotent — check each call site's side effects before wrapping it in a blind retry.
@@ -45,6 +47,8 @@ A coordinator's and an org owner's name / email / phone are stored once, in `con
 ## Bulk-upload: the API only validates, reserves, and enqueues
 
 Streaming CSV parsing is entirely `apps/worker`'s job (see `apps/worker/CLAUDE.md`). The API side (`routes/bulk-uploads.ts`) does: presigned S3 PUT → `/start` validates the object exists via `headObject` (size-0 check + `BULK_UPLOAD_MAX_BYTES` as belt-and-braces, since a presigned PUT can't itself cap size) → `store.markUploaded` → `enqueueBulkFileProcess` (`services/bulk-queue/index.ts`, `jobId = uploadId` for idempotent enqueue — a retry of `/start` can't double-enqueue). If enqueue fails after `markUploaded` succeeds, the row is left `uploaded` with no active job — recovery relies on the worker's stuck-job watchdog (`cron-watchdog.ts`, see `apps/worker/CLAUDE.md`), not a retry here.
+
+**Rate limits (#848).** Two fixed-window Redis buckets in `services/bulk-upload-rate.ts`, keyed by the authenticated user id (i.e. per coordinator): `POST /v1/bulk-uploads` allows **5 per hour** and `GET /v1/bulk-uploads/template` **30 per hour**. Exceeding either returns `429 RATE_LIMITED` with `retryAfterSeconds`. The numbers are hard-coded constants, not env config, and the limiter fails open on a Redis error.
 
 ## Health probes & observability
 
