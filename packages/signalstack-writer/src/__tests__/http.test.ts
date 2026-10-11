@@ -617,6 +617,90 @@ describe('HttpSignalStackWriter.onboard', () => {
     expect(result.error.code).toBe('SIGNALSTACK_PROFILE_LIMIT_REACHED');
   });
 
+  it('distinguishes a coordinate outside the country (400 + LOCATION_OUTSIDE_COUNTRY, signals-dpg#789)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      errJsonResponse(400, {
+        error: 'LOCATION_OUTSIDE_COUNTRY',
+        message: 'Location 23.8103, 90.4125 is outside the allowed region (IN).',
+      }),
+    );
+
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'bulk',
+      source_id: 'upload-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+      item_locations: [{ lat: 23.8103, lng: 90.4125 }],
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY');
+    expect(result.error.message).toContain('outside the allowed region (IN)');
+  });
+
+  it("forwards Signals' error code and per-field map on the error details", async () => {
+    fetchMock.mockResolvedValueOnce(
+      errJsonResponse(400, {
+        error: 'INVALID_ITEM_STATE',
+        message: 'Invalid item_state: mobile_number: Enter a 10-digit mobile number',
+        fields: { mobile_number: 'Enter a 10-digit mobile number' },
+      }),
+    );
+
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'bulk',
+      source_id: 'upload-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.details).toMatchObject({
+      upstreamCode: 'INVALID_ITEM_STATE',
+      signalsFields: { mobile_number: 'Enter a 10-digit mobile number' },
+      signalsMessage: 'Invalid item_state: mobile_number: Enter a 10-digit mobile number',
+    });
+  });
+
+  it("reads a Fastify request-validation error's `code`, not its generic `error`", async () => {
+    fetchMock.mockResolvedValueOnce(
+      errJsonResponse(400, {
+        statusCode: 400,
+        code: 'FST_ERR_VALIDATION',
+        error: 'Bad Request',
+        message: 'body/email Invalid email address',
+      }),
+    );
+
+    const result = await writer.onboard({
+      actingOrgId: 'org-abc',
+      name: 'Asha',
+      email: 'asha@example.com',
+      channel: 'bulk',
+      source_id: 'upload-1',
+      network: 'blue_dot',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      profile: {},
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.details).toMatchObject({ upstreamCode: 'FST_ERR_VALIDATION' });
+  });
+
   it('combines a nested { error: { code, message } } body into one message', async () => {
     fetchMock.mockResolvedValueOnce(
       errJsonResponse(422, { error: { code: 'FANCY_CODE', message: 'fancy message' } }),

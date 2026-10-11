@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import Papa from 'papaparse';
 
 // ─── Mutable fixtures read by the mocked db/redis/object-storage below ──────
 
@@ -289,6 +290,95 @@ describe('finaliseBulk — normal completion', () => {
     expect(dataLine).toBe('Asha,asha@x.io,,validation,missing city');
   });
 
+  it('rebuilds a row from its stored JSON cells, untouched by "|", "," or quotes', async () => {
+    counters = { passed: '0', failed: '1', skipped: '0' };
+    hscanPages = [
+      [
+        '0',
+        [
+          'err-0',
+          JSON.stringify({ row_index: 0, reasons: ['bad category'], error_category: 'validation' }),
+        ],
+      ],
+    ];
+    headersJson = JSON.stringify(['name', 'disabilities', 'address']);
+    hmgetReturn = [
+      JSON.stringify(['Asha', 'Blindness|Deaf|Low Vision|Dwarfism|Hemophilia', 'Basti, "UP"']),
+    ];
+
+    await finaliseBulk(JOB);
+    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const [cells] = Papa.parse<string[]>(csv.split('\n')[1]!, { delimiter: ',' }).data;
+    expect(cells).toEqual([
+      'Asha',
+      'Blindness|Deaf|Low Vision|Dwarfism|Hemophilia',
+      'Basti, "UP"',
+      'validation',
+      'bad category',
+    ]);
+  });
+
+  it('keeps the error columns for a stored JSON row wider than the header', async () => {
+    counters = { passed: '0', failed: '1', skipped: '0' };
+    hscanPages = [
+      ['0', ['err-0', JSON.stringify({ row_index: 0, reasons: ['bad'], error_category: 'v' })]],
+    ];
+    headersJson = JSON.stringify(['name']);
+    hmgetReturn = [JSON.stringify(['Asha', 'extra'])];
+
+    await finaliseBulk(JOB);
+    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const [cells] = Papa.parse<string[]>(csv.split('\n')[1]!, { delimiter: ',' }).data;
+    expect(cells!.slice(0, 2)).toEqual(['Asha', 'v']);
+    expect(cells![2]).toMatch(/^bad; row has 2 cells but the header has 1 columns/);
+  });
+
+  it('legacy CSV line (previous release): re-parses on "," even when it carries more "|" than ","', async () => {
+    // Multi-value cells are joined with `|`. Left to auto-detect, a single row
+    // with more pipes than commas was split on `|`, shifting every cell and
+    // pushing the error columns off the end of errors.csv.
+    counters = { passed: '0', failed: '1', skipped: '0' };
+    hscanPages = [
+      [
+        '0',
+        [
+          'err-0',
+          JSON.stringify({ row_index: 0, reasons: ['bad category'], error_category: 'validation' }),
+        ],
+      ],
+    ];
+    headersJson = JSON.stringify(['name', 'disabilities', 'city']);
+    hmgetReturn = ['Asha,Blindness|Deaf|Low Vision|Dwarfism|Hemophilia|Thalassemia,Basti'];
+
+    await finaliseBulk(JOB);
+    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    expect(csv.split('\n')[1]!.trim()).toBe(
+      'Asha,Blindness|Deaf|Low Vision|Dwarfism|Hemophilia|Thalassemia,Basti,validation,bad category',
+    );
+  });
+
+  it('legacy CSV line: keeps the error columns for a row wider than the header and says why', async () => {
+    counters = { passed: '0', failed: '1', skipped: '0' };
+    hscanPages = [
+      [
+        '0',
+        [
+          'err-0',
+          JSON.stringify({ row_index: 0, reasons: ['bad city'], error_category: 'validation' }),
+        ],
+      ],
+    ];
+    headersJson = JSON.stringify(['name', 'city']);
+    hmgetReturn = ['Asha,Basti,extra one,extra two'];
+
+    await finaliseBulk(JOB);
+    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const [cells] = Papa.parse<string[]>(csv.split('\n')[1]!, { delimiter: ',' }).data;
+    expect(cells).toHaveLength(4);
+    expect(cells!.slice(0, 3)).toEqual(['Asha', 'Basti', 'validation']);
+    expect(cells![3]).toMatch(/^bad city; row has 4 cells but the header has 2 columns/);
+  });
+
   it('defuses spreadsheet-formula-injection cells in errors.csv (security)', async () => {
     counters = { passed: '0', failed: '1', skipped: '0' };
     hscanPages = [
@@ -346,8 +436,11 @@ describe('finaliseBulk — normal completion', () => {
     const res = await finaliseBulk(JOB);
     expect(res.failed).toBe(2);
     const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
-    expect(csv).toContain('row0');
-    expect(csv).toContain('row1');
+    // No header was stashed, so only the error columns are written — one line
+    // per failure from BOTH cursor pages. (This used to print `row0,x`: the raw
+    // cell displaced the category and the reason fell off the end.)
+    expect(csv).toContain('x,a');
+    expect(csv).toContain('y,b');
   });
 });
 

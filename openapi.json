@@ -894,10 +894,7 @@
                   },
                   "organisation_type": {
                     "type": "string",
-                    "enum": [
-                      "educational",
-                      "non_educational"
-                    ]
+                    "maxLength": 100
                   },
                   "organisation_sub_type_educational": {
                     "type": "string",
@@ -10080,6 +10077,9 @@
                                 "type": "string"
                               },
                               "logo": {
+                                "type": "string"
+                              },
+                              "logoLight": {
                                 "type": "string"
                               }
                             },

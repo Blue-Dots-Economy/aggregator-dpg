@@ -24,6 +24,7 @@ import { schema, getDb } from '../db.js';
 import { getRedis } from '../services/redis.js';
 import { putObject } from '../object-storage.js';
 import { logger } from '../logger.js';
+import { CSV_FIELD_DELIMITER } from './bulk-file-stream.js';
 
 interface ErrorRecord {
   row_index: number;
@@ -108,16 +109,18 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
   if (failed > 0) {
     const headerCols = await readHeaderCols(redis, `${ns}:meta`);
     const csvHeader = [...headerCols, 'error_category', 'error_reason'];
-    // Fetch raw CSV lines for only the failed row indices in one round-trip.
+    // Fetch the stored cells for only the failed row indices in one round-trip.
     const indices = errors.map((e) => String(e.row_index));
     const rawRows =
       indices.length > 0 ? await redis.hmget(`${ns}:lines`, ...indices) : ([] as (string | null)[]);
     const csvRows: string[][] = errors.map((e, i) => {
-      const cells = parseRawRow(rawRows[i] ?? '', headerCols.length).map(sanitiseCsvCell);
+      const { cells, surplus } = fitToHeader(readStoredRow(rawRows[i] ?? ''), headerCols.length);
+      const reasons = [...(e.reasons ?? [])];
+      if (surplus > 0) reasons.push(surplusNote(headerCols.length + surplus, headerCols.length));
       return [
-        ...cells,
+        ...cells.map(sanitiseCsvCell),
         sanitiseCsvCell(e.error_category ?? ''),
-        sanitiseCsvCell((e.reasons ?? []).join('; ')),
+        sanitiseCsvCell(reasons.join('; ')),
       ];
     });
     const csvBody = Papa.unparse({ fields: csvHeader, data: csvRows });
@@ -197,8 +200,10 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
  */
 async function readErrors(redis: ReturnType<typeof getRedis>, key: string): Promise<ErrorRecord[]> {
   const errors: ErrorRecord[] = [];
-  let cursor = '0';
-  do {
+  // One HSCAN page per call, recursing on the returned cursor until it wraps
+  // to '0'. Pages are inherently sequential (each needs the previous cursor);
+  // at COUNT 200 a 10k-row upload is ~50 frames deep.
+  const scanFrom = async (cursor: string): Promise<void> => {
     const [next, fields] = (await redis.hscan(key, cursor, 'COUNT', 200)) as [string, string[]];
     for (let i = 1; i < fields.length; i += 2) {
       const raw = fields[i];
@@ -210,8 +215,9 @@ async function readErrors(redis: ReturnType<typeof getRedis>, key: string): Prom
         // skip malformed entry — counter on bulk_uploads still reflects it
       }
     }
-    cursor = next;
-  } while (cursor !== '0');
+    if (next !== '0') await scanFrom(next);
+  };
+  await scanFrom('0');
   return errors;
 }
 
@@ -236,18 +242,75 @@ async function readHeaderCols(
 }
 
 /**
- * Reconstructs cells from a raw CSV line. With header=false Papaparse
- * returns a positional array; we pad to the expected width if the line is
- * shorter (defensive — File Processor already validates header coverage).
+ * Reads a row stored under `bu:{id}:lines` back into its cells.
+ *
+ * Rows are stored as a JSON array of strings, so nothing is CSV-parsed twice.
+ * A value that is not one is a row written by the previous release, which
+ * stored a CSV line (still present for an upload in flight across the
+ * deploy); that is split on {@link CSV_FIELD_DELIMITER}, never auto-detected —
+ * a guess made from a single row with more `|` than `,` picked `|`. The
+ * fallback can go once no upload predates this release.
+ *
+ * @param stored - The `:lines` value, or `''` when the row is missing.
+ * @returns The row's cells, possibly ragged.
  */
-function parseRawRow(rawRow: string, expectedCols: number): string[] {
-  if (!rawRow) return new Array<string>(expectedCols).fill('');
-  const result = Papa.parse<string[]>(rawRow, { header: false, skipEmptyLines: 'greedy' });
-  const cells = (result.data[0] ?? []) as string[];
-  if (cells.length < expectedCols) {
-    return [...cells, ...new Array<string>(expectedCols - cells.length).fill('')];
+function readStoredRow(stored: string): string[] {
+  if (!stored) return [];
+  if (stored.startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.every((c) => typeof c === 'string')) return parsed;
+    } catch {
+      // Not JSON — a legacy CSV line that happens to start with `[`.
+    }
   }
-  return cells;
+  const result = Papa.parse<string[]>(stored, {
+    header: false,
+    skipEmptyLines: 'greedy',
+    delimiter: CSV_FIELD_DELIMITER,
+  });
+  return (result.data[0] ?? []) as string[];
+}
+
+/**
+ * Fits a row's cells to the header width for errors.csv.
+ *
+ * Short rows are padded and wide rows truncated, so `error_category` /
+ * `error_reason` always land under their own headings —
+ * `Papa.unparse({ fields })` drops anything past the header, which used to
+ * swallow the reason of every wide row. With no known header (`expectedCols`
+ * 0) no data cells are emitted at all.
+ *
+ * @param cells - The row's cells as stored.
+ * @param expectedCols - Number of header columns.
+ * @returns The fitted cells, and how many surplus cells were dropped.
+ */
+function fitToHeader(cells: string[], expectedCols: number): { cells: string[]; surplus: number } {
+  if (cells.length < expectedCols) {
+    return {
+      cells: [...cells, ...new Array<string>(expectedCols - cells.length).fill('')],
+      surplus: 0,
+    };
+  }
+  return {
+    cells: cells.slice(0, expectedCols),
+    surplus: expectedCols > 0 ? cells.length - expectedCols : 0,
+  };
+}
+
+/**
+ * The errors.csv note for a row wider than the header, telling the uploader
+ * why columns went missing and the usual cause.
+ *
+ * @param actual - Cells found in the row.
+ * @param expected - Columns in the header.
+ * @returns A one-line, user-facing note.
+ */
+function surplusNote(actual: number, expected: number): string {
+  return (
+    `row has ${actual} cells but the header has ${expected} columns; the extra cells are ` +
+    'not shown (join multiple values with the list separator, not a comma)'
+  );
 }
 
 /**

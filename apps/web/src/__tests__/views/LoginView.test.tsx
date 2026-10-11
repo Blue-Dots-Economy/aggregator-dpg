@@ -20,11 +20,16 @@ vi.mock('@/hooks/useAggregatorConfig', () => {
 });
 
 import { LoginView } from '@/app/(public)/login/LoginView';
+import { ThemeModeProvider } from '@/lib/theme-mode';
 
 function renderView(props: { returnTo?: string; error?: string | null } = {}) {
+  // ThemeModeProvider mirrors the app: `Providers` wraps every route from the
+  // root layout, and LoginView now reads the mode to pick its lockup variant.
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <LoginView returnTo={props.returnTo ?? '/dashboard'} error={props.error ?? null} />
+      <ThemeModeProvider>
+        <LoginView returnTo={props.returnTo ?? '/dashboard'} error={props.error ?? null} />
+      </ThemeModeProvider>
     </NextIntlClientProvider>,
   );
 }

@@ -58,7 +58,11 @@
     }
   },
   "aggregator_type": {
-    "ui:enumNames": ["Seekers", "Service Providers"]
+    "ui:widget": "checkboxes",
+    "ui:enumNames": ["Seekers", "Service Providers"],
+    "ui:options": {
+      "inline": true
+    }
   },
   "address": {
     "ui:title": "",

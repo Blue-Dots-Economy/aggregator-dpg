@@ -242,3 +242,52 @@ describe('createGooglePlacesProvider — Maps API loader', () => {
     expect(await pending).toEqual([]);
   });
 });
+
+describe('createGooglePlacesProvider country restriction (signals-dpg#785)', () => {
+  const BOGURA_BD: StubPlace = {
+    location: { lat: () => 24.85, lng: () => 89.37 },
+    addressComponents: [{ types: ['country'], longText: 'Bangladesh', shortText: 'BD' }],
+  };
+
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends includedRegionCodes when a country is set', async () => {
+    const { fetchAutocompleteSuggestions } = stubMapsApi([]);
+    await createGooglePlacesProvider('key-123', 'IN').suggest('jayanagar');
+    expect(fetchAutocompleteSuggestions).toHaveBeenCalledWith(
+      expect.objectContaining({ input: 'jayanagar', includedRegionCodes: ['in'] }),
+    );
+  });
+
+  it('sends no includedRegionCodes when no country is set', async () => {
+    const { fetchAutocompleteSuggestions } = stubMapsApi([]);
+    await createGooglePlacesProvider('key-123').suggest('jayanagar');
+    expect(fetchAutocompleteSuggestions.mock.calls[0]?.[0]).not.toHaveProperty(
+      'includedRegionCodes',
+    );
+  });
+
+  it('drops a suggestion from another country as a backstop', async () => {
+    stubMapsApi([
+      prediction('Bogura, Bangladesh', BOGURA_BD),
+      prediction('Jayanagar, Bengaluru, Karnataka, India', BENGALURU),
+    ]);
+    const out = await createGooglePlacesProvider('key-123', 'IN').suggest('b');
+    expect(out.map((s) => s.label)).toEqual(['Jayanagar, Bengaluru, Karnataka, India']);
+  });
+
+  it('keeps foreign suggestions when no country is set', async () => {
+    stubMapsApi([
+      prediction('Bogura, Bangladesh', BOGURA_BD),
+      prediction('Jayanagar, Bengaluru, Karnataka, India', BENGALURU),
+    ]);
+    const out = await createGooglePlacesProvider('key-123').suggest('b');
+    expect(out).toHaveLength(2);
+  });
+});

@@ -209,8 +209,9 @@ export function MultiLocationAutocompleteWidget({
       getGeoProvider({
         ...(config.googleMapsApiKey ? { googleMapsApiKey: config.googleMapsApiKey } : {}),
         ...(config.photonUrl ? { photonUrl: config.photonUrl } : {}),
+        ...(config.geoCountry ? { country: config.geoCountry } : {}),
       }),
-    [config.googleMapsApiKey, config.photonUrl],
+    [config.googleMapsApiKey, config.photonUrl, config.geoCountry],
   );
 
   function ensureRefs(count: number) {

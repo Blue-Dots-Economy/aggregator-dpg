@@ -9,6 +9,19 @@
  */
 
 import type { JsonSchema } from '@aggregator-dpg/schema-loader/interface';
+import {
+  WELL_KNOWN_COLUMNS,
+  wellKnownColumnMeta,
+} from '@aggregator-dpg/shared-primitives/bulk-columns';
+
+/**
+ * Example cell for a well-known column, or undefined when `name` is a normal
+ * schema property. These carry no JSON Schema, so `exampleValue` — which is
+ * schema-driven — has nothing to work from and would sample a bare string.
+ */
+export function wellKnownExample(name: string): string | undefined {
+  return wellKnownColumnMeta(name)?.example;
+}
 
 export interface CsvTemplateOptions {
   /**
@@ -70,6 +83,13 @@ export function orderedColumns(schema: JsonSchema): string[] {
   for (const name of Object.keys(properties)) {
     if (!requiredSet.has(name)) ordered.push(name);
   }
+  // Well-known columns last, and only when the schema does not already own the
+  // name — the schema wins, exactly as it does in the parser. Without this an
+  // operator downloading the template has no way to discover the feature, and
+  // an undiscoverable optional column may as well not exist.
+  for (const name of WELL_KNOWN_COLUMNS) {
+    if (!properties[name]) ordered.push(name);
+  }
   return ordered;
 }
 
@@ -91,6 +111,8 @@ export function buildCsvTemplate(schema: JsonSchema, options: CsvTemplateOptions
   const example =
     ordered
       .map((name) => {
+        const wellKnown = wellKnownExample(name);
+        if (wellKnown !== undefined) return escapeCsvCell(wellKnown);
         const prop = properties[name] ?? {};
         const identityCell =
           identity === undefined ? undefined : identityExample(name, prop, identity);
