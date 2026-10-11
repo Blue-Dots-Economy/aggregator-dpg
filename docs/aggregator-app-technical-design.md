@@ -136,7 +136,7 @@ The constraints below are load-bearing for the design — they shape the technol
 - **Two login paths** — OTP (email/phone) and password — both required at MVP.
 - **External approval flow** — admin actions happen in email, not in-app. The system must hold a registration in `under_review` and accept a side-channel approval signal.
 - **Self-registration via shareable link / QR** — public, unauthenticated entry point that resolves to a context-bound form (state, district, domain, source/sub-source, campaign).
-- **Bulk CSV upload, asynchronous, partial-success** — up to 50 rows per file, valid rows register, invalid rows surface in an error report; duplicates are skipped.
+- **Bulk CSV upload, asynchronous, partial-success** — up to 50 rows per file, valid rows register, invalid rows surface in an error report. Nothing is deduplicated locally — each row's outcome is Signals' verdict, and a Signals rejection such as `DOMAIN_LOCKED` or `USER_ALREADY_EXISTS` is reported in the error report under the `duplicate` category.
 - **System-derived participant status** — New / Active / At Risk / Inactive / Satisfied — computed from time-window rules expressed as configuration.
 - **Recommended actions** — system-generated suggestions (e.g. "Update Location") derived from missing fields on a participant's profile.
 - **Telemetry on every action** — every meaningful UX or backend event emits a structured telemetry event conformant to the **Sunbird Telemetry Spec v3** (https://telemetry.sunbird.org/learn/specification), carrying the originating context (link metadata, actor, action) so reporting metrics can be computed downstream.

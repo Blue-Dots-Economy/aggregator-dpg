@@ -43,6 +43,10 @@ Both `/register` and `/profile` call `loadRegistrationSchema()`, which loads `re
 
 `src/services/*` (`profile.service.ts`, `dashboard.service.ts`, etc.) are plain client-side fetch modules, **not** `interface.ts`/abstract-class services — route handlers are the real "service boundary" here. The two places that _do_ follow the repo-wide base-class pattern (`.claude/rules/base-class-pattern.md`) are `lib/oidc/interface.ts` and `lib/session/interface.ts` — treat those two as governed by that rule; everything else under `src/services/` and `src/lib/*-client` files is not.
 
+## Mobile layout (#793 / #817)
+
+The logged-in portal is responsive at the Tailwind `lg` (1024px) breakpoint: below it `components/shell/Sidebar.tsx` hides the sidebar behind a slim menu bar and opens it as a slide-in drawer (Escape / backdrop / link / widen-to-desktop close it; scroll-locked, focus-trapped), and pages reflow for phones. From `lg` up the layout is unchanged, so check both widths when touching the shell or the dashboard.
+
 ## Tests
 
 Vitest + jsdom + `@testing-library/react` for components (`src/__tests__/components/*.test.tsx`, one co-located `components/support/__tests__`); plain unit tests for `src/services/__tests__/*.test.ts` (no fake-subpath convention — these are simple fetch wrappers, not abstract-class services). No Playwright/e2e. Coverage thresholds (70/70/60/70) are set in `vitest.config.ts`.

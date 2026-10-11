@@ -4,6 +4,10 @@
 **Repo:** `aggregator-dpg` @ `a480002`
 **Question:** is there a practical need for the `aggregator_profile` table, and what does deleting it mean?
 
+> **Resolved — the table has been dropped.** The removal recommended here landed
+> in #818: migration `0023_drop_aggregator_profile.sql` drops `aggregator_profile`.
+> This review is kept as the rationale; the code paths it describes no longer exist.
+
 **Status:** claims below were independently fact-checked against the code by a
 second pass. The core thesis held; three supporting arguments were wrong and have
 been corrected in place (the `contact.name` CHECK guarantee, the
