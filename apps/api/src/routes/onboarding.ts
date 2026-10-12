@@ -66,7 +66,7 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
     async (req, reply) => {
       const auth = await requireAuth(req);
       const range = parseRange(req.query as z.infer<typeof RangeQuerySchema>);
-      const conditions = [eq(onboarding.aggregatorId, auth.aggregatorId)];
+      const conditions = [eq(onboarding.userId, auth.aggregatorId)];
       if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
       if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
 
@@ -109,7 +109,7 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
     async (req, reply) => {
       const auth = await requireAuth(req);
       const range = parseRange(req.query as z.infer<typeof RangeQuerySchema>);
-      const conditions = [eq(onboarding.aggregatorId, auth.aggregatorId)];
+      const conditions = [eq(onboarding.userId, auth.aggregatorId)];
       if (range.from) conditions.push(gte(onboarding.periodStart, range.from));
       if (range.to) conditions.push(lte(onboarding.periodEnd, range.to));
 

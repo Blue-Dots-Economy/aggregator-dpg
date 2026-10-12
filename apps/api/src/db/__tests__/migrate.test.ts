@@ -27,6 +27,13 @@ vi.mock('drizzle-orm/node-postgres/migrator', () => ({
   migrate: (...args: unknown[]) => migrateMock(...args),
 }));
 
+// The pre-migration guards have their own tests (migration-guards.test.ts);
+// here they are recorded so the run order can be asserted.
+const guardsMock = vi.fn(async (..._args: unknown[]): Promise<void> => undefined);
+vi.mock('../migration-guards.js', () => ({
+  runMigrationGuards: (...args: unknown[]) => guardsMock(...args),
+}));
+
 import { _setDbClients, closeDb } from '../client.js';
 import { runMigrations } from '../migrate.js';
 
@@ -121,5 +128,35 @@ describe('runMigrations', () => {
     expect(events).toEqual(['lock', 'release']);
     expect(migrateMock).not.toHaveBeenCalled();
     expect(released[0]).toBeInstanceOf(Error);
+  });
+});
+
+describe('runMigrations — pre-migration guards', () => {
+  beforeEach(() => {
+    installFakePool();
+    guardsMock.mockClear();
+  });
+  afterEach(async () => {
+    delete process.env.ALLOW_TRAIN_ON_BOOT;
+    await closeDb();
+  });
+
+  it('runs the guards before taking the lock, passing the override flag', async () => {
+    guardsMock.mockImplementationOnce(async () => {
+      events.push('guards');
+    });
+    process.env.ALLOW_TRAIN_ON_BOOT = 'true';
+    await runMigrations();
+    expect(events[0]).toBe('guards');
+    expect(guardsMock.mock.calls[0]?.[2]).toBe(true);
+  });
+
+  it('never takes the lock or migrates when a guard refuses', async () => {
+    guardsMock.mockImplementationOnce(async () => {
+      throw new Error('refusing to apply the user & org release train');
+    });
+    await expect(runMigrations()).rejects.toThrow(/release train/);
+    expect(events).toEqual([]);
+    expect(migrateMock).not.toHaveBeenCalled();
   });
 });

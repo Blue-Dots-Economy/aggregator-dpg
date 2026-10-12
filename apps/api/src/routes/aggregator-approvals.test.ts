@@ -10,11 +10,16 @@ import {
 import {
   AggregatorOrgStoreFake,
   buildAggregatorOrg,
+  buildDefaultOrg,
   _setAggregatorOrgStore,
 } from '../services/aggregator-org-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
-import { _resetTokenKey, mintApprovalToken } from '../services/approval-token.js';
+import {
+  _resetTokenKey,
+  mintApprovalToken,
+  verifyApprovalToken,
+} from '../services/approval-token.js';
 import { _setApprovalVerifyRateChecker } from '../services/approval-verify-rate.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { _setNetworkConfig } from '../services/network-config.js';
@@ -23,6 +28,12 @@ import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testin
 import { SignalStackWriterBase } from '@aggregator-dpg/signalstack-writer/interface';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
+import { getIdentityStore } from '../services/identity-store/index.js';
+import { MEMORY_DEFAULT_ORG_ID } from '../services/aggregator-store/memory.js';
+
+/** The Default org every coordinator here belongs to unless a test moves it. */
+const DEFAULT_ORG = MEMORY_DEFAULT_ORG_ID;
+import type { IdentityStoreFake } from '../services/identity-store/testing.js';
 
 const aggregatorId = '11111111-1111-1111-1111-111111111111';
 
@@ -34,6 +45,12 @@ describe('admin approval routes', () => {
   let signalstack: SignalStackWriterFake;
   let orgStore: AggregatorOrgStoreFake;
   let kcUserId: string;
+
+  /** Moves a seeded coordinator to another org (the store has no org patch since 0028). */
+  function setCoordinatorOrg(id: string, orgId: string): void {
+    const row = aggregatorStore.findByIdSync(id);
+    aggregatorStore.seed([{ ...row, parentOrgId: orgId, isDefaultOrg: orgId === DEFAULT_ORG }]);
+  }
 
   beforeEach(async () => {
     _resetTokenKey();
@@ -89,6 +106,8 @@ describe('admin approval routes', () => {
     _setSignalStackWriter(signalstack);
 
     orgStore = new AggregatorOrgStoreFake();
+    // Every coordinator has an org since 0028; the seeded one is in Default.
+    orgStore.seed([buildDefaultOrg()]);
     _setAggregatorOrgStore(orgStore);
 
     // Approval flow now reads cfg.domainIds from the network config —
@@ -115,7 +134,11 @@ describe('admin approval routes', () => {
       allowed: false,
       retryAfterSeconds: 42,
     }));
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'GET',
       url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}`,
@@ -131,7 +154,11 @@ describe('admin approval routes', () => {
       allowed: false,
       retryAfterSeconds: 30,
     }));
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -149,7 +176,11 @@ describe('admin approval routes', () => {
       allowed: false,
       retryAfterSeconds: 30,
     }));
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/renew/${aggregatorId}`,
@@ -160,7 +191,11 @@ describe('admin approval routes', () => {
   });
 
   it('GET /read/:id renders the single review page with both actions', async () => {
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'GET',
       url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}`,
@@ -173,11 +208,19 @@ describe('admin approval routes', () => {
     expect(res.body).toContain('name="decision" value="reject"');
     expect(res.body).toContain('asha@trrain.org');
     expect(res.body).toContain(`/admin/v1/aggregator-registrations/decision/${aggregatorId}`);
+    // 0027: opening the review link records the coordinator's IdP login.
+    const identities = (getIdentityStore() as IdentityStoreFake).all();
+    expect(identities).toHaveLength(1);
+    expect(identities[0]).toMatchObject({ userId: aggregatorId, provider: 'keycloak' });
   });
 
   it('GET /read/:id shows already-approved when aggregator.status=active', async () => {
     await aggregatorStore.updateStatus(aggregatorId, 'active', 'admin');
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'GET',
       url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}`,
@@ -188,7 +231,7 @@ describe('admin approval routes', () => {
 
   it('GET /read/:id shows already-rejected when aggregator.status=inactive', async () => {
     await aggregatorStore.updateStatus(aggregatorId, 'inactive', 'admin');
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
+    const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'reject' });
     const res = await app.inject({
       method: 'GET',
       url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}`,
@@ -219,7 +262,11 @@ describe('admin approval routes', () => {
   });
 
   it('POST /decision/:id approve flips DB status, enables KC user, stamps decision_made, emails applicant', async () => {
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -268,7 +315,11 @@ describe('admin approval routes', () => {
   });
 
   it('POST /decision/:id approve is single-use via CAS — a second click sends no duplicate email', async () => {
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const first = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -320,7 +371,11 @@ describe('admin approval routes', () => {
     }
     _setSignalStackWriter(new FailingUpsertWriter());
 
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -361,7 +416,11 @@ describe('admin approval routes', () => {
       return originalEnable(id);
     };
 
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
 
     const first = await app.inject({
       method: 'POST',
@@ -429,7 +488,11 @@ describe('admin approval routes', () => {
       }
     }
     _setSignalStackWriter(new FailingUpsertWriter());
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const first = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -460,7 +523,11 @@ describe('admin approval routes', () => {
 
   it('POST /decision/:id approve skips upsert cleanly when signalstack writer is disabled', async () => {
     _setSignalStackWriter(null);
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -536,7 +603,11 @@ describe('admin approval routes', () => {
       const captured: Array<{ external_id: string; domains: string[] | undefined }> = [];
       _setSignalStackWriter(buildCapturingWriter(captured, `mem-org-${type}`));
 
-      const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+      const { token } = await mintApprovalToken({
+        org: DEFAULT_ORG,
+        aggregatorId,
+        intent: 'approve',
+      });
       const res = await app.inject({
         method: 'POST',
         url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -554,7 +625,11 @@ describe('admin approval routes', () => {
     const captured: Array<{ external_id: string; domains: string[] | undefined }> = [];
     _setSignalStackWriter(buildCapturingWriter(captured, 'mem-org-legacy'));
 
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -565,7 +640,7 @@ describe('admin approval routes', () => {
   });
 
   it('POST /decision/:id reject flips DB status to inactive, keeps user disabled, emails applicant with reason', async () => {
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
+    const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'reject' });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -594,7 +669,11 @@ describe('admin approval routes', () => {
   });
 
   it('POST /decision/:id approve is idempotent — second click does not re-send', async () => {
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const first = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -613,7 +692,7 @@ describe('admin approval routes', () => {
   });
 
   it('POST /decision/:id reject is idempotent — second click does not re-send', async () => {
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
+    const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'reject' });
     const first = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -707,6 +786,76 @@ describe('admin approval routes', () => {
     expect(mailer.outbox.length).toBe(0);
   });
 
+  it('renew binds a legacy org-less link of a Default-org coordinator to the Default org (0028)', async () => {
+    const { id } = await seedPendingAggregator();
+    const expired = await mintExpiredApproveToken(id);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/renew/${id}`,
+      payload: { token: expired },
+    });
+    expect(res.statusCode).toBe(200);
+    const fresh = /name="token" value="([^"]+)"/.exec(res.body)?.[1] ?? '';
+    const v = await verifyApprovalToken(fresh);
+    expect(v.ok && v.org).toBe(DEFAULT_ORG);
+  });
+
+  it('renew never re-binds a link minted for another org', async () => {
+    const { id } = await seedPendingAggregator();
+    const key = new TextEncoder().encode(process.env.APPROVAL_TOKEN_SECRET);
+    const otherOrg = await new SignJWT({ intent: 'approve', org: 'org-A' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setSubject(id)
+      .setIssuer('aggregator-api')
+      .setAudience('aggregator-admin')
+      .setIssuedAt(Math.floor(Date.now() / 1000) - 7200)
+      .setExpirationTime(Math.floor(Date.now() / 1000) - 3600)
+      .sign(key);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/renew/${id}`,
+      payload: { token: otherOrg },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Token does not match this organisation.');
+  });
+
+  it('serves the review page for a pre-0028 org-less link with a token bound to the Default org', async () => {
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}&intent=approve`,
+    });
+    expect(res.statusCode).toBe(200);
+    const pageToken = /name="token" value="([^"]+)"/.exec(res.body)?.[1] ?? '';
+    const v = await verifyApprovalToken(pageToken);
+    expect(v.ok && v.org).toBe(DEFAULT_ORG);
+  });
+
+  it('refuses the review page for a link bound to another org', async () => {
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve', org: 'org-A' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}&intent=approve`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Token does not match this organisation.');
+  });
+
+  it('rejects a decision with a pre-0028 org-less link and offers to regenerate it', async () => {
+    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Regenerate &amp; review');
+    expect(res.body).toContain(`/admin/v1/aggregator-registrations/renew/${aggregatorId}`);
+    const stored = await aggregatorStore.findById(aggregatorId);
+    expect(stored.ok && stored.value?.status).toBe('pending');
+  });
+
   it('renew rejects a malformed token with 400', async () => {
     const { id } = await seedPendingAggregator();
     const res = await app.inject({
@@ -746,7 +895,7 @@ describe('admin approval routes', () => {
 
   it('rejects a coordinator decision when the token org claim mismatches parent_org_id', async () => {
     // The seeded coordinator belongs to org-B; the token is minted for org-A.
-    await aggregatorStore.update(aggregatorId, { parentOrgId: 'org-B', updatedBy: 'test' });
+    setCoordinatorOrg(aggregatorId, 'org-B');
     const { token } = await mintApprovalToken({
       aggregatorId,
       intent: 'approve',
@@ -764,7 +913,7 @@ describe('admin approval routes', () => {
   });
 
   it('allows the decision when the token org claim matches parent_org_id', async () => {
-    await aggregatorStore.update(aggregatorId, { parentOrgId: 'org-A', updatedBy: 'test' });
+    setCoordinatorOrg(aggregatorId, 'org-A');
     orgStore.seed([buildAggregatorOrg({ id: 'org-A', slug: 'a', status: 'active' })]);
     const { token } = await mintApprovalToken({
       aggregatorId,
@@ -787,9 +936,8 @@ describe('admin approval routes', () => {
   // ---------------------------------------------------------------------------
 
   it('renders TARGET_ORG_INACTIVE when the bound org is re-validated as inactive at decision time', async () => {
-    process.env.ORG_HIERARCHY_ENABLED = 'true';
-    try {
-      await aggregatorStore.update(aggregatorId, { parentOrgId: 'org-A', updatedBy: 'test' });
+    {
+      setCoordinatorOrg(aggregatorId, 'org-A');
       orgStore.seed([buildAggregatorOrg({ id: 'org-A', slug: 'a', status: 'pending' })]);
       const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve', org: 'org-A' });
       const res = await app.inject({
@@ -801,8 +949,6 @@ describe('admin approval routes', () => {
       expect(res.body).toContain('Organisation unavailable');
       const stored = await aggregatorStore.findById(aggregatorId);
       expect(stored.ok && stored.value?.status).toBe('pending');
-    } finally {
-      delete process.env.ORG_HIERARCHY_ENABLED;
     }
   });
 
@@ -811,7 +957,11 @@ describe('admin approval routes', () => {
       ok: false,
       error: { code: 'IDP_UNAVAILABLE', message: 'stamp failed' },
     });
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -832,7 +982,11 @@ describe('admin approval routes', () => {
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db write failed' },
     });
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -847,7 +1001,11 @@ describe('admin approval routes', () => {
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'cas failed' },
     });
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -863,7 +1021,11 @@ describe('admin approval routes', () => {
     // pending-check read and the update — the store reports success but a
     // null value, meaning some other request already flipped the row.
     aggregatorStore.approveFromPending = async () => ({ ok: true, value: null });
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -879,7 +1041,11 @@ describe('admin approval routes', () => {
       ok: false,
       error: { code: 'TRANSPORT_FAILED', message: 'smtp down' },
     });
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -897,7 +1063,7 @@ describe('admin approval routes', () => {
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
+    const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'reject' });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -913,7 +1079,7 @@ describe('admin approval routes', () => {
       ok: false,
       error: { code: 'IDP_UNAVAILABLE', message: 'stamp failed' },
     });
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
+    const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'reject' });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -928,7 +1094,7 @@ describe('admin approval routes', () => {
       ok: false,
       error: { code: 'TRANSPORT_FAILED', message: 'smtp down' },
     });
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
+    const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'reject' });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -945,7 +1111,11 @@ describe('admin approval routes', () => {
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -957,7 +1127,11 @@ describe('admin approval routes', () => {
 
   it('404s when the aggregator id does not exist', async () => {
     const unknownId = '22222222-2222-2222-2222-222222222299';
-    const { token } = await mintApprovalToken({ aggregatorId: unknownId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId: unknownId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${unknownId}`,
@@ -972,7 +1146,11 @@ describe('admin approval routes', () => {
       ok: false,
       error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
     });
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -984,7 +1162,11 @@ describe('admin approval routes', () => {
 
   it('404s when the identity record is missing for an otherwise-known aggregator', async () => {
     idp.findByAttribute = async () => ({ ok: true, value: null });
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -1007,7 +1189,7 @@ describe('admin approval routes', () => {
       }),
     ]);
     // firstName/lastName were seeded in beforeEach as Asha/Rao already.
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
+    const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'reject' });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -1035,7 +1217,7 @@ describe('admin approval routes', () => {
       delete kc.value.firstName;
       delete kc.value.lastName;
     }
-    const { token } = await mintApprovalToken({ aggregatorId, intent: 'reject' });
+    const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'reject' });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,

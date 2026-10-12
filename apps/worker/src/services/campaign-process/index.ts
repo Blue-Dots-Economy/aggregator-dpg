@@ -327,7 +327,7 @@ async function recordSuccessPathAudit(
       deps.audit?.recordCompleted({
         correlationId: job.id,
         channel: job.channel,
-        actorOrgId: job.signalstackOrgId,
+        actorSignalstackOrgId: job.signalstackOrgId,
         outcome: deriveAuditOutcome(status),
         completedAt: new Date(),
         ...toAuditCounts(counts),
@@ -373,7 +373,7 @@ async function finalizeFailedJob(
       deps.audit?.recordCompleted({
         correlationId: job.id,
         channel: job.channel,
-        actorOrgId: job.signalstackOrgId,
+        actorSignalstackOrgId: job.signalstackOrgId,
         outcome: 'failed',
         completedAt: new Date(),
         errorCode: err instanceof Error ? err.constructor.name : 'unknown',

@@ -10,7 +10,12 @@
  *
  *       body.aggregator.contact    → Keycloak FIRST (mirror is authoritative
  *                                    for phone+email), then DB
- *       body.aggregator.*          → DB only (name / url / locations)
+ *       body.aggregator.*          → DB only (name)
+ *
+ *     Org details (`url`, `locations`, `contact.company`, `contact.gstNumber`)
+ *     belong to the coordinator's org since migration 0028: they are rendered
+ *     from it on GET, and a PATCH carrying any of them is refused with
+ *     `409 ORG_DETAILS_READ_ONLY` before anything is written.
  *
  *     `consent` is read-only: it is recorded once, at registration, in the
  *     append-only consent ledger, and a coordinator cannot rewrite it. A body
@@ -52,6 +57,8 @@ const AggregatorPatchSchema = z
     contact: BecknContactSchema.optional(),
     locations: z.array(BecknLocationSchema).optional(),
   })
+  // Consent is read-only after registration (#836; since 0029 it lives only in
+  // the consent ledger): a body carrying it is refused, 400 SCHEMA_VALIDATION.
   .strict();
 
 const ProfileUpdateBodySchema = z
@@ -87,7 +94,9 @@ const ProfileCommonResponseShape = {
   url: z.string().nullable(),
   contact: BecknContactSchema,
   locations: z.array(BecknLocationSchema),
-  consent: ConsentRecordSchema,
+  // The newest registration consent from the ledger; null only when the
+  // ledger holds none (never after the 0029 verify).
+  consent: ConsentRecordSchema.nullable(),
   status: z.string(),
   updated_at: z.string(),
 };
@@ -186,7 +195,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         tags: ['aggregator-profile'],
         summary: 'Update the caller aggregator profile',
         description:
-          'Partial update of the caller aggregator (name / url / contact / locations). Contact phone + email are mirrored to Keycloak before the DB write. `consent` is read-only (recorded at registration) and is rejected here.',
+          "Partial update of the caller aggregator (name / contact). Consent is read-only after registration: a body carrying `consent` is refused with 400 SCHEMA_VALIDATION. Contact phone + email are mirrored to Keycloak before the DB write. Org details (url, locations, contact.company, contact.gstNumber) belong to the coordinator's organisation and are refused with 409 ORG_DETAILS_READ_ONLY.",
         security: [{ bearerAuth: [] }],
         body: ProfileUpdateBodySchema,
         response: {
@@ -206,6 +215,47 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
       const body = req.body as z.infer<typeof ProfileUpdateBodySchema>;
 
       const aggregatorStore = getAggregatorStore();
+
+      // Org details are shared by every coordinator of the org: a CHANGE to any
+      // of them is refused before any write (Keycloak or DB). Sending back the
+      // values GET returned (a client echoing its own contact) is not a change.
+      const sentOrgDetails =
+        body.aggregator.url !== undefined ||
+        body.aggregator.locations !== undefined ||
+        body.aggregator.contact?.company !== undefined ||
+        body.aggregator.contact?.gstNumber !== undefined;
+      if (sentOrgDetails) {
+        const current = await aggregatorStore.findById(auth.aggregatorId);
+        if (!current.ok) {
+          throw httpError('DB_UNAVAILABLE', {
+            cause: new Error(current.error.message),
+            fields: { sub_operation: 'aggregatorStore.findById' },
+          });
+        }
+        const now = current.value;
+        const same = (a: unknown, b: unknown) =>
+          JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+        const changed = [
+          ...(body.aggregator.url !== undefined && !same(body.aggregator.url, now?.url)
+            ? ['url']
+            : []),
+          ...(body.aggregator.locations !== undefined &&
+          !same(body.aggregator.locations, now?.locations)
+            ? ['locations']
+            : []),
+          ...(body.aggregator.contact?.company !== undefined &&
+          !same(body.aggregator.contact.company, now?.contact.company)
+            ? ['contact.company']
+            : []),
+          ...(body.aggregator.contact?.gstNumber !== undefined &&
+          !same(body.aggregator.contact.gstNumber, now?.contact.gstNumber)
+            ? ['contact.gstNumber']
+            : []),
+        ];
+        if (changed.length > 0) {
+          throw httpError('ORG_DETAILS_READ_ONLY', { fields: { fields: changed } });
+        }
+      }
 
       // ─── 1. Mirror phone/email to Keycloak FIRST (authoritative). ──────────
       // If KC fails, abort before touching the DB so we never have the DB
@@ -259,9 +309,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         updatedBy: auth.userId,
       };
       if (body.aggregator.name !== undefined) patch.name = body.aggregator.name;
-      if (body.aggregator.url !== undefined) patch.url = body.aggregator.url;
       if (normalisedContact !== undefined) patch.contact = normalisedContact;
-      if (body.aggregator.locations !== undefined) patch.locations = body.aggregator.locations;
 
       const result = await aggregatorStore.update(auth.aggregatorId, patch);
       if (!result.ok && normalisedContact && previousPhone !== undefined) {
@@ -364,6 +412,7 @@ function mapAggregatorUpdateError(
     | 'DUPLICATE_EMAIL'
     | 'DUPLICATE'
     | 'CHECK_VIOLATION'
+    | 'CONSENT_WRITE_FAILED'
     | 'DB_UNAVAILABLE',
 ): Parameters<typeof httpError>[0] {
   switch (code) {

@@ -47,7 +47,7 @@ Don't try to work around it.
 ## Phase 1 — launch
 
 ```bash
-stack_up          # ORG_HIERARCHY_ENABLED=true + dev overlay (mailpit, host ports)
+stack_up          # dev overlay (mailpit, host ports)
 wait_for_stack    # blocks on health/ready, then prints the dependency table
 mail_clear        # a clean inbox makes "the newest mail" unambiguous
 ```
@@ -60,10 +60,10 @@ docker-compose.dev.yml --profile storage up -d --build`. Three things that matte
   mailpit (`http://localhost:8025`) instead of trying real SMTP. Without it the
   api falls back to whatever `SMTP_HOST` is in `apps/api/.env` — commonly a real
   Gmail host, which fails auth and makes the login/approval flows untestable.
-- **`ORG_HIERARCHY_ENABLED` must match across api and web.** Compose reads
-  `${ORG_HIERARCHY_ENABLED:-false}` for both; `stack_up` sets it inline. With it
-  off, `/v1/orgs*` and `/admin/v1/orgs*` are **not registered** and return 404 —
-  so a 404 there means the flag didn't take, not that the route is broken.
+- **Organisations are always on (migration 0028).** `/v1/orgs*` and
+  `/admin/v1/orgs*` are always registered; there is no `ORG_HIERARCHY_ENABLED`
+  any more. Every coordinator belongs to an org — the fixed **Default** org
+  (`slug = 'default'`) when it registered without one.
 - **`--build` is required, not optional.** `NEXT_PUBLIC_*` is baked into the web
   image at build time.
 
@@ -110,7 +110,7 @@ Verify the invite side-effects in the DB, not just the response:
 
 ```bash
 psql_q "SELECT status, consumed_at IS NULL FROM registration_invites WHERE jti='$JTI';"
-psql_q "SELECT count(*) FROM aggregators WHERE parent_org_id='$ORG_ID';"
+psql_q "SELECT count(*) FROM users WHERE user_type='coordinator' AND org_id='$ORG_ID';"
 ```
 
 Remaining API groups, same shape — assert status **and** the persisted effect:

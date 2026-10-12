@@ -3,7 +3,7 @@
  *
  * These are structural facts, not business logic: if someone renames an
  * enum value or drops one, the application-layer validation that trusts
- * these lists (e.g. `aggregators.status` state-machine checks) would
+ * these lists (e.g. `users.status` state-machine checks) would
  * silently start rejecting/accepting the wrong values. Asserting the exact
  * `enumValues` array (order included, since Postgres enum ordinals matter
  * for `<`/`>` comparisons some call sites may rely on) catches that at
@@ -14,8 +14,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  aggregatorActorTypeEnum,
-  aggregatorStatusEnum,
+  registrationStatusEnum,
   bulkUploadStatusEnum,
   registrationLinkStatusEnum,
   linkSubmissionOutcomeEnum,
@@ -23,14 +22,9 @@ import {
 } from '../schema.js';
 
 describe('schema.ts enums', () => {
-  it('aggregatorActorTypeEnum: aggregator | seeker | provider', () => {
-    expect(aggregatorActorTypeEnum.enumName).toBe('aggregator_actor_type');
-    expect(aggregatorActorTypeEnum.enumValues).toEqual(['aggregator', 'seeker', 'provider']);
-  });
-
-  it('aggregatorStatusEnum: pending | active | inactive | retired', () => {
-    expect(aggregatorStatusEnum.enumName).toBe('aggregator_status');
-    expect(aggregatorStatusEnum.enumValues).toEqual(['pending', 'active', 'inactive', 'retired']);
+  it('registrationStatusEnum: pending | active | inactive | retired', () => {
+    expect(registrationStatusEnum.enumName).toBe('registration_status');
+    expect(registrationStatusEnum.enumValues).toEqual(['pending', 'active', 'inactive', 'retired']);
   });
 
   it('bulkUploadStatusEnum: the full CSV-upload lifecycle', () => {

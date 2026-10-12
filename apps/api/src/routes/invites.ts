@@ -1,7 +1,7 @@
 /**
  * Coordinator-invite mint endpoint (#700 mint, #701 recovery folded in).
  *
- * Flag-gated by `ORG_HIERARCHY_ENABLED`: not registered when the flag is off.
+ * Always registered (the org hierarchy is always on since migration 0028).
  *
  *   POST /admin/v1/invites   body { grant, recipients[] }
  *     Authed by the owner GRANT token (the owner cannot log in). Three outcomes,
@@ -22,7 +22,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest, FastifyBaseLogger } from 'fastify';
 import { z } from 'zod';
-import { config, orgHierarchyEnabled } from '../config.js';
+import { config } from '../config.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { mintInviteToken } from '../services/invite-token.js';
@@ -213,13 +213,11 @@ async function mintBatch(deps: MintBatchDeps): Promise<MintSummary> {
 }
 
 /**
- * Registers the invite mint route. No-op when the org hierarchy is disabled.
+ * Registers the invite mint route.
  *
  * @param app - Fastify instance to attach the route to.
  */
 export async function registerInviteRoutes(app: FastifyInstance): Promise<void> {
-  if (!orgHierarchyEnabled()) return;
-
   app.post(
     '/admin/v1/invites',
     {
@@ -227,7 +225,7 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
         tags: ['invites'],
         summary: 'Mint coordinator invites (owner grant-authed)',
         description:
-          'Authed by the owner grant token. A valid grant mints/refreshes one 14-day invite per recipient and emails each. An expired grant mints nothing and re-mails a fresh grant to the registered owner (recovery). Per-org rate limited. Only registered when ORG_HIERARCHY_ENABLED=true.',
+          'Authed by the owner grant token. A valid grant mints/refreshes one 14-day invite per recipient and emails each. An expired grant mints nothing and re-mails a fresh grant to the registered owner (recovery). Per-org rate limited.',
         body: MintBodySchema,
         response: { 200: MintResponseSchema, ...errorResponses(400, 409, 429, 503) },
       },
@@ -267,7 +265,8 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
       // Grant is implicitly revoked once the org leaves active (§5.2). Bind to a
       // local so TS narrows it non-null for the rest of the handler.
       const orgRow = org.value;
-      if (orgRow?.status !== 'active') {
+      // The Default org has no owner console to invite from (0028).
+      if (orgRow?.status !== 'active' || orgRow.isDefault) {
         throw httpError('TARGET_ORG_INACTIVE');
       }
 

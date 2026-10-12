@@ -7,7 +7,7 @@
 
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
-import { aggregators, registrationLinks, type RegistrationLinkRow } from '../../db/schema.js';
+import { users, registrationLinks, type RegistrationLinkRow } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import {
   RegistrationLinksStoreBase,
@@ -45,7 +45,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       const rows = await getDb()
         .insert(registrationLinks)
         .values({
-          aggregatorId: input.aggregatorId,
+          userId: input.aggregatorId,
           slug: input.slug,
           domain: input.domain,
           context: input.context,
@@ -64,7 +64,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
         status: 'success',
         latency_ms: Date.now() - start,
         link_id: row.id,
-        aggregator_id: row.aggregatorId,
+        aggregator_id: row.userId,
       });
       return { ok: true, value: toDomain(row) };
     } catch (err: unknown) {
@@ -113,8 +113,8 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       const rows = await getDb()
         .select({ link: registrationLinks })
         .from(registrationLinks)
-        .innerJoin(aggregators, eq(registrationLinks.aggregatorId, aggregators.id))
-        .where(and(eq(aggregators.orgSlug, orgSlug), eq(registrationLinks.slug, slug)))
+        .innerJoin(users, eq(registrationLinks.userId, users.id))
+        .where(and(eq(users.signalstackOrgSlug, orgSlug), eq(registrationLinks.slug, slug)))
         .limit(1);
       const row = rows[0]?.link;
       return { ok: true, value: row ? toDomain(row) : null };
@@ -133,7 +133,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       const rows = await getDb()
         .select()
         .from(registrationLinks)
-        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.aggregatorId, aggregatorId)))
+        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.userId, aggregatorId)))
         .limit(1);
       const row = rows[0];
       return { ok: true, value: row ? toDomain(row) : null };
@@ -154,10 +154,10 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
     try {
       const where = options.status
         ? and(
-            eq(registrationLinks.aggregatorId, aggregatorId),
+            eq(registrationLinks.userId, aggregatorId),
             eq(registrationLinks.status, options.status),
           )
-        : eq(registrationLinks.aggregatorId, aggregatorId);
+        : eq(registrationLinks.userId, aggregatorId);
       const [rows, totalRows] = await Promise.all([
         getDb()
           .select()
@@ -203,7 +203,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
         .where(
           and(
             eq(registrationLinks.id, id),
-            eq(registrationLinks.aggregatorId, aggregatorId),
+            eq(registrationLinks.userId, aggregatorId),
             // Only drafts are mutable — live rows have already published the
             // QR + public URL; mutating them in-place would invalidate the
             // posters in the field. Live → retire → recreate is the right flow.
@@ -223,7 +223,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
         status: 'success',
         latency_ms: Date.now() - start,
         link_id: row.id,
-        aggregator_id: row.aggregatorId,
+        aggregator_id: row.userId,
         slug_changed: patch.slug !== undefined,
       });
       return { ok: true, value: toDomain(row) };
@@ -254,7 +254,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       const rows = await getDb()
         .update(registrationLinks)
         .set({ status: nextStatus, updatedAt: new Date() })
-        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.aggregatorId, aggregatorId)))
+        .where(and(eq(registrationLinks.id, id), eq(registrationLinks.userId, aggregatorId)))
         .returning();
       const row = rows[0];
       if (!row) {
@@ -275,7 +275,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
 function toDomain(row: RegistrationLinkRow): RegistrationLink {
   return {
     id: row.id,
-    aggregatorId: row.aggregatorId,
+    aggregatorId: row.userId,
     slug: row.slug,
     domain: row.domain,
     context: row.context,

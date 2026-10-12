@@ -175,9 +175,10 @@ export async function changeContact(
     throw new ContactTakenError();
   }
 
+  // Every reference to a contact is a `users` row since 0027 (coordinators and
+  // org owners' admin accounts alike); two rows = one person in two roles.
   const refs = await db.execute<{ n: number }>(sql`
-    SELECT (SELECT count(*) FROM aggregators WHERE contact_id = ${oldId})
-         + (SELECT count(*) FROM aggregator_orgs WHERE contact_id = ${oldId}) AS n`);
+    SELECT count(*) AS n FROM users WHERE contact_id = ${oldId}`);
   const shared = Number(refs.rows[0]?.n ?? 0) > 1;
   if (shared) throw new SharedContactError();
 

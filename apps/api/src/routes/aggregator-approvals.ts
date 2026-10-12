@@ -28,7 +28,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { config, orgHierarchyEnabled } from '../config.js';
+import { config } from '../config.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { ERR } from '../errors/codes.js';
 import { formatApprovalTtl } from '../services/approval-token.js';
@@ -47,6 +47,7 @@ import { sendHtml, sendPage, missingTokenPage, verifyTokenForId } from './approv
 import { checkApprovalVerifyRate } from '../services/approval-verify-rate.js';
 import type { Aggregator } from '../services/aggregator-store/index.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
+import { recordLoginIdentity } from '../services/identity-store/record.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
 
 const DecisionBodySchema = z.object({
@@ -202,6 +203,20 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
 
+      // A link minted before migration 0028 for a formerly-flat coordinator has
+      // no org claim; the coordinator is now in the Default org. Such a link
+      // went to the admin list, so the page is served with a fresh token bound
+      // to the coordinator's org (the decision then passes the org check). A
+      // link bound to ANOTHER org is never re-bound.
+      const currentOrg = lookup.aggregator.parentOrgId;
+      let pageToken = token;
+      if (currentOrg && verified.org !== currentOrg) {
+        if (verified.org !== undefined || !lookup.aggregator.isDefaultOrg) {
+          return sendHtml(reply, 400, renderResultPage(orgMismatchView()));
+        }
+        pageToken = await mintReviewToken(aggregatorId, currentOrg);
+      }
+
       logApprovalAudit(req, { aggregatorId, action: 'view_confirm' });
 
       return sendHtml(
@@ -209,12 +224,12 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         200,
         renderConfirmPage({
           aggregatorId,
-          token,
+          token: pageToken,
           applicantEmail: lookup.kcUser.email,
           ...(lookup.aggregator.inviteEmail ? { invitedEmail: lookup.aggregator.inviteEmail } : {}),
           association: lookup.aggregator.name,
-          // For aggregator actors `type` is null. Surface `actor_type`
-          // instead so the admin page always shows something meaningful.
+          // `type` is null when the coordinator serves every domain. Surface
+          // `actor_type` instead so the admin page always shows something.
           aggregatorType: lookup.aggregator.type ?? lookup.aggregator.actorType,
           postUrl: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
           expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
@@ -270,25 +285,36 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
 
       // Org-bound coordinator: the token must carry the matching `org` claim so
       // an owner's link can only decide their own org's coordinators (spec §9 /
-      // A1). Enforced whenever the record has a parent_org_id — it is a security
-      // invariant on the record, independent of the runtime flag.
+      // A1). Every coordinator has an org since 0028 (the Default org included),
+      // so a link minted before the migration for a formerly-flat coordinator
+      // carries no claim and is rejected here; the admin regenerates it.
       const parentOrgId = lookup.aggregator.parentOrgId;
       if (parentOrgId && verified.org !== parentOrgId) {
-        return sendHtml(
-          reply,
-          400,
-          renderResultPage({
-            status: 'error',
-            title: 'Invalid link',
-            message: 'Token does not match this organisation.',
-          }),
-        );
+        // A pre-0028 link of a formerly-flat coordinator: offer the inline
+        // regenerate step, which re-binds it to the Default org.
+        if (verified.org === undefined && lookup.aggregator.isDefaultOrg) {
+          return sendHtml(
+            reply,
+            400,
+            renderResultPage({
+              status: 'error',
+              title: 'Link out of date',
+              message:
+                'This approval link was sent before an upgrade. Click below to regenerate it and continue to the review.',
+              action: {
+                url: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/renew/${aggregatorId}`,
+                token: parsed.data.token,
+                label: 'Regenerate & review',
+              },
+            }),
+          );
+        }
+        return sendHtml(reply, 400, renderResultPage(orgMismatchView()));
       }
 
       // Re-validate the target org is still active before provisioning (spec
-      // §6.2): a row can be rejected/retired between submit and approval. Only
-      // when the hierarchy is enabled and the coordinator is org-bound.
-      if (orgHierarchyEnabled() && parentOrgId) {
+      // §6.2): a row can be rejected/retired between submit and approval.
+      if (parentOrgId) {
         const org = await getAggregatorOrgStore().findById(parentOrgId);
         if (!org.ok || !org.value || org.value.status !== 'active') {
           return sendHtml(
@@ -657,12 +683,21 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
 
+      // The fresh token is bound to the coordinator's CURRENT org, so the
+      // decision handler's org check passes. Only a link already bound to that
+      // org may be renewed — plus one legacy case: a link minted before 0028 for
+      // a formerly-flat coordinator carries no org claim and went to the admin
+      // list, so it may be renewed for the Default org. A link bound to another
+      // org is never upgraded.
+      const currentOrg = lookup.aggregator.parentOrgId;
+      const legacyFlatLink = verified.org === undefined && lookup.aggregator.isDefaultOrg;
+      if (currentOrg && verified.org !== currentOrg && !legacyFlatLink) {
+        return sendHtml(reply, 400, renderResultPage(orgMismatchView()));
+      }
+
       logApprovalAudit(req, { aggregatorId, action: 'renew' });
 
-      // Mint a fresh review token, preserving the original org binding (so the
-      // decision handler's parent_org_id check still passes), and land the
-      // reviewer on the review page directly.
-      const freshToken = await mintReviewToken(aggregatorId, verified.org);
+      const freshToken = await mintReviewToken(aggregatorId, currentOrg ?? verified.org);
       return sendHtml(
         reply,
         200,
@@ -679,6 +714,15 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       );
     },
   );
+}
+
+/** The result page for a link bound to a different org than the coordinator's. */
+function orgMismatchView(): Parameters<typeof renderResultPage>[0] {
+  return {
+    status: 'error',
+    title: 'Invalid link',
+    message: 'Token does not match this organisation.',
+  };
 }
 
 interface PriorDecision {
@@ -779,6 +823,9 @@ async function loadAggregatorAndUser(aggregatorId: string): Promise<LookupOk | L
       }),
     };
   }
+  // The DB's own link to this coordinator's IdP login (0027). Best-effort:
+  // never blocks the review.
+  await recordLoginIdentity(aggregatorId, kc.value.id, 'aggregator-approvals.recordIdentity');
   return { ok: true, aggregator: stored.value, kcUser: kc.value };
 }
 

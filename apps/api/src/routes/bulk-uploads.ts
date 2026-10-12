@@ -974,7 +974,7 @@ async function recordBulkUploadAttestation({
   }
 
   const result = await getConsentLedger().recordRegistrationConsent({
-    subjectType: 'aggregator',
+    subjectType: 'user',
     subjectId: aggregatorId,
     network,
     brand: brand ?? null,

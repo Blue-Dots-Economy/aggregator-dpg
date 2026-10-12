@@ -39,8 +39,6 @@ export interface CoordinatorRegisterFormProps {
   schema: RJSFSchema;
   /** Coordinator registration UI schema. */
   uiSchema: Record<string, unknown>;
-  /** True when the org hierarchy is on — shows the required org selector. */
-  orgHierarchyEnabled: boolean;
   /**
    * Versioned Terms/Privacy content for the aggregator (coordinator) audience.
    * Flattened via {@link toConsentDocs} into the ordered document list the
@@ -70,20 +68,46 @@ interface OrgOption {
   display_name: string;
 }
 
+/** Slug of the fixed Default org (migration 0028). */
+const DEFAULT_ORG_SLUG = 'default';
+
 /**
- * Renders the coordinator registration form. With the org hierarchy off, it is
- * today's flat form. With it on, it adds a required organisation selector
- * (spec §6.2) populated from the active-org list, hides the free-text
- * organisation name (inherited from the selected org), and gates submit on an
- * org being picked. Bootstrap empty-state shows when no orgs are live yet.
+ * Removes the schema properties marked `"x-org-detail": true` (url, locations):
+ * they belong to the coordinator's org, so a coordinator of a real org neither
+ * sees nor submits them (migration 0028).
  *
- * @param props - Schema/UI schema + the org-hierarchy flag.
+ * @param schema - The coordinator form schema.
+ * @returns The schema without org-detail properties.
+ */
+function withoutOrgDetails(schema: RJSFSchema): RJSFSchema {
+  const props = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
+  const orgDetailKeys = Object.keys(props).filter((k) => props[k]?.['x-org-detail'] === true);
+  if (orgDetailKeys.length === 0) return schema;
+  return {
+    ...schema,
+    properties: Object.fromEntries(
+      Object.entries(props).filter(([k]) => !orgDetailKeys.includes(k)),
+    ) as RJSFSchema['properties'],
+    ...(Array.isArray(schema.required)
+      ? { required: schema.required.filter((k) => !orgDetailKeys.includes(k)) }
+      : {}),
+  };
+}
+
+/**
+ * Renders the coordinator registration form with a required organisation
+ * selector (spec §6.2; always on since migration 0028) populated from the
+ * active-org list. Picking a real org inherits its name and hides the
+ * org-detail fields (they are the org's); picking the Default org keeps the
+ * flat form — the coordinator names its own organisation and enters its own
+ * url / locations. The Default org is preselected when it is the only one.
+ *
+ * @param props - Schema/UI schema, consent content and the invite context.
  * @returns The coordinator registration content block.
  */
 export function CoordinatorRegisterForm({
   schema,
   uiSchema,
-  orgHierarchyEnabled,
   consentContent,
   inviteToken,
   lockedOrgName,
@@ -115,42 +139,53 @@ export function CoordinatorRegisterForm({
     setState,
   );
 
-  // Fetch the active-org list only when the hierarchy is on.
+  // The active-org list (not needed in invite mode: the org is fixed).
   const orgsQuery = useQuery({
     queryKey: ['active-orgs'],
     queryFn: () => jsonFetch<{ orgs: OrgOption[] }>('/api/orgs'),
-    enabled: orgHierarchyEnabled && !inviteMode,
+    enabled: !inviteMode,
     staleTime: 30_000,
   });
-  const orgs = orgsQuery.data?.orgs ?? [];
-  const noOrgsYet =
-    orgHierarchyEnabled &&
-    !inviteMode &&
-    orgsQuery.isSuccess &&
-    !orgsQuery.isError &&
-    orgs.length === 0;
-  // The record inherits its org's display name (the name field hides). In invite
-  // mode the org is fixed by the invite; otherwise it's the selected dropdown org.
-  const selectedOrgName = inviteMode
-    ? (lockedOrgName ?? '')
-    : (orgs.find((o) => o.id === orgId)?.display_name ?? '');
+  const orgs = useMemo(() => orgsQuery.data?.orgs ?? [], [orgsQuery.data]);
+  const selectedOrg = orgs.find((o) => o.id === orgId);
+  // A real org lends the coordinator its name and its details; the Default org
+  // has neither, so its coordinators fill them in themselves (as flat mode did).
+  const inheritsFromOrg =
+    inviteMode || (selectedOrg !== undefined && selectedOrg.slug !== DEFAULT_ORG_SLUG);
+  const selectedOrgName = inviteMode ? (lockedOrgName ?? '') : (selectedOrg?.display_name ?? '');
 
-  // Keep the hidden required `name` in sync with the org so the validity gate
-  // passes without the coordinator typing an organisation name.
+  // The API lists the Default org only while it is the only active org:
+  // preselect it then, so a formerly-flat instance's form works as before.
   useEffect(() => {
-    if (!orgHierarchyEnabled && !inviteMode) return;
-    const next = selectedOrgName || undefined;
-    setFormData((prev) => (prev['name'] === next ? prev : { ...prev, name: next }));
-  }, [orgHierarchyEnabled, inviteMode, selectedOrgName]);
+    if (inviteMode || orgId) return;
+    const only = orgs.length === 1 ? orgs[0] : undefined;
+    if (only?.slug === DEFAULT_ORG_SLUG) setOrgId(only.id);
+  }, [inviteMode, orgId, orgs]);
 
-  const formSchema = useMemo(() => stripConsentBlock(stripFormChrome(schema)), [schema]);
+  // Keep the hidden required `name` in sync with an inherited org name; drop
+  // an inherited name again when the coordinator switches to the Default org.
+  useEffect(() => {
+    if (inheritsFromOrg) {
+      const next = selectedOrgName || undefined;
+      setFormData((prev) => (prev['name'] === next ? prev : { ...prev, name: next }));
+    } else {
+      setFormData((prev) =>
+        orgs.some((o) => o.display_name === prev['name']) ? { ...prev, name: undefined } : prev,
+      );
+    }
+  }, [inheritsFromOrg, selectedOrgName, orgs]);
+
+  const formSchema = useMemo(() => {
+    const base = stripConsentBlock(stripFormChrome(schema));
+    return inheritsFromOrg ? withoutOrgDetails(base) : base;
+  }, [schema, inheritsFromOrg]);
 
   const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
 
-  // Flag-on: hide the free-text "Organisation Name" (`name`) — auto-filled from
-  // the selected org. Flag-off keeps the flat form unchanged.
+  // A real org: hide the free-text "Organisation Name" (`name`) — inherited
+  // from the selected org. The Default org keeps the flat form.
   const formUiSchema = useMemo<Record<string, unknown>>(() => {
-    if (!orgHierarchyEnabled && !inviteMode) return uiSchema;
+    if (!inheritsFromOrg) return uiSchema;
     // Hide the org-name field (inherited from the org); the invited email is
     // prefilled but stays editable (#701) — a coordinator may register with a
     // different address, and the owner sees the mismatch at approval.
@@ -158,7 +193,7 @@ export function CoordinatorRegisterForm({
       ...uiSchema,
       name: { ...((uiSchema['name'] as Record<string, unknown>) ?? {}), 'ui:widget': 'hidden' },
     };
-  }, [uiSchema, orgHierarchyEnabled]);
+  }, [uiSchema, inheritsFromOrg]);
 
   /** Runs after the gate is accepted: stamps consent and posts. */
   const submitWithConsent = async (): Promise<void> => {
@@ -174,14 +209,18 @@ export function CoordinatorRegisterForm({
       resolvedPlace,
     );
     // The API strips `org_id`/`invite` before RJSF validation and stores the
-    // resolved org on `aggregators.parent_org_id`. In invite mode the org comes
-    // from the token claim (never `org_id`); otherwise from the dropdown.
+    // resolved org on `users.org_id`. In invite mode the org comes from the
+    // token claim (never `org_id`); otherwise from the dropdown. A real org's
+    // name and details are its own, so none are submitted for it.
     if (inviteMode) {
       payload['invite'] = inviteToken;
-      payload['name'] = selectedOrgName;
-    } else if (orgHierarchyEnabled && orgId) {
+    } else if (orgId) {
       payload['org_id'] = orgId;
+    }
+    if (inheritsFromOrg) {
       payload['name'] = selectedOrgName;
+      delete payload['url'];
+      delete payload['locations'];
     }
     const result = await submitRegistration('/api/aggregator/register', payload);
     setState(
@@ -213,89 +252,76 @@ export function CoordinatorRegisterForm({
         />
       ) : null}
 
-      {noOrgsYet ? (
-        <div
-          role="status"
-          className="rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-5 text-[13.5px] text-amber-800"
-        >
-          {t('coordinator_no_orgs')}
-        </div>
-      ) : (
-        <>
-          {inviteMode ? (
-            <output className="mb-5 block text-[13.5px] text-ink-500">
-              Registering as a coordinator under{' '}
-              <span className="font-semibold text-ink-800">{selectedOrgName}</span>.
-            </output>
-          ) : null}
-          {!inviteMode && orgHierarchyEnabled ? (
-            <div className="form-group mb-4">
-              <label className="bd-label" htmlFor="coordinator-org">
-                {t('org_selector_label')}
-                <span className="text-rose-500"> *</span>
-              </label>
-              {orgsQuery.isError ? (
-                <div className="text-[13px] text-red-600 flex items-center gap-2">
-                  {t('org_selector_error')}
-                  <button
-                    type="button"
-                    onClick={() => orgsQuery.refetch()}
-                    className="text-primary-600 font-semibold hover:underline"
-                  >
-                    {t('org_selector_retry')}
-                  </button>
-                </div>
-              ) : (
-                <Select
-                  {...(orgId ? { value: orgId } : {})}
-                  onValueChange={setOrgId}
-                  disabled={orgsQuery.isLoading}
-                >
-                  <SelectTrigger id="coordinator-org" aria-required>
-                    <SelectValue
-                      placeholder={
-                        orgsQuery.isLoading
-                          ? t('org_selector_loading')
-                          : t('org_selector_placeholder')
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {orgs.map((o) => (
-                      <SelectItem key={o.id} value={o.id}>
-                        {o.display_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
+      {inviteMode ? (
+        <output className="mb-5 block text-[13.5px] text-ink-500">
+          Registering as a coordinator under{' '}
+          <span className="font-semibold text-ink-800">{selectedOrgName}</span>.
+        </output>
+      ) : null}
+      {!inviteMode ? (
+        <div className="form-group mb-4">
+          <label className="bd-label" htmlFor="coordinator-org">
+            {t('org_selector_label')}
+            <span className="text-rose-500"> *</span>
+          </label>
+          {orgsQuery.isError ? (
+            <div className="text-[13px] text-red-600 flex items-center gap-2">
+              {t('org_selector_error')}
+              <button
+                type="button"
+                onClick={() => orgsQuery.refetch()}
+                className="text-primary-600 font-semibold hover:underline"
+              >
+                {t('org_selector_retry')}
+              </button>
             </div>
-          ) : null}
+          ) : (
+            <Select
+              {...(orgId ? { value: orgId } : {})}
+              onValueChange={setOrgId}
+              disabled={orgsQuery.isLoading}
+            >
+              <SelectTrigger id="coordinator-org" aria-required>
+                <SelectValue
+                  placeholder={
+                    orgsQuery.isLoading ? t('org_selector_loading') : t('org_selector_placeholder')
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {orgs.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.display_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      ) : null}
 
-          <RjsfThemedForm
-            schema={formSchema}
-            uiSchema={formUiSchema as unknown as UiSchema<Record<string, unknown>>}
-            {...sharedRegistrationFormProps({
-              formData,
-              setFormData,
-              setCanSubmit,
-              setState,
-              handleSubmit,
-              formSchema,
-              consentContent,
-              onLocationResolved: setResolvedPlace,
-              validationErrorTitle: t('validation_error_title'),
-            })}
-          >
-            <RegistrationSubmitButton
-              submitting={state.status === 'submitting'}
-              canSubmit={canSubmit && !(orgHierarchyEnabled && !inviteMode && !orgId)}
-              label={t('submit')}
-              submittingLabel={t('submitting')}
-            />
-          </RjsfThemedForm>
-        </>
-      )}
+      <RjsfThemedForm
+        schema={formSchema}
+        uiSchema={formUiSchema as unknown as UiSchema<Record<string, unknown>>}
+        {...sharedRegistrationFormProps({
+          formData,
+          setFormData,
+          setCanSubmit,
+          setState,
+          handleSubmit,
+          formSchema,
+          consentContent,
+          onLocationResolved: setResolvedPlace,
+          validationErrorTitle: t('validation_error_title'),
+        })}
+      >
+        <RegistrationSubmitButton
+          submitting={state.status === 'submitting'}
+          canSubmit={canSubmit && (inviteMode || Boolean(orgId))}
+          label={t('submit')}
+          submittingLabel={t('submitting')}
+        />
+      </RjsfThemedForm>
 
       <ConsentGate
         open={gateOpen}

@@ -7,6 +7,10 @@ import {
   _setAggregatorStore,
 } from '../services/aggregator-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
+import {
+  AggregatorOrgStoreFake,
+  _setAggregatorOrgStore,
+} from '../services/aggregator-org-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 
@@ -29,6 +33,8 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     mailer = new FakeMailer();
 
     _setAggregatorStore(aggregatorStore);
+    // The stale-org prune always runs since 0028; no stale orgs here.
+    _setAggregatorOrgStore(new AggregatorOrgStoreFake());
     _setIdpAdmin(idp);
     _setMailer(mailer);
     _setAccessTokenVerifier(async (token) => {
@@ -44,6 +50,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
   afterAll(async () => {
     await app?.close();
     _setAggregatorStore(null);
+    _setAggregatorOrgStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
     _setAccessTokenVerifier(null);

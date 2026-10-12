@@ -3,8 +3,8 @@
  *
  * As of #619 owner/organisation registration is no longer a tab here (it lives
  * on the `/register/owner` deep link — see OwnerRegisterView.test.tsx). This
- * view is always the single coordinator flow; the `orgHierarchyEnabled` flag
- * only toggles the coordinator's parent-org selector — never tabs.
+ * view is always the single coordinator flow with its org selector (always on
+ * since migration 0028) — never tabs.
  *
  * RJSF, the shadcn Select, and useAggregatorConfig are shimmed so the test
  * exercises RegisterView's own logic, not third-party rendering.
@@ -86,14 +86,17 @@ vi.mock('@/components/ui/Select', () => ({
     children,
     onValueChange,
     disabled,
+    value,
   }: {
     children?: ReactNode;
     onValueChange?: (v: string) => void;
     disabled?: boolean;
+    value?: string;
   }) => (
     <select
       data-testid="org-select"
       disabled={disabled}
+      {...(value !== undefined ? { value } : {})}
       onChange={(e) => onValueChange?.(e.target.value)}
     >
       {children}
@@ -128,6 +131,21 @@ const consentContentFixture = {
   privacy: { version: 1, title: 'Privacy', content: 'Privacy body' },
 };
 
+/** A coordinator schema with the two org-detail fields (0028). */
+const orgDetailSchema = {
+  type: 'object',
+  properties: {
+    name: { type: 'string' },
+    url: { type: 'string', 'x-org-detail': true },
+    locations: { type: 'array', items: { type: 'object' }, 'x-org-detail': true },
+  },
+};
+
+/** The registration POSTs a fetch spy saw (the org-list fetch is not one). */
+function registerPosts(spy: { mock: { calls: unknown[][] } }): unknown[][] {
+  return spy.mock.calls.filter((c) => String(c[0]).includes('/api/aggregator/register'));
+}
+
 function renderView(props: Record<string, unknown>) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -155,19 +173,43 @@ describe('RegisterView coordinator flow', () => {
     vi.clearAllMocks();
   });
 
-  it('flag off: renders a single form, no tabs, no org fetch', async () => {
-    const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+  it('preselects the Default org when it is the only one, and keeps the flat form (0028)', async () => {
+    const calls: { url: string; body: string }[] = [];
+    globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
+      const url = String(input);
+      if (url.includes('/api/orgs')) {
+        return new Response(
+          JSON.stringify({ orgs: [{ id: 'd', slug: 'default', display_name: 'Default' }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      calls.push({ url, body: init?.body ?? '' });
+      return new Response(JSON.stringify({ aggregator_id: 'agg-1' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
 
-    renderView({ orgHierarchyEnabled: false });
+    renderView({ schema: orgDetailSchema });
 
-    expect(screen.queryByRole('tab')).toBeNull();
-    expect(screen.queryByTestId('org-select')).toBeNull();
-    const orgCalls = fetchSpy.mock.calls.filter((c) => String(c[0]).includes('/api/orgs'));
-    expect(orgCalls).toHaveLength(0);
+    const select = (await screen.findByTestId('org-select')) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe('d'));
+    // The Default org has no details of its own: url / locations stay visible.
+    const rendered = capturedSchema as { properties?: Record<string, unknown> };
+    expect(rendered.properties).toHaveProperty('url');
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await screen.findByRole('dialog');
+    act(() => {
+      capturedGateProps?.onAccept();
+    });
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    const body = JSON.parse(calls[0]!.body) as Record<string, unknown>;
+    expect(body).toMatchObject({ org_id: 'd' });
+    // The coordinator names its own organisation: never "Default".
+    expect(body['name']).not.toBe('Default');
   });
 
-  it('flag on: no tabs, but shows the coordinator parent-org selector', async () => {
+  it('no tabs, and always the coordinator org selector', async () => {
     globalThis.fetch = vi.fn(
       async () =>
         new Response(
@@ -176,7 +218,7 @@ describe('RegisterView coordinator flow', () => {
         ),
     ) as unknown as typeof fetch;
 
-    renderView({ orgHierarchyEnabled: true });
+    renderView({});
 
     // #619: owner registration moved off this page — never any tabs.
     expect(screen.queryByRole('tab')).toBeNull();
@@ -184,22 +226,7 @@ describe('RegisterView coordinator flow', () => {
     expect(await screen.findByRole('option', { name: 'Enable India' })).toBeInTheDocument();
   });
 
-  it('flag on, zero active orgs: shows the bootstrap empty state, hides the form', async () => {
-    globalThis.fetch = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ orgs: [] }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
-    ) as unknown as typeof fetch;
-
-    renderView({ orgHierarchyEnabled: true });
-
-    expect(await screen.findByText(messages.register.coordinator_no_orgs)).toBeInTheDocument();
-    expect(screen.queryByTestId('rjsf-shim')).toBeNull();
-  });
-
-  it('flag on: forwards the selected org as org_id on coordinator submit', async () => {
+  it('a real org hides the org-detail fields and never submits them (0028)', async () => {
     const calls: { url: string; body: string }[] = [];
     globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
       const url = String(input);
@@ -216,7 +243,44 @@ describe('RegisterView coordinator flow', () => {
       });
     }) as unknown as typeof fetch;
 
-    renderView({ orgHierarchyEnabled: true });
+    renderView({ schema: orgDetailSchema });
+    await screen.findByRole('option', { name: 'Enable India' });
+    fireEvent.change(await screen.findByTestId('org-select'), { target: { value: 'o1' } });
+    await waitFor(() =>
+      expect(
+        (capturedSchema as { properties?: Record<string, unknown> }).properties,
+      ).not.toHaveProperty('url'),
+    );
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await screen.findByRole('dialog');
+    act(() => {
+      capturedGateProps?.onAccept();
+    });
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    const body = JSON.parse(calls[0]!.body) as Record<string, unknown>;
+    expect(body).toMatchObject({ org_id: 'o1', name: 'Enable India' });
+    expect(body).not.toHaveProperty('url');
+    expect(body).not.toHaveProperty('locations');
+  });
+
+  it('forwards the selected org as org_id on coordinator submit', async () => {
+    const calls: { url: string; body: string }[] = [];
+    globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
+      const url = String(input);
+      if (url.includes('/api/orgs')) {
+        return new Response(
+          JSON.stringify({ orgs: [{ id: 'o1', slug: 's', display_name: 'Enable India' }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      calls.push({ url, body: init?.body ?? '' });
+      return new Response(JSON.stringify({ aggregator_id: 'agg-1' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    renderView({});
 
     await screen.findByRole('option', { name: 'Enable India' });
     const select = await screen.findByTestId('org-select');
@@ -234,7 +298,7 @@ describe('RegisterView coordinator flow', () => {
     expect(JSON.parse(submitCall!.body)).toMatchObject({ org_id: 'o1', name: 'Enable India' });
   });
 
-  it('flag on: shows the org-selector error state with a working retry', async () => {
+  it('shows the org-selector error state with a working retry', async () => {
     let calls = 0;
     globalThis.fetch = vi.fn(async () => {
       calls += 1;
@@ -245,7 +309,7 @@ describe('RegisterView coordinator flow', () => {
       );
     }) as unknown as typeof fetch;
 
-    renderView({ orgHierarchyEnabled: true });
+    renderView({});
 
     expect(await screen.findByText(messages.register.org_selector_error)).toBeInTheDocument();
     fireEvent.click(screen.getByText(messages.register.org_selector_retry));
@@ -257,7 +321,7 @@ describe('RegisterView coordinator flow', () => {
     globalThis.fetch = vi.fn(
       async () => new Response('{}', { status: 200 }),
     ) as unknown as typeof fetch;
-    renderView({ orgHierarchyEnabled: false });
+    renderView({});
 
     act(() => {
       capturedOnError?.([{ property: '.name', message: 'is required', name: 'required' }]);
@@ -298,7 +362,7 @@ describe('RegisterView consent gate', () => {
       async () => new Response('{}', { status: 200 }),
     ) as unknown as typeof fetch;
 
-    renderView({ orgHierarchyEnabled: false, schema: schemaWithConsent });
+    renderView({ schema: schemaWithConsent });
 
     const rendered = capturedSchema as {
       properties?: Record<string, unknown>;
@@ -318,18 +382,18 @@ describe('RegisterView consent gate', () => {
     );
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    renderView({ orgHierarchyEnabled: false });
+    renderView({});
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(registerPosts(fetchSpy)).toHaveLength(0);
   });
 
   it('coordinator: cancelling the gate closes it without posting, leaving the form in place', async () => {
     const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    renderView({ orgHierarchyEnabled: false });
+    renderView({});
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
 
@@ -338,13 +402,19 @@ describe('RegisterView consent gate', () => {
     });
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(registerPosts(fetchSpy)).toHaveLength(0);
     expect(screen.getByTestId('rjsf-shim')).toBeInTheDocument();
   });
 
   it('coordinator: accepting the gate posts consent.value:true with both timestamps to /api/aggregator/register', async () => {
     const calls: { url: string; body: string }[] = [];
     const fetchSpy = vi.fn(async (input: unknown, init?: { body?: string }) => {
+      if (String(input).includes('/api/orgs')) {
+        return new Response(JSON.stringify({ orgs: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       calls.push({ url: String(input), body: init?.body ?? '' });
       return new Response(JSON.stringify({ aggregator_id: 'agg-1' }), {
         status: 200,
@@ -353,7 +423,7 @@ describe('RegisterView consent gate', () => {
     });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    renderView({ orgHierarchyEnabled: false });
+    renderView({});
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
     await screen.findByRole('dialog');
 
@@ -373,13 +443,13 @@ describe('RegisterView consent gate', () => {
     const fetchSpy = vi.fn();
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    renderView({ orgHierarchyEnabled: false, aggregatorConsentContent: null });
+    renderView({ aggregatorConsentContent: null });
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
 
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.getByText(messages.register.consent.load_failed_title)).toBeInTheDocument();
     expect(screen.getByText(messages.register.consent.load_failed_detail)).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(registerPosts(fetchSpy)).toHaveLength(0);
   });
 });

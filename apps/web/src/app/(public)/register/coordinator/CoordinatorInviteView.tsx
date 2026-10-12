@@ -137,7 +137,6 @@ export function CoordinatorInviteView({
       <CoordinatorRegisterForm
         schema={schema}
         uiSchema={uiSchema}
-        orgHierarchyEnabled
         inviteToken={inviteToken}
         lockedOrgName={org.display_name}
         lockedEmail={claims.email}

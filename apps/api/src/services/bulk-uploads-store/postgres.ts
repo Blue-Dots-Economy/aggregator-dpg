@@ -27,7 +27,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       const rows = await getDb()
         .insert(bulkUploads)
         .values({
-          aggregatorId: input.aggregatorId,
+          userId: input.aggregatorId,
           participantType: input.participantType,
           s3Key: input.s3Key,
           schemaId: input.schemaId,
@@ -45,7 +45,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
         status: 'success',
         latency_ms: Date.now() - start,
         upload_id: row.id,
-        aggregator_id: row.aggregatorId,
+        aggregator_id: row.userId,
       });
       return { ok: true, value: toDomain(row) };
     } catch (err: unknown) {
@@ -65,7 +65,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       const rows = await getDb()
         .select()
         .from(bulkUploads)
-        .where(and(eq(bulkUploads.id, id), eq(bulkUploads.aggregatorId, aggregatorId)))
+        .where(and(eq(bulkUploads.id, id), eq(bulkUploads.userId, aggregatorId)))
         .limit(1);
       const row = rows[0];
       return { ok: true, value: row ? toDomain(row) : null };
@@ -87,7 +87,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       const rows = await getDb()
         .select()
         .from(bulkUploads)
-        .where(and(eq(bulkUploads.aggregatorId, aggregatorId), eq(bulkUploads.s3Etag, s3Etag)))
+        .where(and(eq(bulkUploads.userId, aggregatorId), eq(bulkUploads.s3Etag, s3Etag)))
         .limit(1);
       const row = rows[0];
       return { ok: true, value: row ? toDomain(row) : null };
@@ -106,7 +106,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
     options: ListBulkUploadsOptions,
   ): Promise<StoreResult<ListBulkUploadsResult>> {
     try {
-      const where = eq(bulkUploads.aggregatorId, aggregatorId);
+      const where = eq(bulkUploads.userId, aggregatorId);
       const [rows, totalRows] = await Promise.all([
         getDb()
           .select()
@@ -139,7 +139,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
         .where(
           and(
             eq(bulkUploads.id, id),
-            eq(bulkUploads.aggregatorId, aggregatorId),
+            eq(bulkUploads.userId, aggregatorId),
             eq(bulkUploads.status, 'pending'),
           ),
         );
@@ -192,7 +192,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
         .where(
           and(
             eq(bulkUploads.id, id),
-            eq(bulkUploads.aggregatorId, aggregatorId),
+            eq(bulkUploads.userId, aggregatorId),
             inArray(bulkUploads.status, ['pending', 'uploaded']),
           ),
         )
@@ -242,7 +242,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
 function toDomain(row: BulkUploadRow): BulkUpload {
   return {
     id: row.id,
-    aggregatorId: row.aggregatorId,
+    aggregatorId: row.userId,
     participantType: row.participantType,
     s3Key: row.s3Key,
     s3Etag: row.s3Etag,

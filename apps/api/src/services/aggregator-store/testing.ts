@@ -6,8 +6,12 @@
  */
 
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
-import { InMemoryAggregatorStore } from './memory.js';
+import { InMemoryAggregatorStore, MEMORY_DEFAULT_ORG_ID } from './memory.js';
+import type { OrgDetailColumns } from './org-details.js';
 import type { Aggregator, CreateAggregatorInput } from './interface.js';
+import { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
+
+export { NO_CONSENT_WRITE };
 import type { BecknContact, ConsentRecord } from '@aggregator-dpg/shared-primitives/aggregator';
 
 export class AggregatorStoreFake extends InMemoryAggregatorStore {
@@ -20,12 +24,66 @@ export class AggregatorStoreFake extends InMemoryAggregatorStore {
     for (const r of rows) this.indexInsert(r);
   }
 
+  /**
+   * Seeds an org's detail columns, rendered for its coordinators created
+   * afterwards (as the Postgres join does).
+   *
+   * @param orgId - The org id.
+   * @param details - The org's `url` / `locations` / `legalName` / `gstNumber`.
+   */
+  seedOrgDetails(orgId: string, details: Partial<OrgDetailColumns>): void {
+    this.orgDetails.set(orgId, {
+      url: null,
+      locations: [],
+      legalName: null,
+      gstNumber: null,
+      ...details,
+    });
+  }
+
+  /**
+   * Seeds an invite's address, read back as `inviteEmail` by coordinators
+   * created with that `inviteId` (the Postgres store joins
+   * `registration_invites`).
+   *
+   * @param jti - The invite id.
+   * @param email - The invited address.
+   */
+  seedInviteEmail(jti: string, email: string): void {
+    this.inviteEmails.set(jti, email);
+  }
+
+  /**
+   * Changes which org id counts as the Default org.
+   *
+   * @param orgId - The Default org's id.
+   */
+  setDefaultOrgId(orgId: string): void {
+    this.defaultOrgId = orgId;
+  }
+
+  /**
+   * Synchronous read of a seeded row (test setup only).
+   *
+   * @param id - Row id.
+   * @returns The row.
+   * @throws Error when absent.
+   */
+  findByIdSync(id: string): Aggregator {
+    const row = this.byId.get(id);
+    if (!row) throw new Error(`no aggregator ${id}`);
+    return row;
+  }
+
   /** Reset between tests. */
   reset(): void {
     this.byId.clear();
     this.bySlug.clear();
     this.byPhone.clear();
     this.byEmail.clear();
+    this.orgDetails.clear();
+    this.legacy.clear();
+    this.defaultOrgId = MEMORY_DEFAULT_ORG_ID;
   }
 
   /**
@@ -65,7 +123,8 @@ export function buildAggregator(overrides: Partial<Aggregator> = {}): Aggregator
     orgSlug: 'test-org-0001',
     actorType: 'aggregator',
     name: 'Test Org',
-    type: null,
+    type: overrides.type ?? null,
+    serves: overrides.serves ?? (overrides.type ? [overrides.type] : []),
     url: null,
     contactId: contactId(contact.email, contact.phone),
     contact,
@@ -81,8 +140,10 @@ export function buildAggregator(overrides: Partial<Aggregator> = {}): Aggregator
     createdAt,
     updatedAt: createdAt,
     signalstackOrgId: null,
-    parentOrgId: null,
+    parentOrgId: MEMORY_DEFAULT_ORG_ID,
+    isDefaultOrg: true,
     inviteEmail: null,
+    inviteId: null,
     rejectedAt: null,
     ...overrides,
   };
@@ -93,13 +154,14 @@ export function buildCreateAggregatorInput(
 ): CreateAggregatorInput {
   return {
     orgSlug: 'test-org-0001',
-    actorType: 'aggregator',
     name: 'Test Org',
     type: null,
     contact: DEFAULT_CONTACT,
+    recordConsent: NO_CONSENT_WRITE,
     consent: DEFAULT_CONSENT,
     createdBy: 'system',
     updatedBy: 'system',
+    orgId: MEMORY_DEFAULT_ORG_ID,
     ...overrides,
   };
 }

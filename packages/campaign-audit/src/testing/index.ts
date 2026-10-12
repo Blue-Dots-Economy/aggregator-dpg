@@ -98,7 +98,7 @@ export function buildRequestedAudit(over: Partial<RequestedAuditInput> = {}): Re
     correlationId: '00000000-0000-4000-8000-000000000001',
     channel: 'export',
     actorUserId: 'kc-sub-1',
-    actorOrgId: 'org_test',
+    actorSignalstackOrgId: 'org_test',
     actorAzp: 'campaign-manager',
     piiFields: ['name', 'email', 'phone'],
     itemCount: 3,
@@ -119,7 +119,7 @@ export function buildCompletedAudit(over: Partial<CompletedAuditInput> = {}): Co
   return {
     correlationId: '00000000-0000-4000-8000-000000000001',
     channel: 'export',
-    actorOrgId: 'org_test',
+    actorSignalstackOrgId: 'org_test',
     outcome: 'succeeded',
     completedAt: new Date('2026-09-02T10:00:05.000Z'),
     resolvedCount: 3,

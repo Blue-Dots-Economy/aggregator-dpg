@@ -36,6 +36,7 @@ import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import { getDb, getPool, closeDb, _setDbClients } from '../client.js';
 import { PostgresAggregatorStore } from '../../services/aggregator-store/postgres.js';
 import { PostgresAggregatorOrgStore } from '../../services/aggregator-org-store/postgres.js';
+import { NO_CONSENT_WRITE } from '../../services/consent-ledger/hook.js';
 
 const realUrl = process.env.INTEGRATION_DATABASE_URL;
 const suite = realUrl ? describe : describe.skip;
@@ -65,6 +66,8 @@ suite('contact (migration 0025) — integration', () => {
   let sql0026: string;
   let legacy = false;
   let headSchema = false;
+  /** The Default org (0028): every coordinator needs an org. */
+  let defaultOrgId = '';
 
   beforeAll(async () => {
     _setDbClients(null, null);
@@ -81,10 +84,14 @@ suite('contact (migration 0025) — integration', () => {
         WHERE table_schema = 'public' AND table_name = 'aggregators' AND column_name = 'contact'`,
     );
     legacy = r.rows[0].n > 0;
-    // The store tests run the current store code; it reads and writes only
-    // `contact` / `contact_id` / `contact_extra`, which exist in every schema
-    // state from 0025 on, so they run in both states.
-    headSchema = true;
+    // The store tests run the current store code, which targets `users`
+    // (migration 0028): they run only once `organisations` exists.
+    const head = await pool.query(`SELECT to_regclass('public.organisations')::text AS t`);
+    headSchema = Boolean(head.rows[0].t);
+    if (headSchema) {
+      const d = await pool.query(`SELECT id FROM organisations WHERE slug = 'default'`);
+      defaultOrgId = d.rows[0]?.id ?? '';
+    }
   });
 
   afterAll(async () => {
@@ -312,24 +319,26 @@ suite('contact (migration 0025) — integration', () => {
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const p = phone();
       const created = await store.create({
+        recordConsent: NO_CONSENT_WRITE,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
-        actorType: 'aggregator',
         name: 'IT Org',
         type: null,
         contact: { name: 'Store Test', email, phone: p, gstNumber: 'GST1' },
         consent: CONSENT,
         createdBy: 'it',
+        orgId: defaultOrgId,
         updatedBy: 'it',
       });
       expect(created.ok).toBe(true);
       if (!created.ok) return;
       try {
         expect(created.value.contactId).toBe(contactId(email, p));
+        // GST belongs to the org since 0028: a submitted value is not stored,
+        // and the Default org has none to render.
         expect(created.value.contact).toEqual({
           name: 'Store Test',
           email,
           phone: p,
-          gstNumber: 'GST1',
         });
         const byEmail = await store.findByContactEmail(email.toUpperCase());
         expect(byEmail.ok && byEmail.value?.id).toBe(created.value.id);
@@ -355,6 +364,7 @@ suite('contact (migration 0025) — integration', () => {
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const p = phone();
       const created = await store.create({
+        recordConsent: NO_CONSENT_WRITE,
         slug: `it-org-${randomUUID().slice(0, 8)}`,
         displayName: `IT Org ${randomUUID().slice(0, 8)}`,
         ownerEmail: email.toUpperCase(),
@@ -474,22 +484,26 @@ suite('contact (migration 0025) — integration', () => {
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const input = { name: 'Asha', email, phone: phone(), gstNumber: 'G1', company: 'Acme' };
       const created = await store.create({
+        recordConsent: NO_CONSENT_WRITE,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
-        actorType: 'aggregator',
         name: 'IT Org',
         type: null,
         contact: input,
         consent: CONSENT,
         createdBy: 'it',
+        orgId: defaultOrgId,
         updatedBy: 'it',
       });
       expect(created.ok).toBe(true);
       if (!created.ok) return;
       try {
         // What Postgres would have stored (and returned) for this object.
-        const asJsonb = await pool.query('SELECT $1::jsonb AS j', [JSON.stringify(input)]);
+        // Company / GST belong to the org since 0028 (the Default org has none),
+        // so the coordinator's contact carries only the person's own keys.
+        const { gstNumber: _g, company: _c, ...own } = input;
+        const asJsonb = await pool.query('SELECT $1::jsonb AS j', [JSON.stringify(own)]);
         expect(JSON.stringify(created.value.contact)).toBe(JSON.stringify(asJsonb.rows[0].j));
-        const raw = await pool.query('SELECT contact_id FROM aggregators WHERE id = $1', [
+        const raw = await pool.query('SELECT contact_id FROM users WHERE id = $1', [
           created.value.id,
         ]);
         expect(raw.rows[0].contact_id).toBe(contactId(email, input.phone));
@@ -509,15 +523,18 @@ suite('contact (migration 0025) — integration', () => {
         type: null,
         consent: CONSENT,
         createdBy: 'it',
+        orgId: defaultOrgId,
         updatedBy: 'it',
       };
       const first = await store.create({
+        recordConsent: NO_CONSENT_WRITE,
         ...base,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
         contact: { name: 'A', email, phone: phone() },
       });
       expect(first.ok).toBe(true);
       const second = await store.create({
+        recordConsent: NO_CONSENT_WRITE,
         ...base,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
         contact: { name: 'B', email, phone: phone() },
@@ -545,11 +562,22 @@ suite('contact (migration 0025) — integration', () => {
         type: null,
         consent: CONSENT,
         createdBy: 'it',
+        orgId: defaultOrgId,
         updatedBy: 'it',
       };
       const [a, b] = await Promise.all([
-        store.create({ ...base, orgSlug: `it-${randomUUID().slice(0, 8)}`, contact: person }),
-        store.create({ ...base, orgSlug: `it-${randomUUID().slice(0, 8)}`, contact: person }),
+        store.create({
+          recordConsent: NO_CONSENT_WRITE,
+          ...base,
+          orgSlug: `it-${randomUUID().slice(0, 8)}`,
+          contact: person,
+        }),
+        store.create({
+          recordConsent: NO_CONSENT_WRITE,
+          ...base,
+          orgSlug: `it-${randomUUID().slice(0, 8)}`,
+          contact: person,
+        }),
       ]);
       try {
         expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1);
@@ -569,16 +597,18 @@ suite('contact (migration 0025) — integration', () => {
       const aggStore = new PostgresAggregatorStore();
       const orgStore = new PostgresAggregatorOrgStore();
       const coord = await aggStore.create({
+        recordConsent: NO_CONSENT_WRITE,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
-        actorType: 'aggregator',
         name: 'IT Org',
         type: null,
         contact: { name: 'Both', email, phone: p },
         consent: CONSENT,
         createdBy: 'it',
+        orgId: defaultOrgId,
         updatedBy: 'it',
       });
       const org = await orgStore.create({
+        recordConsent: NO_CONSENT_WRITE,
         slug: `it-org-${randomUUID().slice(0, 8)}`,
         displayName: `IT Org ${randomUUID().slice(0, 8)}`,
         ownerEmail: email,
@@ -607,12 +637,12 @@ suite('contact (migration 0025) — integration', () => {
         await c.query('BEGIN');
         await c.query('SET LOCAL enable_seqscan = off');
         const plan = await c.query(
-          `EXPLAIN SELECT a.id FROM aggregators a LEFT JOIN contact c ON c.id = a.contact_id
+          `EXPLAIN SELECT a.id FROM users a LEFT JOIN contact c ON c.id = a.contact_id
             WHERE a.contact_id = (SELECT id FROM contact WHERE phone = $1)`,
           ['+910000000000'],
         );
         const text = plan.rows.map((r: Record<string, string>) => Object.values(r)[0]).join('\n');
-        expect(text).not.toMatch(/Seq Scan on aggregators/);
+        expect(text).not.toMatch(/Seq Scan on users/);
         expect(text).toMatch(/contact_phone_unique/);
       } finally {
         await c.query('ROLLBACK');
@@ -626,6 +656,7 @@ suite('contact (migration 0025) — integration', () => {
       const store = new PostgresAggregatorOrgStore();
       const p = phone();
       const created = await store.create({
+        recordConsent: NO_CONSENT_WRITE,
         slug: `it-org-${randomUUID().slice(0, 8)}`,
         displayName: `IT Org ${randomUUID().slice(0, 8)}`,
         ownerEmail: `it-${randomUUID().slice(0, 8)}@example.org`,
@@ -713,13 +744,14 @@ suite('contact (migration 0025) — integration', () => {
   describe('migration 0026 (legacy columns dropped)', () => {
     it('removed the legacy columns and sync triggers, kept GC and made contact_id NOT NULL', async (ctx) => {
       if (legacy) ctx.skip();
+      // After 0027 the only contact reference is users.contact_id (org owners
+      // are admin accounts); the legacy columns stay gone.
       const cols = await pool.query(
         `SELECT table_name, column_name, is_nullable FROM information_schema.columns
-          WHERE table_schema = 'public' AND table_name IN ('aggregators', 'aggregator_orgs')
+          WHERE table_schema = 'public' AND table_name IN ('users', 'aggregator_orgs')
             AND column_name IN ('contact', 'contact_phone', 'contact_email', 'owner_email', 'owner_phone', 'contact_id')`,
       );
       expect(cols.rows.map((r: { column_name: string }) => r.column_name).sort()).toEqual([
-        'contact_id',
         'contact_id',
       ]);
       expect(cols.rows.every((r: { is_nullable: string }) => r.is_nullable === 'NO')).toBe(true);
@@ -727,18 +759,18 @@ suite('contact (migration 0025) — integration', () => {
         `SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE '%contact%' ORDER BY 1`,
       );
       expect(trig.rows.map((r: { tgname: string }) => r.tgname)).toEqual([
-        'aggregator_orgs_contact_ad',
-        'aggregators_contact_ad',
         'contact_set_updated_at',
+        'users_contact_ad',
       ]);
     });
 
-    it('is idempotent: re-applying 0026 is a no-op', async (ctx) => {
+    it('is idempotent: re-applying 0029 (the current head) is a no-op', async (ctx) => {
       if (legacy) ctx.skip();
+      const head = await readFile(path.join(MIGRATIONS_DIR, '0029_cleanup.sql'), 'utf8');
       const c = await pool.connect();
       try {
         await c.query('BEGIN');
-        await c.query(sql0026);
+        await c.query(head);
         await c.query('COMMIT');
       } finally {
         c.release();
@@ -750,13 +782,14 @@ suite('contact (migration 0025) — integration', () => {
       const store = new PostgresAggregatorStore();
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const created = await store.create({
+        recordConsent: NO_CONSENT_WRITE,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
-        actorType: 'aggregator',
         name: 'IT Org',
         type: null,
         contact: { name: 'Gc', email, phone: phone() },
         consent: CONSENT,
         createdBy: 'it',
+        orgId: defaultOrgId,
         updatedBy: 'it',
       });
       if (!created.ok) throw new Error('create failed');
@@ -774,6 +807,7 @@ suite('contact (migration 0025) — integration', () => {
       const ownerEmail = `it-${randomUUID().slice(0, 8)}@example.org`;
       const ownerPhone = phone();
       const org = await orgStore.create({
+        recordConsent: NO_CONSENT_WRITE,
         slug: `it-org-${randomUUID().slice(0, 8)}`,
         displayName: `IT Org ${randomUUID().slice(0, 8)}`,
         ownerEmail,
@@ -781,8 +815,8 @@ suite('contact (migration 0025) — integration', () => {
         ownerName: 'Owner Name',
       });
       const coord = await aggStore.create({
+        recordConsent: NO_CONSENT_WRITE,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
-        actorType: 'aggregator',
         name: 'IT Org',
         type: null,
         contact: {
@@ -792,6 +826,7 @@ suite('contact (migration 0025) — integration', () => {
         },
         consent: CONSENT,
         createdBy: 'it',
+        orgId: defaultOrgId,
         updatedBy: 'it',
       });
       if (!org.ok || !coord.ok) throw new Error('setup failed');

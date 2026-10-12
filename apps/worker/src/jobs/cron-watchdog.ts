@@ -106,7 +106,7 @@ export async function runWatchdog(): Promise<WatchdogOutcome> {
       id: schema.campaignJob.id,
       // Free on this UPDATE (already loaded for the WHERE/SET), and exactly
       // what the `completed` audit row (#617 follow-up) needs: `channel` to
-      // record which surface stalled, `signalstackOrgId` for `actorOrgId`,
+      // record which surface stalled, `signalstackOrgId` for `actorSignalstackOrgId`,
       // `requestedBy` so an export-channel row can recompute the same
       // operator `recipientRef` a normal completion carries (never a
       // participant address — see `resolveExportRecipient`).
@@ -257,7 +257,7 @@ async function auditStalledJob(
       getCampaignAuditWriter().recordCompleted({
         correlationId: stalledJob.id,
         channel: stalledJob.channel,
-        actorOrgId: stalledJob.signalstackOrgId,
+        actorSignalstackOrgId: stalledJob.signalstackOrgId,
         outcome: 'failed',
         errorCode: 'stalled',
         completedAt: new Date(),

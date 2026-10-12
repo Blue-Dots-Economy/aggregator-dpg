@@ -53,7 +53,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
     try {
       const result = await getDb().transaction(async (tx) => {
         const values = {
-          aggregatorId: input.aggregatorId,
+          userId: input.aggregatorId,
           signalstackOrgId: input.signalstackOrgId,
           channel: input.channel,
           metadata: input.metadata,

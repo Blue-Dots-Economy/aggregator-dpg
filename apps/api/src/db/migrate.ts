@@ -25,6 +25,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Pool } from 'pg';
 import { closeDb, getDb, getPool } from './client.js';
 import { logger } from '../logger.js';
+import { runMigrationGuards } from './migration-guards.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -75,11 +76,16 @@ export async function migrateWithLock<TSchema extends Record<string, unknown>>(
 }
 
 /**
- * Applies all pending migrations under the migration advisory lock.
+ * Applies all pending migrations under the migration advisory lock, after the
+ * pre-migration guards (`migration-guards.ts`).
  */
 export async function runMigrations(): Promise<void> {
   const migrationsFolder = path.resolve(__dirname, '../../drizzle/migrations');
   logger.info({ migrationsFolder }, 'running database migrations');
+  // Refuse foreign migrations, and the user & org release train on a
+  // database with data (that path is the migration tool's; see
+  // migration-guards.ts). Read once here, at startup.
+  await runMigrationGuards(getPool(), migrationsFolder, process.env.ALLOW_TRAIN_ON_BOOT === 'true');
   await migrateWithLock(getDb(), getPool(), migrationsFolder);
   logger.info('database migrations applied');
 }

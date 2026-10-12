@@ -16,8 +16,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { PostgresAggregatorOrgStore } from '../postgres.js';
 import { _setDbClients } from '../../../db/client.js';
+import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
 import type { AggregatorOrg, CreateOrgInput } from '../interface.js';
-import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 
 // ─── Fake Drizzle chain ─────────────────────────────────────────────────────
 
@@ -31,14 +31,26 @@ function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
   // resolve to `{ o, c }` pairs. Tests keep returning flat rows; wrap them
   // here, deriving the joined contact from the fixture's owner fields.
   const resolve = (chain: ChainCall[]): unknown => {
-    if (chain[0]?.method === 'execute') return { rows: [{ n: 1 }] };
+    // Raw SQL: the admin-account link reads `id`; ownerIsShared reads `shared`.
+    if (chain[0]?.method === 'execute') return { rows: [{ n: 1, id: 'admin-1', shared: false }] };
     const out = resolveRaw(chain);
     if (!chain.some((c) => c.method === 'innerJoin') || !Array.isArray(out)) return out;
     return out.map((r: Record<string, unknown>) =>
       'o' in r
         ? r
         : {
-            o: r,
+            // The fixture is a domain row; the table columns follow 0028.
+            o: {
+              ...r,
+              name: r['displayName'],
+              orgOwner: r['ownerUserId'],
+              orgType: 'aggregator',
+              url: r['url'] ?? null,
+              locations: r['locations'] ?? [],
+              legalName: r['legalName'] ?? null,
+              gstNumber: r['gstNumber'] ?? null,
+            },
+            ownerKcSub: (r['ownerKcSub'] as string | null) ?? null,
             c: {
               id: 'c'.repeat(64),
               email: String(r['ownerEmail']).toLowerCase(),
@@ -105,6 +117,7 @@ function makeRow(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
     displayName: 'Test Org',
     state: null,
     contactId: 'a'.repeat(64),
+    ownerUserId: 'admin-1',
     ownerEmail: 'owner@test.local',
     ownerPhone: null,
     ownerName: null,
@@ -116,6 +129,11 @@ function makeRow(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
     createdAt,
     updatedAt: createdAt,
     rejectedAt: null,
+    isDefault: false,
+    url: null,
+    locations: [],
+    legalName: null,
+    gstNumber: null,
     ...overrides,
   };
 }
@@ -125,6 +143,7 @@ function makeInput(overrides: Partial<CreateOrgInput> = {}): CreateOrgInput {
     slug: 'test-org',
     displayName: 'Test Org',
     ownerEmail: 'owner@test.local',
+    recordConsent: NO_CONSENT_WRITE,
     ...overrides,
   };
 }
@@ -150,13 +169,18 @@ describe('PostgresAggregatorOrgStore.create', () => {
     expect(result.value.ownerEmail).toBe('owner@test.local');
     expect(callArgs(captured, 'values')?.[0]).toMatchObject({
       slug: 'test-org',
-      displayName: 'Test Org',
-      // The lowercased email lives on the contact, keyed by its hash.
-      contactId: contactId('owner@test.local', null),
+      name: 'Test Org',
+      // Every new org is an aggregator under the network root (0028).
+      orgType: 'aggregator',
+      // The owner is an admin account (0027) linked to the owner's contact;
+      // the org row holds no contact or IdP copy of its own.
+      orgOwner: 'admin-1',
       state: null,
-      ownerKcSub: null,
       kcGroupId: null,
     });
+    const orgValues = callArgs(captured, 'values')?.[0] as Record<string, unknown>;
+    expect(orgValues).not.toHaveProperty('contactId');
+    expect(orgValues).not.toHaveProperty('ownerKcSub');
   });
 
   it('returns DB_UNAVAILABLE when insert returns no row', async () => {
@@ -174,7 +198,7 @@ describe('PostgresAggregatorOrgStore.create', () => {
     const db = makeFakeDb(() => {
       throw Object.assign(new Error('duplicate key'), {
         code: '23505',
-        constraint: 'aggregator_orgs_display_name_active_unique',
+        constraint: 'organisations_name_live_unique',
       });
     });
     _setDbClients(null, db as never);
@@ -190,7 +214,7 @@ describe('PostgresAggregatorOrgStore.create', () => {
     const db = makeFakeDb(() => {
       throw Object.assign(new Error('duplicate key'), {
         code: '23505',
-        constraint: 'aggregator_orgs_slug_active_unique',
+        constraint: 'organisations_slug_live_unique',
       });
     });
     _setDbClients(null, db as never);
@@ -219,7 +243,7 @@ describe('PostgresAggregatorOrgStore.create', () => {
     // mentions the unique index (Drizzle puts the query text on `.message`).
     const db = makeFakeDb(() => {
       throw Object.assign(
-        new Error('Failed query: insert ... aggregator_orgs_display_name_active_unique ...'),
+        new Error('Failed query: insert ... organisations_name_live_unique ...'),
         { cause: new Error('connection terminated') },
       );
     });
@@ -239,9 +263,9 @@ describe('PostgresAggregatorOrgStore.create', () => {
     const db = makeFakeDb(() => {
       const pgErr = Object.assign(
         new Error(
-          'duplicate key value violates unique constraint "aggregator_orgs_display_name_active_unique"',
+          'duplicate key value violates unique constraint "organisations_name_live_unique"',
         ),
-        { code: '23505', constraint: 'aggregator_orgs_display_name_active_unique' },
+        { code: '23505', constraint: 'organisations_name_live_unique' },
       );
       throw Object.assign(new Error('Failed query: insert into "aggregator_orgs" ...'), {
         cause: pgErr,
@@ -260,7 +284,7 @@ describe('PostgresAggregatorOrgStore.create', () => {
     const db = makeFakeDb(() => {
       const pgErr = Object.assign(new Error('duplicate key value ...'), {
         code: '23505',
-        constraint: 'aggregator_orgs_slug_active_unique',
+        constraint: 'organisations_slug_live_unique',
       });
       throw Object.assign(new Error('Failed query: insert into "aggregator_orgs" ...'), {
         cause: pgErr,
@@ -470,7 +494,7 @@ describe('PostgresAggregatorOrgStore.update', () => {
     if (!result.ok) return;
     expect(result.value.displayName).toBe('New Name');
     const set = callArgs(captured, 'set')?.[0] as Record<string, unknown>;
-    expect(set).toMatchObject({ displayName: 'New Name' });
+    expect(set).toMatchObject({ name: 'New Name' });
     expect(set).toHaveProperty('updatedAt');
   });
 
@@ -599,5 +623,39 @@ describe('PostgresAggregatorOrgStore.approve / reject', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DB_UNAVAILABLE');
+  });
+});
+
+describe('PostgresAggregatorOrgStore — consent in the create transaction (0029)', () => {
+  it('runs recordConsent inside the transaction with the new org id', async () => {
+    const db = makeFakeDb(() => [makeRow({ id: 'org-7', ownerEmail: 'owner@test.local' })]);
+    _setDbClients(null, db as never);
+    const calls: { tx: unknown; id: string }[] = [];
+    const result = await new PostgresAggregatorOrgStore().create(
+      makeInput({
+        recordConsent: async (tx, id) => {
+          calls.push({ tx, id });
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.tx).toBeDefined();
+  });
+
+  it('answers CONSENT_WRITE_FAILED when the hook throws (the transaction rolls back)', async () => {
+    const db = makeFakeDb(() => [makeRow({ id: 'org-8', ownerEmail: 'owner@test.local' })]);
+    _setDbClients(null, db as never);
+    const result = await new PostgresAggregatorOrgStore().create(
+      makeInput({
+        recordConsent: async () => {
+          throw new Error('ledger down');
+        },
+      }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'CONSENT_WRITE_FAILED', message: 'consent could not be recorded' },
+    });
   });
 });

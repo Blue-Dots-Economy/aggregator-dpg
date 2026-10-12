@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Pre-deploy runner for migration 0025 (`contact` table) on an EXISTING instance.
 #
+# SUPERSEDED for the user & org release train: deployed instances (all at
+# 0022) migrate with scripts/user-org-migrate.sh, which covers 0023 onwards in
+# one window. This script and scripts/sql/contact-*.sql only understand the
+# schema BEFORE migration 0027 (`aggregators`, `aggregator_orgs.contact_id`);
+# they are kept for databases still on that path and removed with the train.
+#
 # Phase 1 ships as one release, deployed stop-the-world. The migration file IS
 # the script: `apply` runs apps/api/drizzle/migrations/0025_contact.sql with
 # psql; the release's first API boot re-runs it through drizzle (a no-op) and

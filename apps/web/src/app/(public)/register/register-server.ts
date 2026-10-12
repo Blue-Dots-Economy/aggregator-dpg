@@ -1,8 +1,8 @@
 /**
  * Server-only helpers shared by the public registration routes — the
  * coordinator page (`/register`) and the owner deep link (`/register/owner`,
- * #619). Extracted so both routes resolve the org-hierarchy flag, the org
- * schema, and the versioned consent content the same way.
+ * #619). Extracted so both routes resolve the org schema and the versioned
+ * consent content the same way.
  *
  * @module apps/web/src/app/(public)/register/register-server
  */
@@ -15,15 +15,20 @@ import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { logger } from '../../../lib/logger';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
 
+let legacyFlagWarned = false;
+
 /**
- * Whether the org → coordinator hierarchy is enabled for this instance. Reads
- * the same `ORG_HIERARCHY_ENABLED` env var the API reads; both registration
- * routes are `force-dynamic`, so this is evaluated per request.
- *
- * @returns True when the flag is set to `'true'`.
+ * Logs once per process when the removed `ORG_HIERARCHY_ENABLED` variable is
+ * still set: organisations are always on since migration 0028, so it has no
+ * effect and should be removed from the environment (the API warns too).
  */
-export function isOrgHierarchyEnabled(): boolean {
-  return (process.env.ORG_HIERARCHY_ENABLED ?? '').trim() === 'true';
+export function warnIfLegacyHierarchyFlag(): void {
+  if (legacyFlagWarned || process.env.ORG_HIERARCHY_ENABLED === undefined) return;
+  legacyFlagWarned = true;
+  logger.warn(
+    { operation: 'config.orgHierarchy', status: 'skipped' },
+    'ORG_HIERARCHY_ENABLED is ignored — organisations are always on; remove it from the environment',
+  );
 }
 
 /**

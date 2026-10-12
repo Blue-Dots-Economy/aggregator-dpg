@@ -101,7 +101,7 @@ describe('campaign submit — requested audit row (#617)', () => {
     const rows = auditFake.rows.filter((r) => r.kind === 'requested');
     expect(rows).toHaveLength(1);
     expect(rows[0]!.correlationId).toBe(res.json().job_id);
-    expect(rows[0]!.actorOrgId).toBe('org_5d3b7fa4-x');
+    expect(rows[0]!.actorSignalstackOrgId).toBe('org_5d3b7fa4-x');
     expect(rows[0]!.purpose).toBe('audit');
     expect(rows[0]!.piiFields).toEqual(['name', 'email', 'phone']);
     expect('outcome' in rows[0]!).toBe(false);

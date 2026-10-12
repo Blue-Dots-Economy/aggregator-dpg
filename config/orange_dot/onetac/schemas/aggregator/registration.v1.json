@@ -24,7 +24,8 @@
       "title": "Website",
       "format": "uri",
       "maxLength": 2048,
-      "examples": ["https://skillbridge.in"]
+      "examples": ["https://skillbridge.in"],
+      "x-org-detail": true
     },
     "locations": {
       "type": "array",
@@ -75,7 +76,8 @@
             }
           }
         }
-      }
+      },
+      "x-org-detail": true
     },
     "contact": {
       "type": "object",

@@ -98,7 +98,7 @@ export class PostgresCampaignAuditWriter extends CampaignAuditWriterBase {
       event: 'requested' as const,
       channel: input.channel,
       actorUserId: input.actorUserId,
-      actorOrgId: input.actorOrgId,
+      actorSignalstackOrgId: input.actorSignalstackOrgId,
       actorAzp: input.actorAzp ?? null,
       piiFields: input.piiFields,
       itemCount: input.itemCount,
@@ -128,7 +128,7 @@ export class PostgresCampaignAuditWriter extends CampaignAuditWriterBase {
       correlationId: input.correlationId,
       event: 'completed' as const,
       channel: input.channel,
-      actorOrgId: input.actorOrgId,
+      actorSignalstackOrgId: input.actorSignalstackOrgId,
       outcome: input.outcome,
       completedAt: input.completedAt,
       destination: input.destination ?? null,
@@ -144,7 +144,7 @@ export class PostgresCampaignAuditWriter extends CampaignAuditWriterBase {
   /**
    * Inserts the single row for a synchronous, non-PII dump access.
    *
-   * `actorOrgId` is intentionally omitted (a dump is whole-network) and
+   * `actorSignalstackOrgId` is intentionally omitted (a dump is whole-network) and
    * `piiFields` is set to an empty array rather than left null, asserting
    * positively that no PII field was released.
    *
@@ -158,7 +158,7 @@ export class PostgresCampaignAuditWriter extends CampaignAuditWriterBase {
       event: 'completed' as const,
       channel: 'dump' as const,
       actorUserId: input.actorUserId,
-      // actorOrgId intentionally omitted — a dump is whole-network, no org.
+      // actorSignalstackOrgId intentionally omitted — a dump is whole-network, no org.
       actorAzp: input.actorAzp ?? null,
       // Empty, not null: asserts positively that no PII field was released.
       piiFields: [],

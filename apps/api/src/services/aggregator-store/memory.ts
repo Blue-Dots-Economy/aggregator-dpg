@@ -2,8 +2,11 @@
  * In-memory aggregator store.
  *
  * Process-local Maps, suitable for unit tests. Mirrors the Postgres adapter's
- * external behaviour: unique slug / phone / email, conditional `actor_type ↔
- * type` invariant, immutable slug on update.
+ * external behaviour: unique slug / phone / email, `serves` from `type`, the
+ * fail-closed consent hook, immutable slug on update, and org details rendered from the
+ * coordinator's org with the `legacy_org_details` fallback (0028). Org details
+ * are seeded per org id (`AggregatorStoreFake.seedOrgDetails`); the Default org
+ * is {@link MEMORY_DEFAULT_ORG_ID} unless a test changes it.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -15,9 +18,15 @@ import {
   type ListAggregatorsPage,
   type StoreError,
   type StoreResult,
+  type LegacyOrgDetails,
   type UpdateAggregatorPatch,
 } from './interface.js';
-import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
+import type { AggregatorStatus, BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
+import { renderOrgDetails, type OrgDetailColumns } from './org-details.js';
+import { servesOf } from './serves.js';
+
+/** The Default org's id in the in-memory store (matches `buildDefaultOrg`). */
+export const MEMORY_DEFAULT_ORG_ID = '00000000-0000-0000-0000-0000000000d0';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 
 /**
@@ -38,39 +47,104 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
   protected readonly byPhone = new Map<string, string>();
   protected readonly byEmail = new Map<string, string>();
 
-  create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
-    const invariant = checkInvariant(input.actorType, input.type);
-    if (invariant) return Promise.resolve({ ok: false, error: invariant });
+  /** Org-detail columns per org id (seeded by tests). */
+  protected readonly orgDetails = new Map<string, OrgDetailColumns>();
+  /** Each coordinator's own `legacy_org_details`. */
+  protected readonly legacy = new Map<string, LegacyOrgDetails | null>();
+  /** Which org id is the Default org. */
+  protected defaultOrgId: string = MEMORY_DEFAULT_ORG_ID;
+  /** Invite addresses by `jti` (the Postgres store reads them from `registration_invites`). */
+  protected readonly inviteEmails = new Map<string, string>();
 
+  /**
+   * Renders org details and the composed contact as Postgres does: company /
+   * GST come from the org (or the coordinator's legacy values), never from
+   * the submitted contact.
+   */
+  private render(
+    orgId: string,
+    legacy: LegacyOrgDetails | null,
+    submitted: BecknContact,
+  ): { url: string | null; locations: Aggregator['locations']; contact: BecknContact } {
+    const d = renderOrgDetails(this.orgDetails.get(orgId) ?? null, legacy);
+    const { name, email, phone, alternatePhone } = submitted;
+    return {
+      url: d.url,
+      locations: d.locations,
+      contact: {
+        name,
+        email,
+        phone,
+        ...(d.company !== undefined ? { company: d.company } : {}),
+        ...(d.gstNumber !== undefined ? { gstNumber: d.gstNumber } : {}),
+        ...(alternatePhone !== undefined ? { alternatePhone } : {}),
+      },
+    };
+  }
+
+  /**
+   * Re-renders a row's org details on read, as the Postgres join does, so org
+   * details seeded after a coordinator was created are reflected. Rows whose
+   * org has no seeded details and that hold no legacy values are returned as
+   * stored (rows seeded directly by tests keep their own url / locations).
+   */
+  protected view(row: Aggregator): Aggregator {
+    const orgId = row.parentOrgId;
+    const legacy = this.legacy.get(row.id) ?? null;
+    if (!orgId || (!this.orgDetails.has(orgId) && !legacy)) return row;
+    const rendered = this.render(orgId, legacy, row.contact);
+    return { ...row, url: rendered.url, locations: rendered.locations, contact: rendered.contact };
+  }
+
+  /** {@link view} for a possibly-missing row. */
+  protected viewOrNull(row: Aggregator | undefined): Aggregator | null {
+    return row ? this.view(row) : null;
+  }
+
+  async create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
     if (this.bySlug.has(input.orgSlug)) {
-      return Promise.resolve(errResult('DUPLICATE_SLUG', `slug already exists: ${input.orgSlug}`));
+      return errResult('DUPLICATE_SLUG', `slug already exists: ${input.orgSlug}`);
     }
     const phone = input.contact.phone;
     const email = input.contact.email.toLowerCase();
     if (this.byPhone.has(phone)) {
-      return Promise.resolve(errResult('DUPLICATE_PHONE', `phone already exists: ${phone}`));
+      return errResult('DUPLICATE_PHONE', `phone already exists: ${phone}`);
     }
     if (this.byEmail.has(email)) {
-      return Promise.resolve(errResult('DUPLICATE_EMAIL', `email already exists: ${email}`));
+      return errResult('DUPLICATE_EMAIL', `email already exists: ${email}`);
     }
 
     const cid = safeContactId(email, phone);
-    if (!cid)
-      return Promise.resolve(errResult('CHECK_VIOLATION', 'contactId: phone must be canonical'));
+    if (!cid) return errResult('CHECK_VIOLATION', 'contactId: phone must be canonical');
+
+    const id = randomUUID();
+    // Fail-closed like the Postgres transaction: nothing is stored when the
+    // consent write fails.
+    if (input.recordConsent) {
+      try {
+        await input.recordConsent(undefined, id);
+      } catch {
+        return errResult('CONSENT_WRITE_FAILED', 'consent could not be recorded');
+      }
+    }
 
     const now = new Date();
+    this.legacy.set(id, input.legacyOrgDetails ?? null);
+    const rendered = this.render(input.orgId, input.legacyOrgDetails ?? null, input.contact);
+    const serves = servesOf(input.type);
     const row: Aggregator = {
-      id: randomUUID(),
+      id,
       orgSlug: input.orgSlug,
-      actorType: input.actorType,
+      actorType: 'aggregator',
       name: input.name,
-      type: input.type,
-      url: input.url ?? null,
+      type: serves[0] ?? null,
+      serves,
+      url: rendered.url,
       contactId: cid,
-      contact: input.contact,
+      contact: rendered.contact,
       contactPhone: phone,
       contactEmail: email,
-      locations: input.locations ?? [],
+      locations: rendered.locations,
       consent: input.consent,
       profile: input.profile ?? {},
       profileRef: input.profileRef ?? null,
@@ -80,37 +154,41 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       createdAt: now,
       updatedAt: now,
       signalstackOrgId: null,
-      parentOrgId: input.parentOrgId ?? null,
-      inviteEmail: input.inviteEmail ?? null,
+      parentOrgId: input.orgId,
+      isDefaultOrg: input.orgId === this.defaultOrgId,
+      inviteEmail: input.inviteId ? (this.inviteEmails.get(input.inviteId) ?? null) : null,
+      inviteId: input.inviteId ?? null,
       rejectedAt: null,
     };
     this.indexInsert(row);
-    return Promise.resolve({ ok: true, value: row });
+    return { ok: true, value: this.view(row) };
   }
 
   findById(id: string): Promise<StoreResult<Aggregator | null>> {
-    return Promise.resolve({ ok: true, value: this.byId.get(id) ?? null });
+    return Promise.resolve({ ok: true, value: this.viewOrNull(this.byId.get(id)) });
   }
 
   findBySlug(orgSlug: string): Promise<StoreResult<Aggregator | null>> {
     const id = this.bySlug.get(orgSlug);
-    return Promise.resolve({ ok: true, value: id ? (this.byId.get(id) ?? null) : null });
+    return Promise.resolve({ ok: true, value: id ? this.viewOrNull(this.byId.get(id)) : null });
   }
 
   findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>> {
     const id = this.byPhone.get(phone);
-    return Promise.resolve({ ok: true, value: id ? (this.byId.get(id) ?? null) : null });
+    return Promise.resolve({ ok: true, value: id ? this.viewOrNull(this.byId.get(id)) : null });
   }
 
   findByContactEmail(email: string): Promise<StoreResult<Aggregator | null>> {
     const id = this.byEmail.get(email.toLowerCase());
-    return Promise.resolve({ ok: true, value: id ? (this.byId.get(id) ?? null) : null });
+    return Promise.resolve({ ok: true, value: id ? this.viewOrNull(this.byId.get(id)) : null });
   }
 
   findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>> {
     return Promise.resolve({
       ok: true,
-      value: [...this.byId.values()].filter((r) => r.parentOrgId === orgId),
+      value: [...this.byId.values()]
+        .filter((r) => r.parentOrgId === orgId)
+        .map((r) => this.view(r)),
     });
   }
 
@@ -119,7 +197,6 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     const offset = Math.max(0, filter.offset ?? 0);
     let rows = [...this.byId.values()];
     if (filter.status) rows = rows.filter((r) => r.status === filter.status);
-    if (filter.actorType) rows = rows.filter((r) => r.actorType === filter.actorType);
     if (filter.updatedBefore) {
       const before = filter.updatedBefore.getTime();
       rows = rows.filter((r) => r.updatedAt.getTime() < before);
@@ -127,7 +204,10 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     return Promise.resolve({
       ok: true,
-      value: { rows: rows.slice(offset, offset + limit), total: rows.length },
+      value: {
+        rows: rows.slice(offset, offset + limit).map((r) => this.view(r)),
+        total: rows.length,
+      },
     });
   }
 
@@ -135,16 +215,13 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     const existing = this.byId.get(id);
     if (!existing) return Promise.resolve(errResult('NOT_FOUND', id));
 
-    const nextActorType = existing.actorType;
-    const nextType = patch.type !== undefined ? patch.type : existing.type;
-    const invariant = checkInvariant(nextActorType, nextType);
-    if (invariant) return Promise.resolve({ ok: false, error: invariant });
-
     let nextPhone = existing.contactPhone;
     let nextEmail = existing.contactEmail;
     let nextContact = existing.contact;
     if (patch.contact) {
-      nextContact = patch.contact;
+      nextContact = existing.parentOrgId
+        ? this.render(existing.parentOrgId, this.legacy.get(id) ?? null, patch.contact).contact
+        : patch.contact;
       nextPhone = patch.contact.phone;
       nextEmail = patch.contact.email.toLowerCase();
       if (nextPhone !== existing.contactPhone && this.byPhone.has(nextPhone)) {
@@ -162,22 +239,20 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     const next: Aggregator = {
       ...existing,
       name: patch.name ?? existing.name,
-      type: patch.type !== undefined ? patch.type : existing.type,
-      url: patch.url !== undefined ? patch.url : existing.url,
+      ...(patch.type !== undefined
+        ? { serves: servesOf(patch.type), type: servesOf(patch.type)[0] ?? null }
+        : {}),
       contactId: nextId,
       contact: nextContact,
       contactPhone: nextPhone,
       contactEmail: nextEmail,
-      locations: patch.locations ?? existing.locations,
-      consent: existing.consent,
       status: patch.status ?? existing.status,
-      parentOrgId: patch.parentOrgId !== undefined ? patch.parentOrgId : existing.parentOrgId,
       rejectedAt: patch.rejectedAt !== undefined ? patch.rejectedAt : existing.rejectedAt,
       updatedBy: patch.updatedBy,
       updatedAt: new Date(),
     };
     this.indexReplace(existing, next);
-    return Promise.resolve({ ok: true, value: next });
+    return Promise.resolve({ ok: true, value: this.view(next) });
   }
 
   async updateStatus(
@@ -209,7 +284,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       updatedAt: new Date(),
     };
     this.byId.set(id, next);
-    return Promise.resolve({ ok: true, value: next });
+    return Promise.resolve({ ok: true, value: this.view(next) });
   }
 
   deleteById(id: string): Promise<StoreResult<void>> {
@@ -243,28 +318,6 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     }
     // org_slug is immutable — no maintenance needed.
   }
-}
-
-function checkInvariant(
-  actorType: Aggregator['actorType'],
-  type: Aggregator['type'],
-): StoreError | null {
-  // Migration 0006 relaxed the invariant: aggregator actors may carry any
-  // role-type (including null); seeker/provider actors must mirror their
-  // actor_type in `type`.
-  if (actorType === 'seeker' && type !== 'seeker') {
-    return {
-      code: 'CHECK_VIOLATION',
-      message: 'type must equal "seeker" when actor_type=seeker',
-    };
-  }
-  if (actorType === 'provider' && type !== 'provider') {
-    return {
-      code: 'CHECK_VIOLATION',
-      message: 'type must equal "provider" when actor_type=provider',
-    };
-  }
-  return null;
 }
 
 function errResult<T>(code: StoreError['code'], message: string): StoreResult<T> {

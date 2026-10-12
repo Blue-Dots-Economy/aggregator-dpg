@@ -1,7 +1,7 @@
 /**
  * Org approval endpoints (spec §6.1 / §8 org column).
  *
- * Flag-gated by `ORG_HIERARCHY_ENABLED`: not registered when the flag is off.
+ * Always registered: the org hierarchy is always on since migration 0028.
  *
  *   GET  /admin/v1/orgs/read/:id?token=...&intent=approve|reject
  *     HTML confirmation page reached from the network-admin review email.
@@ -22,7 +22,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { config, orgHierarchyEnabled } from '../config.js';
+import { config } from '../config.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import type { AggregatorOrg } from '../services/aggregator-org-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
@@ -65,14 +65,11 @@ const orgUnavailablePage = (): HtmlPage =>
   serviceUnavailablePage('Service unavailable', 'Could not load the organisation record.');
 
 /**
- * Registers the org approval routes. No-op (routes absent) when the org
- * hierarchy is disabled, preserving flag-off behaviour.
+ * Registers the org approval routes.
  *
  * @param app - Fastify instance to attach the routes to.
  */
 export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance): Promise<void> {
-  if (!orgHierarchyEnabled()) return;
-
   app.get(
     '/admin/v1/orgs/read/:id',
     {
@@ -80,7 +77,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         tags: ['aggregator-orgs'],
         summary: 'Render the network-admin approve/reject page for an org',
         description:
-          'HTML page reached from the network-admin notification email. All responses are text/html. Only registered when ORG_HIERARCHY_ENABLED=true.',
+          'HTML page reached from the network-admin notification email. All responses are text/html.',
         params: OrgApprovalParamsSchema,
         querystring: OrgReadQuerySchema,
       },
@@ -157,7 +154,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         tags: ['aggregator-orgs'],
         summary: 'Approve or reject a pending org',
         description:
-          'Browser form flow; every response is text/html. approve = enable owner + org_owner role + group + atomic status CAS; reject = atomic status CAS to inactive. Only registered when ORG_HIERARCHY_ENABLED=true.',
+          'Browser form flow; every response is text/html. approve = enable owner + org_owner role + group + atomic status CAS; reject = atomic status CAS to inactive.',
         params: OrgApprovalParamsSchema,
       },
     },
@@ -341,7 +338,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         tags: ['aggregator-orgs'],
         summary: 'Regenerate an expired org review link and show the confirm page',
         description:
-          'Reached from the "Regenerate & review" button on the expired-link page. Accepts an expired-but-signature-valid token as proof the admin held a legitimate link, mints a fresh decision token, and renders the approve/reject confirm page inline (no email). Only registered when ORG_HIERARCHY_ENABLED=true.',
+          'Reached from the "Regenerate & review" button on the expired-link page. Accepts an expired-but-signature-valid token as proof the admin held a legitimate link, mints a fresh decision token, and renders the approve/reject confirm page inline (no email).',
         params: OrgApprovalParamsSchema,
       },
     },

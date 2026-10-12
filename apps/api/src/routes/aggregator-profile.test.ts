@@ -130,35 +130,6 @@ describe('aggregator profile routes', () => {
     expect(body.error.code).toBe('SCHEMA_VALIDATION');
   });
 
-  it('PATCH rejects `consent` — it is read-only and the stored record is unchanged', async () => {
-    const before = await aggregatorStore.findById(aggregatorId);
-    let updateCalls = 0;
-    const realUpdate = aggregatorStore.update.bind(aggregatorStore);
-    aggregatorStore.update = async (...args) => {
-      updateCalls += 1;
-      return realUpdate(...args);
-    };
-    const res = await app.inject({
-      method: 'PATCH',
-      url: '/v1/aggregators/profile/me',
-      headers: { authorization: 'Bearer good-token' },
-      payload: {
-        aggregator: {
-          consent: {
-            value: false,
-            given_at: '2020-01-01T00:00:00Z',
-            valid_till: '2099-01-01T00:00:00Z',
-          },
-        },
-      },
-    });
-    expect(res.statusCode).toBe(400);
-    expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
-    expect(updateCalls).toBe(0);
-    const after = await aggregatorStore.findById(aggregatorId);
-    expect(after.ok && after.value?.consent).toEqual(before.ok && before.value?.consent);
-  });
-
   it('PATCH rejects a `profile` key — the profile half of the body is gone', async () => {
     const res = await app.inject({
       method: 'PATCH',
@@ -475,7 +446,8 @@ describe('aggregator profile routes', () => {
     expect(kcWrites).toBe(0);
   });
 
-  it('PATCH updates aggregator name/url/locations successfully', async () => {
+  it('PATCH refuses consent: read-only after registration (#836, 0029)', async () => {
+    const before = await aggregatorStore.findById(aggregatorId);
     const res = await app.inject({
       method: 'PATCH',
       url: '/v1/aggregators/profile/me',
@@ -483,15 +455,35 @@ describe('aggregator profile routes', () => {
       payload: {
         aggregator: {
           name: 'TRRAIN Renamed',
-          url: 'https://trrain.example.org',
-          locations: [],
+          consent: {
+            value: false,
+            given_at: '2020-01-15T10:00:00Z',
+            valid_till: '2099-01-15T10:00:00Z',
+          },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
+    const after = await aggregatorStore.findById(aggregatorId);
+    expect(after.ok && after.value?.name).toBe(before.ok ? before.value?.name : undefined);
+    expect(after.ok && after.value?.consent).toEqual(before.ok ? before.value?.consent : undefined);
+  });
+
+  it('PATCH updates the aggregator name successfully', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          name: 'TRRAIN Renamed',
         },
       },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>;
     expect(body.name).toBe('TRRAIN Renamed');
-    expect(body.url).toBe('https://trrain.example.org');
     for (const k of [
       'contact_name',
       'personas',
@@ -503,6 +495,69 @@ describe('aggregator profile routes', () => {
       expect(body).not.toHaveProperty(k);
     }
   });
+
+  it('PATCH accepts org details unchanged from what GET returned (an echoed contact)', async () => {
+    const before = await aggregatorStore.findById(aggregatorId);
+    if (!before.ok || !before.value) throw new Error('seed missing');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+      payload: {
+        aggregator: {
+          name: 'Echoed',
+          url: before.value.url,
+          locations: before.value.locations,
+        },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { name: string }).name).toBe('Echoed');
+  });
+
+  it.each([
+    [{ url: 'https://trrain.example.org' }, ['url']],
+    [
+      {
+        locations: [
+          {
+            geo: { type: 'Point', coordinates: [77.6, 12.9] },
+            address: { streetAddress: 'New st' },
+          },
+        ],
+      },
+      ['locations'],
+    ],
+    [
+      {
+        contact: {
+          name: 'Asha Rao',
+          phone: '+919876543210',
+          email: 'asha@trrain.org',
+          company: 'TRRAIN',
+          gstNumber: 'G1',
+        },
+      },
+      ['contact.company', 'contact.gstNumber'],
+    ],
+  ])(
+    'PATCH of org details %j → 409 ORG_DETAILS_READ_ONLY before any write (0028)',
+    async (aggregator, fields) => {
+      const before = await aggregatorStore.findById(aggregatorId);
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/v1/aggregators/profile/me',
+        headers: { authorization: 'Bearer good-token' },
+        payload: { aggregator: { name: 'Should Not Apply', ...aggregator } },
+      });
+      expect(res.statusCode).toBe(409);
+      const body = res.json() as { error: { code: string; fields: { fields: string[] } } };
+      expect(body.error.code).toBe('ORG_DETAILS_READ_ONLY');
+      expect(body.error.fields.fields).toEqual(fields);
+      const after = await aggregatorStore.findById(aggregatorId);
+      expect(after.ok && after.value?.name).toBe(before.ok && before.value?.name);
+    },
+  );
 
   it.each([
     ['DUPLICATE_PHONE', 409, 'PHONE_EXISTS'],

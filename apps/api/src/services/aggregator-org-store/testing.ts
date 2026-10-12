@@ -7,7 +7,8 @@
 
 import { InMemoryAggregatorOrgStore } from './memory.js';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
-import type { AggregatorOrg } from './interface.js';
+import { DEFAULT_ORG_SLUG, type AggregatorOrg } from './interface.js';
+export { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
 
 export class AggregatorOrgStoreFake extends InMemoryAggregatorOrgStore {
   /**
@@ -20,9 +21,19 @@ export class AggregatorOrgStoreFake extends InMemoryAggregatorOrgStore {
     for (const r of rows) this.byId.set(r.id, r);
   }
 
+  /**
+   * Seeds the network-facilitator root (only `findRoot` returns it).
+   *
+   * @param row - The root org.
+   */
+  seedRoot(row: AggregatorOrg): void {
+    this.root = row;
+  }
+
   /** Reset between tests. */
   reset(): void {
     this.byId.clear();
+    this.root = null;
   }
 }
 
@@ -42,6 +53,9 @@ export function buildAggregatorOrg(overrides: Partial<AggregatorOrg> = {}): Aggr
     displayName: 'Test Org',
     state: null,
     contactId: contactId(ownerEmail, ownerPhone),
+    // One admin account per owner person (0027): derived from the owner's
+    // contact, so two orgs share an owner exactly when they share the person.
+    ownerUserId: `owner-${contactId(ownerEmail, ownerPhone).slice(0, 16)}`,
     ownerEmail,
     ownerPhone,
     ownerName: null,
@@ -53,6 +67,29 @@ export function buildAggregatorOrg(overrides: Partial<AggregatorOrg> = {}): Aggr
     createdAt,
     updatedAt: createdAt,
     rejectedAt: null,
+    isDefault: false,
+    url: null,
+    locations: [],
+    legalName: null,
+    gstNumber: null,
     ...overrides,
   };
+}
+
+/**
+ * Builds the fixed Default org (0028): active, owned by the network admin.
+ *
+ * @param overrides - Field overrides.
+ * @returns The Default org row.
+ */
+export function buildDefaultOrg(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
+  return buildAggregatorOrg({
+    id: '00000000-0000-0000-0000-0000000000d0',
+    slug: DEFAULT_ORG_SLUG,
+    displayName: 'Default',
+    ownerEmail: 'network-admin@nf.invalid',
+    status: 'active',
+    isDefault: true,
+    ...overrides,
+  });
 }

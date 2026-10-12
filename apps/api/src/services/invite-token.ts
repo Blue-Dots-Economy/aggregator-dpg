@@ -34,7 +34,7 @@ export type InviteRole = typeof INVITE_ROLE;
 export interface MintInviteInput {
   /** `jti` of the `registration_invites` row this token represents. */
   jti: string;
-  /** `parent_org_id` the invite admits the coordinator to. */
+  /** The org id (`organisations.id`) the invite admits the coordinator to. */
   org: string;
   /** Invited email — bound; enforced against the submitted email. */
   email: string;
@@ -74,7 +74,7 @@ export interface VerifyInviteOk {
   /** `jti` of the invite row (token `sub`). */
   jti: string;
   role: InviteRole;
-  /** `parent_org_id` from the token. */
+  /** The org id (`organisations.id`) from the token. */
   org: string;
   /** Bound recipient email (normalised at mint time). */
   email: string;

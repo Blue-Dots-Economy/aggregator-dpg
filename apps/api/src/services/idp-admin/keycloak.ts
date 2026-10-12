@@ -381,6 +381,53 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
     return { ok: true, value: undefined };
   }
 
+  async findGroupByName(
+    name: string,
+  ): Promise<IdpResult<{ id: string; attributes: Record<string, string[]> } | null>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+    const url = `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/groups?search=${encodeURIComponent(name)}&exact=true&briefRepresentation=false`;
+    const res = await this.safeFetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${tokenResult.value}` },
+    });
+    if (!res.ok) return res;
+    if (!res.value.ok) {
+      return {
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: `findGroupByName HTTP ${res.value.status}` },
+      };
+    }
+    const groups = (await res.value.json().catch(() => [])) as Array<{
+      id?: string;
+      name?: string;
+      attributes?: Record<string, string[]>;
+    }>;
+    const match = Array.isArray(groups) ? groups.find((g) => g.name === name && g.id) : undefined;
+    return {
+      ok: true,
+      value: match?.id ? { id: match.id, attributes: match.attributes ?? {} } : null,
+    };
+  }
+
+  async removeUserFromGroup(userId: string, groupId: string): Promise<IdpResult<void>> {
+    const tokenResult = await this.getToken();
+    if (!tokenResult.ok) return tokenResult;
+    const url = `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/users/${userId}/groups/${groupId}`;
+    const res = await this.safeFetch(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${tokenResult.value}` },
+    });
+    if (!res.ok) return res;
+    if (!res.value.ok && res.value.status !== 404) {
+      return {
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: `removeUserFromGroup HTTP ${res.value.status}` },
+      };
+    }
+    return { ok: true, value: undefined };
+  }
+
   async addUserToGroup(userId: string, groupId: string): Promise<IdpResult<void>> {
     const tokenResult = await this.getToken();
     if (!tokenResult.ok) return tokenResult;

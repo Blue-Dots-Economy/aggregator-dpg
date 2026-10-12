@@ -58,7 +58,7 @@ async function fetchLinkMetrics(
     .from(onboarding)
     .where(
       and(
-        eq(onboarding.aggregatorId, aggregatorId),
+        eq(onboarding.userId, aggregatorId),
         eq(onboarding.source, 'link'),
         inArray(onboarding.linkId, linkIds),
       ),
@@ -771,7 +771,7 @@ function generateSlug(): string {
 
 /**
  * Build the public URL for a registration link. The URL is namespaced under
- * the aggregator's `org_slug` so two aggregators can use the same per-link
+ * the aggregator's `org_slug` so two users can use the same per-link
  * slug without collision: `${base}/<org_slug>/<slug>`.
  */
 function buildPublicUrl(orgSlug: string, slug: string): string {
