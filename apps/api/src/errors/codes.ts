@@ -482,13 +482,6 @@ export const ERR = {
     detail: 'This registration link is not accepting submissions.',
     hint: 'registration_link.status is retired or expired.',
   },
-  LINK_DUPLICATE: {
-    code: 'LINK_DUPLICATE',
-    status: 409,
-    title: 'Already registered',
-    detail: 'This participant has already registered with this aggregator.',
-    hint: 'participants UNIQUE (aggregator_id, participant_id) — ON CONFLICT path.',
-  },
   RATE_LIMITED: {
     code: 'RATE_LIMITED',
     status: 429,

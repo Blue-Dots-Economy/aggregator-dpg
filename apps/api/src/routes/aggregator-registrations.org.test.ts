@@ -7,10 +7,6 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { AggregatorStoreFake, _setAggregatorStore } from '../services/aggregator-store/index.js';
 import {
-  AggregatorProfileStoreFake,
-  _setAggregatorProfileStore,
-} from '../services/aggregator-profile-store/index.js';
-import {
   AggregatorOrgStoreFake,
   buildAggregatorOrg,
   _setAggregatorOrgStore,
@@ -60,7 +56,6 @@ describe('coordinator submit with ORG_HIERARCHY_ENABLED', () => {
     mailer = new FakeMailer();
 
     _setAggregatorStore(aggregatorStore);
-    _setAggregatorProfileStore(new AggregatorProfileStoreFake());
     _setAggregatorOrgStore(orgStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
@@ -78,7 +73,6 @@ describe('coordinator submit with ORG_HIERARCHY_ENABLED', () => {
   afterAll(async () => {
     await app?.close();
     _setAggregatorStore(null);
-    _setAggregatorProfileStore(null);
     _setAggregatorOrgStore(null);
     _setIdpAdmin(null);
     _setMailer(null);

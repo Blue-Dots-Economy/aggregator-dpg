@@ -1,10 +1,12 @@
 /**
  * Unit tests for the migration runner (`runMigrations`).
  *
- * `drizzle-orm/node-postgres/migrator`'s `migrate()` is mocked (per
- * testing-requirements.md — no real DB/network calls in unit tests) so these
- * tests exercise the real folder-resolution / logging / error-propagation
- * logic in `migrate.ts` without touching a live database.
+ * `drizzle-orm/node-postgres/migrator`'s `migrate()` is mocked and the shared
+ * pool is replaced by a fake (per testing-requirements.md — no real DB/network
+ * calls in unit tests) so these tests exercise the real folder-resolution,
+ * advisory-lock ordering and error-propagation logic in `migrate.ts` without
+ * touching a live database. The lock against a real Postgres is covered by
+ * `contact-deploy.integration.test.ts`.
  *
  * The `isMain` CLI-entrypoint block (`if (isMain) { runMigrations()... }`) is
  * intentionally left uncovered: it only runs when this file is executed
@@ -17,7 +19,7 @@
  *
  * @module @aggregator-dpg/api
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const migrateMock = vi.fn();
 
@@ -25,31 +27,99 @@ vi.mock('drizzle-orm/node-postgres/migrator', () => ({
   migrate: (...args: unknown[]) => migrateMock(...args),
 }));
 
-import { closeDb } from '../client.js';
+import { _setDbClients, closeDb } from '../client.js';
 import { runMigrations } from '../migrate.js';
+
+/** Records every call to the fake pool/client and to `migrate()` in order. */
+let events: string[];
+let released: unknown[];
+let failUnlock = false;
+let failLock = false;
+
+function installFakePool(): void {
+  events = [];
+  released = [];
+  const client = {
+    query: vi.fn(async (sql: string) => {
+      if (sql.includes('pg_advisory_unlock')) {
+        events.push('unlock');
+        if (failUnlock) throw new Error('connection terminated');
+      } else if (sql.includes('pg_advisory_lock')) {
+        events.push('lock');
+        if (failLock) throw new Error('lock query failed');
+      }
+      return { rows: [] };
+    }),
+    release: vi.fn((err?: unknown) => {
+      events.push('release');
+      released.push(err);
+    }),
+  };
+  const pool = { connect: vi.fn(async () => client), end: vi.fn(async () => undefined) };
+  _setDbClients(pool as never, { fake: 'db' } as never);
+  migrateMock.mockImplementation(async () => {
+    events.push('migrate');
+  });
+}
+
+beforeEach(() => {
+  failUnlock = false;
+  failLock = false;
+  installFakePool();
+});
 
 afterEach(async () => {
   migrateMock.mockReset();
   await closeDb().catch(() => undefined);
+  _setDbClients(null, null);
 });
 
 describe('runMigrations', () => {
   it('resolves the migrations folder relative to this module and calls migrate()', async () => {
-    migrateMock.mockResolvedValueOnce(undefined);
-
     await runMigrations();
 
     expect(migrateMock).toHaveBeenCalledTimes(1);
     const [dbArg, options] = migrateMock.mock.calls[0] as [unknown, { migrationsFolder: string }];
-    expect(dbArg).toBeDefined();
+    expect(dbArg).toEqual({ fake: 'db' });
     expect(options.migrationsFolder.replace(/\\/g, '/')).toMatch(
       /\/apps\/api\/drizzle\/migrations$/,
     );
   });
 
-  it('propagates a rejection from migrate() to the caller', async () => {
-    migrateMock.mockRejectedValueOnce(new Error('migration failed: relation already exists'));
+  it('holds the session advisory lock around migrate() and releases the connection', async () => {
+    await runMigrations();
+
+    expect(events).toEqual(['lock', 'migrate', 'unlock', 'release']);
+    expect(released).toEqual([undefined]);
+  });
+
+  it('propagates a rejection from migrate() and still unlocks + releases', async () => {
+    migrateMock.mockReset();
+    migrateMock.mockImplementation(async () => {
+      events.push('migrate');
+      throw new Error('migration failed: relation already exists');
+    });
 
     await expect(runMigrations()).rejects.toThrow('migration failed: relation already exists');
+    expect(events).toEqual(['lock', 'migrate', 'unlock', 'release']);
+  });
+
+  it('discards the lock connection when the unlock fails', async () => {
+    failUnlock = true;
+
+    await runMigrations();
+
+    expect(events).toEqual(['lock', 'migrate', 'unlock', 'release']);
+    expect(released[0]).toBeInstanceOf(Error);
+  });
+
+  it('never migrates, and discards the connection, when taking the lock fails', async () => {
+    failLock = true;
+
+    await expect(runMigrations()).rejects.toThrow('lock query failed');
+
+    expect(events).toEqual(['lock', 'release']);
+    expect(migrateMock).not.toHaveBeenCalled();
+    expect(released[0]).toBeInstanceOf(Error);
   });
 });

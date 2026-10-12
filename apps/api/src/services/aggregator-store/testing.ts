@@ -5,6 +5,7 @@
  * reaching into the in-memory implementation directly.
  */
 
+import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import { InMemoryAggregatorStore } from './memory.js';
 import type { Aggregator, CreateAggregatorInput } from './interface.js';
 import type { BecknContact, ConsentRecord } from '@aggregator-dpg/shared-primitives/aggregator';
@@ -66,6 +67,7 @@ export function buildAggregator(overrides: Partial<Aggregator> = {}): Aggregator
     name: 'Test Org',
     type: null,
     url: null,
+    contactId: contactId(contact.email, contact.phone),
     contact,
     contactPhone: overrides.contactPhone ?? contact.phone,
     contactEmail: overrides.contactEmail ?? contact.email.toLowerCase(),

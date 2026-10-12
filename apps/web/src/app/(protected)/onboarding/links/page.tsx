@@ -15,7 +15,7 @@ export default function RegistrationLinksPage() {
         title={t('links_page.title')}
         subtitle={t('links_page.subtitle')}
         right={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => router.push('/onboarding')}

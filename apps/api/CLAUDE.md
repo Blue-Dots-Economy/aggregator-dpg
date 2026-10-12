@@ -22,9 +22,23 @@ Service-account-only endpoints additionally gate on `subject.startsWith('service
 
 `recordAggregatorConsent()` (`routes/aggregator-registrations.ts:310`) calls `getConsentLedger().recordRegistrationConsent(...)` (line 456) **before** Keycloak/profile provisioning. On failure (config load throws, or the ledger write returns `!success`), the caller (`:315-319`) **deletes the just-created aggregator row** (`aggregatorStore.deleteById`) and throws `CONSENT_WRITE_FAILED` — a real rollback, not a log-and-continue. Same pattern in `aggregator-orgs.ts:375`. **Do not reorder this** — provisioning before consent would let a subject exist without a consent record, which is exactly what "fail-closed" is designed to prevent.
 
+**Consent is recorded once, at registration — the profile PATCH cannot change it (ae842508, breaking).** `PATCH /v1/aggregators/profile/me` has no `consent` key and its body schema is `.strict()`, so a body that sends `consent` is refused with `400 SCHEMA_VALIDATION`; the store's update path no longer writes `aggregators.consent`. Do not re-add it — a client-supplied consent object would let the stored record and the append-only ledger disagree.
+
 ## Known gap: Keycloak calls have timeout but no retry — flagged, not fixed here
 
 `.claude/rules/error-handling.md` requires "retry transient failures at least once with exponential backoff" on every external call. `services/idp-admin/keycloak.ts` (582 lines) routes every admin call through `safeFetch` (`:530`), which applies `AbortSignal.timeout(HTTP_TIMEOUT_MS)` uniformly — but **there is no retry loop anywhere in this file**. This is a real, verified deviation from the repo-wide rule, not a doc gap. If you're touching this file for an unrelated reason, don't assume retry exists; if you're adding retry, be aware Keycloak admin calls (user enable, role assign) are not all naturally idempotent — check each call site's side effects before wrapping it in a blind retry.
+
+## Person contacts live in `contact` (migrations 0025 / 0026)
+
+A coordinator's and an org owner's name / email / phone are stored once, in `contact`, and referenced by `aggregators.contact_id` / `aggregator_orgs.contact_id` (every FK to `contact` is named `contact_id`; a second one in the same table would take a role prefix). The stores compose the Beckn `contact` the API has always returned (`contact` row + `aggregators.contact_extra` for `alternatePhone` / `company` / `gstNumber`), in the legacy jsonb key order, so responses are byte-identical to before. Things that are easy to get wrong:
+
+- **`contact.id` is PII.** It is `sha256(lower(email):phone)` (`contactId()` in `@aggregator-dpg/shared-primitives/contact`, `contact_id_of()` in SQL — golden vectors pin them together). Never log it or put it in a URL.
+- **One person per email and per phone, across coordinators AND org owners** (`contact_email_unique`, `contact_phone_unique`). The phone is the OTP login key. Org create pre-checks this (`PHONE_EXISTS` / `OWNER_ALREADY_REGISTERED`) and profile PATCH too (`PHONE_EXISTS` / `USER_EXISTS`), both before touching Keycloak; the unique indexes are the backstop.
+- **Write through `db/contact-writes.ts`, inside the store's transaction.** Changing an email or phone re-keys the row in place (FKs are `ON UPDATE CASCADE`). It is refused when the contact is shared by two roles (`SharedContactError` → 409 `CONFLICT`) or when the new email + phone already form another person's contact (`ContactTakenError` → `USER_EXISTS`); rows are never merged.
+- **Orphan contacts are collected by the database** (`contact_gc()` from `AFTER DELETE` triggers on both tables) — do not add app-side deletes.
+- **Store errors never echo the driver message**: Drizzle puts the query parameters (emails, phones) in it. Log the SQLSTATE and constraint name instead.
+- **Existing instances run a pre-flight before deploying** — `docs/contact-migration-runbook.md` (stop-the-world; `scripts/contact-migrate.sh preflight | dry-run | apply | verify`). 0025 is also the pre-deploy script, so it must stay idempotent.
+- **A new migration's journal `when` must exceed every earlier entry's.** The migrator skips by that high-water mark, not by hash, so a smaller `when` is silently never applied. `runMigrations()` holds an advisory lock, so replicas booting together are safe.
 
 ## Org→coordinator hierarchy: routes 404, not 403, when the flag is off
 
@@ -33,6 +47,8 @@ Service-account-only endpoints additionally gate on `subject.startsWith('service
 ## Bulk-upload: the API only validates, reserves, and enqueues
 
 Streaming CSV parsing is entirely `apps/worker`'s job (see `apps/worker/CLAUDE.md`). The API side (`routes/bulk-uploads.ts`) does: presigned S3 PUT → `/start` validates the object exists via `headObject` (size-0 check + `BULK_UPLOAD_MAX_BYTES` as belt-and-braces, since a presigned PUT can't itself cap size) → `store.markUploaded` → `enqueueBulkFileProcess` (`services/bulk-queue/index.ts`, `jobId = uploadId` for idempotent enqueue — a retry of `/start` can't double-enqueue). If enqueue fails after `markUploaded` succeeds, the row is left `uploaded` with no active job — recovery relies on the worker's stuck-job watchdog (`cron-watchdog.ts`, see `apps/worker/CLAUDE.md`), not a retry here.
+
+**Rate limits (#848).** Two fixed-window Redis buckets in `services/bulk-upload-rate.ts`, keyed by the authenticated user id (i.e. per coordinator): `POST /v1/bulk-uploads` allows **5 per hour** and `GET /v1/bulk-uploads/template` **30 per hour**. Exceeding either returns `429 RATE_LIMITED` with `retryAfterSeconds`. The numbers are hard-coded constants, not env config, and the limiter fails open on a Redis error.
 
 ## Health probes & observability
 
@@ -46,7 +62,9 @@ A Signals `409 PROFILE_LIMIT_REACHED` is mapped to `SIGNALSTACK_PROFILE_LIMIT_RE
 
 **`item_locations` is transport metadata, not a profile field (#778).** The submit body may carry `item_locations` — the coordinates the registrant picked from the address autocomplete. `public-registration-links.ts` reads it and then **deletes it from the body**, exactly like the consent and birth-year keys, so it never reaches Ajv or the signalstack `item_state`. It is validated locally (strict numbers, lat/lng bounds, max 25 entries) rather than forwarded blind: signals would answer with its own 400 that this route cannot attribute back to the offending key. Absent or empty means no suggestion was chosen — or no Maps key is configured — and signals geocodes the address text instead, which is the behaviour that predates the field.
 
-**The local `participants` mirror no longer decides the outcome (#780).** It dedups per phone and used to report `skipped`, which after the client-side gate came down meant a participant was told "already registered" while a second profile had just been created upstream. Signals is the identity authority; the route now skips **only** when the identity is genuinely owned by ANOTHER aggregator — tenant isolation, not deduplication. The `link_submissions` row is inserted before the push, so the corrected verdict is persisted in the same transaction; without that the table records a duplicate for a submission that created a profile.
+**The local `participants` mirror is gone (#780, then migration 0024).** It deduped per phone and used to report `skipped`, which after the client-side gate came down meant a participant was told "already registered" while a second profile had just been created upstream — it pushed to Signals regardless of its own UPSERT result, so the local verdict was simply wrong. #780 stopped it deciding the outcome; 0024 removed the table. Signals is the identity authority; the route skips **only** when the identity is genuinely owned by ANOTHER aggregator — tenant isolation, not deduplication, and sourced from Signals' `owned_elsewhere`, never from a local row. The `link_submissions` row is still inserted before the push and corrected in the same transaction, so a submission that created a profile is never recorded as a duplicate.
+
+**There is no deduplication on either onboarding path.** Verified empirically: two identical public-link submissions both return 201 `passed` and produce two distinct Signals profiles. This is consistent with the `onboard` note above — it always inserts. If dedup is wanted it belongs in Signals, where the identity actually lives; a per-aggregator table cannot see other aggregators anyway.
 
 **Brand `attribution` on `/v1/aggregator-config` is opt-in (signals-dpg#720).** The response only carries an `attribution` array when the resolved `brand.json` declares one, so every deployment that does not is byte-identical to before.
 

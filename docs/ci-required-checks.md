@@ -19,9 +19,14 @@ Add each check name exactly as listed below (copy-paste — GitHub matches by ex
 
 ## Advisory checks (not required)
 
-| Check name                 | What it reports                                    |
-| -------------------------- | -------------------------------------------------- |
-| `SonarCloud Code Analysis` | Coverage + code-quality gate, posted by SonarCloud |
+| Check name                 | What it reports                                                                                                                                                 |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SonarCloud Code Analysis` | Coverage + code-quality gate, posted by SonarCloud                                                                                                              |
+| `db-integration`           | Real-Postgres integration suites (`*.integration.test.ts`) on `postgres:16`, run twice: on the full migration set and on the expand-phase schema (through 0025) |
+
+`db-integration` starts **advisory** while it proves stable. Promote it to required
+once it has run green on a few PRs: it is the only check that executes the SQL
+migrations and the database triggers for real.
 
 This check is **deliberately not in the required list**. It is posted by SonarCloud
 (project `Blue-Dots-Economy_aggregator-dpg`, org `blue-dots-economy`) after the
@@ -41,9 +46,11 @@ until coverage and the security rating are green.
   is what actually gates. Do not "tidy" these into one step — that re-introduces the
   coupling.
 - The `SonarCloud scan` step is **also** `continue-on-error: true`, for a different
-  reason: the `docker` matrix depends on the `ci` job, so a SonarCloud outage or an
-  expired token must not stop a green build from publishing images. Scan failures show
-  up in the run log and in SonarCloud's own commit check instead of reddening CI.
+  reason: `CI` is the one required check, so a scan that fails for reasons unrelated
+  to the code — a SonarCloud outage, an expired token, the quality gate — must not
+  redden it. Scan failures show up in the run log and in SonarCloud's own commit
+  check instead. (This used to be justified by the `docker` matrix depending on the
+  `ci` job; that matrix now lives in `build-images.yml` and no longer depends on CI.)
 - `SONAR_TOKEN` lives in repo Actions secrets. Checkout uses `fetch-depth: 0` so
   Sonar can attribute new code to the right commits.
 - The token is exposed as a **job-level** `env` so the scan step can gate on it with

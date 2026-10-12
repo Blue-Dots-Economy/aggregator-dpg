@@ -1,12 +1,10 @@
 /**
  * Aggregator-specific DTOs and Zod schemas — actor / role / status enums,
- * persona and service registry references, public-key entries, consent
- * records, and the registration + profile payload shapes that drive the
- * two-table aggregator schema (`aggregators` + `aggregator_profile`).
+ * consent records, and the registration payload shape that drives the
+ * `aggregators` table.
  *
- * Source of truth for the table shape is migration 0005
- * (`apps/api/drizzle/migrations/0005_aggregator_profile.sql`) and the Drizzle
- * definitions in `@aggregator-dpg/db-schema/schema`.
+ * Source of truth for the table shape is the Drizzle definitions in
+ * `@aggregator-dpg/db-schema/schema`.
  *
  * @module @aggregator-dpg/shared-primitives/aggregator
  */
@@ -44,40 +42,6 @@ export type AggregatorStatus = z.infer<typeof AggregatorStatusSchema>;
 
 export const DecisionMadeSchema = z.enum(['pending', 'approved', 'rejected']);
 export type DecisionMade = z.infer<typeof DecisionMadeSchema>;
-
-// ─── Schema-registry references ─────────────────────────────────────────────
-
-export const PersonaRefSchema = z
-  .object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-  })
-  .strict();
-
-export type PersonaRef = z.infer<typeof PersonaRefSchema>;
-
-export const ServiceRefSchema = z
-  .object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-  })
-  .strict();
-
-export type ServiceRef = z.infer<typeof ServiceRefSchema>;
-
-// ─── Verified certificate ───────────────────────────────────────────────────
-
-export const PublicKeyEntrySchema = z
-  .object({
-    key_id: z.string().min(1),
-    public_key: z.string().min(1),
-    algorithm: z.string().min(1),
-    valid_till: z.string().datetime(),
-    revoked_at: z.string().datetime().optional(),
-  })
-  .strict();
-
-export type PublicKeyEntry = z.infer<typeof PublicKeyEntrySchema>;
 
 // ─── Consent ────────────────────────────────────────────────────────────────
 
@@ -132,60 +96,6 @@ export const RegistrationPayloadSchema = z
   .strict();
 
 export type RegistrationPayload = z.infer<typeof RegistrationPayloadSchema>;
-
-// ─── Profile payload (post-login completion via PATCH) ──────────────────────
-
-export const ProfilePayloadSchema = z
-  .object({
-    contact_name: z.string().min(1).max(200).optional(),
-    personas: z.array(PersonaRefSchema).optional(),
-    services: z.array(ServiceRefSchema).optional(),
-    verified_certificate: z.array(PublicKeyEntrySchema).optional(),
-  })
-  .strict();
-
-export type ProfilePayload = z.infer<typeof ProfilePayloadSchema>;
-
-// ─── Aggregator view (server → client merged response) ──────────────────────
-
-/**
- * Merged read-shape returned by `GET /aggregator-profile`. Joins the
- * `aggregators` row with its 1:1 `aggregator_profile` partner so the client
- * sees the full Beckn-aligned aggregator record in one payload.
- */
-export const AggregatorViewSchema = z
-  .object({
-    id: z.string().uuid(),
-    org_slug: z.string().min(1),
-    actor_type: ActorTypeSchema,
-    name: z.string().min(1),
-    type: RoleTypeSchema.nullable(),
-    url: z.string().url().nullable(),
-
-    contact: BecknContactSchema,
-    locations: z.array(BecknLocationSchema),
-
-    // From aggregator_profile
-    contact_name: z.string().nullable(),
-    personas: z.array(PersonaRefSchema),
-    services: z.array(ServiceRefSchema),
-    verified_certificate: z.array(PublicKeyEntrySchema),
-    profile_completed_at: z.string().datetime().nullable(),
-
-    consent: ConsentRecordSchema,
-    status: AggregatorStatusSchema,
-    created_by: z.string(),
-    updated_by: z.string(),
-    created_at: z.string().datetime(),
-    updated_at: z.string().datetime(),
-  })
-  .strict()
-  .refine((a) => (a.actor_type === 'aggregator' ? a.type === null : a.type !== null), {
-    message: 'type must be null iff actor_type=aggregator',
-    path: ['type'],
-  });
-
-export type AggregatorView = z.infer<typeof AggregatorViewSchema>;
 
 // Re-export the inferred Beckn types for callers that only import from this subpath.
 export type { BecknContact, BecknLocation };

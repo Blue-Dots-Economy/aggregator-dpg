@@ -13,9 +13,8 @@
  *   4. Generate `org_slug = slugFromName(body.name)` with retry on the
  *      (statistically tiny) suffix collision.
  *   5. INSERT `aggregators` (status='pending', actor_type='aggregator',
- *      type=null) and INSERT a stub `aggregator_profile` row alongside.
- *      If the profile insert fails, delete the aggregator (cascade clears
- *      anything that managed to land).
+ *      type=null). Schema-declared fields with no column of their own go
+ *      into the `profile` jsonb, tagged by `profile_ref`.
  *   6. Create the Keycloak user with attributes
  *      { aggregator_id, aggregator_type, phoneNumber, decision_made: 'pending' }.
  *      Email is a built-in field. The user is created disabled — login is
@@ -25,8 +24,8 @@
  *      bulk uploads and public registration links.
  *   7. Mint approve / reject JWTs and email the configured admins.
  *
- * Failures throw `httpError(<CODE>)`. KC failure post-DB → rollback the
- * aggregator row (FK cascades the profile).
+ * Failures throw `httpError(<CODE>)`. A consent-ledger or KC failure after the
+ * DB write rolls back the aggregator row (FK cascades its children).
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -36,7 +35,6 @@ import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator'
 import { getRegistrationValidator } from '../services/registration-validator.js';
 import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import type { Aggregator } from '../services/aggregator-store/interface.js';
-import { getAggregatorProfileStore } from '../services/aggregator-profile-store/index.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { verifyInviteToken } from '../services/invite-token.js';
@@ -241,7 +239,6 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         };
 
         const aggregatorStore = getAggregatorStore();
-        const profileStore = getAggregatorProfileStore();
         const idp = getIdpAdmin();
 
         // Server-stamp the consent timestamp so the recorded value reflects
@@ -504,19 +501,6 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           await aggregatorStore.deleteById(aggregatorId);
           throw httpError('CONSENT_WRITE_FAILED', {
             fields: { sub_operation: 'recordAggregatorConsent', rolled_back: true },
-          });
-        }
-
-        const profile = await profileStore.create({
-          aggregatorId,
-          createdBy: 'self',
-          updatedBy: 'self',
-        });
-        if (!profile.ok) {
-          await aggregatorStore.deleteById(aggregatorId);
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(profile.error.message),
-            fields: { sub_operation: 'profileStore.create', rolled_back: true },
           });
         }
 

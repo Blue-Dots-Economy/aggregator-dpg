@@ -138,9 +138,7 @@ export async function runWatchdog(): Promise<WatchdogOutcome> {
   }
 
   // Retention: terminal-status bulk uploads beyond cutoff. Keep onboarding
-  // rollups untouched (forever per design); cascade FK from
-  // link_submission.participant_id is set null on participant delete, but
-  // we don't sweep participants.
+  // rollups untouched (forever per design).
   const bulkPurged = await getDb()
     .delete(schema.bulkUploads)
     .where(

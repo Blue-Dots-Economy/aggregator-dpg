@@ -19,9 +19,10 @@ This document was written before build and remains the product-intent spec. Wher
 - **Identity & auth** — authentication is **Keycloak** (realm `aggregator`, OIDC Authorization-Code + PKCE) with a custom **email/phone OTP** authenticator SPI, not a bespoke local JWT service. Portal sessions are Redis-backed signed cookies. `aggregator_id` is still asserted server-side on every request and never trusted from the client.
 - **Registration & approval** — approval is an **in-app, token-based email flow** (signed approval-token link → approver page → atomic compare-and-set on the row → Keycloak user enable + role assignment), with expired-link regeneration, resubmit-reclaim of a pending/rejected registration, and a service-auth endpoint that prunes stale pending registrations. It is no longer a purely manual/external process (§4.1 / §6.1).
 - **Org → coordinator hierarchy** — an optional parent-organisation → coordinator hierarchy sits behind the per-instance **`ORG_HIERARCHY_ENABLED`** flag (default off = the flat flow described here). When on, a parent org registers/approves separately (system-of-record `aggregator_orgs` table + mirrored Keycloak group + `org_owner` realm role), and each coordinator is bound to an active org (`aggregators.parent_org_id`).
-- **Consent** — registration now **captures consent** (§7.3): a required consent checkbox + read-only Terms/Privacy popup on both registration forms, with document text managed as versioned config-as-code (`config/**/consent.json`, per `org` / `aggregator` audience) and every acceptance written to an append-only `aggregator_consent_record` ledger (fail-closed — no subject is provisioned without a consent row).
+- **Consent** — registration now **captures consent** (§7.3): a required consent checkbox + read-only Terms/Privacy popup on both registration forms, with document text managed as versioned config-as-code (`config/**/consent.json`, per `org` / `aggregator` audience) and every acceptance written to an append-only `aggregator_consent_record` ledger (fail-closed — no subject is provisioned without a consent row). Consent is recorded **once, at registration**: `PATCH /v1/aggregators/profile/me` rejects a `consent` field with `400 SCHEMA_VALIDATION`.
 - **Profile is a read-only registration form** — the `/profile` page renders the **same** `registration.v1` schema as the public registration page (single source via `apps/web/src/lib/aggregator-schema.server.ts`), populated and fully disabled — not the edit-in-place form described in §4.2. Changes are raised through a **"Request an update"** panel that lists the schema-flagged (`x-updatable`) fields; the admin-approval flow behind the submit is a stub (backend tracked separately), so it only acknowledges "coming soon" today.
 - **Contact support** — an authenticated coordinator can send a support message from the portal (Sidebar → "Contact support"). The BFF forwards to the API's `POST /v1/support`, which emails the submission via the aggregator's own mailer (`getMailer()`) with **Reply-To set to the submitting coordinator**. The feature is gated by the per-instance **`SUPPORT_EMAIL`** env: when unset, `GET /v1/support/config` reports `enabled: false`, the Sidebar entry is hidden, and `POST /v1/support` returns `503 SUPPORT_NOT_CONFIGURED` (a failed send is `502 SUPPORT_SEND_FAILED`). The form accepts optional image/video/audio **attachments** (base64, server-side MIME allowlist + filename sanitisation, up to `SUPPORT_ATTACHMENT_MAX_FILES` files totalling `SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES` decoded), mailed as real MIME attachments, and is per-coordinator rate-limited.
+- **Mobile layout** — the logged-in portal is usable on phones (#817): below 1024px the sidebar becomes a slide-in drawer behind a menu button, and pages, dashboard tables and dialogs reflow for narrow screens. From 1024px up it renders as before.
 - **Consent-gated bulk onboarding** — bulk-uploaded accounts are not discoverable until the participant consents at first contact; the upload success message reflects this: _"Accounts will be live once the user logs in on the platform or via the call."_
 - **Not yet built** — the standalone **Signal Processing Service** (§2.3, §5.2) is not implemented; derived/dashboard metrics are served by the API reading upstream. Treat §5.2 and the two-service diagram as target architecture, not current state.
 
@@ -196,25 +197,25 @@ Node.js + TypeScript, **Fastify** (as built). Stateless, deployed behind the pla
 
 #### Endpoint sketch (REST, all JSON)
 
-| Method    | Path                             | Purpose                                           |
-| --------- | -------------------------------- | ------------------------------------------------- |
-| POST      | `/v1/auth/otp/request`           | Request OTP to email/phone                        |
-| POST      | `/v1/auth/otp/verify`            | Exchange OTP for session JWT                      |
-| POST      | `/v1/registration-requests`      | Submit new-aggregator request (pre-login)         |
-| GET       | `/v1/me`                         | Current aggregator org + verified flag            |
-| GET       | `/v1/profile/schema`             | Current profile schema (versioned)                |
-| GET/PATCH | `/v1/profile`                    | Read/update aggregator profile                    |
-| GET       | `/v1/onboard/summary`            | Registered / verified / discoverable counts       |
-| POST      | `/v1/onboard/links`              | Create onboarding link (returns URL + QR payload) |
-| GET       | `/v1/onboard/links`              | List links with join counts per mode              |
-| POST      | `/v1/onboard/bulk-uploads`       | Multipart CSV upload; returns batch id            |
+| Method    | Path                             | Purpose                                                       |
+| --------- | -------------------------------- | ------------------------------------------------------------- |
+| POST      | `/v1/auth/otp/request`           | Request OTP to email/phone                                    |
+| POST      | `/v1/auth/otp/verify`            | Exchange OTP for session JWT                                  |
+| POST      | `/v1/registration-requests`      | Submit new-aggregator request (pre-login)                     |
+| GET       | `/v1/me`                         | Current aggregator org + verified flag                        |
+| GET       | `/v1/profile/schema`             | Current profile schema (versioned)                            |
+| GET/PATCH | `/v1/profile`                    | Read/update aggregator profile                                |
+| GET       | `/v1/onboard/summary`            | Registered / verified / discoverable counts                   |
+| POST      | `/v1/onboard/links`              | Create onboarding link (returns URL + QR payload)             |
+| GET       | `/v1/onboard/links`              | List links with join counts per mode                          |
+| POST      | `/v1/onboard/bulk-uploads`       | Multipart CSV upload; returns batch id                        |
 | GET       | `/v1/bulk-uploads/template`      | Template download; `?participant_type=` + `?format=csv\|xlsx` |
-| GET       | `/v1/onboard/bulk-uploads/:id`   | Batch status + per-row outcomes                   |
-| GET       | `/v1/onboard/flagged-profiles`   | Incomplete/flagged profile list                   |
-| GET       | `/v1/blue-dots/summary`          | Aggregate status + participation metrics          |
-| GET       | `/v1/blue-dots/participants`     | Paginated participant list with filters & search  |
-| GET       | `/v1/blue-dots/participants/:id` | Participant detail                                |
-| GET       | `/v1/blue-dots/export`           | CSV export of current filter                      |
+| GET       | `/v1/onboard/bulk-uploads/:id`   | Batch status + per-row outcomes                               |
+| GET       | `/v1/onboard/flagged-profiles`   | Incomplete/flagged profile list                               |
+| GET       | `/v1/blue-dots/summary`          | Aggregate status + participation metrics                      |
+| GET       | `/v1/blue-dots/participants`     | Paginated participant list with filters & search              |
+| GET       | `/v1/blue-dots/participants/:id` | Participant detail                                            |
+| GET       | `/v1/blue-dots/export`           | CSV export of current filter                                  |
 
 Every listing endpoint accepts `aggregator_id` implicitly from the session and applies it as a hard filter at query time.
 
@@ -248,8 +249,6 @@ MVP recommendation: **Option A with a 5–15 minute refresh cadence.** The PRD's
 Single logical database, owned by the Aggregator API. Suggested tables:
 
 ```
-aggregator_profile_schema      (id, version, schema_json, active, created_at)
-aggregator_profile             (aggregator_id PK, schema_version, values_json, updated_at)
 onboarding_link                (id PK, aggregator_id, mode, target_role, label, created_at, expires_at, revoked_at)
 bulk_upload_batch              (id PK, aggregator_id, filename, total, succeeded, flagged, created_at, created_by)
 bulk_upload_row                (id PK, batch_id FK, row_number, raw_row_json, outcome, error_code, error_message)
@@ -295,14 +294,17 @@ Diagrams in the PRD (Flows 1–4) are authoritative. Implementation notes:
 2. For each valid row, API calls the Signals Stack bulk-create endpoint; failures are recorded with `error_code`.
 3. `bulk_upload_batch` and `bulk_upload_row` rows persisted; summary shown immediately on completion.
 
+**Rate limits** (#848). Each coordinator may start **5 uploads per hour** and download **30 templates per hour**; beyond that the API returns `429 RATE_LIMITED` with a `retryAfterSeconds` hint. The limits are fixed in code (`apps/api/src/services/bulk-upload-rate.ts`), not configurable per deployment.
+
 **Template formats** (`GET /v1/bulk-uploads/template?participant_type=seeker|provider`, #564). Both are generated from the participant schema resolved out of `network.json` and are gated on the caller's registered `aggregator_type` — nothing is shipped in the repo. The previously committed `bulk-samples/*.csv` were deleted because they had rotted into templates the parser itself rejects.
 
-| `?format=` | Returns |
-| --- | --- |
-| `csv` (default) | `text/csv` — the header row plus one example row. What a caller generating its own file needs. |
-| `xlsx` | A four-tab workbook for that type: **Instructions** (and the colour legend), **Allowed values** (every column, closed sets first), **Sample data** (worked rows covering every conditional branch), and **Enter your &lt;type&gt;s** (the empty grid, with a dropdown on every closed-set column). |
+| `?format=`      | Returns                                                                                                                                                                                                                                                                                            |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `csv` (default) | `text/csv` — the header row plus one example row. What a caller generating its own file needs.                                                                                                                                                                                                     |
+| `xlsx`          | A four-tab workbook for that type: **Instructions** (and the colour legend), **Allowed values** (every column, closed sets first), **Sample data** (worked rows covering every conditional branch), and **Enter your &lt;type&gt;s** (the empty grid, with a dropdown on every closed-set column). |
 
-**The upload path is unchanged and still accepts `.csv` only.** The workbook is what an operator fills in and then exports with *File > Save As > CSV* — it exists because a CSV cannot tell an operator which columns are required, which values a closed set accepts, or that an array cell is delimiter-joined, each of which is a class of failure otherwise only reported after the fact, per row, in `errors.csv`. The grid deliberately keeps **machine-name headers** rather than the human `title` from `network.json`, because the exported CSV's header line is what `bulk-file-stream` matches against. Array-typed fields use the network's `csv_array_delimiter`.
+**The upload path is unchanged and still accepts `.csv` only.** The workbook is what an operator fills in and then exports with _File > Save As > CSV_ — it exists because a CSV cannot tell an operator which columns are required, which values a closed set accepts, or that an array cell is delimiter-joined, each of which is a class of failure otherwise only reported after the fact, per row, in `errors.csv`. The grid deliberately keeps **machine-name headers** rather than the human `title` from `network.json`, because the exported CSV's header line is what `bulk-file-stream` matches against. Array-typed fields use the network's `csv_array_delimiter`.
+
 4. Profile-completeness flags surface later via the Signal Processing Service (because completion % is a computed signal).
 
 ### 6.4 My Blue Dots list

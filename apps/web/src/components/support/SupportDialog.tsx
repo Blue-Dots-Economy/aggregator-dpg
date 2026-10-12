@@ -270,7 +270,8 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
   };
 
   const inputClass =
-    'w-full rounded-[10px] border border-(--bd-border) px-3 py-2 text-[14px] bg-transparent';
+    // 16px below `sm` so iOS Safari does not zoom the page when a field is focused.
+    'w-full rounded-[10px] border border-(--bd-border) px-3 py-2 text-[16px] sm:text-[14px] bg-transparent';
 
   return createPortal(
     <div
@@ -287,7 +288,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
         onClick={() => onOpenChange(false)}
         tabIndex={-1}
       />
-      <div className="relative z-10 w-full max-w-md rounded-[14px] bg-(--bd-card) border border-(--bd-border) p-5 max-h-[90vh] overflow-y-auto">
+      <div className="relative z-10 w-full max-w-md rounded-[14px] bg-(--bd-card) border border-(--bd-border) p-5 max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between mb-1">
           <h2 className="text-[17px] font-semibold text-(--bd-fg)">{t('title')}</h2>
           <button

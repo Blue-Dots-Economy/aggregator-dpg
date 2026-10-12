@@ -17,11 +17,12 @@
  * Belongs to `@aggregator-dpg/api`.
  */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config, orgHierarchyEnabled } from '../config.js';
 import { coolingRetryAfter } from '../services/registration-cooling.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
+import { getAggregatorStore } from '../services/aggregator-store/index.js';
 import type { AggregatorOrg } from '../services/aggregator-org-store/interface.js';
 import { resolveProfileRef } from '../services/schema-ref.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
@@ -70,16 +71,35 @@ const OrgCreateBodySchema = z.object({
   organisation_sub_type_educational: z.string().max(100).optional(),
   organisation_sub_type_non_educational: z.string().max(100).optional(),
   management_type: z.enum(['private', 'government', 'ngo', 'other']).optional(),
+  /**
+   * One free-text address, as picked from the autocomplete (#810).
+   *
+   * The discrete parts are no longer collected, but they stay declared here so
+   * a body written against the previous schema still validates rather than
+   * being silently stripped — `z.object` defaults to stripping unknown keys,
+   * which would turn an old client into a silent data-loss path.
+   */
   address: z
     .object({
-      streetAddress: z.string().max(300).optional(),
+      streetAddress: z.string().max(500).optional(),
       addressLocality: z.string().max(200).optional(),
+      // ka-dhwd, up-gzb and alimco all collected a district before #810, so
+      // dropping it would be the exact silent-stripping path this block
+      // exists to prevent.
       addressDistrict: z.string().max(200).optional(),
       addressRegion: z.string().max(200).optional(),
       postalCode: z.string().max(20).optional(),
       addressCountry: z.string().max(100).optional(),
     })
     .optional(),
+  /**
+   * `[longitude, latitude]` for the picked address, GeoJSON order.
+   *
+   * Must be declared to survive: `z.object` strips undeclared keys silently,
+   * so an omission here would drop the coordinate with no error anywhere.
+   * Absent whenever the user typed an address without picking a suggestion.
+   */
+  coordinates: z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]).optional(),
 });
 
 /**
@@ -137,7 +157,7 @@ const OrgListResponseSchema = z
  *
  * @param app - Fastify instance to attach the routes to.
  */
-export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise<void> {
+export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
   if (!orgHierarchyEnabled()) return;
 
   app.post(
@@ -355,6 +375,23 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         return reclaimOrgReview(prior);
       }
 
+      // One person per email and per phone across coordinators AND org owners
+      // (the `contact` table, migration 0025). Checked before anything is
+      // written so a clash never leaves a half-provisioned org behind.
+      //  * email held by a coordinator → the same 409 the Keycloak USER_EXISTS
+      //    branch below returns (it used to fire only after the org row and
+      //    KC group had been created and rolled back);
+      //  * phone held by a coordinator, or by a different org's owner →
+      //    PHONE_EXISTS. The phone is the OTP login key; two users on one
+      //    number make login ambiguous.
+      const contactClash = await findOwnerContactClash(ownerEmail, phoneE164);
+      if (contactClash === 'email') {
+        throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
+      }
+      if (contactClash === 'phone') {
+        throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+      }
+
       const orgProfileRef = resolveProfileRef('org-registration.v1.json');
       if (!orgProfileRef) {
         log.warn(
@@ -376,6 +413,7 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         state: body.address?.addressRegion ?? body.state ?? null,
         ownerEmail: ownerEmail,
         ownerPhone: phoneE164,
+        ownerName: body.owner.name,
         profile: buildOrgProfile(body),
         // Derived from the schema file that actually resolved, not from the
         // brand env — a missing override must not be recorded as if its
@@ -388,6 +426,14 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         }
         if (created.error.code === 'DUPLICATE_SLUG') {
           throw httpError('ORG_SLUG_TAKEN', { fields: { slug } });
+        }
+        // Backstops for the contact pre-check above (a concurrent registration
+        // took the email/phone between the check and the insert).
+        if (created.error.code === 'DUPLICATE_EMAIL') {
+          throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
+        }
+        if (created.error.code === 'DUPLICATE_PHONE') {
+          throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
         }
         throw httpError('DB_UNAVAILABLE', {
           cause: new Error(created.error.message),
@@ -415,8 +461,8 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         });
       }
 
-      // Mirrored KC group (authz mirror — spec §9). Roll the org back to
-      // inactive on failure so a half-provisioned org never appears active.
+      // Mirrored KC group (authz mirror — spec §9). On failure the org is
+      // deleted (below), so a half-provisioned org never lingers.
       // The group name is slug-based (unique + stable); the human org name is
       // carried as a `display_name` attribute so it is visible in Keycloak.
       const group = await idp.createGroup(`org-${slug}`, {
@@ -424,7 +470,11 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         display_name: body.display_name,
       });
       if (!group.ok) {
-        await orgStore.update(org.id, { status: 'inactive' });
+        // Delete the half-created org (the contact GC trigger then frees the
+        // owner's email/phone) rather than parking it inactive: an inactive
+        // row that never got a Keycloak owner would hold the owner's contact
+        // and block every retry with PHONE_EXISTS.
+        await discardHalfCreatedOrg(org.id, null, log);
         throw httpError('IDP_UNAVAILABLE', {
           cause: new Error(group.error.message),
           fields: { sub_operation: 'idp.createGroup', rolled_back: true },
@@ -446,7 +496,7 @@ export async function registerAggregatorOrgRoutes(app: FastifyInstance): Promise
         },
       });
       if (!ownerUser.ok) {
-        await orgStore.update(org.id, { status: 'inactive' });
+        await discardHalfCreatedOrg(org.id, group.value.id, log);
         if (ownerUser.error.code === 'USER_EXISTS') {
           throw httpError('OWNER_ALREADY_REGISTERED', {
             fields: { email: body.owner.email, rolled_back: true },
@@ -608,4 +658,87 @@ async function recordOrgConsent({
   }
 
   return true;
+}
+
+/**
+ * Reports whether an org owner's email or phone already belongs to someone
+ * else — a coordinator, or (for the phone) another org's owner. Same-email org
+ * rows are handled earlier by the reclaim/revive/resend branches, so a phone
+ * match on an org with the SAME owner email is not a clash.
+ *
+ * @param ownerEmail - Lowercased owner email.
+ * @param phoneE164 - Canonical owner phone.
+ * @returns `'email'`, `'phone'`, or `null` when the pair is free.
+ * @throws {HttpError} `DB_UNAVAILABLE` when a lookup fails.
+ */
+async function findOwnerContactClash(
+  ownerEmail: string,
+  phoneE164: string,
+): Promise<'email' | 'phone' | null> {
+  const aggregators = getAggregatorStore();
+  const byEmail = await aggregators.findByContactEmail(ownerEmail);
+  if (!byEmail.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(byEmail.error.message),
+      fields: { sub_operation: 'aggregatorStore.findByContactEmail' },
+    });
+  }
+  if (byEmail.value) return 'email';
+
+  const byPhone = await aggregators.findByContactPhone(phoneE164);
+  if (!byPhone.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(byPhone.error.message),
+      fields: { sub_operation: 'aggregatorStore.findByContactPhone' },
+    });
+  }
+  if (byPhone.value) return 'phone';
+
+  const orgByPhone = await getAggregatorOrgStore().findByOwnerPhone(phoneE164);
+  if (!orgByPhone.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(orgByPhone.error.message),
+      fields: { sub_operation: 'orgStore.findByOwnerPhone' },
+    });
+  }
+  if (orgByPhone.value && orgByPhone.value.ownerEmail !== ownerEmail) return 'phone';
+  return null;
+}
+
+/**
+ * Removes an org whose Keycloak provisioning failed part-way: its mirrored
+ * group (when one was created) and the row itself. Best-effort — each step is
+ * logged; a leftover is reported by scripts/sql/contact-preflight.sql
+ * ("inactive_orgs_without_kc_owner") and the stale-registration prune.
+ *
+ * @param orgId - The half-created org.
+ * @param groupId - Its Keycloak group id, or `null` when none was created.
+ * @param log - Request logger.
+ */
+async function discardHalfCreatedOrg(
+  orgId: string,
+  groupId: string | null,
+  log: FastifyBaseLogger,
+): Promise<void> {
+  if (groupId) {
+    const g = await getIdpAdmin().deleteGroup(groupId);
+    if (!g.ok) {
+      log.warn(
+        { status: 'failure', sub_operation: 'idp.deleteGroup', org_id: orgId, code: g.error.code },
+        'could not remove the Keycloak group of a half-created org',
+      );
+    }
+  }
+  const d = await getAggregatorOrgStore().deleteById(orgId);
+  if (!d.ok) {
+    log.warn(
+      {
+        status: 'failure',
+        sub_operation: 'orgStore.deleteById',
+        org_id: orgId,
+        code: d.error.code,
+      },
+      'could not remove a half-created org row',
+    );
+  }
 }

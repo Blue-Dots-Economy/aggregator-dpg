@@ -6,10 +6,6 @@ import {
   buildAggregator,
   _setAggregatorStore,
 } from '../services/aggregator-store/index.js';
-import {
-  AggregatorProfileStoreFake,
-  _setAggregatorProfileStore,
-} from '../services/aggregator-profile-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -20,7 +16,6 @@ const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
 describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
   let app: FastifyInstance;
   let aggregatorStore: AggregatorStoreFake;
-  let profileStore: AggregatorProfileStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
 
@@ -30,12 +25,10 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     process.env.KEYCLOAK_REALM = 'bluedots';
 
     aggregatorStore = new AggregatorStoreFake();
-    profileStore = new AggregatorProfileStoreFake();
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
 
     _setAggregatorStore(aggregatorStore);
-    _setAggregatorProfileStore(profileStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
     _setAccessTokenVerifier(async (token) => {
@@ -51,7 +44,6 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
   afterAll(async () => {
     await app?.close();
     _setAggregatorStore(null);
-    _setAggregatorProfileStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
     _setAccessTokenVerifier(null);
