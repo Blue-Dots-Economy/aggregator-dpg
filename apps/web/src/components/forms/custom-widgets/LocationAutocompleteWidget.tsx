@@ -92,8 +92,9 @@ export function LocationAutocompleteWidget({
       getGeoProvider({
         ...(config.googleMapsApiKey ? { googleMapsApiKey: config.googleMapsApiKey } : {}),
         ...(config.photonUrl ? { photonUrl: config.photonUrl } : {}),
+        ...(config.geoCountry ? { country: config.geoCountry } : {}),
       }),
-    [config.googleMapsApiKey, config.photonUrl],
+    [config.googleMapsApiKey, config.photonUrl, config.geoCountry],
   );
 
   // Keep the input in sync when RJSF pushes a new value (e.g. a prefill). This

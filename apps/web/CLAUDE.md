@@ -43,6 +43,10 @@ Both `/register` and `/profile` call `loadRegistrationSchema()`, which loads `re
 
 `src/services/*` (`profile.service.ts`, `dashboard.service.ts`, etc.) are plain client-side fetch modules, **not** `interface.ts`/abstract-class services — route handlers are the real "service boundary" here. The two places that _do_ follow the repo-wide base-class pattern (`.claude/rules/base-class-pattern.md`) are `lib/oidc/interface.ts` and `lib/session/interface.ts` — treat those two as governed by that rule; everything else under `src/services/` and `src/lib/*-client` files is not.
 
+## Mobile layout (#793 / #817)
+
+The logged-in portal is responsive at the Tailwind `lg` (1024px) breakpoint: below it `components/shell/Sidebar.tsx` hides the sidebar behind a slim menu bar and opens it as a slide-in drawer (Escape / backdrop / link / widen-to-desktop close it; scroll-locked, focus-trapped), and pages reflow for phones. From `lg` up the layout is unchanged, so check both widths when touching the shell or the dashboard.
+
 ## Tests
 
 Vitest + jsdom + `@testing-library/react` for components (`src/__tests__/components/*.test.tsx`, one co-located `components/support/__tests__`); plain unit tests for `src/services/__tests__/*.test.ts` (no fake-subpath convention — these are simple fetch wrappers, not abstract-class services). No Playwright/e2e. Coverage thresholds (70/70/60/70) are set in `vitest.config.ts`.
@@ -58,9 +62,11 @@ The pattern to follow instead: resolve the value in a **server** component and p
 - Needed by a subtree of client components → resolve once in `app/layout.tsx` and publish via a context provider. `EnabledLocalesProvider` (`src/i18n/EnabledLocalesProvider.tsx`) does this for `ENABLED_LANGUAGES`, since `LanguageSwitcher` renders in four places, three of them inside client components. Its `useEnabledLocales` returns `['en']` (English only) when no provider is above it, which makes the switcher hide itself — chosen over defaulting to every supported locale (that would offer a language the deployment disabled) and over throwing (a blank page for a non-fatal problem).
 - Needed by one client component → read it in that route's `page.tsx` and pass a prop, as `register/invite/page.tsx` does for `INVITE_MAX_RECIPIENTS` (and `register/page.tsx` did for the former `ORG_HIERARCHY_ENABLED`, removed in migration 0028).
 
-`FormRuntimeConfigProvider` (`lib/FormRuntimeConfigProvider.tsx`) is the second provider-shaped case: `getFormRuntimeConfig()` (`lib/form-runtime-config.ts`) reads `GOOGLE_MAPS_API_KEY`, `PHOTON_URL`, `COLLEGE_DATASET` and `REFERENCE_BASE_URL` in a **server** component, and the form widgets take the resolved object from context. `getFormRuntimeConfig()` is server-only in effect — the module itself is `next/*`-free so it stays unit-testable, but calling it from a client component reads an empty `process.env`. Note it treats a **blank** value as absent, because Helm renders an unset value as `""` rather than omitting the variable.
+`FormRuntimeConfigProvider` (`lib/FormRuntimeConfigProvider.tsx`) is the second provider-shaped case: `getFormRuntimeConfig()` (`lib/form-runtime-config.ts`) reads `GOOGLE_MAPS_API_KEY`, `PHOTON_URL`, `GEO_COUNTRY`, `COLLEGE_DATASET` and `REFERENCE_BASE_URL` in a **server** component, and the form widgets take the resolved object from context. `getFormRuntimeConfig()` is server-only in effect — the module itself is `next/*`-free so it stays unit-testable, but calling it from a client component reads an empty `process.env`. Note it treats a **blank** value as absent, because Helm renders an unset value as `""` rather than omitting the variable.
 
 ## The form widgets' geo layer (`lib/geo/`)
+
+**Country restriction (signals-dpg#785).** `GEO_COUNTRY` (e.g. `IN`) is passed to the Google Places provider as `includedRegionCodes`, a hard filter. Each suggestion's own `country` component is also checked as a backstop. The Photon provider gets the same restriction (signals-dpg#788): it sends `countrycode`, re-checks each feature's `properties.countrycode` (older Photon servers ignore the param), and drops country- and state-level features. It mirrors Signals' `VITE_GEO_COUNTRY`. Unset, blank or a non-two-letter value means no restriction. The search box only covers picked points: coordinates a registrant or a bulk `geo_location` cell supplies are checked by Signals, which rejects one outside the country with `400 LOCATION_OUTSIDE_COUNTRY` (signals-dpg#789).
 
 Ported from Signals-DPG `apps/ui/src/lib/geo/` and behaviourally the same — read that copy when changing this one, and keep them in step.
 

@@ -15,6 +15,7 @@ const KEYS = [
   'PHOTON_URL',
   'COLLEGE_DATASET',
   'REFERENCE_BASE_URL',
+  'GEO_COUNTRY',
 ] as const;
 
 afterEach(() => {
@@ -22,6 +23,19 @@ afterEach(() => {
 });
 
 describe('getFormRuntimeConfig', () => {
+  it('reads GEO_COUNTRY as an upper-case ISO code (signals-dpg#785)', () => {
+    process.env.GEO_COUNTRY = ' in ';
+    expect(getFormRuntimeConfig().geoCountry).toBe('IN');
+  });
+
+  it('omits geoCountry when GEO_COUNTRY is unset, blank, or not a two-letter code', () => {
+    expect(getFormRuntimeConfig()).not.toHaveProperty('geoCountry');
+    process.env.GEO_COUNTRY = '';
+    expect(getFormRuntimeConfig()).not.toHaveProperty('geoCountry');
+    process.env.GEO_COUNTRY = 'India';
+    expect(getFormRuntimeConfig()).not.toHaveProperty('geoCountry');
+  });
+
   it('reads every configured value', () => {
     process.env.GOOGLE_MAPS_API_KEY = 'maps-key-123';
     process.env.PHOTON_URL = 'https://photon.internal';

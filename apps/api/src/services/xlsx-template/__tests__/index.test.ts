@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { createRequire } from 'node:module';
 import { buildXlsxTemplate, columnLetter } from '../index.js';
 import { buildCsvTemplate, exampleValue, orderedColumns } from '../../csv-template/index.js';
+import { WELL_KNOWN_COLUMNS } from '@aggregator-dpg/shared-primitives/bulk-columns';
 
 /**
  * Mirrors the shapes the real networks use, including the three that constrain
@@ -292,7 +293,7 @@ describe('buildXlsxTemplate', () => {
     // discovered. Anchored on the bullet: unanchored, "21 of the 10 columns"
     // and "11 of the 10 columns" both matched, so an off-by-one in the count
     // (or counting `plans` where it meant the conditional subset) passed.
-    expect(text).toContain('• 1 of the 10 columns only appl');
+    expect(text).toContain('• 1 of the 11 columns only appl');
   });
 
   it('lists closed sets first on the allowed-values tab, with labels', async () => {
@@ -721,6 +722,17 @@ describe('buildXlsxTemplate', () => {
  * accepts partial `item_state` and classifies the item as `draft`; every other
  * keyword is blocking).
  */
+/**
+ * Drops the well-known columns before validating. They are deliberately not
+ * schema properties, and `bulk-row-process` extracts them before Ajv runs —
+ * validating them here would assert the opposite of what production does.
+ */
+function withoutWellKnown(row: Record<string, string>): Record<string, string> {
+  const out = { ...row };
+  for (const name of WELL_KNOWN_COLUMNS) delete out[name];
+  return out;
+}
+
 describe('generated examples validate against the schema they came from', () => {
   /** The subset of an Ajv validator these cases read. */
   interface Validator {
@@ -846,7 +858,7 @@ describe('generated examples validate against the schema they came from', () => 
         const row = Object.fromEntries(
           cols.map((name, i) => [name, String(sheet.getCell(r, i + 1).value ?? '')]),
         );
-        expect(blockingErrors(schema, toPayload(schema, row, '|'))).toEqual([]);
+        expect(blockingErrors(schema, toPayload(schema, withoutWellKnown(row), '|'))).toEqual([]);
       }
     });
 
@@ -856,7 +868,7 @@ describe('generated examples validate against the schema they came from', () => 
       // The generator only quotes a cell containing `,`, `"` or a newline, and
       // no example value here does, so a plain split matches the columns.
       const row = Object.fromEntries(cols.map((name, i) => [name, example.split(',')[i] ?? '']));
-      expect(blockingErrors(schema, toPayload(schema, row, '|'))).toEqual([]);
+      expect(blockingErrors(schema, toPayload(schema, withoutWellKnown(row), '|'))).toEqual([]);
     });
   }
 

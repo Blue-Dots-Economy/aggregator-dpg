@@ -332,6 +332,62 @@ describe('<RjsfThemedForm /> widgets', () => {
     expect(lastCall.formData.langs).toEqual(['js']);
   });
 
+  // The `ui:widget` name the config tree actually uses is RJSF's lowercase
+  // `checkboxes` alias, not the registry key `CheckboxesWidget` the test above
+  // names directly. Pinned because the alias is what makes a `minItems: 1`
+  // array-of-enum satisfiable at all: without it RJSF's multi-select path
+  // falls back to the single-value SelectWidget, whose scalar write RJSF
+  // discards, and FieldTemplate treats the widget-less array as a container
+  // and drops its label and description (the ALIMCO org-registration bug).
+  it('array-of-enum via the "checkboxes" alias: keeps its label and writes an array', async () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      required: ['aggregator_type'],
+      properties: {
+        aggregator_type: {
+          type: 'array',
+          title: 'Aggregator Type',
+          description: 'Which participants this organisation represents.',
+          minItems: 1,
+          uniqueItems: true,
+          items: { type: 'string', enum: ['seeker', 'provider'] },
+        },
+      },
+    };
+    const uiSchema: UiSchema = {
+      aggregator_type: {
+        'ui:widget': 'checkboxes',
+        'ui:enumNames': ['Seekers', 'Service Providers'],
+      },
+    };
+    let latest: Record<string, unknown> = {};
+    const validity: boolean[] = [];
+    renderControlled({
+      schema,
+      uiSchema,
+      initialData: {},
+      onDataChange: (d) => {
+        latest = d;
+      },
+      onValidityChange: (v) => validity.push(v),
+    });
+
+    // Label + description survive, and the required marker is on the label —
+    // all three are what the container code path silently swallows.
+    expect(screen.getByText('Aggregator Type')).toBeTruthy();
+    expect(screen.getByText('Which participants this organisation represents.')).toBeTruthy();
+    expect(validity[validity.length - 1]).toBe(false);
+
+    // `/Aggregator Type/`, not the exact string: the required marker lives
+    // inside the <label>, so the trigger's accessible name is "Aggregator Type *".
+    fireEvent.click(screen.getByLabelText(/Aggregator Type/));
+    fireEvent.click(await screen.findByRole('button', { name: 'Seekers', exact: true }));
+
+    // An array, not the bare 'seeker' a single-select would have written.
+    expect(latest['aggregator_type']).toEqual(['seeker']);
+    expect(validity[validity.length - 1]).toBe(true);
+  });
+
   it('ConsentCheckbox: wires the ConsentCheckbox widget through formContext', () => {
     const schema: RJSFSchema = {
       type: 'object',

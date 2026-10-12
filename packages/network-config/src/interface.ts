@@ -141,6 +141,14 @@ export const BrandAttributionSchema = z.object({
   name: z.string().min(1),
   /** Mark to render. Omit to fall back to the name as text. */
   logo: z.string().min(1).optional(),
+  /**
+   * Dark-mode variant of {@link logo}, mirroring `footerLogoLight` in signals.
+   * Needed because a mark tuned for one background can fail on the other: the
+   * Swavlamban artwork is gold, which measures ~1.6:1 against the light page
+   * and ~11:1 against the dark one. Falls back to `logo` when absent, so a
+   * brand whose mark works on both (ALIMCO's deep purple) sets only `logo`.
+   */
+  logoLight: z.string().min(1).optional(),
 });
 export type BrandAttribution = z.infer<typeof BrandAttributionSchema>;
 

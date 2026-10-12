@@ -48,7 +48,13 @@
 
 import ExcelJS from 'exceljs';
 import type { JsonSchema } from '@aggregator-dpg/schema-loader/interface';
-import { exampleValue, identityExample, orderedColumns } from '../csv-template/index.js';
+import {
+  exampleValue,
+  identityExample,
+  orderedColumns,
+  wellKnownExample,
+} from '../csv-template/index.js';
+import { wellKnownColumnMeta } from '@aggregator-dpg/shared-primitives/bulk-columns';
 
 /** Tab 1 — what to do. */
 const INSTRUCTIONS_SHEET = '1. Instructions';
@@ -278,9 +284,17 @@ export async function buildXlsxTemplate(
   const required = new Set(
     Array.isArray(schema['required']) ? (schema['required'] as string[]) : [],
   );
-  const plans = orderedColumns(schema).map((name) =>
-    planColumn(name, properties[name] ?? {}, required.has(name)),
-  );
+  // A well-known column has no schema fragment, so `planColumn` would label it
+  // with the raw field name and fall back to "Free text" on the allowed-values
+  // tab — leaving the one column with a non-obvious format as the only one
+  // with no explanation. Synthesise title + description from the shared
+  // metadata so both template formats describe it identically.
+  const plans = orderedColumns(schema).map((name) => {
+    const meta = wellKnownColumnMeta(name);
+    const prop =
+      properties[name] ?? (meta ? { title: meta.title, description: meta.description } : {});
+    return planColumn(name, prop, required.has(name));
+  });
   const byName = new Map(plans.map((p) => [p.name, p]));
 
   const wb = new ExcelJS.Workbook();
@@ -667,6 +681,10 @@ function sampleRows(
       resolving.add(plan.name);
       const value =
         pins.get(plan.name) ??
+        // Well-known columns carry no JSON Schema, so `exampleValue` — which is
+        // purely schema-driven — has nothing to work from. Both formats of one
+        // template have to agree about the same column.
+        wellKnownExample(plan.name) ??
         conditionalCell(plan, selectedIn) ??
         identityCell(plan, rowIndex, identity) ??
         rotatedCell(plan, rowIndex, controllers) ??

@@ -127,6 +127,7 @@ const AggregatorConfigResponseSchema = z
               label: z.string(),
               name: z.string(),
               logo: z.string().optional(),
+              logoLight: z.string().optional(),
             }),
           )
           .optional(),

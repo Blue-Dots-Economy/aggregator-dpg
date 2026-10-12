@@ -110,6 +110,30 @@ describe('processBulkFile — success path', () => {
     expect(calls.indexOf('lines')).toBeLessThan(calls.indexOf('enqueue'));
   });
 
+  it('stores each row in :lines as a JSON array of its cells (no CSV re-parse later)', async () => {
+    await processBulkFile(JOB);
+    const linesCall = hset.mock.calls.find(([key]) => String(key).endsWith(':lines'));
+    expect(linesCall).toBeDefined();
+    const [, ...fieldValues] = linesCall!;
+    expect(fieldValues[0]).toBe('0');
+    const stored = JSON.parse(String(fieldValues[1])) as unknown;
+    expect(Array.isArray(stored)).toBe(true);
+    expect((stored as unknown[]).every((c) => typeof c === 'string')).toBe(true);
+  });
+
+  it('processes chunks strictly in order, each writing :lines before its enqueue', async () => {
+    // 2,001 rows → three chunks (ENQUEUE_CHUNK = 1000). The promise chain must keep them
+    // serial: lines, enqueue, lines, enqueue, lines, enqueue.
+    const body = ['name,email', ...Array.from({ length: 2001 }, (_, i) => `P${i},p${i}@x.io`)];
+    const { getCsvStream } = await import('../object-storage.js');
+    vi.mocked(getCsvStream).mockResolvedValueOnce(
+      Readable.from([Buffer.from(body.join('\n'), 'utf8')]),
+    );
+    await processBulkFile(JOB);
+    const order = calls.filter((c) => c === 'lines' || c === 'enqueue');
+    expect(order).toEqual(['lines', 'enqueue', 'lines', 'enqueue', 'lines', 'enqueue']);
+  });
+
   it('transitions the upload to row_processing', async () => {
     await processBulkFile(JOB);
     expect(updates.some((u) => u['status'] === 'row_processing')).toBe(true);
@@ -141,6 +165,33 @@ describe('processBulkFile — idempotency + failure', () => {
     expect(res.reason).toBe('header_mismatch');
     expect(enqueueRowProcessBulk).not.toHaveBeenCalled();
     expect(updates.some((u) => u['status'] === 'file_failed')).toBe(true);
+  });
+
+  it('accepts a well-known column in the header (#807)', async () => {
+    // The single line that makes geo_location work at all is the
+    // `...WELL_KNOWN_COLUMNS` union in the allowlist. Without it the header
+    // check rejects the column as unknown and the WHOLE file onboards zero
+    // rows — so every CSV downloaded from the new template would fail, and
+    // none of the row-level behaviour is ever reached.
+    const { getCsvStream } = await import('../object-storage.js');
+    vi.mocked(getCsvStream).mockResolvedValueOnce(
+      Readable.from([Buffer.from('name,email,geo_location\nAsha,a@b.c,12.9352|77.6245', 'utf8')]),
+    );
+    const res = await processBulkFile(JOB);
+    expect(res.status).not.toBe('failed');
+    expect(enqueueRowProcessBulk).toHaveBeenCalled();
+  });
+
+  it('still rejects a genuinely unknown column', async () => {
+    // The allowlist is a union, not a bypass — anything outside the schema's
+    // properties and the well-known set must still fail the file.
+    const { getCsvStream } = await import('../object-storage.js');
+    vi.mocked(getCsvStream).mockResolvedValueOnce(
+      Readable.from([Buffer.from('name,email,not_a_column\nAsha,a@b.c,x', 'utf8')]),
+    );
+    const res = await processBulkFile(JOB);
+    expect(res.status).toBe('failed');
+    expect(res.reason).toBe('header_mismatch');
   });
 
   it('marks file_failed with a bare (non-detailed) reason for a failure kind that carries no detail', async () => {

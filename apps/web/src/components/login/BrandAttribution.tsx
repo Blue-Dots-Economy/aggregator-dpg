@@ -1,4 +1,5 @@
 import Image from 'next/image';
+import { useThemeMode } from '../../lib/theme-mode';
 import type { JSX } from 'react';
 import type { BrandAttribution as Row } from '../../hooks/useAggregatorConfig';
 
@@ -24,6 +25,11 @@ import type { BrandAttribution as Row } from '../../hooks/useAggregatorConfig';
 export function BrandAttribution({
   rows,
 }: Readonly<{ rows: Row[] | undefined }>): JSX.Element | null {
+  // A mark tuned for one background can fail on the other: Swavlamban's gold
+  // measures ~1.6:1 against the light page and ~11:1 against the dark one, so
+  // it ships deepened for light and untouched for dark. `logoLight` is the
+  // dark-mode variant; a mark that works on both (ALIMCO) sets only `logo`.
+  const { mode } = useThemeMode();
   if (!rows?.length) return null;
   return (
     // Marks are sized by HEIGHT only (`h-24 w-auto`), never by a fixed box, so
@@ -35,17 +41,17 @@ export function BrandAttribution({
     // flush: both marks are symmetric emblems whose visual weight sits inboard
     // of their left edge, so a caption starting at x=0 looks like it is sitting
     // to the left of its own logo.
-    // `pl-6` insets the block from the column's left edge. It is the only
-    // thing on the right pane that is not body copy, so starting it flush
-    // with the headline and the sign-in card made it read as a fourth
-    // paragraph rather than a footer credit.
-    <div className="mt-16 flex items-start gap-8 pl-6">
+    // Centred in the column rather than offset by a fixed padding. A literal
+    // inset only lines up for one particular pair of mark widths; `justify-center`
+    // keeps the block optically centred under the sign-in card whatever artwork
+    // a brand ships, and however wide each mark renders.
+    <div className="mt-16 flex w-full items-start justify-center gap-8">
       {rows.map((row) => (
         <div key={`${row.label}-${row.name}`} className="flex flex-col items-center gap-2">
           <span className="text-xs font-medium tracking-wide text-ink-400">{row.label}</span>
           {row.logo ? (
             <Image
-              src={row.logo}
+              src={(mode === 'dark' ? (row.logoLight ?? row.logo) : row.logo) as string}
               alt={row.name}
               width={352}
               height={160}
