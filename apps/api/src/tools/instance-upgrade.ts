@@ -6,6 +6,7 @@
  *
  *   node dist/tools/instance-upgrade.js check [--fix <name> [--id <uuid> | --org-id <uuid>] [--dry-run]]
  *   node dist/tools/instance-upgrade.js run (--snapshot-taken <id> | --dry-run)
+ *   node dist/tools/instance-upgrade.js data [--dry-run]
  *   node dist/tools/instance-upgrade.js enrich [--dry-run] [--rate <n per second>]
  *   node dist/tools/instance-upgrade.js enable-owners [--dry-run] [--rate <n per second>]
  *
@@ -495,7 +496,9 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> {
       if (blockers.length > 0) throw new Refusal(`${blockers.length} blocker(s) — see above`);
       before = await counts(client, 'instance-upgrade-counts-before.sql');
     } else {
-      out('  part-way through the instance upgrade: no 0022 drain / pre-flight / counts; verify gates only');
+      out(
+        '  part-way through the instance upgrade: no 0022 drain / pre-flight / counts; verify gates only',
+      );
     }
     out('== applying');
     const tags = new Map((await readJournal(MIGRATIONS)).map((e) => [e.when, e.tag]));
@@ -597,9 +600,25 @@ async function main(argv: string[]): Promise<number> {
     const online = await import('./instance-upgrade-online.js');
     return command === 'enrich' ? online.enrich(opts, out) : online.enableOwners(opts, out);
   }
+  if (command === 'data') {
+    const pool = openPool();
+    try {
+      const level = await levelOf(pool);
+      if (level.state !== 'done') {
+        throw new Refusal(
+          `data runs after the instance upgrade (the database is at ${level.appliedTag ?? 'nothing'})`,
+        );
+      }
+      // Config-free (DB only); loaded lazily to keep `check` / `run` lean.
+      const { DATA_STEPS, runDataSteps } = await import('./instance-upgrade-data.js');
+      return await runDataSteps(pool, DATA_STEPS, { dryRun: args.includes('--dry-run') }, out);
+    } finally {
+      await pool.end();
+    }
+  }
   if (command !== 'check' && command !== 'run') {
     out(
-      'usage: instance-upgrade check [--fix <name> …] | run (--snapshot-taken <id> | --dry-run) | enrich [--dry-run] [--rate n] | enable-owners [--dry-run] [--rate n]',
+      'usage: instance-upgrade check [--fix <name> …] | run (--snapshot-taken <id> | --dry-run) | data [--dry-run] | enrich [--dry-run] [--rate n] | enable-owners [--dry-run] [--rate n]',
     );
     return 2;
   }
