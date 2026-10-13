@@ -9,7 +9,8 @@
 # committed. Re-running is safe: already-filled values are left alone, so it
 # will not invalidate data encrypted under an existing SIGNALS_PII_KEY.
 #
-# Everything gets `openssl rand -hex 32` except SIGNALS_PII_KEY, which the
+# Everything gets `openssl rand -hex 32` except AGGREGATOR_DPG_API_KEY (an
+# sk_signals_ apikey) and SIGNALS_PII_KEY, which the
 # signals API requires to be base64 decoding to exactly 32 bytes (AES-256).
 set -eu
 
@@ -49,6 +50,8 @@ cp "$ENV_FILE" "$tmp"
 for name in $vars; do
   case "$name" in
     SIGNALS_PII_KEY) value=$(openssl rand -base64 32) ;;
+    # signals apikeys carry the sk_signals_ prefix the seed script uses.
+    AGGREGATOR_DPG_API_KEY) value="sk_signals_$(openssl rand -hex 24)" ;;
     *)               value=$(openssl rand -hex 32) ;;
   esac
   # `value` is hex or base64, so the only character needing care in the sed

@@ -9,7 +9,7 @@ name: aggregator-dpg
 #   Infra    postgres (3 DBs), signals-redis, aggregator-redis,
 #            keycloak, minio (+init), mailpit
 #   signals-dpg   signals-bootstrap (one-shot: migrate+seed) -> signals-api -> signals-ui
-#   search        signals-search api + worker + TEI embeddings  (--profile search)
+#   search        signals-search api + worker + TEI embeddings
 #   aggregator-dpg   aggregator-api (auto-migrates) -> aggregator-web + aggregator-worker
 #
 # This file is for LOCAL DEV ONLY. It intentionally does NOT use the
@@ -45,7 +45,7 @@ name: aggregator-dpg
 #   MinIO S3 API             http://localhost:9000
 #   Postgres                 localhost:5432               (dbs: aggregator, signals, keycloak)
 #   signals-redis            localhost:5555               (password-protected)
-#   Signals Search API       http://localhost:3110        (opt-in: --profile search)
+#   Signals Search API       http://localhost:3110
 #   aggregator-redis         localhost:6379
 #
 # Ports match each project's own setup guide (signals-dpg/SETUP.md,
@@ -404,6 +404,10 @@ services:
       # for service access") before even checking for a seeded service org.
       # Matches signals-bootstrap's seed_service_users.ts slug ('aggregator-dpg').
       KEYCLOAK_SERVICE_CLIENT_IDS: ${KEYCLOAK_SERVICE_CLIENT_IDS:-aggregator-dpg}
+      # Seeded as the aggregator-dpg service apikey + org, so aggregator and
+      # signals-search use them without copying anything from the seed output.
+      AGGREGATOR_DPG_API_KEY: ${AGGREGATOR_DPG_API_KEY:?AGGREGATOR_DPG_API_KEY must be set in .env (run ./gen-secrets.sh)}
+      AGGREGATOR_DPG_ORG_ID: ${AGGREGATOR_DPG_ORG_ID:?AGGREGATOR_DPG_ORG_ID must be set in .env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -418,16 +422,14 @@ services:
     image: signals-dpg/api:local
     container_name: sd-signals-api
     restart: unless-stopped
-    # Inherits the exact same env as the bootstrap step.
-    environment: *signals-env
-    # signals-search wiring, ONLY when the developer opts in: copy
-    # .env.search.example -> .env.search. A separate optional file rather than
-    # entries in the map above because MATCH_SCORE_PROVIDER is a Zod enum and
-    # compose cannot omit a mapping key whose value is empty — a blank default
-    # would fail validation and break boot for everyone NOT running search.
-    env_file:
-      - path: .env.search
-        required: false
+    # Same env as the bootstrap step, plus signals-search wiring. Discover and
+    # match score read the same URL under two names; both must be set.
+    environment:
+      <<: *signals-env
+      SIGNALS_SEARCH_URL: http://signals-search-api:3100
+      MATCH_SCORE_PROVIDER: signals_search
+      SIGNALS_SEARCH_ENDPOINT: http://signals-search-api:3100
+      SIGNALS_SEARCH_API_KEY: ${AGGREGATOR_DPG_API_KEY}
     ports:
       - "2742:2742"
     depends_on:
@@ -538,11 +540,10 @@ services:
       SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/schemas
       AGGREGATOR_CONFIG_PATH: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/aggregator.config.yaml
       # ── Cross-DPG push into signals (optional; see LOCAL_SETUP.md) ────────
-      # SIGNALSTACK_ADMIN_KEY + SIGNALSTACK_ACTING_ORG_ID come from the
-      # signals-bootstrap seed output. Leave blank to run aggregator standalone.
+      # The apikey + org id signals-bootstrap seeds for aggregator-dpg.
       SIGNALSTACK_BASE_URL: ${SIGNALSTACK_BASE_URL:-http://signals-api:2742}
-      SIGNALSTACK_ADMIN_KEY: ${SIGNALSTACK_ADMIN_KEY:-}
-      SIGNALSTACK_ACTING_ORG_ID: ${SIGNALSTACK_ACTING_ORG_ID:-}
+      SIGNALSTACK_ADMIN_KEY: ${AGGREGATOR_DPG_API_KEY}
+      SIGNALSTACK_ACTING_ORG_ID: ${AGGREGATOR_DPG_ORG_ID}
       SIGNALSTACK_ITEM_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
       # Phase C, opt-in, stays manual: set SIGNALSTACK_AUTH_MODE=bearer in
@@ -681,7 +682,7 @@ services:
       LINK_METRICS_ROLLUP_INTERVAL_MS: ${LINK_METRICS_ROLLUP_INTERVAL_MS:-300000}
       WATCHDOG_INTERVAL_MS: ${WATCHDOG_INTERVAL_MS:-3600000}
       SIGNALSTACK_BASE_URL: ${SIGNALSTACK_BASE_URL:-http://signals-api:2742}
-      SIGNALSTACK_ADMIN_KEY: ${SIGNALSTACK_ADMIN_KEY:-}
+      SIGNALSTACK_ADMIN_KEY: ${AGGREGATOR_DPG_API_KEY}
       SIGNALSTACK_ITEM_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
       # Phase C, opt-in, stays manual — see aggregator-api's env block above
@@ -701,22 +702,21 @@ services:
         condition: service_healthy
 
   # ───────────────────────────────────────────────────────────────────────
-  # signals-search — OPT-IN: `docker compose --profile search up -d`
+  # signals-search — relevance-ranked discover + match score for signals-api.
   #
-  # Mirrors signals-dpg/local-setup's `search` profile; see that repo's
-  # LOCAL_SETUP.md §7 for the full explanation of every setting here.
+  # Same services as signals-dpg/local-setup's `search` profile; see that
+  # repo's LOCAL_SETUP.md §7 for the full explanation of every setting here.
   # ───────────────────────────────────────────────────────────────────────
 
   # BAAI/bge-m3 baked into the image — no ~2.3 GB runtime download, no HF
   # dependency. Public on GHCR, so no login. Same model production runs.
   tei-embeddings:
-    profiles: ["search"]
     image: ghcr.io/blue-dots-economy/tei-bge-m3:cpu-1.7-bge-m3
     # Both published images are amd64-only: signals-search's CI does not set
     # `platforms:`, so it publishes just the ubuntu-latest runner's arch, and
     # upstream HuggingFace TEI publishes no arm64 cpu-* tag at all. Without this
     # line, `docker pull` on an arm64 machine (Apple Silicon) fails outright with
-    # "no matching manifest for linux/arm64/v8" and the profile cannot start.
+    # "no matching manifest for linux/arm64/v8" and search cannot start.
     #
     # Emulation is viable, and measured, not assumed: on an M-series host this
     # image loads bge-m3 and serves a 1024-dim embedding ~35s after start, and is
@@ -742,7 +742,6 @@ services:
       - "80"
 
   signals-search-api:
-    profiles: ["search"]
     image: ${SIGNALS_SEARCH_IMAGE:-ghcr.io/blue-dots-economy/signals-search:develop}
     # amd64-only image (see the note on tei-embeddings). Overridable so a native
     # build can be used instead of emulation on arm64:
@@ -789,7 +788,6 @@ services:
         condition: service_completed_successfully
 
   signals-search-worker:
-    profiles: ["search"]
     image: ${SIGNALS_SEARCH_IMAGE:-ghcr.io/blue-dots-economy/signals-search:develop}
     # amd64-only image (see the note on tei-embeddings). Overridable so a native
     # build can be used instead of emulation on arm64:

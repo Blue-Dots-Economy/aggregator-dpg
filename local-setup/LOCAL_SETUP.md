@@ -43,9 +43,10 @@ Both tracks share the same prerequisites (§1). Track A uses the unified
 with `pnpm dev` against Dockerised backing services, using each repo's own
 tooling.
 
-> **⚠️ Memory guidance.** Track A builds **5 app images** and then runs **~11
-> containers** — budget **≥ 6 GB of Docker memory** (Docker Desktop → Settings →
-> Resources → Memory) and ideally a 16 GB machine. On an **8 GB machine** (where
+> **⚠️ Memory guidance.** Track A builds **5 app images** and then runs **~14
+> containers**, including signals-search and its embedding server (which alone
+> wants 3-4 GB) — budget **≥ 10 GB of Docker memory** (Docker Desktop → Settings →
+> Resources → Memory) on a 16 GB machine. On an **8 GB machine** (where
 > Docker can only get ~4 GB), Track A will OOM-thrash — a first
 > `docker compose up --build` can take an hour or fail. **Use Track B instead:**
 > Docker then only runs small _prebuilt_ backing images (no builds), and the
@@ -101,6 +102,16 @@ dhi.io/...` (Docker Hardened Images), and dhi.io refuses anonymous pulls — so
 Unauthorized` unless you have run `docker login dhi.io` with a Docker Hub
 > account. Track B needs no login: it builds no app images. signals-dpg's
 > `local-setup/LOCAL_SETUP.md` carries the same note.
+>
+> Check the login before the first build — a stale entry in
+> `~/.docker/config.json` looks logged in but still gets the 401, and the first
+> image (`signals-bootstrap`) builds without it, so the failure only shows up at
+> `signals-api`:
+>
+> ```bash
+> docker login dhi.io
+> docker pull dhi.io/node:24-alpine   # must succeed before you build
+> ```
 > | A REST client (curl / Postman / HTTPie) | — | poking APIs, cross-DPG wiring | optional |
 
 You do **not** need a real AWS account, a real SMTP server, or a real SMS
@@ -119,7 +130,7 @@ pre-fills everything except the first item and the secrets, which
 | **SMTP account**                                                                                                                                                                         | Sending real approval + OTP email in staging/prod.                                                                                     | Not needed locally (Mailpit catches all). For real email use a Gmail **App Password** (not your login password) or Amazon SES.             |
 | **SMS / OTP provider**                                                                                                                                                                   | Delivering login OTPs by phone in prod (Twilio / AWS SNS / MSG91).                                                                     | Not needed locally — Keycloak's `log` provider writes the code to `docker compose logs keycloak`; signals-dpg sets `CREATE_TEST_OTP=true`. |
 | **S3 bucket + credentials**                                                                                                                                                              | aggregator bulk-uploads, QR PNGs, error CSVs in prod.                                                                                  | Not needed locally — MinIO provides an S3-compatible endpoint and the bucket is auto-created.                                              |
-| **App secrets + infra passwords** (`SESSION_KEY`, `APPROVAL_TOKEN_SECRET`, `SIGNALS_AUTH_SECRET`, `SIGNALS_PII_KEY`, `POSTGRES_PASSWORD`, `SIGNALS_REDIS_PASSWORD`, `KC_ADMIN_PASSWORD`) | Signing sessions/approval tokens, encrypting PII, and the local Postgres/Redis/Keycloak logins.                                        | Ship as `CHANGE_ME_*` placeholders. Run `./gen-secrets.sh` after copying `.env` — it fills each one with a fresh random value.             |
+| **App secrets + infra passwords** (`SESSION_KEY`, `APPROVAL_TOKEN_SECRET`, `SIGNALS_AUTH_SECRET`, `SIGNALS_PII_KEY`, `POSTGRES_PASSWORD`, `SIGNALS_REDIS_PASSWORD`, `KC_ADMIN_PASSWORD`, `AGGREGATOR_DPG_API_KEY`) | Signing sessions/approval tokens, encrypting PII, and the local Postgres/Redis/Keycloak logins.                                        | Ship as `CHANGE_ME_*` placeholders. Run `./gen-secrets.sh` after copying `.env` — it fills each one with a fresh random value.             |
 | **`127.0.0.1 keycloak` in `/etc/hosts`**                                                                                                                                                 | So the browser and the web container resolve the OIDC issuer to the _same_ Keycloak (issuer-claim validation).                         | You add it once (§2).                                                                                                                      |
 
 ### 1.3 Clone both repos
@@ -129,8 +140,8 @@ compose build contexts (`../../signals-dpg` and `..`) resolve:
 
 ```bash
 # from a common parent directory of your choosing
-git clone <aggregator-dpg-repo-url>  aggregator-dpg
-git clone <signals-dpg-repo-url>     signals-dpg
+git clone https://github.com/Blue-Dots-Economy/aggregator-dpg.git
+git clone https://github.com/Blue-Dots-Economy/signals-dpg.git
 ```
 
 If you already have both repos side by side (you do, if you're reading this file
@@ -201,6 +212,8 @@ order is handled automatically:
 postgres, redis×2, mailpit, minio ─► minio-init (bucket)
                                   ─► keycloak (imports realm)
 signals-bootstrap (migrate+seed, runs once) ─► signals-api ─► signals-ui
+                                            ─► signals-search-api + signals-search-worker
+tei-embeddings (bge-m3, ~30-60s warm-up)
 aggregator-api (auto-migrates on boot) ─► aggregator-web + aggregator-worker
 ```
 
@@ -208,7 +221,7 @@ Follow logs if anything looks stuck:
 
 ```bash
 docker compose logs -f keycloak            # realm import / OTP codes
-docker compose logs -f signals-bootstrap   # migration + seed + minted apikeys
+docker compose logs -f signals-bootstrap   # migration + seed
 docker compose logs -f aggregator-api      # migrations + upstream calls
 ```
 
@@ -232,7 +245,7 @@ docker compose logs -f aggregator-api      # migrations + upstream calls
 | MinIO console    | http://localhost:9001       | `minioadmin` / `MINIO_ROOT_PASSWORD`                                                                            |
 | Postgres         | localhost:5432              | `dpg` / `POSTGRES_PASSWORD` (one shared server; dbs: `aggregator`, `signals`, `keycloak`)                       |
 | signals-redis    | localhost:5555              | password-protected (`SIGNALS_REDIS_PASSWORD`)                                                                   |
-| Signals Search   | http://localhost:3110       | opt-in `--profile search` (§10). **3110, not 3100** — the portal owns 3100. `POST /v1/search` needs `x-api-key` |
+| Signals Search   | http://localhost:3110       | §10. **3110, not 3100** — the portal owns 3100. `POST /v1/search` needs `x-api-key` (`AGGREGATOR_DPG_API_KEY`) |
 | aggregator-redis | localhost:6379              | —                                                                                                               |
 
 > Ports mirror each project's own guide (`signals-dpg/SETUP.md`,
@@ -240,7 +253,7 @@ docker compose logs -f aggregator-api      # migrations + upstream calls
 > consolidation: the unified stack runs a **single** Postgres on `:5432` holding
 > all three databases (the per-repo guides use separate `:5432`/`:5433`).
 
-Continue to §3 (aggregator smoke test) and §4 (cross-DPG wiring).
+Continue to §3 (aggregator smoke test), §4 (cross-DPG check) and §10 (search check).
 
 ---
 
@@ -267,58 +280,34 @@ This exercises Keycloak OTP, the approval email, and the portal end to end.
 
 ---
 
-## 4. Wire aggregator-dpg → signals-dpg (cross-DPG integration)
+## 4. aggregator-dpg → signals-dpg (cross-DPG integration)
 
-By default each DPG runs standalone. To let aggregator-dpg **push** approved
-aggregators and onboarded participants **into** signals-dpg, it authenticates
-with the two-header service-auth model:
+aggregator-dpg **pushes** approved aggregators and onboarded participants
+**into** signals-dpg. This is wired automatically — nothing to copy:
 
-- `x-api-key` — a service apikey minted by signals-dpg's seed script.
-- `x-acting-org-id` — the org the call acts on behalf of.
+- `gen-secrets.sh` generates `AGGREGATOR_DPG_API_KEY` (`sk_signals_…`) in `.env`;
+  `AGGREGATOR_DPG_ORG_ID` ships with a fixed local value.
+- `signals-bootstrap` seeds exactly that apikey and org id as the
+  `aggregator-dpg` network-service account.
+- aggregator-api and aggregator-worker read them as `SIGNALSTACK_ADMIN_KEY` /
+  `SIGNALSTACK_ACTING_ORG_ID`, and signals-api uses the same key for
+  signals-search (§10).
 
-The apikey is generated at seed time, so it can't be pre-baked into `.env`.
-Wire it up after the first `up`:
-
-**1. Read the seeded credentials** (printed on the bootstrap's first run only):
-
-```bash
-docker compose logs signals-bootstrap
-# look for the aggregator-dpg service apikey (prefix sk_signals_...) and the
-# aggregator-dpg network_service org id.
-```
-
-If the log has scrolled or the seed already ran, re-mint by resetting (§7) or
-inspect Postgres:
-
-```bash
-docker compose exec postgres psql -U dpg -d signals \
-  -c "select o.id, o.name, o.type from organization o where o.type='network_service';"
-```
-
-**2. Put them in `.env`:**
-
-```dotenv
-SIGNALSTACK_ADMIN_KEY=sk_signals_...................
-SIGNALSTACK_ACTING_ORG_ID=org_....................   # aggregator-dpg network_service org id
-```
-
-**3. Restart the aggregator services that call upstream:**
-
-```bash
-docker compose up -d aggregator-api aggregator-worker
-```
-
-**4. Verify** (mirror an aggregator into signals — the pattern documented in
+**Verify** (mirror an aggregator into signals — the pattern documented in
 `signals-dpg/docs/operations/integrating-dpgs.md`):
 
 ```bash
+set -a; . ./.env; set +a
 curl -X POST http://localhost:2742/api/v1/admin/aggregator/upsert \
-  -H "x-api-key: $SIGNALSTACK_ADMIN_KEY" \
-  -H "x-acting-org-id: $SIGNALSTACK_ACTING_ORG_ID" \
+  -H "x-api-key: $AGGREGATOR_DPG_API_KEY" \
+  -H "x-acting-org-id: $AGGREGATOR_DPG_ORG_ID" \
   -H 'Content-Type: application/json' \
   -d '{"external_id":"agg_demo_001","name":"Demo Aggregator","slug":"demo","domains":["seeker","provider"]}'
 # -> { "org_id": "org_<uuid>", "created": true }
 ```
+
+> The seed applies these values only when it first creates the rows. If you
+> change either one in `.env` after the first `up`, reset with `down -v` (§7).
 
 ---
 
@@ -548,8 +537,9 @@ docker compose down -v         # ALSO wipe all data volumes (fresh DBs on next u
 docker compose up -d --build   # rebuild from scratch; re-runs migrate + seed
 ```
 
-Wiping volumes re-runs `signals-bootstrap`, which **mints new apikeys** — redo
-§4 with the new values.
+Wiping volumes re-runs `signals-bootstrap`, which seeds the same
+`AGGREGATOR_DPG_API_KEY` / `AGGREGATOR_DPG_ORG_ID` from `.env` again — nothing to
+re-wire.
 
 **Track B:** stop the `pnpm dev` processes, then from `local-setup/` run
 `docker compose down -v` to wipe the backing volumes. On the next run, redo
@@ -563,7 +553,7 @@ Step 2 (`db:push:api` / `db:init:api` / `db:seed:services:api`) and Step 3
 
 | Symptom                                                                                                                                                               | Cause / fix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `port is already allocated` on `up`                                                                                                                                   | Another local process holds one of the host ports (`5432`, `5555`, `6379`, `8080`, `5173`, `2742`, `3100`, `3110` with `--profile search`, `4000`, `8025`, `9000/9001`). Stop it, or edit the host-port mapping in `docker-compose.yml`. Host-native processes (e.g. a Homebrew Postgres on 5432) are NOT freed by stopping Docker containers.                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `port is already allocated` on `up`                                                                                                                                   | Another local process holds one of the host ports (`5432`, `5555`, `6379`, `8080`, `5173`, `2742`, `3100`, `3110`, `4000`, `8025`, `9000/9001`). Stop it, or edit the host-port mapping in `docker-compose.yml`. Host-native processes (e.g. a Homebrew Postgres on 5432, or a signals `pnpm dev` on 2742) are NOT freed by stopping Docker containers. Find the owner with `lsof -nP -iTCP:<port> -sTCP:LISTEN`.                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Browser can't reach `http://keycloak:8080` / login redirect fails                                                                                                     | Missing `127.0.0.1 keycloak` in `/etc/hosts` (§2.1). Re-add and retry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Login redirects to `/login?error=invalid_flow_cookie`                                                                                                                 | Portal is HTTP but cookies are Secure. The unified compose sets `COOKIE_SECURE=false`; if you changed it, revert and `docker compose up -d aggregator-web`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `403 MISSING_AGGREGATOR_ID` on the profile endpoint                                                                                                                   | Keycloak `aggregator_id` mapper missing. The unified realm bakes it in — if you swapped realms, re-import (`down -v` + `up`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -571,7 +561,7 @@ Step 2 (`db:push:api` / `db:init:api` / `db:seed:services:api`) and Step 3
 | `AGGREGATOR_TYPE_MISSING` on onboarding (bulk upload / links)                                                                                                         | Same root cause as above — the `aggregator_type` KC attribute was dropped at registration (policy DISABLED then), so the JWT has no `aggregator_type` claim. Fixed for new registrations by the `keycloak-init` sidecar. For an already-registered user: **sign out and back in** to mint a fresh token (the claim only appears in a new token); if the attribute itself is missing, re-register or `down -v` + `up`.                                                                                                                                                                                                                                                                                                                                                     |
 | `signals-api` restarts / "relation does not exist"                                                                                                                    | `signals-bootstrap` didn't finish. Check `docker compose logs signals-bootstrap`; re-run with `docker compose up -d --force-recreate signals-bootstrap signals-api`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `signals-bootstrap` fails on `SIGNALS_PII_KEY`                                                                                                                        | It must be base64 that decodes to exactly 32 bytes: `openssl rand -base64 32`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| aggregator upstream calls 403 `INVALID_API_KEY`                                                                                                                       | `SIGNALSTACK_ADMIN_KEY` doesn't match a seeded key. Re-read §4 step 1.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| aggregator upstream calls 403 `INVALID_API_KEY`                                                                                                                       | `AGGREGATOR_DPG_API_KEY` in `.env` was changed after the first seed. `docker compose down -v && docker compose up -d` (§7).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | No email arrives                                                                                                                                                      | It's not actually delivered locally — open Mailpit at http://localhost:8025.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | OTP code never emailed                                                                                                                                                | For phone/SMS OTP the `log` provider prints it: `docker compose logs keycloak \| grep -i otp`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | First `up --build` is very slow                                                                                                                                       | Normal — five app images build from source. Subsequent ups are cached.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -646,87 +636,56 @@ Step 2 (`db:push:api` / `db:init:api` / `db:seed:services:api`) and Step 3
 
 ---
 
-## 10. Optional — signals-search (relevance ranking + match score)
+## 10. signals-search (relevance ranking + match score)
 
-Without this, discover returns results in **recency order** and match scores are
-unavailable. Adding it gives the aggregator flows relevance-ranked search from the
-same stack.
+signals-search is part of the stack: `docker compose up -d` starts
+`sd-signals-search-api`, `sd-signals-search-worker` and `sd-tei-embeddings`, and
+signals-api is already pointed at it. Discover returns relevance-ranked results
+and match scores work out of the box.
 
 > **The canonical documentation for signals-search's configuration lives in
 > `signals-dpg/local-setup/LOCAL_SETUP.md` §7** — the apikey-table auth, the
 > `network.json` requirements, the four-place embedding-dimension lock, and the
-> error-keyed troubleshooting table. It is deliberately not duplicated here; two
-> copies of that detail would drift. This section covers only what differs in the
-> unified stack.
+> error-keyed troubleshooting table. This section covers only what differs in
+> the unified stack.
 
-### 10.1 Bring it up
-
-```bash
-cd aggregator-dpg/local-setup
-cp .env.search.example .env.search      # then mint the apikey, §10.3
-docker compose --profile search up -d
-```
-
-Adds three services — `sd-signals-search-api`, `sd-signals-search-worker` and
-`sd-tei-embeddings`. Both images are **public on GHCR**: no `docker login`, and
-no `signals-search` checkout (unlike signals-dpg and aggregator-dpg, which this
-stack builds from source, signals-search is pulled prebuilt).
-
-> **Every `--profile search` command needs the flag**, `down` and `ps` included.
+Both images are **public on GHCR**: no `docker login`, and no `signals-search`
+checkout (signals-search is pulled prebuilt).
 
 > **On Apple Silicon / arm64 these run emulated.** Both images are amd64-only, so
 > the compose pins `platform: linux/amd64` — without it the pull fails with
 > `no matching manifest for linux/arm64/v8`. It works (bge-m3 serves a 1024-dim
 > embedding ~35s after start on an M-series host), just slower. Upstream TEI has
 > no arm64 build, so the embedder cannot be made native; the search app can, via
-> `SIGNALS_SEARCH_IMAGE=signals-search:local` + `SEARCH_PLATFORM=linux/arm64`.
+> `SIGNALS_SEARCH_IMAGE=signals-search:local` + `SEARCH_PLATFORM=linux/arm64` in
+> `.env`.
 
-### 10.2 What differs from signals-dpg's own stack
+### 10.1 What differs from signals-dpg's own stack
 
-|                      | signals-dpg stack       | here                                                                                                                                                                                |
-| -------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Search API host port | `3100`                  | **`3110`** — the aggregator portal already owns 3100. The container still listens on 3100, so in-compose URLs are unchanged.                                                        |
-| Database             | the single `postgresdb` | the **`signals`** database specifically; this Postgres also holds `aggregator` and `keycloak`. Pointing search at the wrong one gives `401`s (no `apikey` rows) and an empty index. |
-| Redis                | `redis`                 | `signals-redis` — signals-search shares the _signals_ Redis, because that is where the ingestion stream lives. Not `aggregator-redis`.                                              |
-| `network.json`       | `../examples/...`       | `../../signals-dpg/examples/schemas/blue_dot/network.json` — from the sibling checkout, so both services agree on domains and permitted interactions.                               |
-| Memory               | +3-4 GB                 | +3-4 GB **on top of an already ~11-container stack**. This guide's §2 asks for ≥6 GB; with search, budget **≥10 GB**.                                                               |
+|                      | signals-dpg stack                       | here                                                                                                                                                                                |
+| -------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enabled              | opt-in `--profile search` + `.env.search` | always on; wired in `docker-compose.yml`                                                                                                                                          |
+| Search API host port | `3100`                                  | **`3110`** — the aggregator portal already owns 3100. The container still listens on 3100, so in-compose URLs are unchanged.                                                        |
+| API key              | minted by the seed, copied by hand      | `AGGREGATOR_DPG_API_KEY` from `.env`, seeded by `signals-bootstrap` (§4)                                                                                                            |
+| Database             | the single `postgresdb`                 | the **`signals`** database specifically; this Postgres also holds `aggregator` and `keycloak`. Pointing search at the wrong one gives `401`s (no `apikey` rows) and an empty index. |
+| Redis                | `redis`                                 | `signals-redis` — signals-search shares the _signals_ Redis, because that is where the ingestion stream lives. Not `aggregator-redis`.                                              |
+| `network.json`       | `../examples/...`                       | `../../signals-dpg/examples/schemas/blue_dot/network.json` — from the sibling checkout, so both services agree on domains and permitted interactions.                               |
 
-### 10.3 The apikey and the two-var-set trap
+signals-api gets **both** search config blocks — `SIGNALS_SEARCH_URL` (discover)
+and `MATCH_SCORE_PROVIDER` + `SIGNALS_SEARCH_ENDPOINT` (match score) — because
+they read the same URL under different names. They use the compose service name
+and container port (`signals-search-api:3100`), not `localhost:3110`.
 
-Identical to signals-dpg's §7.3/§7.4, and both apply here:
-
-```bash
-# Mint the service apikey (prints sk_signals_… on FIRST run only)
-docker compose run --rm signals-bootstrap sh -lc "pnpm --filter api db:seed:services"
-```
-
-Then in `.env.search` — note the **same URL under two different variable names**,
-because discover and match-score read separate config blocks:
-
-```bash
-SIGNALS_SEARCH_URL=http://signals-search-api:3100        # discover
-MATCH_SCORE_PROVIDER=signals_search                       # match score
-SIGNALS_SEARCH_ENDPOINT=http://signals-search-api:3100    # match score (same value!)
-SIGNALS_SEARCH_API_KEY=<raw key from above>
-```
-
-Use the **compose service name and container port** (`signals-search-api:3100`),
-not `localhost:3110` — that mapping is for your browser and curl, not for
-container-to-container calls.
-
-Setting only the first pair leaves every match-score call returning
-`503 MATCH_SCORE_NOT_CONFIGURED`; setting only the second leaves the UI showing
-"Showing basic matches — relevance ranking is temporarily unavailable".
-
-### 10.4 Smoke test
+### 10.2 Smoke test
 
 `/health` is unauthenticated and checks neither the database nor the embedder, so
 a 200 there proves only that the process is up. Run a real query:
 
 ```bash
+set -a; . ./.env; set +a
 curl -sS -X POST http://localhost:3110/v1/search \
   -H 'content-type: application/json' \
-  -H "x-api-key: $SIGNALS_SEARCH_API_KEY" \
+  -H "x-api-key: $AGGREGATOR_DPG_API_KEY" \
   -d '{
         "context": {
           "messageId": "local-smoke-1",
@@ -744,13 +703,13 @@ gets you a `400 VALIDATION_ERROR`, not a 401, because validation runs before aut
 domain.
 
 A `200` with a `message.items` array means the whole chain worked: apikey row →
-network config → embedder → pgvector index. Verified responses look like:
+network config → embedder → pgvector index:
 
 ```json
 {"context":{...},"message":{"items":[],"meta":{"total":0,"limit":20,"offset":0}}}
 ```
 
-TEI warms up for ~30-60s on CPU before it can serve; an empty `results` array
+TEI warms up for ~30-60s on CPU before it can serve; an empty `items` array
 usually just means the worker's sweep has not backfilled yet (every 60s by
 default). If `sd-tei-embeddings` dies during startup, it is almost certainly
-memory — see signals-dpg's §6.1.
+memory — raise Docker's memory limit (§0) and see signals-dpg's §6.1.
