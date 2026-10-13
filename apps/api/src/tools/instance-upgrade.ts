@@ -9,6 +9,7 @@
  *   node dist/tools/instance-upgrade.js data [--dry-run]
  *   node dist/tools/instance-upgrade.js enrich [--dry-run] [--rate <n per second>]
  *   node dist/tools/instance-upgrade.js enable-owners [--dry-run] [--rate <n per second>]
+ *   node dist/tools/instance-upgrade.js run-all --snapshot-taken <id>
  *
  * `check` is read-only (fixes excepted). `run` takes a database from 0022 to
  * the latest shipped migration in ONE transaction that also runs every verify
@@ -34,7 +35,7 @@ import {
   shippedFileHashes,
   type Queryable,
 } from '../db/migrate-core.js';
-import { upgradeLevel, type UpgradeLevel } from './instance-upgrade-logic.js';
+import { upgradeLevel, type UpgradeLevel, type UpgradeState } from './instance-upgrade-logic.js';
 import {
   canActAsOwner,
   isFailing,
@@ -580,8 +581,124 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> {
  * @returns The exit code (0 ok, 1 failed, 2 usage).
  * @throws {Refusal} When a guard refuses.
  */
+/** One step of `run-all`: a tool subcommand and its flags. */
+export interface RunAllStep {
+  cmd: string;
+  args: string[];
+}
+
+/**
+ * The ordered steps of `run-all` for a database at `state`. The online steps
+ * (`data` / `enrich` / `enable-owners`) require the schema already at head, so
+ * they can only be dry-run AFTER the real `run` commits — hence they follow it.
+ * A database already at head resumes with just the online block (completed
+ * steps re-check and skip themselves).
+ *
+ * @param state - The database's upgrade level.
+ * @param snapshot - The `--snapshot-taken` id (required to start from 0022).
+ * @returns The step list, or a refusal with an exit code.
+ */
+export function planRunAll(
+  state: UpgradeState,
+  snapshot: string | undefined,
+): { ok: true; steps: RunAllStep[] } | { ok: false; reason: string; code: number } {
+  const online: RunAllStep[] = [
+    { cmd: 'data', args: ['--dry-run'] },
+    { cmd: 'enrich', args: ['--dry-run'] },
+    { cmd: 'enable-owners', args: ['--dry-run'] },
+    { cmd: 'data', args: [] },
+    { cmd: 'enrich', args: [] },
+    { cmd: 'enable-owners', args: [] },
+    { cmd: 'check', args: [] },
+  ];
+  if (state === 'start') {
+    if (!snapshot) {
+      return {
+        ok: false,
+        reason: 'run-all needs --snapshot-taken <id> to start from 0022',
+        code: 2,
+      };
+    }
+    return {
+      ok: true,
+      steps: [
+        { cmd: 'check', args: [] },
+        { cmd: 'run', args: ['--dry-run'] },
+        { cmd: 'run', args: ['--snapshot-taken', snapshot] },
+        ...online,
+      ],
+    };
+  }
+  if (state === 'done') return { ok: true, steps: online };
+  return {
+    ok: false,
+    reason: `run-all starts at 0022 or resumes at head; the database is '${state}'`,
+    code: 1,
+  };
+}
+
+/**
+ * Runs each step in order, stopping at the first non-zero exit (e.g. `enrich`
+ * on login conflicts). Re-running `run-all` resumes: completed steps re-check
+ * and skip. Never throws.
+ *
+ * @param steps - From {@link planRunAll}.
+ * @param runStep - Executes one step, returning its exit code.
+ * @param out - Line printer.
+ * @returns 0 when every step passed, else the failing step's exit code.
+ */
+export async function executeRunAll(
+  steps: RunAllStep[],
+  runStep: (step: RunAllStep) => Promise<number>,
+  out: (line: string) => void,
+): Promise<number> {
+  for (const step of steps) {
+    const label = [step.cmd, ...step.args].join(' ');
+    out(`\n=== run-all → ${label} ===`);
+    const code = await runStep(step);
+    if (code !== 0) {
+      out(
+        `\nrun-all STOPPED at '${label}' (exit ${code}). Fix the cause and re-run run-all — completed steps are skipped.`,
+      );
+      return code;
+    }
+  }
+  out('\nrun-all COMPLETE — schema, data and owner access applied; final check passed.');
+  return 0;
+}
+
 async function main(argv: string[]): Promise<number> {
   const [command, ...args] = argv;
+  if (command === 'run-all') {
+    // Full env (it runs enrich / enable-owners against Keycloak).
+    const pool = openPool();
+    let state: UpgradeState;
+    try {
+      state = (await levelOf(pool)).state;
+    } finally {
+      await pool.end();
+    }
+    const plan = planRunAll(state, flag(args, '--snapshot-taken'));
+    if (!plan.ok) {
+      if (plan.code === 1) throw new Refusal(plan.reason);
+      out(`usage: ${plan.reason}`);
+      return plan.code;
+    }
+    return executeRunAll(
+      plan.steps,
+      async (step) => {
+        try {
+          return await main([step.cmd, ...step.args]);
+        } catch (err) {
+          // A step that throws (not returns a code) still stops run-all cleanly.
+          const e = err as { code?: string; name?: string };
+          out(`  ${step.cmd} failed: ${e.code ?? e.name ?? 'error'}`);
+          return 1;
+        }
+      },
+      out,
+    );
+  }
   if (command === 'enrich' || command === 'enable-owners') {
     const pool = openPool();
     try {
@@ -618,7 +735,7 @@ async function main(argv: string[]): Promise<number> {
   }
   if (command !== 'check' && command !== 'run') {
     out(
-      'usage: instance-upgrade check [--fix <name> …] | run (--snapshot-taken <id> | --dry-run) | data [--dry-run] | enrich [--dry-run] [--rate n] | enable-owners [--dry-run] [--rate n]',
+      'usage: instance-upgrade check [--fix <name> …] | run (--snapshot-taken <id> | --dry-run) | data [--dry-run] | enrich [--dry-run] [--rate n] | enable-owners [--dry-run] [--rate n] | run-all --snapshot-taken <id>',
     );
     return 2;
   }

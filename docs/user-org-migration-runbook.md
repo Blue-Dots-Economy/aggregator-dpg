@@ -45,15 +45,16 @@ spec:
 
 `kubectl apply -f job.yaml && kubectl logs -f job/user-org-train-<step>`; keep each Job's log with the change record.
 
-| Command                                                   | What it does                                                                                                                                                                                                                                                                                                                                                                                             | Exit  |
-| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| `check`                                                   | Read-only. At **0022**: drain (D1–D6), prerequisites and pre-flight (T0b–F23), Keycloak prerequisite (F19). Part-way through the train (a rehearsal copy): what `run` will apply. At **the latest level**: every verify gate, plus `I1` (coordinators without a recorded login). Prints `MIGRATION IN PROGRESS` when a run holds the lock. Below 0022: refused.                                          | 0 / 1 |
-| `check --fix <name> [--id / --org-id <uuid>] [--dry-run]` | A documented fix (§5) in one transaction; `--dry-run` rolls back.                                                                                                                                                                                                                                                                                                                                        | 0 / 1 |
-| `run --dry-run`                                           | Everything `run` does, then **always rolls back**.                                                                                                                                                                                                                                                                                                                                                       | 0 / 1 |
-| `run --snapshot-taken <id>`                               | The pending migrations and every gate; **commits** only when all pass and no other session connected meanwhile.                                                                                                                                                                                                                                                                                          | 0 / 1 |
-| `data [--dry-run]`                                        | After `run`, before `enrich`. Runs the release's **standalone** data migrations (data moves with no schema dependency), each in one transaction with a verify, committing only when all pass. **No-op in this release** (0027–0029's data moves are schema-coupled and run inside `run`); kept as the home for future ones. Config-free (only `DATABASE_URL`).                                           | 0 / 1 |
-| `enrich [--dry-run] [--rate <n/s>]`                       | After the train only. Records each coordinator's Keycloak login and backfills org-owner names. Resumable. **Its exit code is a gate.** Lists coordinators with no Keycloak user and login conflicts, by id.                                                                                                                                                                                              | 0 / 1 |
-| `enable-owners [--dry-run] [--rate <n/s>]`                | After `enrich`, once. Lets the owner of every active organisation sign in: enables their Keycloak user, grants `org_owner`, adds the org's group (also repairs a missing role / group). Resumable and idempotent. Lists by org id owners with no recorded login or a deleted Keycloak user. Exit 1 on a Keycloak error (re-run). The Default org's and the root's owners are handled by the API at boot. | 0 / 1 |
+| Command                                                   | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Exit  |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| `check`                                                   | Read-only. At **0022**: drain (D1–D6), prerequisites and pre-flight (T0b–F23), Keycloak prerequisite (F19). Part-way through the train (a rehearsal copy): what `run` will apply. At **the latest level**: every verify gate, plus `I1` (coordinators without a recorded login). Prints `MIGRATION IN PROGRESS` when a run holds the lock. Below 0022: refused.                                                                                                                  | 0 / 1 |
+| `check --fix <name> [--id / --org-id <uuid>] [--dry-run]` | A documented fix (§5) in one transaction; `--dry-run` rolls back.                                                                                                                                                                                                                                                                                                                                                                                                                | 0 / 1 |
+| `run --dry-run`                                           | Everything `run` does, then **always rolls back**.                                                                                                                                                                                                                                                                                                                                                                                                                               | 0 / 1 |
+| `run --snapshot-taken <id>`                               | The pending migrations and every gate; **commits** only when all pass and no other session connected meanwhile.                                                                                                                                                                                                                                                                                                                                                                  | 0 / 1 |
+| `data [--dry-run]`                                        | After `run`, before `enrich`. Runs the release's **standalone** data migrations (data moves with no schema dependency), each in one transaction with a verify, committing only when all pass. **No-op in this release** (0027–0029's data moves are schema-coupled and run inside `run`); kept as the home for future ones. Config-free (only `DATABASE_URL`).                                                                                                                   | 0 / 1 |
+| `enrich [--dry-run] [--rate <n/s>]`                       | After the train only. Records each coordinator's Keycloak login and backfills org-owner names. Resumable. **Its exit code is a gate.** Lists coordinators with no Keycloak user and login conflicts, by id.                                                                                                                                                                                                                                                                      | 0 / 1 |
+| `enable-owners [--dry-run] [--rate <n/s>]`                | After `enrich`, once. Lets the owner of every active organisation sign in: enables their Keycloak user, grants `org_owner`, adds the org's group (also repairs a missing role / group). Resumable and idempotent. Lists by org id owners with no recorded login or a deleted Keycloak user. Exit 1 on a Keycloak error (re-run). The Default org's and the root's owners are handled by the API at boot.                                                                         | 0 / 1 |
+| `run-all --snapshot-taken <id>`                           | **One command for the whole DB+Keycloak sequence.** From 0022: `check` → `run --dry-run` → `run --snapshot-taken` (commit) → then, now that the schema is at head, `data`/`enrich`/`enable-owners` each `--dry-run` then for real → final `check`. **Stops at the first failure** (e.g. `enrich` login conflicts); re-run to **resume** (completed steps re-check and skip). Needs the **full** API env. Does NOT take the snapshot, scale pods, or deploy — do those around it. | 0 / 1 |
 
 Output is counts, check ids, error codes and database ids — never an email, phone or name.
 
@@ -79,6 +80,38 @@ Output is counts, check ids, error codes and database ids — never an email, ph
 Why read-only before go / no-go: a submit, upload, registration or approval creates Keycloak users, Signals participants, S3 objects, queue jobs and emails that a snapshot restore does not undo.
 
 **Downtime** ≈ the snapshot + the staging `run` time + `enrich` (paced, 5 coordinators / s by default) + `enable-owners` (paced, 5 owners / s) + pod start.
+
+## 3b. One orchestrated Job (optional)
+
+Instead of five Jobs, `run-all` runs the whole DB + Keycloak sequence in order with per-step validation and stops on the first failure. The snapshot, scaling pods to 0, and deploying the new images stay **outside** it (operator/pipeline), exactly as in §3.
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: iu-run-all
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: iu
+          image: ghcr.io/<org>/aggregator-dpg/api:<release-tag>
+          command:
+            [
+              'node',
+              'dist/tools/instance-upgrade.js',
+              'run-all',
+              '--snapshot-taken',
+              '<snapshot-id>',
+            ]
+          envFrom:
+            - configMapRef: { name: <api configmap> }
+            - secretRef: { name: <api secret> }
+```
+
+Window order with it: `check` (app up) → freeze + scale to 0 → snapshot → **`iu-run-all`** → `ANALYZE` + deploy → read-only smoke + go/no-go → scale up. If it stops (e.g. `enrich` conflicts), fix and re-apply the same Job — it resumes (the schema `run` is skipped once the level is at head). `DATABASE_URL` must still be the direct primary, not a pooler.
 
 ## 4. When something fails
 
