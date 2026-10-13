@@ -4,17 +4,31 @@
  * resolver (`services/auth/actor`); reach from `scope.ts`.
  */
 
-export { initRbac, getRbacRuntime, rbacConfigCandidates, _setRbacRuntime } from './runtime.js';
-export type { RbacMode, RbacRuntime } from './runtime.js';
 export {
-  actorInput,
+  initRbac,
+  getRbacRuntime,
+  rbacConfigCandidates,
+  refreshRbacCatalogue,
+  stopRbacRefresh,
+  _setRbacRuntime,
+} from './runtime.js';
+export type { RbacMode, RbacRuntime, RefreshOutcome } from './runtime.js';
+export {
+  actorPermissions,
   checkCapability,
   decisionInput,
   listActorCapabilities,
+  permissionsByOrg,
   requirePermission,
   resolveCaller,
 } from './guard.js';
-export type { GuardOutcome, GuardRequest, TokenIdentity } from './guard.js';
+export type {
+  CheckOptions,
+  GuardOutcome,
+  GuardRequest,
+  TargetOrg,
+  TokenIdentity,
+} from './guard.js';
 export {
   assertRouteDeclared,
   callerFromAny,

@@ -21,7 +21,7 @@ import {
 } from './services/organisation-root.js';
 import { getIdpAdmin } from './services/idp-admin/index.js';
 import { setApprovalBrand } from './views/approval-pages.js';
-import { initRbac } from './services/authz/index.js';
+import { initRbac, stopRbacRefresh } from './services/authz/index.js';
 import { setEmailBrand } from './services/email-templates/shared.js';
 import {
   loadEmailMessageOverrides,
@@ -114,6 +114,7 @@ async function main(): Promise<void> {
       // Redis, the shared API Redis, and the BullMQ enqueue queue were all
       // previously leaked on SIGTERM (only Fastify + the PG pool were closed).
       await app.close();
+      stopRbacRefresh();
       await closeDb();
       await Promise.allSettled([
         closeRateLimiter(),

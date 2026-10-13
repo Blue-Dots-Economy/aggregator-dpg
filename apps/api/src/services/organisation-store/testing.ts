@@ -73,7 +73,6 @@ export function buildOrganisation(overrides: Partial<Organisation> = {}): Organi
     locations: [],
     legalName: null,
     gstNumber: null,
-    permissionSet: null,
     ...overrides,
   };
 }

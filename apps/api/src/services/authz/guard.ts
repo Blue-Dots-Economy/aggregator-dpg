@@ -1,8 +1,10 @@
 /**
- * Capability checks for the API (`@aggregator-dpg/api`, RBAC).
+ * Permission checks for the API (`@aggregator-dpg/api`, RBAC; design §3).
  *
- * Builds the decision input from a resolved actor (Phase 5's actor resolver)
- * and `config/rbac.yaml`, asks the decision engine, and logs the outcome. In
+ * Expands a resolved actor's base roles (from its memberships) and live
+ * additional roles into permissions, for the organisation acted on and its
+ * ancestors (or every organisation the actor belongs to or owns, for a route
+ * with no single target), asks the decision engine, and logs the outcome. In
  * `log` mode a deny is only logged; in `enforce` mode the caller turns
  * `allowed: false` into a 403. Reach (which targets) is not decided here:
  * `scope.ts` answers it with 404 (design decision D3).
@@ -11,13 +13,13 @@
 import type { FastifyBaseLogger } from 'fastify';
 import {
   CAPABILITIES,
-  orgCapabilities,
-  roleCapabilities,
+  effectivePermissions,
   type AuthorizerBase,
   type Capability,
   type Decision,
   type DecisionInput,
-  type RbacConfig,
+  type OrgType,
+  type RoleIndex,
 } from '@aggregator-dpg/rbac';
 import { getActorResolver, type Actor } from '../auth/actor/index.js';
 import { getRbacRuntime, type RbacMode } from './runtime.js';
@@ -36,6 +38,22 @@ export interface GuardRequest {
   log: FastifyBaseLogger;
   routeOptions?: { url?: string | undefined };
   method?: string | undefined;
+}
+
+/** The organisation a request acts on. */
+export interface TargetOrg {
+  id: string;
+  orgType: OrgType;
+  /** Its ancestors, nearest first (the root for an aggregator organisation). */
+  ancestorIds: string[];
+}
+
+/** Optional inputs of a check. */
+export interface CheckOptions {
+  /** The organisation acted on; omitted = every organisation the actor relates to. */
+  target?: TargetOrg | undefined;
+  /** Clock, for role expiry. Injectable for tests. */
+  now?: number | undefined;
 }
 
 /** Who the token says the caller is. */
@@ -65,44 +83,63 @@ export async function resolveCaller(
 }
 
 /**
- * Builds the policy input for an actor.
+ * The permissions an actor holds where a request applies: its base roles
+ * (from its memberships) and live additional roles, expanded through the
+ * role snapshot.
  *
- * @param cfg - The validated `rbac.yaml`.
+ * @param roles - The role snapshot.
  * @param actor - The resolved actor.
- * @param capability - The capability asked for.
- * @param now - Clock, for grant expiry.
- * @returns The decision input.
+ * @param target - The organisation acted on, or undefined for every organisation the actor relates to.
+ * @param now - Clock, for role expiry.
+ * @returns The permissions, sorted.
  */
-export function decisionInput(
-  cfg: RbacConfig,
+export function actorPermissions(
+  roles: RoleIndex,
   actor: Actor,
-  capability: Capability,
+  target: TargetOrg | undefined,
   now: number,
-): DecisionInput {
-  return { capability, now, actor: actorInput(cfg, actor) };
+): Capability[] {
+  return effectivePermissions(
+    roles,
+    {
+      userType: actor.userType,
+      memberships: actor.orgs.map((o) => ({
+        orgId: o.id,
+        orgType: o.orgType,
+        relation: o.relation,
+      })),
+      held: actor.roles ?? [],
+    },
+    target ? new Set([target.id, ...target.ancestorIds]) : null,
+    now,
+  );
 }
 
 /**
- * The policy's view of an actor: role and organisation capabilities from
- * `rbac.yaml`, and the actor's grants.
+ * Builds the policy input for one question.
  *
- * @param cfg - The validated `rbac.yaml`.
+ * @param roles - The role snapshot.
  * @param actor - The resolved actor.
- * @returns The `actor` part of a policy input.
+ * @param capability - The permission asked for.
+ * @param target - The organisation acted on, or undefined.
+ * @param now - Clock, for role expiry.
+ * @returns The decision input.
  */
-export function actorInput(cfg: RbacConfig, actor: Actor): DecisionInput['actor'] {
+export function decisionInput(
+  roles: RoleIndex,
+  actor: Actor,
+  capability: Capability,
+  target: TargetOrg | undefined,
+  now: number,
+): DecisionInput {
   return {
-    userId: actor.userId,
-    userType: actor.userType,
-    active: actor.active,
-    roleCapabilities: roleCapabilities(cfg, actor.userType),
-    grants: actor.grants ?? [],
-    orgs: actor.orgs.map((o) => ({
-      id: o.id,
-      orgType: o.orgType,
-      relation: o.relation,
-      capabilities: orgCapabilities(cfg, o.orgType, o.permissionSet ?? null),
-    })),
+    capability,
+    actor: {
+      userId: actor.userId,
+      active: actor.active,
+      permissions: actorPermissions(roles, actor, target, now),
+    },
+    org: target ? { id: target.id, orgType: target.orgType } : null,
   };
 }
 
@@ -141,27 +178,35 @@ function outcome(
 }
 
 /**
- * Checks whether a resolved actor holds `capability`. Never throws.
+ * Checks whether a resolved actor holds `capability`, in the target
+ * organisation when one is given. Never throws.
  *
- * Use it inside a handler for checks that do not fail the whole route, such
- * as unmasking contact details.
+ * Use it inside a handler once the target is known, and for checks that do
+ * not fail the whole route, such as unmasking contact details.
  *
  * @param req - The request (for its logger and route).
  * @param actor - The resolved actor.
- * @param capability - The capability asked for.
- * @param now - Clock, for grant expiry. Injectable for tests.
+ * @param capability - The permission asked for.
+ * @param options - The organisation acted on, and a clock for tests.
  * @returns Whether to continue, the mode, and the decision.
  */
 export async function checkCapability(
   req: GuardRequest,
   actor: Actor,
   capability: Capability,
-  now: number = Date.now(),
+  options: CheckOptions = {},
 ): Promise<GuardOutcome> {
   const rt = getRbacRuntime();
   if (!rt) return { allowed: true, mode: 'off' };
   const start = Date.now();
-  const decision = await decide(rt.authorizer, decisionInput(rt.config, actor, capability, now));
+  const input = decisionInput(
+    rt.roles,
+    actor,
+    capability,
+    options.target,
+    options.now ?? Date.now(),
+  );
+  const decision = await decide(rt.authorizer, input);
   return outcome(req, rt.mode, capability, actor.userId, decision, start);
 }
 
@@ -171,8 +216,8 @@ export async function checkCapability(
  *
  * @param req - The request (for its logger and route).
  * @param identity - Claims from the verified token.
- * @param capability - The capability the route declares.
- * @param now - Clock, for grant expiry. Injectable for tests.
+ * @param capability - The permission the route declares.
+ * @param now - Clock, for role expiry. Injectable for tests.
  * @returns Whether to continue, the mode, and the decision.
  */
 export async function requirePermission(
@@ -195,29 +240,34 @@ export async function requirePermission(
       start,
     );
   }
-  return checkCapability(req, resolved.actor, capability, now);
+  return checkCapability(req, resolved.actor, capability, { now });
 }
 
 /**
- * Lists the capabilities a resolved actor holds, for the portal. Never throws.
+ * Lists the permissions a resolved actor holds, for the portal. Never throws.
  *
  * @param req - The request (for its logger).
  * @param actor - The resolved actor.
- * @param now - Clock, for grant expiry. Injectable for tests.
- * @returns The held capabilities; `null` when RBAC is off (no restriction);
+ * @param options - The organisation acted on (default: every organisation the actor relates to), and a clock for tests.
+ * @returns The held permissions; `null` when RBAC is off (no restriction);
  *   an empty list when the engine cannot answer (the API still decides).
  */
 export async function listActorCapabilities(
   req: GuardRequest,
   actor: Actor,
-  now: number = Date.now(),
+  options: CheckOptions = {},
 ): Promise<Capability[] | null> {
   const rt = getRbacRuntime();
   if (!rt) return null;
+  const target = options.target;
   const res = await rt.authorizer.listCapabilities({
-    actor: actorInput(rt.config, actor),
+    actor: {
+      userId: actor.userId,
+      active: actor.active,
+      permissions: actorPermissions(rt.roles, actor, target, options.now ?? Date.now()),
+    },
+    org: target ? { id: target.id, orgType: target.orgType } : null,
     candidates: [...CAPABILITIES],
-    now,
   });
   if (res.success) return res.value;
   req.log.warn({
@@ -228,4 +278,30 @@ export async function listActorCapabilities(
     error_type: res.error.code,
   });
   return [];
+}
+
+/**
+ * The permissions a resolved actor holds in each organisation it belongs to
+ * or owns, for the portal. Never throws.
+ *
+ * @param req - The request (for its logger).
+ * @param actor - The resolved actor.
+ * @param rootId - The root organisation's id (every aggregator organisation's ancestor), when known.
+ * @returns Permissions per organisation id; `null` when RBAC is off.
+ */
+export async function permissionsByOrg(
+  req: GuardRequest,
+  actor: Actor,
+  rootId: string | null,
+): Promise<Record<string, Capability[]> | null> {
+  if (!getRbacRuntime()) return null;
+  const out: Record<string, Capability[]> = {};
+  for (const o of actor.orgs) {
+    const ancestorIds = o.orgType === 'aggregator' && rootId ? [rootId] : [];
+    out[o.id] =
+      (await listActorCapabilities(req, actor, {
+        target: { id: o.id, orgType: o.orgType, ancestorIds },
+      })) ?? [];
+  }
+  return out;
 }

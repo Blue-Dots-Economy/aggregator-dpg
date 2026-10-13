@@ -640,6 +640,7 @@
       "organisations": "Organisations",
       "coordinators": "Coordinators",
       "invite": "Invite coordinators",
+      "roles": "Roles",
       "account": "My account",
       "sign_out": "Sign out"
     },
@@ -668,10 +669,7 @@
       "owner": "Owner",
       "status": "Status",
       "view_coordinators": "View coordinators",
-      "permission_set": "PermissionSet",
-      "permission_set_default": "Default ({name})",
-      "permission_set_save": "Save PermissionSet",
-      "permission_set_saved": "Saved."
+      "owner_roles": "Owner's roles"
     },
     "orgs": {
       "heading": "Organisations",
@@ -737,17 +735,51 @@
       "rate_limited": "Too many changes in a short time. Wait a moment and try again.",
       "not_found": "Not found.",
       "name_taken": "That name is already taken.",
-      "grant_not_allowed": "This organisation cannot give that access, or the user cannot receive it."
+      "role_not_allowed": "This role cannot be given to this user here.",
+      "role_invalid": "This role breaks a role rule. Check its permissions and where it can be held.",
+      "role_exists": "A role with that key already exists.",
+      "role_builtin": "Built-in roles cannot be changed here.",
+      "role_in_use": "This role is assigned to someone. Revoke it first.",
+      "role_limit": "This instance has the most custom roles allowed."
     },
-    "grants": {
-      "title": "Access grants",
-      "pii_access": "Personal data (PII Access)",
-      "active_until": "Active until {date}",
-      "none": "Not granted",
-      "grant": "Grant for {days} days",
+    "roles": {
+      "title": "Roles",
+      "base": "{role} (from membership)",
+      "until": "Until {date}",
+      "no_expiry": "No expiry",
+      "none": "Not assigned",
+      "assign": "Assign",
+      "assign_for": "Assign for {days} days",
       "revoke": "Revoke",
       "saved": "Saved.",
-      "hint": "Grants add to the coordinator's role, within what the organisation allows. Every change is recorded."
+      "hint": "Additional roles add to the base role in this organisation. Every change is recorded."
+    },
+    "roles_admin": {
+      "title": "Roles",
+      "off": "Access control is off on this instance.",
+      "builtin": "Built-in roles",
+      "builtin_hint": "Defined with the release; they cannot be changed here.",
+      "custom": "Custom roles",
+      "none": "No custom roles yet.",
+      "create": "Create a role",
+      "edit": "Edit",
+      "delete": "Delete",
+      "save": "Save",
+      "cancel": "Cancel",
+      "saved": "Saved.",
+      "deleted": "Deleted.",
+      "key": "Key",
+      "name": "Name",
+      "description": "Description",
+      "account_type": "Held by",
+      "account_admin": "Organisation owners",
+      "account_coordinator": "Coordinators",
+      "org_types": "Held in",
+      "org_aggregator": "Aggregator organisations",
+      "org_network_facilitator": "The network organisation",
+      "assigned_by": "Assigned by holders of",
+      "max_days": "Longest validity (days, empty = none)",
+      "permissions": "Permissions"
     }
   }
 }

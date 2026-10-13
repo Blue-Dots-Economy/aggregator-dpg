@@ -57,6 +57,14 @@ export function errorKey(r: { status: number; error: ConsoleError }): string {
   if (r.status === 429) return 'errors.rate_limited';
   if (r.status === 404) return 'errors.not_found';
   if (r.error.code === 'ORG_NAME_TAKEN') return 'errors.name_taken';
-  if (r.error.code?.startsWith('PERMISSION_GRANT_')) return 'errors.grant_not_allowed';
+  if (r.error.code === 'ROLE_ASSIGNMENT_NOT_ALLOWED') return 'errors.role_not_allowed';
+  const roleErrors: Record<string, string> = {
+    ROLE_INVALID: 'errors.role_invalid',
+    ROLE_EXISTS: 'errors.role_exists',
+    ROLE_BUILTIN: 'errors.role_builtin',
+    ROLE_IN_USE: 'errors.role_in_use',
+    ROLE_LIMIT_REACHED: 'errors.role_limit',
+  };
+  if (r.error.code && roleErrors[r.error.code]) return roleErrors[r.error.code]!;
   return 'errors.generic';
 }

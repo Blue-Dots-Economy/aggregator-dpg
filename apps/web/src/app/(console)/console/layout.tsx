@@ -41,6 +41,9 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
       <ConsoleNav
         isNetworkAdmin={actor.me.is_network_admin}
         canManage={can(actor.me.capabilities, 'org.manage')}
+        canAdministerRoles={
+          actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer')
+        }
       />
       <main className="flex-1 min-w-0 overflow-x-hidden">
         <div className="max-w-[1200px] mx-auto px-4 py-5 sm:px-6 lg:px-8 lg:py-7">{children}</div>

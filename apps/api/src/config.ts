@@ -399,6 +399,11 @@ const ConfigSchema = z.object({
   OPA_RETRIES: z.coerce.number().int().min(0).max(3).default(1),
   /** Base backoff between OPA retries; doubles per retry. */
   OPA_BACKOFF_MS: z.coerce.number().int().positive().default(50),
+  /**
+   * How often each replica re-reads the RBAC catalogue version and reloads
+   * roles and PermissionSets when it moved. `0` disables the timer.
+   */
+  RBAC_CATALOGUE_REFRESH_MS: z.coerce.number().int().min(0).default(30000),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

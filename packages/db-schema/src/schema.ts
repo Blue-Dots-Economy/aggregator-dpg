@@ -38,6 +38,7 @@ import {
   timestamp,
   jsonb,
   integer,
+  boolean,
   pgEnum,
   uniqueIndex,
   index,
@@ -411,8 +412,6 @@ export const organisations = pgTable(
       .default(sql`'[]'::jsonb`),
     legalName: text('legal_name'),
     gstNumber: text('gst_number'),
-    /** RBAC (0030): the org's own PermissionSet name from config/rbac.yaml; null = the org_type default. */
-    permissionSet: text('permission_set'),
     // Schema-driven registration payload (0018). Until Phase 4 it still holds
     // `website` / `address` / `coordinates`, copied into `url` / `locations`.
     profile: jsonb('profile')
@@ -949,31 +948,80 @@ export type ConsentRecordRow = typeof consentRecord.$inferSelect;
 /** Inferred insert type for `consent_record` (all required fields; `id` and `created_at` have DB defaults). */
 export type NewConsentRecordRow = typeof consentRecord.$inferInsert;
 
-// ─── user_permission_grant / iam_audit (RBAC, migration 0030) ───────────────
-// Capabilities granted to one user on top of their role (PII Access), with an
-// expiry; at most one live (unrevoked) grant per user and grant key. The
-// audit is append-only (trigger). See docs/rbac/rbac-design-aggregator.md.
+// ─── RBAC (migration 0030; docs/rbac/rbac-design-aggregator.md §1) ───────────
+// Permissions grouped into roles; `user_role` holds the additional roles a
+// user has in an organisation (base roles follow membership and are not
+// stored). `iam_audit` is append-only (trigger).
 
-export const userPermissionGrant = pgTable(
-  'user_permission_grant',
+export const permission = pgTable('permission', {
+  key: text('key').primaryKey(),
+  resource: text('resource').notNull(),
+  action: text('action').notNull(),
+  description: text('description').notNull(),
+  sensitive: boolean('sensitive').notNull().default(false),
+  deprecated: boolean('deprecated').notNull().default(false),
+});
+
+export const role = pgTable(
+  'role',
+  {
+    key: text('key').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    isBuiltin: boolean('is_builtin').notNull().default(false),
+    accountType: userTypeEnum('account_type').notNull(),
+    baseFor: text('base_for'),
+    assignableOrgTypes: orgTypeEnum('assignable_org_types').array().notNull(),
+    assignedBy: text('assigned_by').references(() => permission.key, { onDelete: 'restrict' }),
+    maxDays: integer('max_days'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('role_base_for_unique')
+      .on(table.baseFor)
+      .where(sql`base_for IS NOT NULL`),
+  ],
+);
+
+export const rolePermission = pgTable(
+  'role_permission',
+  {
+    roleKey: text('role_key')
+      .notNull()
+      .references(() => role.key, { onDelete: 'cascade', onUpdate: 'cascade' }),
+    permissionKey: text('permission_key')
+      .notNull()
+      .references(() => permission.key, { onDelete: 'restrict' }),
+  },
+  (table) => [primaryKey({ columns: [table.roleKey, table.permissionKey] })],
+);
+
+export const userRole = pgTable(
+  'user_role',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    grantKey: text('grant_key').notNull(),
-    capability: text('capability').notNull(),
+    roleKey: text('role_key')
+      .notNull()
+      .references(() => role.key, { onDelete: 'restrict', onUpdate: 'cascade' }),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organisations.id, { onDelete: 'cascade' }),
     grantedBy: uuid('granted_by').references(() => users.id, { onDelete: 'set null' }),
     grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
-    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     revokedBy: uuid('revoked_by').references(() => users.id, { onDelete: 'set null' }),
   },
   (table) => [
-    uniqueIndex('user_permission_grant_live_unique')
-      .on(table.userId, table.grantKey)
+    uniqueIndex('user_role_live_unique')
+      .on(table.userId, table.roleKey, table.orgId)
       .where(sql`revoked_at IS NULL`),
-    index('user_permission_grant_user_idx').on(table.userId),
+    index('user_role_user_idx').on(table.userId),
+    index('user_role_org_idx').on(table.orgId),
   ],
 );
 
@@ -991,5 +1039,5 @@ export const iamAudit = pgTable(
   (table) => [index('iam_audit_at_idx').on(table.at)],
 );
 
-export type UserPermissionGrantRow = typeof userPermissionGrant.$inferSelect;
+export type UserRoleRow = typeof userRole.$inferSelect;
 export type IamAuditRow = typeof iamAudit.$inferSelect;

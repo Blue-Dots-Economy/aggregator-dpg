@@ -4,8 +4,6 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyRequest, RouteOptions } from 'fastify';
-import { join } from 'node:path';
-import { loadRbacConfig } from '@aggregator-dpg/rbac';
 import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
 import { buildApp } from '../../../app.js';
 import {
@@ -18,9 +16,10 @@ import {
   type RouteAccess,
 } from '../route-access.js';
 import { _setRbacRuntime } from '../runtime.js';
+import { shippedRoleIndex } from '../testing.js';
 import { ActorResolverFake, _setActorResolver, buildAdminActor } from '../../auth/actor/index.js';
 
-const { config: cfg } = await loadRbacConfig([join(process.env.CONFIG_ROOT ?? '', 'rbac.yaml')]);
+const roles = await shippedRoleIndex();
 
 afterEach(() => {
   _setRbacRuntime(null);
@@ -53,7 +52,7 @@ function req(rbac: RouteAccess) {
 }
 
 function setup(mode: 'log' | 'enforce', active = true) {
-  _setRbacRuntime({ mode, config: cfg, authorizer: new AuthorizerFake() });
+  _setRbacRuntime({ mode, roles, authorizer: new AuthorizerFake() });
   const resolver = new ActorResolverFake();
   resolver.seed('u1', {
     userId: 'u1',

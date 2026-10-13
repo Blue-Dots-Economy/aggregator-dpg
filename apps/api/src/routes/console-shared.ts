@@ -104,7 +104,6 @@ export function toWireOrg(
     locations: o.locations,
     legal_name: o.legalName,
     gst_number: o.gstNumber,
-    permission_set: o.permissionSet,
     created_at: o.createdAt.toISOString(),
     updated_at: o.updatedAt.toISOString(),
   };

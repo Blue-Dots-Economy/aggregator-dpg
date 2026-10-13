@@ -68,6 +68,8 @@ export const MeOrgSchema = z.object({
   org_type: OrgTypeSchema,
   role: z.enum(['owner', 'member']),
   is_default: z.boolean(),
+  /** The caller's permissions in this organisation (RBAC); `null` when access control is off. */
+  capabilities: z.array(z.string()).nullable().optional(),
 });
 export type MeOrg = z.infer<typeof MeOrgSchema>;
 
@@ -174,8 +176,6 @@ export const OrgSchema = z.object({
   locations: z.array(BecknLocationSchema),
   legal_name: z.string().nullable(),
   gst_number: z.string().nullable(),
-  /** RBAC: the org's own PermissionSet name; null = the org_type default. */
-  permission_set: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -246,72 +246,113 @@ export const OwnerAccessResponseSchema = z.object({
 });
 export type OwnerAccessResponse = z.infer<typeof OwnerAccessResponseSchema>;
 
-// ─── RBAC grants and PermissionSets (R3) ────────────────────────────────────
+// ─── RBAC roles (docs/rbac/rbac-design-aggregator.md §4) ───────────────────
 
-/** One per-user grant on the wire (e.g. PII Access). */
-export const PermissionGrantSchema = z.object({
-  grant_key: z.string(),
-  capability: z.string(),
-  granted_at: z.string(),
-  expires_at: z.string(),
+/** A role on the wire: a named set of permissions and the rules for holding it. */
+export const RoleSchema = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string(),
+  is_builtin: z.boolean(),
+  account_type: z.enum(['admin', 'coordinator']),
+  /** Set for a base role (follows membership); null for an additional role. */
+  base_for: z.enum(['org_member', 'org_owner', 'root_owner']).nullable(),
+  assignable_org_types: z.array(OrgTypeSchema),
+  /** The permission an assigner needs; null for a base role. */
+  assigned_by: z.string().nullable(),
+  max_days: z.number().int().positive().nullable(),
+  permissions: z.array(z.string()),
+});
+export type Role = z.infer<typeof RoleSchema>;
+
+/** One permission of the catalogue on the wire. */
+export const PermissionSchema = z.object({
+  key: z.string(),
+  resource: z.string(),
+  action: z.string(),
+  description: z.string(),
+  sensitive: z.boolean(),
+});
+export type Permission = z.infer<typeof PermissionSchema>;
+
+/** `GET /v1/roles`: every role, and the permissions a role can be composed from. */
+export const RolesResponseSchema = z.object({
+  roles: z.array(RoleSchema),
+  permissions: z.array(PermissionSchema),
+});
+export type RolesResponse = z.infer<typeof RolesResponseSchema>;
+
+/** One additional-role assignment on the wire. */
+export const RoleAssignmentSchema = z.object({
+  id: z.string(),
+  role_key: z.string(),
+  org_id: z.string(),
   granted_by: z.string().nullable(),
+  granted_at: z.string(),
+  expires_at: z.string().nullable(),
   revoked_at: z.string().nullable(),
   /** Not revoked and not expired. */
   live: z.boolean(),
 });
-export type PermissionGrant = z.infer<typeof PermissionGrantSchema>;
+export type RoleAssignment = z.infer<typeof RoleAssignmentSchema>;
 
-/** A grant the caller may give this user, from `rbac.yaml`. */
-export const GrantableSchema = z.object({
-  grant_key: z.string(),
-  capability: z.string(),
-  max_days: z.number().int().positive(),
+/** `GET /v1/user/roles/:id`: base roles (derived) and additional roles. */
+export const UserRolesResponseSchema = z.object({
+  base: z.array(z.object({ role_key: z.string(), org_id: z.string() })),
+  additional: z.array(RoleAssignmentSchema),
+  /** Additional roles the caller may assign to this user, per organisation. */
+  assignable: z.array(z.object({ role_key: z.string(), org_id: z.string() })),
 });
-export type Grantable = z.infer<typeof GrantableSchema>;
+export type UserRolesResponse = z.infer<typeof UserRolesResponseSchema>;
 
-/** `GET /v1/user/grants/:id`. */
-export const UserGrantsResponseSchema = z.object({
-  grants: z.array(PermissionGrantSchema),
-  grantable: z.array(GrantableSchema),
-});
-export type UserGrantsResponse = z.infer<typeof UserGrantsResponseSchema>;
-
-/** `POST /v1/user/grant/:id`. Omit `days` for the grant's longest validity. */
-export const GrantRequestSchema = z
+/** `POST /v1/user/role/assign/:id`. Omit `days` for the role's longest validity. */
+export const AssignRoleRequestSchema = z
   .object({
-    grant_key: z.string().min(1),
-    days: z.number().int().min(1).optional(),
+    role_key: z.string().min(1),
+    org_id: z.string().uuid(),
+    days: z.number().int().positive().optional(),
   })
   .strict();
-export type GrantRequest = z.infer<typeof GrantRequestSchema>;
+export type AssignRoleRequest = z.infer<typeof AssignRoleRequestSchema>;
 
-/** `POST /v1/user/grant/revoke/:id`. */
-export const RevokeGrantRequestSchema = z.object({ grant_key: z.string().min(1) }).strict();
-export type RevokeGrantRequest = z.infer<typeof RevokeGrantRequestSchema>;
-
-/** `POST /v1/user/grant/revoke/:id` response. */
-export const RevokeGrantResponseSchema = z.object({ revoked: z.boolean() });
-export type RevokeGrantResponse = z.infer<typeof RevokeGrantResponseSchema>;
-
-/** `PATCH /v1/org/permission-set/update/:id`. `null` restores the org_type default. */
-export const OrgPermissionSetRequestSchema = z
-  .object({ permission_set: z.string().min(1).nullable() })
+/** `POST /v1/user/role/revoke/:id`. */
+export const RevokeRoleRequestSchema = z
+  .object({ role_key: z.string().min(1), org_id: z.string().uuid() })
   .strict();
-export type OrgPermissionSetRequest = z.infer<typeof OrgPermissionSetRequestSchema>;
+export type RevokeRoleRequest = z.infer<typeof RevokeRoleRequestSchema>;
 
-/** `PATCH /v1/org/permission-set/update/:id` response. */
-export const OrgPermissionSetResponseSchema = z.object({
-  id: z.string(),
-  permission_set: z.string().nullable(),
-  /** The capabilities the organisation now holds. */
-  capabilities: z.array(z.string()),
-});
-export type OrgPermissionSetResponse = z.infer<typeof OrgPermissionSetResponseSchema>;
+/** `POST /v1/user/role/revoke/:id` response. */
+export const RevokeRoleResponseSchema = z.object({ revoked: z.boolean() });
+export type RevokeRoleResponse = z.infer<typeof RevokeRoleResponseSchema>;
 
-/** `GET /v1/org/permission-sets`: the PermissionSets of this instance (rbac.yaml). */
-export const PermissionSetsResponseSchema = z.object({
-  sets: z.array(z.object({ name: z.string(), capabilities: z.array(z.string()) })),
-  /** The set each org_type holds when an organisation has none of its own. */
-  defaults: z.record(z.string(), z.string()),
-});
-export type PermissionSetsResponse = z.infer<typeof PermissionSetsResponseSchema>;
+/** `POST /v1/roles/create`: a custom role (network admin). */
+export const CreateRoleRequestSchema = z
+  .object({
+    key: z
+      .string()
+      .min(1)
+      .max(40)
+      .regex(/^[a-z][a-z0-9_]*$/),
+    name: z.string().min(1).max(80),
+    description: z.string().max(300).default(''),
+    account_type: z.enum(['admin', 'coordinator']),
+    assignable_org_types: z.array(OrgTypeSchema).min(1),
+    assigned_by: z.string().min(1),
+    max_days: z.number().int().positive().nullable().default(null),
+    permissions: z.array(z.string()).min(1),
+  })
+  .strict();
+export type CreateRoleRequest = z.infer<typeof CreateRoleRequestSchema>;
+
+/** `PATCH /v1/roles/update/:key`: change a custom role (the key and account type are fixed). */
+export const UpdateRoleRequestSchema = z
+  .object({
+    name: z.string().min(1).max(80).optional(),
+    description: z.string().max(300).optional(),
+    assignable_org_types: z.array(OrgTypeSchema).min(1).optional(),
+    assigned_by: z.string().min(1).optional(),
+    max_days: z.number().int().positive().nullable().optional(),
+    permissions: z.array(z.string()).min(1).optional(),
+  })
+  .strict();
+export type UpdateRoleRequest = z.infer<typeof UpdateRoleRequestSchema>;

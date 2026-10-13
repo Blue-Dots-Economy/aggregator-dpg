@@ -9,7 +9,7 @@
 import { getUserStore, type Coordinator } from '../../user-store/index.js';
 import { getOrganisationStore, type Organisation } from '../../organisation-store/index.js';
 import { getIdentityStore } from '../../identity-store/index.js';
-import { getGrantStore } from '../../grant-store/index.js';
+import { getRoleStore } from '../../role-store/index.js';
 import { IDP_PROVIDER } from '../../idp-admin/provider.js';
 import {
   ActorResolverBase,
@@ -46,25 +46,25 @@ function ownedOrg(org: Organisation): ActorOrg {
     orgType: 'aggregator',
     relation: 'owner',
     isDefault: org.isDefault,
-    permissionSet: org.permissionSet,
   };
 }
 
 /**
- * Adds the user's live grants (RBAC R3) to a resolved actor.
+ * Adds the user's live additional roles (`user_role`) to a resolved actor.
  *
- * @returns The actor with `grants`, or `UNAVAILABLE` when the store failed.
+ * @returns The actor with `roles`, or `UNAVAILABLE` when the store failed.
  */
-async function withGrants(actor: Actor): Promise<ActorResult> {
-  const live = await getGrantStore().listLive(actor.userId, new Date());
+async function withRoles(actor: Actor): Promise<ActorResult> {
+  const live = await getRoleStore().listLive(actor.userId, new Date());
   if (!live.ok) return unavailable(live.error.message);
   return {
     ok: true,
     value: {
       ...actor,
-      grants: live.value.map((g) => ({
-        capability: g.capability,
-        expiresAt: g.expiresAt.getTime(),
+      roles: live.value.map((r) => ({
+        roleKey: r.roleKey,
+        orgId: r.orgId,
+        expiresAt: r.expiresAt ? r.expiresAt.getTime() : null,
       })),
     },
   };
@@ -101,7 +101,7 @@ export class StoreActorResolver extends ActorResolverBase {
       });
     }
     for (const org of owned.value) if (org.status === 'active') orgs.push(ownedOrg(org));
-    return withGrants({ userId, userType: 'admin', active: orgs.length > 0, orgs });
+    return withRoles({ userId, userType: 'admin', active: orgs.length > 0, orgs });
   }
 
   /**
@@ -121,14 +121,6 @@ export class StoreActorResolver extends ActorResolverBase {
     const row = await getUserStore().findById(id);
     if (!row.ok) return unavailable(row.error.message);
     if (!row.value) return { ok: true, value: null };
-    const actor = coordinatorActor(row.value);
-    // RBAC R3: the organisation's own PermissionSet caps the coordinator.
-    const memberOrg = actor.orgs[0];
-    if (memberOrg) {
-      const org = await getAggregatorOrgStore().findById(memberOrg.id);
-      if (!org.ok) return unavailable(org.error.message);
-      memberOrg.permissionSet = org.value?.permissionSet ?? null;
-    }
-    return withGrants(actor);
+    return withRoles(coordinatorActor(row.value));
   }
 }

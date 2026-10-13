@@ -3,7 +3,7 @@ import { OpaAuthorizer } from '../opa/index.js';
 import { buildActor } from '../testing/index.js';
 import type { DecisionInput } from '../interface.js';
 
-const input: DecisionInput = { capability: 'profiles.view', actor: buildActor(), now: 0 };
+const input: DecisionInput = { capability: 'profiles.view', actor: buildActor(), org: null };
 
 function engine(responses: Array<Response | Error>, retries = 1) {
   const seen: RequestInit[] = [];
@@ -93,7 +93,7 @@ describe('OpaAuthorizer', () => {
     const res = await authz.listCapabilities({
       actor: buildActor(),
       candidates: ['profiles.view'],
-      now: 0,
+      org: null,
     });
     expect(res).toEqual({ success: true, value: ['org.manage', 'profiles.view'] });
     expect(JSON.parse(String(seen[0]?.body)).input.candidates).toEqual(['profiles.view']);
@@ -101,7 +101,7 @@ describe('OpaAuthorizer', () => {
 
   it('rejects an unknown capability in the list', async () => {
     const { authz } = engine([json({ result: ['profiles.teleport'] })]);
-    const res = await authz.listCapabilities({ actor: buildActor(), candidates: [], now: 0 });
+    const res = await authz.listCapabilities({ actor: buildActor(), candidates: [], org: null });
     expect(!res.success && res.error.code).toBe('OPA_BAD_RESPONSE');
   });
 });

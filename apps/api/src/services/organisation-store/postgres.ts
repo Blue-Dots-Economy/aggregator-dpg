@@ -452,7 +452,6 @@ function toDomain(row: JoinedRow): Organisation {
     locations: (o.locations ?? []) as BecknLocation[],
     legalName: o.legalName,
     gstNumber: o.gstNumber,
-    permissionSet: o.permissionSet,
   };
 }
 

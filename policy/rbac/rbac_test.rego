@@ -26,15 +26,15 @@ all_capabilities := [
 	"contact.unmask", "agreement.manage", "network.administer",
 ]
 
-# For every vector's actor, the capability list equals exactly the
-# capabilities a single decision allows.
+# For every vector's actor and organisation, the permission list equals
+# exactly the permissions a single decision allows.
 test_capabilities_agree_with_decisions if {
 	every v in data.rbac_vectors {
-		list_input := {"actor": v.input.actor, "now": v.input.now, "candidates": all_capabilities}
+		list_input := {"actor": v.input.actor, "org": v.input.org, "candidates": all_capabilities}
 		listed := rbac.capabilities with input as list_input
 		allowed := {c |
 			some c in all_capabilities
-			d := rbac.decision with input as {"actor": v.input.actor, "now": v.input.now, "capability": c}
+			d := rbac.decision with input as {"actor": v.input.actor, "org": v.input.org, "capability": c}
 			d.allow
 		}
 		listed == allowed
@@ -43,9 +43,18 @@ test_capabilities_agree_with_decisions if {
 
 test_capabilities_empty_for_inactive if {
 	listed := rbac.capabilities with input as {
-		"actor": {"active": false, "roleCapabilities": ["profiles.view"], "grants": [], "orgs": [{"capabilities": ["profiles.view"], "orgType": "aggregator"}]},
-		"now": 0,
+		"actor": {"active": false, "permissions": ["profiles.view"]},
+		"org": {"id": "A", "orgType": "aggregator"},
 		"candidates": ["profiles.view"],
 	}
 	count(listed) == 0
+}
+
+test_no_personal_data_listed_through_root if {
+	listed := rbac.capabilities with input as {
+		"actor": {"active": true, "permissions": ["profiles.view", "profiles.view_pii"]},
+		"org": {"id": "NF", "orgType": "network_facilitator"},
+		"candidates": ["profiles.view", "profiles.view_pii"],
+	}
+	listed == {"profiles.view"}
 }
