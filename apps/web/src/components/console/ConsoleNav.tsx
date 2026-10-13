@@ -2,8 +2,8 @@
 
 /**
  * Console navigation (user & org Phase 5). The organisations list is the
- * network admin's only; coordinators and invites need `org.manage` (RBAC; the
- * API also checks it).
+ * network admin's only; coordinators and invites need `org.manage`, the roles
+ * page `network.administer` (RBAC; the API also checks them).
  */
 
 import Link from 'next/link';
@@ -14,9 +14,11 @@ import { cn } from '../../lib/cn';
 export function ConsoleNav({
   isNetworkAdmin,
   canManage = true,
+  canAdministerRoles = false,
 }: Readonly<{
   isNetworkAdmin: boolean;
   canManage?: boolean;
+  canAdministerRoles?: boolean;
 }>) {
   const t = useTranslations('console');
   const path = usePathname() ?? '';
@@ -29,6 +31,7 @@ export function ConsoleNav({
           { to: '/console/invite', label: t('nav.invite') },
         ]
       : []),
+    ...(canAdministerRoles ? [{ to: '/console/roles', label: t('nav.roles') }] : []),
     { to: '/console/account', label: t('nav.account') },
   ];
   const active = (to: string) => (to === '/console' ? path === to : path.startsWith(to));

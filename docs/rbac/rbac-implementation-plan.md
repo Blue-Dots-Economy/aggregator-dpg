@@ -2,17 +2,18 @@
 
 ## Summary
 
-The work to build [rbac-design-aggregator.md](rbac-design-aggregator.md) on branch `feat/805-rbac` (#849), based on `refactor/user-org-phase-5-wip`. Phase 5's inputs are listed in [phase-5-rbac-handoff.md](phase-5-rbac-handoff.md). Nobody loses access until an instance runs `RBAC_MODE=enforce`.
+The work to build [rbac-design-aggregator.md](rbac-design-aggregator.md) and [rbac-permissions-and-roles.md](rbac-permissions-and-roles.md) on branch `feat/805-rbac` (#849), based on `refactor/user-org-phase-5-wip`. Phase 5's inputs are in [phase-5-rbac-handoff.md](phase-5-rbac-handoff.md). Nobody loses access until an instance runs `RBAC_MODE=enforce`.
 
 ## Highlights
 
-| Item        | Value                                                                                                           |
-| ----------- | --------------------------------------------------------------------------------------------------------------- |
-| Base branch | `refactor/user-org-phase-5-wip` (contains `refactor/user-org-management`); retarget the PR when Phase 5 merges  |
-| Done        | R0 foundation, R1 route declarations (incl. the 11 Phase 5 console routes), R1.5 adoption of Phase 5, R3 grants |
-| Next        | Switch instances on (R2 operations step); the deferred items in R2 and R3                                       |
-| Safety      | `RBAC_MODE` (`off` / `log` / `enforce`) per instance; `off` by default                                          |
-| Decisions   | D1–D4 in the design's decision record; D3 and D4 can be revisited                                               |
+| Item         | Value                                                                                                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Base branch  | `refactor/user-org-phase-5-wip`; retarget the PR when Phase 5 merges                                                                                                           |
+| Done         | R0–R2 (foundation, route declarations, Phase 5 adoption, enforcement); R3–R6 (role model, resolution, role assignment, custom roles); OPA sidecar deploy (bluedots-automation) |
+| Next         | Switch instances on: deploy, run the backfill, `RBAC_MODE=log`, then `enforce`; R7 later                                                                                       |
+| Reused as is | Permission catalogue, route declarations and boot check, OPA sidecar and authorizer, `scope.ts` reach, `RBAC_MODE`, contact masking, `iam_audit`, identity binding             |
+| Replaced     | Organisation PermissionSets, per-user grants, their routes and console screens                                                                                                 |
+| Decisions    | D1–D7 in the design's decision record                                                                                                                                          |
 
 ---
 
@@ -20,34 +21,43 @@ The work to build [rbac-design-aggregator.md](rbac-design-aggregator.md) on bran
 
 ```mermaid
 flowchart LR
-    P3["Refactor P2–P4<br/>users · organisations"]
     R0["R0 · Foundation<br/>done"]
-    R1["R1 · Declare routes<br/>done"]
-    P5["Refactor P5<br/>phase-5-wip branch"]
-    R15["R1.5 · Adopt Phase 5<br/>done"]
-    R2["R2 · Enforce"]
-    R3["R3 · Grants + pages"]
-    P3 --> R0
+    R1["R1 · Routes<br/>done"]
+    R15["R1.5 · Phase 5<br/>done"]
+    R2["R2 · Enforce<br/>done"]
+    R3["R3 · Data model<br/>+ catalogue"]
+    R4["R4 · Resolve<br/>+ decide"]
+    R5["R5 · Assign<br/>roles"]
+    R6["R6 · Custom<br/>roles"]
+    R7["R7 · Role in<br/>token · later"]
     R0 --> R1
     R1 --> R15
-    P5 --> R15
     R15 --> R2
     R2 --> R3
-    classDef ref fill:#f4f4f4,stroke:#888,color:#1a1a1a
+    R3 --> R4
+    R4 --> R5
+    R5 --> R6
+    R6 --> R7
     classDef done fill:#eaf6ec,stroke:#3f9a52,color:#1a1a1a
     classDef todo fill:#e8f1fb,stroke:#3b78c4,color:#1a1a1a
-    class P3,P5 ref
-    class R0,R1,R15,R3 done
-    class R2 todo
+    classDef later fill:#f4f4f4,stroke:#888,color:#1a1a1a
+    class R0,R1,R15,R2,R3,R4,R5,R6 done
+    class R7 later
 ```
 
-| Step                | Status    | Blocked by                                                                   |
-| ------------------- | --------- | ---------------------------------------------------------------------------- |
-| R0 Foundation       | Done      | -                                                                            |
-| R1 Declare routes   | Done      | -                                                                            |
-| R1.5 Adopt Phase 5  | Done      | -                                                                            |
-| R2 Enforce          | Code done | Switching on: the OPA sidecar and the deployment realm (bluedots-automation) |
-| R3 Grants and pages | Code done | Revocation sign-out waits for #851                                           |
+Green: done. Grey: later.
+
+| Step                        | Status      | Blocked by                                                                              |
+| --------------------------- | ----------- | --------------------------------------------------------------------------------------- |
+| R0 Foundation               | Done        | -                                                                                       |
+| R1 Route declarations       | Done        | -                                                                                       |
+| R1.5 Adopt Phase 5          | Done        | -                                                                                       |
+| R2 Enforce                  | Done (code) | Switching on per instance: OPA sidecar deployed, deployment realm gate (Phase 5 owners) |
+| R3 Data model and catalogue | Code done   | Landed with R4: the new `rbac.yaml` shape needs the new evaluation                      |
+| R4 Resolve and decide       | Code done   | -                                                                                       |
+| R5 Assign roles             | Code done   | -                                                                                       |
+| R6 Custom roles             | Code done   | -                                                                                       |
+| R7 Role in the token        | Later       | Not scheduled; needs the deployment realm's admin-only attributes (handoff H-11)        |
 
 ---
 
@@ -56,111 +66,131 @@ flowchart LR
 ```mermaid
 flowchart TB
     ROUTE["Route<br/>config.rbac"]
-    GUARD["requireActor() / route wrappers<br/>capability check · 403"]
-    RES["Phase 5 actor resolver<br/>+ grants"]
-    AUTHZ["Authorizer<br/>packages/rbac"]
+    GUARD["Guard<br/>permission · 403"]
+    RES["Actor resolver<br/>memberships + roles"]
+    SNAP["Role snapshot<br/>role → permissions"]
     OPA["OPA sidecar<br/>policy/rbac"]
     SCOPE["scope.ts<br/>reach · 404"]
     ROUTE --> GUARD
     GUARD --> RES
-    GUARD --> AUTHZ
-    AUTHZ --> OPA
+    GUARD --> SNAP
+    GUARD --> OPA
     GUARD --> SCOPE
-    classDef code fill:#e8f1fb,stroke:#3b78c4,color:#1a1a1a
+    classDef rbac fill:#e8f1fb,stroke:#3b78c4,color:#1a1a1a
     classDef p5 fill:#f4f4f4,stroke:#888,color:#1a1a1a
     classDef run fill:#fff4e0,stroke:#d08a00,color:#1a1a1a
-    class ROUTE,GUARD,AUTHZ code
+    class ROUTE,GUARD,SNAP rbac
     class RES,SCOPE p5
     class OPA run
 ```
 
-| Component                                                                                        | Path                                                                                               | Owner   |
-| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- | ------- |
-| Capability catalogue, `rbac.yaml` schema and loader, `AuthorizerBase`, OPA and in-memory engines | `packages/rbac`                                                                                    | RBAC    |
-| Policy and shared vectors                                                                        | `policy/rbac/`                                                                                     | RBAC    |
-| Default sets and roles                                                                           | `config/rbac.yaml`                                                                                 | RBAC    |
-| Route declarations and boot check                                                                | `apps/api/src/services/authz/route-access.ts`, `config.rbac` on every route                        | RBAC    |
-| Actor resolver                                                                                   | `apps/api/src/services/auth/actor/` (`StoreActorResolver`); RBAC adds `grants` and `permissionSet` | Phase 5 |
-| Admin guard                                                                                      | `requireActor()` in `services/auth/actor/require.ts`; RBAC adds the capability check               | Phase 5 |
-| Reach                                                                                            | `apps/api/src/services/authz/scope.ts` (out of reach → 404)                                        | Phase 5 |
-| Decision services                                                                                | `services/decisions/coordinator.ts`, `services/decisions/org.ts`                                   | Phase 5 |
+Blue: RBAC. Grey: Phase 5, extended by RBAC. Orange: runtime sidecar.
+
+| Component                                   | Path                                              | Change                                                                        |
+| ------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Permission catalogue                        | `packages/rbac/src/interface.ts` (`CAPABILITIES`) | Unchanged; adds resource, action, description, sensitive                      |
+| Built-in roles                              | `config/rbac.yaml`                                | New shape: roles only (§3 R3)                                                 |
+| Role model, snapshot, effective permissions | `packages/rbac`                                   | Replaces the role ∩ set evaluation                                            |
+| Policy and shared vectors                   | `policy/rbac/`                                    | Rewritten for "active and holds the permission; no PII through the root"      |
+| Catalogue store                             | `apps/api/src/services/rbac-catalogue/`           | Syncs `permission` and built-in `role` rows; loads the snapshot; 30 s refresh |
+| Role assignment store                       | `apps/api/src/services/role-store/`               | Replaces `grant-store`: `user_role` rows and `iam_audit`                      |
+| Actor resolver                              | `apps/api/src/services/auth/actor/`               | Adds additional roles; drops `grants` and `permissionSet`                     |
+| Guard                                       | `apps/api/src/services/authz/guard.ts`            | Permissions in the target organisation                                        |
+| Roles API                                   | `apps/api/src/routes/v1-iam.ts`                   | Replaces the grant and PermissionSet routes                                   |
+| Decision services                           | `services/decisions/coordinator.ts`, `org.ts`     | Revoke additional roles when membership or ownership ends                     |
+| Console                                     | `apps/web`                                        | Roles panels replace the grants panel and PermissionSet picker                |
 
 ---
 
 ## 3. Steps
 
-### R0 — Foundation (done)
+### R0–R2 (done)
 
-`packages/rbac`, `policy/rbac` with shared vectors, `config/rbac.yaml`, actor resolver and log-only guard, `RBAC_MODE` and `OPA_*` settings, `opa` service in compose, `opa check` + `opa test` in CI.
+Capability catalogue, OPA authorizer and sidecar, every route declared with a boot check and snapshot, Phase 5's resolver and `requireActor()`, `capabilities` in `GET /v1/user/read/me`, contact masking, identity binding, and portal hiding. These stay. R2's two deferrals stay open: retiring the emailed decision links (H-7, H-8) and the worker re-check before PII jobs.
 
-### R1 — Declare routes (done)
+### R3 — Data model and catalogue (code done)
 
-Every route declares `config.rbac`; the API refuses to boot without it; a snapshot test lists all routes. The check runs inside each route file's auth wrapper. Service routes require a service-account token; `self` routes an active account. `cleanup-stale` checks `preferred_username`. The 11 Phase 5 console routes are declared (Appendix A).
+| Task                                                                                                                                            | Where                                               | Done when                                                                                                                    |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Rewrite migration `0030_rbac`: `permission`, `role`, `role_permission`, `user_role`, `iam_audit` (design §1); drop the `0031` draft             | `apps/api/drizzle/migrations`, `packages/db-schema` | Done: constraints and foreign keys tested on Postgres 16 (`rbac-catalogue`, `role-store` integration suites)                 |
+| Dev databases that applied an earlier `0030` / `0031`                                                                                           | local only                                          | Reset by hand (drop the old RBAC tables and the `0030`/`0031` migration rows); the earlier `0030` never left `feat/805-rbac` |
+| Permission catalogue with resource, action, description, sensitive                                                                              | `packages/rbac`                                     | Matches the catalogue §2                                                                                                     |
+| `rbac.yaml` holds the six built-in roles: key, name, account type, `base_for`, assignable org types, `assigned_by`, `max_days`, permissions     | `config/rbac.yaml`, `packages/rbac`                 | Validated at boot; tests assert the role × permission matrix of the catalogue §3                                             |
+| Sync at start: upsert permissions (others `deprecated`), upsert built-in roles and their permissions under an advisory lock; leave custom roles | catalogue store, `services/authz/runtime.ts`        | Concurrent boots sync once; a removed permission is marked, not deleted                                                      |
+| Role snapshot with a checksum of `role` + `role_permission`; refresh every `RBAC_CATALOGUE_REFRESH_MS`; keep the last good snapshot             | `services/authz/runtime.ts`                         | Tests: unchanged, reloaded, invalid, store down, timer                                                                       |
 
-### R1.5 — Adopt Phase 5 (done)
+### R4 — Resolve and decide (code done)
 
-| Task                                                                                                            | Where                                                                               | Done when                                       |
-| --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------- |
-| Use Phase 5's resolver; add `grants` and `permissionSet` to its `Actor`; delete `services/authz/actor-resolver` | `services/auth/actor/`, `services/authz/`                                           | One `ActorResolverBase` in the codebase         |
-| Check the route's capability inside `requireActor()`; the older wrappers call the same check                    | `services/auth/actor/require.ts`, `services/authz/route-access.ts`                  | The actor is resolved once per request          |
-| Take reach out of the policy: drop `target`, `orgChain` and the reach rules (decision D3)                       | `policy/rbac/`, `packages/rbac`, vectors                                            | `opa test` and the TS mirror pass without reach |
-| `checkCapability()` for checks inside a handler (no throw)                                                      | `services/authz/`                                                                   | Used by contact masking and org rename          |
-| Org rename needs `network.administer`; Default org refuses invite and edit (decision D4)                        | Already enforced by Phase 5 (`v1-org.ts`, `v1-user.ts`), independent of `RBAC_MODE` | Phase 5 tests; RBAC-enforced console tests      |
-| Catalogue: `org.manage` covers inviting and approving coordinators; `orgs.onboard` covers organisations only    | `docs/rbac/rbac-permissions-and-roles.md`                                           | Done in docs                                    |
+| Task                                                                                                                                       | Where                           | Done when                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- | -------------------------------------------------------------------------------- |
+| Resolver returns memberships (Phase 5 `orgs` with `relation`) and live additional roles (`user_role`, not expired, not revoked)            | `services/auth/actor/store.ts`  | Tests: coordinator, owner of several orgs, root owner, expired and revoked roles |
+| Base roles from membership: member → Coordinator, aggregator owner → Org Admin, root owner → Network Admin                                 | `packages/rbac`                 | Matches the design §1 table                                                      |
+| Effective permissions in the target organisation: union over it and its ancestors; routes without a target use the user's own organisation | `services/authz/guard.ts`       | Test with an owner of two orgs holding different additional roles                |
+| OPA input: permission, active, permissions, organisation type; policy and vectors rewritten; TypeScript mirror kept in step                | `policy/rbac/`, `packages/rbac` | `opa test` and the vectors test pass on the same file                            |
+| `GET /v1/user/read/me` returns permissions per organisation; portal `can()` reads them                                                     | API, `apps/web`                 | Portal and console hide what the user cannot use in that organisation            |
+| Remove `organisations.permission_set`, `user_permission_grant`, the grant store and PermissionSet code                                     | API, web, `packages/rbac`       | No references left; dep-check clean                                              |
 
-### R2 — Enforce (code done; switching on is an operations step)
+Access is unchanged after R4: the base roles reproduce the effective permissions R2 enforces (catalogue §3).
 
-| Task                                                                                                                                                                                            | Where                                                                  | Status                                                                                                                                                                                                                       |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `capabilities` in `GET /v1/user/read/me` (one OPA query, `data.rbac.capabilities`); `null` when RBAC is off                                                                                     | `routes/v1-user.ts`, `packages/rbac`, `policy/rbac`                    | Done                                                                                                                                                                                                                         |
-| Mask contacts in `user/read`, `user/search` and the metadata-update response unless `contact.unmask`; plain reads logged by id and count                                                        | `routes/v1-user.ts`, `routes/console-shared.ts`                        | Done                                                                                                                                                                                                                         |
-| Identity binding: the resolver accepts a coordinator only through its recorded login; the route guard records the login first (best effort) so `self` / `signed_in` routes work on a first call | `services/auth/actor`, `services/authz/route-access.ts`                | Done                                                                                                                                                                                                                         |
-| Portal and console hide what the user cannot use (`can()`, `useCan()`); export actions, onboarding entry, console invite and rename                                                             | `apps/web`                                                             | Done                                                                                                                                                                                                                         |
-| Retire the emailed decision pages and `POST /admin/v1/invites` (H-7, H-8)                                                                                                                       | `aggregator-approvals.ts`, `aggregator-org-approvals.ts`, `invites.ts` | Deferred: Phase 5 keeps the links on purpose, `ADMIN_EMAILS` reviewers still use them, and grant links stay valid for up to 90 days. Remove once the longest grant has expired and the console replaces every link reviewer. |
-| Worker re-checks the requester before PII jobs                                                                                                                                                  | `apps/worker`                                                          | Deferred: needs the actor resolver and OPA client in the worker. The API already checks at enqueue; revocation between enqueue and run is the remaining window.                                                              |
-| Resolve the coordinator export/PII gap (open item 1), then flip instances to `enforce`                                                                                                          | Instance config                                                        | Operations step; see open item 1                                                                                                                                                                                             |
+### R5 — Assign roles (code done)
 
-### R3 — Grants and pages (code done)
+| Task                                                                                                                                                                  | Where                                     | Done when                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Role assignment store: assign, revoke, list; each write with its `iam_audit` row in one transaction                                                                   | `services/role-store/`                    | Postgres integration test                                                                                                                        |
+| Roles API (design §4) with the checks in order: reach, not a base role, membership, `assigned_by`, not self, account type, org type, separation of duties, `max_days` | `routes/v1-iam.ts`                        | One failing-then-passing test per check                                                                                                          |
+| Membership or ownership ends: the user's additional roles in that organisation are revoked                                                                            | decision services, `organisation-root.ts` | Done: right after the user-org change, best effort and logged; a leftover row grants nothing (a role counts only where the user belongs or owns) |
+| Console: coordinator page roles panel (PII Access, Data Export); organisation page owner panel (Org Onboarder)                                                        | `apps/web`                                | Component and BFF route tests                                                                                                                    |
+| Backfill for existing instances: PII Access (90 days) and Data Export for active coordinators, audited                                                                | `scripts/sql/rbac-backfill-roles.sql`     | Done: idempotent, refuses before the roles are synced and beyond PII Access's `max_days` (tested on Postgres 16)                                 |
 
-| Task                                                                                      | Where                                               | Done when                                                                                                                                                                                                                                               |
-| ----------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Migration: `organisations.permission_set`, `user_permission_grant`, `iam_audit`           | `apps/api/drizzle/migrations`, `packages/db-schema` | Done: `0030_rbac`, additive, applied at boot after the train (renumber at merge if taken)                                                                                                                                                               |
-| Grant and set APIs with the subset, separation-of-duties and owner rules                  | API                                                 | Done: `routes/v1-iam.ts`, `services/authz/grants.ts`; each rule tested                                                                                                                                                                                  |
-| Revocation removes the Keycloak role and calls `logoutSessions` (H-10, H-12)              | grant service                                       | Deferred to #851. A revoked grant stops working on the next request (grants are read per request)                                                                                                                                                       |
-| PII Access expiry (90 days) and backfill for existing coordinators                        | `apps/worker`, migration or tool                    | Done: expiry checked per request (no job); `scripts/sql/rbac-backfill-pii-access.sql`, idempotent, audited                                                                                                                                              |
-| With per-organisation sets, check the target organisation's set after `scope.ts` picks it | guard                                               | Deferred: no route needs it yet. Owner routes check `org.manage` / `contact.unmask`, held by every set; the capabilities that differ are checked only on coordinator (one org) or network-admin routes. Do it before an owner route checks one of those |
-| Members and PermissionSet pages                                                           | `apps/web`                                          | Done: access grants on the coordinator page; PermissionSet on the org page (network admin)                                                                                                                                                              |
+### R6 — Custom roles (code done)
+
+| Task                                                                                                                 | Where                               | Done when                                           |
+| -------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | --------------------------------------------------- |
+| Create, edit, delete custom roles (network admin); built-in roles refused; delete refused while assigned; at most 50 | `routes/v1-iam.ts`, catalogue store | Tests per rule; the editing replica reloads at once |
+| Roles page in the console                                                                                            | `apps/web`                          | Component tests                                     |
+
+### R7 — Role in the token (later)
+
+Not scheduled. Kept here so the design stays ready for it.
+
+| Task                                                                                                                        | Where                                                     | Done when                                   |
+| --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------- |
+| Admin-only attribute with the user's role keys per organisation, written by the API on every role change; mapper to a claim | API idp-admin; realm in this repo and bluedots-automation | The user cannot edit it                     |
+| Resolver uses the claim when present; the database stays the authority for expiry and revocation                            | `services/auth/actor`                                     | Tests: claim present, stale claim, no claim |
 
 ---
 
 ## 4. Tests
 
-| Level                         | Covers                                                                                      |
-| ----------------------------- | ------------------------------------------------------------------------------------------- |
-| Rego (`opa test`) + TS mirror | Role × capability × set, grants and expiry, not-grantable, no PII at the root               |
-| Unit (Vitest, ≥ 70%)          | `packages/rbac`, guard, route access, `checkCapability()`                                   |
-| Route snapshot                | Every route's declaration; any change shows in review                                       |
-| Phase 5 tests                 | Reach (`scope.ts`) and the console routes                                                   |
-| E2E (`aggregator-e2e` skill)  | Admin login → coordinator approval → export denied without PII Access → allowed after grant |
+| Level                                 | Covers                                                                                                     |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Rego (`opa test`) + TypeScript mirror | One `vectors.json`: holds / lacks the permission, inactive user, PII through the root                      |
+| Unit (Vitest, ≥ 70 %)                 | `packages/rbac` (yaml, base roles, effective permissions), guard, resolver, stores (in-memory), roles API  |
+| Integration (Postgres 16)             | Migration, sync race, snapshot checksum, assignment store, foreign keys                                    |
+| Route snapshot                        | Every route's declaration; any change shows in review                                                      |
+| E2E (`aggregator-e2e` skill)          | Owner approves a coordinator → export denied → Data Export assigned → allowed; PII Access expires → denied |
 
 ---
 
 ## 5. Work outside this repo
 
-| Repo                  | Change                                                                                                                                                                  | Step         |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| `bluedots-automation` | OPA sidecar in the API pod, `OPA_URL`: done on `feat/aggregator-opa-sidecar` (`docs/aggregator-rbac-opa-plan.md`); needs an api image with `/app/policy/rbac/rbac.rego` | before `log` |
-| `bluedots-automation` | Portal gate for admins and admin-only attributes in the deployment realm (handoff §1, H-11)                                                                             | R2           |
+| Repo                  | Change                                                                       | Step                                                                       |
+| --------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `bluedots-automation` | OPA sidecar in the API pod: done on `feat/aggregator-opa-sidecar`            | Before `log`                                                               |
+| `bluedots-automation` | `rbac.config` override now carries built-in roles only; document it          | R3                                                                         |
+| `bluedots-automation` | Portal gate for org owners and admin-only attributes in the deployment realm | Phase 5 owners; `hotfix/realm-admin-only-attributes` covers the attributes |
+| `bluedots-automation` | Role claim attribute and mapper                                              | R7                                                                         |
 
 ---
 
 ## 6. Open items
 
-| #   | Item                                                                                                  | Recommendation                                                                                                |
-| --- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| 1   | Today a coordinator can export lists and decrypted profiles; the default Coordinator role has neither | Ship `profiles.export` in the Coordinator config for existing instances; backfill PII Access before enforcing |
-| 2   | Admin views across many coordinators call Signals once per coordinator tenant                         | Measure at R2; cache per tenant if slow                                                                       |
-| 3   | `refactor/user-org-phase-5-wip` may be rebased before it merges                                       | Rebase on each change; ask its owner to announce history rewrites                                             |
+| #   | Item                                                                          | Recommendation                                                                         |
+| --- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| 1   | Existing coordinators export lists and decrypted profiles today               | Run the R5 backfill (Data Export, PII Access) before an instance switches to `enforce` |
+| 2   | `refactor/user-org-phase-5-wip` has moved on since the base                   | Rebase before R3; force-push with lease                                                |
+| 3   | `features/rbac/` Gherkin specs describe PermissionSets and `rbac.yaml` grants | Their owner updates them to the role model                                             |
+| 4   | Admin views across many coordinators call Signals once per tenant             | Measure after R4; cache per tenant if slow                                             |
 
 ---
 
@@ -170,7 +200,7 @@ Every route declares `config.rbac`; the API refuses to boot without it; a snapsh
 | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `health.ts`, `aggregator-config.ts`, `public-registration-links.ts`, `public-lookup.ts`                                      | `public`                                                                                  |
 | `aggregator-registrations.ts` (create), `aggregator-orgs.ts` (create, list), `aggregator-maintenance.ts`, `campaign-dump.ts` | `service`                                                                                 |
-| `aggregator-approvals.ts`, `aggregator-org-approvals.ts`, `invites.ts`                                                       | `link_token` until retired in R2                                                          |
+| `aggregator-approvals.ts`, `aggregator-org-approvals.ts`, `invites.ts`                                                       | `link_token` until the emailed links are retired                                          |
 | `aggregator-profile.ts`                                                                                                      | `self`                                                                                    |
 | `support.ts`, `GET /v1/user/read/me`                                                                                         | `signed_in`                                                                               |
 | `registration-links.ts`                                                                                                      | reads `profiles.view`; writes `profiles.onboard`                                          |
@@ -180,6 +210,9 @@ Every route declares `config.rbac`; the API refuses to boot without it; a snapsh
 | `campaign-export.ts`                                                                                                         | `profiles.view_pii`                                                                       |
 | `campaign-email.ts`, `campaign-voice.ts`                                                                                     | `campaigns.run`                                                                           |
 | `/v1/user/read/:id`, `/v1/user/search`, `/v1/user/create`, `/v1/user/decision/:id`, `/v1/user/metadata/update/:id`           | `org.manage`                                                                              |
-| `/v1/org/read/:id`, `/v1/org/search`, `/v1/org/metadata/update/:id`                                                          | `org.manage` (decision D1; rename also needs `network.administer`)                        |
+| `/v1/org/read/:id`, `/v1/org/search`, `/v1/org/metadata/update/:id`                                                          | `org.manage` (D1; rename also needs `network.administer`)                                 |
 | `/v1/org/decision/:id`                                                                                                       | `orgs.onboard`                                                                            |
-| `/v1/org/access/repair/:id`                                                                                                  | `network.administer` (decision D2)                                                        |
+| `/v1/org/access/repair/:id`                                                                                                  | `network.administer` (D2)                                                                 |
+| `GET /v1/roles`, `GET /v1/user/roles/:id`                                                                                    | `org.manage`                                                                              |
+| `POST /v1/user/role/assign/:id`, `POST /v1/user/role/revoke/:id`                                                             | `signed_in` at the route; the role's `assigned_by` checked in the handler                 |
+| `POST /v1/roles/create`, `PATCH /v1/roles/update/:key`, `POST /v1/roles/delete/:key`                                         | `network.administer`                                                                      |

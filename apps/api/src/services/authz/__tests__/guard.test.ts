@@ -1,13 +1,13 @@
 /**
- * Unit tests for the RBAC capability checks (`@aggregator-dpg/api`): modes,
- * deny paths, and the decision input built from a Phase 5 actor.
+ * Unit tests for the RBAC permission checks (`@aggregator-dpg/api`): modes,
+ * deny paths, and the decision input built from a Phase 5 actor's base and
+ * additional roles.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { join } from 'node:path';
-import { loadRbacConfig } from '@aggregator-dpg/rbac';
 import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
 import { checkCapability, decisionInput, requirePermission } from '../guard.js';
 import { _setRbacRuntime } from '../runtime.js';
+import { shippedRoleIndex } from '../testing.js';
 import {
   ActorResolverFake,
   _setActorResolver,
@@ -15,7 +15,8 @@ import {
   type Actor,
 } from '../../auth/actor/index.js';
 
-const { config: cfg } = await loadRbacConfig([join(process.env.CONFIG_ROOT ?? '', 'rbac.yaml')]);
+const roles = await shippedRoleIndex();
+const COORDINATOR = ['campaigns.run', 'profiles.onboard', 'profiles.view'];
 
 function req() {
   const log = { debug: vi.fn(), warn: vi.fn() };
@@ -31,7 +32,7 @@ const coordinator: Actor = {
 
 function setup(mode: 'log' | 'enforce', actor: Actor | null = coordinator) {
   const authorizer = new AuthorizerFake();
-  _setRbacRuntime({ mode, config: cfg, authorizer });
+  _setRbacRuntime({ mode, roles, authorizer });
   const resolver = new ActorResolverFake();
   if (actor) resolver.seed('u-coord', actor);
   _setActorResolver(resolver);
@@ -46,35 +47,28 @@ afterEach(() => {
 });
 
 describe('decisionInput', () => {
-  it('builds role and organisation capabilities from rbac.yaml', () => {
-    const input = decisionInput(cfg, coordinator, 'profiles.view', 42);
-    expect(input).toMatchObject({ capability: 'profiles.view', now: 42 });
-    expect(input.actor.roleCapabilities).toEqual(cfg.roles.coordinator);
-    expect(input.actor.orgs[0]?.capabilities).toEqual(cfg.permission_sets.aggregator);
-    expect(input.actor.grants).toEqual([]);
+  it("gives a coordinator its base role's permissions", () => {
+    const input = decisionInput(roles, coordinator, 'profiles.view', undefined, 42);
+    expect(input).toMatchObject({ capability: 'profiles.view', org: null });
+    expect(input.actor).toEqual({ userId: 'u-coord', active: true, permissions: COORDINATOR });
   });
 
-  it('uses an organisation override and the actor grants', () => {
-    const input = decisionInput(
-      cfg,
-      {
-        ...coordinator,
-        orgs: [
-          {
-            id: 'o',
-            orgType: 'aggregator',
-            relation: 'member',
-            isDefault: false,
-            permissionSet: 'super_aggregator',
-          },
-        ],
-        grants: [{ capability: 'profiles.view_pii', expiresAt: 9 }],
-      },
-      'profiles.view',
-      0,
+  it('adds a live additional role in the target organisation', () => {
+    const actor: Actor = {
+      ...coordinator,
+      roles: [{ roleKey: 'data_export', orgId: 'org-a', expiresAt: null }],
+    };
+    const target = { id: 'org-a', orgType: 'aggregator' as const, ancestorIds: [] };
+    const input = decisionInput(roles, actor, 'profiles.export', target, 0);
+    expect(input.org).toEqual({ id: 'org-a', orgType: 'aggregator' });
+    expect(input.actor.permissions).toEqual([...COORDINATOR, 'profiles.export'].sort());
+  });
+
+  it('gives nothing in an organisation the actor is not part of', () => {
+    const target = { id: 'org-b', orgType: 'aggregator' as const, ancestorIds: [] };
+    expect(decisionInput(roles, coordinator, 'profiles.view', target, 0).actor.permissions).toEqual(
+      [],
     );
-    expect(input.actor.orgs[0]?.capabilities).toEqual(cfg.permission_sets.super_aggregator);
-    expect(input.actor.grants).toHaveLength(1);
   });
 });
 
@@ -100,7 +94,7 @@ describe('requirePermission', () => {
     setup('enforce');
     const r = req();
     const out = await requirePermission(r, caller, 'profiles.view_pii');
-    expect(out).toMatchObject({ allowed: false, decision: { reasons: ['not_in_role'] } });
+    expect(out).toMatchObject({ allowed: false, decision: { reasons: ['not_held'] } });
     expect(r.spy.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         operation: 'rbac.decide',
@@ -138,14 +132,45 @@ describe('requirePermission', () => {
 });
 
 describe('checkCapability', () => {
-  it('honours an unexpired grant on a resolved actor', async () => {
+  it('honours an additional role until it expires', async () => {
     setup('enforce');
-    const actor = {
+    const actor: Actor = {
       ...coordinator,
-      grants: [{ capability: 'profiles.view_pii' as const, expiresAt: 100 }],
+      roles: [{ roleKey: 'pii_access', orgId: 'org-a', expiresAt: 100 }],
     };
-    expect((await checkCapability(req(), actor, 'profiles.view_pii', 99)).allowed).toBe(true);
-    expect((await checkCapability(req(), actor, 'profiles.view_pii', 100)).allowed).toBe(false);
+    expect((await checkCapability(req(), actor, 'profiles.view_pii', { now: 99 })).allowed).toBe(
+      true,
+    );
+    expect((await checkCapability(req(), actor, 'profiles.view_pii', { now: 100 })).allowed).toBe(
+      false,
+    );
+  });
+
+  it('checks the target organisation for an owner of two', async () => {
+    setup('enforce');
+    const owner = buildAdminActor({
+      orgs: [
+        { id: 'A', orgType: 'aggregator', relation: 'owner', isDefault: false },
+        { id: 'B', orgType: 'aggregator', relation: 'owner', isDefault: false },
+      ],
+      roles: [{ roleKey: 'org_onboarder', orgId: 'A', expiresAt: null }],
+    });
+    const at = (id: string) => ({
+      target: { id, orgType: 'aggregator' as const, ancestorIds: [] },
+    });
+    expect((await checkCapability(req(), owner, 'orgs.onboard', at('A'))).allowed).toBe(true);
+    expect((await checkCapability(req(), owner, 'orgs.onboard', at('B'))).allowed).toBe(false);
+  });
+
+  it('never allows personal data through the root', async () => {
+    setup('enforce');
+    const nf = buildAdminActor({
+      orgs: [{ id: 'nf', orgType: 'network_facilitator', relation: 'owner', isDefault: false }],
+    });
+    const out = await checkCapability(req(), nf, 'profiles.view_pii', {
+      target: { id: 'nf', orgType: 'network_facilitator', ancestorIds: [] },
+    });
+    expect(out.decision?.reasons).toEqual(['not_held', 'not_through_root']);
   });
 
   it('lets a network admin repair access but not an aggregator admin', async () => {

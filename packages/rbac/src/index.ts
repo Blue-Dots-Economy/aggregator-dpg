@@ -8,17 +8,18 @@
  */
 
 export * from './interface.js';
-export { NOT_GRANTABLE, USER_GRANTABLE, SENSITIVE } from './catalogue.js';
+export { SENSITIVE, NOT_THROUGH_ROOT, permissionDefinitions } from './catalogue.js';
 export { evaluate, listCapabilities } from './evaluate.js';
 export { OpaAuthorizer } from './opa/index.js';
 export type { OpaAuthorizerOptions } from './opa/index.js';
 export { InMemoryAuthorizer } from './in-memory/index.js';
 export {
-  RbacConfigSchema,
-  parseRbacConfig,
-  roleCapabilities,
-  orgCapabilities,
-} from './rbac-config.js';
-export type { RbacConfig } from './rbac-config.js';
-export { loadRbacConfig } from './fs/index.js';
-export type { LoadedRbacConfig } from './fs/index.js';
+  RbacFileSchema,
+  parseRbacFile,
+  roleCatalogueIssues,
+  assertRoleCatalogue,
+} from './roles.js';
+export { indexRoles, baseRoleOf, effectivePermissions } from './permissions.js';
+export type { PermissionSubject, RoleIndex } from './permissions.js';
+export { loadRbacFile } from './fs/index.js';
+export type { LoadedRbacFile } from './fs/index.js';

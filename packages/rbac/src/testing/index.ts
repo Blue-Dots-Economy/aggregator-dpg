@@ -15,11 +15,11 @@ import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { InMemoryAuthorizer } from '../in-memory/index.js';
 import type {
   Actor,
-  ActorOrg,
   Capability,
   CapabilityListInput,
   Decision,
   DecisionInput,
+  RoleDefinition,
 } from '../interface.js';
 
 /** In-process engine that records its inputs and can be made to fail. */
@@ -64,23 +64,7 @@ export class AuthorizerFake extends InMemoryAuthorizer {
 }
 
 /**
- * Builds an organisation entry for an actor.
- *
- * @param overrides - Fields to change from the defaults.
- * @returns An aggregator organisation the actor coordinates in.
- */
-export function buildActorOrg(overrides: Partial<ActorOrg> = {}): ActorOrg {
-  return {
-    id: 'org-a',
-    orgType: 'aggregator',
-    relation: 'member',
-    capabilities: ['profiles.view', 'profiles.onboard'],
-    ...overrides,
-  };
-}
-
-/**
- * Builds an active coordinator actor.
+ * Builds an active actor holding a coordinator's base permissions.
  *
  * @param overrides - Fields to change from the defaults.
  * @returns A fully-formed actor.
@@ -88,11 +72,30 @@ export function buildActorOrg(overrides: Partial<ActorOrg> = {}): ActorOrg {
 export function buildActor(overrides: Partial<Actor> = {}): Actor {
   return {
     userId: 'user-coord',
-    userType: 'coordinator',
     active: true,
-    roleCapabilities: ['profiles.view', 'profiles.onboard'],
-    orgs: [buildActorOrg()],
-    grants: [],
+    permissions: ['campaigns.run', 'profiles.onboard', 'profiles.view'],
+    ...overrides,
+  };
+}
+
+/**
+ * Builds a role definition (an additional coordinator role by default).
+ *
+ * @param overrides - Fields to change from the defaults.
+ * @returns A role that passes the role rules.
+ */
+export function buildRole(overrides: Partial<RoleDefinition> = {}): RoleDefinition {
+  return {
+    key: 'viewer',
+    name: 'Viewer',
+    description: '',
+    isBuiltin: false,
+    accountType: 'coordinator',
+    baseFor: null,
+    assignableOrgTypes: ['aggregator'],
+    assignedBy: 'org.manage',
+    maxDays: null,
+    permissions: ['profiles.view'],
     ...overrides,
   };
 }

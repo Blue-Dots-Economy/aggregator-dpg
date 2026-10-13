@@ -8,12 +8,13 @@
  * The shape mirrors the RBAC work's `ActorResolverBase`
  * (`resolve({ aggregatorId?, subject })` → `{ userId, userType, active, orgs }`)
  * so RBAC can adopt this resolver or replace it behind the same contract
- * (`docs/rbac/phase-5-rbac-handoff.md`, H-3). RBAC adds `grants` and `permissionSet`.
+ * (`docs/rbac/phase-5-rbac-handoff.md`, H-3). RBAC adds the user's additional
+ * roles (`user_role`); base roles follow `orgs` (design decision D7).
  *
  * Never throws across the service boundary.
  */
 
-import type { Grant } from '@aggregator-dpg/rbac/interface';
+import type { HeldRole } from '@aggregator-dpg/rbac/interface';
 
 /** How the actor relates to an organisation. */
 export type ActorOrgRelation = 'member' | 'owner';
@@ -25,11 +26,6 @@ export interface ActorOrg {
   relation: ActorOrgRelation;
   /** The fixed Default org (`slug = 'default'`). */
   isDefault: boolean;
-  /**
-   * The organisation's own PermissionSet name (RBAC R3). Absent or null: the
-   * `org_type` default from `config/rbac.yaml`.
-   */
-  permissionSet?: string | null;
 }
 
 /** The resolved caller. */
@@ -47,8 +43,11 @@ export interface Actor {
    * (`owner`), the root among them for the network admin.
    */
   orgs: ActorOrg[];
-  /** Per-user grants on top of the role (RBAC R3, e.g. PII Access). Absent: none. */
-  grants?: Grant[];
+  /**
+   * The user's live additional roles (`user_role`: not revoked, not expired
+   * when read). Absent: none.
+   */
+  roles?: HeldRole[];
 }
 
 /** Input of {@link ActorResolverBase.resolve}: verified token claims. */

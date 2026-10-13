@@ -1,131 +1,201 @@
 /**
- * RBAC grant and PermissionSet routes (`@aggregator-dpg/api`, R3).
+ * RBAC roles API (`@aggregator-dpg/api`; design §4).
  *
- *   GET   /v1/user/grants/:id                 a coordinator's grants and what may be granted
- *   POST  /v1/user/grant/:id                  grant (e.g. PII Access) to a coordinator
- *   POST  /v1/user/grant/revoke/:id           revoke a coordinator's live grant
- *   GET   /v1/org/permission-sets             the PermissionSets of this instance
- *   PATCH /v1/org/permission-set/update/:id   set an organisation's own PermissionSet
+ *   GET  /v1/roles                     every role and its permissions
+ *   GET  /v1/user/roles/:id            a user's base and additional roles, and what the caller may assign
+ *   POST /v1/user/role/assign/:id      assign an additional role in an organisation
+ *   POST /v1/user/role/revoke/:id      revoke an additional role
+ *   POST /v1/roles/create              create a custom role (network admin)
+ *   PATCH /v1/roles/update/:key        change a custom role (network admin)
+ *   POST /v1/roles/delete/:key         delete an unused custom role (network admin)
  *
- * `requireActor()` checks the declared capability first; the rules that need
- * the target (reach → 404, subset, no self-grant, parent only) are in
- * `services/authz/grants.ts`. Every change is written to `iam_audit`.
+ * `requireActor()` admits admins only. The assign and revoke routes declare
+ * `signed_in`: the permission they need is the role's own `assigned_by`,
+ * checked in the target organisation by `services/authz/roles.ts` together
+ * with the other rules. Every change is written to `iam_audit`.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { CAPABILITIES, permissionDefinitions, type RoleDefinition } from '@aggregator-dpg/rbac';
 import {
-  GrantRequestSchema,
-  OrgPermissionSetRequestSchema,
-  OrgPermissionSetResponseSchema,
-  PermissionGrantSchema,
-  PermissionSetsResponseSchema,
-  RevokeGrantRequestSchema,
-  RevokeGrantResponseSchema,
-  UserGrantsResponseSchema,
-  type PermissionGrant as WireGrant,
+  AssignRoleRequestSchema,
+  CreateRoleRequestSchema,
+  RoleSchema,
+  UpdateRoleRequestSchema,
+  RevokeRoleRequestSchema,
+  RevokeRoleResponseSchema,
+  RoleAssignmentSchema,
+  RolesResponseSchema,
+  UserRolesResponseSchema,
+  type Role as WireRole,
+  type RoleAssignment as WireAssignment,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { requireActor } from '../services/auth/actor/index.js';
 import { getRbacRuntime } from '../services/authz/runtime.js';
 import {
-  grantToUser,
-  listUserGrants,
-  revokeFromUser,
-  setOrgPermissionSet,
-  type GrantFailure,
-} from '../services/authz/grants.js';
-import type { PermissionGrant } from '../services/grant-store/index.js';
+  assignRole,
+  listUserRoles,
+  revokeRole,
+  type RoleFailure,
+} from '../services/authz/roles.js';
+import type { UserRoleRecord } from '../services/role-store/index.js';
+import {
+  createCustomRole,
+  deleteCustomRole,
+  updateCustomRole,
+  type CustomRoleFailure,
+} from '../services/authz/custom-roles.js';
 import { guardWriteRate } from './console-shared.js';
 
 const IdParamsSchema = z.object({ id: z.string().uuid() });
 type IdParams = z.infer<typeof IdParamsSchema>;
+const KeyParamsSchema = z.object({ key: z.string().min(1).max(40) });
+type KeyParams = z.infer<typeof KeyParamsSchema>;
 
-/** A stored grant on the wire. */
-function toWireGrant(g: PermissionGrant, now: Date): WireGrant {
-  return {
-    grant_key: g.grantKey,
-    capability: g.capability,
-    granted_at: g.grantedAt.toISOString(),
-    expires_at: g.expiresAt.toISOString(),
-    granted_by: g.grantedBy,
-    revoked_at: g.revokedAt ? g.revokedAt.toISOString() : null,
-    live: g.revokedAt === null && g.expiresAt > now,
-  };
-}
-
-/** Throws the HTTP error for a failed rule check. */
-function throwFailure(f: GrantFailure): never {
+/** Throws the HTTP error for a failed custom-role change. */
+function throwCustomFailure(f: CustomRoleFailure): never {
   switch (f.kind) {
     case 'rbac_off':
       throw httpError('RBAC_NOT_ENABLED');
     case 'not_found':
       throw httpError('NOT_FOUND');
-    case 'not_allowed':
-      if (f.reason === 'parent_only') {
-        throw httpError('FORBIDDEN', { fields: { reason: 'parent_only' } });
-      }
-      throw httpError('PERMISSION_GRANT_NOT_ALLOWED', { fields: { reason: f.reason } });
-    case 'exceeds_org_set':
-      throw httpError('PERMISSION_GRANT_EXCEEDS_ORG_SET', { fields: { capability: f.capability } });
-    case 'unknown_set':
-      throw httpError('PERMISSION_SET_UNKNOWN');
+    case 'exists':
+      throw httpError('ROLE_EXISTS');
+    case 'builtin':
+      throw httpError('ROLE_BUILTIN');
+    case 'in_use':
+      throw httpError('ROLE_IN_USE');
+    case 'limit':
+      throw httpError('ROLE_LIMIT_REACHED');
+    case 'invalid':
+      throw httpError('ROLE_INVALID', { fields: { issues: f.issues } });
     case 'unavailable':
       throw httpError('DB_UNAVAILABLE', {
         cause: new Error(f.message),
-        fields: { sub_operation: 'rbac.grants' },
+        fields: { sub_operation: 'rbac.customRoles' },
+      });
+  }
+}
+
+/** A role on the wire. */
+export function toWireRole(r: RoleDefinition): WireRole {
+  return {
+    key: r.key,
+    name: r.name,
+    description: r.description,
+    is_builtin: r.isBuiltin,
+    account_type: r.accountType,
+    base_for: r.baseFor,
+    assignable_org_types: r.assignableOrgTypes,
+    assigned_by: r.assignedBy,
+    max_days: r.maxDays,
+    permissions: [...r.permissions].sort(),
+  };
+}
+
+/** An assignment on the wire. */
+function toWireAssignment(a: UserRoleRecord, now: Date): WireAssignment {
+  return {
+    id: a.id,
+    role_key: a.roleKey,
+    org_id: a.orgId,
+    granted_by: a.grantedBy,
+    granted_at: a.grantedAt.toISOString(),
+    expires_at: a.expiresAt ? a.expiresAt.toISOString() : null,
+    revoked_at: a.revokedAt ? a.revokedAt.toISOString() : null,
+    live: a.revokedAt === null && (a.expiresAt === null || a.expiresAt > now),
+  };
+}
+
+/** Throws the HTTP error for a failed rule check. */
+function throwFailure(f: RoleFailure): never {
+  switch (f.kind) {
+    case 'rbac_off':
+      throw httpError('RBAC_NOT_ENABLED');
+    case 'not_found':
+      throw httpError('NOT_FOUND');
+    case 'unknown_role':
+      throw httpError('ROLE_UNKNOWN');
+    case 'not_allowed':
+      throw httpError('ROLE_ASSIGNMENT_NOT_ALLOWED', { fields: { reason: f.reason } });
+    case 'forbidden':
+      throw httpError('FORBIDDEN', { fields: { permission: f.permission } });
+    case 'unavailable':
+      throw httpError('DB_UNAVAILABLE', {
+        cause: new Error(f.message),
+        fields: { sub_operation: 'rbac.roles' },
       });
   }
 }
 
 /**
- * Registers the RBAC grant and PermissionSet routes.
+ * Registers the roles API.
  *
  * @param app - Fastify instance to attach the routes to.
  */
 export function registerV1IamRoutes(app: FastifyInstance): void {
   app.get(
-    '/v1/user/grants/:id',
+    '/v1/roles',
     {
       config: { rbac: { capability: 'org.manage' } },
       schema: {
         tags: ['console'],
-        summary: "A coordinator's grants and what may be granted",
+        summary: 'Every role and its permissions',
+        response: { 200: RolesResponseSchema, ...errorResponses(401, 403, 503) },
+      },
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      await requireActor(req);
+      const rt = getRbacRuntime();
+      if (!rt) throw httpError('RBAC_NOT_ENABLED');
+      const roles = [...rt.roles.byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
+      return reply
+        .status(200)
+        .send({ roles: roles.map(toWireRole), permissions: permissionDefinitions(CAPABILITIES) });
+    },
+  );
+
+  app.get(
+    '/v1/user/roles/:id',
+    {
+      config: { rbac: { capability: 'org.manage' } },
+      schema: {
+        tags: ['console'],
+        summary: "A user's roles and the additional roles the caller may assign",
         params: IdParamsSchema,
-        response: { 200: UserGrantsResponseSchema, ...errorResponses(401, 403, 404, 503) },
+        response: { 200: UserRolesResponseSchema, ...errorResponses(401, 403, 404, 503) },
       },
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
-      const res = await listUserGrants(actor, id);
-      if (!res.ok) throwFailure(res.failure);
       const now = new Date();
+      const res = await listUserRoles(actor, id, now);
+      if (!res.ok) throwFailure(res.failure);
       return reply.status(200).send({
-        grants: res.value.grants.map((g) => toWireGrant(g, now)),
-        grantable: res.value.grantable.map((g) => ({
-          grant_key: g.grantKey,
-          capability: g.capability,
-          max_days: g.maxDays,
-        })),
+        base: res.value.base.map((b) => ({ role_key: b.roleKey, org_id: b.orgId })),
+        additional: res.value.additional.map((a) => toWireAssignment(a, now)),
+        assignable: res.value.assignable.map((a) => ({ role_key: a.roleKey, org_id: a.orgId })),
       });
     },
   );
 
   app.post(
-    '/v1/user/grant/:id',
+    '/v1/user/role/assign/:id',
     {
-      config: { rbac: { capability: 'org.manage' } },
+      config: { rbac: { access: 'signed_in' } },
       schema: {
         tags: ['console'],
-        summary: 'Grant a capability (e.g. PII Access) to a coordinator',
+        summary: 'Assign an additional role to a user in an organisation',
         description:
-          "Replaces the coordinator's live grant of the same key. Refused for a capability the coordinator's organisation does not hold, for yourself, and beyond the grant's longest validity.",
+          "Needs the role's assigned_by permission in that organisation. Replaces a live assignment of the same role there. Refused for a base role, an organisation the user is not part of, yourself, the wrong account or organisation type, separation of duties, and beyond the role's longest validity.",
         params: IdParamsSchema,
-        body: GrantRequestSchema,
+        body: AssignRoleRequestSchema,
         response: {
-          200: PermissionGrantSchema,
+          200: RoleAssignmentSchema,
           ...errorResponses(400, 401, 403, 404, 409, 429, 503),
         },
       },
@@ -134,32 +204,37 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       await guardWriteRate(actor, reply);
       const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof GrantRequestSchema>;
-      const res = await grantToUser(actor, id, body.grant_key, body.days);
+      const body = req.body as z.infer<typeof AssignRoleRequestSchema>;
+      const res = await assignRole(req, actor, id, {
+        roleKey: body.role_key,
+        orgId: body.org_id,
+        days: body.days,
+      });
       if (!res.ok) throwFailure(res.failure);
       req.log.info({
-        operation: 'rbac.grant',
+        operation: 'console.role.assign',
         status: 'success',
         actor_id: actor.userId,
         target_id: id,
-        grant_key: body.grant_key,
+        role: body.role_key,
+        org_id: body.org_id,
       });
-      return reply.status(200).send(toWireGrant(res.value, new Date()));
+      return reply.status(200).send(toWireAssignment(res.value, new Date()));
     },
   );
 
   app.post(
-    '/v1/user/grant/revoke/:id',
+    '/v1/user/role/revoke/:id',
     {
-      config: { rbac: { capability: 'org.manage' } },
+      config: { rbac: { access: 'signed_in' } },
       schema: {
         tags: ['console'],
-        summary: "Revoke a coordinator's live grant",
+        summary: "Revoke a user's additional role in an organisation",
         params: IdParamsSchema,
-        body: RevokeGrantRequestSchema,
+        body: RevokeRoleRequestSchema,
         response: {
-          200: RevokeGrantResponseSchema,
-          ...errorResponses(400, 401, 403, 404, 429, 503),
+          200: RevokeRoleResponseSchema,
+          ...errorResponses(400, 401, 403, 404, 409, 429, 503),
         },
       },
     },
@@ -167,80 +242,123 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       await guardWriteRate(actor, reply);
       const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof RevokeGrantRequestSchema>;
-      const res = await revokeFromUser(actor, id, body.grant_key);
+      const body = req.body as z.infer<typeof RevokeRoleRequestSchema>;
+      const res = await revokeRole(req, actor, id, body.role_key, body.org_id);
       if (!res.ok) throwFailure(res.failure);
       req.log.info({
-        operation: 'rbac.revoke',
+        operation: 'console.role.revoke',
         status: 'success',
         actor_id: actor.userId,
         target_id: id,
-        grant_key: body.grant_key,
+        role: body.role_key,
+        org_id: body.org_id,
         revoked: res.value,
       });
       return reply.status(200).send({ revoked: res.value });
     },
   );
 
-  app.get(
-    '/v1/org/permission-sets',
+  app.post(
+    '/v1/roles/create',
     {
-      config: { rbac: { capability: 'orgs.onboard' } },
+      config: { rbac: { capability: 'network.administer' } },
       schema: {
         tags: ['console'],
-        summary: 'The PermissionSets of this instance (rbac.yaml)',
-        response: { 200: PermissionSetsResponseSchema, ...errorResponses(401, 403, 503) },
+        summary: 'Create a custom role from existing permissions',
+        body: CreateRoleRequestSchema,
+        response: { 201: RoleSchema, ...errorResponses(400, 401, 403, 409, 429, 503) },
       },
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
-      await requireActor(req);
-      const rt = getRbacRuntime();
-      if (!rt) throw httpError('RBAC_NOT_ENABLED');
-      return reply.status(200).send({
-        sets: Object.entries(rt.config.permission_sets)
-          .map(([name, capabilities]) => ({ name, capabilities: [...capabilities] }))
-          .sort((a, b) => a.name.localeCompare(b.name)),
-        defaults: { ...rt.config.org_type_defaults },
+      const { actor } = await requireActor(req);
+      await guardWriteRate(actor, reply);
+      const body = req.body as z.infer<typeof CreateRoleRequestSchema>;
+      const res = await createCustomRole(actor, {
+        key: body.key,
+        name: body.name,
+        description: body.description,
+        accountType: body.account_type,
+        assignableOrgTypes: body.assignable_org_types,
+        assignedBy: body.assigned_by,
+        maxDays: body.max_days,
+        permissions: body.permissions,
       });
+      if (!res.ok) throwCustomFailure(res.failure);
+      req.log.info({
+        operation: 'console.role.create',
+        status: 'success',
+        actor_id: actor.userId,
+        role: body.key,
+      });
+      return reply.status(201).send(toWireRole(res.value));
     },
   );
 
   app.patch(
-    '/v1/org/permission-set/update/:id',
+    '/v1/roles/update/:key',
     {
-      config: { rbac: { capability: 'orgs.onboard' } },
+      config: { rbac: { capability: 'network.administer' } },
       schema: {
         tags: ['console'],
-        summary: "Set an organisation's own PermissionSet",
-        description:
-          "A key of rbac.yaml permission_sets, or null for the org_type default. Only a parent sets a child organisation's set; today that is the network admin.",
-        params: IdParamsSchema,
-        body: OrgPermissionSetRequestSchema,
+        summary: 'Change a custom role',
+        params: KeyParamsSchema,
+        body: UpdateRoleRequestSchema,
+        response: { 200: RoleSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
+      },
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const { actor } = await requireActor(req);
+      await guardWriteRate(actor, reply);
+      const { key } = req.params as KeyParams;
+      const body = req.body as z.infer<typeof UpdateRoleRequestSchema>;
+      const res = await updateCustomRole(actor, key, {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.description !== undefined ? { description: body.description } : {}),
+        ...(body.assignable_org_types !== undefined
+          ? { assignableOrgTypes: body.assignable_org_types }
+          : {}),
+        ...(body.assigned_by !== undefined ? { assignedBy: body.assigned_by } : {}),
+        ...(body.max_days !== undefined ? { maxDays: body.max_days } : {}),
+        ...(body.permissions !== undefined ? { permissions: body.permissions } : {}),
+      });
+      if (!res.ok) throwCustomFailure(res.failure);
+      req.log.info({
+        operation: 'console.role.update',
+        status: 'success',
+        actor_id: actor.userId,
+        role: key,
+      });
+      return reply.status(200).send(toWireRole(res.value));
+    },
+  );
+
+  app.post(
+    '/v1/roles/delete/:key',
+    {
+      config: { rbac: { capability: 'network.administer' } },
+      schema: {
+        tags: ['console'],
+        summary: 'Delete a custom role no live assignment uses',
+        params: KeyParamsSchema,
         response: {
-          200: OrgPermissionSetResponseSchema,
-          ...errorResponses(400, 401, 403, 404, 429, 503),
+          200: z.object({ deleted: z.boolean() }),
+          ...errorResponses(401, 403, 404, 409, 429, 503),
         },
       },
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { actor } = await requireActor(req);
       await guardWriteRate(actor, reply);
-      const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof OrgPermissionSetRequestSchema>;
-      const res = await setOrgPermissionSet(actor, id, body.permission_set);
-      if (!res.ok) throwFailure(res.failure);
+      const { key } = req.params as KeyParams;
+      const res = await deleteCustomRole(actor, key);
+      if (!res.ok) throwCustomFailure(res.failure);
       req.log.info({
-        operation: 'rbac.orgPermissionSet',
+        operation: 'console.role.delete',
         status: 'success',
         actor_id: actor.userId,
-        target_id: id,
-        permission_set: res.value.permissionSet,
+        role: key,
       });
-      return reply.status(200).send({
-        id: res.value.id,
-        permission_set: res.value.permissionSet,
-        capabilities: res.value.capabilities,
-      });
+      return reply.status(200).send({ deleted: true });
     },
   );
 }

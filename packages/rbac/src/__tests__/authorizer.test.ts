@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { InMemoryAuthorizer } from '../in-memory/index.js';
-import { AuthorizerFake, buildActor, buildActorOrg } from '../testing/index.js';
+import { AuthorizerFake, buildActor } from '../testing/index.js';
 import type { DecisionInput } from '../interface.js';
 
 describe('InMemoryAuthorizer', () => {
@@ -8,7 +8,7 @@ describe('InMemoryAuthorizer', () => {
     const res = await new InMemoryAuthorizer().decide({
       capability: 'profiles.view',
       actor: buildActor(),
-      now: 0,
+      org: null,
     });
     expect(res).toEqual({ success: true, value: { allow: true, reasons: [] } });
   });
@@ -17,7 +17,7 @@ describe('InMemoryAuthorizer', () => {
     const res = await new InMemoryAuthorizer().decide({
       capability: 'nope',
       actor: buildActor(),
-      now: 0,
+      org: null,
     } as unknown as DecisionInput);
     expect(!res.success && res.error.code).toBe('RBAC_INPUT_INVALID');
   });
@@ -26,16 +26,16 @@ describe('InMemoryAuthorizer', () => {
 describe('AuthorizerFake', () => {
   it('records inputs and evaluates the real rules', async () => {
     const fake = new AuthorizerFake();
-    const actor = buildActor({ orgs: [buildActorOrg({ capabilities: [] })] });
-    const res = await fake.decide({ capability: 'profiles.view', actor, now: 0 });
-    expect(res.success && res.value).toEqual({ allow: false, reasons: ['not_in_org_set'] });
+    const actor = buildActor({ permissions: [] });
+    const res = await fake.decide({ capability: 'profiles.view', actor, org: null });
+    expect(res.success && res.value).toEqual({ allow: false, reasons: ['not_held'] });
     expect(fake.calls).toHaveLength(1);
   });
 
   it('fails every call after failWith', async () => {
     const fake = new AuthorizerFake();
     fake.failWith();
-    const res = await fake.decide({ capability: 'profiles.view', actor: buildActor(), now: 0 });
+    const res = await fake.decide({ capability: 'profiles.view', actor: buildActor(), org: null });
     expect(!res.success && res.error.code).toBe('OPA_UNAVAILABLE');
   });
 });
@@ -45,7 +45,7 @@ describe('capability lists', () => {
     const res = await new InMemoryAuthorizer().listCapabilities({
       actor: buildActor(),
       candidates: ['profiles.view', 'profiles.view_pii'],
-      now: 0,
+      org: null,
     });
     expect(res).toEqual({ success: true, value: ['profiles.view'] });
   });
@@ -54,7 +54,7 @@ describe('capability lists', () => {
     const res = await new InMemoryAuthorizer().listCapabilities({
       actor: buildActor(),
       candidates: ['nope'],
-      now: 0,
+      org: null,
     } as never);
     expect(!res.success && res.error.code).toBe('RBAC_INPUT_INVALID');
   });
@@ -62,7 +62,7 @@ describe('capability lists', () => {
   it('fails the list after failWith', async () => {
     const fake = new AuthorizerFake();
     fake.failWith();
-    const res = await fake.listCapabilities({ actor: buildActor(), candidates: [], now: 0 });
+    const res = await fake.listCapabilities({ actor: buildActor(), candidates: [], org: null });
     expect(!res.success && res.error.code).toBe('OPA_UNAVAILABLE');
   });
 });

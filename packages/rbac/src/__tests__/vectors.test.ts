@@ -24,7 +24,7 @@ describe('shared policy vectors', () => {
 describe('capability lists agree with single decisions', () => {
   const all = [...CAPABILITIES];
   it.each(vectors.map((v) => [v.name, v] as const))('%s', (_name, v) => {
-    const listed = listCapabilities({ actor: v.input.actor, candidates: all, now: v.input.now });
+    const listed = listCapabilities({ actor: v.input.actor, org: v.input.org, candidates: all });
     const allowed = all.filter((c) => evaluate({ ...v.input, capability: c }).allow).sort();
     expect(listed).toEqual(allowed);
   });
@@ -35,7 +35,7 @@ describe('capability lists agree with single decisions', () => {
       listCapabilities({
         actor,
         candidates: ['profiles.view', 'profiles.onboard', 'profiles.view'],
-        now: 0,
+        org: null,
       }),
     ).toEqual(['profiles.onboard', 'profiles.view']);
   });

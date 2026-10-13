@@ -69,8 +69,6 @@ export interface AggregatorOrg {
   locations: BecknLocation[];
   legalName: string | null;
   gstNumber: string | null;
-  /** RBAC (0030): the org's own PermissionSet name; null = the org_type default. */
-  permissionSet: string | null;
 }
 
 export interface CreateOrgInput {
@@ -108,8 +106,6 @@ export interface UpdateOrgPatch {
   locations?: BecknLocation[];
   legalName?: string | null;
   gstNumber?: string | null;
-  /** RBAC (0030): the org's own PermissionSet name; null = the org_type default. */
-  permissionSet?: string | null;
   /** Audit actor of this write (an admin user id; `'self'` / `'admin'` elsewhere). */
   updatedBy?: string;
 }

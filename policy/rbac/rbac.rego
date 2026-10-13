@@ -3,10 +3,10 @@
 # Query: POST /v1/data/rbac/decision with {"input": DecisionInput}
 # (DecisionInput is defined in packages/rbac/src/interface.ts).
 #
-# Answers "does the actor hold this capability". Allowed when the actor is
-# active, the capability is grantable, the role holds it or an unexpired grant
-# adds it, and at least one of the actor's organisations holds it in its
-# PermissionSet — never personal data through the Network Facilitator root.
+# Answers "does the actor hold this permission in this organisation". The API
+# computes the actor's permissions from their base and additional roles
+# (design §3); the policy allows when the actor is active and holds the
+# permission, and never allows personal data through the root organisation.
 #
 # Reach (which targets) is not decided here: the API's scope checks answer it
 # after this decision, with 404 (design decision D3).
@@ -17,67 +17,33 @@ package rbac
 
 import rego.v1
 
-not_grantable := {"orgs.block"}
+not_through_root := {"profiles.view_pii"}
 
 cap := input.capability
 
-holding contains o if {
-	some o in input.actor.orgs
-	cap in o.capabilities
-}
+held if cap in input.actor.permissions
 
-role_or_grant if cap in input.actor.roleCapabilities
-
-role_or_grant if {
-	some g in input.actor.grants
-	g.capability == cap
-	g.expiresAt > input.now
-}
-
-pii_blocked(o) if {
-	cap == "profiles.view_pii"
-	o.orgType == "network_facilitator"
+through_root if {
+	cap in not_through_root
+	input.org.orgType == "network_facilitator"
 }
 
 default allow := false
 
 allow if {
 	input.actor.active
-	not cap in not_grantable
-	role_or_grant
-	some o in holding
-	not pii_blocked(o)
+	held
+	not through_root
 }
 
 reasons contains "inactive" if not input.actor.active
 
-reasons contains "not_grantable" if cap in not_grantable
+reasons contains "not_held" if not held
 
-reasons contains "no_organisation" if count(input.actor.orgs) == 0
+reasons contains "not_through_root" if through_root
 
-reasons contains "not_in_role" if not role_or_grant
-
-reasons contains "grant_expired" if {
-	not role_or_grant
-	some g in input.actor.grants
-	g.capability == cap
-	g.expiresAt <= input.now
-}
-
-reasons contains "not_in_org_set" if {
-	count(input.actor.orgs) > 0
-	count(holding) == 0
-}
-
-reasons contains "pii_blocked_at_root" if {
-	count(holding) > 0
-	every o in holding {
-		pii_blocked(o)
-	}
-}
-
-# The candidate capabilities the actor holds (input.candidates), each one
-# that `decision` would allow. One call for the portal's menus and buttons.
+# The candidate permissions the actor holds (input.candidates), each one that
+# `decision` would allow. One call for the portal's menus and buttons.
 capabilities contains c if {
 	some c in input.candidates
 	allow with input.capability as c

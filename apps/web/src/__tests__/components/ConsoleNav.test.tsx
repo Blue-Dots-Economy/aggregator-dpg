@@ -20,4 +20,12 @@ describe('<ConsoleNav />', () => {
     expect(screen.queryByText('nav.invite')).not.toBeInTheDocument();
     expect(screen.getByText('nav.organisations')).toBeInTheDocument();
   });
+
+  it('shows the roles page to the network admin only', () => {
+    const { unmount } = render(<ConsoleNav isNetworkAdmin canAdministerRoles />);
+    expect(screen.getByText('nav.roles')).toBeInTheDocument();
+    unmount();
+    render(<ConsoleNav isNetworkAdmin={false} />);
+    expect(screen.queryByText('nav.roles')).not.toBeInTheDocument();
+  });
 });

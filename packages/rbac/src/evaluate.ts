@@ -5,81 +5,51 @@
  * it, and the shared vectors in `policy/rbac/vectors.json` run against both
  * this function and the Rego policy, so the two cannot drift apart.
  *
- * The policy answers whether the actor holds a capability. Reach (which
- * targets) is decided outside it, by the API's scope checks (design D3).
+ * The policy answers whether the actor holds a permission in the organisation
+ * acted on. Reach (which targets) is decided outside it, by the API's scope
+ * checks (design D3).
  *
  * @module @aggregator-dpg/rbac/evaluate
  */
 
-import { NOT_GRANTABLE } from './catalogue.js';
-import type {
-  ActorOrg,
-  Capability,
-  CapabilityListInput,
-  Decision,
-  DecisionInput,
-} from './interface.js';
+import { NOT_THROUGH_ROOT } from './catalogue.js';
+import type { Capability, CapabilityListInput, Decision, DecisionInput } from './interface.js';
 
-/** Whether personal data is being asked for through the Network Facilitator root. */
-function piiBlocked(org: ActorOrg, input: DecisionInput): boolean {
-  return input.capability === 'profiles.view_pii' && org.orgType === 'network_facilitator';
-}
-
-/** Whether the role holds the capability, or an unexpired grant adds it. */
-function roleOrGrant(input: DecisionInput): boolean {
-  if (input.actor.roleCapabilities.includes(input.capability)) return true;
-  return input.actor.grants.some(
-    (g) => g.capability === input.capability && g.expiresAt > input.now,
+/** Whether the permission is personal data asked for through the root. */
+function throughRoot(input: DecisionInput): boolean {
+  return (
+    NOT_THROUGH_ROOT.includes(input.capability) && input.org?.orgType === 'network_facilitator'
   );
 }
 
 /**
  * Answers one access question without any I/O.
  *
- * Allowed when the actor is active, the capability is grantable, the role (or
- * an unexpired grant) holds it, and at least one of the actor's organisations
- * holds it in its PermissionSet — never personal data through the root.
+ * Allowed when the actor is active and holds the permission, and it is not
+ * personal data asked for through the root organisation.
  *
- * @param input - The capability, actor and current time.
+ * @param input - The permission, the actor and the organisation.
  * @returns `allow` plus sorted deny reasons (empty when allowed).
  */
 export function evaluate(input: DecisionInput): Decision {
   const reasons = new Set<string>();
-  const cap = input.capability;
-  const orgs = input.actor.orgs;
-  const roleOk = roleOrGrant(input);
-  const holding = orgs.filter((o) => o.capabilities.includes(cap));
-
+  const held = input.actor.permissions.includes(input.capability);
   if (!input.actor.active) reasons.add('inactive');
-  if (NOT_GRANTABLE.includes(cap)) reasons.add('not_grantable');
-  if (orgs.length === 0) reasons.add('no_organisation');
-  if (!roleOk) reasons.add('not_in_role');
-  if (!roleOk && input.actor.grants.some((g) => g.capability === cap && g.expiresAt <= input.now)) {
-    reasons.add('grant_expired');
-  }
-  if (orgs.length > 0 && holding.length === 0) reasons.add('not_in_org_set');
-  if (holding.length > 0 && holding.every((o) => piiBlocked(o, input))) {
-    reasons.add('pii_blocked_at_root');
-  }
-
-  const allow =
-    input.actor.active &&
-    !NOT_GRANTABLE.includes(cap) &&
-    roleOk &&
-    holding.some((o) => !piiBlocked(o, input));
-
+  if (!held) reasons.add('not_held');
+  if (throughRoot(input)) reasons.add('not_through_root');
+  const allow = input.actor.active && held && !throughRoot(input);
   return { allow, reasons: allow ? [] : [...reasons].sort() };
 }
 
 /**
- * Lists the candidate capabilities the actor holds, without any I/O.
+ * Lists the candidate permissions the actor holds, without any I/O.
  *
- * @param input - The actor, the candidates and the current time.
- * @returns The held capabilities, sorted and without duplicates.
+ * @param input - The actor, the organisation and the candidates.
+ * @returns The held permissions, sorted and without duplicates.
  */
 export function listCapabilities(input: CapabilityListInput): Capability[] {
   const held = input.candidates.filter(
-    (capability) => evaluate({ capability, actor: input.actor, now: input.now }).allow,
+    (capability) => evaluate({ capability, actor: input.actor, org: input.org }).allow,
   );
   return [...new Set(held)].sort();
 }

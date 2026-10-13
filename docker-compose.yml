@@ -614,7 +614,7 @@ services:
     volumes:
       - ./policy/rbac:/policy:ro
     healthcheck:
-      test: ["CMD", "/opa", "eval", "--fail", "--data", "/policy", "--ignore", "*_test.rego", "--ignore", "vectors.json", "data.rbac.not_grantable"]
+      test: ["CMD", "/opa", "eval", "--fail", "--data", "/policy", "--ignore", "*_test.rego", "--ignore", "vectors.json", "data.rbac.not_through_root"]
       interval: 10s
       timeout: 3s
       retries: 5

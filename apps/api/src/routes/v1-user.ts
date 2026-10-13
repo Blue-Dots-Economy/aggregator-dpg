@@ -55,7 +55,7 @@ import {
   throwDecisionFailure,
   toWireUser,
 } from './console-shared.js';
-import { checkCapability, listActorCapabilities } from '../services/authz/index.js';
+import { checkCapability, listActorCapabilities, type TargetOrg } from '../services/authz/index.js';
 
 const IdParamsSchema = z.object({ id: z.string().uuid() });
 type IdParams = z.infer<typeof IdParamsSchema>;
@@ -98,12 +98,33 @@ async function loadOrg(id: string): Promise<AggregatorOrg> {
  * @throws {HttpError} DB_UNAVAILABLE.
  */
 /**
- * Whether contact details are shown plain to this actor (RBAC
- * `contact.unmask`; handoff H-6). True when access control is off or only
- * logging, so behaviour changes only under `enforce`.
+ * The aggregator organisation a request acts on, with the root as its
+ * ancestor (RBAC: a role held in the root applies below it).
+ *
+ * @param orgId - The organisation, or null for none.
+ * @returns The target, or undefined for none.
+ * @throws {HttpError} DB_UNAVAILABLE.
  */
-async function showsContact(req: FastifyRequest, actor: Actor): Promise<boolean> {
-  return (await checkCapability(req, actor, 'contact.unmask')).allowed;
+async function aggregatorTarget(orgId: string | null): Promise<TargetOrg | undefined> {
+  if (!orgId) return undefined;
+  const root = await getAggregatorOrgStore().findRoot();
+  if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
+  return { id: orgId, orgType: 'aggregator', ancestorIds: root.value ? [root.value.id] : [] };
+}
+
+/**
+ * Whether contact details are shown plain to this actor (RBAC
+ * `contact.unmask`; handoff H-6), in the target user's organisation when one
+ * is given. True when access control is off or only logging, so behaviour
+ * changes only under `enforce`.
+ */
+async function showsContact(
+  req: FastifyRequest,
+  actor: Actor,
+  orgId: string | null = null,
+): Promise<boolean> {
+  const target = await aggregatorTarget(orgId);
+  return (await checkCapability(req, actor, 'contact.unmask', { target })).allowed;
 }
 
 async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> { // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
@@ -122,13 +143,21 @@ async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> { //
     };
   }
 
+  const root = await orgStore.findRoot();
+  if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
+  const rootId = root.value?.id ?? null;
   for (const o of actor.orgs) {
     const found =
       o.orgType === 'network_facilitator'
-        ? await orgStore.findRoot() // NOSONAR typescript:S9382 — sequential by design
+        ? root
         : await orgStore.findById(o.id); // NOSONAR typescript:S9382 — sequential by design
     if (!found.ok) dbDown('orgStore.findById', found.error.message);
     if (!found.value) continue;
+    const target: TargetOrg = {
+      id: o.id,
+      orgType: o.orgType,
+      ancestorIds: o.orgType === 'aggregator' && rootId ? [rootId] : [],
+    };
     orgs.push({
       id: found.value.id,
       name: found.value.displayName,
@@ -136,6 +165,7 @@ async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> { //
       org_type: o.orgType,
       role: o.relation,
       is_default: found.value.isDefault,
+      capabilities: await listActorCapabilities(req, actor, { target }),
     });
     // An admin's own contact is its orgs' owner contact (one person).
     if (!self && o.relation === 'owner') self = ownerContact(found.value);
@@ -188,7 +218,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
       const row = await coordinatorInReach(actor, id);
-      const plain = await showsContact(req, actor);
+      const plain = await showsContact(req, actor, row.parentOrgId ?? null);
       // Contact read audit (design C8): ids only.
       req.log.info({
         operation: 'console.user.read',
@@ -448,9 +478,11 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
           );
         }
       }
-      return reply
-        .status(200)
-        .send(toWireUser(updated.value, { masked: !(await showsContact(req, actor)) }));
+      return reply.status(200).send(
+        toWireUser(updated.value, {
+          masked: !(await showsContact(req, actor, row.parentOrgId ?? null)),
+        }),
+      );
     },
   );
 }

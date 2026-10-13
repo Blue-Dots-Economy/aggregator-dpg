@@ -3199,6 +3199,13 @@
                           },
                           "is_default": {
                             "type": "boolean"
+                          },
+                          "capabilities": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "nullable": true
                           }
                         },
                         "required": [
@@ -5680,10 +5687,6 @@
                           "type": "string",
                           "nullable": true
                         },
-                        "permission_set": {
-                          "type": "string",
-                          "nullable": true
-                        },
                         "created_at": {
                           "type": "string"
                         },
@@ -6141,10 +6144,6 @@
                             "nullable": true
                           },
                           "gst_number": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "permission_set": {
                             "type": "string",
                             "nullable": true
                           },
@@ -6645,10 +6644,6 @@
                       "nullable": true
                     },
                     "gst_number": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "permission_set": {
                       "type": "string",
                       "nullable": true
                     },
@@ -7871,9 +7866,295 @@
         }
       }
     },
-    "/v1/user/grants/{id}": {
+    "/v1/roles": {
       "get": {
-        "summary": "A coordinator's grants and what may be granted",
+        "summary": "Every role and its permissions",
+        "tags": [
+          "console"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "roles": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "is_builtin": {
+                            "type": "boolean"
+                          },
+                          "account_type": {
+                            "type": "string",
+                            "enum": [
+                              "admin",
+                              "coordinator"
+                            ]
+                          },
+                          "base_for": {
+                            "type": "string",
+                            "enum": [
+                              "org_member",
+                              "org_owner",
+                              "root_owner"
+                            ],
+                            "nullable": true
+                          },
+                          "assignable_org_types": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "network_facilitator",
+                                "aggregator"
+                              ]
+                            }
+                          },
+                          "assigned_by": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "max_days": {
+                            "type": "integer",
+                            "exclusiveMinimum": true,
+                            "minimum": 0,
+                            "nullable": true
+                          },
+                          "permissions": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "name",
+                          "description",
+                          "is_builtin",
+                          "account_type",
+                          "base_for",
+                          "assignable_org_types",
+                          "assigned_by",
+                          "max_days",
+                          "permissions"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "permissions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "resource": {
+                            "type": "string"
+                          },
+                          "action": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "sensitive": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "resource",
+                          "action",
+                          "description",
+                          "sensitive"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "roles",
+                    "permissions"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/user/roles/{id}": {
+      "get": {
+        "summary": "A user's roles and the additional roles the caller may assign",
         "tags": [
           "console"
         ],
@@ -7896,24 +8177,47 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "grants": {
+                    "base": {
                       "type": "array",
                       "items": {
                         "type": "object",
                         "properties": {
-                          "grant_key": {
+                          "role_key": {
                             "type": "string"
                           },
-                          "capability": {
+                          "org_id": {
                             "type": "string"
+                          }
+                        },
+                        "required": [
+                          "role_key",
+                          "org_id"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "additional": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "role_key": {
+                            "type": "string"
+                          },
+                          "org_id": {
+                            "type": "string"
+                          },
+                          "granted_by": {
+                            "type": "string",
+                            "nullable": true
                           },
                           "granted_at": {
                             "type": "string"
                           },
                           "expires_at": {
-                            "type": "string"
-                          },
-                          "granted_by": {
                             "type": "string",
                             "nullable": true
                           },
@@ -7926,46 +8230,42 @@
                           }
                         },
                         "required": [
-                          "grant_key",
-                          "capability",
+                          "id",
+                          "role_key",
+                          "org_id",
+                          "granted_by",
                           "granted_at",
                           "expires_at",
-                          "granted_by",
                           "revoked_at",
                           "live"
                         ],
                         "additionalProperties": false
                       }
                     },
-                    "grantable": {
+                    "assignable": {
                       "type": "array",
                       "items": {
                         "type": "object",
                         "properties": {
-                          "grant_key": {
+                          "role_key": {
                             "type": "string"
                           },
-                          "capability": {
+                          "org_id": {
                             "type": "string"
-                          },
-                          "max_days": {
-                            "type": "integer",
-                            "exclusiveMinimum": true,
-                            "minimum": 0
                           }
                         },
                         "required": [
-                          "grant_key",
-                          "capability",
-                          "max_days"
+                          "role_key",
+                          "org_id"
                         ],
                         "additionalProperties": false
                       }
                     }
                   },
                   "required": [
-                    "grants",
-                    "grantable"
+                    "base",
+                    "additional",
+                    "assignable"
                   ],
                   "additionalProperties": false
                 }
@@ -8179,13 +8479,13 @@
         }
       }
     },
-    "/v1/user/grant/{id}": {
+    "/v1/user/role/assign/{id}": {
       "post": {
-        "summary": "Grant a capability (e.g. PII Access) to a coordinator",
+        "summary": "Assign an additional role to a user in an organisation",
         "tags": [
           "console"
         ],
-        "description": "Replaces the coordinator's live grant of the same key. Refused for a capability the coordinator's organisation does not hold, for yourself, and beyond the grant's longest validity.",
+        "description": "Needs the role's assigned_by permission in that organisation. Replaces a live assignment of the same role there. Refused for a base role, an organisation the user is not part of, yourself, the wrong account or organisation type, separation of duties, and beyond the role's longest validity.",
         "requestBody": {
           "required": true,
           "content": {
@@ -8193,17 +8493,23 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "grant_key": {
+                  "role_key": {
                     "type": "string",
                     "minLength": 1
                   },
+                  "org_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
                   "days": {
                     "type": "integer",
-                    "minimum": 1
+                    "exclusiveMinimum": true,
+                    "minimum": 0
                   }
                 },
                 "required": [
-                  "grant_key"
+                  "role_key",
+                  "org_id"
                 ],
                 "additionalProperties": false
               }
@@ -8229,19 +8535,23 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "grant_key": {
+                    "id": {
                       "type": "string"
                     },
-                    "capability": {
+                    "role_key": {
                       "type": "string"
+                    },
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "granted_by": {
+                      "type": "string",
+                      "nullable": true
                     },
                     "granted_at": {
                       "type": "string"
                     },
                     "expires_at": {
-                      "type": "string"
-                    },
-                    "granted_by": {
                       "type": "string",
                       "nullable": true
                     },
@@ -8254,11 +8564,12 @@
                     }
                   },
                   "required": [
-                    "grant_key",
-                    "capability",
+                    "id",
+                    "role_key",
+                    "org_id",
+                    "granted_by",
                     "granted_at",
                     "expires_at",
-                    "granted_by",
                     "revoked_at",
                     "live"
                   ],
@@ -8627,9 +8938,9 @@
         }
       }
     },
-    "/v1/user/grant/revoke/{id}": {
+    "/v1/user/role/revoke/{id}": {
       "post": {
-        "summary": "Revoke a coordinator's live grant",
+        "summary": "Revoke a user's additional role in an organisation",
         "tags": [
           "console"
         ],
@@ -8640,13 +8951,18 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "grant_key": {
+                  "role_key": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "org_id": {
+                    "type": "string",
+                    "format": "uuid"
                   }
                 },
                 "required": [
-                  "grant_key"
+                  "role_key",
+                  "org_id"
                 ],
                 "additionalProperties": false
               }
@@ -8888,6 +9204,57 @@
               }
             }
           },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
           "429": {
             "description": "Default Response",
             "content": {
@@ -8993,54 +9360,212 @@
         }
       }
     },
-    "/v1/org/permission-sets": {
-      "get": {
-        "summary": "The PermissionSets of this instance (rbac.yaml)",
+    "/v1/roles/create": {
+      "post": {
+        "summary": "Create a custom role from existing permissions",
         "tags": [
           "console"
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40,
+                    "pattern": "^[a-z][a-z0-9_]*$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "default": ""
+                  },
+                  "account_type": {
+                    "type": "string",
+                    "enum": [
+                      "admin",
+                      "coordinator"
+                    ]
+                  },
+                  "assignable_org_types": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "network_facilitator",
+                        "aggregator"
+                      ]
+                    },
+                    "minItems": 1
+                  },
+                  "assigned_by": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "max_days": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0,
+                    "nullable": true,
+                    "default": null
+                  },
+                  "permissions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": [
+                  "key",
+                  "name",
+                  "account_type",
+                  "assignable_org_types",
+                  "assigned_by",
+                  "permissions"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "sets": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "is_builtin": {
+                      "type": "boolean"
+                    },
+                    "account_type": {
+                      "type": "string",
+                      "enum": [
+                        "admin",
+                        "coordinator"
+                      ]
+                    },
+                    "base_for": {
+                      "type": "string",
+                      "enum": [
+                        "org_member",
+                        "org_owner",
+                        "root_owner"
+                      ],
+                      "nullable": true
+                    },
+                    "assignable_org_types": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "name": {
-                            "type": "string"
-                          },
-                          "capabilities": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          }
-                        },
-                        "required": [
-                          "name",
-                          "capabilities"
-                        ],
-                        "additionalProperties": false
+                        "type": "string",
+                        "enum": [
+                          "network_facilitator",
+                          "aggregator"
+                        ]
                       }
                     },
-                    "defaults": {
-                      "type": "object",
-                      "additionalProperties": {
+                    "assigned_by": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "max_days": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0,
+                      "nullable": true
+                    },
+                    "permissions": {
+                      "type": "array",
+                      "items": {
                         "type": "string"
                       }
                     }
                   },
                   "required": [
-                    "sets",
-                    "defaults"
+                    "key",
+                    "name",
+                    "description",
+                    "is_builtin",
+                    "account_type",
+                    "base_for",
+                    "assignable_org_types",
+                    "assigned_by",
+                    "max_days",
+                    "permissions"
                   ],
                   "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
                 }
               }
             }
@@ -9147,6 +9672,108 @@
               }
             }
           },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
           "503": {
             "description": "Default Response",
             "content": {
@@ -9201,13 +9828,12 @@
         }
       }
     },
-    "/v1/org/permission-set/update/{id}": {
+    "/v1/roles/update/{key}": {
       "patch": {
-        "summary": "Set an organisation's own PermissionSet",
+        "summary": "Change a custom role",
         "tags": [
           "console"
         ],
-        "description": "A key of rbac.yaml permission_sets, or null for the org_type default. Only a parent sets a child organisation's set; today that is the network admin.",
         "requestBody": {
           "required": true,
           "content": {
@@ -9215,15 +9841,44 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "permission_set": {
+                  "name": {
                     "type": "string",
                     "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 300
+                  },
+                  "assignable_org_types": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "network_facilitator",
+                        "aggregator"
+                      ]
+                    },
+                    "minItems": 1
+                  },
+                  "assigned_by": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "max_days": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0,
                     "nullable": true
+                  },
+                  "permissions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
                   }
                 },
-                "required": [
-                  "permission_set"
-                ],
                 "additionalProperties": false
               }
             }
@@ -9233,10 +9888,11 @@
           {
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "minLength": 1,
+              "maxLength": 40
             },
             "in": "path",
-            "name": "id",
+            "name": "key",
             "required": true
           }
         ],
@@ -9248,14 +9904,55 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "id": {
+                    "key": {
                       "type": "string"
                     },
-                    "permission_set": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "is_builtin": {
+                      "type": "boolean"
+                    },
+                    "account_type": {
+                      "type": "string",
+                      "enum": [
+                        "admin",
+                        "coordinator"
+                      ]
+                    },
+                    "base_for": {
+                      "type": "string",
+                      "enum": [
+                        "org_member",
+                        "org_owner",
+                        "root_owner"
+                      ],
+                      "nullable": true
+                    },
+                    "assignable_org_types": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "network_facilitator",
+                          "aggregator"
+                        ]
+                      }
+                    },
+                    "assigned_by": {
                       "type": "string",
                       "nullable": true
                     },
-                    "capabilities": {
+                    "max_days": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0,
+                      "nullable": true
+                    },
+                    "permissions": {
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -9263,9 +9960,16 @@
                     }
                   },
                   "required": [
-                    "id",
-                    "permission_set",
-                    "capabilities"
+                    "key",
+                    "name",
+                    "description",
+                    "is_builtin",
+                    "account_type",
+                    "base_for",
+                    "assignable_org_types",
+                    "assigned_by",
+                    "max_days",
+                    "permissions"
                   ],
                   "additionalProperties": false
                 }
@@ -9426,6 +10130,404 @@
             }
           },
           "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/roles/delete/{key}": {
+      "post": {
+        "summary": "Delete a custom role no live assignment uses",
+        "tags": [
+          "console"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "in": "path",
+            "name": "key",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "deleted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "409": {
             "description": "Default Response",
             "content": {
               "application/json": {
