@@ -149,7 +149,8 @@ services:
 
   # S3-compatible object storage for aggregator bulk uploads + QR PNGs.
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    # minio/minio and minio/mc are gone from Docker Hub; this image ships both binaries.
+    image: cgr.dev/chainguard/minio:latest
     container_name: sd-minio
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
@@ -163,7 +164,7 @@ services:
     volumes:
       - sd-minio-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      test: ["CMD-SHELL", "mc alias set local http://localhost:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\" >/dev/null && mc ready local"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -171,7 +172,7 @@ services:
 
   # Creates the aggregator upload bucket once MinIO is healthy. Idempotent.
   minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    image: cgr.dev/chainguard/minio:latest
     container_name: sd-minio-init
     depends_on:
       minio:
