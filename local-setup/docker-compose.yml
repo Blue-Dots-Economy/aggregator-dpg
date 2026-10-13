@@ -516,6 +516,9 @@ services:
       # Approval flow — where new-aggregator approval emails go.
       APPROVAL_TOKEN_SECRET: ${APPROVAL_TOKEN_SECRET:?APPROVAL_TOKEN_SECRET must be set in .env (>=32 chars)}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@bluedots.local}
+      # Org → coordinator hierarchy. On by default locally (code default is
+      # off); must match aggregator-web's value.
+      ORG_HIERARCHY_ENABLED: ${ORG_HIERARCHY_ENABLED:-true}
       PUBLIC_API_URL: http://localhost:4000
       PUBLIC_PORTAL_URL: http://localhost:3100
       PUBLIC_LINK_BASE_URL: http://localhost:3100
@@ -615,6 +618,8 @@ services:
       SESSION_COOKIE_NAME: sid
       SESSION_TTL_SECONDS: "43200"
       SESSION_KEY: ${SESSION_KEY:?SESSION_KEY must be set in .env (>=32 chars)}
+      # Gates the org-registration tab; must match aggregator-api's value.
+      ORG_HIERARCHY_ENABLED: ${ORG_HIERARCHY_ENABLED:-true}
       # Portal is served over plain HTTP locally -> cookies must NOT be Secure.
       COOKIE_SECURE: "false"
       PUBLIC_PORTAL_URL: http://localhost:3100
