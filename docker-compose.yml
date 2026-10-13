@@ -571,8 +571,9 @@ services:
       INSTANCE_ENV: ${INSTANCE_ENV:-production}
       # RBAC (docs/rbac/rbac-design-aggregator.md). `off` loads nothing; `log`
       # decides and logs would-denies; `enforce` returns 403. Decisions come
-      # from the `opa` service below.
-      RBAC_MODE: ${RBAC_MODE:-off}
+      # from the `opa` service below. `log` here so local runs exercise the
+      # policy without blocking anything; set RBAC_MODE=off to skip it.
+      RBAC_MODE: ${RBAC_MODE:-log}
       OPA_URL: ${OPA_URL:-http://opa:8181}
     # No host port mapping — exposed only via nginx at /backend/.
     # See `extra_hosts` rationale on the web service: api hits Keycloak via
@@ -601,6 +602,9 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+      # So the first requests are not denied because OPA is still starting.
+      opa:
+        condition: service_healthy
 
   # ── OPA (RBAC decisions) ──────────────────────────────────────────────────
   # Serves POST /v1/data/rbac/decision from policy/rbac/*.rego. Only queried
@@ -611,6 +615,10 @@ services:
     container_name: aggregator-opa
     restart: unless-stopped
     command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=error", "--ignore=*_test.rego", "--ignore=vectors.json", "/policy"]
+    # Host port for hybrid dev (`pnpm dev` on the host, OPA_URL defaults to
+    # http://localhost:8181). Loopback only.
+    ports:
+      - "127.0.0.1:8181:8181"
     volumes:
       - ./policy/rbac:/policy:ro
     healthcheck:
