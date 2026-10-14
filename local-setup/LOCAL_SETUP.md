@@ -258,18 +258,28 @@ Continue to §3 (aggregator smoke test), §4 (cross-DPG check) and §10 (search 
 
 This exercises Keycloak OTP, the approval email, and the portal end to end.
 
+Org hierarchy is on by default (`ORG_HIERARCHY_ENABLED=true`), so an
+organisation registers first and invites its coordinators:
+
 ```
-1. http://localhost:3100/register
-   → fill the form (type, organisation, email, phone) → submit
+1. http://localhost:3100/register/owner
+   → register the organisation (owner email + phone) → submit
 2. http://localhost:8025  (Mailpit)
    → open the "approval request" mail (sent to ADMIN_EMAILS, admin@bluedots.local by default)
    → click Approve → confirm on the approval page
-   → the applicant receives a welcome mail (also in Mailpit)
-3. http://localhost:3100/login
-   → sign in with the registered email or phone
+   → the owner receives a mail with an invite link (/register/invite?grant=…)
+3. Open the invite link → invite a coordinator by email
+4. Mailpit → open the coordinator invite → register through it (/register/coordinator?invite=…)
+5. Mailpit → approve the coordinator's registration, as in step 2
+6. http://localhost:3100/login
+   → sign in as the coordinator with the registered email or phone
    → the OTP code arrives in Mailpit (email) or `docker compose logs keycloak` (SMS 'log')
-4. First login prompts for first/last name, then lands on the portal.
+7. First login prompts for first/last name, then lands on the portal.
 ```
+
+The owner has no login of their own — the grant link is their only entry
+point. With `ORG_HIERARCHY_ENABLED=false` the flat flow applies instead: register
+at `/register`, approve in Mailpit, log in.
 
 > The realm ships with the `aggregator_id` and `phone_number` protocol mappers
 > and `unmanagedAttributePolicy: ENABLED` already baked in — no manual Keycloak
