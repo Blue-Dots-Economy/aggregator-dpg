@@ -18,10 +18,8 @@ import { describe, it, expect } from 'vitest';
 import {
   aggregators,
   aggregatorOrgs,
-  aggregatorProfile,
   bulkUploads,
   registrationLinks,
-  participants,
   linkSubmissions,
   aggregatorConsentRecord,
   onboarding,
@@ -73,24 +71,18 @@ describe('aggregators columns', () => {
     expect(aggregators.signalstackOrgId.notNull).toBe(false);
   });
 
-  it('Beckn contact jsonb + the generated login-lookup columns', () => {
-    expect(aggregators.contact.name).toBe('contact');
-    expect(aggregators.contact.notNull).toBe(true);
-    expect(aggregators.contact.columnType).toBe('PgJsonb');
+  it('contact FK + contact_extra (migration 0025)', () => {
+    expect(aggregators.contactId.name).toBe('contact_id');
+    expect(aggregators.contactId.notNull).toBe(true);
+    expect(aggregators.contactExtra.name).toBe('contact_extra');
+    expect(aggregators.contactExtra.notNull).toBe(true);
+    expect(aggregators.contactExtra.hasDefault).toBe(true);
+  });
 
-    // Generated columns: derived from `contact` via a stored SQL expression,
-    // never written directly. They exist purely for indexed login lookups.
-    expect(aggregators.contactPhone.name).toBe('contact_phone');
-    expect(aggregators.contactPhone.notNull).toBe(true);
-    expect(aggregators.contactPhone.generated).toBeTruthy();
-    expect(aggregators.contactPhone.generated?.type).toBe('always');
-    expect(aggregators.contactPhone.generated?.mode).toBe('stored');
-
-    expect(aggregators.contactEmail.name).toBe('contact_email');
-    expect(aggregators.contactEmail.notNull).toBe(true);
-    expect(aggregators.contactEmail.generated).toBeTruthy();
-    expect(aggregators.contactEmail.generated?.type).toBe('always');
-    expect(aggregators.contactEmail.generated?.mode).toBe('stored');
+  it('the legacy Beckn contact jsonb and generated lookup columns are gone (0026)', () => {
+    expect('contact' in aggregators).toBe(false);
+    expect('contactPhone' in aggregators).toBe(false);
+    expect('contactEmail' in aggregators).toBe(false);
   });
 
   it('locations + consent jsonb columns', () => {
@@ -105,46 +97,15 @@ describe('aggregators columns', () => {
 });
 
 describe('aggregator_orgs remaining columns (not covered by aggregator-orgs.schema.test.ts)', () => {
-  it('owner_phone is a nullable text column', () => {
-    expect(aggregatorOrgs.ownerPhone.name).toBe('owner_phone');
-    expect(aggregatorOrgs.ownerPhone.notNull).toBe(false);
+  it('contact_id FK column (0025)', () => {
+    expect(aggregatorOrgs.contactId.name).toBe('contact_id');
+    expect(aggregatorOrgs.contactId.notNull).toBe(true);
   });
 
   it('id is a defaulted primary key', () => {
     expect(aggregatorOrgs.id.name).toBe('id');
     expect(aggregatorOrgs.id.primary).toBe(true);
     expect(aggregatorOrgs.id.hasDefault).toBe(true);
-  });
-});
-
-describe('aggregator_profile columns', () => {
-  it('is 1:1 keyed on aggregator_id as its own primary key', () => {
-    expect(aggregatorProfile.aggregatorId.name).toBe('aggregator_id');
-    expect(aggregatorProfile.aggregatorId.primary).toBe(true);
-    expect(aggregatorProfile.aggregatorId.notNull).toBe(true);
-  });
-
-  it('personas/services/verified_certificate default to an empty jsonb array', () => {
-    expect(aggregatorProfile.personas.name).toBe('personas');
-    expect(aggregatorProfile.personas.notNull).toBe(true);
-    expect(aggregatorProfile.personas.hasDefault).toBe(true);
-
-    expect(aggregatorProfile.services.name).toBe('services');
-    expect(aggregatorProfile.services.notNull).toBe(true);
-    expect(aggregatorProfile.services.hasDefault).toBe(true);
-
-    expect(aggregatorProfile.verifiedCertificate.name).toBe('verified_certificate');
-    expect(aggregatorProfile.verifiedCertificate.notNull).toBe(true);
-    expect(aggregatorProfile.verifiedCertificate.hasDefault).toBe(true);
-  });
-
-  it('contactName is nullable and profileCompletedAt has no default', () => {
-    expect(aggregatorProfile.contactName.name).toBe('contact_name');
-    expect(aggregatorProfile.contactName.notNull).toBe(false);
-
-    expect(aggregatorProfile.profileCompletedAt.name).toBe('profile_completed_at');
-    expect(aggregatorProfile.profileCompletedAt.notNull).toBe(false);
-    expect(aggregatorProfile.profileCompletedAt.hasDefault).toBe(false);
   });
 });
 
@@ -212,37 +173,6 @@ describe('registration_links remaining columns', () => {
   });
 });
 
-describe('participants columns', () => {
-  it('dedup identity + payload + source-tracking columns', () => {
-    expect(participants.aggregatorId.name).toBe('aggregator_id');
-    expect(participants.aggregatorId.notNull).toBe(true);
-
-    expect(participants.type.name).toBe('type');
-    expect(participants.type.notNull).toBe(true);
-
-    expect(participants.participantId.name).toBe('participant_id');
-    expect(participants.participantId.notNull).toBe(true);
-
-    expect(participants.data.name).toBe('data');
-    expect(participants.data.notNull).toBe(true);
-    expect(participants.data.hasDefault).toBe(true);
-
-    expect(participants.phone.name).toBe('phone');
-    expect(participants.phone.notNull).toBe(false);
-    expect(participants.email.name).toBe('email');
-    expect(participants.email.notNull).toBe(false);
-
-    expect(participants.sourceBulkUploadId.name).toBe('source_bulk_upload_id');
-    expect(participants.sourceBulkUploadId.notNull).toBe(false);
-    expect(participants.sourceLinkId.name).toBe('source_link_id');
-    expect(participants.sourceLinkId.notNull).toBe(false);
-
-    expect(participants.sourceRowIndex.name).toBe('source_row_index');
-    expect(participants.sourceRowIndex.notNull).toBe(false);
-    expect(participants.sourceRowIndex.columnType).toBe('PgInteger');
-  });
-});
-
 describe('link_submissions columns', () => {
   it('outcome + snapshot payload columns', () => {
     expect(linkSubmissions.linkId.name).toBe('link_id');
@@ -250,9 +180,6 @@ describe('link_submissions columns', () => {
 
     expect(linkSubmissions.aggregatorId.name).toBe('aggregator_id');
     expect(linkSubmissions.aggregatorId.notNull).toBe(true);
-
-    expect(linkSubmissions.participantId.name).toBe('participant_id');
-    expect(linkSubmissions.participantId.notNull).toBe(false);
 
     expect(linkSubmissions.metadataSnapshot.name).toBe('metadata_snapshot');
     expect(linkSubmissions.metadataSnapshot.notNull).toBe(true);

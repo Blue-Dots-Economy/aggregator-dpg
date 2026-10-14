@@ -5,14 +5,19 @@
  *   1. Pull job { uploadId, aggregatorId, rowIndex, rawRow, payload }.
  *   2. Validate against the schema pinned on bulk_uploads.
  *   3. Normalise phone (E.164) and email (lowercase).
- *   4. INSERT participant ON CONFLICT (aggregator_id, participant_id) DO NOTHING.
+ *   4. Push to signalstack (the store of record — there is no local row).
  *   5. Run Lua script (§7) for atomic SADD + counter INCR + error HSET.
  *   6. If processed_count == total && reader_done → enqueue Finaliser.
  *
  * Outcome categories:
- *   passed   = INSERT succeeded
- *   skipped  = duplicate (ON CONFLICT)
- *   failed   = validation | normalisation | system_error
+ *   passed   = signalstack accepted the push
+ *   failed   = validation | normalisation | limit_reached | owned_elsewhere |
+ *              system_error
+ *   skipped  = no producer on this path since migration 0024 dropped the local
+ *              `participants` table. It deduped its own row but pushed to
+ *              signals regardless, so `skipped`/`duplicate` was reported while a
+ *              second profile was created upstream. Signals does not dedup;
+ *              de-duplication, if wanted, belongs there.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -22,8 +27,6 @@ import {
   type BulkFinaliseJob,
   type BulkRowProcessJob,
 } from '@aggregator-dpg/queue';
-import { PostgresParticipantsWriter } from '@aggregator-dpg/participants-writer/postgres';
-import type { ParticipantsWriterBase } from '@aggregator-dpg/participants-writer/interface';
 import { getDb, schema } from '../db.js';
 import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
@@ -41,18 +44,6 @@ import {
 } from '@aggregator-dpg/shared-primitives/bulk-columns';
 import { buildSignalStackItemState } from '@aggregator-dpg/signalstack-writer/item-state';
 
-let participantsWriter: ParticipantsWriterBase | null = null;
-function getParticipantsWriter(): ParticipantsWriterBase {
-  if (participantsWriter) return participantsWriter;
-  participantsWriter = new PostgresParticipantsWriter(getDb());
-  return participantsWriter;
-}
-
-/** Test helper — override the writer (e.g., inject a fake). */
-export function _setParticipantsWriter(w: ParticipantsWriterBase | null): void {
-  participantsWriter = w;
-}
-
 /**
  * Returns the set of participant types declared by the active network
  * (e.g. `seeker`/`provider` for blue/purple, `tourist`/`practitioner`
@@ -67,12 +58,16 @@ async function loadValidParticipantTypes(): Promise<Set<string>> {
 type ErrorCategory =
   | 'validation'
   | 'normalisation'
+  // No producer since 0024 (see the module header). Retained because the redis
+  // / finalise / errors.csv plumbing still carries the field, and signals-side
+  // dedup would repopulate it.
   | 'duplicate'
   | 'limit_reached'
   | 'owned_elsewhere'
   | 'system_error';
 
 interface RowOutcome {
+  /** `skipped` has no producer on this path since 0024 — see the module header. */
   outcome: 'passed' | 'skipped' | 'failed';
   category: ErrorCategory | null;
   reasons: string[];
@@ -194,9 +189,8 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   }
 
   // 2. Normalisation. Auto-allocate a UUID when the row carries no explicit
-  // `participant_id` — keeps the `(aggregator, type, participant_id)` unique
-  // index satisfied while letting the participant schema decide whether the
-  // field is a meaningful business id or not.
+  // `participant_id`. Since 0024 this no longer backs a local unique index; it
+  // is the external id forwarded to signals and the name fallback below.
   const rawParticipantId = String(job.payload['participant_id'] ?? '').trim();
   const participantId = rawParticipantId.length > 0 ? rawParticipantId : randomUUID();
 
@@ -246,60 +240,31 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
       : null,
   );
 
-  // 3. Persist via the participants-writer wrapper (shared by bulk + link).
+  // 3. Push to signalstack. Signals is the identity store of record — there is
+  // no local participant row any more, so its verdict is the row's outcome.
+  //
+  // Note there is no duplicate detection here, and there was none before: the
+  // old local `participants` table deduped its own row but pushed to signals
+  // regardless, so a repeat CSV row reported `skipped`/`duplicate` while a
+  // second signals profile was created. Reporting `passed` is the honest
+  // answer. Real deduplication belongs upstream in signals.
   let outcome: RowOutcome;
-  const writeResult = await getParticipantsWriter().writeBulkRow({
-    aggregatorId: job.aggregatorId,
-    type: job.participantType,
+  const push = await pushToSignalStack(
+    job,
     participantId,
-    data: job.payload,
-    phone: phoneNormalised,
-    email: emailNormalised,
-    sourceBulkUploadId: job.uploadId,
-    sourceRowIndex: job.rowIndex,
-  });
-  if (writeResult.success) {
-    if (writeResult.value.outcome === 'passed') {
-      outcome = { outcome: 'passed', category: null, reasons: [] };
-    } else {
-      outcome = {
-        outcome: 'skipped',
-        category: 'duplicate',
-        reasons: [`participant_id '${participantId}' already registered for this aggregator`],
-      };
-    }
-
-    // Outward signalstack push. The local participant write is now committed,
-    // so a push failure can NOT roll back the row — instead we flip this
-    // row's outcome to `failed` so it surfaces in errors.csv alongside any
-    // validation / normalisation failures. Operators see one consistent
-    // signal: a row only counts as "passed" once signalstack has it too.
-    const push = await pushToSignalStack(
-      job,
-      participantId,
-      phoneNormalised,
-      emailNormalised,
-      log,
-      geo.status === 'ok' ? geo.value : null,
-    );
-    if (!push.success) {
-      // Classified by Signals' own error code: a row Signals rejected for its
-      // data is the operator's to fix and reads like a local schema failure;
-      // only a genuine platform fault is `system_error`.
-      const category = categoriseSignalsRejection(push);
-      outcome = { outcome: 'failed', category, reasons: signalsRejectionReasons(push, category) };
-    }
+    phoneNormalised,
+    emailNormalised,
+    log,
+    geo.status === 'ok' ? geo.value : null,
+  );
+  if (push.success) {
+    outcome = { outcome: 'passed', category: null, reasons: [] };
   } else {
-    log.error({
-      status: 'failure',
-      sub: 'participants.write',
-      error: writeResult.error.message,
-    });
-    outcome = {
-      outcome: 'failed',
-      category: 'system_error',
-      reasons: [`db: ${writeResult.error.message}`],
-    };
+    // Classified by Signals' own error code: a row Signals rejected for its
+    // data is the operator's to fix and reads like a local schema failure;
+    // only a genuine platform fault is `system_error`.
+    const category = categoriseSignalsRejection(push);
+    outcome = { outcome: 'failed', category, reasons: signalsRejectionReasons(push, category) };
   }
 
   return await commit(job, outcome, log);
@@ -314,8 +279,9 @@ async function commit(
   outcome: RowOutcome,
   log: typeof logger,
 ): Promise<RowOutcome> {
-  // Only `failed` outcomes get a payload — `skipped` (e.g. duplicate
-  // participant) is dedup, not an error, and must not appear in errors.csv.
+  // Only `failed` outcomes get a payload — `skipped` is a deliberate no-op,
+  // not an error, and must not appear in errors.csv. (No bulk producer emits
+  // `skipped` since 0024; the branch is kept for the shared outcome shape.)
   // raw_row is reconstructed by the Finaliser from `bu:{id}:lines` keyed on
   // row_index, so it does NOT travel in the per-row job payload anymore.
   const errorPayload =

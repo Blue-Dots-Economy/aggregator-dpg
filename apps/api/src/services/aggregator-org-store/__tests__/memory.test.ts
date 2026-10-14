@@ -99,3 +99,39 @@ describe('InMemoryAggregatorOrgStore', () => {
     expect(revived.ok && revived.value.rejectedAt).toBeNull();
   });
 });
+
+describe('InMemoryAggregatorOrgStore contact rules', () => {
+  it('fails a non-canonical owner phone like the Postgres store (no row written)', async () => {
+    const store = new InMemoryAggregatorOrgStore();
+    const r = await store.create({
+      slug: 'bad-phone',
+      displayName: 'Bad Phone',
+      ownerEmail: 'o@x.org',
+      ownerPhone: '98765',
+    });
+    expect(r.ok || r.error.code).toBe('DB_UNAVAILABLE');
+    expect(await store.findBySlug('bad-phone')).toEqual({ ok: true, value: null });
+  });
+
+  it('finds an org by its owner phone', async () => {
+    const store = new InMemoryAggregatorOrgStore();
+    const r = await store.create({
+      slug: 'with-phone',
+      displayName: 'With Phone',
+      ownerEmail: 'o@x.org',
+      ownerPhone: '+919876500001',
+    });
+    const found = await store.findByOwnerPhone('+919876500001');
+    expect(found.ok && found.value?.id).toBe(r.ok && r.value.id);
+  });
+
+  it('returns NOT_FOUND from update / approve / reject for an unknown id', async () => {
+    const store = new InMemoryAggregatorOrgStore();
+    const results = [
+      await store.update('missing', { status: 'active' }),
+      await store.approve('missing'),
+      await store.reject('missing'),
+    ];
+    for (const r of results) expect(r.ok || r.error.code).toBe('NOT_FOUND');
+  });
+});

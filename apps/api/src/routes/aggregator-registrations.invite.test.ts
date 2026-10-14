@@ -11,10 +11,6 @@ import {
   _setAggregatorStore,
 } from '../services/aggregator-store/index.js';
 import {
-  AggregatorProfileStoreFake,
-  _setAggregatorProfileStore,
-} from '../services/aggregator-profile-store/index.js';
-import {
   AggregatorOrgStoreFake,
   buildAggregatorOrg,
   _setAggregatorOrgStore,
@@ -90,7 +86,6 @@ describe('coordinator submit with an invite token (#700)', () => {
     invites = new RegistrationInvitesStoreFake();
 
     _setAggregatorStore(aggregatorStore);
-    _setAggregatorProfileStore(new AggregatorProfileStoreFake());
     _setAggregatorOrgStore(orgStore);
     _setRegistrationInvitesStore(invites);
     _setIdpAdmin(new IdpAdminFake());
@@ -112,7 +107,6 @@ describe('coordinator submit with an invite token (#700)', () => {
   afterAll(async () => {
     await app?.close();
     _setAggregatorStore(null);
-    _setAggregatorProfileStore(null);
     _setAggregatorOrgStore(null);
     _setRegistrationInvitesStore(null);
     _setIdpAdmin(null);

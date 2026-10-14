@@ -14,11 +14,17 @@
       "maxLength": 200,
       "examples": ["Enable India", "Pankh Foundation"]
     },
-    "state": {
-      "type": "string",
-      "title": "State",
-      "maxLength": 200,
-      "examples": ["Karnataka", "Maharashtra"]
+    "address": {
+      "type": "object",
+      "title": "Address",
+      "additionalProperties": false,
+      "properties": {
+        "streetAddress": {
+          "type": "string",
+          "title": "Address",
+          "maxLength": 500
+        }
+      }
     },
     "owner": {
       "type": "object",

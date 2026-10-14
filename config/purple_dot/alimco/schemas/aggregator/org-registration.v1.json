@@ -44,46 +44,14 @@
     "address": {
       "type": "object",
       "title": "Address",
-      "description": "Street onwards for the organisation.",
       "additionalProperties": false,
       "properties": {
         "streetAddress": {
           "type": "string",
-          "title": "Street",
-          "maxLength": 300
-        },
-        "addressLocality": {
-          "type": "string",
-          "title": "City",
-          "maxLength": 200
-        },
-        "addressDistrict": {
-          "type": "string",
-          "title": "District",
-          "maxLength": 200
-        },
-        "addressRegion": {
-          "type": "string",
-          "title": "State",
-          "maxLength": 200
-        },
-        "postalCode": {
-          "type": "string",
-          "title": "PIN code",
-          "maxLength": 20
-        },
-        "addressCountry": {
-          "type": "string",
-          "title": "Country",
-          "maxLength": 100
+          "title": "Address",
+          "maxLength": 500
         }
       }
-    },
-    "state": {
-      "type": "string",
-      "title": "State",
-      "description": "Derived from the address block on this instance; not asked for separately.",
-      "maxLength": 200
     },
     "owner": {
       "type": "object",

@@ -42,7 +42,7 @@ overrides:
   #     Dependabot cannot raise it.
   #   @babel/core <7.29.6 → CVE-2026-49356 (LOW).
   'postcss@<8.5.26': 8.5.26
-  'sharp@<0.35.4': 0.35.4
+  'sharp@<0.35.5': 0.35.5
   '@babel/core@<7.29.6': 7.29.6
 
   # fast-uri 3.1.5 and 4.1.2 → four HIGH SSRF / host-confusion advisories:
@@ -55,8 +55,32 @@ overrides:
   # above. The replacement is an exact version, not `'>=3.1.6'`: an open-ended
   # `>=` is not bounded by the selector's major, so the 3.x floor silently
   # pulled that copy up to 4.1.4 when first tried in signals-dpg.
-  'fast-uri@>=3.0.0 <3.1.6': 3.1.7
-  'fast-uri@>=4.0.0 <4.1.3': 4.1.4
+  #
+  # Raised again: 3.1.7 and 4.1.4 — the versions the previous floors produced —
+  # carry CVE-2026-86472 (host-case normalization bypass) and CVE-2026-86818
+  # (mailto header injection via percent-encoded field-name desynchronization).
+  # Fixed in 2.4.7 / 3.1.8 / 4.1.5. Each selector is widened to catch its own
+  # prior output; the two majors stay on separate copies.
+  'fast-uri@>=3.0.0 <3.1.8': 3.1.8
+  'fast-uri@>=4.0.0 <4.1.5': 4.1.5
+
+  # brace-expansion → CVE-2026-102276 and CVE-2026-102278 (HIGH) plus
+  # CVE-2026-102277 (MODERATE): ReDoS and uncontrolled recursion on crafted
+  # brace patterns. Three major lines are present in this tree (1.x and 2.x via
+  # the glob/minimatch family, 5.x via the newer consumers), so each is floored
+  # separately rather than collapsed — the same cross-major rule as fast-uri
+  # above. Declared nowhere here, so Dependabot cannot raise it.
+  'brace-expansion@<1.1.21': 1.1.21
+  'brace-expansion@>=2.0.0 <2.1.7': 2.1.7
+  'brace-expansion@>=5.0.0 <5.0.12': 5.0.12
+
+  # source-map-js <1.2.2 → CVE-2026-93749 (HIGH), DoS via malformed indexed
+  # source maps. Arrives via postcss and the css tooling; not declared here.
+  'source-map-js@<1.2.2': 1.2.2
+
+  # shell-quote <1.11.0 → GHSA (MODERATE), argument injection via crafted
+  # quoting. Transitive, not declared here.
+  'shell-quote@<1.11.0': 1.11.0
 
   # uuid <11.1.1 → GHSA-w5hq-g745-h8pq (MODERATE): missing buffer bounds check
   # in v3/v5/v6 when `buf` is passed. NOT reachable here — it arrives only via

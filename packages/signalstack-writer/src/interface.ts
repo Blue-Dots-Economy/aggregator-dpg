@@ -3,7 +3,6 @@
  * pushes a participant + optional profile to a signalstack instance through
  * `POST /api/v1/admin/onboard`.
  *
- * The local `participants` table is written by `@aggregator-dpg/participants-writer`.
  * This writer is the parallel "outward" wrapper: every place that decides a
  * participant should be reflected into signalstack calls this single method.
  *

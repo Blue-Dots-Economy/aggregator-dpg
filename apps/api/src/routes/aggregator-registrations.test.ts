@@ -6,10 +6,6 @@ import {
   _setAggregatorStore,
   buildAggregator,
 } from '../services/aggregator-store/index.js';
-import {
-  AggregatorProfileStoreFake,
-  _setAggregatorProfileStore,
-} from '../services/aggregator-profile-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _resetTokenKey } from '../services/approval-token.js';
@@ -32,7 +28,6 @@ const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
 describe('POST /v1/aggregator-registrations/create', () => {
   let app: FastifyInstance;
   let aggregatorStore: AggregatorStoreFake;
-  let profileStore: AggregatorProfileStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
   let consentLedger: ConsentLedgerFake;
@@ -46,7 +41,6 @@ describe('POST /v1/aggregator-registrations/create', () => {
     process.env.KEYCLOAK_REALM = 'bluedots';
 
     aggregatorStore = new AggregatorStoreFake();
-    profileStore = new AggregatorProfileStoreFake();
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
     consentLedger = new ConsentLedgerFake();
@@ -64,7 +58,6 @@ describe('POST /v1/aggregator-registrations/create', () => {
     _setSubmitRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
 
     _setAggregatorStore(aggregatorStore);
-    _setAggregatorProfileStore(profileStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
     _setConsentLedger(consentLedger);
@@ -82,7 +75,6 @@ describe('POST /v1/aggregator-registrations/create', () => {
     await app?.close();
     _setSubmitRateChecker(null);
     _setAggregatorStore(null);
-    _setAggregatorProfileStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
     _setConsentLedger(null);
@@ -123,16 +115,6 @@ describe('POST /v1/aggregator-registrations/create', () => {
 
     const stored = await aggregatorStore.findById(body.aggregator_id);
     if (stored.ok) expect(stored.value?.orgSlug).toBe(body.org_slug);
-
-    const profile = await profileStore.findByAggregatorId(body.aggregator_id);
-    if (profile.ok) {
-      expect(profile.value?.aggregatorId).toBe(body.aggregator_id);
-      expect(profile.value?.contactName).toBeNull();
-      expect(profile.value?.personas).toEqual([]);
-      expect(profile.value?.services).toEqual([]);
-      expect(profile.value?.verifiedCertificate).toEqual([]);
-      expect(profile.value?.profileCompletedAt).toBeNull();
-    }
 
     const kcUser = await idp.findByEmail(validBody.contact.email);
     if (kcUser.ok && kcUser.value) {
@@ -621,26 +603,6 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(res.statusCode).toBe(500);
     expect((res.json() as { error: { code: string } }).error.code).toBe('CONSENT_WRITE_FAILED');
     const found = await aggregatorStore.findByContactEmail('consent-fail@trrain.org');
-    expect(found.ok && found.value).toBeNull();
-  });
-
-  it('503 DB_UNAVAILABLE (rolled back) when profileStore.create fails', async () => {
-    profileStore.create = async () => ({
-      ok: false,
-      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
-    });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/aggregator-registrations/create',
-      headers: AUTH_HEADER,
-      payload: {
-        ...validBody,
-        contact: { ...validBody.contact, email: 'profile-fail@trrain.org' },
-      },
-    });
-    expect(res.statusCode).toBe(503);
-    expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
-    const found = await aggregatorStore.findByContactEmail('profile-fail@trrain.org');
     expect(found.ok && found.value).toBeNull();
   });
 

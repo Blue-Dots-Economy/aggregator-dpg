@@ -1,11 +1,11 @@
 /**
- * BFF route test: GET/PATCH/PUT /api/aggregator/profile/me.
+ * BFF route test: GET/PATCH /api/aggregator/profile/me.
  *
  * Authenticated proxy over `callApi` — the session/token plumbing is
  * `callApi`'s job (covered by its own unit tests), so here we mock
  * `callApi` directly and assert: passthrough shape, the `no active
  * session` → 401 mapping, and the generic-throw → 503 mapping. Also
- * covers the PUT→PATCH legacy alias and PATCH's own bad-JSON guard.
+ * covers PATCH's own bad-JSON guard.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
@@ -13,7 +13,7 @@ vi.mock('@/lib/upstream-client', () => ({
   callApi: vi.fn(),
 }));
 
-import { GET, PATCH, PUT } from '@/app/api/aggregator/profile/me/route';
+import { GET, PATCH } from '@/app/api/aggregator/profile/me/route';
 import { callApi } from '@/lib/upstream-client';
 
 const mockCallApi = vi.mocked(callApi);
@@ -99,23 +99,5 @@ describe('PATCH /api/aggregator/profile/me', () => {
     });
     const res = await PATCH(req as never);
     expect(res.status).toBe(503);
-  });
-});
-
-describe('PUT /api/aggregator/profile/me (legacy alias)', () => {
-  afterEach(() => vi.clearAllMocks());
-
-  it('delegates to PATCH', async () => {
-    mockCallApi.mockResolvedValue(jsonResponse(200, { updated: true }));
-    const req = new Request('http://localhost/api/aggregator/profile/me', {
-      method: 'PUT',
-      body: JSON.stringify({ name: 'New Name' }),
-    });
-    const res = await PUT(req as never);
-    expect(res.status).toBe(200);
-    expect(mockCallApi).toHaveBeenCalledWith('/v1/aggregators/profile/me', {
-      method: 'PATCH',
-      body: { name: 'New Name' },
-    });
   });
 });

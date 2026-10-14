@@ -11,6 +11,20 @@ import type { GeoComponents, GeoProvider, GeoSuggestion } from './types';
 
 const DEFAULT_PHOTON_URL = 'https://photon.komoot.io';
 
+/**
+ * Deadline for a single geocoder call.
+ *
+ * `.claude/rules/error-handling.md` requires an explicit timeout on every
+ * external call. The caller's `signal` is a *cancellation* channel — it aborts
+ * when the next keystroke supersedes this query — not a deadline, so a public
+ * endpoint that accepts the connection and then stalls would leave the request
+ * hanging and the dropdown empty with no explanation.
+ *
+ * 4s: long enough for a cold lookup over a slow mobile link, short enough that
+ * a stalled request gives up before the person has retyped the line.
+ */
+const REQUEST_TIMEOUT_MS = 4_000;
+
 interface PhotonFeature {
   geometry?: { coordinates?: [number, number] }; // [lng, lat]
   properties?: {
@@ -24,6 +38,30 @@ interface PhotonFeature {
     /** Feature granularity, e.g. `city`, `district`, `state`, `country`. */
     type?: string;
   };
+}
+
+/**
+ * Combines the caller's cancellation signal with a request deadline.
+ *
+ * Built by hand rather than with `AbortSignal.any`, which is too recent to
+ * assume across the browsers this portal targets.
+ *
+ * @param signal - The caller's cancel signal, if any.
+ * @returns The combined signal, and `clear` — call it once the request settles
+ *   so a finished request does not stay armed and abort 4s later.
+ */
+function withDeadline(signal?: AbortSignal): { signal: AbortSignal; clear: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const cancel = () => {
+    clearTimeout(timer);
+    controller.abort();
+  };
+  if (signal) {
+    if (signal.aborted) cancel();
+    else signal.addEventListener('abort', cancel, { once: true });
+  }
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
 /** Feature types too coarse to stand in for an address (signals-dpg#788). */
@@ -86,13 +124,11 @@ export function createPhotonProvider(baseUrl = DEFAULT_PHOTON_URL, country?: str
     async suggest(query, signal) {
       const q = query.trim();
       if (!q) return [];
+      const deadline = withDeadline(signal);
       try {
         const base = `${baseUrl.replace(/\/$/, '')}/api?q=${encodeURIComponent(q)}&limit=5`;
         const url = country ? `${base}&countrycode=${country}` : base;
-        // Spread rather than `{ signal }`: under `exactOptionalPropertyTypes`,
-        // `RequestInit.signal` is `AbortSignal | null` and will not accept an
-        // explicit `undefined` from the optional parameter.
-        const res = await fetch(url, { ...(signal ? { signal } : {}) });
+        const res = await fetch(url, { signal: deadline.signal });
         if (!res.ok) return [];
         const json = (await res.json()) as { features?: PhotonFeature[] };
         if (!country) return parsePhotonFeatures(json);
@@ -101,6 +137,8 @@ export function createPhotonProvider(baseUrl = DEFAULT_PHOTON_URL, country?: str
         });
       } catch {
         return [];
+      } finally {
+        deadline.clear();
       }
     },
   };

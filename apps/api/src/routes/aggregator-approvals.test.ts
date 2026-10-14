@@ -8,10 +8,6 @@ import {
   buildAggregator,
 } from '../services/aggregator-store/index.js';
 import {
-  _setAggregatorProfileStore,
-  AggregatorProfileStoreFake,
-} from '../services/aggregator-profile-store/index.js';
-import {
   AggregatorOrgStoreFake,
   buildAggregatorOrg,
   _setAggregatorOrgStore,
@@ -73,7 +69,6 @@ describe('admin approval routes', () => {
       }),
     ]);
     _setAggregatorStore(aggregatorStore);
-    _setAggregatorProfileStore(new AggregatorProfileStoreFake());
 
     idp = new IdpAdminFake();
     const created = await idp.createUser({
@@ -108,7 +103,6 @@ describe('admin approval routes', () => {
     await app?.close();
     _setApprovalVerifyRateChecker(null);
     _setAggregatorStore(null);
-    _setAggregatorProfileStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
     _setSignalStackWriter(null);
