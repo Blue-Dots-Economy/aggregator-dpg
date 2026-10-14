@@ -40,7 +40,10 @@ Portal → http://localhost:3100 · Signals UI → http://localhost:5173 ·
 Mailpit → http://localhost:8025 · Keycloak → http://localhost:8080/admin ·
 Signals Search → http://localhost:3110
 
-Needs **≥10 GB** of Docker memory (the embedder alone wants 3-4 GB) and a
+signals-search is on by default (`COMPOSE_PROFILES=search` in `.env`); set
+`COMPOSE_PROFILES=` to run without it — see `LOCAL_SETUP.md` §10.3.
+
+Needs **≥10 GB** of Docker memory (the embedder alone wants 3-4 GB; ~6 GB without search) and a
 `docker login dhi.io` before the first build — see `LOCAL_SETUP.md` §0–§1.
 
 ## Contents

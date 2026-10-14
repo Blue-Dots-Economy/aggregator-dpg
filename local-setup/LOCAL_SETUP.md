@@ -37,6 +37,7 @@ the aggregator-dpg repo at `aggregator-dpg/local-setup/`** and builds both DPGs.
 | ------------------- | ------------------------------------------------------------------ | ---------------------- |
 | **A — Docker-only** | Just get everything running to explore/demo the apps. One command. | §1 → §2 → §3 → §5      |
 | **B — Hybrid dev**  | Write code with hot-reload; both DPGs run from source.             | §1 → §6 (3 steps) → §3 |
+| **A without search** | Track A, but skip signals-search (native recency-order discover, ~4 GB less memory). | Track A + §10.3 |
 
 Both tracks share the same prerequisites (§1). Track A uses the unified
 `docker-compose.yml` in this `local-setup/` directory. Track B runs each app
@@ -649,10 +650,11 @@ so `apps/api/.env` needs no change.
 
 ## 10. signals-search (relevance ranking + match score)
 
-signals-search is part of the stack: `docker compose up -d` starts
+signals-search is part of the stack by default: `.env.example` sets
+`COMPOSE_PROFILES=search`, so `docker compose up -d` starts
 `sd-signals-search-api`, `sd-signals-search-worker` and `sd-tei-embeddings`, and
 signals-api is already pointed at it. Discover returns relevance-ranked results
-and match scores work out of the box.
+and match scores work out of the box. To run without it, see §10.3.
 
 > **The canonical documentation for signals-search's configuration lives in
 > `signals-dpg/local-setup/LOCAL_SETUP.md` §7** — the apikey-table auth, the
@@ -675,7 +677,7 @@ checkout (signals-search is pulled prebuilt).
 
 |                      | signals-dpg stack                       | here                                                                                                                                                                                |
 | -------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Enabled              | opt-in `--profile search` + `.env.search` | always on; wired in `docker-compose.yml`                                                                                                                                          |
+| Enabled              | opt-in `--profile search` + `.env.search` | on by default (`COMPOSE_PROFILES=search` in `.env`); `COMPOSE_PROFILES=` turns it off (§10.3)                                                                                   |
 | Search API host port | `3100`                                  | **`3110`** — the aggregator portal already owns 3100. The container still listens on 3100, so in-compose URLs are unchanged.                                                        |
 | API key              | minted by the seed, copied by hand      | `SIGNALS_SEARCH_API_KEY` from `.env`, seeded by `signals-bootstrap` as the `signals-search` apikey                                                                                    |
 | Database             | the single `postgresdb`                 | the **`signals`** database specifically; this Postgres also holds `aggregator` and `keycloak`. Pointing search at the wrong one gives `401`s (no `apikey` rows) and an empty index. |
@@ -724,3 +726,42 @@ TEI warms up for ~30-60s on CPU before it can serve; an empty `items` array
 usually just means the worker's sweep has not backfilled yet (every 60s by
 default). If `sd-tei-embeddings` dies during startup, it is almost certainly
 memory — raise Docker's memory limit (§0) and see signals-dpg's §6.1.
+
+### 10.3 Run without signals-search
+
+Search is optional. Without it the stack needs about **4 GB less** Docker memory
+(≈6 GB instead of ≥10 GB) and skips the ~8 GB embedder image. What changes:
+
+- Discover falls back to the **native** path: results in recency/distance order
+  with text and facet filters still applied, and the UI shows _"Showing basic
+  matches — relevance ranking is temporarily unavailable"_.
+- Match scores are unavailable.
+
+**Fresh setup without search** — in `.env`, leave the profile empty, then bring
+the stack up as usual:
+
+```bash
+# .env
+COMPOSE_PROFILES=
+```
+
+```bash
+docker compose up -d --build
+docker compose ps        # no sd-tei-embeddings / sd-signals-search-* containers
+```
+
+**Turn search off on a running stack** — clear `COMPOSE_PROFILES` in `.env` as
+above, then remove the three search containers:
+
+```bash
+docker compose --profile search rm -sf tei-embeddings signals-search-api signals-search-worker
+```
+
+**Turn it back on** — set `COMPOSE_PROFILES=search` in `.env` and run
+`docker compose up -d`. The ingestion worker indexes existing items on start.
+
+> `SIGNALS_SEARCH_API_KEY` is still required in `.env` (it is seeded either way),
+> and signals-api keeps its search settings — with search absent it simply takes
+> the native fallback. To wipe everything, including stopped search containers,
+> use `docker compose --profile search down -v`.
+

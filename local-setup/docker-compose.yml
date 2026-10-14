@@ -9,7 +9,8 @@ name: aggregator-dpg
 #   Infra    postgres (3 DBs), signals-redis, aggregator-redis,
 #            keycloak, minio (+init), mailpit
 #   signals-dpg   signals-bootstrap (one-shot: migrate+seed) -> signals-api -> signals-ui
-#   search        signals-search api + worker + TEI embeddings
+#   search        signals-search api + worker + TEI embeddings — `search`
+#                 profile, on by default via COMPOSE_PROFILES=search in .env
 #   aggregator-dpg   aggregator-api (auto-migrates) -> aggregator-web + aggregator-worker
 #
 # This file is for LOCAL DEV ONLY. It intentionally does NOT use the
@@ -709,6 +710,9 @@ services:
   #
   # Same services as signals-dpg/local-setup's `search` profile; see that
   # repo's LOCAL_SETUP.md §7 for the full explanation of every setting here.
+  # On by default: .env.example sets COMPOSE_PROFILES=search. Clear it to run
+  # without search — signals-api then falls back to native discover (recency
+  # order, no relevance ranking) and match score is unavailable.
   # ───────────────────────────────────────────────────────────────────────
 
   # BAAI/bge-m3 baked into the image — no ~2.3 GB runtime download, no HF
@@ -727,6 +731,7 @@ services:
     # local development, and there is no native alternative to switch to.
     platform: linux/amd64
     container_name: sd-tei-embeddings
+    profiles: ["search"]
     restart: unless-stopped
     command:
       - "--model-id"
@@ -753,6 +758,7 @@ services:
     # signals-search's Dockerfile builds cleanly on arm64, so that path is real.
     platform: ${SEARCH_PLATFORM:-linux/amd64}
     container_name: sd-signals-search-api
+    profiles: ["search"]
     restart: unless-stopped
     environment: &search-env
       # The `signals` database specifically — this Postgres also hosts
@@ -799,6 +805,7 @@ services:
     # signals-search's Dockerfile builds cleanly on arm64, so that path is real.
     platform: ${SEARCH_PLATFORM:-linux/amd64}
     container_name: sd-signals-search-worker
+    profiles: ["search"]
     restart: unless-stopped
     command: ["node", "dist/worker/main.js"]
     environment:
