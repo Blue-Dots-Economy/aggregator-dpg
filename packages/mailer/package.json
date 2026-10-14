@@ -24,7 +24,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@aws-sdk/client-sesv2": "^3.1141.0",
+    "@aws-sdk/client-sesv2": "^3.1147.0",
     "nodemailer": "^10.0.9"
   },
   "devDependencies": {
