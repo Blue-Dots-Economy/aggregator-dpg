@@ -32,7 +32,7 @@ name: aggregator-dpg
 # Always run compose FROM this directory so the relative build contexts and
 # volume mounts resolve:
 #     cd aggregator-dpg/local-setup
-#     cp .env.example .env    # then set ADMIN_EMAILS (see LOCAL_SETUP.md §2)
+#     cp .env.example .env    # then ./gen-secrets.sh (see LOCAL_SETUP.md §2)
 #     docker compose up -d --build
 #
 # ── Host ports ──────────────────────────────────────────────────────────────

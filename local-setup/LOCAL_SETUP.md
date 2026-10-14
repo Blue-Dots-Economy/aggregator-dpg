@@ -127,7 +127,7 @@ pre-fills everything except the first item and the secrets, which
 
 | Prerequisite                                                                                                                                                                             | Why it's needed                                                                                                                        | Local default                                                                                                                              |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Admin email address** (`ADMIN_EMAILS`)                                                                                                                                                 | aggregator-dpg emails new-aggregator **approval requests** here. You approve/reject from this inbox to complete the registration flow. | You must set it. Any address works — the mail is captured by Mailpit, not actually delivered.                                              |
+| **Admin email address** (`ADMIN_EMAILS`)                                                                                                                                                 | aggregator-dpg emails new-aggregator **approval requests** here. You approve/reject from this inbox to complete the registration flow. | Optional — defaults to `admin@bluedots.local`. Any address works; the mail is captured by Mailpit, not actually delivered.                                              |
 | **SMTP account**                                                                                                                                                                         | Sending real approval + OTP email in staging/prod.                                                                                     | Not needed locally (Mailpit catches all). For real email use a Gmail **App Password** (not your login password) or Amazon SES.             |
 | **SMS / OTP provider**                                                                                                                                                                   | Delivering login OTPs by phone in prod (Twilio / AWS SNS / MSG91).                                                                     | Not needed locally — Keycloak's `log` provider writes the code to `docker compose logs keycloak`; signals-dpg sets `CREATE_TEST_OTP=true`. |
 | **S3 bucket + credentials**                                                                                                                                                              | aggregator bulk-uploads, QR PNGs, error CSVs in prod.                                                                                  | Not needed locally — MinIO provides an S3-compatible endpoint and the bucket is auto-created.                                              |
@@ -160,13 +160,9 @@ cp .env.example .env
 ./gen-secrets.sh                  # fills every CHANGE_ME_* with a random value
 ```
 
-Then open `.env` and set the **one required edit**:
-
-```dotenv
-ADMIN_EMAILS=you@yourorg.com
-```
-
-Everything else has working defaults. Then add the hosts entry (once):
+Everything has working defaults — no edits needed. Approval mails go to
+`ADMIN_EMAILS` (`admin@bluedots.local` by default) and land in Mailpit; change it
+only if you want a different address. Then add the hosts entry (once):
 
 ```bash
 # macOS / Linux
@@ -266,7 +262,7 @@ This exercises Keycloak OTP, the approval email, and the portal end to end.
 1. http://localhost:3100/register
    → fill the form (type, organisation, email, phone) → submit
 2. http://localhost:8025  (Mailpit)
-   → open the "approval request" mail addressed to ADMIN_EMAILS
+   → open the "approval request" mail (sent to ADMIN_EMAILS, admin@bluedots.local by default)
    → click Approve → confirm on the approval page
    → the applicant receives a welcome mail (also in Mailpit)
 3. http://localhost:3100/login
@@ -353,7 +349,7 @@ app images:
 ```bash
 cd aggregator-dpg/local-setup
 cp .env.example .env
-./gen-secrets.sh                                    # then set ADMIN_EMAILS=you@yourorg.com
+./gen-secrets.sh                                    # fills every CHANGE_ME_* value
 # once (browser + host apps resolve the OIDC issuer); safe to re-run
 grep -qE '^[[:space:]]*127\.0\.0\.1[[:space:]]+keycloak([[:space:]]|$)' /etc/hosts \
   || sudo sh -c "printf '\n127.0.0.1 keycloak\n' >> /etc/hosts"
@@ -474,7 +470,6 @@ KEYCLOAK_URL=http://keycloak:8080
 
 # Your values
 APPROVAL_TOKEN_SECRET=<same as local-setup/.env, >=32 chars>
-ADMIN_EMAILS=you@yourorg.com
 
 # SignalStack wiring — Keycloak client-credentials token + the org id from Step 2
 SIGNALSTACK_BASE_URL=http://localhost:2742

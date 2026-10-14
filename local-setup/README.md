@@ -28,7 +28,7 @@ and is always run **from this directory**:
 
 ```bash
 cd aggregator-dpg/local-setup
-cp .env.example .env          # then ./gen-secrets.sh, and set ADMIN_EMAILS (see LOCAL_SETUP.md §2)
+cp .env.example .env          # then ./gen-secrets.sh (see LOCAL_SETUP.md §2)
 # once; safe to re-run
 grep -qE '^[[:space:]]*127\.0\.0\.1[[:space:]]+keycloak([[:space:]]|$)' /etc/hosts \
   || sudo sh -c "printf '\n127.0.0.1 keycloak\n' >> /etc/hosts"
