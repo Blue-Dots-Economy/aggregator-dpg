@@ -22,10 +22,9 @@ export function SubmitBlockers({
 }): JSX.Element | null {
   if (reasons.length === 0) return null;
   return (
-    <div
-      role="status"
+    <output
       aria-live="polite"
-      className="rounded-[10px] border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800"
+      className="block rounded-[10px] border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800"
     >
       <div className="flex items-start gap-2">
         <I.alert size={14} className="mt-0.5 shrink-0 text-amber-600" />
@@ -38,6 +37,6 @@ export function SubmitBlockers({
           </ul>
         </div>
       </div>
-    </div>
+    </output>
   );
 }

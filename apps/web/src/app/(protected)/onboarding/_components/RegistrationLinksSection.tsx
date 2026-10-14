@@ -134,13 +134,12 @@ function SuccessToast({ message, onDone }: { message: string; onDone: () => void
   }, [onDone]);
   if (!mounted) return null;
   return createPortal(
-    <div
-      role="status"
+    <output
       aria-live="polite"
       className="fixed top-4 left-4 right-4 sm:left-auto z-100 rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-center gap-2"
     >
       <I.check size={14} /> {message}
-    </div>,
+    </output>,
     document.body,
   );
 }

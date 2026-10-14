@@ -519,15 +519,12 @@ export const bulkUploads = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
-  (table) => ({
+  (table) => [
     // Watchdog scan: status + last_progress_at to detect stalled jobs.
-    statusProgressIdx: index('bulk_uploads_status_progress_idx').on(
-      table.status,
-      table.lastProgressAt,
-    ),
+    index('bulk_uploads_status_progress_idx').on(table.status, table.lastProgressAt),
     // Per-aggregator concurrent cap + tenant isolation queries.
-    userStatusIdx: index('bulk_uploads_user_status_idx').on(table.userId, table.status),
-  }),
+    index('bulk_uploads_user_status_idx').on(table.userId, table.status),
+  ],
 );
 
 // ─── registration_links ──────────────────────────────────────────────────────
@@ -559,15 +556,12 @@ export const registrationLinks = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => ({
+  (table) => [
     // Per-aggregator slug uniqueness — two aggregators may pick the same
     // human-readable slug since the public URL is `/<org_slug>/<slug>`.
-    aggregatorSlugUnique: uniqueIndex('registration_links_user_slug_unique').on(
-      table.userId,
-      table.slug,
-    ),
-    userStatusIdx: index('registration_links_user_status_idx').on(table.userId, table.status),
-  }),
+    uniqueIndex('registration_links_user_slug_unique').on(table.userId, table.slug),
+    index('registration_links_user_status_idx').on(table.userId, table.status),
+  ],
 );
 
 // ─── link_submissions ────────────────────────────────────────────────────────
@@ -597,15 +591,12 @@ export const linkSubmissions = pgTable(
     rolledUpAt: timestamp('rolled_up_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => ({
+  (table) => [
     // Metrics Aggregator pickup: NULLS FIRST surfaces unrolled rows first.
-    rollupPickupIdx: index('link_submissions_rollup_pickup_idx').on(
-      table.rolledUpAt,
-      table.createdAt,
-    ),
-    linkIdx: index('link_submissions_link_idx').on(table.linkId),
-    userCreatedIdx: index('link_submissions_user_created_idx').on(table.userId, table.createdAt),
-  }),
+    index('link_submissions_rollup_pickup_idx').on(table.rolledUpAt, table.createdAt),
+    index('link_submissions_link_idx').on(table.linkId),
+    index('link_submissions_user_created_idx').on(table.userId, table.createdAt),
+  ],
 );
 
 // ─── consent_record ──────────────────────────────────────────────────────────
@@ -704,24 +695,20 @@ export const onboarding = pgTable(
     skipped: integer('skipped').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => ({
+  (table) => [
     // Bulk: one row per upload (batch_id is the upload id).
     // Partial UNIQUE so the constraint applies only when source='bulk'.
-    bulkBatchUnique: uniqueIndex('onboarding_bulk_batch_unique')
+    uniqueIndex('onboarding_bulk_batch_unique')
       .on(table.batchId)
       .where(sql`${table.source} = 'bulk'`),
     // Link: one row per (aggregator, link, period). UPSERT target for
     // Metrics Aggregator hour-bucket rollups.
-    linkRollupUnique: uniqueIndex('onboarding_link_rollup_unique')
+    uniqueIndex('onboarding_link_rollup_unique')
       .on(table.userId, table.linkId, table.periodStart)
       .where(sql`${table.source} = 'link'`),
-    userSourceIdx: index('onboarding_user_source_idx').on(
-      table.userId,
-      table.source,
-      table.periodStart,
-    ),
-    batchIdx: index('onboarding_batch_idx').on(table.batchId),
-  }),
+    index('onboarding_user_source_idx').on(table.userId, table.source, table.periodStart),
+    index('onboarding_batch_idx').on(table.batchId),
+  ],
 );
 
 // ─── campaign_job / campaign_job_item ────────────────────────────────────────
