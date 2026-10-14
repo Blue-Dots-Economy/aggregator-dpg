@@ -1,24 +1,20 @@
-# signals-search add-on for the unified local stack.
+# The unified local stack WITH signals-search.
 #
-# docker-compose.yml runs the stack WITHOUT search: signals-api uses native
-# discover (recency/distance order) and match score is unavailable. Layer this
-# file on top to add relevance ranking + match score:
+# docker-compose.yml alone runs the stack without search (signals-api falls
+# back to native discover; match score is unavailable). This file includes it
+# and adds the three search services:
 #
-#     docker compose -f docker-compose.yml -f docker-compose.search.yml up -d --build
+#     docker compose -f docker-compose.search.yml up -d --build
 #
-# Use the same two -f flags for every later command (ps, logs, down), or the
-# search containers are left out. Needs ~4 GB more Docker memory (≥10 GB total).
+# Use the same -f flag for later commands (ps, logs, down), or set
+# COMPOSE_FILE=docker-compose.search.yml in .env. Needs ~4 GB more Docker
+# memory (≥10 GB total).
+name: aggregator-dpg
+
+include:
+  - docker-compose.yml
 
 services:
-  # Point signals-api at search. Discover and match score read the same URL
-  # under two names; both must be set. The key (SIGNALS_SEARCH_API_KEY) is
-  # already in signals-api's env — signals-bootstrap seeds it either way.
-  signals-api:
-    environment:
-      SIGNALS_SEARCH_URL: http://signals-search-api:3100
-      MATCH_SCORE_PROVIDER: signals_search
-      SIGNALS_SEARCH_ENDPOINT: http://signals-search-api:3100
-
   # ───────────────────────────────────────────────────────────────────────
   # signals-search — relevance-ranked discover + match score for signals-api.
   #

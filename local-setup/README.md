@@ -43,7 +43,7 @@ Mailpit → http://localhost:8025 · Keycloak → http://localhost:8080/admin
 http://localhost:3110):
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.search.yml up -d --build
+docker compose -f docker-compose.search.yml up -d --build
 ```
 
 Needs **≈6 GB** of Docker memory (**≥10 GB** with search — the embedder alone wants 3-4 GB) and a
@@ -54,7 +54,7 @@ Needs **≈6 GB** of Docker memory (**≥10 GB** with search — the embedder al
 | File                                 | Purpose                                                                   |
 | ------------------------------------ | ------------------------------------------------------------------------- |
 | `docker-compose.yml`                 | the unified stack (both DPGs + shared infra), without search              |
-| `docker-compose.search.yml`          | optional add-on: signals-search (API, worker, embedder) + signals-api search settings |
+| `docker-compose.search.yml`          | the stack WITH signals-search — includes `docker-compose.yml`, adds API, worker, embedder |
 | `.env.example`                       | single root env — copy to `.env`, then run `gen-secrets.sh`               |
 | `gen-secrets.sh`                     | fills every `CHANGE_ME_*` placeholder in `.env` (incl. the signals-search apikey) |
 | `LOCAL_SETUP.md`                     | from-scratch setup guide, both run modes, troubleshooting                 |
