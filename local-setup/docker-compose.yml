@@ -411,6 +411,8 @@ services:
       # the seed output.
       AGGREGATOR_DPG_ORG_ID: ${AGGREGATOR_DPG_ORG_ID:?AGGREGATOR_DPG_ORG_ID must be set in .env}
       SIGNALS_SEARCH_API_KEY: ${SIGNALS_SEARCH_API_KEY:?SIGNALS_SEARCH_API_KEY must be set in .env (run ./gen-secrets.sh)}
+      # What the seed stores; signals-api sends the raw key above.
+      SIGNALS_SEARCH_API_KEY_HASH: ${SIGNALS_SEARCH_API_KEY_HASH:?SIGNALS_SEARCH_API_KEY_HASH must be set in .env (run ./gen-secrets.sh)}
     depends_on:
       postgres:
         condition: service_healthy
