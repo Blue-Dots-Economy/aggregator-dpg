@@ -6,8 +6,8 @@ Signal Stack ecosystem, wired for localhost:
 - **aggregator-dpg** (this repo) — portal (web) + API + worker
 - **signals-dpg** (upstream, sibling repo) — the Signals Stack backend
 - shared infra — Postgres (3 DBs), two Redis, Keycloak, MinIO, Mailpit
-- **signals-search** — relevance-ranked discover + match scores (search API,
-  ingestion worker, bge-m3 embedder)
+- **signals-search** (optional, `docker-compose.search.yml`) — relevance-ranked
+  discover + match scores (search API, ingestion worker, bge-m3 embedder)
 
 👉 **Full walkthrough: [`LOCAL_SETUP.md`](./LOCAL_SETUP.md)** (Track A = all-in-Docker,
 Track B = hybrid hot-reload).
@@ -37,20 +37,24 @@ docker compose ps             # wait for keycloak + aggregator-api healthy
 ```
 
 Portal → http://localhost:3100 · Signals UI → http://localhost:5173 ·
-Mailpit → http://localhost:8025 · Keycloak → http://localhost:8080/admin ·
-Signals Search → http://localhost:3110
+Mailpit → http://localhost:8025 · Keycloak → http://localhost:8080/admin
 
-signals-search is on by default (`COMPOSE_PROFILES=search` in `.env`); set
-`COMPOSE_PROFILES=` to run without it — see `LOCAL_SETUP.md` §10.3.
+**With signals-search** (relevance ranking + match scores; Search API on
+http://localhost:3110):
 
-Needs **≥10 GB** of Docker memory (the embedder alone wants 3-4 GB; ~6 GB without search) and a
+```bash
+docker compose -f docker-compose.yml -f docker-compose.search.yml up -d --build
+```
+
+Needs **≈6 GB** of Docker memory (**≥10 GB** with search — the embedder alone wants 3-4 GB) and a
 `docker login dhi.io` before the first build — see `LOCAL_SETUP.md` §0–§1.
 
 ## Contents
 
 | File                                 | Purpose                                                                   |
 | ------------------------------------ | ------------------------------------------------------------------------- |
-| `docker-compose.yml`                 | the unified stack (both DPGs + shared infra)                              |
+| `docker-compose.yml`                 | the unified stack (both DPGs + shared infra), without search              |
+| `docker-compose.search.yml`          | optional add-on: signals-search (API, worker, embedder) + signals-api search settings |
 | `.env.example`                       | single root env — copy to `.env`, then run `gen-secrets.sh`               |
 | `gen-secrets.sh`                     | fills every `CHANGE_ME_*` placeholder in `.env` (incl. the signals-search apikey) |
 | `LOCAL_SETUP.md`                     | from-scratch setup guide, both run modes, troubleshooting                 |
