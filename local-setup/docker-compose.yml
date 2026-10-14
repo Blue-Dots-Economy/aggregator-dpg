@@ -244,8 +244,8 @@ services:
       AGGREGATOR_PORTAL_SECRET: ${OIDC_PORTAL_CLIENT_SECRET:-aggregator-portal-local-dev-secret}
       AGGREGATOR_BFF_SECRET: ${OIDC_BFF_CLIENT_SECRET:-aggregator-bff-local-dev-secret}
       # Signals-side client secrets (Phase B realm merge). signals-api's must
-      # match KEYCLOAK_API_CLIENT_SECRET below; aggregator-dpg's is pre-wired
-      # for Phase C, not yet consumed by any aggregator env var.
+      # match KEYCLOAK_API_CLIENT_SECRET below; aggregator-dpg's must match
+      # SIGNALSTACK_CLIENT_SECRET on aggregator-api/worker (same var).
       SIGNALS_API_SECRET: ${SIGNALS_API_CLIENT_SECRET:-signals-api-local-dev-secret}
       SIGNALSTACK_CLIENT_SECRET: ${SIGNALSTACK_CLIENT_SECRET:-aggregator-dpg-signals-local-dev-secret}
       VOICE_DPG_SIGNALS_SECRET: ${VOICE_DPG_SIGNALS_SECRET:-voice-dpg-signals-local-dev-secret}
@@ -404,10 +404,11 @@ services:
       # for service access") before even checking for a seeded service org.
       # Matches signals-bootstrap's seed_service_users.ts slug ('aggregator-dpg').
       KEYCLOAK_SERVICE_CLIENT_IDS: ${KEYCLOAK_SERVICE_CLIENT_IDS:-aggregator-dpg}
-      # Seeded as the aggregator-dpg service apikey + org, so aggregator and
-      # signals-search use them without copying anything from the seed output.
-      AGGREGATOR_DPG_API_KEY: ${AGGREGATOR_DPG_API_KEY:?AGGREGATOR_DPG_API_KEY must be set in .env (run ./gen-secrets.sh)}
+      # Seeded as the aggregator-dpg org id and the signals-search apikey, so
+      # aggregator-api and signals-api use them without copying anything from
+      # the seed output.
       AGGREGATOR_DPG_ORG_ID: ${AGGREGATOR_DPG_ORG_ID:?AGGREGATOR_DPG_ORG_ID must be set in .env}
+      SIGNALS_SEARCH_API_KEY: ${SIGNALS_SEARCH_API_KEY:?SIGNALS_SEARCH_API_KEY must be set in .env (run ./gen-secrets.sh)}
     depends_on:
       postgres:
         condition: service_healthy
@@ -429,7 +430,6 @@ services:
       SIGNALS_SEARCH_URL: http://signals-search-api:3100
       MATCH_SCORE_PROVIDER: signals_search
       SIGNALS_SEARCH_ENDPOINT: http://signals-search-api:3100
-      SIGNALS_SEARCH_API_KEY: ${AGGREGATOR_DPG_API_KEY}
     ports:
       - "2742:2742"
     depends_on:
@@ -543,18 +543,17 @@ services:
       SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/schemas
       AGGREGATOR_CONFIG_PATH: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/aggregator.config.yaml
       # ── Cross-DPG push into signals (optional; see LOCAL_SETUP.md) ────────
-      # The apikey + org id signals-bootstrap seeds for aggregator-dpg.
+      # The org id signals-bootstrap seeds for aggregator-dpg.
       SIGNALSTACK_BASE_URL: ${SIGNALSTACK_BASE_URL:-http://signals-api:2742}
-      SIGNALSTACK_ADMIN_KEY: ${AGGREGATOR_DPG_API_KEY}
       SIGNALSTACK_ACTING_ORG_ID: ${AGGREGATOR_DPG_ORG_ID}
       SIGNALSTACK_ITEM_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
-      # Phase C, opt-in, stays manual: set SIGNALSTACK_AUTH_MODE=bearer in
-      # .env to switch from x-api-key to a Keycloak client-credentials token.
+      # Keycloak client-credentials token for the aggregator-dpg client; signals
+      # maps the client id to the seeded org of the same slug.
       # SIGNALSTACK_CLIENT_SECRET must equal the value the `keycloak` service
       # rendered into the aggregator-dpg client's secret (see that service's
       # environment block above) — same var, same value, both read from .env.
-      SIGNALSTACK_AUTH_MODE: ${SIGNALSTACK_AUTH_MODE:-apikey}
+      SIGNALSTACK_AUTH_MODE: ${SIGNALSTACK_AUTH_MODE:-bearer}
       SIGNALSTACK_CLIENT_ID: ${SIGNALSTACK_CLIENT_ID:-aggregator-dpg}
       SIGNALSTACK_CLIENT_SECRET: ${SIGNALSTACK_CLIENT_SECRET:-aggregator-dpg-signals-local-dev-secret}
     volumes:
@@ -687,13 +686,12 @@ services:
       LINK_METRICS_ROLLUP_INTERVAL_MS: ${LINK_METRICS_ROLLUP_INTERVAL_MS:-300000}
       WATCHDOG_INTERVAL_MS: ${WATCHDOG_INTERVAL_MS:-3600000}
       SIGNALSTACK_BASE_URL: ${SIGNALSTACK_BASE_URL:-http://signals-api:2742}
-      SIGNALSTACK_ADMIN_KEY: ${AGGREGATOR_DPG_API_KEY}
       SIGNALSTACK_ITEM_NETWORK: ${AGGREGATOR_NETWORK:-blue_dot}
       SIGNALSTACK_TIMEOUT_MS: ${SIGNALSTACK_TIMEOUT_MS:-10000}
-      # Phase C, opt-in, stays manual — see aggregator-api's env block above
-      # for what these mean. Worker has no OIDC login of its own; KEYCLOAK_URL
+      # Keycloak client-credentials token — see aggregator-api's env block
+      # above. Worker has no OIDC login of its own; KEYCLOAK_URL
       # / KEYCLOAK_REALM here exist solely to mint this service token.
-      SIGNALSTACK_AUTH_MODE: ${SIGNALSTACK_AUTH_MODE:-apikey}
+      SIGNALSTACK_AUTH_MODE: ${SIGNALSTACK_AUTH_MODE:-bearer}
       SIGNALSTACK_CLIENT_ID: ${SIGNALSTACK_CLIENT_ID:-aggregator-dpg}
       SIGNALSTACK_CLIENT_SECRET: ${SIGNALSTACK_CLIENT_SECRET:-aggregator-dpg-signals-local-dev-secret}
       KEYCLOAK_URL: http://keycloak:8080

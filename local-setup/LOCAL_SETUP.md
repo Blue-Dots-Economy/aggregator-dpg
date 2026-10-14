@@ -130,7 +130,7 @@ pre-fills everything except the first item and the secrets, which
 | **SMTP account**                                                                                                                                                                         | Sending real approval + OTP email in staging/prod.                                                                                     | Not needed locally (Mailpit catches all). For real email use a Gmail **App Password** (not your login password) or Amazon SES.             |
 | **SMS / OTP provider**                                                                                                                                                                   | Delivering login OTPs by phone in prod (Twilio / AWS SNS / MSG91).                                                                     | Not needed locally — Keycloak's `log` provider writes the code to `docker compose logs keycloak`; signals-dpg sets `CREATE_TEST_OTP=true`. |
 | **S3 bucket + credentials**                                                                                                                                                              | aggregator bulk-uploads, QR PNGs, error CSVs in prod.                                                                                  | Not needed locally — MinIO provides an S3-compatible endpoint and the bucket is auto-created.                                              |
-| **App secrets + infra passwords** (`SESSION_KEY`, `APPROVAL_TOKEN_SECRET`, `SIGNALS_AUTH_SECRET`, `SIGNALS_PII_KEY`, `POSTGRES_PASSWORD`, `SIGNALS_REDIS_PASSWORD`, `KC_ADMIN_PASSWORD`, `AGGREGATOR_DPG_API_KEY`) | Signing sessions/approval tokens, encrypting PII, and the local Postgres/Redis/Keycloak logins.                                        | Ship as `CHANGE_ME_*` placeholders. Run `./gen-secrets.sh` after copying `.env` — it fills each one with a fresh random value.             |
+| **App secrets + infra passwords** (`SESSION_KEY`, `APPROVAL_TOKEN_SECRET`, `SIGNALS_AUTH_SECRET`, `SIGNALS_PII_KEY`, `POSTGRES_PASSWORD`, `SIGNALS_REDIS_PASSWORD`, `KC_ADMIN_PASSWORD`, `SIGNALS_SEARCH_API_KEY`) | Signing sessions/approval tokens, encrypting PII, and the local Postgres/Redis/Keycloak logins.                                        | Ship as `CHANGE_ME_*` placeholders. Run `./gen-secrets.sh` after copying `.env` — it fills each one with a fresh random value.             |
 | **`127.0.0.1 keycloak` in `/etc/hosts`**                                                                                                                                                 | So the browser and the web container resolve the OIDC issuer to the _same_ Keycloak (issuer-claim validation).                         | You add it once (§2).                                                                                                                      |
 
 ### 1.3 Clone both repos
@@ -245,7 +245,7 @@ docker compose logs -f aggregator-api      # migrations + upstream calls
 | MinIO console    | http://localhost:9001       | `minioadmin` / `MINIO_ROOT_PASSWORD`                                                                            |
 | Postgres         | localhost:5432              | `dpg` / `POSTGRES_PASSWORD` (one shared server; dbs: `aggregator`, `signals`, `keycloak`)                       |
 | signals-redis    | localhost:5555              | password-protected (`SIGNALS_REDIS_PASSWORD`)                                                                   |
-| Signals Search   | http://localhost:3110       | §10. **3110, not 3100** — the portal owns 3100. `POST /v1/search` needs `x-api-key` (`AGGREGATOR_DPG_API_KEY`) |
+| Signals Search   | http://localhost:3110       | §10. **3110, not 3100** — the portal owns 3100. `POST /v1/search` needs `x-api-key` (`SIGNALS_SEARCH_API_KEY`) |
 | aggregator-redis | localhost:6379              | —                                                                                                               |
 
 > Ports mirror each project's own guide (`signals-dpg/SETUP.md`,
@@ -285,29 +285,34 @@ This exercises Keycloak OTP, the approval email, and the portal end to end.
 aggregator-dpg **pushes** approved aggregators and onboarded participants
 **into** signals-dpg. This is wired automatically — nothing to copy:
 
-- `gen-secrets.sh` generates `AGGREGATOR_DPG_API_KEY` (`sk_signals_…`) in `.env`;
-  `AGGREGATOR_DPG_ORG_ID` ships with a fixed local value.
-- `signals-bootstrap` seeds exactly that apikey and org id as the
-  `aggregator-dpg` network-service account.
-- aggregator-api and aggregator-worker read them as `SIGNALSTACK_ADMIN_KEY` /
-  `SIGNALSTACK_ACTING_ORG_ID`, and signals-api uses the same key for
-  signals-search (§10).
+- aggregator-api and aggregator-worker authenticate with a Keycloak
+  client-credentials token (`SIGNALSTACK_AUTH_MODE=bearer`) for the
+  `aggregator-dpg` client. Its secret, `SIGNALSTACK_CLIENT_SECRET`, is rendered
+  into the realm by the `keycloak` service from the same `.env` value.
+- signals-api accepts that client (`KEYCLOAK_SERVICE_CLIENT_IDS=aggregator-dpg`)
+  and maps it to the org whose slug is `aggregator-dpg`.
+- `signals-bootstrap` seeds that org with the fixed id `AGGREGATOR_DPG_ORG_ID`
+  from `.env`; aggregator-api sends the same id as `x-acting-org-id`.
 
 **Verify** (mirror an aggregator into signals — the pattern documented in
 `signals-dpg/docs/operations/integrating-dpgs.md`):
 
 ```bash
 set -a; . ./.env; set +a
+TOKEN=$(curl -s http://keycloak:8080/realms/$KEYCLOAK_REALM/protocol/openid-connect/token \
+  -d grant_type=client_credentials -d client_id=aggregator-dpg \
+  -d client_secret="$SIGNALSTACK_CLIENT_SECRET" | sed 's/.*"access_token":"\([^"]*\)".*/\1/')
 curl -X POST http://localhost:2742/api/v1/admin/aggregator/upsert \
-  -H "x-api-key: $AGGREGATOR_DPG_API_KEY" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "x-acting-org-id: $AGGREGATOR_DPG_ORG_ID" \
   -H 'Content-Type: application/json' \
   -d '{"external_id":"agg_demo_001","name":"Demo Aggregator","slug":"demo","domains":["seeker","provider"]}'
 # -> { "org_id": "org_<uuid>", "created": true }
 ```
 
-> The seed applies these values only when it first creates the rows. If you
-> change either one in `.env` after the first `up`, reset with `down -v` (§7).
+> The seed applies `AGGREGATOR_DPG_ORG_ID` and `SIGNALS_SEARCH_API_KEY` only
+> when it first creates the rows. If you change either one in `.env` after the
+> first `up`, reset with `down -v` (§7).
 
 ---
 
@@ -409,6 +414,16 @@ REDIS_URL=redis://:<SIGNALS_REDIS_PASSWORD>@localhost:5555
 
 # 32-byte base64 key — any fresh value is fine locally: openssl rand -base64 32
 SIGNALS_PII_KEY=<base64-32-byte-key>
+
+# Keycloak from Step 1; accept the aggregator's client-credentials token
+AUTH_PROVIDER=keycloak
+KEYCLOAK_BASE_URL=http://keycloak:8080
+KEYCLOAK_API_CLIENT_ID=signals-api
+KEYCLOAK_API_CLIENT_SECRET=signals-api-local-dev-secret
+KEYCLOAK_SERVICE_CLIENT_IDS=aggregator-dpg
+
+# Seeded as the aggregator-dpg org id — same value as local-setup/.env
+AGGREGATOR_DPG_ORG_ID=org_00000000-0000-4000-8000-00000000a001
 ```
 
 Apply schema, seed the service account, then run it:
@@ -416,24 +431,14 @@ Apply schema, seed the service account, then run it:
 ```bash
 pnpm db:push:api           # apply schema (confirm the prompt)
 pnpm db:init:api           # partitioned items / actions / events tables
-pnpm db:seed:services:api  # mints the aggregator service apikey — COPY the printed key
+pnpm db:seed:services:api  # seeds the aggregator-dpg org (id from AGGREGATOR_DPG_ORG_ID)
 
 pnpm dev:api               # signals API on :2742   (terminal 1)
 pnpm dev:ui                # signals UI  on :5173   (terminal 2)
 ```
 
-**Capture two values for Step 3** (the aggregator↔signals wiring):
-
-1. **`SIGNALSTACK_ADMIN_KEY`** — the `sk_signals_…` apikey printed by
-   `db:seed:services:api` above.
-2. **`SIGNALSTACK_ACTING_ORG_ID`** — the aggregator-dpg service org id. Read it
-   from the Dockerised Postgres:
-
-   ```bash
-   docker exec sd-postgres psql -U dpg -d signals -t -c \
-     "select id from organization where name like 'aggregator-dpg%';"
-   # -> org_........................
-   ```
+Nothing to capture: the aggregator authenticates with a Keycloak token, and the
+org id is the `AGGREGATOR_DPG_ORG_ID` set above.
 
 ### Step 3 — aggregator-dpg from source (+ signals wiring)
 
@@ -470,10 +475,12 @@ KEYCLOAK_URL=http://keycloak:8080
 APPROVAL_TOKEN_SECRET=<same as local-setup/.env, >=32 chars>
 ADMIN_EMAILS=you@yourorg.com
 
-# SignalStack wiring — the two values captured in Step 2
+# SignalStack wiring — Keycloak client-credentials token + the org id from Step 2
 SIGNALSTACK_BASE_URL=http://localhost:2742
-SIGNALSTACK_ADMIN_KEY=sk_signals_....................
-SIGNALSTACK_ACTING_ORG_ID=org_....................
+SIGNALSTACK_AUTH_MODE=bearer
+SIGNALSTACK_CLIENT_ID=aggregator-dpg
+SIGNALSTACK_CLIENT_SECRET=aggregator-dpg-signals-local-dev-secret
+SIGNALSTACK_ACTING_ORG_ID=org_00000000-0000-4000-8000-00000000a001
 ```
 
 `apps/web/.env.example` is likewise complete for local dev — the client
@@ -493,7 +500,11 @@ just DB + the SignalStack push; note there's **no** acting-org here):
 ```dotenv
 DATABASE_URL=postgres://dpg:<POSTGRES_PASSWORD from local-setup/.env>@localhost:5432/aggregator
 SIGNALSTACK_BASE_URL=http://localhost:2742
-SIGNALSTACK_ADMIN_KEY=sk_signals_....................
+SIGNALSTACK_AUTH_MODE=bearer
+SIGNALSTACK_CLIENT_ID=aggregator-dpg
+SIGNALSTACK_CLIENT_SECRET=aggregator-dpg-signals-local-dev-secret
+KEYCLOAK_URL=http://keycloak:8080
+KEYCLOAK_REALM=bluedots
 ```
 
 Migrate and run:
@@ -538,14 +549,14 @@ docker compose up -d --build   # rebuild from scratch; re-runs migrate + seed
 ```
 
 Wiping volumes re-runs `signals-bootstrap`, which seeds the same
-`AGGREGATOR_DPG_API_KEY` / `AGGREGATOR_DPG_ORG_ID` from `.env` again — nothing to
+`AGGREGATOR_DPG_ORG_ID` / `SIGNALS_SEARCH_API_KEY` from `.env` again — nothing to
 re-wire.
 
 **Track B:** stop the `pnpm dev` processes, then from `local-setup/` run
 `docker compose down -v` to wipe the backing volumes. On the next run, redo
 Step 2 (`db:push:api` / `db:init:api` / `db:seed:services:api`) and Step 3
-(`db:migrate`) — and because the seed **mints a new apikey**, re-copy the new
-`SIGNALSTACK_ADMIN_KEY` / `SIGNALSTACK_ACTING_ORG_ID` into `apps/api/.env`.
+(`db:migrate`). The seed reuses `AGGREGATOR_DPG_ORG_ID` from the signals `.env`,
+so `apps/api/.env` needs no change.
 
 ---
 
@@ -561,7 +572,7 @@ Step 2 (`db:push:api` / `db:init:api` / `db:seed:services:api`) and Step 3
 | `AGGREGATOR_TYPE_MISSING` on onboarding (bulk upload / links)                                                                                                         | Same root cause as above — the `aggregator_type` KC attribute was dropped at registration (policy DISABLED then), so the JWT has no `aggregator_type` claim. Fixed for new registrations by the `keycloak-init` sidecar. For an already-registered user: **sign out and back in** to mint a fresh token (the claim only appears in a new token); if the attribute itself is missing, re-register or `down -v` + `up`.                                                                                                                                                                                                                                                                                                                                                     |
 | `signals-api` restarts / "relation does not exist"                                                                                                                    | `signals-bootstrap` didn't finish. Check `docker compose logs signals-bootstrap`; re-run with `docker compose up -d --force-recreate signals-bootstrap signals-api`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `signals-bootstrap` fails on `SIGNALS_PII_KEY`                                                                                                                        | It must be base64 that decodes to exactly 32 bytes: `openssl rand -base64 32`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| aggregator upstream calls 403 `INVALID_API_KEY`                                                                                                                       | `AGGREGATOR_DPG_API_KEY` in `.env` was changed after the first seed. `docker compose down -v && docker compose up -d` (§7).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| signals-search 401 `INVALID_API_KEY`                                                                                                                                  | `SIGNALS_SEARCH_API_KEY` in `.env` was changed after the first seed. `docker compose down -v && docker compose up -d` (§7).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | No email arrives                                                                                                                                                      | It's not actually delivered locally — open Mailpit at http://localhost:8025.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | OTP code never emailed                                                                                                                                                | For phone/SMS OTP the `log` provider prints it: `docker compose logs keycloak \| grep -i otp`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | First `up --build` is very slow                                                                                                                                       | Normal — five app images build from source. Subsequent ups are cached.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -666,7 +677,7 @@ checkout (signals-search is pulled prebuilt).
 | -------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Enabled              | opt-in `--profile search` + `.env.search` | always on; wired in `docker-compose.yml`                                                                                                                                          |
 | Search API host port | `3100`                                  | **`3110`** — the aggregator portal already owns 3100. The container still listens on 3100, so in-compose URLs are unchanged.                                                        |
-| API key              | minted by the seed, copied by hand      | `AGGREGATOR_DPG_API_KEY` from `.env`, seeded by `signals-bootstrap` (§4)                                                                                                            |
+| API key              | minted by the seed, copied by hand      | `SIGNALS_SEARCH_API_KEY` from `.env`, seeded by `signals-bootstrap` as the `signals-search` apikey                                                                                    |
 | Database             | the single `postgresdb`                 | the **`signals`** database specifically; this Postgres also holds `aggregator` and `keycloak`. Pointing search at the wrong one gives `401`s (no `apikey` rows) and an empty index. |
 | Redis                | `redis`                                 | `signals-redis` — signals-search shares the _signals_ Redis, because that is where the ingestion stream lives. Not `aggregator-redis`.                                              |
 | `network.json`       | `../examples/...`                       | `../../signals-dpg/examples/schemas/blue_dot/network.json` — from the sibling checkout, so both services agree on domains and permitted interactions.                               |
@@ -685,7 +696,7 @@ a 200 there proves only that the process is up. Run a real query:
 set -a; . ./.env; set +a
 curl -sS -X POST http://localhost:3110/v1/search \
   -H 'content-type: application/json' \
-  -H "x-api-key: $AGGREGATOR_DPG_API_KEY" \
+  -H "x-api-key: $SIGNALS_SEARCH_API_KEY" \
   -d '{
         "context": {
           "messageId": "local-smoke-1",

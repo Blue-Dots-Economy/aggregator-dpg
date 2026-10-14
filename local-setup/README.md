@@ -49,7 +49,7 @@ Needs **≥10 GB** of Docker memory (the embedder alone wants 3-4 GB) and a
 | ------------------------------------ | ------------------------------------------------------------------------- |
 | `docker-compose.yml`                 | the unified stack (both DPGs + shared infra)                              |
 | `.env.example`                       | single root env — copy to `.env`, then run `gen-secrets.sh`               |
-| `gen-secrets.sh`                     | fills every `CHANGE_ME_*` placeholder in `.env` (incl. the shared aggregator↔signals apikey) |
+| `gen-secrets.sh`                     | fills every `CHANGE_ME_*` placeholder in `.env` (incl. the signals-search apikey) |
 | `LOCAL_SETUP.md`                     | from-scratch setup guide, both run modes, troubleshooting                 |
 | `infra/postgres.Dockerfile`          | Postgres 17 + PostGIS + pgvector image                                    |
 | `infra/postgres-init/`               | creates the `signals` + `keycloak` DBs on first boot                      |
