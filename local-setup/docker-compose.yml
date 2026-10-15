@@ -193,6 +193,24 @@ services:
         echo "minio-init: bucket '$$S3_BUCKET' ready"
     restart: "no"
 
+  # Serves signals-dpg's network.json for AGGREGATOR_NETWORK over HTTP, so the
+  # Aggregator reads the same file as Signals (its loader only fetches
+  # network.json from a URL). Replace the file in
+  # signals-dpg/examples/schemas/<network>/ and both sides pick it up.
+  # Override with AGGREGATOR_NETWORK_SOURCE to use another URL.
+  schema-server:
+    image: python:3.12-alpine
+    container_name: sd-schema-server
+    restart: unless-stopped
+    command: ["python", "-m", "http.server", "8765", "--directory", "/schemas"]
+    volumes:
+      - ../../signals-dpg/examples/schemas/${AGGREGATOR_NETWORK:-blue_dot}:/schemas:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/network.json')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # ───────────────────────────────────────────────────────────────────────
   # Keycloak — identity for aggregator-dpg (OIDC + email/phone OTP)
   #
@@ -549,6 +567,7 @@ services:
       # Per-network config (schemas + aggregator.config.yaml).
       SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/schemas
       AGGREGATOR_CONFIG_PATH: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/aggregator.config.yaml
+      AGGREGATOR_NETWORK_SOURCE: ${AGGREGATOR_NETWORK_SOURCE:-http://schema-server:8765/network.json}
       # ── Cross-DPG push into signals (optional; see LOCAL_SETUP.md) ────────
       # The org id signals-bootstrap seeds for aggregator-dpg.
       SIGNALSTACK_BASE_URL: ${SIGNALSTACK_BASE_URL:-http://signals-api:2742}
@@ -587,6 +606,8 @@ services:
       # API can create users — otherwise aggregator_id attributes are dropped.
       keycloak-init:
         condition: service_completed_successfully
+      schema-server:
+        condition: service_healthy
 
   aggregator-web:
     build:
@@ -687,6 +708,7 @@ services:
       EXPORT_NETWORK_ADMIN_EMAIL: ${EXPORT_NETWORK_ADMIN_EMAIL:-}
       SCHEMA_ROOT_DIR: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/schemas
       AGGREGATOR_CONFIG_PATH: /app/config/${AGGREGATOR_NETWORK:-blue_dot}/aggregator.config.yaml
+      AGGREGATOR_NETWORK_SOURCE: ${AGGREGATOR_NETWORK_SOURCE:-http://schema-server:8765/network.json}
       # Bulk-file processor caps + cron intervals (match aggregator-dpg/docker-compose.yml).
       BULK_MAX_ROWS: ${BULK_MAX_ROWS:-10000}
       BULK_MAX_ROW_BYTES: ${BULK_MAX_ROW_BYTES:-65536}
@@ -709,6 +731,8 @@ services:
       postgres:
         condition: service_healthy
       aggregator-redis:
+        condition: service_healthy
+      schema-server:
         condition: service_healthy
 
 volumes:
