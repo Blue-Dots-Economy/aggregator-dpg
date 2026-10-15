@@ -197,21 +197,22 @@ sequenceDiagram
 
 ## 4. Managing roles
 
-| Endpoint                                                                             | Permission               | Does                                                                                                                  |
-| ------------------------------------------------------------------------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `GET /v1/roles`                                                                      | `org.manage`             | Every role with its permissions, and the permission catalogue a custom role is composed from                          |
-| `POST /v1/roles/create`, `PATCH /v1/roles/update/:key`, `POST /v1/roles/delete/:key` | `network.administer`     | Custom roles; built-in roles are refused                                                                              |
-| `GET /v1/user/roles/:id`                                                             | `org.manage`             | A user's roles: base roles (derived) and additional roles, live and past                                              |
-| `POST /v1/user/role/assign/:id`                                                      | The role's `assigned_by` | Assign an additional role in an organisation the user belongs to or owns, with an expiry when the role has `max_days` |
-| `POST /v1/user/role/revoke/:id`                                                      | The role's `assigned_by` | Revoke an assignment                                                                                                  |
+| Endpoint                                                                             | Permission                               | Does                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------ | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/roles`                                                                      | `org.manage`                             | Every role with its permissions, and the permission catalogue a custom role is composed from                                                                                                                      |
+| `POST /v1/roles/create`, `PATCH /v1/roles/update/:key`, `POST /v1/roles/delete/:key` | `network.administer`                     | Custom roles; built-in roles are refused. No console page calls them (#871)                                                                                                                                       |
+| `GET /v1/rbac/roles`, `GET /v1/rbac/permissions`                                     | `network.administer`, network admin only | Read-only (#871): every enforced role (who holds it, where, how it is given, longest validity, permissions) and every permission (personal-data and retired flags, the roles that grant it); anyone else gets 404 |
+| `GET /v1/user/roles/:id`                                                             | `org.manage`                             | A user's roles: base roles (derived) and additional roles, live and past                                                                                                                                          |
+| `POST /v1/user/role/assign/:id`                                                      | The role's `assigned_by`                 | Assign an additional role in an organisation the user belongs to or owns, with an expiry when the role has `max_days`                                                                                             |
+| `POST /v1/user/role/revoke/:id`                                                      | The role's `assigned_by`                 | Revoke an assignment                                                                                                                                                                                              |
 
 Every assignment checks, in order: the target is in reach (else 404), the role is not a base role, the target belongs to or owns the organisation, the caller holds the role's `assigned_by` permission there, the target is not the caller, the account type matches, the organisation type is assignable, separation of duties holds, and the expiry is within `max_days`. Each write and its `iam_audit` row commit together.
 
-| Console page      | Who                      | Shows                                                                                        |
-| ----------------- | ------------------------ | -------------------------------------------------------------------------------------------- |
-| Coordinator page  | Org Admin, Network Admin | The coordinator's roles: assign and revoke PII Access, Data Export, custom coordinator roles |
-| Organisation page | Network Admin            | The owner's roles: Org Onboarder, custom admin roles                                         |
-| Roles             | Network Admin            | Built-in roles (read-only) and custom roles (create, edit, delete)                           |
+| Console page          | Who                      | Shows                                                                                                                 |
+| --------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Coordinator page      | Org Admin, Network Admin | The coordinator's roles: assign and revoke PII Access, Data Export, custom coordinator roles                          |
+| Organisation page     | Network Admin            | The owner's roles: Org Onboarder, custom admin roles                                                                  |
+| Roles and permissions | Network Admin            | Read-only (#871): the roles table and the permissions table, from `GET /v1/rbac/*`; no create, edit, delete or assign |
 
 ---
 

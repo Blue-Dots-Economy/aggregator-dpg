@@ -282,6 +282,62 @@ export const RolesResponseSchema = z.object({
 });
 export type RolesResponse = z.infer<typeof RolesResponseSchema>;
 
+/**
+ * How a role is given: by membership (a base role, and which membership), or
+ * assigned by holders of a named permission (an additional role).
+ */
+export const RoleGrantSchema = z.discriminatedUnion('via', [
+  z.object({
+    via: z.literal('membership'),
+    membership: z.enum(['org_member', 'org_owner', 'root_owner']),
+  }),
+  z.object({ via: z.literal('assignment'), assigned_by: z.string() }),
+]);
+export type RoleGrant = z.infer<typeof RoleGrantSchema>;
+
+/** One row of the network admin's read-only roles table (#871). */
+export const CatalogueRoleSchema = z.object({
+  key: z.string(),
+  name: z.string(),
+  description: z.string(),
+  is_builtin: z.boolean(),
+  /** Who holds it: organisation owners (admin accounts) or coordinators. */
+  held_by: z.enum(['org_owners', 'coordinators']),
+  /** Organisation types it is held in. */
+  held_in: z.array(OrgTypeSchema),
+  granted: RoleGrantSchema,
+  /** Longest validity of an assignment, in days; null = none applies. */
+  max_days: z.number().int().positive().nullable(),
+  /** As stored, sorted. */
+  permissions: z.array(z.string()),
+});
+export type CatalogueRole = z.infer<typeof CatalogueRoleSchema>;
+
+/** `GET /v1/rbac/roles`: every role the API enforces, built-in and custom. */
+export const CatalogueRolesResponseSchema = z.object({ roles: z.array(CatalogueRoleSchema) });
+export type CatalogueRolesResponse = z.infer<typeof CatalogueRolesResponseSchema>;
+
+/** One row of the network admin's read-only permissions table (#871). */
+export const CataloguePermissionSchema = z.object({
+  key: z.string(),
+  description: z.string(),
+  resource: z.string(),
+  action: z.string(),
+  /** Exposes or processes decrypted personal data. */
+  personal_data: z.boolean(),
+  /** No longer in the code's catalogue; kept so stored roles still resolve. */
+  retired: z.boolean(),
+  /** Keys of the roles that grant it, sorted. */
+  granted_by_roles: z.array(z.string()),
+});
+export type CataloguePermission = z.infer<typeof CataloguePermissionSchema>;
+
+/** `GET /v1/rbac/permissions`: every permission in the catalogue, retired included. */
+export const CataloguePermissionsResponseSchema = z.object({
+  permissions: z.array(CataloguePermissionSchema),
+});
+export type CataloguePermissionsResponse = z.infer<typeof CataloguePermissionsResponseSchema>;
+
 /** One additional-role assignment on the wire. */
 export const RoleAssignmentSchema = z.object({
   id: z.string(),

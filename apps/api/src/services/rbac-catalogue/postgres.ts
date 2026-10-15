@@ -27,6 +27,7 @@ import {
   RbacCatalogueBase,
   type CatalogueSnapshot,
   type CatalogueStoreResult,
+  type StoredPermission,
   type SyncResult,
 } from './interface.js';
 
@@ -322,6 +323,17 @@ export class PostgresRbacCatalogue extends RbacCatalogueBase {
       return { ok: true, value: revisionOf(await getDb().execute(REVISION)) };
     } catch (e) {
       return dbFailure('rbacCatalogue.revision', e);
+    }
+  }
+
+  /** {@inheritDoc RbacCatalogueBase.listPermissions} */
+  async listPermissions(): Promise<CatalogueStoreResult<StoredPermission[]>> {
+    try {
+      // Sorted here, not by the database's collation, so every store orders alike.
+      const rows = await getDb().select().from(permission);
+      return { ok: true, value: rows.sort((a, b) => a.key.localeCompare(b.key)) };
+    } catch (e) {
+      return dbFailure('rbacCatalogue.listPermissions', e);
     }
   }
 }

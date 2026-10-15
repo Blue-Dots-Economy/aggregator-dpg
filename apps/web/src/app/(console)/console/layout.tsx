@@ -41,7 +41,7 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
       <ConsoleNav
         isNetworkAdmin={actor.me.is_network_admin}
         canManage={can(actor.me.capabilities, 'org.manage')}
-        canAdministerRoles={
+        canViewAccess={
           actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer')
         }
       />
