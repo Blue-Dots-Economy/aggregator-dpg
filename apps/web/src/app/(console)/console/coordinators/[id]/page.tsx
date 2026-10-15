@@ -4,7 +4,6 @@
  * on, its roles: the base Coordinator role and additional roles to assign.
  */
 
-import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import type {
   RolesResponse,
@@ -15,7 +14,8 @@ import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
 import { getConsoleActor } from '@/lib/console-actor';
 import { can } from '@/lib/capabilities';
 import { RolesPanel } from '@/components/console/RolesPanel';
-import { Card } from '@/components/ui/Card';
+import { Topbar } from '@/components/shell/Topbar';
+import { BackLink, ConsoleSection, DetailList } from '@/components/console/ConsoleUi';
 import { CoordinatorActions } from '@/components/console/CoordinatorActions';
 
 interface ConfigPayload {
@@ -54,31 +54,31 @@ export default async function ConsoleCoordinatorPage({
     canManage ? consoleReadOptional<RolesResponse>('/v1/roles') : Promise.resolve(null),
   ]);
   return (
-    <div className="flex flex-col gap-4">
-      <Link className="text-primary-600 underline text-[13.5px]" href="/console/coordinators">
-        {t('coordinator.back')}
-      </Link>
-      <h1 className="font-display text-[22px] font-bold text-ink-900">{user.name}</h1>
-      <Card className="p-4 text-[13.5px] flex flex-col gap-1">
-        <span>
-          {t('account.name')}: {user.contact.name ?? '—'}
-        </span>
-        <span>
-          {t('account.email')}: {user.contact.email}
-        </span>
-        <span>
-          {t('account.phone')}: {user.contact.phone ?? '—'}
-        </span>
-      </Card>
-      <CoordinatorActions user={user} domains={domainList} />
-      {userRoles && catalogue && user.org_id ? (
-        <RolesPanel
-          userId={user.id}
-          orgId={user.org_id}
-          initial={userRoles}
-          roles={catalogue.roles}
-        />
-      ) : null}
-    </div>
+    <>
+      <div>
+        <BackLink href="/console/coordinators">{t('coordinator.back')}</BackLink>
+        <Topbar title={user.name} subtitle={user.contact.email} />
+      </div>
+      <div className="flex flex-col gap-6">
+        <ConsoleSection title={t('coordinator.details')}>
+          <DetailList
+            items={[
+              { label: t('account.name'), value: user.contact.name ?? '—' },
+              { label: t('account.email'), value: user.contact.email },
+              { label: t('account.phone'), value: user.contact.phone ?? '—' },
+            ]}
+          />
+        </ConsoleSection>
+        <CoordinatorActions user={user} domains={domainList} />
+        {userRoles && catalogue && user.org_id ? (
+          <RolesPanel
+            userId={user.id}
+            orgId={user.org_id}
+            initial={userRoles}
+            roles={catalogue.roles}
+          />
+        ) : null}
+      </div>
+    </>
   );
 }

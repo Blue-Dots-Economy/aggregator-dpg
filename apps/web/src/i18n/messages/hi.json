@@ -642,7 +642,10 @@
       "invite": "Invite coordinators",
       "access": "Roles and permissions",
       "account": "My account",
-      "sign_out": "Sign out"
+      "sign_out": "Sign out",
+      "portal_label": "Organisation console",
+      "network_admin": "Network admin",
+      "org_owner": "Organisation owner"
     },
     "home": {
       "heading": "Your organisations",
@@ -652,7 +655,11 @@
       "coordinators": "{count} coordinators",
       "pending": "{count} pending",
       "open": "Open",
-      "no_orgs": "You don't manage an active organisation."
+      "no_orgs": "You don't manage an active organisation.",
+      "subtitle_admin": "The network, your organisations and what is waiting for review.",
+      "subtitle_owner": "Your organisations and their coordinators.",
+      "coordinators_label": "Coordinators",
+      "pending_label": "Pending review"
     },
     "org": {
       "details": "Organisation details",
@@ -669,7 +676,9 @@
       "owner": "Owner",
       "status": "Status",
       "view_coordinators": "View coordinators",
-      "owner_roles": "Owner's roles"
+      "owner_roles": "Owner's roles",
+      "overview": "Overview",
+      "subtitle": "Organisation details, owner and coordinators."
     },
     "orgs": {
       "heading": "Organisations",
@@ -679,7 +688,12 @@
       "reject": "Reject",
       "repair": "Re-grant owner access",
       "repaired": "Owner access: {status}",
-      "empty": "No organisations match."
+      "empty": "No organisations match.",
+      "subtitle": "Every aggregator organisation on the network.",
+      "col_name": "Organisation",
+      "col_status": "Status",
+      "col_counts": "Coordinators",
+      "col_actions": "Actions"
     },
     "coordinators": {
       "heading": "Coordinators",
@@ -692,7 +706,9 @@
       "status": "Status",
       "serves": "Domains",
       "every_domain": "Every domain",
-      "open": "Open"
+      "open": "Open",
+      "subtitle": "Coordinators in your organisations, newest first.",
+      "apply": "Apply"
     },
     "coordinator": {
       "approve": "Approve",
@@ -704,7 +720,9 @@
       "domains_hint": "Select none to serve every domain.",
       "save_domains": "Save domains",
       "saved": "Saved.",
-      "back": "Back to coordinators"
+      "back": "Back to coordinators",
+      "details": "Contact details",
+      "decision": "Registration"
     },
     "invite": {
       "heading": "Invite coordinators",
@@ -715,14 +733,16 @@
       "result": "Sent {sent}, resent {resent}.",
       "invalid": "Not sent:",
       "existing": "Already in this organisation:",
-      "no_orgs": "None of your organisations accepts invites."
+      "no_orgs": "None of your organisations accepts invites.",
+      "subtitle": "Invite coordinators to one of your organisations by email."
     },
     "account": {
       "heading": "My account",
       "name": "Name",
       "email": "Email",
       "phone": "Phone",
-      "read_only": "Contact details can't be changed here yet."
+      "read_only": "Contact details can't be changed here yet.",
+      "subtitle": "The details you sign in with."
     },
     "status": {
       "pending": "Pending",
@@ -766,15 +786,11 @@
       "col_description": "Description",
       "col_kind": "Type",
       "col_held_by": "Held by",
-      "col_held_in": "Held in",
-      "col_given": "How it is given",
-      "col_max_days": "Longest validity",
+      "held_in_line": "in {orgs}",
+      "valid_for": "Valid for up to {count, plural, one {# day} other {# days}}.",
       "col_permissions": "Permissions",
       "col_permission": "Permission",
-      "col_resource": "Resource",
-      "col_action": "Action",
       "col_personal_data": "Personal data",
-      "col_status": "Status",
       "col_granted_by": "Granted by roles",
       "builtin": "Built-in",
       "custom": "Custom",
@@ -782,15 +798,8 @@
       "held_by_coordinators": "Coordinators",
       "org_aggregator": "Aggregator organisations",
       "org_network_facilitator": "The network organisation",
-      "given_org_member": "From membership: coordinators of the organisation",
-      "given_org_owner": "From membership: owners of an aggregator organisation",
-      "given_root_owner": "From membership: the network organisation owner",
-      "given_assigned": "Assigned by holders of {permission}",
-      "days": "{count, plural, one {# day} other {# days}}",
-      "no_limit": "No limit",
       "yes": "Yes",
       "no": "No",
-      "active": "Active",
       "retired": "Retired",
       "none": "None"
     }

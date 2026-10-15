@@ -10,7 +10,8 @@ import type { CatalogueRolesResponse } from '@aggregator-dpg/shared-primitives/u
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleReadOptional } from '@/lib/console-api.server';
 import { can } from '@/lib/capabilities';
-import { Card } from '@/components/ui/Card';
+import { Topbar } from '@/components/shell/Topbar';
+import { ConsoleSection } from '@/components/console/ConsoleUi';
 import { AccessTabs, RolesCatalogueTable } from '@/components/console/AccessCatalogue';
 
 export default async function ConsoleAccessRolesPage() {
@@ -20,17 +21,17 @@ export default async function ConsoleAccessRolesPage() {
   if (!actor.me.is_network_admin || !can(actor.me.capabilities, 'network.administer')) notFound();
   const data = await consoleReadOptional<CatalogueRolesResponse>('/v1/rbac/roles');
   return (
-    <div className="flex flex-col gap-4">
-      <h1 className="font-display text-[22px] font-bold text-ink-900">{t('title')}</h1>
-      <p className="text-[13.5px] text-ink-600">{t('intro')}</p>
-      <AccessTabs current="roles" />
-      {data ? (
-        <Card className="p-2">
-          <RolesCatalogueTable roles={data.roles} />
-        </Card>
-      ) : (
-        <Card className="p-4 text-[13.5px]">{t('off')}</Card>
-      )}
-    </div>
+    <>
+      <Topbar title={t('title')} subtitle={t('intro')} />
+      <div className="flex flex-col gap-6">
+        <ConsoleSection flush action={<AccessTabs current="roles" />}>
+          {data ? (
+            <RolesCatalogueTable roles={data.roles} />
+          ) : (
+            <p className="p-5 text-[13.5px] text-ink-500">{t('off')}</p>
+          )}
+        </ConsoleSection>
+      </div>
+    </>
   );
 }

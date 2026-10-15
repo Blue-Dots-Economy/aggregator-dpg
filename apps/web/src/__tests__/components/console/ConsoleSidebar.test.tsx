@@ -1,0 +1,96 @@
+/**
+ * Unit tests for the console sidebar: the links each actor gets, which link is
+ * active, and the account card, in the shell shared with the coordinator
+ * portal. Hooks the shared shell reads are mocked, as in `Sidebar.test.tsx`.
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, within } from '@testing-library/react';
+
+const { useAuth, useThemeMode, useAggregatorConfig, usePathname } = vi.hoisted(() => ({
+  useAuth: vi.fn(),
+  useThemeMode: vi.fn(),
+  useAggregatorConfig: vi.fn(),
+  usePathname: vi.fn(),
+}));
+
+vi.mock('@/lib/auth-context', () => ({ useAuth, useCan: () => () => true }));
+vi.mock('@/lib/theme-mode', () => ({ useThemeMode }));
+vi.mock('@/hooks/useAggregatorConfig', () => ({
+  useAggregatorConfig,
+  DEFAULT_AGGREGATOR_CONFIG: {
+    aggregator: { name: 'Aggregator' },
+    brand: { short_name: 'Blue Dots', long_name: 'Blue Dots Portal', url_slug: 'dashboard' },
+    network: { id: 'blue_dot' },
+    domains: [],
+  },
+}));
+vi.mock('@/hooks/useDashboard', () => ({ useDashboard: () => ({ data: undefined }) }));
+vi.mock('@/hooks/useProfile', () => ({ useProfileRaw: () => ({ data: undefined }) }));
+vi.mock('next/navigation', () => ({ usePathname }));
+vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
+
+import { ConsoleSidebar } from '@/components/console/ConsoleSidebar';
+
+const account = { title: 'Asha Rao', subtitle: 'nav.network_admin' };
+
+/** The desktop sidebar (the mobile drawer is closed). */
+const aside = () => screen.getByRole('complementary');
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  usePathname.mockReturnValue('/console');
+  useAuth.mockReturnValue({ signOut: vi.fn(), supportEnabled: false });
+  useThemeMode.mockReturnValue({ mode: 'light' });
+  useAggregatorConfig.mockReturnValue({ data: undefined });
+});
+
+describe('<ConsoleSidebar />', () => {
+  it('gives the network admin every console link, with the brand and portal label', () => {
+    render(<ConsoleSidebar isNetworkAdmin canViewAccess account={account} />);
+    const links = within(aside())
+      .getAllByRole('link')
+      .map((a) => [a.textContent, a.getAttribute('href')]);
+    expect(links).toEqual([
+      ['nav.home', '/console'],
+      ['nav.organisations', '/console/orgs'],
+      ['nav.coordinators', '/console/coordinators'],
+      ['nav.invite', '/console/invite'],
+      ['nav.access', '/console/access/roles'],
+      ['nav.account', '/console/account'],
+    ]);
+    expect(within(aside()).getByText('Blue Dots')).toBeInTheDocument();
+    expect(within(aside()).getByText('nav.portal_label')).toBeInTheDocument();
+  });
+
+  it('leaves out organisations, roles and, without org.manage, coordinators and invites', () => {
+    render(<ConsoleSidebar isNetworkAdmin={false} canManage={false} account={account} />);
+    const hrefs = within(aside())
+      .getAllByRole('link')
+      .map((a) => a.getAttribute('href'));
+    expect(hrefs).toEqual(['/console', '/console/account']);
+  });
+
+  it('marks home active only on /console itself', () => {
+    usePathname.mockReturnValue('/console/orgs/123');
+    render(<ConsoleSidebar isNetworkAdmin canViewAccess account={account} />);
+    expect(within(aside()).getByRole('link', { name: 'nav.home' })).not.toHaveClass('nav-active');
+    expect(within(aside()).getByRole('link', { name: 'nav.organisations' })).toHaveClass(
+      'nav-active',
+    );
+  });
+
+  it('keeps the roles and permissions link active on the permissions table', () => {
+    usePathname.mockReturnValue('/console/access/permissions');
+    render(<ConsoleSidebar isNetworkAdmin canViewAccess account={account} />);
+    expect(within(aside()).getByRole('link', { name: 'nav.access' })).toHaveClass('nav-active');
+  });
+
+  it('shows the account card with the role, and sign-out, but no contact support', () => {
+    render(<ConsoleSidebar isNetworkAdmin account={account} />);
+    expect(within(aside()).getByText('Asha Rao')).toBeInTheDocument();
+    expect(within(aside()).getByText('AS')).toBeInTheDocument();
+    expect(within(aside()).getByText('nav.network_admin')).toBeInTheDocument();
+    expect(within(aside()).getByRole('button', { name: 'sign_out' })).toBeInTheDocument();
+    expect(within(aside()).queryByText('contact_support')).toBeNull();
+  });
+});

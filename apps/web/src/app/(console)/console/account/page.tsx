@@ -5,7 +5,8 @@
 
 import { getTranslations } from 'next-intl/server';
 import { getConsoleActor } from '@/lib/console-actor';
-import { Card } from '@/components/ui/Card';
+import { Topbar } from '@/components/shell/Topbar';
+import { ConsoleSection, DetailList } from '@/components/console/ConsoleUi';
 
 export default async function ConsoleAccountPage() {
   const t = await getTranslations('console');
@@ -13,20 +14,20 @@ export default async function ConsoleAccountPage() {
   if (!actor.ok) return null;
   const c = actor.me.user.contact;
   return (
-    <div className="flex flex-col gap-4">
-      <h1 className="font-display text-[22px] font-bold text-ink-900">{t('account.heading')}</h1>
-      <Card className="p-4 text-[13.5px] flex flex-col gap-1">
-        <span>
-          {t('account.name')}: {c.name ?? '—'}
-        </span>
-        <span>
-          {t('account.email')}: {c.email}
-        </span>
-        <span>
-          {t('account.phone')}: {c.phone ?? '—'}
-        </span>
-      </Card>
-      <p className="text-[13px] text-ink-600">{t('account.read_only')}</p>
-    </div>
+    <>
+      <Topbar title={t('account.heading')} subtitle={t('account.subtitle')} />
+      <div className="flex flex-col gap-6">
+        <ConsoleSection>
+          <DetailList
+            items={[
+              { label: t('account.name'), value: c.name ?? '—' },
+              { label: t('account.email'), value: c.email },
+              { label: t('account.phone'), value: c.phone ?? '—' },
+            ]}
+          />
+          <p className="mt-5 text-[13px] text-ink-500">{t('account.read_only')}</p>
+        </ConsoleSection>
+      </div>
+    </>
   );
 }
