@@ -144,6 +144,39 @@
                         <button type="submit" class="bd-link-btn">${msg("doTryAnotherWay")}</button>
                     </form>
                 </#if>
+
+                <#-- "Owned by / Managed by" attribution, mirroring the web login
+                     page. Two rows because that is what the only brand using it
+                     needs; each is opt-in, so a theme that sets no attrOneLabel
+                     renders nothing and every other brand's page is byte-identical.
+
+                     On the CARD, not the hero, for the same reason as the web app:
+                     the hero collapses on narrow viewports, and ownership
+                     attribution that disappears on a phone is not attribution.
+
+                     The mark carries the org name as its alt text rather than
+                     repeating it as visible copy — "only the logo, not the text". -->
+                <#if (properties.attrOneLabel!'')?has_content || (properties.attrTwoLabel!'')?has_content>
+                    <div class="bd-attribution">
+                        <#list [
+                            {"label": properties.attrOneLabel!'', "name": properties.attrOneName!'', "logo": properties.attrOneLogo!''},
+                            {"label": properties.attrTwoLabel!'', "name": properties.attrTwoName!'', "logo": properties.attrTwoLogo!''}
+                        ] as row>
+                            <#if row.label?has_content>
+                                <div class="bd-attribution-row">
+                                    <span class="bd-attribution-label">${row.label}</span>
+                                    <#if row.logo?has_content>
+                                        <img class="bd-attribution-mark"
+                                             src="${url.resourcesPath}/img/brand/${properties.brandLogoSlug!'blue-dot'}/${row.logo}"
+                                             alt="${row.name}"/>
+                                    <#else>
+                                        <span class="bd-attribution-name">${row.name}</span>
+                                    </#if>
+                                </div>
+                            </#if>
+                        </#list>
+                    </div>
+                </#if>
             </div>
         </main>
     </div>

@@ -80,7 +80,7 @@ describe('<OnboardingMetrics />', () => {
         by_source: [
           { source: 'bulk', total: 500, passed: 400, failed: 20, skipped: 5 },
           { source: 'link', total: 300, passed: 250, failed: 10, skipped: 2 },
-          { source: 'whatsapp_referral', total: 200, passed: 150, failed: 5, skipped: 1 },
+          { source: 'partner_referral', total: 200, passed: 150, failed: 5, skipped: 1 },
         ],
       },
     });
@@ -97,7 +97,7 @@ describe('<OnboardingMetrics />', () => {
     expect(screen.getByText('CSV upload')).toBeInTheDocument();
     expect(screen.getByText('Registration link')).toBeInTheDocument();
     // Unregistered source falls back to a title-cased label.
-    expect(screen.getByText('Whatsapp Referral')).toBeInTheDocument();
+    expect(screen.getByText('Partner Referral')).toBeInTheDocument();
     // totalJoins = 400+250+150 = 800; percentages shown next to each passed count.
     expect(screen.getByText('800 verified joins')).toBeInTheDocument();
   });

@@ -2,6 +2,22 @@
 
 **Scope:** Participant onboarding pipeline covering two sources — **bulk CSV upload** and **public registration link** — with a shared metrics surface.
 
+> **Superseded in part — the local `participant` table has been removed.**
+>
+> This document describes the design as originally drafted, when both sources
+> INSERTed into a local `participant` table with
+> `ON CONFLICT (aggregator_id, participant_id) DO NOTHING` and counted a conflict
+> as `skipped` / `duplicate`.
+> That mirror (built as `participants`) was dropped in migration 0024 (#819).
+>
+> Signals is now the only participant record. Every reference below to inserting
+> into, deduplicating against, or securing a local `participant` table no longer
+> applies. There is **no local deduplication** on either path: a bulk row's
+> outcome is Signals' verdict, and Signals rejections such as `DOMAIN_LOCKED`,
+> `USER_ALREADY_EXISTS` and `IDENTITY_CONFLICT` are what errors.csv categorises
+> as `duplicate` (`SIGNALS_REJECTION_CATEGORY` in
+> `apps/worker/src/jobs/bulk-row-process.ts`).
+
 **Status:** Draft.
 
 **Date:** 2026-05-08.

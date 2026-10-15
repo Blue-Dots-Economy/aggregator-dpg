@@ -132,17 +132,47 @@ const { logger } = await import('../logger.js');
 
 // ─── Fakes that fail on demand (extend the real in-memory impls) ───────────
 
+/**
+ * Records every `onboard` input so a test can assert what actually reached the
+ * wire — `item_locations` presence and the absence of `geo_location` from the
+ * profile are the two claims #807 makes, and neither is observable from the
+ * row outcome alone.
+ */
+class RecordingSignalStackWriter extends InMemorySignalStackWriter {
+  readonly inputs: SignalStackOnboardParticipantInput[] = [];
+  override async onboard(
+    input: SignalStackOnboardParticipantInput,
+  ): Promise<Result<SignalStackOnboardParticipantResult, BaseError>> {
+    this.inputs.push(input);
+    return await super.onboard(input);
+  }
+}
+
 class FailingSignalStackWriter extends InMemorySignalStackWriter {
   constructor(
     private readonly code = 'UPSTREAM_TIMEOUT',
     private readonly message = 'signalstack unreachable',
+    /** The bare upstream sentence the real writer puts on `details.signalsMessage`. */
+    private readonly signalsMessage?: string,
+    /** Signals' own error code and per-field map, as the real writer forwards them. */
+    private readonly upstream: { code?: string; fields?: Record<string, string> } = {},
   ) {
     super();
   }
   override async onboard(
     _input: SignalStackOnboardParticipantInput,
   ): Promise<Result<SignalStackOnboardParticipantResult, BaseError>> {
-    return err(new UpstreamError(this.message, { code: this.code }));
+    const details = {
+      ...(this.signalsMessage ? { signalsMessage: this.signalsMessage } : {}),
+      ...(this.upstream.code ? { upstreamCode: this.upstream.code } : {}),
+      ...(this.upstream.fields ? { signalsFields: this.upstream.fields } : {}),
+    };
+    return err(
+      new UpstreamError(this.message, {
+        code: this.code,
+        ...(Object.keys(details).length > 0 ? { details } : {}),
+      }),
+    );
   }
 }
 
@@ -320,6 +350,113 @@ describe('processBulkRow — signalstack push outcomes', () => {
     expect(result.category).toBe('limit_reached');
   });
 
+  it('categorises a coordinate outside the country as a validation failure, not a system error (signals-dpg#789)', async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY',
+        'signalstack onboard returned 400: LOCATION_OUTSIDE_COUNTRY: Location 23.8103, 90.4125 is outside the allowed region (IN).',
+        'Location 23.8103, 90.4125 is outside the allowed region (IN).',
+      ),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.outcome).toBe('failed');
+    expect(result.category).toBe('validation');
+    // errors.csv gets the bare sentence the operator can act on, exactly like a
+    // local validation failure — not the transport/status prefix chain.
+    expect(result.reasons).toEqual([
+      'Location 23.8103, 90.4125 is outside the allowed region (IN).',
+    ]);
+  });
+
+  it('falls back to the full upstream message when Signals sent no bare sentence', async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY',
+        'signalstack onboard returned 400',
+      ),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.category).toBe('validation');
+    expect(result.reasons).toEqual(['signalstack onboard returned 400']);
+  });
+
+  it('keeps the diagnostic prefix on a system error, where operators need the code', async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter('UPSTREAM_TIMEOUT', 'signalstack unreachable'),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.category).toBe('system_error');
+    expect(result.reasons).toEqual(['signalstack [UPSTREAM_TIMEOUT]: signalstack unreachable']);
+  });
+
+  it.each([
+    ['INVALID_ITEM_STATE', 'validation'],
+    ['FST_ERR_VALIDATION', 'validation'],
+    ['MISSING_IDENTIFIER', 'validation'],
+    ['AGE_REQUIRED', 'validation'],
+    ['USER_LEVEL_INCOMPLETE', 'validation'],
+    ['CONSENT_DECLINED', 'validation'],
+    ['U18_NOT_ALLOWED', 'validation'],
+    ['LOCATION_OUTSIDE_COUNTRY', 'validation'],
+    ['DOMAIN_LOCKED', 'duplicate'],
+    ['USER_ALREADY_EXISTS', 'duplicate'],
+    ['IDENTITY_CONFLICT', 'duplicate'],
+    ['PROFILE_LIMIT_REACHED', 'limit_reached'],
+    ['UNSERVED_DOMAIN', 'system_error'],
+    ['ONBOARD_FAILED', 'system_error'],
+  ])("categorises Signals' %s as %s", async (upstreamCode, category) => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_BAD_REQUEST',
+        'signalstack onboard returned 400',
+        'why',
+        {
+          code: upstreamCode,
+        },
+      ),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.outcome).toBe('failed');
+    expect(result.category).toBe(category);
+  });
+
+  it("lists Signals' per-field messages as the row's reasons, like a local schema failure", async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_BAD_REQUEST',
+        'signalstack onboard returned 400: INVALID_ITEM_STATE: …',
+        'Invalid item_state: mobile_number: Enter a 10-digit mobile number, gender: must be one of: Male, Female',
+        {
+          code: 'INVALID_ITEM_STATE',
+          fields: {
+            mobile_number: 'Enter a 10-digit mobile number',
+            gender: 'must be one of: Male, Female',
+          },
+        },
+      ),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.category).toBe('validation');
+    expect(result.reasons).toEqual([
+      'mobile_number: Enter a 10-digit mobile number',
+      'gender: must be one of: Male, Female',
+    ]);
+  });
+
+  it("uses Signals' sentence for a duplicate, not the transport prefix", async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_FORBIDDEN',
+        'signalstack onboard returned 403: DOMAIN_LOCKED: …',
+        'This participant is already registered as a provider.',
+        { code: 'DOMAIN_LOCKED' },
+      ),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.category).toBe('duplicate');
+    expect(result.reasons).toEqual(['This participant is already registered as a provider.']);
+  });
+
   it('categorises an owned-elsewhere push rejection distinctly', async () => {
     signalStackWriter.seedForeignUser({ phoneNumber: '+919876543210' });
     const result = await processBulkRow(
@@ -427,5 +564,77 @@ describe('processBulkRow — Redis commit outcome handling', () => {
     heartbeatShouldThrow = new Error('db unavailable');
     const result = await processBulkRow(makeJob());
     expect(result.outcome).toBe('passed');
+  });
+});
+
+describe('processBulkRow — geo_location column (#807)', () => {
+  let recorder: RecordingSignalStackWriter;
+
+  beforeEach(() => {
+    recorder = new RecordingSignalStackWriter();
+    _setSignalStackWriter(recorder);
+  });
+
+  it('sends a valid cell as item_locations and keeps it out of the profile', async () => {
+    const result = await processBulkRow(
+      makeJob({
+        payload: {
+          name: 'Asha',
+          phone: '9876543210',
+          geo_location: '12.9352|77.6245',
+        },
+      }),
+    );
+
+    expect(result.outcome).toBe('passed');
+    const input = recorder.inputs.at(-1)!;
+    expect(input.item_locations).toEqual([{ lat: 12.9352, lng: 77.6245 }]);
+    // The column is not a schema property; leaking it would reach Signals as a
+    // junk item_state field.
+    expect(input.profile).not.toHaveProperty('geo_location');
+  });
+
+  it('omits item_locations entirely when the column is absent', async () => {
+    const result = await processBulkRow(makeJob());
+    expect(result.outcome).toBe('passed');
+    // Omitted, not `[]` — Signals reads a present non-empty array as "use
+    // these, do not geocode", and an empty one would be ambiguous.
+    expect(recorder.inputs.at(-1)!.item_locations).toBeUndefined();
+  });
+
+  it('passes the row and falls back to geocoding when the cell is unusable', async () => {
+    // `12.9352|` is the case that matters: Number('') is 0, not NaN, so this
+    // once parsed as a valid point at longitude 0.
+    const result = await processBulkRow(
+      makeJob({
+        payload: { name: 'Asha', phone: '9876543210', geo_location: '12.9352|' },
+      }),
+    );
+
+    expect(result.outcome).toBe('passed');
+    expect(lastCommit()).toEqual({ outcome: 'passed', errorPayload: '' });
+    const input = recorder.inputs.at(-1)!;
+    expect(input.item_locations).toBeUndefined();
+    expect(input.profile).not.toHaveProperty('geo_location');
+  });
+
+  it('leaves the value alone when the schema itself declares geo_location', async () => {
+    // The schema wins. Extracting here would delete a real property before Ajv
+    // sees it, failing every row on a column the operator can see in the file.
+    schemaResultVal = {
+      success: true,
+      value: { required: [], properties: { geo_location: { type: 'string' } } },
+    };
+
+    const result = await processBulkRow(
+      makeJob({
+        payload: { name: 'Asha', phone: '9876543210', geo_location: '12.9352|77.6245' },
+      }),
+    );
+
+    expect(result.outcome).toBe('passed');
+    const input = recorder.inputs.at(-1)!;
+    expect(input.item_locations).toBeUndefined();
+    expect(input.profile).toHaveProperty('geo_location', '12.9352|77.6245');
   });
 });

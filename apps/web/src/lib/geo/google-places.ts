@@ -85,7 +85,33 @@ function toGeoComponents(components: AddressComponent[]): GeoComponents {
   };
 }
 
-export function createGooglePlacesProvider(apiKey: string): GeoProvider {
+/**
+ * Whether a resolved place is in `country`, read from its `country` address
+ * component's short code. A place with no country component fails the check.
+ *
+ * @param components - `addressComponents` from a resolved Place.
+ * @param country - Upper-case ISO 3166-1 alpha-2 code.
+ * @returns True when the place's country code matches.
+ */
+function isInCountry(components: AddressComponent[], country: string): boolean {
+  return components.find((c) => c.types.includes('country'))?.shortText.toUpperCase() === country;
+}
+
+/**
+ * Google Places autocomplete provider.
+ *
+ * `country` (upper-case ISO 3166-1 alpha-2, e.g. `IN`) restricts suggestions to
+ * that country (signals-dpg#785). `includedRegionCodes` is a hard filter: "Only
+ * include results in the specified regions". `region` would only bias the
+ * ranking, and `locationRestriction` is a rectangle (India's contains
+ * Bangladesh), so neither stops a larger foreign place with the same name being
+ * suggested. Each suggestion's own country is also checked, as a backstop.
+ *
+ * @param apiKey - Browser Maps JS API key.
+ * @param country - Optional country restriction.
+ * @returns The provider.
+ */
+export function createGooglePlacesProvider(apiKey: string, country?: string): GeoProvider {
   return {
     async suggest(query, signal) {
       const q = query.trim();
@@ -120,6 +146,7 @@ export function createGooglePlacesProvider(apiKey: string): GeoProvider {
         const { suggestions } = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
           input: q,
           sessionToken: token,
+          ...(country ? { includedRegionCodes: [country.toLowerCase()] } : {}),
         });
 
         const top = suggestions.slice(0, 5);
@@ -130,11 +157,13 @@ export function createGooglePlacesProvider(apiKey: string): GeoProvider {
             await place.fetchFields({ fields: ['location', 'addressComponents'] });
             const loc = place.location;
             if (!loc) return null;
+            const components = place.addressComponents ?? [];
+            if (country && !isInCountry(components, country)) return null;
             return {
               label: s.placePrediction.text.toString(),
               lat: loc.lat(),
               lng: loc.lng(),
-              components: toGeoComponents(place.addressComponents ?? []),
+              components: toGeoComponents(components),
             };
           }),
         );

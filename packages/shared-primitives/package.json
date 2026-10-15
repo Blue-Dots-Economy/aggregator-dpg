@@ -47,6 +47,10 @@
     "./user-org": {
       "import": "./dist/user-org/index.js",
       "types": "./dist/user-org/index.d.ts"
+    },
+    "./bulk-columns": {
+      "import": "./dist/bulk-columns/index.js",
+      "types": "./dist/bulk-columns/index.d.ts"
     }
   },
   "scripts": {

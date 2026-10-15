@@ -338,6 +338,7 @@ services:
       COLLEGE_DATASET: ${COLLEGE_DATASET:-}
       REFERENCE_BASE_URL: ${REFERENCE_BASE_URL:-}
       PHOTON_URL: ${PHOTON_URL:-}
+      GEO_COUNTRY: ${GEO_COUNTRY:-}
       # Transitional: both settings were `NEXT_PUBLIC_`-prefixed before they
       # were made runtime-readable. Forwarded so a deployment whose `.env` still
       # uses the old name keeps working until it renames. Drop these two once no

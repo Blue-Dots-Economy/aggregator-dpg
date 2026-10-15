@@ -316,17 +316,19 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         const message = upstreamMsg
           ? `signalstack onboard returned ${res.status}: ${upstreamMsg}`
           : `signalstack onboard returned ${res.status}`;
-        // Distinguish the per-user profile cap (signals #349) from other 409s
-        // so callers can categorise it as a user/data condition rather than a
-        // generic conflict or system error.
-        const code =
-          res.status === 409 && upstreamCode === 'PROFILE_LIMIT_REACHED'
-            ? 'SIGNALSTACK_PROFILE_LIMIT_REACHED'
-            : this.codeForStatus(res.status);
+        // Distinguish the per-user profile cap (signals #349) from other 409s,
+        // and a supplied coordinate outside the instance's country
+        // (signals-dpg#789) from other 400s, so callers can categorise them as
+        // user/data conditions rather than a generic conflict or system error.
+        const code = this.onboardErrorCode(res.status, upstreamCode);
         // `signalsMessage` is the bare, user-safe sentence (no infra prefixes) —
         // callers surfacing errors to end users (public forms) should prefer it;
         // errors.csv/operators keep the prefixed `message`.
         const signalsMessage = extractUpstreamMessageText(bodyText);
+        // Signals' own code and per-field map, so a caller can classify the
+        // rejection (bad row data vs a platform fault) and point at the
+        // offending input, without parsing `message`.
+        const signalsFields = extractUpstreamFields(bodyText);
         return err(
           new UpstreamError(message, {
             code,
@@ -334,6 +336,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
               status: res.status,
               body: bodyText,
               ...(signalsMessage ? { signalsMessage } : {}),
+              ...(upstreamCode ? { upstreamCode } : {}),
+              ...(signalsFields ? { signalsFields } : {}),
             },
           }),
         );
@@ -1169,6 +1173,22 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     return null;
   }
 
+  /**
+   * Picks the error code for a rejected onboard. The per-user profile cap
+   * (signals #349) and a coordinate outside the instance's country
+   * (signals-dpg#789) get their own codes so callers treat them as user/data
+   * conditions; everything else falls back to the status-based code.
+   */
+  private onboardErrorCode(status: number, upstreamCode: string | null): string {
+    if (status === 409 && upstreamCode === 'PROFILE_LIMIT_REACHED') {
+      return 'SIGNALSTACK_PROFILE_LIMIT_REACHED';
+    }
+    if (status === 400 && upstreamCode === 'LOCATION_OUTSIDE_COUNTRY') {
+      return 'SIGNALSTACK_LOCATION_OUTSIDE_COUNTRY';
+    }
+    return this.codeForStatus(status);
+  }
+
   private codeForStatus(status: number): string {
     if (status === 400) return 'SIGNALSTACK_BAD_REQUEST';
     if (status === 401 || status === 403) return 'SIGNALSTACK_FORBIDDEN';
@@ -1204,6 +1224,12 @@ function extractUpstreamCode(bodyText: string): string | null {
   if (!bodyText) return null;
   try {
     const obj = JSON.parse(bodyText) as Record<string, unknown>;
+    // Fastify's own request-validation body is
+    // `{ statusCode, code: 'FST_ERR_VALIDATION', error: 'Bad Request', message }`:
+    // there `error` is the generic HTTP reason and `code` is the machine code.
+    // Signals' own bodies carry the code in `error` and no `code` at all.
+    const c = obj?.['code'];
+    if (typeof c === 'string' && /^[A-Z][A-Z0-9_]+$/.test(c)) return c;
     const e = obj?.['error'];
     if (typeof e === 'string') return e;
     if (isObject(e) && typeof e['code'] === 'string') return e['code'] as string;
@@ -1211,6 +1237,26 @@ function extractUpstreamCode(bodyText: string): string | null {
     /* non-JSON body — no machine code */
   }
   return null;
+}
+
+/**
+ * Signals' per-field map from a JSON error body (`fields: { <field>: <message> }`,
+ * signals-dpg#785 — present on INVALID_ITEM_STATE). Only string entries are
+ * kept; anything else is not a field message and would mislead a caller that
+ * renders it.
+ */
+function extractUpstreamFields(bodyText: string): Record<string, string> | null {
+  if (!bodyText) return null;
+  try {
+    const obj = JSON.parse(bodyText) as Record<string, unknown>;
+    const f = obj['fields'];
+    if (!isObject(f)) return null;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(f)) if (typeof v === 'string') out[k] = v;
+    return Object.keys(out).length > 0 ? out : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
