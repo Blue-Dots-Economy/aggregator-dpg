@@ -259,4 +259,146 @@ describe('aggregator-org-approvals routes', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Already approved');
   });
+
+  // ---------------------------------------------------------------------------
+  // Branch coverage: missing/invalid token, store failures, already-decided
+  // variants, and the decision not-found / unavailable outcomes.
+  // ---------------------------------------------------------------------------
+
+  it('GET read with no token shows the missing-token page', async () => {
+    const res = await app.inject({ method: 'GET', url: '/admin/v1/orgs/read/some-id' });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('GET read with a malformed token shows the invalid-token page', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/admin/v1/orgs/read/some-id?token=not-a-jwt',
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('GET read returns 503 when the org store is unavailable', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000c1';
+    orgStore.seed([buildAggregatorOrg({ id: orgId, slug: 'c1', status: 'pending' })]);
+    orgStore.findById = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } });
+    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/orgs/read/${orgId}?token=${encodeURIComponent(token)}`,
+    });
+    expect(res.statusCode).toBe(503);
+  });
+
+  it('GET read returns 404 for an unknown org', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000c2';
+    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/orgs/read/${orgId}?token=${encodeURIComponent(token)}`,
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it.each([
+    ['active', 'Already approved'],
+    ['retired', 'Already approved'],
+    ['inactive', 'Already rejected'],
+  ] as const)('GET read shows already-decided for a %s org', async (status, text) => {
+    const orgId = `00000000-0000-0000-0000-0000000000d${status.length}`;
+    orgStore.seed([buildAggregatorOrg({ id: orgId, slug: `d-${status}`, status })]);
+    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/orgs/read/${orgId}?token=${encodeURIComponent(token)}`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain(text);
+  });
+
+  it('POST decision with a malformed body shows the bad-request page', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/orgs/decision/some-id',
+      payload: { token: '', decision: 'maybe' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('POST decision with an invalid token shows the invalid-token page', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/orgs/decision/some-id',
+      payload: { token: 'not-a-jwt', decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('POST decision reject notes a failed owner notification', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000e1';
+    orgStore.seed([
+      buildAggregatorOrg({ id: orgId, slug: 'e1', status: 'pending', ownerEmail: 'o@e1.org' }),
+    ]);
+    mailer.send = async () => ({ ok: false, error: { code: 'TRANSPORT_FAILED', message: 'down' } });
+    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'reject' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/orgs/decision/${orgId}`,
+      payload: { token, decision: 'reject' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('could not be delivered');
+  });
+
+  it('POST decision returns 404 for an unknown org', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000e2';
+    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/orgs/decision/${orgId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('POST decision returns 503 when the org store is unavailable', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000e3';
+    orgStore.findById = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } });
+    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/orgs/decision/${orgId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(503);
+  });
+
+  it('POST renew with no body shows the invalid-token page', async () => {
+    const res = await app.inject({ method: 'POST', url: '/admin/v1/orgs/renew/some-id' });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('POST renew returns 503 when the org store is unavailable', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000f1';
+    orgStore.seed([buildAggregatorOrg({ id: orgId, slug: 'f1', status: 'pending' })]);
+    orgStore.findById = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } });
+    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'approve', ttlSec: -1 });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/orgs/renew/${orgId}`,
+      payload: { token },
+    });
+    expect(res.statusCode).toBe(503);
+  });
+
+  it('POST renew returns 404 for an unknown org', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000f2';
+    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'approve', ttlSec: -1 });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/orgs/renew/${orgId}`,
+      payload: { token },
+    });
+    expect(res.statusCode).toBe(404);
+  });
 });

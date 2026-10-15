@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
 import { IdpAdminFake } from '../idp-admin/testing.js';
+import { KC_ATTR, OWNER_CREATED_BY } from '../idp-admin/index.js';
 import {
   IdentityMismatchError,
   IdentityTakenError,
@@ -512,6 +513,53 @@ describe('provisionRootIdp', () => {
     );
     expect(subjects.size).toBe(0);
     expect(report.usersCreated + report.usersReused).toBe(0);
+  });
+
+  it('counts a failed disable while revoking a released owner this app created', async () => {
+    const idp = new IdpAdminFake();
+    const old = await idp.createUser({
+      email: 'released@example.org',
+      enabled: true,
+      attributes: { [KC_ATTR.CREATED_BY]: OWNER_CREATED_BY },
+    });
+    if (!old.ok) throw new Error('seed');
+    await idp.assignRealmRole(old.value.id, 'org_owner');
+    // Its account was released: the reconcile must disable the login it created,
+    // but Keycloak rejects the disable — it is counted and retried next boot.
+    idp.disableUser = async () => ({ ok: false, error: { code: 'IDP_UNAVAILABLE', message: 'x' } });
+    const { r } = recorder();
+    const report = await provisionRootIdp(
+      idp,
+      {
+        root: org({}),
+        defaultOrg: org({ id: 'org-2', slug: 'default', ownerSubject: 'sub-x' }),
+        replacedOwners: [{ orgId: 'org-1', subject: old.value.id, released: true }],
+      },
+      r,
+    );
+    expect(report.failures).toBeGreaterThan(0);
+    expect(idp.rolesOf(old.value.id)).not.toContain('org_owner');
+  });
+
+  it('revokes a released owner not created by this app without disabling it', async () => {
+    const idp = new IdpAdminFake();
+    const old = await idp.createUser({ email: 'reused@example.org', enabled: true });
+    if (!old.ok) throw new Error('seed');
+    await idp.assignRealmRole(old.value.id, 'org_owner');
+    const { r } = recorder();
+    const report = await provisionRootIdp(
+      idp,
+      {
+        root: org({}),
+        defaultOrg: org({ id: 'org-2', slug: 'default', ownerSubject: 'sub-x' }),
+        replacedOwners: [{ orgId: 'org-1', subject: old.value.id, released: true }],
+      },
+      r,
+    );
+    expect(report.ownersRevoked).toBeGreaterThan(0);
+    const still = await idp.findById(old.value.id);
+    // A reused login (not created by us) keeps its enabled flag.
+    expect(still.ok && still.value?.enabled).toBe(true);
   });
 });
 

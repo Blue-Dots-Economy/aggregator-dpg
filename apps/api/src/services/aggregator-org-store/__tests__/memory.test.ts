@@ -341,3 +341,126 @@ describe('InMemoryAggregatorOrgStore — consent hook (0029)', () => {
     expect(found.ok && found.value).toBeNull();
   });
 });
+
+describe('InMemoryAggregatorOrgStore — listPending, search, delete and details', () => {
+  const mk = (store: InMemoryAggregatorOrgStore, slug: string, email: string, phone?: string) =>
+    store.create({
+      recordConsent: NO_CONSENT_WRITE,
+      slug,
+      displayName: slug.toUpperCase(),
+      ownerEmail: email,
+      ...(phone ? { ownerPhone: phone } : {}),
+    });
+
+  it('markCoordinator makes a contact count as shared even without a second org', async () => {
+    const store = new InMemoryAggregatorOrgStore();
+    const a = await mk(store, 'solo', 'solo@x.org', '+919000000041');
+    if (!a.ok) throw new Error('seed');
+    expect(await store.ownerIsShared(a.value.id)).toEqual({ ok: true, value: false });
+    store.markCoordinator(a.value.contactId);
+    expect(await store.ownerIsShared(a.value.id)).toEqual({ ok: true, value: true });
+  });
+
+  it('listPending filters by updatedBefore and orders oldest first', async () => {
+    const store = new AggregatorOrgStoreFake();
+    store.seed([
+      buildAggregatorOrg({ id: 'p1', slug: 'p1', status: 'pending', createdAt: new Date(1000), updatedAt: new Date(1000) }),
+      buildAggregatorOrg({ id: 'p2', slug: 'p2', status: 'pending', createdAt: new Date(2000), updatedAt: new Date(5000) }),
+    ]);
+    const all = await store.listPending();
+    expect(all.ok && all.value.map((o) => o.id)).toEqual(['p1', 'p2']);
+    const stale = await store.listPending(new Date(3000));
+    expect(stale.ok && stale.value.map((o) => o.id)).toEqual(['p1']);
+  });
+
+  it('deleteById releases the owner account once it owns no other org', async () => {
+    const store = new InMemoryAggregatorOrgStore();
+    const a = await mk(store, 'only', 'only@x.org', '+919000000042');
+    if (!a.ok) throw new Error('seed');
+    await store.deleteById(a.value.id);
+    // A fresh create by the same owner mints a new account id (the old was released).
+    const b = await mk(store, 'again', 'only@x.org', '+919000000042');
+    expect(b.ok && b.value.ownerUserId).not.toBe(a.value.ownerUserId);
+  });
+
+  it('search scopes by orgIds, status and name prefix, and pages with a cursor', async () => {
+    const store = new AggregatorOrgStoreFake();
+    store.seed([
+      buildAggregatorOrg({ id: 'a', slug: 'a', displayName: 'Alpha', status: 'active' }),
+      buildAggregatorOrg({ id: 'b', slug: 'b', displayName: 'Beta', status: 'active' }),
+      buildAggregatorOrg({ id: 'c', slug: 'c', displayName: 'Gamma', status: 'pending' }),
+    ]);
+    const scoped = await store.search({ orgIds: ['a', 'b'], limit: 20 });
+    expect(scoped.ok && scoped.value.rows.map((o) => o.id)).toEqual(['a', 'b']);
+    const byStatus = await store.search({ orgIds: null, status: 'pending', limit: 20 });
+    expect(byStatus.ok && byStatus.value.rows.map((o) => o.id)).toEqual(['c']);
+    const byName = await store.search({ orgIds: null, namePrefix: 'be', limit: 20 });
+    expect(byName.ok && byName.value.rows.map((o) => o.id)).toEqual(['b']);
+
+    const page1 = await store.search({ orgIds: null, limit: 1 });
+    expect(page1.ok && page1.value.rows.map((o) => o.id)).toEqual(['a']);
+    expect(page1.ok && page1.value.nextCursor).not.toBeNull();
+    if (page1.ok && page1.value.nextCursor) {
+      const page2 = await store.search({ orgIds: null, limit: 1, cursor: page1.value.nextCursor });
+      expect(page2.ok && page2.value.rows.map((o) => o.id)).toEqual(['b']);
+    }
+  });
+
+  it('search breaks a same-name tie by id', async () => {
+    const store = new AggregatorOrgStoreFake();
+    store.seed([
+      buildAggregatorOrg({ id: 'id-2', slug: 's2', displayName: 'Same', status: 'active' }),
+      buildAggregatorOrg({ id: 'id-1', slug: 's1', displayName: 'same', status: 'active' }),
+    ]);
+    const r = await store.search({ orgIds: null, limit: 20 });
+    expect(r.ok && r.value.rows.map((o) => o.id)).toEqual(['id-1', 'id-2']);
+  });
+
+  it('listOwnedBy returns an owner\'s orgs by name', async () => {
+    const store = new AggregatorOrgStoreFake();
+    store.seed([
+      buildAggregatorOrg({ id: 'o1', slug: 'o1', displayName: 'Zeta', ownerUserId: 'owner-1' }),
+      buildAggregatorOrg({ id: 'o2', slug: 'o2', displayName: 'Acme', ownerUserId: 'owner-1' }),
+      buildAggregatorOrg({ id: 'o3', slug: 'o3', displayName: 'Other', ownerUserId: 'owner-2' }),
+    ]);
+    const r = await store.listOwnedBy('owner-1');
+    expect(r.ok && r.value.map((o) => o.displayName)).toEqual(['Acme', 'Zeta']);
+  });
+
+  it('update patches org-detail columns in place', async () => {
+    const store = new InMemoryAggregatorOrgStore();
+    const a = await mk(store, 'det', 'det@x.org', '+919000000043');
+    if (!a.ok) throw new Error('seed');
+    const u = await store.update(a.value.id, {
+      url: 'https://det.example',
+      legalName: 'Det Ltd',
+      gstNumber: 'GST123',
+      state: 'KA',
+      locations: [{ geo: { type: 'Point', coordinates: [1, 2] }, address: {} }],
+    });
+    expect(u.ok && u.value.url).toBe('https://det.example');
+    expect(u.ok && u.value.legalName).toBe('Det Ltd');
+    expect(u.ok && u.value.gstNumber).toBe('GST123');
+    expect(u.ok && u.value.state).toBe('KA');
+  });
+
+  it('deleteIfPending deletes a stale pending org, aborts on a false hook, skips a decided org', async () => {
+    const store = new InMemoryAggregatorOrgStore();
+    const a = await mk(store, 'del', 'del@x.org', '+919000000044');
+    const b = await mk(store, 'keep', 'keep@x.org', '+919000000045');
+    const c = await mk(store, 'abort', 'abort@x.org', '+919000000046');
+    if (!a.ok || !b.ok || !c.ok) throw new Error('seed');
+    const future = new Date(Date.now() + 3600_000);
+    expect((await store.deleteIfPending(a.value.id, future, async () => true)).ok).toBe(true);
+    expect(await store.findById(a.value.id)).toEqual({ ok: true, value: null });
+
+    await store.approve(b.value.id, 't');
+    const kept = await store.deleteIfPending(b.value.id, future, async () => true);
+    expect(kept.ok && kept.value).toBe('not_pending');
+
+    const aborted = await store.deleteIfPending(c.value.id, future, async () => false);
+    expect(aborted.ok && aborted.value).toBe('aborted');
+    const stillThere = await store.findById(c.value.id);
+    expect(stillThere.ok && stillThere.value).not.toBeNull();
+  });
+});

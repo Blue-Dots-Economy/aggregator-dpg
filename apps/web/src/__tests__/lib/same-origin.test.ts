@@ -57,4 +57,16 @@ describe('rejectCrossSite (C11)', () => {
     expect(expectedOrigin(r)).toBe('https://portal.example.org');
     expect(rejectCrossSite(r)?.status).toBe(403);
   });
+
+  it('falls back to the request origin when PUBLIC_PORTAL_URL is malformed', () => {
+    process.env.PUBLIC_PORTAL_URL = 'not a url';
+    const r = req({ 'content-type': 'application/json', origin: 'http://portal.test' });
+    expect(expectedOrigin(r)).toBe('http://portal.test');
+    expect(rejectCrossSite(r)).toBeNull();
+  });
+
+  it('treats a missing content-type as non-JSON (415)', () => {
+    const r = req({ origin: 'http://portal.test' });
+    expect(rejectCrossSite(r)?.status).toBe(415);
+  });
 });
