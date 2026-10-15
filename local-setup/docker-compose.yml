@@ -36,6 +36,17 @@ name: aggregator-dpg
 #   with signals-search (that file includes this one):
 #     docker compose -f docker-compose.search.yml up -d --build
 #
+# ── Build from source vs. pull prebuilt (signals-api/ui, aggregator-api/web/worker) ──
+# These five services declare both `build:` and `image:`. The `--build` flag is
+# the toggle:
+#     docker compose up -d --build   builds from your checked-out source (validating
+#                                     local changes — this is what the flag has always done)
+#     docker compose up -d           skips the build and PULLS the image tag below from
+#                                     GHCR instead — much faster, but runs whatever that
+#                                     tag was last published as, not your local source
+# Override any single image (e.g. to pin a release tag) via <SERVICE>_IMAGE in .env,
+# e.g. AGGREGATOR_API_IMAGE=ghcr.io/blue-dots-economy/aggregator-dpg/api:202609-s1-rc3.
+#
 # ── Host ports ──────────────────────────────────────────────────────────────
 #   Aggregator portal (web)  http://localhost:3100
 #   Aggregator API           http://localhost:4000        /health/live
@@ -424,7 +435,7 @@ services:
     build:
       context: ../../signals-dpg
       dockerfile: apps/api/Dockerfile
-    image: signals-dpg/api:local
+    image: ${SIGNALS_API_IMAGE:-ghcr.io/blue-dots-economy/signals-dpg/api:main}
     container_name: sd-signals-api
     restart: unless-stopped
     # Same env as the bootstrap step, plus signals-search wiring. Discover and
@@ -464,7 +475,7 @@ services:
       args:
         VITE_API_URL: http://localhost:2742
         VITE_NETWORK_NAME: blue_dot
-    image: signals-dpg/ui:local
+    image: ${SIGNALS_UI_IMAGE:-ghcr.io/blue-dots-economy/signals-dpg/ui:main}
     container_name: sd-signals-ui
     restart: unless-stopped
     environment:
@@ -484,7 +495,7 @@ services:
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
-    image: aggregator-dpg/api:local
+    image: ${AGGREGATOR_API_IMAGE:-ghcr.io/blue-dots-economy/aggregator-dpg/api:main}
     container_name: sd-aggregator-api
     restart: unless-stopped
     ports:
@@ -592,7 +603,7 @@ services:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
-    image: aggregator-dpg/web:local
+    image: ${AGGREGATOR_WEB_IMAGE:-ghcr.io/blue-dots-economy/aggregator-dpg/web:main}
     container_name: sd-aggregator-web
     restart: unless-stopped
     environment:
@@ -646,7 +657,7 @@ services:
     build:
       context: ..
       dockerfile: apps/worker/Dockerfile
-    image: aggregator-dpg/worker:local
+    image: ${AGGREGATOR_WORKER_IMAGE:-ghcr.io/blue-dots-economy/aggregator-dpg/worker:main}
     container_name: sd-aggregator-worker
     restart: unless-stopped
     environment:
