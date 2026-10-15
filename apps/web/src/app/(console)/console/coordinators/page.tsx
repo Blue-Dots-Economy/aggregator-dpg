@@ -14,9 +14,9 @@ const UUID_RE = /^[0-9a-f-]{36}$/i;
 
 export default async function ConsoleCoordinatorsPage({
   searchParams,
-}: {
+}: Readonly<{
   searchParams: Promise<{ status?: string; org_id?: string; cursor?: string }>;
-}) {
+}>) {
   const t = await getTranslations('console');
   const params = await searchParams;
   const status = STATUSES.find((s) => s === params.status);

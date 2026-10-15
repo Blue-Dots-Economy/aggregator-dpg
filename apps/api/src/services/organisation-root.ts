@@ -274,7 +274,7 @@ async function applyRootConfig(
  *   accounts (and identities) are released, so the mirror can take them out
  *   of the org's group.
  */
-async function applyOwners(
+async function applyOwners( // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   tx: DbExecutor,
   cfg: RootConfig,
   root: RootOrgState,
@@ -634,7 +634,7 @@ export async function provisionRootIdp(
   const revoke = new Set(
     replaced.filter((r) => r.released && !current.has(r.subject)).map((r) => r.subject),
   );
-  for (const subject of revoke) await revokeReleasedOwner(ctx, subject);
+  for (const subject of revoke) await revokeReleasedOwner(ctx, subject); // NOSONAR typescript:S9382 — sequential by design
   return report;
 }
 

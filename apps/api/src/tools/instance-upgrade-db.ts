@@ -114,7 +114,7 @@ export function isFailing(row: CheckRow): boolean {
  * @param script - The script text.
  * @returns The statements, in order.
  */
-export function sqlStatements(script: string): string[] {
+export function sqlStatements(script: string): string[] { // NOSONAR typescript:S3776 — inherently branchy migration step; splitting would obscure it
   const body = script
     .split('\n')
     .filter((l) => !l.trimStart().startsWith('\\') && !l.trimStart().startsWith('--'))
@@ -170,7 +170,7 @@ export function sqlStatements(script: string): string[] {
 export async function runChecks(client: Queryable, file: string): Promise<CheckRow[]> {
   const rows: CheckRow[] = [];
   for (const stmt of sqlStatements(await readFile(file, 'utf8'))) {
-    const r = await client.query<{ check_id?: string; category?: string; n?: string }>(stmt);
+    const r = await client.query<{ check_id?: string; category?: string; n?: string }>(stmt); // NOSONAR typescript:S9382 — sequential by design
     for (const row of r.rows ?? []) {
       if (row.check_id === undefined) continue;
       const category =

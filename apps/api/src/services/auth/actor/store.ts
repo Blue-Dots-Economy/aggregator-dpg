@@ -65,7 +65,7 @@ export class StoreActorResolver extends ActorResolverBase {
     if (!root.ok) return unavailable(root.error.message);
 
     const orgs: ActorOrg[] = [];
-    if (root.value && root.value.ownerUserId === userId) {
+    if (root.value?.ownerUserId === userId) {
       orgs.push({
         id: root.value.id,
         orgType: 'network_facilitator',

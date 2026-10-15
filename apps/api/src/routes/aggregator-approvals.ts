@@ -331,21 +331,24 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
               message: ERR.TARGET_ORG_INACTIVE.detail,
             }),
           );
-        case 'unavailable':
+        case 'unavailable': {
+          let message = 'Database unavailable. Please try again shortly.';
+          if (outcome.dependency === 'signalstack') {
+            message =
+              'Could not register the aggregator with the signalstack network. The application is still pending — open this approval link again once the signalstack service is reachable.';
+          } else if (outcome.dependency === 'idp') {
+            message = 'Identity service unavailable. Please try again shortly.';
+          }
           return sendHtml(
             reply,
             503,
             renderResultPage({
               status: 'error',
               title: 'Action failed',
-              message:
-                outcome.dependency === 'signalstack'
-                  ? 'Could not register the aggregator with the signalstack network. The application is still pending — open this approval link again once the signalstack service is reachable.'
-                  : outcome.dependency === 'idp'
-                    ? 'Identity service unavailable. Please try again shortly.'
-                    : 'Database unavailable. Please try again shortly.',
+              message,
             }),
           );
+        }
       }
     },
   );

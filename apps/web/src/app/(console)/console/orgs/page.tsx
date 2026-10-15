@@ -16,9 +16,9 @@ const STATUSES = ['pending', 'active', 'inactive', 'retired'] as const;
 
 export default async function ConsoleOrgsPage({
   searchParams,
-}: {
+}: Readonly<{
   searchParams: Promise<{ status?: string; cursor?: string }>;
-}) {
+}>) {
   const t = await getTranslations('console');
   const actor = await getConsoleActor();
   if (!actor.ok) return null;

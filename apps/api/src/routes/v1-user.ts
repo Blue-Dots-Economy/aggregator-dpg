@@ -96,7 +96,7 @@ async function loadOrg(id: string): Promise<AggregatorOrg> {
  *
  * @throws {HttpError} DB_UNAVAILABLE.
  */
-async function meOf(actor: Actor): Promise<MeResponse> {
+async function meOf(actor: Actor): Promise<MeResponse> { // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   const orgStore = getAggregatorOrgStore();
   const orgs: MeOrg[] = [];
   let self: { name: string | null; email: string; phone: string | null } | null = null;
@@ -115,8 +115,8 @@ async function meOf(actor: Actor): Promise<MeResponse> {
   for (const o of actor.orgs) {
     const found =
       o.orgType === 'network_facilitator'
-        ? await orgStore.findRoot()
-        : await orgStore.findById(o.id);
+        ? await orgStore.findRoot() // NOSONAR typescript:S9382 — sequential by design
+        : await orgStore.findById(o.id); // NOSONAR typescript:S9382 — sequential by design
     if (!found.ok) dbDown('orgStore.findById', found.error.message);
     if (!found.value) continue;
     orgs.push({

@@ -10,7 +10,7 @@ import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { cn } from '../../lib/cn';
 
-export function ConsoleNav({ isNetworkAdmin }: { isNetworkAdmin: boolean }) {
+export function ConsoleNav({ isNetworkAdmin }: Readonly<{ isNetworkAdmin: boolean }>) {
   const t = useTranslations('console');
   const path = usePathname() ?? '';
   const items = [

@@ -7,7 +7,7 @@
  * edited here (the address widget is the registration form's).
  */
 
-import { useState, type FormEvent } from 'react';
+import { useState, type SubmitEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import type { Org } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
@@ -23,11 +23,11 @@ export function OrgEditForm({
   org,
   editable,
   canRename,
-}: {
+}: Readonly<{
   org: Org;
   editable: boolean;
   canRename: boolean;
-}) {
+}>) {
   const t = useTranslations('console');
   const [current, setCurrent] = useState(org);
   const [name, setName] = useState(org.name);
@@ -37,7 +37,7 @@ export function OrgEditForm({
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function onSubmit(e: FormEvent) {
+  async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const patch: Record<string, unknown> = {};
     if (canRename && name.trim() !== current.name) patch['name'] = name.trim();
@@ -117,7 +117,7 @@ export function OrgEditForm({
           {addresses.length ? (
             <ul className="list-disc pl-5">
               {addresses.map((a, i) => (
-                <li key={i}>{a}</li>
+                <li key={`${a}-${i}`}>{a}</li>
               ))}
             </ul>
           ) : (
@@ -130,9 +130,7 @@ export function OrgEditForm({
               {t('org.save')}
             </Button>
             {message ? (
-              <span role="status" className="text-[13px] text-ink-600">
-                {message}
-              </span>
+              <output className="text-[13px] text-ink-600">{message}</output>
             ) : null}
           </div>
         ) : null}

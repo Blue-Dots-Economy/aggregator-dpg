@@ -14,11 +14,11 @@ export function StatusFilter({
   action,
   value,
   hidden = {},
-}: {
+}: Readonly<{
   action: string;
   value: string;
   hidden?: Record<string, string>;
-}) {
+}>) {
   const t = useTranslations('console');
   return (
     <form method="get" action={action} className="flex items-end gap-2 text-[13.5px]">

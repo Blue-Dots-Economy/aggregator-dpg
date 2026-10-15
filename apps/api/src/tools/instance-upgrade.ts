@@ -166,7 +166,7 @@ function report(title: string, rows: CheckRow[]): CheckRow[] {
 async function verifyGates(db: Queryable): Promise<CheckRow[]> {
   const failing: CheckRow[] = [];
   for (const file of VERIFY_FILES) {
-    failing.push(...report(file, await runChecks(db, path.join(sqlDir(), file))));
+    failing.push(...report(file, await runChecks(db, path.join(sqlDir(), file)))); // NOSONAR typescript:S9382 — sequential by design
   }
   return failing;
 }
@@ -175,7 +175,7 @@ async function verifyGates(db: Queryable): Promise<CheckRow[]> {
 async function counts(db: Queryable, file: string): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   for (const stmt of sqlStatements(await readFile(path.join(sqlDir(), file), 'utf8'))) {
-    const r = await db.query<{ key: string; n: string }>(stmt);
+    const r = await db.query<{ key: string; n: string }>(stmt); // NOSONAR typescript:S9382 — sequential by design
     for (const row of r.rows) result.set(row.key, Number(row.n));
   }
   return result;
@@ -295,7 +295,7 @@ async function foreignSessions(db: Queryable): Promise<string[]> {
 }
 
 /** Runs a documented fix in one transaction; `--dry-run` rolls it back. */
-async function fix(pool: pg.Pool, args: string[]): Promise<number> {
+async function fix(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR typescript:S3776 — inherently branchy migration step; splitting would obscure it
   const name = flag(args, '--fix') ?? '';
   const spec = FIXES[name];
   if (!spec) throw new Refusal(`unknown fix "${name}" (${Object.keys(FIXES).join(', ')})`);
@@ -320,7 +320,7 @@ async function fix(pool: pg.Pool, args: string[]): Promise<number> {
     for (const stmt of sqlStatements(
       await readFile(path.join(sqlDir(), 'fixes', spec.file), 'utf8'),
     )) {
-      const r = await client.query(stmt);
+      const r = await client.query(stmt); // NOSONAR typescript:S9382 — sequential by design
       if (r.command === 'UPDATE' || r.command === 'DELETE')
         out(`  ${r.command.toLowerCase()}d ${r.rowCount ?? 0} row(s)`);
     }
@@ -342,7 +342,7 @@ async function fix(pool: pg.Pool, args: string[]): Promise<number> {
   }
 }
 
-async function check(pool: pg.Pool, args: string[]): Promise<number> {
+async function check(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR typescript:S3776 — inherently branchy migration step; splitting would obscure it
   if (await migrationInProgress(pool)) {
     out(
       'MIGRATION IN PROGRESS — a `run` (or a boot migration) holds the lock; wait, then `check` again',
@@ -389,10 +389,11 @@ async function check(pool: pg.Pool, args: string[]): Promise<number> {
   );
   const kcOk = await keycloakCheck();
   const ok = failing.length === 0 && kcOk;
+  const kcNote = kcOk ? '' : ' + keycloak';
   out(
     ok
       ? 'CHECK PASSED — ready for `run`'
-      : `CHECK FAILED — ${failing.length} blocker(s)${kcOk ? '' : ' + keycloak'}`,
+      : `CHECK FAILED — ${failing.length} blocker(s)${kcNote}`,
   );
   return ok ? 0 : 1;
 }
@@ -430,13 +431,12 @@ async function gatesInside(
   if (!before) return failing.length === 0;
   const after = await counts(client, 'instance-upgrade-counts-after.sql');
   const differ = [...before.keys()].filter((k) => before.get(k) !== after.get(k));
-  out(
-    `== completeness: ${differ.length === 0 ? 'every count equal' : `differ: ${differ.join(', ')}`}`,
-  );
+  const completeness = differ.length === 0 ? 'every count equal' : `differ: ${differ.join(', ')}`;
+  out(`== completeness: ${completeness}`);
   return failing.length === 0 && differ.length === 0;
 }
 
-async function run(pool: pg.Pool, args: string[]): Promise<number> {
+async function run(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR typescript:S3776 — inherently branchy migration step; splitting would obscure it
   const dryRun = args.includes('--dry-run');
   const snapshot = flag(args, '--snapshot-taken')?.trim();
   if (!dryRun && !snapshot)
@@ -555,8 +555,9 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> {
       latency_ms: Date.now() - started,
     });
     if (!committing) {
+      const detail = e.code === 'P0001' ? `: ${e.message ?? ''}` : '';
       out(
-        `RUN FAILED (${e.code ?? 'error'}${e.code === 'P0001' ? `: ${e.message ?? ''}` : ''}) — ` +
+        `RUN FAILED (${e.code ?? 'error'}${detail}) — ` +
           'rolled back: nothing was applied, the database is unchanged',
       );
       return 1;
@@ -667,7 +668,7 @@ export async function executeRunAll(
   return 0;
 }
 
-async function main(argv: string[]): Promise<number> {
+async function main(argv: string[]): Promise<number> { // NOSONAR typescript:S3776 — inherently branchy dispatcher; splitting would obscure it
   const [command, ...args] = argv;
   if (command === 'run-all') {
     // Full env (it runs enrich / enable-owners against Keycloak).

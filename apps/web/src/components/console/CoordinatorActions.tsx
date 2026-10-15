@@ -17,10 +17,10 @@ import { errorKey, sendConsole } from '../../lib/console-client';
 export function CoordinatorActions({
   user,
   domains,
-}: {
+}: Readonly<{
   user: User;
   domains: Array<{ id: string; label: string }>;
-}) {
+}>) {
   const t = useTranslations('console');
   const [status, setStatus] = useState(user.status);
   const [reason, setReason] = useState('');
@@ -90,9 +90,7 @@ export function CoordinatorActions({
           </>
         ) : null}
         {decisionNote ? (
-          <p role="status" className="text-ink-600">
-            {decisionNote}
-          </p>
+          <output className="text-ink-600">{decisionNote}</output>
         ) : null}
       </Card>
 
@@ -115,9 +113,7 @@ export function CoordinatorActions({
               {t('coordinator.save_domains')}
             </Button>
             {servesNote ? (
-              <span role="status" className="text-ink-600">
-                {servesNote}
-              </span>
+              <output className="text-ink-600">{servesNote}</output>
             ) : null}
           </div>
         </Card>

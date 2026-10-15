@@ -19,7 +19,7 @@ import { errorKey, sendConsole } from '../../lib/console-client';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
-export function OrgsTable({ orgs }: { orgs: OrgRow[] }) {
+export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
   const t = useTranslations('console');
   const [rows, setRows] = useState(orgs);
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -65,9 +65,7 @@ export function OrgsTable({ orgs }: { orgs: OrgRow[] }) {
                 {o.name}
               </Link>
               {notes[o.id] ? (
-                <p role="status" className="text-[12.5px] text-ink-600 mt-1">
-                  {notes[o.id]}
-                </p>
+                <output className="text-[12.5px] text-ink-600 mt-1 block">{notes[o.id]}</output>
               ) : null}
             </td>
             <td>{t(`status.${o.status}`)}</td>

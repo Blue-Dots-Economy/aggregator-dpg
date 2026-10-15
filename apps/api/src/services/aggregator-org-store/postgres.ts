@@ -270,7 +270,8 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
       if (filter.namePrefix) {
         // A prefix match on the name; LIKE wildcards in the input are escaped.
         const p = filter.namePrefix.toLowerCase().replace(/[\\%_]/g, (m) => `\\${m}`);
-        conds.push(sql`${lname} LIKE ${`${p}%`}`);
+        const pattern = `${p}%`;
+        conds.push(sql`${lname} LIKE ${pattern}`);
       }
       if (filter.cursor) {
         const c = filter.cursor;

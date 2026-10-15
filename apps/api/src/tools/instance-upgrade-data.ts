@@ -74,7 +74,8 @@ export async function runDataSteps(
     for (const step of steps) {
       await step.apply(client);
       const bad = step.verify ? await step.verify(client) : 0;
-      out(`data: ${step.name} applied${step.verify ? `, verify_bad=${bad}` : ''}`);
+      const verifyNote = step.verify ? `, verify_bad=${bad}` : '';
+      out(`data: ${step.name} applied${verifyNote}`);
       if (bad > 0) {
         await client.query('ROLLBACK');
         out(`data: ${step.name} verify failed (${bad}) — rolled back, nothing applied`);
@@ -92,7 +93,8 @@ export async function runDataSteps(
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
     const code = (err as { code?: string }).code;
-    out(`data: FAILED — rolled back${code ? ` (${code})` : ''}`);
+    const codeNote = code ? ` (${code})` : '';
+    out(`data: FAILED — rolled back${codeNote}`);
     return 1;
   } finally {
     client.release();

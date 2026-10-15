@@ -29,9 +29,9 @@ async function domains(): Promise<Array<{ id: string; label: string }>> {
 
 export default async function ConsoleCoordinatorPage({
   params,
-}: {
+}: Readonly<{
   params: Promise<{ id: string }>;
-}) {
+}>) {
   const t = await getTranslations('console');
   const { id } = await params;
   const [user, domainList] = await Promise.all([

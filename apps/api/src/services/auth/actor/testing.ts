@@ -29,7 +29,7 @@ export class ActorResolverFake extends ActorResolverBase {
     this.byKey.set(key, actor);
   }
 
-  async resolve(input: ResolveActorInput): Promise<ActorResult> {
+  async resolve(input: ResolveActorInput): Promise<ActorResult> { // NOSONAR typescript:S7503 — fake implements the async contract
     if (this.failWith) return { ok: false, error: { code: 'UNAVAILABLE', message: this.failWith } };
     const actor = this.byKey.get(input.aggregatorId ?? input.subject) ?? null;
     return { ok: true, value: actor };

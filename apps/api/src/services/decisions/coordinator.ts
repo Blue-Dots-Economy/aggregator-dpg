@@ -149,7 +149,7 @@ export async function decideCoordinator(input: CoordinatorDecisionInput): Promis
     : reject(input, lookup.aggregator, lookup.kcUser, log);
 }
 
-async function approve(
+async function approve( // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   input: CoordinatorDecisionInput,
   aggregator: Aggregator,
   kcUser: IdpUser,
@@ -163,7 +163,7 @@ async function approve(
   if (aggregator.parentOrgId) {
     const org = await getAggregatorOrgStore().findById(aggregator.parentOrgId);
     if (!org.ok) return { kind: 'unavailable', dependency: 'db' };
-    if (!org.value || org.value.status !== 'active') return { kind: 'org_inactive' };
+    if (org.value?.status !== 'active') return { kind: 'org_inactive' };
   }
 
   // 1. Signals first: until the upsert succeeds the row stays pending and the

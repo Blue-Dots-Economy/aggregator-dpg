@@ -273,7 +273,7 @@ export class IdpAdminFake extends IdpAdminAdapter {
     this.roles.set(userId, set);
     return { ok: true, value: undefined };
   }
-  async listRealmRoles(userId: string): Promise<IdpResult<string[]>> {
+  async listRealmRoles(userId: string): Promise<IdpResult<string[]>> { // NOSONAR typescript:S7503 — fake implements the async contract
     if (this.failNext) {
       const e = this.failNext;
       this.failNext = null;
@@ -285,7 +285,7 @@ export class IdpAdminFake extends IdpAdminAdapter {
     return { ok: true, value: this.rolesOf(userId) };
   }
 
-  async removeRealmRole(userId: string, role: string): Promise<IdpResult<void>> {
+  async removeRealmRole(userId: string, role: string): Promise<IdpResult<void>> { // NOSONAR typescript:S7503 — fake implements the async contract
     if (this.failNext) {
       const e = this.failNext;
       this.failNext = null;
@@ -301,7 +301,7 @@ export class IdpAdminFake extends IdpAdminAdapter {
   /** Test inspector — how many times each user's sessions were ended. */
   readonly logouts = new Map<string, number>();
 
-  async logoutSessions(userId: string): Promise<IdpResult<void>> {
+  async logoutSessions(userId: string): Promise<IdpResult<void>> { // NOSONAR typescript:S7503 — fake implements the async contract
     if (this.failNext) {
       const e = this.failNext;
       this.failNext = null;

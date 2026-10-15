@@ -152,7 +152,7 @@ async function accountFor(email: string, orgId: string): Promise<AccountMatch> {
  * @param deps - Store, mailer, org, recipients, and token settings.
  * @returns Per-batch counts, the invalid list and own-org existing members.
  */
-export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary> {
+export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary> { // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   const { invites, mailer, orgId, orgName, inviterEmail, recipients, ttlSec, createdBy, log } =
     deps;
   const summary: MintSummary = { sent: 0, resent: 0, invalid: [], existing: [] };
@@ -171,7 +171,7 @@ export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary>
     }
     seen.add(email);
 
-    const account = await accountFor(email, orgId);
+    const account = await accountFor(email, orgId); // NOSONAR typescript:S9382 — sequential by design
     if (account.kind === 'error') {
       summary.invalid.push({ email: recipient.email, reason: 'store_error' });
       continue;
@@ -185,7 +185,7 @@ export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary>
       // `resent` exactly like a fresh address (no account oracle); the row is
       // harmless — registering with an address that has an account is refused.
       const expiresAt = new Date(Date.now() + ttlSec * 1000);
-      const kept = await resolveInviteJti(invites, orgId, email, expiresAt, createdBy);
+      const kept = await resolveInviteJti(invites, orgId, email, expiresAt, createdBy); // NOSONAR typescript:S9382 — sequential by design
       if (!kept) {
         summary.invalid.push({ email: recipient.email, reason: 'store_error' });
         continue;
@@ -194,7 +194,7 @@ export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary>
         orgName,
         signInUrl: `${config.PUBLIC_PORTAL_URL}/login`,
       });
-      const send = await mailer.send({
+      const send = await mailer.send({ // NOSONAR typescript:S9382 — sequential by design
         to: email,
         subject: mail.subject,
         html: mail.html,
@@ -213,13 +213,13 @@ export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary>
     }
 
     const expiresAt = new Date(Date.now() + ttlSec * 1000);
-    const resolved = await resolveInviteJti(invites, orgId, email, expiresAt, createdBy);
+    const resolved = await resolveInviteJti(invites, orgId, email, expiresAt, createdBy); // NOSONAR typescript:S9382 — sequential by design
     if (!resolved) {
       summary.invalid.push({ email: recipient.email, reason: 'store_error' });
       continue;
     }
 
-    const { token } = await mintInviteToken({ jti: resolved.jti, org: orgId, email });
+    const { token } = await mintInviteToken({ jti: resolved.jti, org: orgId, email }); // NOSONAR typescript:S9382 — sequential by design
     const mail = renderCoordinatorInvite({
       orgName,
       inviterEmail,
@@ -227,7 +227,7 @@ export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary>
       expiresOn: formatExpiryDate(expiresAt),
       ...(recipient.name ? { recipientName: recipient.name } : {}),
     });
-    const send = await mailer.send({
+    const send = await mailer.send({ // NOSONAR typescript:S9382 — sequential by design
       to: email,
       subject: mail.subject,
       html: mail.html,

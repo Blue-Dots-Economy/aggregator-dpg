@@ -59,13 +59,16 @@ export interface OrgDecisionInput {
   log: FastifyBaseLogger;
 }
 
+/** Outcome of one owner-access provisioning step. */
+export type OwnerAccessStepResult = 'ok' | 'failed' | 'skipped';
+
 /** What {@link grantOwnerAccess} achieved; any `failed` step can be retried. */
 export interface OwnerAccessResult {
   /** `no_login`: the owner has no recorded Keycloak user. */
   status: 'granted' | 'partial' | 'no_login';
-  enable: 'ok' | 'failed' | 'skipped';
-  role: 'ok' | 'failed' | 'skipped';
-  group: 'ok' | 'failed' | 'skipped';
+  enable: OwnerAccessStepResult;
+  role: OwnerAccessStepResult;
+  group: OwnerAccessStepResult;
 }
 
 /** The sign-in link owners are sent (the console is reached after sign-in). */
@@ -82,7 +85,7 @@ export function ownerSignInUrl(): string {
  * @param log - Logger.
  * @returns Per-step results.
  */
-export async function grantOwnerAccess(
+export async function grantOwnerAccess( // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   org: AggregatorOrg,
   log: FastifyBaseLogger,
 ): Promise<OwnerAccessResult> {
@@ -100,21 +103,33 @@ export async function grantOwnerAccess(
   const enable = await idp.enableUser(sub);
   const role = await idp.assignRealmRole(sub, OWNER_ROLE);
   const group = org.kcGroupId ? await idp.addUserToGroup(sub, org.kcGroupId) : null;
+  let groupStatus: OwnerAccessStepResult;
+  if (group === null) {
+    groupStatus = 'skipped';
+  } else {
+    groupStatus = group.ok ? 'ok' : 'failed';
+  }
   const result: OwnerAccessResult = {
     status: 'granted',
     enable: enable.ok ? 'ok' : 'failed',
     role: role.ok ? 'ok' : 'failed',
-    group: group === null ? 'skipped' : group.ok ? 'ok' : 'failed',
+    group: groupStatus,
   };
   if (result.enable === 'failed' || result.role === 'failed' || result.group === 'failed') {
     result.status = 'partial';
+    let groupDetail: string;
+    if (group === null) {
+      groupDetail = 'skipped';
+    } else {
+      groupDetail = group.ok ? 'ok' : group.error.code;
+    }
     log.warn({
       operation: 'owner-access.grant',
       status: 'failure',
       org_id: org.id,
       enable: enable.ok ? 'ok' : enable.error.code,
       role: role.ok ? 'ok' : role.error.code,
-      group: group === null ? 'skipped' : group.ok ? 'ok' : group.error.code,
+      group: groupDetail,
     });
   }
   return result;
@@ -126,7 +141,7 @@ export async function grantOwnerAccess(
  * @param input - The org, the decision and who takes it.
  * @returns The outcome; never throws.
  */
-export async function decideOrg(input: OrgDecisionInput): Promise<OrgDecisionOutcome> {
+export async function decideOrg(input: OrgDecisionInput): Promise<OrgDecisionOutcome> { // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   const log = input.log.child({ operation: 'org-decision', org_id: input.orgId });
   const store = getAggregatorOrgStore();
   const found = await store.findById(input.orgId);

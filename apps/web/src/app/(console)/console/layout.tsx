@@ -14,7 +14,7 @@ import { getSession } from '@/lib/server-session';
 import { getConsoleActor } from '@/lib/console-actor';
 import { ConsoleNav } from '@/components/console/ConsoleNav';
 
-export default async function ConsoleLayout({ children }: { children: ReactNode }) {
+export default async function ConsoleLayout({ children }: Readonly<{ children: ReactNode }>) {
   const session = await getSession();
   const path = (await headers()).get('x-pathname') ?? '/console';
   if (!session) redirect(`/api/auth/login?returnTo=${encodeURIComponent(path)}`);

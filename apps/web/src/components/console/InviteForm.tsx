@@ -6,14 +6,14 @@
  * already in the organisation.
  */
 
-import { useState, type FormEvent } from 'react';
+import { useState, type SubmitEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import type { UserInviteResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { errorKey, sendConsole } from '../../lib/console-client';
 
-export function InviteForm({ orgs }: { orgs: Array<{ id: string; name: string }> }) {
+export function InviteForm({ orgs }: Readonly<{ orgs: Array<{ id: string; name: string }> }>) {
   const t = useTranslations('console');
   const [orgId, setOrgId] = useState(orgs[0]?.id ?? '');
   const [text, setText] = useState('');
@@ -21,7 +21,7 @@ export function InviteForm({ orgs }: { orgs: Array<{ id: string; name: string }>
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function onSubmit(e: FormEvent) {
+  async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const recipients = text
       .split(/[\n,;]+/)
@@ -81,7 +81,7 @@ export function InviteForm({ orgs }: { orgs: Array<{ id: string; name: string }>
           </p>
         ) : null}
         {result ? (
-          <div role="status" className="flex flex-col gap-1">
+          <output className="flex flex-col gap-1">
             <span>{t('invite.result', { sent: result.sent, resent: result.resent })}</span>
             {result.invalid.length ? (
               <span>
@@ -93,7 +93,7 @@ export function InviteForm({ orgs }: { orgs: Array<{ id: string; name: string }>
                 {t('invite.existing')} {result.existing.map((i) => i.email).join(', ')}
               </span>
             ) : null}
-          </div>
+          </output>
         ) : null}
       </form>
     </Card>

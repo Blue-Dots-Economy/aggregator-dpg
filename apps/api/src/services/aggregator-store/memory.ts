@@ -307,7 +307,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
   async rejectFromPending(id: string, updatedBy: string): Promise<StoreResult<Aggregator | null>> {
     const existing = this.byId.get(id);
     // Only pending → inactive; anything else means already decided.
-    if (!existing || existing.status !== 'pending') return { ok: true, value: null };
+    if (existing?.status !== 'pending') return { ok: true, value: null };
     return this.update(id, { status: 'inactive', rejectedAt: new Date(), updatedBy });
   }
 
@@ -317,7 +317,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
     beforeCommit: () => Promise<boolean>,
   ): Promise<StoreResult<DeleteIfPendingOutcome>> {
     const row = this.byId.get(id);
-    if (!row || row.status !== 'pending' || row.updatedAt.getTime() >= cutoff.getTime()) {
+    if (row?.status !== 'pending' || (row?.updatedAt.getTime() ?? 0) >= cutoff.getTime()) {
       return { ok: true, value: 'not_pending' };
     }
     if (!(await beforeCommit())) return { ok: true, value: 'aborted' };

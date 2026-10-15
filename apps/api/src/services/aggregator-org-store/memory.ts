@@ -259,10 +259,9 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
   ): Promise<OrgStoreResult<OrgDeleteIfPendingOutcome>> {
     const row = this.byId.get(id);
     if (
-      !row ||
-      row.status !== 'pending' ||
-      row.isDefault ||
-      row.updatedAt.getTime() >= cutoff.getTime()
+      row?.status !== 'pending' ||
+      row?.isDefault ||
+      (row?.updatedAt.getTime() ?? 0) >= cutoff.getTime()
     ) {
       return { ok: true, value: 'not_pending' };
     }
@@ -316,5 +315,6 @@ function byName(a: AggregatorOrg, b: AggregatorOrg): number {
   const an = a.displayName.toLowerCase();
   const bn = b.displayName.toLowerCase();
   if (an !== bn) return an < bn ? -1 : 1;
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  if (a.id < b.id) return -1;
+  return a.id > b.id ? 1 : 0;
 }

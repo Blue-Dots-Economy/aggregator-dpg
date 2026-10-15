@@ -89,7 +89,7 @@ async function pruneStale<T>(
       continue;
     }
 
-    const deleted = await spec.deleteIfPending(row, async () => {
+    const deleted = await spec.deleteIfPending(row, async () => { // NOSONAR typescript:S9382 — sequential by design
       if (kc.value) {
         const del = await idp.deleteUser(kc.value.id);
         if (!del.ok) {

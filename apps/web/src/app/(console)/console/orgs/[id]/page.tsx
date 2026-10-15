@@ -12,7 +12,7 @@ import { consoleRead } from '@/lib/console-api.server';
 import { Card } from '@/components/ui/Card';
 import { OrgEditForm } from '@/components/console/OrgEditForm';
 
-export default async function ConsoleOrgPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ConsoleOrgPage({ params }: Readonly<{ params: Promise<{ id: string }> }>) {
   const t = await getTranslations('console');
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
