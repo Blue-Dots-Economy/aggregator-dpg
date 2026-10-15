@@ -8,8 +8,11 @@ import type { MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
 
 vi.mock('@/lib/server-session', () => ({ getSession: vi.fn() }));
 vi.mock('@/lib/console-actor', () => ({ getConsoleActor: vi.fn() }));
-vi.mock('@/components/console/ConsoleNav', () => ({
-  ConsoleNav: () => <nav data-testid="console-nav" />,
+vi.mock('@/components/console/ConsoleSidebar', () => ({
+  ConsoleSidebar: () => <nav data-testid="console-nav" />,
+}));
+vi.mock('next-intl/server', () => ({
+  getTranslations: vi.fn(async () => (key: string) => key),
 }));
 vi.mock('next/navigation', () => ({
   redirect: vi.fn((url: string) => {

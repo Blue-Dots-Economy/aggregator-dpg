@@ -13,6 +13,9 @@ vi.mock('@/lib/console-api.server', () => ({ consoleReadOptional: vi.fn() }));
 vi.mock('next-intl/server', () => ({
   getTranslations: vi.fn(async () => (key: string) => `access.${key}`),
 }));
+vi.mock('@/components/shell/Topbar', () => ({
+  Topbar: ({ title }: { title: string }) => <h1>{title}</h1>,
+}));
 vi.mock('next/navigation', () => ({
   notFound: vi.fn(() => {
     throw new Error('NOT_FOUND');

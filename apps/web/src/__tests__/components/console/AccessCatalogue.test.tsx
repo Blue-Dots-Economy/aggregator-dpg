@@ -84,36 +84,38 @@ const cells = (testId: string) =>
     .map((c) => c.textContent);
 
 describe('<RolesCatalogueTable />', () => {
-  it('shows who holds each role, where, how it is given, and what it grants', () => {
+  it('shows each role with its description, who holds it, where, and what it grants', () => {
     withIntl(<RolesCatalogueTable roles={ROLES} />);
     expect(cells('role-network_admin')).toEqual([
       'Network Adminnetwork_admin',
       "The root organisation's owner; administers the network.",
       'Built-in',
-      'Organisation owners',
-      'The network organisation',
-      'From membership: the network organisation owner',
-      'No limit',
+      'Organisation ownersin The network organisation',
       'network.administerorg.manage',
     ]);
+  });
+
+  it('adds the longest validity to the description only where one applies', () => {
+    withIntl(<RolesCatalogueTable roles={ROLES} />);
     expect(cells('role-pii_access')).toEqual([
       'PII Accesspii_access',
-      'Sees and exports decrypted profile details.',
+      'Sees and exports decrypted profile details.Valid for up to 90 days.',
       'Built-in',
-      'Coordinators',
-      'Aggregator organisations',
-      'Assigned by holders of org.manage',
-      '90 days',
+      'Coordinatorsin Aggregator organisations',
       'profiles.view_pii',
     ]);
+    expect(cells('role-network_admin')[1]).not.toMatch(/Valid for/);
   });
 
   it('marks a custom role, a one-day validity and a role granting nothing', () => {
     withIntl(<RolesCatalogueTable roles={ROLES} />);
-    const row = cells('role-verifier');
-    expect(row[2]).toBe('Custom');
-    expect(row[6]).toBe('1 day');
-    expect(row[7]).toBe('None');
+    expect(cells('role-verifier')).toEqual([
+      'Verifierverifier',
+      'Valid for up to 1 day.',
+      'Custom',
+      'Coordinatorsin Aggregator organisations',
+      'None',
+    ]);
   });
 
   it('has no controls to create, edit, delete or assign', () => {
@@ -131,26 +133,25 @@ describe('<RolesCatalogueTable />', () => {
 });
 
 describe('<PermissionsCatalogueTable />', () => {
-  it('shows each permission with its personal-data and retired flags and granting roles', () => {
+  it('shows each permission with its personal-data flag and granting roles', () => {
     withIntl(<PermissionsCatalogueTable permissions={PERMISSIONS} />);
     expect(cells('permission-profiles.view_pii')).toEqual([
       'profiles.view_pii',
       'See and export decrypted details',
-      'profiles',
-      'view_pii',
       'Yes',
-      'Active',
       'pii_access',
     ]);
+  });
+
+  it('tags a retired permission, and only that one', () => {
+    withIntl(<PermissionsCatalogueTable permissions={PERMISSIONS} />);
     expect(cells('permission-agreement.manage')).toEqual([
-      'agreement.manage',
+      'agreement.manageRetired',
       'Create and link agreements (terms, privacy, consent)',
-      'agreements',
-      'manage',
       'No',
-      'Retired',
       'None',
     ]);
+    expect(cells('permission-profiles.view_pii')[0]).not.toMatch(/Retired/);
   });
 
   it('has no controls', () => {

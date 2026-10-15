@@ -11,6 +11,10 @@ import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
 import { OrgsTable } from '@/components/console/OrgsTable';
 import { StatusFilter } from '@/components/console/StatusFilter';
+import { ConsoleSection } from '@/components/console/ConsoleUi';
+import { Topbar } from '@/components/shell/Topbar';
+import { buttonClass } from '@/components/ui/button-class';
+import { I } from '@/icons';
 
 const STATUSES = ['pending', 'active', 'inactive', 'retired'] as const;
 
@@ -31,21 +35,27 @@ export default async function ConsoleOrgsPage({
     ...(params.cursor ? { cursor: params.cursor } : {}),
   });
   return (
-    <div className="flex flex-col gap-4">
-      <h1 className="font-display text-[22px] font-bold text-ink-900">{t('orgs.heading')}</h1>
-      <StatusFilter action="/console/orgs" value={status ?? ''} />
-      <OrgsTable orgs={page.orgs} />
-      {page.next_cursor ? (
-        <a
-          className="text-primary-600 underline text-[13.5px]"
-          href={`/console/orgs?${new URLSearchParams({
-            ...(status ? { status } : {}),
-            cursor: page.next_cursor,
-          }).toString()}`}
-        >
-          {t('coordinators.next')}
-        </a>
-      ) : null}
-    </div>
+    <>
+      <Topbar title={t('orgs.heading')} subtitle={t('orgs.subtitle')} />
+      <div className="flex flex-col gap-6">
+        <ConsoleSection flush action={<StatusFilter action="/console/orgs" value={status ?? ''} />}>
+          <OrgsTable orgs={page.orgs} />
+        </ConsoleSection>
+        {page.next_cursor ? (
+          <div>
+            <a
+              className={buttonClass('ghost')}
+              href={`/console/orgs?${new URLSearchParams({
+                ...(status ? { status } : {}),
+                cursor: page.next_cursor,
+              }).toString()}`}
+            >
+              {t('coordinators.next')}
+              <I.chevR size={14} />
+            </a>
+          </div>
+        ) : null}
+      </div>
+    </>
   );
 }

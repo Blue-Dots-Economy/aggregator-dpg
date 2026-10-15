@@ -10,7 +10,8 @@ import type { CataloguePermissionsResponse } from '@aggregator-dpg/shared-primit
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleReadOptional } from '@/lib/console-api.server';
 import { can } from '@/lib/capabilities';
-import { Card } from '@/components/ui/Card';
+import { Topbar } from '@/components/shell/Topbar';
+import { ConsoleSection } from '@/components/console/ConsoleUi';
 import { AccessTabs, PermissionsCatalogueTable } from '@/components/console/AccessCatalogue';
 
 export default async function ConsoleAccessPermissionsPage() {
@@ -20,17 +21,17 @@ export default async function ConsoleAccessPermissionsPage() {
   if (!actor.me.is_network_admin || !can(actor.me.capabilities, 'network.administer')) notFound();
   const data = await consoleReadOptional<CataloguePermissionsResponse>('/v1/rbac/permissions');
   return (
-    <div className="flex flex-col gap-4">
-      <h1 className="font-display text-[22px] font-bold text-ink-900">{t('title')}</h1>
-      <p className="text-[13.5px] text-ink-600">{t('intro')}</p>
-      <AccessTabs current="permissions" />
-      {data ? (
-        <Card className="p-2">
-          <PermissionsCatalogueTable permissions={data.permissions} />
-        </Card>
-      ) : (
-        <Card className="p-4 text-[13.5px]">{t('off')}</Card>
-      )}
-    </div>
+    <>
+      <Topbar title={t('title')} subtitle={t('intro')} />
+      <div className="flex flex-col gap-6">
+        <ConsoleSection flush action={<AccessTabs current="permissions" />}>
+          {data ? (
+            <PermissionsCatalogueTable permissions={data.permissions} />
+          ) : (
+            <p className="p-5 text-[13.5px] text-ink-500">{t('off')}</p>
+          )}
+        </ConsoleSection>
+      </div>
+    </>
   );
 }
