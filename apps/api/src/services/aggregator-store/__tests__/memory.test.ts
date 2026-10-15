@@ -152,11 +152,6 @@ describe('InMemoryAggregatorStore — consent hook and serves (0029)', () => {
 });
 
 describe('InMemoryAggregatorStore CAS, list, search and counts', () => {
-  const row = (over: Parameters<typeof buildAggregator>[0] = {}) =>
-    buildAggregator({
-      contact: { name: 'C', email: `${over.id ?? 'x'}@x.org`, phone: `+9190000${over.id ?? '0001'}` },
-      ...over,
-    });
 
   it('approveFromPending / rejectFromPending return null for an already-decided row', async () => {
     const store = new AggregatorStoreFake();
