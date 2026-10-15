@@ -29,13 +29,12 @@ function UploadToast({ message, onDone }: { message: string; onDone: () => void 
   }, [onDone]);
   if (!mounted) return null;
   return createPortal(
-    <div
-      role="status"
+    <output
       aria-live="polite"
       className="fixed top-4 left-4 right-4 sm:left-auto z-100 sm:max-w-sm rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 shadow-lg inline-flex items-start gap-2"
     >
       <I.check size={14} className="mt-0.5 shrink-0" /> <span>{message}</span>
-    </div>,
+    </output>,
     document.body,
   );
 }
