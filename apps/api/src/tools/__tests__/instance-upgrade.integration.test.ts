@@ -197,6 +197,9 @@ suite('instance upgrade from 0022 (instance-upgrade run) — integration', () =>
       max: 2,
       application_name: 'train-it',
     });
+    // Teardown force-drops this scratch DB; swallow the 57P01 it sends an
+    // attached backend so it isn't an unhandled error after tests pass.
+    pool.on('error', () => undefined);
     pools.push(pool);
     if (lastIdx !== null) {
       await migrate(drizzle(pool), { migrationsFolder: await folderAt(lastIdx) });
@@ -425,6 +428,7 @@ suite('instance upgrade from 0022 (instance-upgrade run) — integration', () =>
         max: 1,
         application_name: 'aggregator-api',
       });
+      app.on('error', () => undefined);
       pools.push(app);
       await app.query('SELECT 1');
       expect((await cli(url, ['run', '--snapshot-taken', 's'])).out).toMatch(

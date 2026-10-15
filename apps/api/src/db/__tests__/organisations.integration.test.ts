@@ -178,6 +178,9 @@ suite('organisations (migration 0028) — integration', () => {
       max: 4,
       options: '-c aggregator_dpg.network=blue_dot',
     });
+    // Teardown force-drops this scratch DB; swallow the 57P01 it sends an
+    // attached backend so it isn't an unhandled error after tests pass.
+    p.on('error', () => undefined);
     pools.push(p);
     return { pool: p, url: url.toString() };
   }

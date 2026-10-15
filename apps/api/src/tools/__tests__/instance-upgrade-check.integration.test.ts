@@ -451,6 +451,10 @@ suite('instance-upgrade-check.sql at 0022 — integration', () => {
     const url = new URL(adminUrl!);
     url.pathname = `/${dbName}`;
     pool = new pg.Pool({ connectionString: url.toString(), max: 2 });
+    // Teardown drops this scratch DB WITH (FORCE), which sends 57P01 to any
+    // backend still attached; swallow it so it isn't an unhandled error that
+    // fails the run after every test has already passed.
+    pool.on('error', () => undefined);
     await migrate(drizzle(pool), { migrationsFolder: folder });
   }, TIMEOUT_MS);
 

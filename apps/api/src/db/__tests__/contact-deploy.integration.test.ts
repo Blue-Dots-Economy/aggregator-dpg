@@ -141,6 +141,9 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
       max: 4,
       options: '-c aggregator_dpg.network=blue_dot',
     });
+    // Teardown force-drops this scratch DB; swallow the 57P01 it sends an
+    // attached backend so it isn't an unhandled error after tests pass.
+    pool.on('error', () => undefined);
     pools.push(pool);
     urlOf.set(pool, url.toString());
     return pool;
@@ -380,6 +383,7 @@ suite('contact deploy (0024 → 0025 + 0026) — integration', () => {
   /** Opens a second, independent pool on the same database as `pool`. */
   function scratchDbPeer(pool: pg.Pool): pg.Pool {
     const peer = new pg.Pool({ connectionString: urlOf.get(pool), max: 4 });
+    peer.on('error', () => undefined);
     pools.push(peer);
     return peer;
   }
