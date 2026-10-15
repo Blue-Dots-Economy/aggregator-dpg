@@ -19,10 +19,13 @@ const user: User = {
   rejected_at: null,
 };
 
-function renderIt() {
+function renderIt(
+  u: User = user,
+  domains: Array<{ id: string; label: string }> = [{ id: 'seeker', label: 'Seekers' }],
+) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <CoordinatorActions user={user} domains={[{ id: 'seeker', label: 'Seekers' }]} />
+      <CoordinatorActions user={u} domains={domains} />
     </NextIntlClientProvider>,
   );
 }
@@ -87,5 +90,47 @@ describe('<CoordinatorActions />', () => {
     renderIt();
     fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
     expect(await screen.findByText(messages.console.errors.rate_limited)).toBeInTheDocument();
+  });
+
+  it('confirms the decision saved on a successful approve', async () => {
+    global.fetch = respond({ id: user.id, status: 'active', notified: true }, 200) as never;
+    renderIt();
+    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
+    expect(await screen.findByText(messages.console.coordinator.decided)).toBeInTheDocument();
+  });
+
+  it('hides the decision controls for a coordinator who is not pending', () => {
+    renderIt({ ...user, status: 'active' });
+    expect(screen.queryByRole('button', { name: messages.console.coordinator.approve })).toBeNull();
+    expect(screen.getByTestId('coordinator-status')).toHaveTextContent(messages.console.status.active);
+  });
+
+  it('toggles a domain and saves the served domains', async () => {
+    global.fetch = respond({ ...user, serves: ['seeker'] }, 200) as never;
+    renderIt();
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.save_domains }));
+    await waitFor(() =>
+      expect(screen.getByText(messages.console.coordinator.saved)).toBeInTheDocument(),
+    );
+    expect(global.fetch).toHaveBeenCalledWith(
+      `/api/console/user/metadata/${user.id}`,
+      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ serves: ['seeker'] }) }),
+    );
+  });
+
+  it('shows a generic error when saving domains fails', async () => {
+    global.fetch = respond({ error: { code: 'BOOM' } }, 500) as never;
+    renderIt();
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.save_domains }));
+    expect(await screen.findByText(messages.console.errors.generic)).toBeInTheDocument();
+  });
+
+  it('does not render the domains card when no domains are offered', () => {
+    renderIt(user, []);
+    expect(
+      screen.queryByRole('button', { name: messages.console.coordinator.save_domains }),
+    ).toBeNull();
   });
 });
