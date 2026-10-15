@@ -1,7 +1,7 @@
 # Existing instances: migrating their data to the new user & org model
 
 **Date:** 2026-10-05 (reworked after the decisions of the same day)
-**Status:** Plan. Companion to `user-org-target-model.md`. The phase designs are `users-phase-2.md`, `organisation-phase-3.md` and `cleanup-phase-4.md`.
+**Status:** Plan; **superseded for the operator tool and the execution** by `user-org-migrate-tool-simplification.md` and `docs/user-org-migration-runbook.md` (one window for Phases 1–5, one transaction, snapshot-only rollback — so §3, §6, §9, §13 and §14's tool items no longer apply; §4's catalogue lives on in `scripts/sql/train-check.sql`). Companion to `user-org-target-model.md`. The phase designs are `users-phase-2.md`, `organisation-phase-3.md` and `cleanup-phase-4.md`.
 
 ---
 

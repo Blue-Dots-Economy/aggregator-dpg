@@ -107,7 +107,7 @@ stack_up() {
     return 1
   fi
   # ALLOW_TRAIN_ON_BOOT: a dev/e2e database with data may migrate the user &
-  # org release train at boot (never set it in a deployment).
+  # org instance upgrade at boot (never set it in a deployment).
   ( cd "$REPO_ROOT" && AGGREGATOR_NETWORK="$NETWORK" \
       ALLOW_TRAIN_ON_BOOT=true pnpm stack:up )
   return $?

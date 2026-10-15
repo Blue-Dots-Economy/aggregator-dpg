@@ -1,7 +1,7 @@
 /**
  * Unit tests for the pre-migration guards (`db/migration-guards.ts`,
  * `@aggregator-dpg/api`): the foreign-migration classification and the
- * release-train refusal rule. The database-reading wrapper is exercised by the
+ * instance-upgrade refusal rule. The database-reading wrapper is exercised by the
  * integration suite.
  */
 import { describe, expect, it } from 'vitest';
@@ -13,17 +13,17 @@ import path from 'node:path';
 import {
   checkForeign,
   runMigrationGuards,
-  trainRefusal,
-  TRAIN_FIRST_WHEN,
-  TRAIN_LAST_WHEN,
+  upgradeRefusal,
+  UPGRADE_FIRST_WHEN,
+  UPGRADE_LAST_WHEN,
   type JournalEntry,
 } from '../migration-guards.js';
 
 const journal: JournalEntry[] = [
   { when: 1788400000000, tag: '0022_campaign_pii_audit' },
-  { when: TRAIN_FIRST_WHEN, tag: '0023_drop_aggregator_profile' },
+  { when: UPGRADE_FIRST_WHEN, tag: '0023_drop_aggregator_profile' },
   { when: 1790900000000, tag: '0026_contact_drop_legacy' },
-  { when: TRAIN_LAST_WHEN, tag: '0027_users' },
+  { when: UPGRADE_LAST_WHEN, tag: '0027_users' },
 ];
 
 describe('checkForeign', () => {
@@ -50,9 +50,9 @@ describe('checkForeign', () => {
   });
 });
 
-describe('trainRefusal', () => {
+describe('upgradeRefusal', () => {
   it('refuses a pending train migration on a database with data', () => {
-    expect(trainRefusal(journal, [1788400000000], true, false)).toEqual([
+    expect(upgradeRefusal(journal, [1788400000000], true, false)).toEqual([
       '0023_drop_aggregator_profile',
       '0026_contact_drop_legacy',
       '0027_users',
@@ -60,24 +60,24 @@ describe('trainRefusal', () => {
   });
 
   it('allows an empty database (fresh instance, CI)', () => {
-    expect(trainRefusal(journal, [], false, false)).toEqual([]);
+    expect(upgradeRefusal(journal, [], false, false)).toEqual([]);
   });
 
   it('allows the dev override', () => {
-    expect(trainRefusal(journal, [1788400000000], true, true)).toEqual([]);
+    expect(upgradeRefusal(journal, [1788400000000], true, true)).toEqual([]);
   });
 
   it('never fires once the train is applied (later releases migrate at boot)', () => {
     const later: JournalEntry[] = [
       ...journal,
-      { when: TRAIN_LAST_WHEN + 100000000, tag: '0099_next' },
+      { when: UPGRADE_LAST_WHEN + 100000000, tag: '0099_next' },
     ];
-    expect(trainRefusal(later, [TRAIN_LAST_WHEN], true, false)).toEqual([]);
+    expect(upgradeRefusal(later, [UPGRADE_LAST_WHEN], true, false)).toEqual([]);
   });
 
   it('refuses only the train part of a partially migrated database', () => {
     expect(
-      trainRefusal(journal, [1788400000000, TRAIN_FIRST_WHEN, 1790900000000], true, false),
+      upgradeRefusal(journal, [1788400000000, UPGRADE_FIRST_WHEN, 1790900000000], true, false),
     ).toEqual(['0027_users']);
   });
 });
@@ -118,7 +118,7 @@ describe('runMigrationGuards (IO wrapper)', () => {
 
   const entries: JournalEntry[] = [
     { when: 1788400000000, tag: '0022_x' },
-    { when: TRAIN_LAST_WHEN, tag: '0027_users' },
+    { when: UPGRADE_LAST_WHEN, tag: '0027_users' },
   ];
   const at0022: AppliedRow[] = [{ created_at: '1788400000000', hash: hash('0022_x') }];
 
@@ -132,7 +132,7 @@ describe('runMigrationGuards (IO wrapper)', () => {
   it('refuses the train on a database with data, unless overridden', async () => {
     const dir = await folder(entries);
     const p = pool({ meta: true, applied: at0022, dataIn: ['aggregators'] });
-    await expect(runMigrationGuards(p, dir, false)).rejects.toThrow(/release train/);
+    await expect(runMigrationGuards(p, dir, false)).rejects.toThrow(/instance upgrade/);
     await expect(runMigrationGuards(p, dir, true)).resolves.toBeUndefined();
   });
 
@@ -163,17 +163,17 @@ describe('runMigrationGuards (IO wrapper)', () => {
 });
 
 describe('train bounds vs the shipped journal', () => {
-  it('cover every migration from 0023 to the latest — bump TRAIN_LAST_WHEN with each train migration', async () => {
+  it('cover every migration from 0023 to the latest — bump UPGRADE_LAST_WHEN with each train migration', async () => {
     const journalPath = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
       '../../../drizzle/migrations/meta/_journal.json',
     );
     const real = JSON.parse(await readFile(journalPath, 'utf8')) as { entries: JournalEntry[] };
     const first = real.entries.find((e) => e.tag.startsWith('0023_'));
-    expect(first?.when).toBe(TRAIN_FIRST_WHEN);
+    expect(first?.when).toBe(UPGRADE_FIRST_WHEN);
     // Until the train ships, the latest migration IS the last train migration:
-    // a new one (0028, 0029) must move TRAIN_LAST_WHEN, or it would migrate at
+    // a new one (0028, 0029) must move UPGRADE_LAST_WHEN, or it would migrate at
     // boot on databases that hold data.
-    expect(real.entries.at(-1)?.when).toBe(TRAIN_LAST_WHEN);
+    expect(real.entries.at(-1)?.when).toBe(UPGRADE_LAST_WHEN);
   });
 });

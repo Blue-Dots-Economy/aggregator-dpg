@@ -153,9 +153,9 @@ describe('runMigrations — pre-migration guards', () => {
 
   it('never takes the lock or migrates when a guard refuses', async () => {
     guardsMock.mockImplementationOnce(async () => {
-      throw new Error('refusing to apply the user & org release train');
+      throw new Error('refusing to apply the user & org instance upgrade');
     });
-    await expect(runMigrations()).rejects.toThrow(/release train/);
+    await expect(runMigrations()).rejects.toThrow(/instance upgrade/);
     expect(events).toEqual([]);
     expect(migrateMock).not.toHaveBeenCalled();
   });
