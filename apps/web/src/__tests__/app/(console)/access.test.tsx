@@ -14,7 +14,12 @@ vi.mock('next-intl/server', () => ({
   getTranslations: vi.fn(async () => (key: string) => `access.${key}`),
 }));
 vi.mock('@/components/shell/Topbar', () => ({
-  Topbar: ({ title }: { title: string }) => <h1>{title}</h1>,
+  Topbar: ({ title, subtitle }: { title: string; subtitle?: string }) => (
+    <header>
+      <h1>{title}</h1>
+      <p>{subtitle}</p>
+    </header>
+  ),
 }));
 vi.mock('next/navigation', () => ({
   notFound: vi.fn(() => {
@@ -42,12 +47,18 @@ const show = (el: Awaited<ReturnType<typeof RolesPage>>) =>
     </NextIntlClientProvider>,
   );
 
+/** Each endpoint's body, empty: the page shows the list's empty state. */
+const bodies: Record<string, unknown> = {
+  '/v1/rbac/roles': { roles: [] },
+  '/v1/rbac/permissions': { permissions: [] },
+};
+
 const pages = [
-  ['roles', RolesPage, '/v1/rbac/roles', { roles: [] }, 'No roles.'],
-  ['permissions', PermissionsPage, '/v1/rbac/permissions', { permissions: [] }, 'No permissions.'],
+  ['roles', RolesPage, 'No roles.', 'access.subtitle_roles'],
+  ['permissions', PermissionsPage, 'No permissions.', 'access.subtitle_permissions'],
 ] as const;
 
-describe.each(pages)('console access %s page', (_name, Page, path, body, emptyText) => {
+describe.each(pages)('console access %s page', (_name, Page, emptyText, subtitle) => {
   beforeEach(() => vi.clearAllMocks());
 
   it('is not found for an organisation owner, without reading the API', async () => {
@@ -69,10 +80,16 @@ describe.each(pages)('console access %s page', (_name, Page, path, body, emptyTe
       ok: true,
       me: me({ is_network_admin: true, capabilities: ['network.administer'] }),
     });
-    vi.mocked(consoleReadOptional).mockResolvedValue(body);
+    vi.mocked(consoleReadOptional).mockImplementation(async (path: string) => bodies[path] ?? null);
     show(await Page());
-    expect(consoleReadOptional).toHaveBeenCalledWith(path);
+    expect(
+      vi
+        .mocked(consoleReadOptional)
+        .mock.calls.map(([p]) => p)
+        .sort(),
+    ).toEqual(['/v1/rbac/permissions', '/v1/rbac/roles']);
     expect(screen.getByText(emptyText)).toBeInTheDocument();
+    expect(screen.getByText(subtitle)).toBeInTheDocument();
     expect(screen.queryByText('access.off')).not.toBeInTheDocument();
   });
 
@@ -82,6 +99,18 @@ describe.each(pages)('console access %s page', (_name, Page, path, body, emptyTe
       me: me({ is_network_admin: true, capabilities: null }),
     });
     vi.mocked(consoleReadOptional).mockResolvedValue(null);
+    show(await Page());
+    expect(screen.getByText('access.off')).toBeInTheDocument();
+  });
+
+  it('says the view is unavailable when only one of the two lists can be read', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me({ is_network_admin: true, capabilities: null }),
+    });
+    vi.mocked(consoleReadOptional).mockImplementation(async (path: string) =>
+      path === '/v1/rbac/roles' ? bodies[path] : null,
+    );
     show(await Page());
     expect(screen.getByText('access.off')).toBeInTheDocument();
   });
