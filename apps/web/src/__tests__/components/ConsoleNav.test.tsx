@@ -21,11 +21,14 @@ describe('<ConsoleNav />', () => {
     expect(screen.getByText('nav.organisations')).toBeInTheDocument();
   });
 
-  it('shows the roles page to the network admin only', () => {
-    const { unmount } = render(<ConsoleNav isNetworkAdmin canAdministerRoles />);
-    expect(screen.getByText('nav.roles')).toBeInTheDocument();
+  it('shows the roles and permissions view to the network admin only', () => {
+    const { unmount } = render(<ConsoleNav isNetworkAdmin canViewAccess />);
+    expect(screen.getByText('nav.access').closest('a')).toHaveAttribute(
+      'href',
+      '/console/access/roles',
+    );
     unmount();
     render(<ConsoleNav isNetworkAdmin={false} />);
-    expect(screen.queryByText('nav.roles')).not.toBeInTheDocument();
+    expect(screen.queryByText('nav.access')).not.toBeInTheDocument();
   });
 });

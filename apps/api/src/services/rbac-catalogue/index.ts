@@ -34,6 +34,7 @@ export type {
   CatalogueSnapshot,
   CatalogueStoreError,
   CatalogueStoreResult,
+  StoredPermission,
   SyncResult,
 } from './interface.js';
 export { InMemoryRbacCatalogue } from './memory.js';

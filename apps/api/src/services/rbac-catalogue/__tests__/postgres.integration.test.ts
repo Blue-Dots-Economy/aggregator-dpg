@@ -147,6 +147,13 @@ suite('rbac catalogue (migration 0030) — integration', () => {
       (await pool.query(`SELECT deprecated FROM permission WHERE key = 'agreement.manage'`)).rows[0]
         .deprecated,
     ).toBe(true);
+    const listed = await store.listPermissions();
+    expect(listed.ok && listed.value.map((p) => p.key)).toEqual(
+      PERMS.map((p) => p.key).sort((a, b) => a.localeCompare(b)),
+    );
+    expect(listed.ok && listed.value.find((p) => p.key === 'agreement.manage')).toMatchObject({
+      deprecated: true,
+    });
     await store.sync(PERMS, builtins, SHIPPED);
     expect(
       (await pool.query(`SELECT deprecated FROM permission WHERE key = 'agreement.manage'`)).rows[0]

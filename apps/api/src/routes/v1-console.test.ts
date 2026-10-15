@@ -3,8 +3,8 @@
 
 import { describe, it, expect, beforeEach, afterAll, afterEach } from 'vitest';
 import { CAPABILITIES, indexRoles, permissionDefinitions } from '@aggregator-dpg/rbac';
-import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
-import { _setRbacRuntime } from '../services/authz/runtime.js';
+import { AuthorizerFake, buildRole } from '@aggregator-dpg/rbac/testing';
+import { _setRbacRuntime, refreshRbacCatalogue } from '../services/authz/runtime.js';
 import { shippedRoles, testRbacRuntime } from '../services/authz/testing.js';
 import { getRoleStore, type InMemoryRoleStore } from '../services/role-store/index.js';
 import { getRbacCatalogue, type InMemoryRbacCatalogue } from '../services/rbac-catalogue/index.js';
@@ -1132,6 +1132,147 @@ describe('console routes /v1/user, /v1/org', () => {
         expect((await get('/v1/roles', 'a')).statusCode).toBe(503);
         const res = await assign('a', C3, { role_key: 'pii_access', org_id: ORG_A });
         expect(res.statusCode).toBe(503);
+      });
+    });
+
+    // #871: the network admin's read-only view of the roles and permissions.
+    describe('catalogue view /v1/rbac/*', () => {
+      type Row = { key: string } & Record<string, unknown>;
+      const rolesOf = async (who: keyof typeof TOKENS) =>
+        ((await get('/v1/rbac/roles', who)).json() as { roles: Row[] }).roles;
+      const permissionsOf = async (who: keyof typeof TOKENS) =>
+        ((await get('/v1/rbac/permissions', who)).json() as { permissions: Row[] }).permissions;
+
+      beforeEach(async () => {
+        await getRbacCatalogue().sync(
+          permissionDefinitions(CAPABILITIES),
+          await shippedRoles(),
+          'test',
+        );
+      });
+
+      it('lists every enforced role with who holds it, where, and how it is given', async () => {
+        const roles = await rolesOf('na');
+        expect(roles.map((r) => r.key)).toEqual([
+          'coordinator',
+          'data_export',
+          'network_admin',
+          'org_admin',
+          'org_onboarder',
+          'pii_access',
+        ]);
+        expect(roles.find((r) => r.key === 'network_admin')).toMatchObject({
+          name: 'Network Admin',
+          is_builtin: true,
+          held_by: 'org_owners',
+          held_in: ['network_facilitator'],
+          granted: { via: 'membership', membership: 'root_owner' },
+          max_days: null,
+        });
+        expect(roles.find((r) => r.key === 'pii_access')).toEqual({
+          key: 'pii_access',
+          name: 'PII Access',
+          description: 'Sees and exports decrypted profile details.',
+          is_builtin: true,
+          held_by: 'coordinators',
+          held_in: ['aggregator'],
+          granted: { via: 'assignment', assigned_by: 'org.manage' },
+          max_days: 90,
+          permissions: ['profiles.view_pii'],
+        });
+      });
+
+      it('lists every permission, and "granted by roles" matches the roles table', async () => {
+        const roles = await rolesOf('na');
+        const permissions = await permissionsOf('na');
+        expect(permissions.map((p) => p.key)).toEqual(
+          [...CAPABILITIES].sort((a, b) => a.localeCompare(b)),
+        );
+        for (const p of permissions) {
+          const granting = roles
+            .filter((r) => (r.permissions as string[]).includes(p.key))
+            .map((r) => r.key);
+          expect(p.granted_by_roles, p.key).toEqual(granting);
+        }
+        expect(permissions.find((p) => p.key === 'profiles.view_pii')).toEqual({
+          key: 'profiles.view_pii',
+          description: 'See and export decrypted details',
+          resource: 'profiles',
+          action: 'view_pii',
+          personal_data: true,
+          retired: false,
+          granted_by_roles: ['pii_access'],
+        });
+        expect(permissions.find((p) => p.key === 'profiles.view')).toMatchObject({
+          personal_data: false,
+        });
+      });
+
+      it('keeps a permission the code retired, flagged', async () => {
+        const fewer = permissionDefinitions(CAPABILITIES).filter(
+          (p) => p.key !== 'agreement.manage',
+        );
+        await getRbacCatalogue().sync(fewer, await shippedRoles(), 'test');
+        const retired = (await permissionsOf('na')).find((p) => p.key === 'agreement.manage');
+        expect(retired).toMatchObject({ retired: true, granted_by_roles: ['network_admin'] });
+      });
+
+      it('shows a role change after the catalogue refresh, with no restart', async () => {
+        const store = getRbacCatalogue() as InMemoryRbacCatalogue;
+        const revision = await store.revision();
+        _setRbacRuntime({
+          ...(await testRbacRuntime('enforce')),
+          catalogueRevision: revision.ok ? revision.value : '',
+        });
+        store.setRoles([
+          ...store.storedRoles(),
+          buildRole({ key: 'verifier', name: 'Verifier', permissions: ['profiles.verify'] }),
+        ]);
+        expect((await rolesOf('na')).map((r) => r.key)).not.toContain('verifier');
+        expect(await refreshRbacCatalogue()).toBe('reloaded');
+        expect((await rolesOf('na')).find((r) => r.key === 'verifier')).toMatchObject({
+          is_builtin: false,
+          permissions: ['profiles.verify'],
+        });
+        expect(
+          (await permissionsOf('na')).find((p) => p.key === 'profiles.verify')?.granted_by_roles,
+        ).toContain('verifier');
+      });
+
+      it('refuses an organisation owner and a coordinator', async () => {
+        for (const url of ['/v1/rbac/roles', '/v1/rbac/permissions']) {
+          const owner = await get(url, 'a');
+          expect(owner.statusCode).toBe(403);
+          expect(permissionOf(owner)).toBe('network.administer');
+          expect((await get(url, 'coord')).statusCode).toBe(403);
+        }
+      });
+
+      it('answers 404 to an owner when access is only logged', async () => {
+        _setRbacRuntime(await testRbacRuntime('log'));
+        for (const url of ['/v1/rbac/roles', '/v1/rbac/permissions']) {
+          expect((await get(url, 'a')).statusCode).toBe(404);
+          expect((await get(url, 'na')).statusCode).toBe(200);
+        }
+      });
+
+      it('answers 503 when access control is off, or the catalogue cannot be read', async () => {
+        const store = getRbacCatalogue() as InMemoryRbacCatalogue;
+        store.failWith({ code: 'DB_UNAVAILABLE', message: 'down' });
+        expect((await get('/v1/rbac/permissions', 'na')).statusCode).toBe(503);
+        store.failWith(null);
+        _setRbacRuntime(null);
+        expect((await get('/v1/rbac/roles', 'na')).statusCode).toBe(503);
+        expect((await get('/v1/rbac/permissions', 'na')).statusCode).toBe(503);
+      });
+
+      it('accepts no writes', async () => {
+        for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
+          for (const url of ['/v1/rbac/roles', '/v1/rbac/permissions']) {
+            const res = await app.inject({ method, url, headers: auth('na'), payload: {} });
+            expect(res.statusCode, `${method} ${url}`).toBe(404);
+          }
+        }
       });
     });
 

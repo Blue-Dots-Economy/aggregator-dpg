@@ -2,8 +2,9 @@
 
 /**
  * Console navigation (user & org Phase 5). The organisations list is the
- * network admin's only; coordinators and invites need `org.manage`, the roles
- * page `network.administer` (RBAC; the API also checks them).
+ * network admin's only; coordinators and invites need `org.manage`, and the
+ * read-only roles and permissions view `network.administer` (RBAC; the API
+ * also checks them).
  */
 
 import Link from 'next/link';
@@ -14,11 +15,11 @@ import { cn } from '../../lib/cn';
 export function ConsoleNav({
   isNetworkAdmin,
   canManage = true,
-  canAdministerRoles = false,
+  canViewAccess = false,
 }: Readonly<{
   isNetworkAdmin: boolean;
   canManage?: boolean;
-  canAdministerRoles?: boolean;
+  canViewAccess?: boolean;
 }>) {
   const t = useTranslations('console');
   const path = usePathname() ?? '';
@@ -31,10 +32,13 @@ export function ConsoleNav({
           { to: '/console/invite', label: t('nav.invite') },
         ]
       : []),
-    ...(canAdministerRoles ? [{ to: '/console/roles', label: t('nav.roles') }] : []),
+    ...(canViewAccess
+      ? [{ to: '/console/access/roles', match: '/console/access', label: t('nav.access') }]
+      : []),
     { to: '/console/account', label: t('nav.account') },
   ];
   const active = (to: string) => (to === '/console' ? path === to : path.startsWith(to));
+  const isActive = (i: { to: string; match?: string }) => active(i.match ?? i.to);
   return (
     <nav
       aria-label={t('title')}
@@ -46,10 +50,10 @@ export function ConsoleNav({
           <li key={i.to}>
             <Link
               href={i.to}
-              aria-current={active(i.to) ? 'page' : undefined}
+              aria-current={isActive(i) ? 'page' : undefined}
               className={cn(
                 'block rounded-[8px] px-3 py-2 text-[13.5px]',
-                active(i.to)
+                isActive(i)
                   ? 'bg-(--bd-primary-50) text-primary-600 font-semibold'
                   : 'text-ink-700 hover:bg-ink-50',
               )}
