@@ -38,7 +38,11 @@ import { getUserStore, type Coordinator } from '../services/user-store/index.js'
 import { getOrganisationStore, type Organisation } from '../services/organisation-store/index.js';
 import { isNetworkAdmin, requireActor, type Actor } from '../services/auth/actor/index.js';
 import { narrowOrgFilter } from '../services/authz/scope.js';
-import { inManageScope, manageableOrgIds } from '../services/authz/manage-scope.js';
+import {
+  inManageScope,
+  manageableOrgIds,
+  type ScopePurpose,
+} from '../services/authz/manage-scope.js';
 import { decideCoordinator } from '../services/decisions/coordinator.js';
 import { mintInviteBatch } from '../services/invites/mint.js';
 import { checkInviteMintRate } from '../services/invite-mint-rate.js';
@@ -81,17 +85,22 @@ async function rootOrgId(): Promise<string | null> {
 }
 
 /**
- * The organisations whose coordinators the actor may manage (#873).
+ * The organisations whose coordinators the actor may manage, or with
+ * `view` only read (the network admin sees every organisation's) (#873).
  *
  * @throws {HttpError} DB_UNAVAILABLE.
  */
-async function manageScope(req: FastifyRequest, actor: Actor): Promise<string[] | null> {
-  return manageableOrgIds(req, actor, await rootOrgId());
+async function manageScope(
+  req: FastifyRequest,
+  actor: Actor,
+  purpose: ScopePurpose = 'manage',
+): Promise<string[] | null> {
+  return manageableOrgIds(req, actor, await rootOrgId(), purpose);
 }
 
 /**
  * Loads a coordinator the actor may manage (in reach, and `org.manage` in its
- * organisation), else 404 so ids cannot be probed.
+ * organisation) or, for `view`, read; else 404 so ids cannot be probed.
  *
  * @throws {HttpError} NOT_FOUND / DB_UNAVAILABLE.
  */
@@ -99,10 +108,11 @@ async function coordinatorInReach(
   req: FastifyRequest,
   actor: Actor,
   id: string,
+  purpose: ScopePurpose = 'manage',
 ): Promise<Coordinator> {
   const row = await getUserStore().findById(id);
   if (!row.ok) dbDown('userStore.findById', row.error.message);
-  if (!row.value || !inManageScope(await manageScope(req, actor), row.value.parentOrgId)) {
+  if (!row.value || !inManageScope(await manageScope(req, actor, purpose), row.value.parentOrgId)) {
     throw httpError('NOT_FOUND');
   }
   return row.value;
@@ -257,7 +267,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/user/read/:id',
     {
-      config: { rbac: { capability: 'org.manage' } },
+      config: { rbac: { anyCapability: ['org.manage', 'network.administer'] } },
       schema: {
         tags: ['console'],
         summary: 'One coordinator within reach',
@@ -268,7 +278,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
-      const row = await coordinatorInReach(req, actor, id);
+      const row = await coordinatorInReach(req, actor, id, 'view');
       const plain = await showsContact(req, actor, row.parentOrgId ?? null);
       // Contact read audit (design C8): ids only.
       req.log.info({
@@ -285,7 +295,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/user/search',
     {
-      config: { rbac: { capability: 'org.manage' } },
+      config: { rbac: { anyCapability: ['org.manage', 'network.administer'] } },
       schema: {
         tags: ['console'],
         summary: 'Coordinators within reach, newest first',
@@ -299,7 +309,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       const body = req.body as z.infer<typeof UserSearchRequestSchema>;
       const page = await getUserStore().search({
-        orgIds: narrowOrgFilter(await manageScope(req, actor), body.filter.org_id),
+        orgIds: narrowOrgFilter(await manageScope(req, actor, 'view'), body.filter.org_id),
         ...(body.filter.status ? { status: body.filter.status } : {}),
         ...(body.filter.serves ? { serves: body.filter.serves } : {}),
         ...(body.cursor ? { cursor: decodeUserCursor(body.cursor) } : {}),

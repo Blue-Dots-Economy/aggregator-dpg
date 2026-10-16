@@ -4,7 +4,8 @@
  * Coordinator actions (user & org Phase 5): approve / reject a pending one
  * (optional reason, mailed to the applicant) and change the domains served.
  * A decision made elsewhere (409 ALREADY_DECIDED) updates the status in place
- * (C10).
+ * (C10). Read-only for a viewer who cannot manage the coordinator's
+ * organisation (the network admin, #873): status and domains, no actions.
  */
 
 import { useState } from 'react';
@@ -18,9 +19,12 @@ import { errorKey, sendConsole } from '../../lib/console-client';
 export function CoordinatorActions({
   user,
   domains,
+  readOnly = false,
 }: Readonly<{
   user: User;
   domains: Array<{ id: string; label: string }>;
+  /** Show status and domains only, with no decision or domain editing. */
+  readOnly?: boolean;
 }>) {
   const t = useTranslations('console');
   const [status, setStatus] = useState(user.status);
@@ -73,7 +77,7 @@ export function CoordinatorActions({
           </span>
         }
       >
-        {status === 'pending' || decisionNote ? (
+        {!readOnly && (status === 'pending' || decisionNote) ? (
           <div className="flex flex-col gap-4 text-[13.5px] max-w-2xl">
             {status === 'pending' ? (
               <>
@@ -110,7 +114,20 @@ export function CoordinatorActions({
         ) : null}
       </ConsoleSection>
 
-      {domains.length > 0 ? (
+      {readOnly && domains.length > 0 ? (
+        <ConsoleSection title={t('coordinator.domains')}>
+          <p className="text-[13.5px] text-ink-700">
+            {serves.length
+              ? domains
+                  .filter((d) => serves.includes(d.id))
+                  .map((d) => d.label)
+                  .join(', ')
+              : t('coordinators.every_domain')}
+          </p>
+        </ConsoleSection>
+      ) : null}
+
+      {!readOnly && domains.length > 0 ? (
         <ConsoleSection title={t('coordinator.domains')}>
           <div className="flex flex-col gap-3 text-[13.5px]">
             <div className="flex flex-wrap gap-2">

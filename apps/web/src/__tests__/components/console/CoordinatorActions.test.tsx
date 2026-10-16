@@ -22,10 +22,11 @@ const user: User = {
 function renderIt(
   u: User = user,
   domains: Array<{ id: string; label: string }> = [{ id: 'seeker', label: 'Seekers' }],
+  readOnly = false,
 ) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <CoordinatorActions user={u} domains={domains} />
+      <CoordinatorActions user={u} domains={domains} readOnly={readOnly} />
     </NextIntlClientProvider>,
   );
 }
@@ -102,14 +103,18 @@ describe('<CoordinatorActions />', () => {
   it('hides the decision controls for a coordinator who is not pending', () => {
     renderIt({ ...user, status: 'active' });
     expect(screen.queryByRole('button', { name: messages.console.coordinator.approve })).toBeNull();
-    expect(screen.getByTestId('coordinator-status')).toHaveTextContent(messages.console.status.active);
+    expect(screen.getByTestId('coordinator-status')).toHaveTextContent(
+      messages.console.status.active,
+    );
   });
 
   it('toggles a domain and saves the served domains', async () => {
     global.fetch = respond({ ...user, serves: ['seeker'] }, 200) as never;
     renderIt();
     fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.save_domains }));
+    fireEvent.click(
+      screen.getByRole('button', { name: messages.console.coordinator.save_domains }),
+    );
     await waitFor(() =>
       expect(screen.getByText(messages.console.coordinator.saved)).toBeInTheDocument(),
     );
@@ -123,7 +128,9 @@ describe('<CoordinatorActions />', () => {
     global.fetch = respond({ error: { code: 'BOOM' } }, 500) as never;
     renderIt();
     fireEvent.click(screen.getByRole('checkbox'));
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.save_domains }));
+    fireEvent.click(
+      screen.getByRole('button', { name: messages.console.coordinator.save_domains }),
+    );
     expect(await screen.findByText(messages.console.errors.generic)).toBeInTheDocument();
   });
 
@@ -132,5 +139,27 @@ describe('<CoordinatorActions />', () => {
     expect(
       screen.queryByRole('button', { name: messages.console.coordinator.save_domains }),
     ).toBeNull();
+  });
+
+  it('shows status and served domains without any action when read-only (#873)', () => {
+    renderIt(
+      { ...user, serves: ['seeker'] },
+      [
+        { id: 'seeker', label: 'Seekers' },
+        { id: 'provider', label: 'Providers' },
+      ],
+      true,
+    );
+    expect(screen.getByTestId('coordinator-status')).toBeInTheDocument();
+    expect(screen.getByText('Seekers')).toBeInTheDocument();
+    expect(screen.queryByText('Providers')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.queryByRole('textbox')).toBeNull();
+  });
+
+  it('shows "every domain" when a read-only coordinator serves all of them', () => {
+    renderIt(user, [{ id: 'seeker', label: 'Seekers' }], true);
+    expect(screen.getByText(messages.console.coordinators.every_domain)).toBeInTheDocument();
   });
 });

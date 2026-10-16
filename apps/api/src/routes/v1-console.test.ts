@@ -1198,11 +1198,19 @@ describe('console routes /v1/user, /v1/org', () => {
       };
       const C9 = '00000000-0000-4000-8000-0000000000c9';
 
-      it('limits the network admin to coordinators of orgs it owns', async () => {
+      it('lets the network admin view every org’s coordinators but change only its own', async () => {
         coordinators.seed([coordinator(C9, DEFAULT, 'pending', 9)]);
-        expect(await searchIds('na')).toEqual([C9]);
-        expect((await get(`/v1/user/read/${C9}`, 'na')).statusCode).toBe(200);
-        expect((await get(`/v1/user/read/${C3}`, 'na')).statusCode).toBe(404);
+        await idp.createUser({
+          email: 'c9@x.org',
+          enabled: false,
+          attributes: { [KC_ATTR.AGGREGATOR_ID]: C9 },
+        });
+        expect(await searchIds('na')).toEqual([C1, C2, C3, C9]);
+        expect((await get(`/v1/user/read/${C3}`, 'na')).statusCode).toBe(200);
+        // Its own (Default) org: the network admin still decides.
+        expect(
+          (await post(`/v1/user/decision/${C9}`, 'na', { decision: 'reject' })).statusCode,
+        ).toBe(200);
         expect(
           (await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' })).statusCode,
         ).toBe(404);
@@ -1214,6 +1222,12 @@ describe('console routes /v1/user, /v1/org', () => {
           recipients: [{ email: 'new@x.org' }],
         });
         expect(invite.statusCode).toBe(404);
+      });
+
+      it('limits an owner’s view to its own coordinators', async () => {
+        coordinators.seed([coordinator(C9, DEFAULT, 'pending', 9)]);
+        expect(await searchIds('b')).toEqual([C2]);
+        expect((await get(`/v1/user/read/${C3}`, 'b')).statusCode).toBe(404);
       });
 
       it('refuses the network admin Data Export or PII Access in another org', async () => {
