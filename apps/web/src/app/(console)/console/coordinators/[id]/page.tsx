@@ -17,25 +17,14 @@ import { getConsoleActor } from '@/lib/console-actor';
 import { canManageOrg } from '@/lib/capabilities';
 import { RolesPanel } from '@/components/console/RolesPanel';
 import { Topbar } from '@/components/shell/Topbar';
-import { BackLink, ConsoleSection, DetailList } from '@/components/console/ConsoleUi';
+import {
+  BackLink,
+  ConsoleSection,
+  ConsoleStatusPill,
+  DetailList,
+} from '@/components/console/ConsoleUi';
+import { networkDomains } from '@/lib/console-domains.server';
 import { CoordinatorActions } from '@/components/console/CoordinatorActions';
-
-interface ConfigPayload {
-  domains?: Array<{ id: string; label: string }>;
-}
-
-/** The network's domains, from the public aggregator config (empty on failure). */
-async function domains(): Promise<Array<{ id: string; label: string }>> {
-  const base = process.env.API_BASE_URL ?? 'http://localhost:4000';
-  try {
-    const res = await fetch(`${base}/v1/aggregator-config`, { signal: AbortSignal.timeout(5000) });
-    if (!res.ok) return [];
-    const cfg = (await res.json()) as ConfigPayload;
-    return (cfg.domains ?? []).map((d) => ({ id: d.id, label: d.label }));
-  } catch {
-    return [];
-  }
-}
 
 export default async function ConsoleCoordinatorPage({
   params,
@@ -47,7 +36,7 @@ export default async function ConsoleCoordinatorPage({
   const actor = await getConsoleActor();
   const [user, domainList] = await Promise.all([
     consoleRead<User>(`/v1/user/read/${encodeURIComponent(id)}`),
-    domains(),
+    networkDomains(),
   ]);
   const canManage = actor.ok && !!user.org_id && canManageOrg(actor.me, user.org_id);
   const [userRoles, catalogue] = await Promise.all([
@@ -61,7 +50,10 @@ export default async function ConsoleCoordinatorPage({
     <>
       <div>
         <BackLink href="/console/coordinators">{t('coordinator.back')}</BackLink>
-        <Topbar title={user.name} subtitle={user.contact.email} />
+        <Topbar
+          title={user.contact.name ?? user.contact.email}
+          subtitle={`${user.name} · ${user.contact.email}`}
+        />
       </div>
       <div className="flex flex-col gap-6">
         <ConsoleSection title={t('coordinator.details')}>
@@ -70,6 +62,10 @@ export default async function ConsoleCoordinatorPage({
               { label: t('account.name'), value: user.contact.name ?? '—' },
               { label: t('account.email'), value: user.contact.email },
               { label: t('account.phone'), value: user.contact.phone ?? '—' },
+              {
+                label: t('coordinators.status'),
+                value: <ConsoleStatusPill status={user.status} />,
+              },
             ]}
           />
         </ConsoleSection>

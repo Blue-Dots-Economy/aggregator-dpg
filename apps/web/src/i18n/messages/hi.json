@@ -654,12 +654,12 @@
       "none_pending": "Nothing is waiting for review.",
       "coordinators": "{count} coordinators",
       "pending": "{count} pending",
-      "open": "Open",
       "no_orgs": "You don't manage an active organisation.",
       "subtitle_admin": "The network, your organisations and what is waiting for review.",
       "subtitle_owner": "Your organisations and their coordinators.",
       "coordinators_label": "Coordinators",
-      "pending_label": "Pending review"
+      "pending_label": "Pending review",
+      "review": "Review"
     },
     "org": {
       "details": "Organisation details",
@@ -696,18 +696,17 @@
       "col_actions": "Actions"
     },
     "coordinators": {
+      "coordinator": "Coordinator",
+      "organisation": "Organisation",
       "heading": "Coordinators",
       "status_filter": "Status",
       "all": "All",
       "empty": "No coordinators match.",
       "next": "Next page",
-      "name": "Name",
-      "contact": "Contact",
       "status": "Status",
       "serves": "Domains",
       "every_domain": "Every domain",
       "access": "Access",
-      "open": "Open",
       "subtitle": "Coordinators in your organisations, newest first.",
       "apply": "Apply"
     },

@@ -1,5 +1,6 @@
 /**
- * One organisation (user & org Phase 5): owner, counts and the details form.
+ * One organisation (user & org Phase 5): owner, counts and the details form;
+ * the network admin re-grants an active org's owner access here.
  * The Default org and the root are read-only; the name is the network
  * admin's only (P5-9, R8). The network admin also sees the owner's roles
  * here (RBAC), to assign Org Onboarder or a custom admin role.
@@ -25,9 +26,12 @@ import {
 import { I } from '@/icons';
 import { OrgEditForm } from '@/components/console/OrgEditForm';
 import { RolesPanel } from '@/components/console/RolesPanel';
+import { OwnerAccessRepair } from '@/components/console/OwnerAccessRepair';
 import { can } from '@/lib/capabilities';
 
-export default async function ConsoleOrgPage({ params }: Readonly<{ params: Promise<{ id: string }> }>) {
+export default async function ConsoleOrgPage({
+  params,
+}: Readonly<{ params: Promise<{ id: string }> }>) {
   const t = await getTranslations('console');
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
@@ -45,6 +49,7 @@ export default async function ConsoleOrgPage({ params }: Readonly<{ params: Prom
         ])
       : [null, null];
   const editable = org.org_type === 'aggregator' && !org.is_default;
+  const canRepair = actor.me.is_network_admin && editable && org.status === 'active';
   return (
     <>
       <div>
@@ -73,10 +78,15 @@ export default async function ConsoleOrgPage({ params }: Readonly<{ params: Prom
               {
                 label: t('org.owner'),
                 value: (
-                  <>
-                    <div>{owner.contact.name ?? owner.contact.email}</div>
-                    <div className="text-[12.5px] text-ink-500">{owner.contact.email}</div>
-                  </>
+                  <div className="flex flex-col gap-2">
+                    <div>
+                      <div>{owner.contact.name ?? owner.contact.email}</div>
+                      {owner.contact.name ? (
+                        <div className="text-[12.5px] text-ink-500">{owner.contact.email}</div>
+                      ) : null}
+                    </div>
+                    {canRepair ? <OwnerAccessRepair orgId={org.id} /> : null}
+                  </div>
                 ),
               },
               {

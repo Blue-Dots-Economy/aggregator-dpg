@@ -1,8 +1,9 @@
 'use client';
 
 /**
- * A plain GET form filtering a console list by status (no JavaScript needed;
- * the page re-reads server-side).
+ * A plain GET form filtering a console list by status; the page re-reads
+ * server-side. It applies as soon as the status changes, with an Apply
+ * button only when JavaScript is off.
  */
 
 import { useTranslations } from 'next-intl';
@@ -29,7 +30,12 @@ export function StatusFilter({
         <span className="text-[13px] font-medium text-(--bd-fg-muted)">
           {t('coordinators.status_filter')}
         </span>
-        <select name="status" defaultValue={value} className="bd-input min-w-[150px]">
+        <select
+          name="status"
+          defaultValue={value}
+          className="bd-input min-w-[150px]"
+          onChange={(e) => e.currentTarget.form?.requestSubmit()}
+        >
           <option value="">{t('coordinators.all')}</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
@@ -38,9 +44,11 @@ export function StatusFilter({
           ))}
         </select>
       </label>
-      <Button type="submit" kind="ghost">
-        {t('coordinators.apply')}
-      </Button>
+      <noscript>
+        <Button type="submit" kind="ghost">
+          {t('coordinators.apply')}
+        </Button>
+      </noscript>
     </form>
   );
 }
