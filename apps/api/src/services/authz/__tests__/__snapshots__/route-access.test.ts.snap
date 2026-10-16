@@ -30,6 +30,8 @@ exports[`declared route table > declares every route of the app 1`] = `
   "GET /v1/org/read/:id": "org.manage",
   "GET /v1/orgs": "service",
   "GET /v1/participant-consent": "public",
+  "GET /v1/rbac/permissions": "network.administer",
+  "GET /v1/rbac/roles": "network.administer",
   "GET /v1/roles": "org.manage",
   "GET /v1/support/config": "signed_in",
   "GET /v1/user/read/:id": "org.manage",

@@ -640,9 +640,12 @@
       "organisations": "Organisations",
       "coordinators": "Coordinators",
       "invite": "Invite coordinators",
-      "roles": "Roles",
+      "access": "Roles and permissions",
       "account": "My account",
-      "sign_out": "Sign out"
+      "sign_out": "Sign out",
+      "portal_label": "Organisation console",
+      "network_admin": "Network admin",
+      "org_owner": "Organisation owner"
     },
     "home": {
       "heading": "Your organisations",
@@ -652,7 +655,11 @@
       "coordinators": "{count} coordinators",
       "pending": "{count} pending",
       "open": "Open",
-      "no_orgs": "You don't manage an active organisation."
+      "no_orgs": "You don't manage an active organisation.",
+      "subtitle_admin": "The network, your organisations and what is waiting for review.",
+      "subtitle_owner": "Your organisations and their coordinators.",
+      "coordinators_label": "Coordinators",
+      "pending_label": "Pending review"
     },
     "org": {
       "details": "Organisation details",
@@ -669,7 +676,9 @@
       "owner": "Owner",
       "status": "Status",
       "view_coordinators": "View coordinators",
-      "owner_roles": "Owner's roles"
+      "owner_roles": "Owner's roles",
+      "overview": "Overview",
+      "subtitle": "Organisation details, owner and coordinators."
     },
     "orgs": {
       "heading": "Organisations",
@@ -679,7 +688,12 @@
       "reject": "Reject",
       "repair": "Re-grant owner access",
       "repaired": "Owner access: {status}",
-      "empty": "No organisations match."
+      "empty": "No organisations match.",
+      "subtitle": "Every aggregator organisation on the network.",
+      "col_name": "Organisation",
+      "col_status": "Status",
+      "col_counts": "Coordinators",
+      "col_actions": "Actions"
     },
     "coordinators": {
       "heading": "Coordinators",
@@ -692,7 +706,9 @@
       "status": "Status",
       "serves": "Domains",
       "every_domain": "Every domain",
-      "open": "Open"
+      "open": "Open",
+      "subtitle": "Coordinators in your organisations, newest first.",
+      "apply": "Apply"
     },
     "coordinator": {
       "approve": "Approve",
@@ -704,7 +720,9 @@
       "domains_hint": "Select none to serve every domain.",
       "save_domains": "Save domains",
       "saved": "Saved.",
-      "back": "Back to coordinators"
+      "back": "Back to coordinators",
+      "details": "Contact details",
+      "decision": "Registration"
     },
     "invite": {
       "heading": "Invite coordinators",
@@ -715,14 +733,16 @@
       "result": "Sent {sent}, resent {resent}.",
       "invalid": "Not sent:",
       "existing": "Already in this organisation:",
-      "no_orgs": "None of your organisations accepts invites."
+      "no_orgs": "None of your organisations accepts invites.",
+      "subtitle": "Invite coordinators to one of your organisations by email."
     },
     "account": {
       "heading": "My account",
       "name": "Name",
       "email": "Email",
       "phone": "Phone",
-      "read_only": "Contact details can't be changed here yet."
+      "read_only": "Contact details can't be changed here yet.",
+      "subtitle": "The details you sign in with."
     },
     "status": {
       "pending": "Pending",
@@ -754,32 +774,46 @@
       "saved": "Saved.",
       "hint": "Additional roles add to the base role in this organisation. Every change is recorded."
     },
-    "roles_admin": {
-      "title": "Roles",
-      "off": "Access control is off on this instance.",
-      "builtin": "Built-in roles",
-      "builtin_hint": "Defined with the release; they cannot be changed here.",
-      "custom": "Custom roles",
-      "none": "No custom roles yet.",
-      "create": "Create a role",
-      "edit": "Edit",
-      "delete": "Delete",
-      "save": "Save",
-      "cancel": "Cancel",
-      "saved": "Saved.",
-      "deleted": "Deleted.",
-      "key": "Key",
-      "name": "Name",
-      "description": "Description",
-      "account_type": "Held by",
-      "account_admin": "Organisation owners",
-      "account_coordinator": "Coordinators",
-      "org_types": "Held in",
+    "access": {
+      "title": "Roles and permissions",
+      "subtitle_roles": "Every role on the network: who holds it and the permissions it grants.",
+      "subtitle_permissions": "Every permission on the network and the roles that grant it.",
+      "off": "Roles and permissions are unavailable: access control is off on this instance, or the catalogue could not be read.",
+      "tab_roles": "Roles",
+      "tab_permissions": "Permissions",
+      "stat_roles": "Roles",
+      "stat_permissions": "Permissions",
+      "stat_retired": "{count} retired",
+      "stat_personal_data": "Expose personal data",
+      "stat_custom": "Custom roles",
+      "search_roles": "Search roles or permissions",
+      "search_permissions": "Search permissions or roles",
+      "no_match": "Nothing matches “{query}”.",
+      "roles_empty": "No roles.",
+      "permissions_empty": "No permissions.",
+      "group_membership": "From membership",
+      "group_membership_hint": "Held automatically by everyone with that membership.",
+      "group_assigned": "Assigned",
+      "group_assigned_hint": "Given to a person in an organisation by someone allowed to assign it.",
+      "group_custom": "Custom roles",
+      "group_custom_hint": "Created by the network admin from existing permissions; assigned like the roles above.",
+      "held_by_org_owners": "Organisation owners",
+      "held_by_coordinators": "Coordinators",
       "org_aggregator": "Aggregator organisations",
       "org_network_facilitator": "The network organisation",
-      "assigned_by": "Assigned by holders of",
-      "max_days": "Longest validity (days, empty = none)",
-      "permissions": "Permissions"
+      "held_line": "{holders} · {orgs}",
+      "valid_for": "Valid for up to {count, plural, one {# day} other {# days}}",
+      "permission_count": "{count, plural, =0 {No permissions} one {# permission} other {# permissions}}",
+      "personal_data": "Personal data",
+      "legend_personal_data": "Exposes personal data",
+      "retired": "Retired",
+      "col_permission": "Permission",
+      "col_description": "Description",
+      "col_personal_data": "Personal data",
+      "col_granted_by": "Granted by roles",
+      "yes": "Yes",
+      "no": "No",
+      "granted_by_none": "No role grants it"
     }
   }
 }

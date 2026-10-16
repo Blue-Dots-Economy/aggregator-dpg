@@ -11,7 +11,8 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { DecisionResponse, User } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
-import { Card } from '../ui/Card';
+import { I } from '../../icons';
+import { ConsoleSection, ConsoleStatusPill } from './ConsoleUi';
 import { errorKey, sendConsole } from '../../lib/console-client';
 
 export function CoordinatorActions({
@@ -63,60 +64,81 @@ export function CoordinatorActions({
     setServes((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   return (
-    <div className="flex flex-col gap-4">
-      <Card className="p-4 flex flex-col gap-3 text-[13.5px]">
-        <span data-testid="coordinator-status">
-          {t('coordinators.status')}: {t(`status.${status}`)}
-        </span>
-        {status === 'pending' ? (
-          <>
-            <label className="flex flex-col gap-1">
-              <span className="bd-label">{t('coordinator.reason')}</span>
-              <textarea
-                className="bd-input min-h-[70px]"
-                maxLength={500}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-              />
-            </label>
-            <div className="flex gap-2">
-              <Button disabled={busy} onClick={() => void decide('approve')}>
-                {t('coordinator.approve')}
-              </Button>
-              <Button kind="danger" disabled={busy} onClick={() => void decide('reject')}>
-                {t('coordinator.reject')}
-              </Button>
-            </div>
-          </>
+    <div className="flex flex-col gap-6">
+      <ConsoleSection
+        title={t('coordinator.decision')}
+        action={
+          <span data-testid="coordinator-status">
+            <ConsoleStatusPill status={status} />
+          </span>
+        }
+      >
+        {status === 'pending' || decisionNote ? (
+          <div className="flex flex-col gap-4 text-[13.5px] max-w-2xl">
+            {status === 'pending' ? (
+              <>
+                <label className="flex flex-col gap-1.5">
+                  <span className="bd-label">{t('coordinator.reason')}</span>
+                  <textarea
+                    className="bd-input min-h-[80px]"
+                    maxLength={500}
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                  />
+                </label>
+                <div className="flex gap-2">
+                  <Button
+                    disabled={busy}
+                    icon={<I.check size={15} />}
+                    onClick={() => void decide('approve')}
+                  >
+                    {t('coordinator.approve')}
+                  </Button>
+                  <Button
+                    kind="danger"
+                    disabled={busy}
+                    icon={<I.x size={15} />}
+                    onClick={() => void decide('reject')}
+                  >
+                    {t('coordinator.reject')}
+                  </Button>
+                </div>
+              </>
+            ) : null}
+            {decisionNote ? <output className="text-ink-600">{decisionNote}</output> : null}
+          </div>
         ) : null}
-        {decisionNote ? (
-          <output className="text-ink-600">{decisionNote}</output>
-        ) : null}
-      </Card>
+      </ConsoleSection>
 
       {domains.length > 0 ? (
-        <Card className="p-4 flex flex-col gap-2 text-[13.5px]">
-          <span className="bd-label">{t('coordinator.domains')}</span>
-          {domains.map((d) => (
-            <label key={d.id} className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={serves.includes(d.id)}
-                onChange={() => toggle(d.id)}
-              />
-              {d.label}
-            </label>
-          ))}
-          <span className="text-[12px] text-ink-500">{t('coordinator.domains_hint')}</span>
-          <div className="flex items-center gap-3">
-            <Button kind="ghost" disabled={busy} onClick={() => void saveServes()}>
-              {t('coordinator.save_domains')}
-            </Button>
-            {servesNote ? (
-              <output className="text-ink-600">{servesNote}</output>
-            ) : null}
+        <ConsoleSection title={t('coordinator.domains')}>
+          <div className="flex flex-col gap-3 text-[13.5px]">
+            <div className="flex flex-wrap gap-2">
+              {domains.map((d) => (
+                <label
+                  key={d.id}
+                  className="inline-flex items-center gap-2 rounded-[10px] border border-(--bd-border) px-3 py-2 cursor-pointer hover:bg-(--bd-border-soft)"
+                >
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4"
+                    style={{ accentColor: 'var(--bd-primary-600)' }}
+                    checked={serves.includes(d.id)}
+                    onChange={() => toggle(d.id)}
+                  />
+                  {d.label}
+                </label>
+              ))}
+            </div>
+            <span className="text-[12px] text-ink-500">{t('coordinator.domains_hint')}</span>
+            <div className="flex items-center gap-3">
+              <Button kind="soft" disabled={busy} onClick={() => void saveServes()}>
+                {t('coordinator.save_domains')}
+              </Button>
+              {servesNote ? <output className="text-ink-600">{servesNote}</output> : null}
+            </div>
           </div>
-        </Card>
+        </ConsoleSection>
       ) : null}
     </div>
   );

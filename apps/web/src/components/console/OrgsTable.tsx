@@ -15,6 +15,7 @@ import type {
   OwnerAccessResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
+import { ConsoleStatusPill, EmptyState } from './ConsoleUi';
 import { errorKey, sendConsole } from '../../lib/console-client';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
@@ -54,49 +55,68 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
     note(id, r.ok ? t('orgs.repaired', { status: r.data.status }) : t(errorKey(r)));
   }
 
-  if (rows.length === 0) return <p className="text-[13.5px] text-ink-600">{t('orgs.empty')}</p>;
+  if (rows.length === 0) return <EmptyState>{t('orgs.empty')}</EmptyState>;
   return (
-    <table className="w-full text-[13.5px]">
-      <tbody>
-        {rows.map((o) => (
-          <tr key={o.id} className="border-t border-(--bd-border) align-top">
-            <td className="py-2">
-              <Link className="text-primary-600 underline" href={`/console/orgs/${o.id}`}>
-                {o.name}
-              </Link>
-              {notes[o.id] ? (
-                <output className="text-[12.5px] text-ink-600 mt-1 block">{notes[o.id]}</output>
-              ) : null}
-            </td>
-            <td>{t(`status.${o.status}`)}</td>
-            <td>
-              {t('home.coordinators', { count: o.coordinator_count })} ·{' '}
-              {t('home.pending', { count: o.pending_count })}
-            </td>
-            <td className="flex gap-2 py-2 justify-end">
-              {o.status === 'pending' ? (
-                <>
-                  <Button disabled={busy === o.id} onClick={() => void decide(o.id, 'approve')}>
-                    {t('orgs.approve')}
-                  </Button>
-                  <Button
-                    kind="danger"
-                    disabled={busy === o.id}
-                    onClick={() => void decide(o.id, 'reject')}
-                  >
-                    {t('orgs.reject')}
-                  </Button>
-                </>
-              ) : null}
-              {o.status === 'active' && !o.is_default ? (
-                <Button kind="ghost" disabled={busy === o.id} onClick={() => void repair(o.id)}>
-                  {t('orgs.repair')}
-                </Button>
-              ) : null}
-            </td>
+    <div className="overflow-x-auto scroll-x">
+      <table className="bd-table">
+        <thead>
+          <tr>
+            <th>{t('orgs.col_name')}</th>
+            <th>{t('orgs.col_status')}</th>
+            <th>{t('orgs.col_counts')}</th>
+            <th style={{ textAlign: 'right' }}>{t('orgs.col_actions')}</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((o) => (
+            <tr key={o.id}>
+              <td>
+                <Link
+                  className="font-semibold text-ink-900 hover:text-primary-600"
+                  href={`/console/orgs/${o.id}`}
+                >
+                  {o.name}
+                </Link>
+                {notes[o.id] ? (
+                  <output className="text-[12.5px] text-ink-500 mt-1 block whitespace-normal">
+                    {notes[o.id]}
+                  </output>
+                ) : null}
+              </td>
+              <td>
+                <ConsoleStatusPill status={o.status} />
+              </td>
+              <td className="text-ink-600">
+                {t('home.coordinators', { count: o.coordinator_count })} ·{' '}
+                {t('home.pending', { count: o.pending_count })}
+              </td>
+              <td>
+                <div className="flex gap-2 justify-end">
+                  {o.status === 'pending' ? (
+                    <>
+                      <Button disabled={busy === o.id} onClick={() => void decide(o.id, 'approve')}>
+                        {t('orgs.approve')}
+                      </Button>
+                      <Button
+                        kind="danger"
+                        disabled={busy === o.id}
+                        onClick={() => void decide(o.id, 'reject')}
+                      >
+                        {t('orgs.reject')}
+                      </Button>
+                    </>
+                  ) : null}
+                  {o.status === 'active' && !o.is_default ? (
+                    <Button kind="ghost" disabled={busy === o.id} onClick={() => void repair(o.id)}>
+                      {t('orgs.repair')}
+                    </Button>
+                  ) : null}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

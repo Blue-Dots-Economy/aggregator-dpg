@@ -1,8 +1,9 @@
 /**
  * In-memory RBAC catalogue (`@aggregator-dpg/api`) for unit tests.
  *
- * Mirrors the Postgres store: a sync replaces the built-in roles and keeps
- * custom ones; the revision changes on every write. `failWith` makes later
+ * Mirrors the Postgres store: a sync upserts the permissions and marks every
+ * other one deprecated, replaces the built-in roles and keeps custom ones; the
+ * revision changes on every write. `failWith` makes later
  * calls fail, to test boot and refresh paths.
  */
 
@@ -12,12 +13,13 @@ import {
   type CatalogueSnapshot,
   type CatalogueStoreError,
   type CatalogueStoreResult,
+  type StoredPermission,
   type SyncResult,
 } from './interface.js';
 
 /** Array-backed {@link RbacCatalogueBase}; `syncs` lists every sync source. */
 export class InMemoryRbacCatalogue extends RbacCatalogueBase {
-  permissions: PermissionDefinition[] = [];
+  permissions: StoredPermission[] = [];
   private roles: RoleDefinition[] = [];
   private rev = 0;
   private failure: CatalogueStoreError | null = null;
@@ -55,14 +57,20 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
   ): Promise<CatalogueStoreResult<SyncResult>> {
     const failed = this.fail();
     if (failed) return failed;
-    this.permissions = structuredClone(permissions);
+    const current = new Set(permissions.map((p) => p.key as string));
+    const dropped = this.permissions.filter((p) => !current.has(p.key));
+    const retired = dropped.filter((p) => !p.deprecated).length;
+    this.permissions = [
+      ...permissions.map((p) => ({ ...p, deprecated: false })),
+      ...dropped.map((p) => ({ ...p, deprecated: true })),
+    ];
     const custom = this.roles.filter((r) => !r.isBuiltin);
     const before = JSON.stringify(this.roles.filter((r) => r.isBuiltin));
     this.roles = [...structuredClone(builtinRoles), ...custom];
     const changed = before === JSON.stringify(builtinRoles) ? 0 : builtinRoles.length;
     if (changed > 0) this.rev += 1;
     this.syncs.push(source);
-    return { ok: true, value: { changed, retired: 0, keptInUse: [] } };
+    return { ok: true, value: { changed, retired, keptInUse: [] } };
   }
 
   /** {@inheritDoc RbacCatalogueBase.load} */
@@ -78,6 +86,16 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
   /** {@inheritDoc RbacCatalogueBase.revision} */
   async revision(): Promise<CatalogueStoreResult<string>> {
     return this.fail() ?? { ok: true, value: `r${this.rev}` };
+  }
+
+  /** {@inheritDoc RbacCatalogueBase.listPermissions} */
+  async listPermissions(): Promise<CatalogueStoreResult<StoredPermission[]>> {
+    return (
+      this.fail() ?? {
+        ok: true,
+        value: structuredClone(this.permissions).sort((a, b) => a.key.localeCompare(b.key)),
+      }
+    );
   }
 
   /** Role keys with a live assignment, consulted by `deleteRole` (tests set it). */
