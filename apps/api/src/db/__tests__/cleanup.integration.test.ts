@@ -200,6 +200,9 @@ suite('cleanup (migration 0029) — integration', () => {
       max: 4,
       ...(options ? { options } : {}),
     });
+    // Teardown force-drops this scratch DB; swallow the 57P01 it sends an
+    // attached backend so it isn't an unhandled error after tests pass.
+    p.on('error', () => undefined);
     pools.push(p);
     return p;
   }

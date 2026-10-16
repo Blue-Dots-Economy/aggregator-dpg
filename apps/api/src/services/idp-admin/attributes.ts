@@ -45,6 +45,12 @@ export const KC_ATTR = {
    * and backfilled by the login-time fallback when missing.
    */
   SIGNALSTACK_ORG_ID: 'signalstack_org_id',
+  /**
+   * `aggregator-owner` on Keycloak users this app created for an org owner.
+   * Only such users are ever disabled when an owner is replaced: the realm is
+   * shared (Signals), so a reused user may belong to someone else's login.
+   */
+  CREATED_BY: 'created_by',
 
   // ─── Deprecated (do not write from new code) ────────────────────────────
   /** @deprecated Slug lives in Postgres (`aggregators.org_slug`). */
@@ -61,3 +67,10 @@ export type KcAttrName = (typeof KC_ATTR)[keyof typeof KC_ATTR];
 
 /** Decision values written to / read from `KC_ATTR.DECISION_MADE`. */
 export type DecisionMade = 'pending' | 'approved' | 'rejected';
+
+/** The realm role the portal gate admits org owners by (Phase 5). */
+export const OWNER_REALM_ROLE = 'org_owner';
+
+/** {@link KC_ATTR.CREATED_BY} value on owner users the aggregator created. */
+export const OWNER_CREATED_BY = 'aggregator-owner';
+

@@ -40,12 +40,15 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   // `?error=`, and the protected layout signs the session out with `?reason=`.
   // Both now classify the same way, so either can carry any of the three.
   const PORTAL_GATE_REASONS = new Set([
-    'org_no_portal',
     'signals_account_no_portal',
     'no_portal_access',
     // Set by `/api/auth/login?switch=1` after it ends the realm session, so the
     // banner explains why the user is back here signed out (#753).
     'account_switch',
+    // Set by the console layout (user & org Phase 5) when the API does not
+    // know the signed-in admin, or they manage no active organisation.
+    'console_not_provisioned',
+    'console_no_org',
   ]);
   // Precedence, most specific first: an expired session, then a portal-gate
   // refusal handed back by the layout, then whatever the callback put on the

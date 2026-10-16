@@ -59,21 +59,19 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
     redirect(`/api/auth/logout?reason=expired&return=${encodeURIComponent(path)}`);
   }
 
-  // Portal is coordinator-only. A coordinator's token carries `aggregator_id`;
-  // org owners / network admins do not. Gate every protected page on it so a
-  // non-coordinator can never reach the portal even if a session was minted
-  // (e.g. before the callback gate, or via another path). Sign them out with a
-  // clear message rather than showing a data-less, broken shell.
+  // This portal is the coordinators'. A coordinator's token carries
+  // `aggregator_id`; org owners and the network admin do not — they belong in
+  // the console (user & org Phase 5), so they are sent there. Anyone else is
+  // signed out with a clear message rather than shown a data-less shell.
   if (!tokenAggregatorId(session.accessToken)) {
-    // Classify rather than assume org owner: this gate exists for a session
-    // minted before the callback gate or by another route, and those users are
-    // the same three populations the callback distinguishes (#753). Hardcoding
-    // one reason here told a Signals participant to go looking for approval
-    // emails that do not exist for them.
+    // Classify rather than assume: this gate exists for a session minted by
+    // another route, and those users are the same populations the callback
+    // distinguishes (#753).
     const population = classifyNonCoordinator(
       session.accessToken,
       await resolveSignalsRealmRoles(),
     );
+    if (population === 'org_owner') redirect('/console');
     redirect(`/api/auth/logout?reason=${PORTAL_GATE_REASON[population]}`);
   }
 

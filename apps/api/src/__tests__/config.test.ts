@@ -1,27 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import {
-  campaignDumpServiceAccount,
-  defaultOrgOwnerEmail,
-  legacyHierarchyFlagSet,
-} from '../config.js';
-
-describe('legacyHierarchyFlagSet (ORG_HIERARCHY_ENABLED removed in 0028)', () => {
-  const original = process.env.ORG_HIERARCHY_ENABLED;
-  afterEach(() => {
-    if (original === undefined) delete process.env.ORG_HIERARCHY_ENABLED;
-    else process.env.ORG_HIERARCHY_ENABLED = original;
-  });
-
-  it('is false when the variable is absent', () => {
-    delete process.env.ORG_HIERARCHY_ENABLED;
-    expect(legacyHierarchyFlagSet()).toBe(false);
-  });
-
-  it('is true for any value, so boot warns that it is ignored', () => {
-    process.env.ORG_HIERARCHY_ENABLED = 'false';
-    expect(legacyHierarchyFlagSet()).toBe(true);
-  });
-});
+import { campaignDumpServiceAccount, defaultOrgOwnerEmail } from '../config.js';
 
 describe('defaultOrgOwnerEmail', () => {
   const original = process.env.DEFAULT_ORG_OWNER_EMAIL;

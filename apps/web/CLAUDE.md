@@ -13,7 +13,16 @@ Guidance specific to working inside `apps/web`. Read the root `CLAUDE.md` first 
 
 `SessionStoreBase` (abstract class) has `RedisSessionStore` (prod) + `MemorySessionStore` (test), both taking a `ttlSec` — **`SESSION_TTL_SECONDS` env var, defaulting to 12h** (`lib/session/index.ts:24`), sliding (refreshed on every `get`). `SessionData` holds `sub/email/phone/name` + `accessToken/refreshToken/idToken` + their expiries + `createdAt/lastSeenAt`. `server-session.ts` wraps `getSession()` in React's `cache()` so one Redis hit is shared per request tree.
 
-**`auth-context` is populated server-side, not by a client fetch.** `(protected)/layout.tsx` calls `getSession()` + `tokenAggregatorId()` (rejects org-owner tokens — this portal is coordinator-only) + `fetchSupportEnabled()` (`GET /v1/support/config` via `callApi`, fails safe to `false`), then passes both as props into `<AuthProvider initialUser supportEnabled>`. If you're debugging why the UI shows stale auth/support state, look at the layout's server render, not a client-side refetch — there isn't one.
+**`auth-context` is populated server-side, not by a client fetch.** `(protected)/layout.tsx` calls `getSession()` + `tokenAggregatorId()` (a token without `aggregator_id` is not a coordinator: an org owner is redirected to `/console`) + `fetchSupportEnabled()` (`GET /v1/support/config` via `callApi`, fails safe to `false`), then passes both as props into `<AuthProvider initialUser supportEnabled>`. If you're debugging why the UI shows stale auth/support state, look at the layout's server render, not a client-side refetch — there isn't one.
+
+## The organisation console (`(console)/console`, Phase 5)
+
+Org owners and the network admin sign in to the same app and land on `/console` (the callback routes an `org_owner` token there; a coordinator never lands on it). Things that are easy to get wrong:
+
+- **The actor comes from `GET /v1/user/read/me`, not the token.** `lib/console-actor.ts` reads it with the user's token via `callApi` and caches it in the session for ~60 s (`SessionData.consoleActor`); the console layout signs out on `USER_NOT_PROVISIONED` / `NOT_ORG_ADMIN` and sends coordinators to `/dashboard`. The coordinator portal still routes on the `aggregator_id` claim.
+- **Screens are server components** reading through `lib/console-api.server.ts`; only mutations go through the BFF, under `app/api/console/*`, all via `lib/console-proxy.ts`: JSON body required (415), **same-origin check** (`lib/same-origin.ts`: `Origin` must equal `PUBLIC_PORTAL_URL`'s origin, else `Sec-Fetch-Site: same-origin`; neither → 403), non-UUID id → 404, then `callApi`. Add any new console mutation the same way; nothing mutates on `GET`.
+- **Out of reach is a 404 upstream**; pages render `notFound()` for it. A `409 ALREADY_DECIDED` updates the row in place.
+- **hi / kn console copy is English** for now (the catalogue test requires the keys).
 
 ## `aggregator-schema.server.ts` is the single source for both editable and read-only rendering
 

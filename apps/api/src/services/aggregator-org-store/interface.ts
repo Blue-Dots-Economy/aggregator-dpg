@@ -55,6 +55,11 @@ export interface AggregatorOrg {
   status: AggregatorStatus;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * Audit actor of the last write: an admin user id (console), `'admin'` (an
+   * emailed link), `'self'`; `null` on rows never attributed.
+   */
+  updatedBy: string | null;
   /** Write-once rejection timestamp (#726) — drives the cooling window. */
   rejectedAt: Date | null;
   /** Whether this is the fixed Default org (slug {@link DEFAULT_ORG_SLUG}). */
@@ -96,7 +101,43 @@ export interface UpdateOrgPatch {
   status?: AggregatorStatus;
   /** Write-once reject timestamp (#726); set to `null` to revive after cooling. */
   rejectedAt?: Date | null;
+  /** Org details (0028), edited from the Phase 5 console. */
+  url?: string | null;
+  locations?: BecknLocation[];
+  legalName?: string | null;
+  gstNumber?: string | null;
+  /** Audit actor of this write (an admin user id; `'self'` / `'admin'` elsewhere). */
+  updatedBy?: string;
 }
+
+/** Keyset position in an org search page (by name, then id). */
+export interface OrgCursor {
+  name: string;
+  id: string;
+}
+
+/**
+ * A scoped org search (Phase 5 console). `orgIds = null` means every
+ * aggregator org (the network admin); an empty array means none.
+ */
+export interface SearchOrgsFilter {
+  orgIds: string[] | null;
+  status?: AggregatorStatus;
+  /** Case-insensitive name prefix. */
+  namePrefix?: string;
+  cursor?: OrgCursor;
+  /** 1..100, default 20. */
+  limit?: number;
+}
+
+/** One page of an org search; `nextCursor` is null on the last page. */
+export interface SearchOrgsPage {
+  rows: AggregatorOrg[];
+  nextCursor: OrgCursor | null;
+}
+
+/** Outcome of {@link AggregatorOrgStoreBase.deleteIfPending}. */
+export type OrgDeleteIfPendingOutcome = 'deleted' | 'not_pending' | 'aborted';
 
 export type OrgStoreError =
   | { code: 'NOT_FOUND'; message: string }
@@ -184,15 +225,47 @@ export abstract class AggregatorOrgStoreBase {
    * race / already decided). Never throws.
    *
    * @param id - The org id.
+   * @param updatedBy - The decider, written in the same statement (`'admin'`
+   *   for an emailed link, else the admin's user id).
    * @returns The updated row, or `null` when the row was not pending.
    */
-  abstract approve(id: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
+  abstract approve(id: string, updatedBy: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
   /**
    * Atomic compare-and-set pending→inactive (== rejected). Same null-on-race
    * semantics as {@link approve}.
    *
    * @param id - The org id.
+   * @param updatedBy - The decider (see {@link approve}).
    * @returns The updated row, or `null` when the row was not pending.
    */
-  abstract reject(id: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
+  abstract reject(id: string, updatedBy: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
+  /**
+   * The aggregator orgs (Default included) an admin account owns.
+   *
+   * @param ownerUserId - The admin `users.id`.
+   * @returns The owned orgs, by name; empty when none.
+   */
+  abstract listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<AggregatorOrg[]>>;
+  /**
+   * Scoped, keyset-paged org search by name (aggregator orgs only).
+   *
+   * @param filter - Scope (`orgIds`), filters and cursor.
+   * @returns One page; an empty scope returns no rows.
+   */
+  abstract search(filter: SearchOrgsFilter): Promise<OrgStoreResult<SearchOrgsPage>>;
+  /**
+   * Deletes an org only while it is still `pending` and older than `cutoff`,
+   * holding the row until `beforeCommit` (the Keycloak clean-up) has run; a
+   * concurrent approval waits, then finds the row gone.
+   *
+   * @param id - Org id.
+   * @param cutoff - Only rows last updated before this instant.
+   * @param beforeCommit - Runs with the row locked; `false` aborts the delete.
+   * @returns `deleted`, `not_pending` (decided, fresh or gone), or `aborted`.
+   */
+  abstract deleteIfPending(
+    id: string,
+    cutoff: Date,
+    beforeCommit: () => Promise<boolean>,
+  ): Promise<OrgStoreResult<OrgDeleteIfPendingOutcome>>;
 }

@@ -16,23 +16,21 @@
  *         the old /grant/renew recovery into the one endpoint.
  *       - invalid grant → GRANT_INVALID.
  *
- * Mint logic lives here, not in a page handler, so a future console is a second
- * caller rather than a rewrite (§4.3). Belongs to `@aggregator-dpg/api`.
+ * Mint logic lives in `services/invites/mint.ts`, shared with the console's
+ * `POST /v1/user/create` (Phase 5). Belongs to `@aggregator-dpg/api`.
  */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest, FastifyBaseLogger } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
-import { mintInviteToken } from '../services/invite-token.js';
-import { mintGrantToken, verifyGrantToken } from '../services/grant-token.js';
+import { mintInviteBatch } from '../services/invites/mint.js';
+import { verifyGrantToken } from '../services/grant-token.js';
+import { ownerSignInUrl } from '../services/decisions/org.js';
 import { checkInviteMintRate, checkInviteIpRate } from '../services/invite-mint-rate.js';
 import { getMailer } from '@aggregator-dpg/mailer';
-import {
-  renderCoordinatorInvite,
-  renderOwnerGrantRefreshed,
-} from '../services/email-templates/index.js';
+import { renderOwnerGrantRefreshed } from '../services/email-templates/index.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 
@@ -50,167 +48,14 @@ const MintBodySchema = z.object({
 });
 
 const MintResponseSchema = z.object({
-  /** True when the grant was expired and a fresh grant link was re-mailed (nothing minted). */
+  /** True when the grant was expired and a sign-in link was mailed (nothing minted). */
   recovered: z.boolean(),
   sent: z.number().int(),
   resent: z.number().int(),
   invalid: z.array(z.object({ email: z.string(), reason: z.string() })),
+  /** Addresses already coordinators of this org (nothing mailed). */
+  existing: z.array(z.object({ email: z.string(), status: z.string() })),
 });
-
-// Conservative RFC-5322-lite check; the real gate is deliverability (a bad
-// address simply never registers). Prevents obvious garbage lines from the
-// bulk textarea becoming invite rows. Domain labels are `[^\s@.]+` separated by
-// dots so the pattern is unambiguous (linear — no catastrophic backtracking).
-const EMAIL_RE = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
-
-/** Builds the coordinator registration URL carrying an invite token. */
-function inviteUrl(token: string): string {
-  return `${config.PUBLIC_PORTAL_URL}/register/coordinator?invite=${encodeURIComponent(token)}`;
-}
-
-/** Builds the owner invite-management URL carrying a grant token. */
-function grantUrl(token: string): string {
-  return `${config.PUBLIC_PORTAL_URL}/register/invite?grant=${encodeURIComponent(token)}`;
-}
-
-/** Formats an absolute expiry date for the invite email (e.g. "15 Sep 2026"). */
-function formatExpiryDate(d: Date): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(d);
-}
-
-/** One recipient outcome after resolving its invite row. */
-interface ResolvedInvite {
-  jti: string;
-  refreshed: boolean;
-}
-
-/**
- * Resolves the invite row for one (org, email): refreshes an existing pending
- * invite, else creates a new one (falling back to refresh on a partial-unique
- * race). Returns the `jti` + whether it was a refresh, or `null` on a store error.
- *
- * @param invites - The invites store.
- * @param orgId - Parent org id.
- * @param email - Normalised recipient email.
- * @param expiresAt - New expiry to stamp.
- * @param createdBy - Minting subject for audit.
- * @returns The resolved invite, or `null` when the store failed.
- */
-async function resolveInviteJti(
-  invites: ReturnType<typeof getRegistrationInvitesStore>,
-  orgId: string,
-  email: string,
-  expiresAt: Date,
-  createdBy: string,
-): Promise<ResolvedInvite | null> {
-  const existing = await invites.findPendingByOrgAndEmail(orgId, email);
-  if (!existing.ok) return null;
-  if (existing.value) {
-    const refreshed = await invites.refresh(existing.value.jti, { expiresAt, createdBy });
-    return refreshed.ok ? { jti: refreshed.value.jti, refreshed: true } : null;
-  }
-  const created = await invites.create({ parentOrgId: orgId, email, expiresAt, createdBy });
-  if (created.ok) return { jti: created.value.jti, refreshed: false };
-  if (created.error.code === 'DUPLICATE_PENDING') {
-    const again = await invites.findPendingByOrgAndEmail(orgId, email);
-    if (again.ok && again.value) {
-      const refreshed = await invites.refresh(again.value.jti, { expiresAt, createdBy });
-      return refreshed.ok ? { jti: refreshed.value.jti, refreshed: true } : null;
-    }
-  }
-  return null;
-}
-
-/** Result of minting a batch of recipients. */
-interface MintSummary {
-  sent: number;
-  resent: number;
-  invalid: Array<{ email: string; reason: string }>;
-}
-
-/** Inputs for {@link mintBatch}. */
-interface MintBatchDeps {
-  invites: ReturnType<typeof getRegistrationInvitesStore>;
-  mailer: ReturnType<typeof getMailer>;
-  orgId: string;
-  orgName: string;
-  /** The inviting org's contact (owner email) — sender identity in the email. */
-  inviterEmail: string;
-  recipients: z.infer<typeof MintBodySchema>['recipients'];
-  ttlSec: number;
-  createdBy: string;
-  log: FastifyBaseLogger;
-}
-
-/**
- * Mints/refreshes and emails an invite per recipient, bucketing invalid and
- * duplicate-in-batch addresses. A failed email is logged and still counted as
- * sent (the row exists; the owner can re-invite to retry delivery).
- *
- * @param deps - Store, mailer, org, recipients, and token settings.
- * @returns Per-batch counts + the invalid list.
- */
-async function mintBatch(deps: MintBatchDeps): Promise<MintSummary> {
-  const { invites, mailer, orgId, orgName, inviterEmail, recipients, ttlSec, createdBy, log } =
-    deps;
-  let sent = 0;
-  let resent = 0;
-  const invalid: MintSummary['invalid'] = [];
-  // De-dupe within the batch so one address can't consume two slots / two emails.
-  const seen = new Set<string>();
-
-  for (const recipient of recipients) {
-    const email = recipient.email.trim().toLowerCase();
-    if (!EMAIL_RE.test(email)) {
-      invalid.push({ email: recipient.email, reason: 'invalid_email' });
-      continue;
-    }
-    if (seen.has(email)) {
-      invalid.push({ email: recipient.email, reason: 'duplicate_in_batch' });
-      continue;
-    }
-    seen.add(email);
-
-    const expiresAt = new Date(Date.now() + ttlSec * 1000);
-    const resolved = await resolveInviteJti(invites, orgId, email, expiresAt, createdBy);
-    if (!resolved) {
-      invalid.push({ email: recipient.email, reason: 'store_error' });
-      continue;
-    }
-
-    const { token } = await mintInviteToken({ jti: resolved.jti, org: orgId, email });
-    const mail = renderCoordinatorInvite({
-      orgName,
-      inviterEmail,
-      inviteUrl: inviteUrl(token),
-      expiresOn: formatExpiryDate(expiresAt),
-      ...(recipient.name ? { recipientName: recipient.name } : {}),
-    });
-    const send = await mailer.send({
-      to: email,
-      subject: mail.subject,
-      html: mail.html,
-      text: mail.text,
-    });
-    if (!send.ok) {
-      log.warn(
-        {
-          status: 'failure',
-          sub_operation: 'mailer.send.coordinatorInvite',
-          code: send.error.code,
-        },
-        'coordinator-invite email delivery failed (invite minted)',
-      );
-    }
-    if (resolved.refreshed) resent += 1;
-    else sent += 1;
-  }
-  return { sent, resent, invalid };
-}
 
 /**
  * Registers the invite mint route.
@@ -283,13 +128,13 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
         });
       }
 
-      // Expired grant → recovery: re-mail a fresh grant to the REGISTERED owner
-      // address (never a request input), mint nothing.
+      // Expired grant → recovery: mail the REGISTERED owner address (never a
+      // request input) a console sign-in link — no fresh grant (Phase 5: grants
+      // are no longer minted; still-valid ones work until they expire).
       if (grant.expired) {
-        const fresh = await mintGrantToken({ org: orgId, ttlSec: config.GRANT_TOKEN_TTL_SECONDS });
         const mail = renderOwnerGrantRefreshed({
           orgName: orgRow.displayName,
-          inviteUrl: grantUrl(fresh.token),
+          inviteUrl: ownerSignInUrl(),
         });
         const send = await getMailer().send({
           to: orgRow.ownerEmail,
@@ -304,17 +149,19 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
               sub_operation: 'mailer.send.grantRecovery',
               code: send.error.code,
             },
-            'fresh-grant email delivery failed',
+            'sign-in email delivery failed',
           );
         }
         log.info(
           { status: 'success', org_id: orgId, recovered: true },
-          'expired grant — fresh link re-mailed',
+          'expired grant — sign-in link mailed',
         );
-        return reply.status(200).send({ recovered: true, sent: 0, resent: 0, invalid: [] });
+        return reply
+          .status(200)
+          .send({ recovered: true, sent: 0, resent: 0, invalid: [], existing: [] });
       }
 
-      const summary = await mintBatch({
+      const summary = await mintInviteBatch({
         invites: getRegistrationInvitesStore(),
         mailer: getMailer(),
         orgId,
@@ -326,7 +173,14 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
         log,
       });
       log.info(
-        { status: 'success', org_id: orgId, ...summary, invalid: summary.invalid.length },
+        {
+          status: 'success',
+          org_id: orgId,
+          sent: summary.sent,
+          resent: summary.resent,
+          invalid: summary.invalid.length,
+          existing: summary.existing.length,
+        },
         'invites minted',
       );
       return reply.status(200).send({ recovered: false, ...summary });

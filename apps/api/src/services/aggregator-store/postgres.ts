@@ -20,7 +20,7 @@
  * transaction (migration 0029).
  */
 
-import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, sql, type SQL } from 'drizzle-orm';
 import type { AggregatorStatus, BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { logger } from '../../logger.js';
 import {
@@ -54,6 +54,10 @@ import {
   type CreateAggregatorInput,
   type ListAggregatorsFilter,
   type ListAggregatorsPage,
+  type DeleteIfPendingOutcome,
+  type OrgCoordinatorCounts,
+  type SearchCoordinatorsFilter,
+  type SearchCoordinatorsPage,
   type StoreError,
   type StoreResult,
   type UpdateAggregatorPatch,
@@ -210,6 +214,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     };
     if (patch.name !== undefined) updates.signalstackOrgName = patch.name;
     if (patch.type !== undefined) updates.serves = servesOf(patch.type);
+    if (patch.serves !== undefined) updates.serves = [...new Set(patch.serves)];
     if (patch.status !== undefined) updates.status = patch.status;
     if (patch.rejectedAt !== undefined) updates.rejectedAt = patch.rejectedAt;
 
@@ -328,6 +333,112 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       return { ok: true, value: undefined };
     } catch (err: unknown) {
       return this.mapReadError('aggregatorStore.deleteById', err);
+    }
+  }
+
+  async rejectFromPending(id: string, updatedBy: string): Promise<StoreResult<Aggregator | null>> {
+    try {
+      const now = new Date();
+      const rows = await getDb()
+        .update(users)
+        .set({ status: 'inactive', rejectedAt: now, updatedBy, updatedAt: now })
+        .where(coordinator(eq(users.id, id), eq(users.status, 'pending')))
+        .returning({ id: users.id });
+      // No row → not pending (a concurrent decision already committed).
+      if (!rows[0]) return { ok: true, value: null };
+      return this.reread('aggregatorStore.rejectFromPending', id);
+    } catch (err: unknown) {
+      return this.mapWriteError('aggregatorStore.rejectFromPending', err, id, Date.now());
+    }
+  }
+
+  async deleteIfPending(
+    id: string,
+    cutoff: Date,
+    beforeCommit: () => Promise<boolean>,
+  ): Promise<StoreResult<DeleteIfPendingOutcome>> {
+    const ABORT = Symbol('abort');
+    try {
+      const outcome = await getDb().transaction(async (tx) => {
+        // The DELETE takes the row lock: a concurrent approval waits for this
+        // transaction, then finds the row gone (or still pending if aborted).
+        const rows = await tx
+          .delete(users)
+          .where(
+            coordinator(eq(users.id, id), eq(users.status, 'pending'), lt(users.updatedAt, cutoff)),
+          )
+          .returning({ id: users.id });
+        if (!rows[0]) return 'not_pending' as const;
+        if (!(await beforeCommit())) throw ABORT;
+        return 'deleted' as const;
+      });
+      return { ok: true, value: outcome };
+    } catch (err: unknown) {
+      if (err === ABORT) return { ok: true, value: 'aborted' };
+      return this.mapWriteError('aggregatorStore.deleteIfPending', err, id, Date.now());
+    }
+  }
+
+  async search(filter: SearchCoordinatorsFilter): Promise<StoreResult<SearchCoordinatorsPage>> {
+    const limit = Math.max(1, Math.min(100, filter.limit ?? 20));
+    if (filter.orgIds !== null && filter.orgIds.length === 0) {
+      return { ok: true, value: { rows: [], nextCursor: null } };
+    }
+    try {
+      const conds: (SQL | undefined)[] = [];
+      if (filter.orgIds !== null) conds.push(inArray(users.orgId, filter.orgIds));
+      if (filter.status) conds.push(eq(users.status, filter.status));
+      if (filter.serves) {
+        // '{}' serves every domain.
+        conds.push(sql`(${users.serves} = '{}' OR ${filter.serves} = ANY(${users.serves}))`);
+      }
+      // Paged at millisecond precision on both sides: `created_at` holds
+      // microseconds, the cursor (a JS Date) only milliseconds, and rows
+      // inserted in one transaction share an instant.
+      const createdMs = sql`date_trunc('milliseconds', ${users.createdAt})`;
+      if (filter.cursor) {
+        const c = filter.cursor;
+        conds.push(
+          sql`(${createdMs}, ${users.id}) < (${c.createdAt.toISOString()}::timestamptz, ${c.id}::uuid)`,
+        );
+      }
+      const rows = await this.selectJoined()
+        .where(coordinator(...conds))
+        .orderBy(sql`${createdMs} desc`, desc(users.id))
+        .limit(limit + 1);
+      const page = rows.slice(0, limit).map(toDomain);
+      const last = page.at(-1);
+      return {
+        ok: true,
+        value: {
+          rows: page,
+          nextCursor:
+            rows.length > limit && last ? { createdAt: last.createdAt, id: last.id } : null,
+        },
+      };
+    } catch (err: unknown) {
+      return this.mapReadError('aggregatorStore.search', err);
+    }
+  }
+
+  async countByOrg(orgIds: string[]): Promise<StoreResult<Record<string, OrgCoordinatorCounts>>> {
+    if (orgIds.length === 0) return { ok: true, value: {} };
+    try {
+      const rows = await getDb()
+        .select({
+          orgId: users.orgId,
+          total: sql<number>`count(*)::int`,
+          pending: sql<number>`count(*) FILTER (WHERE ${users.status} = 'pending')::int`,
+        })
+        .from(users)
+        .where(coordinator(inArray(users.orgId, orgIds)))
+        .groupBy(users.orgId);
+      const out: Record<string, OrgCoordinatorCounts> = {};
+      for (const id of orgIds) out[id] = { total: 0, pending: 0 };
+      for (const r of rows) if (r.orgId) out[r.orgId] = { total: r.total, pending: r.pending };
+      return { ok: true, value: out };
+    } catch (err: unknown) {
+      return this.mapReadError('aggregatorStore.countByOrg', err);
     }
   }
 

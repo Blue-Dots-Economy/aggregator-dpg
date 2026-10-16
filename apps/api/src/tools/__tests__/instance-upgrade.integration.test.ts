@@ -197,6 +197,9 @@ suite('instance upgrade from 0022 (instance-upgrade run) — integration', () =>
       max: 2,
       application_name: 'train-it',
     });
+    // Teardown force-drops this scratch DB; swallow the 57P01 it sends an
+    // attached backend so it isn't an unhandled error after tests pass.
+    pool.on('error', () => undefined);
     pools.push(pool);
     if (lastIdx !== null) {
       await migrate(drizzle(pool), { migrationsFolder: await folderAt(lastIdx) });
@@ -342,7 +345,7 @@ suite('instance upgrade from 0022 (instance-upgrade run) — integration', () =>
     async () => {
       const fresh = await dbAt(null);
       expect((await cli(fresh.url, ['run', '--dry-run'])).out).toMatch(
-        /REFUSED: the database is at nothing; the train starts from 0022/,
+        /REFUSED: the database is at nothing; the instance upgrade starts from 0022/,
       );
       const older = await dbAt(LAST_BEFORE_IDX - 1);
       expect((await cli(older.url, ['check'])).out).toMatch(
@@ -425,6 +428,7 @@ suite('instance upgrade from 0022 (instance-upgrade run) — integration', () =>
         max: 1,
         application_name: 'aggregator-api',
       });
+      app.on('error', () => undefined);
       pools.push(app);
       await app.query('SELECT 1');
       expect((await cli(url, ['run', '--snapshot-taken', 's'])).out).toMatch(
@@ -478,7 +482,7 @@ suite('instance upgrade from 0022 (instance-upgrade run) — integration', () =>
   );
 
   it(
-    'takes a rehearsal database part-way through the train to the end (gates only)',
+    'takes a rehearsal database part-way through the instance upgrade to the end (gates only)',
     async () => {
       const { pool, url } = await dbAt(25);
       const checked = await cli(url, ['check']);
@@ -573,11 +577,11 @@ suite('instance upgrade from 0022 (instance-upgrade run) — integration', () =>
   );
 
   it(
-    'refuses enrich before the train is applied',
+    'refuses enrich before the instance upgrade is applied',
     async () => {
       const { url } = await dbAt();
       expect((await cli(url, ['enrich', '--dry-run'])).out).toMatch(
-        /REFUSED: enrich runs after the train \(the database is at 0022_/,
+        /REFUSED: enrich runs after the instance upgrade \(the database is at 0022_/,
       );
     },
     TIMEOUT_MS,

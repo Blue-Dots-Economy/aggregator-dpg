@@ -181,9 +181,16 @@ describe('coordinator submit with an org', () => {
       return { to: mailer.outbox.at(-1)?.to, token: m?.[1] ?? '' };
     };
 
-    it('places a body without org_id in the Default org for one release, with a warning', async () => {
+    it('refuses a body without org_id or an invite (Phase 5: the one-release fallback is gone)', async () => {
       orgStore.seed([buildDefaultOrg()]);
       const res = await submit({ ...validBody, url: 'https://own.example' });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
+    });
+
+    it('keeps a Default-org coordinator\'s own org details', async () => {
+      orgStore.seed([buildDefaultOrg()]);
+      const res = await submit({ ...validBody, org_id: DEFAULT_ID, url: 'https://own.example' });
       expect(res.statusCode).toBe(201);
       const id = (res.json() as { aggregator_id: string }).aggregator_id;
       const stored = await aggregatorStore.findById(id);
@@ -255,15 +262,14 @@ describe('coordinator submit with an org', () => {
       }
     });
 
-    it("ignores url / locations for a real org (they are the org's)", async () => {
+    it("refuses url / locations for a real org (they are the org's; Phase 5)", async () => {
       orgStore.seed([
         buildAggregatorOrg({ id: 'org-1', slug: 'o', status: 'active', ownerEmail: 'o@o.org' }),
       ]);
       const res = await submit({ ...validBody, org_id: 'org-1', url: 'https://own.example' });
-      expect(res.statusCode).toBe(201);
-      const id = (res.json() as { aggregator_id: string }).aggregator_id;
-      const stored = await aggregatorStore.findById(id);
-      expect(stored.ok && stored.value?.url).toBeNull();
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('ORG_DETAILS_READ_ONLY');
+      expect((await aggregatorStore.findByContactEmail(validBody.contact.email)).ok).toBe(true);
     });
   });
 });

@@ -114,7 +114,7 @@ export function isFailing(row: CheckRow): boolean {
  * @param script - The script text.
  * @returns The statements, in order.
  */
-export function sqlStatements(script: string): string[] {
+export function sqlStatements(script: string): string[] { // NOSONAR typescript:S3776 — inherently branchy migration step; splitting would obscure it
   const body = script
     .split('\n')
     .filter((l) => !l.trimStart().startsWith('\\') && !l.trimStart().startsWith('--'))
@@ -163,14 +163,14 @@ export function sqlStatements(script: string): string[] {
  * returns its `check_id | category | n` rows; statements without a
  * `check_id` (setup such as TEMP views) are run and skipped.
  *
- * @param client - The connection (the train's transaction, or a read session).
+ * @param client - The connection (the instance upgrade's transaction, or a read session).
  * @param file - Path to the script.
  * @returns The rows, in script order.
  */
 export async function runChecks(client: Queryable, file: string): Promise<CheckRow[]> {
   const rows: CheckRow[] = [];
   for (const stmt of sqlStatements(await readFile(file, 'utf8'))) {
-    const r = await client.query<{ check_id?: string; category?: string; n?: string }>(stmt);
+    const r = await client.query<{ check_id?: string; category?: string; n?: string }>(stmt); // NOSONAR typescript:S9382 — sequential by design
     for (const row of r.rows ?? []) {
       if (row.check_id === undefined) continue;
       const category =

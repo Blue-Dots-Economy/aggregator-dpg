@@ -25,16 +25,11 @@ import { z } from 'zod';
 import { config } from '../config.js';
 import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
 import type { AggregatorOrg } from '../services/aggregator-org-store/index.js';
-import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { formatApprovalTtl } from '../services/approval-token.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
 import { mintReviewToken } from '../services/registration-notify.js';
-import { getMailer } from '@aggregator-dpg/mailer';
-import {
-  renderApplicantRejected,
-  renderOrgOwnerApproved,
-} from '../services/email-templates/index.js';
-import { mintGrantToken } from '../services/grant-token.js';
+import { decideOrg } from '../services/decisions/org.js';
+import { LINK_DECIDER } from '../services/decisions/coordinator.js';
 import {
   sendHtml,
   sendPage,
@@ -154,13 +149,12 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         tags: ['aggregator-orgs'],
         summary: 'Approve or reject a pending org',
         description:
-          'Browser form flow; every response is text/html. approve = enable owner + org_owner role + group + atomic status CAS; reject = atomic status CAS to inactive.',
+          'Browser form flow; every response is text/html. Both decisions are an atomic status CAS from pending first; approve then enables the owner (Keycloak user, org_owner role, group) and mails a sign-in link; reject mails the owner.',
         params: OrgApprovalParamsSchema,
       },
     },
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       const orgId = req.params.id;
-      const log = req.log.child({ operation: 'org-approval.decide', org_id: orgId });
 
       const parsed = OrgDecisionBodySchema.safeParse(req.body);
       if (!parsed.success) {
@@ -178,156 +172,54 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       const verified = await verifyTokenForId(parsed.data.token, orgId, ORG_NOUN);
       if (!verified.ok) return sendPage(reply, verified.page);
 
-      const orgStore = getAggregatorOrgStore();
-      const idp = getIdpAdmin();
-
-      const lookup = await orgStore.findById(orgId);
-      if (!lookup.ok) return sendPage(reply, orgUnavailablePage());
-      if (!lookup.value) return sendPage(reply, orgNotFoundPage());
-
-      // Single-use guard: anything other than pending is already decided.
-      const prior = orgDecidedView(lookup.value.status);
-      if (prior) return sendHtml(reply, 200, renderResultPage(prior));
-
-      if (parsed.data.decision === 'reject') {
-        await orgStore.reject(orgId);
-        // Notify the owner, mirroring the coordinator reject path. The CAS above
-        // has already committed, so a mail failure logs and continues rather
-        // than un-rejecting a decided application — same posture as the
-        // org-approved mail below. No owner name is stored on the org row (the
-        // name given at registration only builds the Keycloak user), so the
-        // template greets without one.
-        const rejectedMail = renderApplicantRejected({
-          association: lookup.value.displayName,
-          entityLabel: 'organisation',
-          ...(parsed.data.reason ? { reason: parsed.data.reason } : {}),
-        });
-        const rejectSend = await getMailer().send({
-          to: lookup.value.ownerEmail,
-          subject: rejectedMail.subject,
-          html: rejectedMail.html,
-          text: rejectedMail.text,
-        });
-        if (!rejectSend.ok) {
-          log.warn(
-            {
-              status: 'failure',
-              sub_operation: 'mailer.send.orgRejected',
-              code: rejectSend.error.code,
-              cause: rejectSend.error.message,
-            },
-            'org-rejected email delivery failed (org is inactive; owner not notified)',
+      const outcome = await decideOrg({
+        orgId,
+        decision: parsed.data.decision,
+        ...(parsed.data.reason ? { reason: parsed.data.reason } : {}),
+        decidedBy: LINK_DECIDER,
+        log: req.log,
+      });
+      switch (outcome.kind) {
+        case 'decided':
+          return sendHtml(
+            reply,
+            200,
+            renderResultPage(
+              outcome.decision === 'approve'
+                ? {
+                    status: 'success',
+                    title: 'Organisation approved',
+                    message:
+                      'The organisation is now live. Its owner can sign in, and coordinators can register under it.',
+                  }
+                : {
+                    status: 'success',
+                    title: 'Organisation rejected',
+                    message: outcome.notified
+                      ? 'The owner has been notified.'
+                      : 'The organisation was rejected, but the notification email could not be delivered.',
+                  },
+            ),
+          );
+        case 'already_decided': {
+          const prior = orgDecidedView(outcome.status);
+          return sendHtml(
+            reply,
+            200,
+            renderResultPage((prior ?? orgDecidedView('active')) as ResultView),
           );
         }
-        // The reason is logged for audit but not persisted — there is no column
-        // for it on either table yet (same gap as the coordinator path).
-        log.info(
-          {
-            status: 'success',
-            decision: 'reject',
-            new_status: 'inactive',
-            reason: parsed.data.reason ?? null,
-          },
-          'org rejected',
-        );
-        return sendHtml(
-          reply,
-          200,
-          renderResultPage({
-            status: 'success',
-            title: 'Organisation rejected',
-            message: rejectSend.ok
-              ? `${lookup.value.ownerEmail} has been notified.`
-              : 'The organisation was rejected, but the notification email could not be delivered.',
-          }),
-        );
-      }
-
-      // Approve. The org owner KC user stays DISABLED: org-owner console login
-      // is deferred (spec §9), and an enabled owner would pass Keycloak's OTP
-      // step. Enable them only when the org console ships. The role + group are
-      // still assigned below so that future flip is a no-op.
-      const ownerKcSub = lookup.value.ownerKcSub;
-
-      // Atomic CAS commit. If a concurrent click already flipped it, the CAS
-      // returns null → render already-decided.
-      const cas = await orgStore.approve(orgId);
-      if (!cas.ok) {
-        return sendPage(
-          reply,
-          serviceUnavailablePage(
-            'Action failed',
-            'Database unavailable. Please try again shortly.',
-          ),
-        );
-      }
-      if (cas.value === null) {
-        return sendHtml(reply, 200, renderResultPage(orgDecidedView('active') as ResultView));
-      }
-
-      // Soft-fail provisioning: role + group mirror. Failures are logged and
-      // repaired later; the org is live (status committed above).
-      if (ownerKcSub) {
-        const role = await idp.assignRealmRole(ownerKcSub, 'org_owner');
-        if (!role.ok) {
-          log.warn(
-            { status: 'failure', sub_operation: 'idp.assignRealmRole', code: role.error.code },
-            'failed to assign org_owner role (org is active; repair on next pass)',
+        case 'not_found':
+          return sendPage(reply, orgNotFoundPage());
+        case 'unavailable':
+          return sendPage(
+            reply,
+            serviceUnavailablePage(
+              'Action failed',
+              'Database unavailable. Please try again shortly.',
+            ),
           );
-        }
-        if (lookup.value.kcGroupId) {
-          const grp = await idp.addUserToGroup(ownerKcSub, lookup.value.kcGroupId);
-          if (!grp.ok) {
-            log.warn(
-              { status: 'failure', sub_operation: 'idp.addUserToGroup', code: grp.error.code },
-              'failed to add owner to mirrored group (org is active; repair on next pass)',
-            );
-          }
-        }
       }
-
-      // Notify the owner their organisation is live (#699). Soft-fail: the org
-      // is already active (CAS committed above), so a mail failure logs and
-      // continues — same posture as the role/group mirror right above. No
-      // sign-in CTA (the owner KC user stays disabled); the email carries the
-      // 90-day grant link to the invite-management page (#701).
-      const grant = await mintGrantToken({
-        org: orgId,
-        ttlSec: config.GRANT_TOKEN_TTL_SECONDS,
-      });
-      const ownerMail = renderOrgOwnerApproved({
-        orgName: lookup.value.displayName,
-        ownerEmail: lookup.value.ownerEmail,
-        inviteUrl: `${config.PUBLIC_PORTAL_URL}/register/invite?grant=${encodeURIComponent(grant.token)}`,
-      });
-      const ownerSend = await getMailer().send({
-        to: lookup.value.ownerEmail,
-        subject: ownerMail.subject,
-        html: ownerMail.html,
-        text: ownerMail.text,
-      });
-      if (!ownerSend.ok) {
-        log.warn(
-          {
-            status: 'failure',
-            sub_operation: 'mailer.send.orgOwnerApproved',
-            code: ownerSend.error.code,
-            cause: ownerSend.error.message,
-          },
-          'org-approved email delivery failed (org is active; owner not notified)',
-        );
-      }
-
-      log.info({ status: 'success', decision: 'approve', new_status: 'active' }, 'org approved');
-      return sendHtml(
-        reply,
-        200,
-        renderResultPage({
-          status: 'success',
-          title: 'Organisation approved',
-          message: 'The organisation is now live. Coordinators can register under it.',
-        }),
-      );
     },
   );
 

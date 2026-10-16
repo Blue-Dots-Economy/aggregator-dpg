@@ -756,9 +756,12 @@ describe('admin approval routes', () => {
    * Mints an approve token with iat/exp in the past (expired but valid signature)
    * for the given aggregatorId. Mirrors the pattern used in approval-token.test.ts.
    */
-  async function mintExpiredApproveToken(aggregatorId: string): Promise<string> {
+  async function mintExpiredApproveToken(
+    aggregatorId: string,
+    org: string | null = DEFAULT_ORG,
+  ): Promise<string> {
     const key = new TextEncoder().encode(process.env.APPROVAL_TOKEN_SECRET);
-    return new SignJWT({ intent: 'approve' })
+    return new SignJWT({ intent: 'approve', ...(org ? { org } : {}) })
       .setProtectedHeader({ alg: 'HS256' })
       .setSubject(aggregatorId)
       .setIssuer('aggregator-api')
@@ -786,7 +789,7 @@ describe('admin approval routes', () => {
     expect(mailer.outbox.length).toBe(0);
   });
 
-  it('renew binds a legacy org-less link of a Default-org coordinator to the Default org (0028)', async () => {
+  it('renew keeps the org binding of the expired link', async () => {
     const { id } = await seedPendingAggregator();
     const expired = await mintExpiredApproveToken(id);
     const res = await app.inject({
@@ -798,6 +801,18 @@ describe('admin approval routes', () => {
     const fresh = /name="token" value="([^"]+)"/.exec(res.body)?.[1] ?? '';
     const v = await verifyApprovalToken(fresh);
     expect(v.ok && v.org).toBe(DEFAULT_ORG);
+  });
+
+  it('renew refuses an org-less link (the one-release pre-0028 path is gone, Phase 5)', async () => {
+    const { id } = await seedPendingAggregator();
+    const expired = await mintExpiredApproveToken(id, null);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/renew/${id}`,
+      payload: { token: expired },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Token does not match this organisation.');
   });
 
   it('renew never re-binds a link minted for another org', async () => {
@@ -820,16 +835,14 @@ describe('admin approval routes', () => {
     expect(res.body).toContain('Token does not match this organisation.');
   });
 
-  it('serves the review page for a pre-0028 org-less link with a token bound to the Default org', async () => {
+  it('refuses the review page for an org-less link (Phase 5)', async () => {
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
     const res = await app.inject({
       method: 'GET',
       url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}&intent=approve`,
     });
-    expect(res.statusCode).toBe(200);
-    const pageToken = /name="token" value="([^"]+)"/.exec(res.body)?.[1] ?? '';
-    const v = await verifyApprovalToken(pageToken);
-    expect(v.ok && v.org).toBe(DEFAULT_ORG);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Token does not match this organisation.');
   });
 
   it('refuses the review page for a link bound to another org', async () => {
@@ -842,7 +855,7 @@ describe('admin approval routes', () => {
     expect(res.body).toContain('Token does not match this organisation.');
   });
 
-  it('rejects a decision with a pre-0028 org-less link and offers to regenerate it', async () => {
+  it('refuses a decision with an org-less link (Phase 5)', async () => {
     const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve' });
     const res = await app.inject({
       method: 'POST',
@@ -850,8 +863,7 @@ describe('admin approval routes', () => {
       payload: { token, decision: 'approve' },
     });
     expect(res.statusCode).toBe(400);
-    expect(res.body).toContain('Regenerate &amp; review');
-    expect(res.body).toContain(`/admin/v1/aggregator-registrations/renew/${aggregatorId}`);
+    expect(res.body).toContain('Token does not match this organisation.');
     const stored = await aggregatorStore.findById(aggregatorId);
     expect(stored.ok && stored.value?.status).toBe('pending');
   });
@@ -1226,5 +1238,135 @@ describe('admin approval routes', () => {
     expect(res.statusCode).toBe(200);
     const rejected = mailer.outbox[0];
     expect(rejected?.text).toContain('Hi asha@trrain.org,');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Branch coverage: missing-token, lookup-failure, invalid-token and
+  // decision-outcome paths the flows above don't reach.
+  // ---------------------------------------------------------------------------
+
+  it('GET /read/:id with no token shows the missing-token page', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/aggregator-registrations/read/${aggregatorId}`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.headers['content-type']).toContain('text/html');
+  });
+
+  it('GET /read/:id returns 503 when loading the aggregator record fails', async () => {
+    aggregatorStore.findById = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+    });
+    const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}`,
+    });
+    expect(res.statusCode).toBe(503);
+  });
+
+  it('GET /read/:id renders the invited-email line when the coordinator was invited', async () => {
+    aggregatorStore.seed([
+      buildAggregator({
+        id: aggregatorId,
+        orgSlug: 'trrain-abcd',
+        actorType: 'aggregator',
+        type: null,
+        name: 'TRRAIN',
+        contact: { name: 'Asha Rao', phone: '+919876543210', email: 'asha@trrain.org' },
+        status: 'pending',
+        inviteEmail: 'invited@trrain.org',
+      }),
+    ]);
+    const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('invited@trrain.org');
+  });
+
+  it('POST /decision/:id shows the invalid-token page for a bad (but well-formed) token', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token: 'not-a-jwt', decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('Invalid link');
+  });
+
+  it('POST /decision/:id renders not-found when the decision service cannot find the row', async () => {
+    // The route loads the aggregator (ok twice: its own lookup + the decision
+    // service's), but the post-CAS re-read finds the row gone, so the decision
+    // service returns `not_found`.
+    aggregatorStore.approveFromPending = async () => ({ ok: true, value: null });
+    let calls = 0;
+    const orig = aggregatorStore.findById.bind(aggregatorStore);
+    aggregatorStore.findById = async (id: string) => {
+      calls += 1;
+      return calls >= 3 ? { ok: true, value: null } : orig(id);
+    };
+    const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'approve' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toContain('Aggregator not found');
+  });
+
+  it('POST /renew/:id with no body shows the invalid-token page', async () => {
+    const { id } = await seedPendingAggregator();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/renew/${id}`,
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('POST /renew/:id mints a fresh token from the token org for an org-less coordinator', async () => {
+    const id = `aaaaaaaa-bbbb-cccc-dddd-${String(900).padStart(12, '0')}`;
+    aggregatorStore.seed([
+      buildAggregator({
+        id,
+        orgSlug: 'orgless-abcd',
+        actorType: 'aggregator',
+        type: null,
+        name: 'Orgless',
+        contact: { name: 'No Org', phone: '+919000000900', email: 'orgless@test.local' },
+        status: 'pending',
+        parentOrgId: null,
+        inviteEmail: 'invited@orgless.local',
+      }),
+    ]);
+    const created = await idp.createUser({
+      email: 'orgless@test.local',
+      firstName: 'No',
+      lastName: 'Org',
+      enabled: false,
+      attributes: { aggregator_id: id, decision_made: 'pending' },
+    });
+    if (!created.ok) throw new Error('seed KC user failed');
+    const key = new TextEncoder().encode(process.env.APPROVAL_TOKEN_SECRET);
+    const expired = await new SignJWT({ intent: 'approve', org: 'org-Z' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setSubject(id)
+      .setIssuer('aggregator-api')
+      .setAudience('aggregator-admin')
+      .setIssuedAt(Math.floor(Date.now() / 1000) - 7200)
+      .setExpirationTime(Math.floor(Date.now() / 1000) - 3600)
+      .sign(key);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/renew/${id}`,
+      payload: { token: expired },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('invited@orgless.local');
   });
 });

@@ -96,19 +96,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const { tokens, claims } = exchanged.value;
 
-  // Portal access is coordinator-only. A coordinator's token carries an
-  // `aggregator_id` claim (mapped from the KC user attribute); org owners and
-  // the network admin do not. Block anyone without it at the door so an org
-  // owner who is a valid KC user cannot land in the (data-less, broken)
-  // coordinator portal. Org-owner console login is a separate, future feature.
-  if (!tokenAggregatorId(tokens.accessToken)) {
+  // Who may sign in: a coordinator (the token carries `aggregator_id`, mapped
+  // from the KC user attribute) lands in the portal; an org owner or the
+  // network admin (realm role `org_owner`, user & org Phase 5) lands in the
+  // console, which asks the API who they are. Anyone else is refused here.
+  const isCoordinator = Boolean(tokenAggregatorId(tokens.accessToken));
+  const population = isCoordinator
+    ? null
+    : classifyNonCoordinator(tokens.accessToken, await resolveSignalsRealmRoles());
+  if (population !== null && population !== 'org_owner') {
     // One Keycloak realm serves both this portal and the Signals app, so a
     // token can be entirely valid and still belong to the other application —
     // Keycloak reuses an existing SSO session silently, and the user never
     // gets to pick an account. Classify WHICH population this is so the login
-    // screen can say what happened instead of assuming everyone here is an
-    // org owner (#753).
-    const population = classifyNonCoordinator(tokens.accessToken, await resolveSignalsRealmRoles());
+    // screen can say what happened (#753).
     const reason = PORTAL_GATE_REASON[population];
     log.warn(
       {
@@ -139,10 +140,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   };
   const sid = await getSessionStore().create(sessionData);
 
-  const res = NextResponse.redirect(absoluteUrl(req, flow.returnTo), { status: 302 });
+  const res = NextResponse.redirect(absoluteUrl(req, landingPath(flow.returnTo, isCoordinator)), {
+    status: 302,
+  });
   res.cookies.set(SESSION_COOKIE, sid, sessionCookieOptions());
   res.cookies.set(OIDC_FLOW_COOKIE, '', clearCookieOptions());
   return res;
+}
+
+/**
+ * Where a fresh session lands: the requested path, except that each actor's
+ * home replaces the other's (a coordinator never lands on `/console`, an
+ * admin never on the coordinator portal). The layouts enforce the same rule.
+ */
+function landingPath(returnTo: string, isCoordinator: boolean): string {
+  const inConsole = returnTo === '/console' || returnTo.startsWith('/console/');
+  if (isCoordinator) return inConsole ? '/dashboard' : returnTo;
+  return inConsole ? returnTo : '/console';
 }
 
 function failure(req: NextRequest, reason: string): NextResponse {

@@ -20,7 +20,7 @@ let legacyFlagWarned = false;
 /**
  * Logs once per process when the removed `ORG_HIERARCHY_ENABLED` variable is
  * still set: organisations are always on since migration 0028, so it has no
- * effect and should be removed from the environment (the API warns too).
+ * effect and should be removed from the environment.
  */
 export function warnIfLegacyHierarchyFlag(): void {
   if (legacyFlagWarned || process.env.ORG_HIERARCHY_ENABLED === undefined) return;

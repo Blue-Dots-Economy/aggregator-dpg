@@ -128,6 +128,7 @@ function makeRow(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
     status: 'pending',
     createdAt,
     updatedAt: createdAt,
+    updatedBy: null,
     rejectedAt: null,
     isDefault: false,
     url: null,
@@ -565,7 +566,7 @@ describe('PostgresAggregatorOrgStore.approve / reject', () => {
     _setDbClients(null, db as never);
     const store = new PostgresAggregatorOrgStore();
 
-    const result = await store.approve('org-1');
+    const result = await store.approve('org-1', 'admin');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value?.status).toBe('active');
@@ -577,7 +578,7 @@ describe('PostgresAggregatorOrgStore.approve / reject', () => {
     _setDbClients(null, db as never);
     const store = new PostgresAggregatorOrgStore();
 
-    const result = await store.approve('org-1');
+    const result = await store.approve('org-1', 'admin');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value).toBeNull();
@@ -594,7 +595,7 @@ describe('PostgresAggregatorOrgStore.approve / reject', () => {
     _setDbClients(null, db as never);
     const store = new PostgresAggregatorOrgStore();
 
-    const result = await store.reject('org-1');
+    const result = await store.reject('org-1', 'admin');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value?.status).toBe('inactive');
@@ -606,7 +607,7 @@ describe('PostgresAggregatorOrgStore.approve / reject', () => {
     _setDbClients(null, db as never);
     const store = new PostgresAggregatorOrgStore();
 
-    const result = await store.reject('org-1');
+    const result = await store.reject('org-1', 'admin');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value).toBeNull();
@@ -619,7 +620,7 @@ describe('PostgresAggregatorOrgStore.approve / reject', () => {
     _setDbClients(null, db as never);
     const store = new PostgresAggregatorOrgStore();
 
-    const result = await store.approve('org-1');
+    const result = await store.approve('org-1', 'admin');
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DB_UNAVAILABLE');

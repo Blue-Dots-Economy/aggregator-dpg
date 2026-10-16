@@ -886,7 +886,6 @@ describe('PostgresAggregatorStore serves on write (0029)', () => {
   it.each([
     ['seeker', ['seeker']],
     [null, []],
-    ['both', []],
   ] as const)('create with type %s stores serves %j', async (type, serves) => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
@@ -896,17 +895,6 @@ describe('PostgresAggregatorStore serves on write (0029)', () => {
     _setDbClients(null, db as never);
     await new PostgresAggregatorStore().create(makeInput({ type }));
     expect((callArgs(captured, 'values')?.[0] as { serves: string[] }).serves).toEqual(serves);
-  });
-
-  it("an update to type 'both' stores every domain ([])", async () => {
-    let captured: ChainCall[] = [];
-    const db = makeFakeDb((chain) => {
-      if (callArgs(chain, 'set')) captured = chain;
-      return [makeRow()];
-    });
-    _setDbClients(null, db as never);
-    await new PostgresAggregatorStore().update('agg-1', { type: 'both', updatedBy: 't' });
-    expect((callArgs(captured, 'set')?.[0] as { serves: string[] }).serves).toEqual([]);
   });
 
   it('reads the alternate phone back into the Beckn contact, and omits a NULL one', async () => {

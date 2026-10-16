@@ -1,0 +1,43 @@
+/**
+ * Server-side reads for the console pages (user & org Phase 5).
+ *
+ * Console pages are Server Components that read with the user's own token
+ * (`callApi`); only mutations go through the guarded BFF routes. A search is
+ * a `POST` upstream but a read here. Failures map onto navigation: no session
+ * → login, a lost entitlement → sign-out with a reason, out of reach → 404.
+ *
+ * @module apps/web/src/lib/console-api.server
+ */
+
+import { notFound, redirect } from 'next/navigation';
+import { callApi } from './upstream-client';
+
+/**
+ * Reads one console API resource, or navigates away.
+ *
+ * @param path - Upstream path, e.g. `/v1/org/read/<id>`.
+ * @param body - When set, the read is a `POST` with this JSON body (search).
+ * @returns The parsed JSON body.
+ * @throws Navigation (redirect / notFound) on failure, as Next.js does.
+ */
+export async function consoleRead<T>(path: string, body?: unknown): Promise<T> {
+  let res: Response;
+  try {
+    res = await callApi(path, body === undefined ? { method: 'GET' } : { method: 'POST', body });
+  } catch {
+    redirect('/api/auth/login?returnTo=/console');
+  }
+  if (res.status === 401) redirect('/api/auth/login?returnTo=/console');
+  if (res.status === 404) notFound();
+  if (res.status === 403) {
+    const err = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+    const code = err?.error?.code;
+    if (code === 'USER_NOT_PROVISIONED')
+      redirect('/api/auth/logout?reason=console_not_provisioned');
+    if (code === 'NOT_ORG_ADMIN') redirect('/api/auth/logout?reason=console_no_org');
+    // A route this kind of actor cannot use: back to the console home.
+    redirect('/console');
+  }
+  if (!res.ok) throw new Error(`console read failed (${res.status})`);
+  return (await res.json()) as T;
+}

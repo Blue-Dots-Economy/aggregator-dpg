@@ -166,7 +166,7 @@ describe('GET /api/auth/callback', () => {
    * tell them apart or the login screen shows org-owner advice to a Signals
    * participant (#753).
    */
-  function blockedWith(roles: string[]): Promise<Response> {
+  function blockedWith(roles: string[], returnTo = '/dashboard'): Promise<Response> {
     exchangeCode.mockResolvedValue({
       ok: true,
       value: {
@@ -181,16 +181,21 @@ describe('GET /api/auth/callback', () => {
       },
     });
     const req = new NextRequest('http://localhost/api/auth/callback?code=abc&state=state-1', {
-      headers: { cookie: `oidc_flow=${flowCookie()}` },
+      headers: { cookie: `oidc_flow=${flowCookie(returnTo)}` },
     });
     return GET(req);
   }
 
-  it('blocks an org owner with org_no_portal', async () => {
+  it('signs an org owner in and lands them on the console (Phase 5)', async () => {
     const res = await blockedWith(['org_owner']);
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('http://portal.test/login?error=org_no_portal');
-    expect(create).not.toHaveBeenCalled();
+    expect(res.headers.get('location')).toBe('http://portal.test/console');
+    expect(create).toHaveBeenCalled();
+  });
+
+  it('keeps an org owner on a requested console page', async () => {
+    const res = await blockedWith(['org_owner'], '/console/orgs');
+    expect(res.headers.get('location')).toBe('http://portal.test/console/orgs');
   });
 
   it('blocks a Signals participant with signals_account_no_portal', async () => {

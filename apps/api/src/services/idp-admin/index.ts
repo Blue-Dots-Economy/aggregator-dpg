@@ -41,5 +41,5 @@ export function _setIdpAdmin(a: IdpAdminAdapter | null): void {
 export { IdpAdminAdapter } from './interface.js';
 export type { CreateUserInput, IdpUser, IdpResult, IdpError } from './interface.js';
 export { IdpAdminFake } from './testing.js';
-export { KC_ATTR } from './attributes.js';
+export { KC_ATTR, OWNER_CREATED_BY, OWNER_REALM_ROLE } from './attributes.js';
 export type { KcAttrName } from './attributes.js';

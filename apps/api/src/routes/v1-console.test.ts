@@ -1,0 +1,912 @@
+// Console routes /v1/user/* and /v1/org/* (user & org Phase 5): who may do
+// what, reach (out of reach → 404), and the decision / edit flows.
+
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+import { buildApp } from '../app.js';
+import {
+  AggregatorStoreFake,
+  buildAggregator,
+  _setAggregatorStore,
+} from '../services/aggregator-store/index.js';
+import {
+  AggregatorOrgStoreFake,
+  buildAggregatorOrg,
+  buildDefaultOrg,
+  _setAggregatorOrgStore,
+} from '../services/aggregator-org-store/index.js';
+import { IdpAdminFake, _setIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
+import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
+import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
+import { getIdentityStore } from '../services/identity-store/index.js';
+import { _setNetworkConfig } from '../services/network-config.js';
+import { _setSignalStackWriter } from '../services/signalstack.js';
+import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
+import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
+import { _setConsoleWriteRateChecker } from '../services/console-rate.js';
+import {
+  RegistrationInvitesStoreFake,
+  _setRegistrationInvitesStore,
+} from '../services/registration-invites-store/index.js';
+import {
+  _setInviteMintRateChecker,
+  _setInviteIpRateChecker,
+} from '../services/invite-mint-rate.js';
+import { err } from '@aggregator-dpg/shared-primitives/result';
+import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+
+/** A store `err` result (the aggregator / org fakes use `{ ok, ... }`). */
+// A forced store failure for any store method. The concrete error unions differ
+// per store (StoreError / OrgStoreError / search results), so the static type is
+// widened to `never` (assignable to every result slot); the runtime object still
+// carries `{ ok: false, error: { code, message } }` the handlers read.
+const storeErr = (code = 'DB_UNAVAILABLE') =>
+  ({ ok: false, error: { code, message: 'forced' } }) as unknown as never;
+/** A base64url cursor from an arbitrary payload (for the malformed-cursor paths). */
+const cursorOf = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
+
+const ROOT = '00000000-0000-4000-8000-000000000001';
+const DEFAULT = buildDefaultOrg().id;
+const ORG_A = '00000000-0000-4000-8000-00000000000a';
+const ORG_B = '00000000-0000-4000-8000-00000000000b';
+const ORG_P = '00000000-0000-4000-8000-00000000000c';
+
+const NA = '00000000-0000-4000-8000-0000000000a0';
+const OWNER_A = '00000000-0000-4000-8000-0000000000aa';
+const OWNER_B = '00000000-0000-4000-8000-0000000000ab';
+const OWNER_P = '00000000-0000-4000-8000-0000000000ac';
+
+const C1 = '00000000-0000-4000-8000-0000000000c1'; // ORG_A, pending
+const C2 = '00000000-0000-4000-8000-0000000000c2'; // ORG_B, pending
+const C3 = '00000000-0000-4000-8000-0000000000c3'; // ORG_A, active
+
+/** Token → claims the fake verifier returns. */
+const TOKENS: Record<string, Record<string, unknown>> = {
+  na: { sub: 'sub-na', preferred_username: 'na@net.org' },
+  a: { sub: 'sub-a', preferred_username: 'a@a.org' },
+  b: { sub: 'sub-b', preferred_username: 'b@b.org' },
+  p: { sub: 'sub-p', preferred_username: 'p@p.org' },
+  coord: { sub: 'sub-c3', preferred_username: 'c3@x.org', aggregator_id: C3 },
+  unlinked: { sub: 'sub-nobody', preferred_username: 'nobody@x.org' },
+  // A login whose aggregator_id claim names a coordinator whose recorded login it is not.
+  forged: { sub: 'sub-nobody', preferred_username: 'nobody@x.org', aggregator_id: C3 },
+  svc: { sub: 'sub-svc', preferred_username: 'service-account-aggregator-bff' },
+};
+
+const auth = (who: keyof typeof TOKENS) => ({ authorization: `Bearer ${who}` });
+
+describe('console routes /v1/user, /v1/org', () => {
+  let app: FastifyInstance;
+  let coordinators: AggregatorStoreFake;
+  let orgs: AggregatorOrgStoreFake;
+  let idp: IdpAdminFake;
+  let mailer: FakeMailer;
+
+  function coordinator(
+    id: string,
+    orgId: string,
+    status: 'pending' | 'active' | 'inactive' | 'retired',
+    n: number,
+  ) {
+    return buildAggregator({
+      id,
+      orgSlug: `coord-${n}`,
+      name: `Coordinator ${n}`,
+      parentOrgId: orgId,
+      isDefaultOrg: false,
+      status,
+      contact: { name: `C${n}`, phone: `+91900000010${n}`, email: `c${n}@x.org` },
+      contactPhone: `+91900000010${n}`,
+      contactEmail: `c${n}@x.org`,
+      createdAt: new Date(`2026-02-0${n}T00:00:00Z`),
+    });
+  }
+
+  beforeEach(async () => {
+    _resetJwks();
+    process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
+    process.env.KEYCLOAK_URL = 'http://kc.local';
+    process.env.KEYCLOAK_REALM = 'bluedots';
+
+    coordinators = new AggregatorStoreFake();
+    orgs = new AggregatorOrgStoreFake();
+    idp = new IdpAdminFake();
+    mailer = new FakeMailer();
+
+    orgs.seedRoot(
+      buildAggregatorOrg({
+        id: ROOT,
+        slug: 'network',
+        displayName: 'The Network',
+        status: 'active',
+        ownerUserId: NA,
+        ownerEmail: 'na@net.org',
+      }),
+    );
+    orgs.seed([
+      { ...buildDefaultOrg(), ownerUserId: NA, ownerEmail: 'na@net.org' },
+      buildAggregatorOrg({
+        id: ORG_A,
+        slug: 'org-a',
+        displayName: 'Alpha',
+        status: 'active',
+        ownerUserId: OWNER_A,
+        ownerEmail: 'a@a.org',
+        ownerKcSub: 'sub-a',
+      }),
+      buildAggregatorOrg({
+        id: ORG_B,
+        slug: 'org-b',
+        displayName: 'Beta',
+        status: 'active',
+        ownerUserId: OWNER_B,
+        ownerEmail: 'b@b.org',
+      }),
+      buildAggregatorOrg({
+        id: ORG_P,
+        slug: 'org-p',
+        displayName: 'Pending Org',
+        status: 'pending',
+        ownerUserId: OWNER_P,
+        ownerEmail: 'p@p.org',
+      }),
+    ]);
+    coordinators.seed([
+      coordinator(C1, ORG_A, 'pending', 1),
+      coordinator(C2, ORG_B, 'pending', 2),
+      coordinator(C3, ORG_A, 'active', 3),
+    ]);
+    for (const [id, n] of [
+      [C1, 1],
+      [C2, 2],
+    ] as const) {
+      await idp.createUser({
+        email: `c${n}@x.org`,
+        enabled: false,
+        attributes: { [KC_ATTR.AGGREGATOR_ID]: id },
+      });
+    }
+
+    const identities = getIdentityStore();
+    for (const [user, sub] of [
+      [NA, 'sub-na'],
+      [OWNER_A, 'sub-a'],
+      [OWNER_B, 'sub-b'],
+      [OWNER_P, 'sub-p'],
+      [C1, 'sub-c1'],
+      [C3, 'sub-c3'],
+    ] as const) {
+      await identities.link(user, 'keycloak', sub);
+    }
+
+    _setAggregatorStore(coordinators);
+    _setAggregatorOrgStore(orgs);
+    _setIdpAdmin(idp);
+    _setMailer(mailer);
+    _setNetworkConfig(buildBlueDotConfig());
+    _setSignalStackWriter(new SignalStackWriterFake());
+    _setRegistrationInvitesStore(new RegistrationInvitesStoreFake());
+    _setConsoleWriteRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
+    _setInviteMintRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
+    _setInviteIpRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
+    _setAccessTokenVerifier(async (token) => {
+      const claims = TOKENS[token];
+      if (!claims) throw new Error('invalid token');
+      return { azp: 'aggregator-portal', ...claims };
+    });
+
+    app = await buildApp();
+  });
+
+  afterAll(async () => {
+    await app?.close();
+    _setAggregatorStore(null);
+    _setAggregatorOrgStore(null);
+    _setIdpAdmin(null);
+    _setMailer(null);
+    _setNetworkConfig(null);
+    _setSignalStackWriter(null);
+    _setRegistrationInvitesStore(null);
+    _setConsoleWriteRateChecker(null);
+    _setInviteMintRateChecker(null);
+    _setInviteIpRateChecker(null);
+    _setAccessTokenVerifier(null);
+  });
+
+  const get = (url: string, who: keyof typeof TOKENS) =>
+    app.inject({ method: 'GET', url, headers: auth(who) });
+  const post = (url: string, who: keyof typeof TOKENS, payload: object) =>
+    app.inject({ method: 'POST', url, headers: auth(who), payload });
+  const patch = (url: string, who: keyof typeof TOKENS, payload: object) =>
+    app.inject({ method: 'PATCH', url, headers: auth(who), payload });
+
+  describe('the guard', () => {
+    it('401 without a token', async () => {
+      const res = await app.inject({ method: 'GET', url: '/v1/user/read/me' });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it.each([
+      ['svc', 403, 'FORBIDDEN'],
+      ['unlinked', 403, 'USER_NOT_PROVISIONED'],
+      ['p', 403, 'NOT_ORG_ADMIN'],
+      ['forged', 403, 'USER_NOT_PROVISIONED'],
+    ] as const)('%s → %i %s', async (who, status, code) => {
+      const res = await get('/v1/user/read/me', who);
+      expect(res.statusCode).toBe(status);
+      expect((res.json() as { error: { code: string } }).error.code).toBe(code);
+    });
+
+    it('refuses a pending coordinator with NOT_APPROVED', async () => {
+      TOKENS.c1 = { sub: 'sub-c1', aggregator_id: C1 };
+      const res = await get('/v1/user/read/me', 'c1' as keyof typeof TOKENS);
+      expect(res.statusCode).toBe(403);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('NOT_APPROVED');
+      delete TOKENS.c1;
+    });
+
+    it('refuses a coordinator on an admin route with 403', async () => {
+      const res = await get(`/v1/user/read/${C1}`, 'coord');
+      expect(res.statusCode).toBe(403);
+    });
+  });
+
+  describe('GET /v1/user/read/me', () => {
+    it('describes the network admin: root + Default, flagged', async () => {
+      const res = await get('/v1/user/read/me', 'na');
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as {
+        kind: string;
+        is_network_admin: boolean;
+        orgs: Array<{ id: string; org_type: string; role: string }>;
+        user: { contact: { email: string } };
+      };
+      expect(body.kind).toBe('admin');
+      expect(body.is_network_admin).toBe(true);
+      expect(body.orgs.map((o) => o.id).sort()).toEqual([ROOT, DEFAULT].sort());
+      expect(body.user.contact.email).toBe('na@net.org');
+    });
+
+    it('describes an owner: its org only, not the network admin', async () => {
+      const body = (await get('/v1/user/read/me', 'a')).json() as {
+        is_network_admin: boolean;
+        orgs: Array<{ id: string; role: string }>;
+      };
+      expect(body.is_network_admin).toBe(false);
+      expect(body.orgs).toEqual([expect.objectContaining({ id: ORG_A, role: 'owner' })]);
+    });
+
+    it('describes an approved coordinator as a member of its org', async () => {
+      const body = (await get('/v1/user/read/me', 'coord')).json() as {
+        kind: string;
+        orgs: Array<{ id: string; role: string }>;
+        user: { contact: { email: string } };
+      };
+      expect(body.kind).toBe('coordinator');
+      expect(body.orgs).toEqual([expect.objectContaining({ id: ORG_A, role: 'member' })]);
+      expect(body.user.contact.email).toBe('c3@x.org');
+    });
+  });
+
+  describe('reach', () => {
+    it.each([
+      ['a', C1, 200],
+      ['a', C2, 404],
+      ['na', C2, 200],
+      ['b', C1, 404],
+    ] as const)('%s reads coordinator %s → %i', async (who, id, status) => {
+      expect((await get(`/v1/user/read/${id}`, who)).statusCode).toBe(status);
+    });
+
+    it.each([
+      ['a', ORG_A, 200],
+      ['a', ORG_B, 404],
+      ['a', ROOT, 404],
+      ['na', ROOT, 200],
+      ['na', ORG_B, 200],
+    ] as const)('%s reads org %s → %i', async (who, id, status) => {
+      expect((await get(`/v1/org/read/${id}`, who)).statusCode).toBe(status);
+    });
+
+    it('reads the root as the network facilitator, with owner and counts', async () => {
+      const body = (await get(`/v1/org/read/${ORG_A}`, 'a')).json() as {
+        org: { org_type: string };
+        coordinator_count: number;
+        pending_count: number;
+        owner: { id: string };
+      };
+      expect(body.org.org_type).toBe('aggregator');
+      expect(body.coordinator_count).toBe(2);
+      expect(body.pending_count).toBe(1);
+      expect(body.owner.id).toBe(OWNER_A);
+      const root = (await get(`/v1/org/read/${ROOT}`, 'na')).json() as {
+        org: { org_type: string };
+      };
+      expect(root.org.org_type).toBe('network_facilitator');
+    });
+  });
+
+  describe('POST /v1/user/search', () => {
+    const ids = (res: { json: () => unknown }) =>
+      (res.json() as { users: Array<{ id: string }> }).users.map((u) => u.id).sort();
+
+    it('scopes an owner to its org, the network admin to all', async () => {
+      expect(ids(await post('/v1/user/search', 'a', {}))).toEqual([C1, C3].sort());
+      expect(ids(await post('/v1/user/search', 'na', {}))).toEqual([C1, C2, C3].sort());
+    });
+
+    it('answers an out-of-reach org_id with an empty page', async () => {
+      const res = await post('/v1/user/search', 'a', { filter: { org_id: ORG_B } });
+      expect(res.statusCode).toBe(200);
+      expect(ids(res)).toEqual([]);
+    });
+
+    it('pages with an opaque cursor', async () => {
+      const first = (await post('/v1/user/search', 'na', { limit: 2 })).json() as {
+        users: Array<{ id: string }>;
+        next_cursor: string | null;
+      };
+      expect(first.users.map((u) => u.id)).toEqual([C3, C2]);
+      expect(first.next_cursor).not.toBeNull();
+      const second = (
+        await post('/v1/user/search', 'na', { limit: 2, cursor: first.next_cursor })
+      ).json() as { users: Array<{ id: string }>; next_cursor: string | null };
+      expect(second.users.map((u) => u.id)).toEqual([C1]);
+      expect(second.next_cursor).toBeNull();
+    });
+
+    it('refuses a malformed cursor with 400', async () => {
+      const res = await post('/v1/user/search', 'na', { cursor: 'not-a-cursor' });
+      expect(res.statusCode).toBe(400);
+    });
+  });
+
+  describe('POST /v1/user/decision/:id', () => {
+    it('lets the owner approve its coordinator, then answers ALREADY_DECIDED', async () => {
+      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ id: C1, status: 'active' });
+      const row = await coordinators.findById(C1);
+      expect(row.ok && row.value?.status).toBe('active');
+      expect(row.ok && row.value?.updatedBy).toBe(OWNER_A);
+
+      const again = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'reject' });
+      expect(again.statusCode).toBe(409);
+      const err = (again.json() as { error: { code: string; fields: Record<string, unknown> } })
+        .error;
+      expect(err.code).toBe('ALREADY_DECIDED');
+      expect(err.fields).toMatchObject({ status: 'active', decided_by: 'console' });
+    });
+
+    it("answers 404 for another org's coordinator", async () => {
+      const res = await post(`/v1/user/decision/${C2}`, 'a', { decision: 'approve' });
+      expect(res.statusCode).toBe(404);
+      const row = await coordinators.findById(C2);
+      expect(row.ok && row.value?.status).toBe('pending');
+    });
+
+    it('tells the owner when the network admin decides in their org (C13)', async () => {
+      const res = await post(`/v1/user/decision/${C2}`, 'na', {
+        decision: 'reject',
+        reason: 'incomplete',
+      });
+      expect(res.statusCode).toBe(200);
+      const notice = mailer.outbox.find((m) => m.to === 'b@b.org');
+      expect(notice?.html).toContain('rejected a coordinator');
+    });
+
+    it('answers 429 when the console write budget is spent', async () => {
+      _setConsoleWriteRateChecker(async () => ({ allowed: false, retryAfterSeconds: 30 }));
+      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
+      expect(res.statusCode).toBe(429);
+      expect(res.headers['retry-after']).toBe('30');
+    });
+  });
+
+  describe('PATCH /v1/user/metadata/update/:id', () => {
+    it('sets the served domains', async () => {
+      const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: ['seeker'] });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { serves: string[] }).serves).toEqual(['seeker']);
+    });
+
+    it('refuses a domain the network does not have', async () => {
+      const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: ['pilot'] });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('answers 404 out of reach', async () => {
+      const res = await patch(`/v1/user/metadata/update/${C2}`, 'a', { serves: [] });
+      expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe('POST /v1/user/create (invite)', () => {
+    it('invites into the owner’s org', async () => {
+      const res = await post('/v1/user/create', 'a', {
+        org_id: ORG_A,
+        recipients: [{ email: 'new@x.org' }],
+      });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { sent: number }).sent).toBe(1);
+    });
+
+    it('answers 404 for an org out of reach', async () => {
+      const res = await post('/v1/user/create', 'a', {
+        org_id: ORG_B,
+        recipients: [{ email: 'new@x.org' }],
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('refuses the Default org, even for the network admin (R8)', async () => {
+      const res = await post('/v1/user/create', 'na', {
+        org_id: DEFAULT,
+        recipients: [{ email: 'new@x.org' }],
+      });
+      expect(res.statusCode).toBe(409);
+    });
+  });
+
+  describe('POST /v1/org/search', () => {
+    const ids = (res: { json: () => unknown }) =>
+      (res.json() as { orgs: Array<{ id: string }> }).orgs.map((o) => o.id).sort();
+
+    it('scopes an owner to its org; the network admin sees every aggregator org', async () => {
+      expect(ids(await post('/v1/org/search', 'a', {}))).toEqual([ORG_A]);
+      expect(ids(await post('/v1/org/search', 'na', {}))).toEqual(
+        [DEFAULT, ORG_A, ORG_B, ORG_P].sort(),
+      );
+    });
+
+    it('filters by status', async () => {
+      expect(ids(await post('/v1/org/search', 'na', { filter: { status: 'pending' } }))).toEqual([
+        ORG_P,
+      ]);
+    });
+  });
+
+  describe('PATCH /v1/org/metadata/update/:id', () => {
+    it('lets the owner edit details', async () => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        url: 'https://alpha.example.org',
+        legal_name: 'Alpha Pvt Ltd',
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        url: 'https://alpha.example.org',
+        legal_name: 'Alpha Pvt Ltd',
+      });
+    });
+
+    it('refuses the name to an owner (403)', async () => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { name: 'Alpha 2' });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('lets the network admin rename, and tells the owner (C13)', async () => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'na', { name: 'Alpha Two' });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { name: string }).name).toBe('Alpha Two');
+      const notice = mailer.outbox.find((m) => m.to === 'a@a.org');
+      expect(notice?.html).toContain('updated the name');
+      expect(notice?.html).not.toContain('Alpha Two</strong> as');
+    });
+
+    it('answers ORG_NAME_TAKEN for a duplicate name', async () => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'na', { name: 'beta' });
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('ORG_NAME_TAKEN');
+    });
+
+    it('never edits the Default org', async () => {
+      const res = await patch(`/v1/org/metadata/update/${DEFAULT}`, 'na', {
+        url: 'https://x.example.org',
+      });
+      expect(res.statusCode).toBe(409);
+    });
+
+    it('refuses an empty body', async () => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {});
+      expect(res.statusCode).toBe(400);
+    });
+  });
+
+  describe('POST /v1/org/decision/:id and access repair', () => {
+    it('is the network admin’s only', async () => {
+      expect(
+        (await post(`/v1/org/decision/${ORG_P}`, 'a', { decision: 'approve' })).statusCode,
+      ).toBe(403);
+      expect((await post(`/v1/org/access/repair/${ORG_A}`, 'a', {})).statusCode).toBe(403);
+    });
+
+    it('approves a pending org, then answers ALREADY_DECIDED', async () => {
+      const res = await post(`/v1/org/decision/${ORG_P}`, 'na', { decision: 'approve' });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ id: ORG_P, status: 'active', owner_access: 'no_login' });
+      const again = await post(`/v1/org/decision/${ORG_P}`, 'na', { decision: 'reject' });
+      expect(again.statusCode).toBe(409);
+      expect(
+        (again.json() as { error: { fields: { decided_by: string } } }).error.fields.decided_by,
+      ).toBe('console');
+    });
+
+    it("repairs an active org's owner access", async () => {
+      await idp.createUser({ email: 'a@a.org', enabled: false, attributes: {} });
+      const res = await post(`/v1/org/access/repair/${ORG_A}`, 'na', {});
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ id: ORG_A });
+    });
+
+    it('rejects a pending org (inactive, owner_access none) and notes the reason', async () => {
+      const res = await post(`/v1/org/decision/${ORG_P}`, 'na', {
+        decision: 'reject',
+        reason: 'duplicate',
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ id: ORG_P, status: 'inactive', owner_access: 'none' });
+    });
+
+    it('answers 404 when the org to decide does not exist', async () => {
+      const res = await post(`/v1/org/decision/${ORG_X}`, 'na', { decision: 'approve' });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('answers 503 when the decision store is unavailable', async () => {
+      orgs.findById = async () => storeErr();
+      const res = await post(`/v1/org/decision/${ORG_P}`, 'na', { decision: 'approve' });
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('refuses access repair on a non-active org (409)', async () => {
+      const res = await post(`/v1/org/access/repair/${ORG_P}`, 'na', {});
+      expect(res.statusCode).toBe(409);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Branch coverage: the DB-unavailable / not-found / decision-failure / rate-
+  // limit paths the happy-path tests above don't reach. console-shared.ts is
+  // covered through the /v1/user and /v1/org routes that call it.
+  // ---------------------------------------------------------------------------
+
+  const ORG_X = '00000000-0000-4000-8000-00000000000f'; // never seeded
+  const C4 = '00000000-0000-4000-8000-0000000000c4'; // ORG_A, active, null contact
+  const C5 = '00000000-0000-4000-8000-0000000000c5'; // ORG_A, pending
+  const C6 = '00000000-0000-4000-8000-0000000000c6'; // ORG_A, rejected, null contact
+  const C7 = '00000000-0000-4000-8000-0000000000c7'; // DEFAULT, pending
+
+  describe('v1-user: store failures and not-found', () => {
+    it('503 when loading the target coordinator fails (coordinatorInReach)', async () => {
+      const orig = coordinators.findById.bind(coordinators);
+      coordinators.findById = async (id: string) => (id === C1 ? storeErr() : orig(id));
+      const res = await get(`/v1/user/read/${C1}`, 'na');
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('404 when inviting into an org that does not exist (loadOrg)', async () => {
+      const res = await post('/v1/user/create', 'na', {
+        org_id: ORG_X,
+        recipients: [{ email: 'new@x.org' }],
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('503 when loading the invite org fails (loadOrg)', async () => {
+      orgs.findById = async () => storeErr();
+      const res = await post('/v1/user/create', 'na', {
+        org_id: ORG_X,
+        recipients: [{ email: 'new@x.org' }],
+      });
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('503 when the coordinator search store fails', async () => {
+      coordinators.search = async () => storeErr();
+      const res = await post('/v1/user/search', 'na', {});
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('applies the status and served-domain filters', async () => {
+      const res = await post('/v1/user/search', 'na', {
+        filter: { status: 'active', serves: 'seeker' },
+      });
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('400 on a cursor whose created-at is not a date (decodeUserCursor)', async () => {
+      const res = await post('/v1/user/search', 'na', { cursor: cursorOf({ c: 'not-a-date', i: 'x' }) });
+      expect(res.statusCode).toBe(400);
+    });
+  });
+
+  describe('v1-user: read/me store and provisioning edges', () => {
+    it('503 when the coordinator self-row lookup fails in read/me', async () => {
+      let n = 0;
+      const orig = coordinators.findById.bind(coordinators);
+      coordinators.findById = async (id: string) => {
+        if (id === C3) {
+          n += 1;
+          if (n >= 2) return storeErr();
+        }
+        return orig(id);
+      };
+      const res = await get('/v1/user/read/me', 'coord');
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('403 USER_NOT_PROVISIONED when the coordinator self-row has gone in read/me', async () => {
+      let n = 0;
+      const orig = coordinators.findById.bind(coordinators);
+      coordinators.findById = async (id: string) => {
+        if (id === C3) {
+          n += 1;
+          if (n >= 2) return { ok: true, value: null };
+        }
+        return orig(id);
+      };
+      const res = await get('/v1/user/read/me', 'coord');
+      expect(res.statusCode).toBe(403);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('USER_NOT_PROVISIONED');
+    });
+
+    it('fills null name and phone for a coordinator whose contact is sparse', async () => {
+      coordinators.seed([
+        {
+          ...coordinator(C4, ORG_A, 'active', 4),
+          contact: { email: 'c4@x.org' } as unknown as ReturnType<typeof coordinator>['contact'],
+        },
+      ]);
+      await getIdentityStore().link(C4, 'keycloak', 'sub-c4');
+      TOKENS.coord4 = { sub: 'sub-c4', preferred_username: 'c4@x.org', aggregator_id: C4 };
+      const res = await get('/v1/user/read/me', 'coord4' as keyof typeof TOKENS);
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { user: { contact: { name: null; phone: null } } }).user.contact).toMatchObject({
+        name: null,
+        phone: null,
+      });
+      delete TOKENS.coord4;
+    });
+
+    it('503 when resolving an owned org fails in read/me', async () => {
+      orgs.findById = async () => storeErr();
+      const res = await get('/v1/user/read/me', 'a');
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('403 USER_NOT_PROVISIONED when an admin resolves to no visible org in read/me', async () => {
+      orgs.findById = async () => ({ ok: true, value: null });
+      const res = await get('/v1/user/read/me', 'a');
+      expect(res.statusCode).toBe(403);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('USER_NOT_PROVISIONED');
+    });
+  });
+
+  describe('v1-user: invite rate limit and too-many-recipients', () => {
+    it('400 when a request carries more than the per-request recipient cap', async () => {
+      const recipients = Array.from({ length: 11 }, (_, i) => ({ email: `r${i}@x.org` }));
+      const res = await post('/v1/user/create', 'a', { org_id: ORG_A, recipients });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('429 with Retry-After when the per-org invite budget is spent', async () => {
+      _setInviteMintRateChecker(async () => ({ allowed: false, retryAfterSeconds: 45 }));
+      const res = await post('/v1/user/create', 'a', {
+        org_id: ORG_A,
+        recipients: [{ email: 'new@x.org' }],
+      });
+      expect(res.statusCode).toBe(429);
+      expect(res.headers['retry-after']).toBe('45');
+    });
+  });
+
+  describe('v1-user: metadata update signalstack and store edges', () => {
+    it('updates with no signalstack writer configured', async () => {
+      _setSignalStackWriter(null);
+      const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: ['seeker'] });
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('updates an active coordinator to all domains when serves is empty', async () => {
+      const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: [] });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { serves: string[] }).serves).toEqual([]);
+    });
+
+    it('502 when the signalstack push fails for an active coordinator', async () => {
+      const ss = new SignalStackWriterFake();
+      ss.upsertAggregator = async () => err(new UpstreamError('down', { code: 'SS_DOWN' }));
+      _setSignalStackWriter(ss);
+      const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: ['seeker'] });
+      expect(res.statusCode).toBe(502);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('SIGNALSTACK_PUSH_FAILED');
+    });
+
+    it('503 when the metadata store update fails', async () => {
+      coordinators.update = async () => storeErr();
+      const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: ['seeker'] });
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('502 when a coordinator is approved mid-update and the re-push fails', async () => {
+      coordinators.seed([coordinator(C5, ORG_A, 'pending', 5)]);
+      const ss = new SignalStackWriterFake();
+      ss.upsertAggregator = async () => err(new UpstreamError('down', { code: 'SS_DOWN' }));
+      _setSignalStackWriter(ss);
+      coordinators.update = async () => ({
+        ok: true,
+        value: { ...coordinator(C5, ORG_A, 'active', 5), serves: ['seeker'] },
+      });
+      const res = await patch(`/v1/user/metadata/update/${C5}`, 'a', { serves: ['seeker'] });
+      expect(res.statusCode).toBe(502);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('SIGNALSTACK_PUSH_FAILED');
+    });
+  });
+
+  describe('v1-user: decision-failure outcomes (console-shared throwDecisionFailure)', () => {
+    it('409 TARGET_ORG_INACTIVE when the coordinator org is no longer active', async () => {
+      orgs.seed([buildAggregatorOrg({ id: ORG_A, slug: 'org-a', displayName: 'Alpha', status: 'pending', ownerUserId: OWNER_A, ownerEmail: 'a@a.org', ownerKcSub: 'sub-a' })]);
+      const res = await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' });
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('TARGET_ORG_INACTIVE');
+    });
+
+    it('502 SIGNALSTACK_PUSH_FAILED when the approval push fails', async () => {
+      const ss = new SignalStackWriterFake();
+      ss.upsertAggregator = async () => err(new UpstreamError('down', { code: 'SS_DOWN' }));
+      _setSignalStackWriter(ss);
+      const res = await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' });
+      expect(res.statusCode).toBe(502);
+    });
+
+    it('503 IDP_UNAVAILABLE when enabling the Keycloak user fails on approval', async () => {
+      idp.enableUser = async () => ({ ok: false, error: { code: 'IDP_UNAVAILABLE', message: 'kc down' } });
+      const res = await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' });
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('503 DB_UNAVAILABLE when the approval compare-and-set fails', async () => {
+      coordinators.approveFromPending = async () => storeErr();
+      const res = await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' });
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('404 NOT_FOUND when the identity record is missing at decision time', async () => {
+      idp.findByAttribute = async () => ({ ok: true, value: null });
+      const res = await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' });
+      expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe('console-shared notice and wire mapping edges', () => {
+    it('still succeeds when the owner-notice email fails to send', async () => {
+      mailer.send = async () => ({ ok: false, error: { code: 'TRANSPORT_FAILED', message: 'smtp down' } });
+      const res = await post(`/v1/user/decision/${C2}`, 'na', { decision: 'reject', reason: 'x' });
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('skips the owner notice when the network admin acts in an org it owns', async () => {
+      coordinators.seed([coordinator(C7, DEFAULT, 'pending', 7)]);
+      await idp.createUser({
+        email: 'c7@x.org',
+        enabled: false,
+        attributes: { [KC_ATTR.AGGREGATOR_ID]: C7 },
+      });
+      const res = await post(`/v1/user/decision/${C7}`, 'na', { decision: 'reject' });
+      expect(res.statusCode).toBe(200);
+      // The Default org's owner is the network admin; no self-notice is sent.
+      expect(mailer.outbox.find((m) => m.to === 'na@net.org')).toBeUndefined();
+    });
+
+    it('maps a rejected coordinator with a sparse contact onto the wire', async () => {
+      coordinators.seed([
+        {
+          ...coordinator(C6, ORG_A, 'inactive', 6),
+          contact: { email: 'c6@x.org' } as unknown as ReturnType<typeof coordinator>['contact'],
+          rejectedAt: new Date('2026-03-01T00:00:00Z'),
+        },
+      ]);
+      const res = await get(`/v1/user/read/${C6}`, 'na');
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { contact: { name: null; phone: null }; rejected_at: string };
+      expect(body.contact).toMatchObject({ name: null, phone: null });
+      expect(body.rejected_at).toBe('2026-03-01T00:00:00.000Z');
+    });
+  });
+
+  describe('v1-org: store failures, counts and paging', () => {
+    it('503 when loading an org fails (orgInReach)', async () => {
+      orgs.findById = async () => storeErr();
+      const res = await get(`/v1/org/read/${ORG_A}`, 'a');
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('503 when the root lookup fails for a network-admin read of an unknown id', async () => {
+      let n = 0;
+      const origRoot = orgs.findRoot.bind(orgs);
+      orgs.findRoot = async () => {
+        n += 1;
+        return n >= 2 ? storeErr() : origRoot();
+      };
+      const res = await get(`/v1/org/read/${ORG_X}`, 'na');
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('503 when the coordinator count lookup fails on org read', async () => {
+      coordinators.countByOrg = async () => storeErr();
+      const res = await get(`/v1/org/read/${ORG_A}`, 'na');
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('reports zero counts when the count map omits the org', async () => {
+      coordinators.countByOrg = async () => ({ ok: true, value: {} });
+      const res = await get(`/v1/org/read/${ORG_A}`, 'na');
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ coordinator_count: 0, pending_count: 0 });
+    });
+
+    it('filters org search by name prefix', async () => {
+      const res = await post('/v1/org/search', 'na', { filter: { name_prefix: 'Alpha' } });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { orgs: Array<{ id: string }> }).orgs.map((o) => o.id)).toEqual([ORG_A]);
+    });
+
+    it('pages org search with an opaque cursor', async () => {
+      const first = (await post('/v1/org/search', 'na', { limit: 2 })).json() as {
+        orgs: Array<{ id: string }>;
+        next_cursor: string | null;
+      };
+      expect(first.next_cursor).not.toBeNull();
+      const second = await post('/v1/org/search', 'na', { limit: 2, cursor: first.next_cursor });
+      expect(second.statusCode).toBe(200);
+    });
+
+    it('400 on a malformed org search cursor', async () => {
+      const res = await post('/v1/org/search', 'na', { cursor: 'not-a-cursor' });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('503 when the org search store fails', async () => {
+      orgs.search = async () => storeErr();
+      const res = await post('/v1/org/search', 'na', {});
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('503 when the count lookup fails during org search', async () => {
+      coordinators.countByOrg = async () => storeErr();
+      const res = await post('/v1/org/search', 'na', {});
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('reports zero counts in search when the count map omits an org', async () => {
+      coordinators.countByOrg = async () => ({ ok: true, value: {} });
+      const res = await post('/v1/org/search', 'na', {});
+      expect(res.statusCode).toBe(200);
+      const orgsOut = (res.json() as { orgs: Array<{ coordinator_count: number }> }).orgs;
+      expect(orgsOut.every((o) => o.coordinator_count === 0)).toBe(true);
+    });
+  });
+
+  describe('v1-org: metadata update edges', () => {
+    it('updates locations and GST number', async () => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        locations: [{ geo: { type: 'Point', coordinates: [77.59, 12.97] } }],
+        gst_number: '27AAAAA0000A1Z5',
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ gst_number: '27AAAAA0000A1Z5' });
+    });
+
+    it('404 when the org update reports the row is gone', async () => {
+      orgs.update = async () => storeErr('NOT_FOUND');
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { url: 'https://x.example.org' });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('503 when the org update store fails', async () => {
+      orgs.update = async () => storeErr('DB_UNAVAILABLE');
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { url: 'https://x.example.org' });
+      expect(res.statusCode).toBe(503);
+    });
+  });
+});

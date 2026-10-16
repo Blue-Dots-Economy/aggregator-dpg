@@ -174,6 +174,27 @@ export const EMAIL_CASES: Readonly<Record<string, EmailCaseDef>> = {
       { block: 'note', key: 'footnote' },
     ],
   },
+
+  invite_existing_account: {
+    tokens: { orgName: 'text', signInUrl: 'text' },
+    layout: [
+      { block: 'heading', key: 'heading' },
+      { block: 'para', key: 'intro' },
+      { block: 'cta', key: 'cta', href: 'signInUrl' },
+      { block: 'paraLast', key: 'note' },
+      { block: 'note', key: 'footnote' },
+    ],
+  },
+
+  org_admin_action: {
+    tokens: { orgName: 'text', action: 'text', consoleUrl: 'text' },
+    layout: [
+      { block: 'heading', key: 'heading' },
+      { block: 'para', key: 'intro' },
+      { block: 'cta', key: 'cta', href: 'consoleUrl' },
+      { block: 'note', key: 'footnote' },
+    ],
+  },
 } as const;
 
 /** Case ids, for iteration at boot. */

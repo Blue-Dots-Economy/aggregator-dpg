@@ -92,16 +92,19 @@ export function classifyNonCoordinator(
 }
 
 /**
- * Login-screen reason code for each population the coordinator gate turns away.
+ * Login-screen reason code for each population the portal turns away.
  *
- * A table rather than a chain of conditionals: the cases are a closed set that
- * mirrors {@link classifyNonCoordinator}, so a missing one is a type error
- * instead of a silently wrong message. Shared by BOTH gates — the OIDC callback
- * and the protected-layout re-check — so the two can never disagree about what
- * to tell the same user.
+ * Org owners are not in it: since user & org Phase 5 they sign in to the
+ * console (`/console`), so the callback and the protected layout route them
+ * there instead of refusing them. A table rather than a chain of conditionals:
+ * the refused cases are a closed set mirroring {@link classifyNonCoordinator},
+ * so a missing one is a type error. Shared by BOTH gates — the OIDC callback
+ * and the protected-layout re-check — so the two can never disagree.
  */
-export const PORTAL_GATE_REASON: Record<ReturnType<typeof classifyNonCoordinator>, string> = {
+export const PORTAL_GATE_REASON: Record<
+  Exclude<ReturnType<typeof classifyNonCoordinator>, 'org_owner'>,
+  string
+> = {
   signals_participant: 'signals_account_no_portal',
-  org_owner: 'org_no_portal',
   unknown: 'no_portal_access',
 };

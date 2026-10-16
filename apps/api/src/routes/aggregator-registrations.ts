@@ -53,6 +53,7 @@ import { checkSubmitRate } from '../services/submit-rate.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
+import { getNetworkConfig } from '../services/network-config.js';
 import { resolveProfileRef } from '../services/schema-ref.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
@@ -210,6 +211,17 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         // output), so the typed body can be consumed directly here.
         const body = req.body as z.infer<typeof RegistrationPayloadSchema>;
 
+        // `type` is the coordinator's domain focus and must be one of the
+        // network's domains. Reject anything else here (typos, or the removed
+        // `'both'` sentinel) so only real domain ids reach `serves`.
+        const networkCfg = await getNetworkConfig();
+        if (!networkCfg.domainIds.includes(body.type)) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: `unknown type '${body.type}' — valid: ${networkCfg.domainIds.join(', ')}`,
+            fields: { type: 'invalid' },
+          });
+        }
+
         // `org_id` is an org-hierarchy field outside the form's JSON Schema
         // contract; strip it before Ajv so the schema in `config/` stays the
         // single authority for the form shape.
@@ -350,19 +362,15 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           } else {
             // Selector path: the coordinator picks an active org (spec §6.2).
             const reqOrgId = (req.body as { org_id?: string }).org_id;
-            // For one release a body without `org_id` (an old or formerly-flat
-            // client, or a pending resubmission) is placed in the Default org
-            // with a warning; afterwards it becomes a 400 (D3-13).
-            const org = reqOrgId ? await orgStore.findById(reqOrgId) : await orgStore.findDefault();
-            if (!reqOrgId && org.ok) {
-              if (!org.value) {
-                throw httpError('SCHEMA_VALIDATION', { detail: 'org_id is required.' });
-              }
-              log.warn(
-                { status: 'skipped', sub_operation: 'registration.org_id_missing' },
-                'registration without org_id — placed in the Default org (accepted for one release)',
-              );
+            // `org_id` (or an invite) is required (D3-13; the one-release
+            // fallback to the Default org was removed in Phase 5).
+            if (!reqOrgId) {
+              throw httpError('SCHEMA_VALIDATION', {
+                detail: 'org_id is required.',
+                fields: { field: 'org_id' },
+              });
             }
+            const org = await orgStore.findById(reqOrgId);
             if (!org.ok) {
               throw httpError('DB_UNAVAILABLE', {
                 cause: new Error(org.error.message),
@@ -380,9 +388,8 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             }
             // The Default org is selectable only while it is the only active
             // org (D3-12): otherwise its coordinators' approvals would bypass
-            // every real org's owner. The no-org_id fallback above is exempt for
-            // this release.
-            if (reqOrgId && org.value.isDefault) {
+            // every real org's owner.
+            if (org.value.isDefault) {
               const active = await orgStore.listActive();
               if (!active.ok) {
                 throw httpError('DB_UNAVAILABLE', {
@@ -408,24 +415,20 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           });
         }
 
-        // Org details (0028): a real org's url / locations are its own, so the
-        // submitted ones are ignored (accepted for one release); a Default-org
-        // coordinator keeps its own as `legacy_org_details`, rendered as a
-        // fallback since the Default org has no shared value.
+        // Org details (0028): a real org's url / locations are its own, so a
+        // registration under one that carries them is refused (Phase 5; they
+        // were ignored for one release); a Default-org coordinator keeps its own
+        // as `legacy_org_details`, rendered as a fallback since the Default org
+        // has no shared value.
         const submittedLocations = (body.locations ?? []).filter(hasLocationContent);
         const ownOrgDetails: LegacyOrgDetails = {
           ...(body.url?.trim() ? { url: body.url.trim() } : {}),
           ...(submittedLocations.length > 0 ? { locations: submittedLocations } : {}),
         };
         if (!orgIsDefault && Object.keys(ownOrgDetails).length > 0) {
-          log.warn(
-            {
-              status: 'skipped',
-              sub_operation: 'registration.org_details_ignored',
-              fields: Object.keys(ownOrgDetails),
-            },
-            'org details on a coordinator registration are ignored (they belong to the org)',
-          );
+          throw httpError('ORG_DETAILS_READ_ONLY', {
+            fields: { fields: Object.keys(ownOrgDetails) },
+          });
         }
 
         // Pre-check email + phone uniqueness in both stores. The DB
