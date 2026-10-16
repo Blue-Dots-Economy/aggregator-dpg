@@ -706,6 +706,7 @@
       "status": "Status",
       "serves": "Domains",
       "every_domain": "Every domain",
+      "access": "Access",
       "open": "Open",
       "subtitle": "Coordinators in your organisations, newest first.",
       "apply": "Apply"

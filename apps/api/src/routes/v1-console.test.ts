@@ -1127,6 +1127,56 @@ describe('console routes /v1/user, /v1/org', () => {
         expect(store.audit.map((e) => e.event)).toContain('role.revoke_on_leave');
       });
 
+      // #873: the coordinator list shows who holds which additional role.
+      const rolesById = async (who: keyof typeof TOKENS) => {
+        const res = await post('/v1/user/search', who, {});
+        expect(res.statusCode).toBe(200);
+        const body = res.json() as { users: Array<{ id: string; roles: string[] | null }> };
+        return Object.fromEntries(body.users.map((u) => [u.id, u.roles]));
+      };
+
+      it('lists each coordinator’s live roles in its organisation on search, sorted', async () => {
+        expect((await assign('a', C3, { role_key: 'pii_access', org_id: ORG_A })).statusCode).toBe(
+          200,
+        );
+        expect((await assign('a', C3, { role_key: 'data_export', org_id: ORG_A })).statusCode).toBe(
+          200,
+        );
+        const roles = await rolesById('a');
+        expect(roles[C3]).toEqual(['data_export', 'pii_access']);
+        expect(roles[C1]).toEqual([]);
+      });
+
+      it('drops a revoked role from search, and ignores a role held in another organisation', async () => {
+        expect((await assign('a', C3, { role_key: 'data_export', org_id: ORG_A })).statusCode).toBe(
+          200,
+        );
+        (getRoleStore() as InMemoryRoleStore).seed([
+          { userId: C3, roleKey: 'pii_access', orgId: ORG_B },
+        ]);
+        expect(
+          (
+            await post(`/v1/user/role/revoke/${C3}`, 'a', {
+              role_key: 'data_export',
+              org_id: ORG_A,
+            })
+          ).statusCode,
+        ).toBe(200);
+        expect((await rolesById('na'))[C3]).toEqual([]);
+      });
+
+      it('answers 503 on search when the role store fails', async () => {
+        (getRoleStore() as InMemoryRoleStore).failWith({ code: 'DB_UNAVAILABLE', message: 'down' });
+        expect((await post('/v1/user/search', 'a', {})).statusCode).toBe(503);
+      });
+
+      it('returns null roles on search when access control is off', async () => {
+        _setRbacRuntime(null);
+        const roles = await rolesById('a');
+        expect(Object.values(roles).length).toBeGreaterThan(0);
+        for (const r of Object.values(roles)) expect(r).toBeNull();
+      });
+
       it('answers 503 when access control is off', async () => {
         _setRbacRuntime(null);
         expect((await get('/v1/roles', 'a')).statusCode).toBe(503);

@@ -7,7 +7,7 @@
  * parameters.
  */
 
-import { and, desc, eq, gt, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, or } from 'drizzle-orm';
 import { getDb } from '../../db/client.js';
 import { iamAudit, userRole } from '../../db/schema.js';
 import { pgErrorCode } from '../../db/pg-error.js';
@@ -79,6 +79,29 @@ export class PostgresRoleStore extends RoleStoreBase {
       return { ok: true, value: rows.map(toDomain) };
     } catch (e) {
       return dbFailure('roleStore.listLive', e);
+    }
+  }
+
+  /** {@inheritDoc RoleStoreBase.listLiveForUsers} */
+  async listLiveForUsers(
+    userIds: readonly string[],
+    now: Date,
+  ): Promise<RoleStoreResult<UserRoleRecord[]>> {
+    if (userIds.length === 0) return { ok: true, value: [] };
+    try {
+      const rows = await getDb()
+        .select()
+        .from(userRole)
+        .where(
+          and(
+            inArray(userRole.userId, [...userIds]),
+            isNull(userRole.revokedAt),
+            or(isNull(userRole.expiresAt), gt(userRole.expiresAt, now)),
+          ),
+        );
+      return { ok: true, value: rows.map(toDomain) };
+    } catch (e) {
+      return dbFailure('roleStore.listLiveForUsers', e);
     }
   }
 

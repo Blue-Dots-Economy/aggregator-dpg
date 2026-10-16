@@ -3487,6 +3487,13 @@
                     "rejected_at": {
                       "type": "string",
                       "nullable": true
+                    },
+                    "roles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "nullable": true
                     }
                   },
                   "required": [
@@ -3845,6 +3852,13 @@
                           },
                           "rejected_at": {
                             "type": "string",
+                            "nullable": true
+                          },
+                          "roles": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
                             "nullable": true
                           }
                         },
@@ -5165,6 +5179,13 @@
                     },
                     "rejected_at": {
                       "type": "string",
+                      "nullable": true
+                    },
+                    "roles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
                       "nullable": true
                     }
                   },
