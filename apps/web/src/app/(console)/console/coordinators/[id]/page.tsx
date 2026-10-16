@@ -2,6 +2,8 @@
  * One coordinator (user & org Phase 5): contact (plain within reach, P5-8),
  * approve / reject a pending one, and change the domains served. With RBAC
  * on, its roles: the base Coordinator role and additional roles to assign.
+ * Read-only for a viewer who cannot manage its organisation (the network
+ * admin outside the orgs it owns, #873).
  */
 
 import { getTranslations } from 'next-intl/server';
@@ -12,7 +14,7 @@ import type {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
 import { getConsoleActor } from '@/lib/console-actor';
-import { can } from '@/lib/capabilities';
+import { canManageOrg } from '@/lib/capabilities';
 import { RolesPanel } from '@/components/console/RolesPanel';
 import { Topbar } from '@/components/shell/Topbar';
 import { BackLink, ConsoleSection, DetailList } from '@/components/console/ConsoleUi';
@@ -43,10 +45,12 @@ export default async function ConsoleCoordinatorPage({
   const t = await getTranslations('console');
   const { id } = await params;
   const actor = await getConsoleActor();
-  const canManage = actor.ok && can(actor.me.capabilities, 'org.manage');
-  const [user, domainList, userRoles, catalogue] = await Promise.all([
+  const [user, domainList] = await Promise.all([
     consoleRead<User>(`/v1/user/read/${encodeURIComponent(id)}`),
     domains(),
+  ]);
+  const canManage = actor.ok && !!user.org_id && canManageOrg(actor.me, user.org_id);
+  const [userRoles, catalogue] = await Promise.all([
     // RBAC roles: absent when access control is off or not allowed.
     canManage
       ? consoleReadOptional<UserRolesResponse>(`/v1/user/roles/${encodeURIComponent(id)}`)
@@ -69,7 +73,7 @@ export default async function ConsoleCoordinatorPage({
             ]}
           />
         </ConsoleSection>
-        <CoordinatorActions user={user} domains={domainList} />
+        <CoordinatorActions user={user} domains={domainList} readOnly={!canManage} />
         {userRoles && catalogue && user.org_id ? (
           <RolesPanel
             userId={user.id}

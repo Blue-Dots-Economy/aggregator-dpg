@@ -92,7 +92,7 @@ flowchart LR
 | `agreement.manage`       | ✓             | -         | -             | -           | -          | -           |
 | `network.administer`     | ✓             | -         | -             | -           | -          | -           |
 
-Base roles come from the user-org model and are never assigned by hand. Additional roles are assigned in an organisation the user belongs to or owns, and combine with the base role: an owner of a Super Aggregator holds Org Admin and Org Onboarder; a coordinator who exports lists holds Coordinator and Data Export. `profiles.act_on_behalf` is in no built-in role: only service clients use it. `org.manage` is the Org Admin's alone (#873): the network admin approves and edits organisations (`orgs.onboard`) but manages coordinators, invites and their roles only in organisations it owns, such as the Default org.
+Base roles come from the user-org model and are never assigned by hand. Additional roles are assigned in an organisation the user belongs to or owns, and combine with the base role: an owner of a Super Aggregator holds Org Admin and Org Onboarder; a coordinator who exports lists holds Coordinator and Data Export. `profiles.act_on_behalf` is in no built-in role: only service clients use it. `org.manage` is the Org Admin's alone (#873): the network admin approves and edits organisations (`orgs.onboard`) but manages coordinators, invites and their roles only in organisations it owns, such as the Default org. It still sees every organisation's coordinators, read-only (`network.administer`).
 
 ---
 

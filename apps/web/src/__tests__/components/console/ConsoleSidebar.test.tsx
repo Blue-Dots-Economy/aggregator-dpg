@@ -93,4 +93,13 @@ describe('<ConsoleSidebar />', () => {
     expect(within(aside()).getByRole('button', { name: 'sign_out' })).toBeInTheDocument();
     expect(within(aside()).queryByText('contact_support')).toBeNull();
   });
+
+  it('shows Coordinators without Invite when the caller may view but not invite (#873)', () => {
+    render(<ConsoleSidebar isNetworkAdmin canManage canInvite={false} account={account} />);
+    const hrefs = within(aside())
+      .getAllByRole('link')
+      .map((a) => a.getAttribute('href'));
+    expect(hrefs).toContain('/console/coordinators');
+    expect(hrefs).not.toContain('/console/invite');
+  });
 });

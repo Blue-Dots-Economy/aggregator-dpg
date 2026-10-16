@@ -10,14 +10,15 @@ import { InviteForm } from '@/components/console/InviteForm';
 import { ConsoleSection } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
 import { getConsoleActor } from '@/lib/console-actor';
-import { can, canManageOrg } from '@/lib/capabilities';
+import { canInvite, canManageOrg } from '@/lib/capabilities';
 import { redirect } from 'next/navigation';
 
 export default async function ConsoleInvitePage() {
   const t = await getTranslations('console');
-  // RBAC: inviting needs `org.manage` (the API also checks it).
+  // RBAC: inviting needs `org.manage` in an organisation that takes invites
+  // (the API also checks it).
   const actor = await getConsoleActor();
-  if (actor.ok && !can(actor.me.capabilities, 'org.manage')) redirect('/console');
+  if (actor.ok && !canInvite(actor.me)) redirect('/console');
   const page = await consoleRead<OrgSearchResponse>('/v1/org/search', {
     filter: { status: 'active' },
     limit: 100,

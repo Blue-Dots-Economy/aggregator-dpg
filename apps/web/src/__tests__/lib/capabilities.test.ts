@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { can, canManageOrg } from '@/lib/capabilities';
+import { can, canInvite, canManageOrg, canViewCoordinators } from '@/lib/capabilities';
 
 describe('can', () => {
   it('allows everything when access control is off', () => {
@@ -40,5 +40,52 @@ describe('canManageOrg', () => {
     expect(
       canManageOrg({ capabilities: [], orgs: [{ id: 'own', org_type: 'aggregator' }] }, 'own'),
     ).toBe(false);
+  });
+});
+
+describe('canInvite', () => {
+  const root = { id: 'root', org_type: 'network_facilitator' };
+  const dflt = {
+    id: 'dflt',
+    org_type: 'aggregator',
+    is_default: true,
+    capabilities: ['org.manage'],
+  };
+  const real = {
+    id: 'real',
+    org_type: 'aggregator',
+    is_default: false,
+    capabilities: ['org.manage'],
+  };
+
+  it('is offered when access control is off', () => {
+    expect(canInvite({ capabilities: null, orgs: [] })).toBe(true);
+  });
+
+  it('is not offered to a network admin that manages only the Default org', () => {
+    const me = {
+      capabilities: ['org.manage'],
+      orgs: [{ ...root, capabilities: ['orgs.onboard'] }, dflt],
+    };
+    expect(canInvite(me)).toBe(false);
+  });
+
+  it('is offered for a managed org that takes invites, or org.manage in the root', () => {
+    expect(canInvite({ capabilities: ['org.manage'], orgs: [real] })).toBe(true);
+    expect(
+      canInvite({
+        capabilities: ['org.manage'],
+        orgs: [{ ...root, capabilities: ['org.manage'] }],
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('canViewCoordinators', () => {
+  it('admits an org admin or the network admin, not others', () => {
+    expect(canViewCoordinators({ capabilities: ['org.manage'], orgs: [] })).toBe(true);
+    expect(canViewCoordinators({ capabilities: ['network.administer'], orgs: [] })).toBe(true);
+    expect(canViewCoordinators({ capabilities: ['profiles.view'], orgs: [] })).toBe(false);
+    expect(canViewCoordinators({ capabilities: null, orgs: [] })).toBe(true);
   });
 });

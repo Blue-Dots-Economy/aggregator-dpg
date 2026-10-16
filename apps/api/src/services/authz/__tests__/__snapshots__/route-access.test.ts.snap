@@ -34,7 +34,7 @@ exports[`declared route table > declares every route of the app 1`] = `
   "GET /v1/rbac/roles": "network.administer",
   "GET /v1/roles": "org.manage",
   "GET /v1/support/config": "signed_in",
-  "GET /v1/user/read/:id": "org.manage",
+  "GET /v1/user/read/:id": "org.manage|network.administer",
   "GET /v1/user/read/me": "signed_in",
   "GET /v1/user/roles/:id": "org.manage",
   "PATCH /v1/aggregators/profile/me": "self",
@@ -70,6 +70,6 @@ exports[`declared route table > declares every route of the app 1`] = `
   "POST /v1/user/decision/:id": "org.manage",
   "POST /v1/user/role/assign/:id": "signed_in",
   "POST /v1/user/role/revoke/:id": "signed_in",
-  "POST /v1/user/search": "org.manage",
+  "POST /v1/user/search": "org.manage|network.administer",
 }
 `;

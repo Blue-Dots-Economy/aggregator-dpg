@@ -19,7 +19,7 @@ import { getConsoleActor } from '@/lib/console-actor';
 import { getTranslations } from 'next-intl/server';
 import { ConsoleSidebar } from '@/components/console/ConsoleSidebar';
 import { AuthProvider } from '@/lib/auth-context';
-import { can } from '@/lib/capabilities';
+import { can, canInvite, canViewCoordinators } from '@/lib/capabilities';
 
 export default async function ConsoleLayout({ children }: Readonly<{ children: ReactNode }>) {
   const session = await getSession();
@@ -56,7 +56,8 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
       <div className="flex flex-col lg:flex-row min-h-dvh">
         <ConsoleSidebar
           isNetworkAdmin={me.is_network_admin}
-          canManage={can(me.capabilities, 'org.manage')}
+          canManage={canViewCoordinators(me)}
+          canInvite={canInvite(me)}
           canViewAccess={me.is_network_admin && can(me.capabilities, 'network.administer')}
           account={{
             title: name,

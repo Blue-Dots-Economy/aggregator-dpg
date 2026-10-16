@@ -29,6 +29,7 @@ interface ManageScopeSource {
   orgs: ReadonlyArray<{
     id: string;
     org_type: string;
+    is_default?: boolean | undefined;
     capabilities?: readonly string[] | null | undefined;
   }>;
 }
@@ -48,4 +49,33 @@ export function canManageOrg(me: ManageScopeSource, orgId: string): boolean {
     o?.capabilities?.includes('org.manage') ?? false;
   if (holds(me.orgs.find((o) => o.org_type === 'network_facilitator'))) return true;
   return holds(me.orgs.find((o) => o.id === orgId));
+}
+
+/**
+ * Whether the caller can invite coordinators anywhere: it manages an
+ * organisation that takes invites (never the Default org), or holds
+ * `org.manage` in the root (#873).
+ *
+ * @param me - The caller's `read/me` answer.
+ * @returns True when the console should offer inviting.
+ */
+export function canInvite(me: ManageScopeSource): boolean {
+  if (me.capabilities == null) return true;
+  return me.orgs.some(
+    (o) =>
+      (o.org_type === 'network_facilitator' || (o.org_type === 'aggregator' && !o.is_default)) &&
+      (o.capabilities?.includes('org.manage') ?? false),
+  );
+}
+
+/**
+ * Whether the caller can see coordinators: an organisation's admin
+ * (`org.manage`), or the network admin, read-only (`network.administer`)
+ * (#873).
+ *
+ * @param me - The caller's `read/me` answer.
+ * @returns True when the console should list coordinators.
+ */
+export function canViewCoordinators(me: ManageScopeSource): boolean {
+  return can(me.capabilities, 'org.manage') || can(me.capabilities, 'network.administer');
 }

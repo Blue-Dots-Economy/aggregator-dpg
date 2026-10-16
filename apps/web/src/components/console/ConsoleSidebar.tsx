@@ -23,11 +23,14 @@ export function ConsoleSidebar({
   isNetworkAdmin,
   canManage = true,
   canViewAccess = false,
+  canInvite = canManage,
   account,
 }: {
   isNetworkAdmin: boolean;
   canManage?: boolean;
   canViewAccess?: boolean;
+  /** Offer inviting coordinators; defaults to `canManage`. */
+  canInvite?: boolean;
   account: SidebarAccount;
 }) {
   const t = useTranslations('console');
@@ -37,10 +40,10 @@ export function ConsoleSidebar({
       ? [{ to: '/console/orgs', label: t('nav.organisations'), icon: 'briefcase' as const }]
       : []),
     ...(canManage
-      ? [
-          { to: '/console/coordinators', label: t('nav.coordinators'), icon: 'users' as const },
-          { to: '/console/invite', label: t('nav.invite'), icon: 'mail' as const },
-        ]
+      ? [{ to: '/console/coordinators', label: t('nav.coordinators'), icon: 'users' as const }]
+      : []),
+    ...(canInvite
+      ? [{ to: '/console/invite', label: t('nav.invite'), icon: 'mail' as const }]
       : []),
     ...(canViewAccess
       ? [
