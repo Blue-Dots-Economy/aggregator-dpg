@@ -17,7 +17,12 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { CAPABILITIES, permissionDefinitions, type RoleDefinition } from '@aggregator-dpg/rbac';
+import {
+  CAPABILITIES,
+  compareCodeUnits,
+  permissionDefinitions,
+  type RoleDefinition,
+} from '@aggregator-dpg/rbac';
 import {
   AssignRoleRequestSchema,
   CreateRoleRequestSchema,
@@ -92,7 +97,7 @@ export function toWireRole(r: RoleDefinition): WireRole {
     assignable_org_types: r.assignableOrgTypes,
     assigned_by: r.assignedBy,
     max_days: r.maxDays,
-    permissions: [...r.permissions].sort(),
+    permissions: [...r.permissions].sort(compareCodeUnits),
   };
 }
 

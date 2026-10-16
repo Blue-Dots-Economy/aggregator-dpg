@@ -10,6 +10,7 @@
 export * from './interface.js';
 export { SENSITIVE, NOT_THROUGH_ROOT, permissionDefinitions } from './catalogue.js';
 export { evaluate, listCapabilities } from './evaluate.js';
+export { compareCodeUnits } from './order.js';
 export { OpaAuthorizer } from './opa/index.js';
 export type { OpaAuthorizerOptions } from './opa/index.js';
 export { InMemoryAuthorizer } from './in-memory/index.js';

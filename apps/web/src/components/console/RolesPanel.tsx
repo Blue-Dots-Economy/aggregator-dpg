@@ -19,6 +19,12 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { errorKey, sendConsole } from '../../lib/console-client';
 
+/** Code-unit order, as `sort()` without a compare function; locale-independent. */
+function compareCodeUnits(a: string, b: string): number {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+}
+
 export function RolesPanel({
   userId,
   orgId,
@@ -50,7 +56,7 @@ export function RolesPanel({
       ...assignable,
       ...additional.filter((a) => a.org_id === orgId && a.live).map((a) => a.role_key),
     ]),
-  ].sort();
+  ].sort(compareCodeUnits);
 
   if (base.length === 0 && shown.length === 0) return null;
 
