@@ -18,6 +18,7 @@ import type {
   RoleDefinition,
   UserType,
 } from '@aggregator-dpg/rbac/interface';
+import { compareCodeUnits } from '@aggregator-dpg/rbac';
 import { getDb } from '../../db/client.js';
 import { iamAudit, permission, role, rolePermission, userRole } from '../../db/schema.js';
 import { pgErrorCode } from '../../db/pg-error.js';
@@ -197,7 +198,7 @@ export class PostgresRbacCatalogue extends RbacCatalogueBase {
               assignableOrgTypes: r.assignableOrgTypes as OrgType[],
               assignedBy: (r.assignedBy as Capability | null) ?? null,
               maxDays: r.maxDays,
-              permissions: (permsOf.get(r.key) ?? []).sort(),
+              permissions: (permsOf.get(r.key) ?? []).sort(compareCodeUnits),
             })),
           } satisfies CatalogueSnapshot;
         },

@@ -11,6 +11,7 @@
  */
 
 import { NOT_THROUGH_ROOT } from './catalogue.js';
+import { compareCodeUnits } from './order.js';
 import type {
   BaseFor,
   Capability,
@@ -108,5 +109,5 @@ export function effectivePermissions(
     if (h.expiresAt !== null && h.expiresAt <= now) continue;
     add(index.byKey.get(h.roleKey), orgTypeOf.get(h.orgId));
   }
-  return [...out].sort();
+  return [...out].sort(compareCodeUnits);
 }

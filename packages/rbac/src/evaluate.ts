@@ -13,6 +13,7 @@
  */
 
 import { NOT_THROUGH_ROOT } from './catalogue.js';
+import { compareCodeUnits } from './order.js';
 import type { Capability, CapabilityListInput, Decision, DecisionInput } from './interface.js';
 
 /** Whether the permission is personal data asked for through the root. */
@@ -38,7 +39,7 @@ export function evaluate(input: DecisionInput): Decision {
   if (!held) reasons.add('not_held');
   if (throughRoot(input)) reasons.add('not_through_root');
   const allow = input.actor.active && held && !throughRoot(input);
-  return { allow, reasons: allow ? [] : [...reasons].sort() };
+  return { allow, reasons: allow ? [] : [...reasons].sort(compareCodeUnits) };
 }
 
 /**
@@ -51,5 +52,5 @@ export function listCapabilities(input: CapabilityListInput): Capability[] {
   const held = input.candidates.filter(
     (capability) => evaluate({ capability, actor: input.actor, org: input.org }).allow,
   );
-  return [...new Set(held)].sort();
+  return [...new Set(held)].sort(compareCodeUnits);
 }

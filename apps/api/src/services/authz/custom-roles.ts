@@ -12,6 +12,7 @@ import {
   CapabilitySchema,
   OrgTypeSchema,
   UserTypeSchema,
+  compareCodeUnits,
   roleCatalogueIssues,
   type Capability,
   type OrgType,
@@ -78,7 +79,7 @@ function toDefinition(input: CustomRoleInput): CustomRoleOutcome<RoleDefinition>
       assignableOrgTypes: [...new Set(input.assignableOrgTypes)] as OrgType[],
       assignedBy: input.assignedBy as Capability,
       maxDays: input.maxDays,
-      permissions: [...new Set(input.permissions)].sort() as Capability[],
+      permissions: [...new Set(input.permissions)].sort(compareCodeUnits) as Capability[],
     },
   };
 }

@@ -16,6 +16,7 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { AuthorizerBase, CapabilitySchema, DecisionSchema } from '../interface.js';
 import type { Capability, CapabilityListInput, Decision, DecisionInput } from '../interface.js';
+import { compareCodeUnits } from '../order.js';
 
 /** Settings for {@link OpaAuthorizer}. */
 export interface OpaAuthorizerOptions {
@@ -76,7 +77,7 @@ export class OpaAuthorizer extends AuthorizerBase {
    */
   async listCapabilities(input: CapabilityListInput): Promise<Result<Capability[], BaseError>> {
     const res = await this.query(CAPABILITIES_PATH, input, CapabilityListSchema);
-    return res.success ? ok([...res.value].sort()) : res;
+    return res.success ? ok([...res.value].sort(compareCodeUnits)) : res;
   }
 
   /** POSTs `{ input }` to a data path and validates `result` against `schema`. */
