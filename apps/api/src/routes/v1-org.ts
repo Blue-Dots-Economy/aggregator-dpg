@@ -109,7 +109,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/org/read/:id',
     {
-      config: { rbac: { capability: 'org.manage' } },
+      config: { rbac: { anyCapability: ['org.manage', 'orgs.onboard'] } },
       schema: {
         tags: ['console'],
         summary: 'One organisation within reach, with its owner and coordinator counts',
@@ -142,7 +142,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/org/search',
     {
-      config: { rbac: { capability: 'org.manage' } },
+      config: { rbac: { anyCapability: ['org.manage', 'orgs.onboard'] } },
       schema: {
         tags: ['console'],
         summary: 'Organisations within reach, by name',
@@ -180,7 +180,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
   app.patch(
     '/v1/org/metadata/update/:id',
     {
-      config: { rbac: { capability: 'org.manage' } },
+      config: { rbac: { anyCapability: ['org.manage', 'orgs.onboard'] } },
       schema: {
         tags: ['console'],
         summary: "Update an organisation's details",
