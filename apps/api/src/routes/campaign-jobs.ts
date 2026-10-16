@@ -73,6 +73,7 @@ export async function registerCampaignJobRoutes(
   app.get(
     `/v1/campaign/${channel}/:job_id`,
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['campaign'],
         summary: `Get one ${channel} job's status and per-item outcomes`,
@@ -144,6 +145,7 @@ export async function registerCampaignJobRoutes(
   app.get(
     `/v1/campaign/${channel}`,
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['campaign'],
         summary: `List the org's ${channel} jobs (newest first)`,

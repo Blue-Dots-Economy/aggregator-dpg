@@ -28,12 +28,41 @@ export function consoleUrl(): string {
 }
 
 /**
+ * Masks an email address: the first character of the local part, then `***`,
+ * then the domain (`a***@example.org`). Shows that an address exists without
+ * revealing it.
+ *
+ * @param email - The address.
+ * @returns The masked address; `***` when it has no `@`.
+ */
+export function maskEmail(email: string): string {
+  const at = email.indexOf('@');
+  if (at <= 0) return '***';
+  return `${email.slice(0, 1)}***${email.slice(at)}`;
+}
+
+/**
+ * Masks a phone number to its last four digits (`******1234`).
+ *
+ * @param phone - The number, or null.
+ * @returns The masked number, or null.
+ */
+export function maskPhone(phone: string | null): string | null {
+  if (phone === null) return null;
+  const digits = phone.replace(/\D/g, '');
+  return digits.length <= 4 ? '****' : `${'*'.repeat(digits.length - 4)}${digits.slice(-4)}`;
+}
+
+/**
  * A coordinator on the wire.
  *
  * @param a - The coordinator.
+ * @param opts - `masked`: hide the email and phone (RBAC: the caller lacks
+ *   `contact.unmask`). The name is always shown.
  * @returns The `UserSchema` shape.
  */
-export function toWireUser(a: Aggregator): User {
+export function toWireUser(a: Aggregator, opts: { masked?: boolean } = {}): User {
+  const phone = a.contact.phone ?? null;
   return {
     id: a.id,
     user_type: 'coordinator',
@@ -41,8 +70,8 @@ export function toWireUser(a: Aggregator): User {
     name: a.name,
     contact: {
       name: a.contact.name ?? null,
-      email: a.contact.email,
-      phone: a.contact.phone ?? null,
+      email: opts.masked ? maskEmail(a.contact.email) : a.contact.email,
+      phone: opts.masked ? maskPhone(phone) : phone,
     },
     serves: a.serves,
     org_id: a.parentOrgId,

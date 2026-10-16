@@ -1,12 +1,20 @@
 /**
  * One coordinator (user & org Phase 5): contact (plain within reach, P5-8),
- * approve / reject a pending one, and change the domains served.
+ * approve / reject a pending one, and change the domains served. With RBAC
+ * on, its roles: the base Coordinator role and additional roles to assign.
  */
 
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
-import type { User } from '@aggregator-dpg/shared-primitives/user-org';
-import { consoleRead } from '@/lib/console-api.server';
+import type {
+  RolesResponse,
+  User,
+  UserRolesResponse,
+} from '@aggregator-dpg/shared-primitives/user-org';
+import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
+import { getConsoleActor } from '@/lib/console-actor';
+import { can } from '@/lib/capabilities';
+import { RolesPanel } from '@/components/console/RolesPanel';
 import { Card } from '@/components/ui/Card';
 import { CoordinatorActions } from '@/components/console/CoordinatorActions';
 
@@ -34,9 +42,16 @@ export default async function ConsoleCoordinatorPage({
 }>) {
   const t = await getTranslations('console');
   const { id } = await params;
-  const [user, domainList] = await Promise.all([
+  const actor = await getConsoleActor();
+  const canManage = actor.ok && can(actor.me.capabilities, 'org.manage');
+  const [user, domainList, userRoles, catalogue] = await Promise.all([
     consoleRead<User>(`/v1/user/read/${encodeURIComponent(id)}`),
     domains(),
+    // RBAC roles: absent when access control is off or not allowed.
+    canManage
+      ? consoleReadOptional<UserRolesResponse>(`/v1/user/roles/${encodeURIComponent(id)}`)
+      : Promise.resolve(null),
+    canManage ? consoleReadOptional<RolesResponse>('/v1/roles') : Promise.resolve(null),
   ]);
   return (
     <div className="flex flex-col gap-4">
@@ -56,6 +71,14 @@ export default async function ConsoleCoordinatorPage({
         </span>
       </Card>
       <CoordinatorActions user={user} domains={domainList} />
+      {userRoles && catalogue && user.org_id ? (
+        <RolesPanel
+          userId={user.id}
+          orgId={user.org_id}
+          initial={userRoles}
+          roles={catalogue.roles}
+        />
+      ) : null}
     </div>
   );
 }

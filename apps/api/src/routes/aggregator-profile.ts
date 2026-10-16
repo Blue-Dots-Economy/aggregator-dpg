@@ -47,6 +47,7 @@ import type { IdpUser } from '../services/idp-admin/index.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
+import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
 
 // ─── Body schemas ───────────────────────────────────────────────────────────
 
@@ -121,6 +122,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/aggregators/profile/me',
     {
+      config: { rbac: { access: 'self' } },
       schema: {
         tags: ['aggregator-profile'],
         summary: 'Read the caller aggregator profile',
@@ -191,6 +193,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
   app.patch(
     '/v1/aggregators/profile/me',
     {
+      config: { rbac: { access: 'self' } },
       schema: {
         tags: ['aggregator-profile'],
         summary: 'Update the caller aggregator profile',
@@ -396,7 +399,10 @@ function pickAttribute(user: IdpUser | null, name: string): string | undefined {
 
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await authenticate(req);
-  if (result.ok) return result.context;
+  if (result.ok) {
+    await enforceRouteAccess(req, callerFromAuth(result.context));
+    return result.context;
+  }
   const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
   throw httpError(code, {
     detail: result.error.message,

@@ -26,6 +26,7 @@ import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
+import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
 
 interface LinkMetrics {
   total: number;
@@ -185,6 +186,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
   app.post(
     '/v1/links/create',
     {
+      config: { rbac: { capability: 'profiles.onboard' } },
       schema: {
         tags: ['registration-links'],
         summary: 'Create a shareable registration link',
@@ -349,6 +351,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
   app.get(
     '/v1/links',
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['registration-links'],
         summary: "List the caller aggregator's registration links",
@@ -414,6 +417,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
   app.patch(
     '/v1/links/:id',
     {
+      config: { rbac: { capability: 'profiles.onboard' } },
       schema: {
         tags: ['registration-links'],
         summary: 'Update a registration link',
@@ -532,6 +536,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
   app.get(
     '/v1/links/:id',
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['registration-links'],
         summary: 'Read a registration link',
@@ -565,6 +570,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
   app.post(
     '/v1/links/:id/activate',
     {
+      config: { rbac: { capability: 'profiles.onboard' } },
       schema: {
         tags: ['registration-links'],
         summary: 'Activate a registration link',
@@ -630,6 +636,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
   app.post(
     '/v1/links/:id/deactivate',
     {
+      config: { rbac: { capability: 'profiles.onboard' } },
       schema: {
         tags: ['registration-links'],
         summary: 'Deactivate a registration link',
@@ -790,6 +797,7 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   if (!result.context.aggregatorId) {
     throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
   }
+  await enforceRouteAccess(req, callerFromAuth(result.context));
   return result.context;
 }
 

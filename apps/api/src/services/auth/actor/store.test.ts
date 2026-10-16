@@ -79,7 +79,10 @@ describe('StoreActorResolver', () => {
     });
 
     it('reports UNAVAILABLE when the identity store fails', async () => {
-      identity.subjectOf = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } });
+      identity.subjectOf = async () => ({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'down' },
+      });
       const r = await resolver.resolve({ aggregatorId: COORD_ID, subject: SUBJECT });
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.code).toBe('UNAVAILABLE');
@@ -87,7 +90,10 @@ describe('StoreActorResolver', () => {
 
     it('reports UNAVAILABLE when the coordinator row read fails', async () => {
       identity.seed([{ userId: COORD_ID, provider: IDP_PROVIDER, subject: SUBJECT }]);
-      coordStore.findById = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } });
+      coordStore.findById = async () => ({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'down' },
+      });
       const r = await resolver.resolve({ aggregatorId: COORD_ID, subject: SUBJECT });
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.code).toBe('UNAVAILABLE');
@@ -108,7 +114,10 @@ describe('StoreActorResolver', () => {
     });
 
     it('reports UNAVAILABLE when the login lookup fails', async () => {
-      identity.userOf = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } });
+      identity.userOf = async () => ({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'down' },
+      });
       const r = await resolver.resolve({ subject: SUBJECT });
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.code).toBe('UNAVAILABLE');
@@ -126,7 +135,10 @@ describe('StoreActorResolver', () => {
 
     it('reports UNAVAILABLE when the coordinator probe fails', async () => {
       identity.seed([{ userId: COORD_ID, provider: IDP_PROVIDER, subject: SUBJECT }]);
-      coordStore.findById = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } });
+      coordStore.findById = async () => ({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'down' },
+      });
       const r = await resolver.resolve({ subject: SUBJECT });
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.code).toBe('UNAVAILABLE');
@@ -162,13 +174,16 @@ describe('StoreActorResolver', () => {
       const r = await resolver.resolve({ subject: SUBJECT });
       expect(r).toEqual({
         ok: true,
-        value: { userId: ADMIN_ID, userType: 'admin', active: false, orgs: [] },
+        value: { userId: ADMIN_ID, userType: 'admin', active: false, orgs: [], roles: [] },
       });
     });
 
     it('reports UNAVAILABLE when the owned-orgs read fails', async () => {
       identity.seed([{ userId: ADMIN_ID, provider: IDP_PROVIDER, subject: SUBJECT }]);
-      orgStore.listOwnedBy = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } });
+      orgStore.listOwnedBy = async () => ({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'down' },
+      });
       const r = await resolver.resolve({ subject: SUBJECT });
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.code).toBe('UNAVAILABLE');
@@ -176,7 +191,10 @@ describe('StoreActorResolver', () => {
 
     it('reports UNAVAILABLE when the root read fails', async () => {
       identity.seed([{ userId: ADMIN_ID, provider: IDP_PROVIDER, subject: SUBJECT }]);
-      orgStore.findRoot = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } });
+      orgStore.findRoot = async () => ({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'down' },
+      });
       const r = await resolver.resolve({ subject: SUBJECT });
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.code).toBe('UNAVAILABLE');

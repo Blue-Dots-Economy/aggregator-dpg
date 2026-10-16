@@ -40,6 +40,8 @@ import { pgErrorCode } from '../db/pg-error.js';
 import type { IdpAdminAdapter } from './idp-admin/interface.js';
 import { IDP_PROVIDER } from './idp-admin/provider.js';
 import { KC_ATTR, OWNER_CREATED_BY, OWNER_REALM_ROLE } from './idp-admin/index.js';
+import { getIdentityStore } from './identity-store/index.js';
+import { revokeRolesOnLeave } from './authz/roles.js';
 
 /** The placeholder owner address 0028 seeds; never mirrored to the IdP. */
 export const PLACEHOLDER_OWNER_EMAIL = 'network-admin@nf.invalid';
@@ -522,6 +524,11 @@ async function removeReplacedOwners(
   for (const removed of results) {
     if (removed.ok) ctx.report.ownersRemoved += 1;
     else ctx.fail('removeUserFromGroup', removed.error.code);
+  }
+  // RBAC: a replaced owner's additional roles in the org end with ownership.
+  for (const g of gone) {
+    const user = await getIdentityStore().userOf(IDP_PROVIDER, g.subject);
+    if (user.ok && user.value) await revokeRolesOnLeave(user.value, g.orgId, 'owner_replaced');
   }
 }
 

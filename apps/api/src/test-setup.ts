@@ -1,7 +1,7 @@
 /**
  * Vitest setup for `@aggregator-dpg/api` unit tests.
  *
- * Publishes a fresh in-memory identity store before every test, so no unit
+ * Publishes fresh in-memory identity, role-assignment and RBAC catalogue stores before every test, so no unit
  * test reaches Postgres through the login-recording paths (review link, first
  * approved request). `getIdentityStore()` returns it while no store was
  * injected explicitly (`_setIdentityStore(...)` still wins).
@@ -14,7 +14,13 @@
 import { beforeEach } from 'vitest';
 import { InMemoryIdentityStore } from './services/identity-store/memory.js';
 import { TEST_IDENTITY_STORE_KEY } from './services/identity-store/test-hook.js';
+import { InMemoryRoleStore } from './services/role-store/memory.js';
+import { TEST_ROLE_STORE_KEY } from './services/role-store/test-hook.js';
+import { InMemoryRbacCatalogue } from './services/rbac-catalogue/memory.js';
+import { TEST_RBAC_CATALOGUE_KEY } from './services/rbac-catalogue/test-hook.js';
 
 beforeEach(() => {
   (globalThis as Record<string, unknown>)[TEST_IDENTITY_STORE_KEY] = new InMemoryIdentityStore();
+  (globalThis as Record<string, unknown>)[TEST_ROLE_STORE_KEY] = new InMemoryRoleStore();
+  (globalThis as Record<string, unknown>)[TEST_RBAC_CATALOGUE_KEY] = new InMemoryRbacCatalogue();
 });

@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { I, type IconName } from '../../icons';
 import { BlueDotsLogo } from '../ui/BlueDotsLogo';
-import { useAuth } from '../../lib/auth-context';
+import { useAuth, useCan } from '../../lib/auth-context';
 import { useThemeMode } from '../../lib/theme-mode';
 import { SupportDialog } from '../support/SupportDialog';
 import { Button } from '../ui/Button';
@@ -256,6 +256,7 @@ export function Sidebar() {
     ? dashboard?.by_domain[activeDomain]?.rollup.total_items
     : undefined;
 
+  const can = useCan();
   // Resolve translated labels here so brand interpolation and locale switching
   // work correctly; buildNavBase() supplies the stable route/icon skeleton.
   const navLabels: Record<string, string> = {
@@ -263,13 +264,16 @@ export function Sidebar() {
     '/onboarding': t('onboarding'),
     '/profile': t('profile'),
   };
-  const nav: NavItem[] = buildNavBase().map((n) => ({
-    ...n,
-    label: navLabels[n.to] ?? n.to,
-    ...(n.to === '/dashboard' && participantsBadge !== undefined
-      ? { badge: participantsBadge }
-      : {}),
-  }));
+  // RBAC: onboarding needs `profiles.onboard`; the API also checks it.
+  const nav: NavItem[] = buildNavBase()
+    .filter((n) => n.to !== '/onboarding' || can('profiles.onboard'))
+    .map((n) => ({
+      ...n,
+      label: navLabels[n.to] ?? n.to,
+      ...(n.to === '/dashboard' && participantsBadge !== undefined
+        ? { badge: participantsBadge }
+        : {}),
+    }));
 
   // While the drawer is open: lock background scroll, move focus into the
   // drawer, trap Tab inside it, close on Escape, and close if the viewport
