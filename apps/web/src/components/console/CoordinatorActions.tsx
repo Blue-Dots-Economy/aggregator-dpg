@@ -4,11 +4,13 @@
  * Coordinator actions (user & org Phase 5): approve / reject a pending one
  * (optional reason, mailed to the applicant) and change the domains served.
  * A decision made elsewhere (409 ALREADY_DECIDED) updates the status in place
- * (C10). Read-only for a viewer who cannot manage the coordinator's
- * organisation (the network admin, #873): status and domains, no actions.
+ * (C10). The decision card shows only while pending (or just decided); the
+ * page lists the status. Read-only for a viewer who cannot manage the
+ * coordinator's organisation (the network admin, #873): domains, no actions.
  */
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import type { DecisionResponse, User } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
@@ -27,6 +29,7 @@ export function CoordinatorActions({
   readOnly?: boolean;
 }>) {
   const t = useTranslations('console');
+  const router = useRouter();
   const [status, setStatus] = useState(user.status);
   const [reason, setReason] = useState('');
   const [serves, setServes] = useState<string[]>(user.serves);
@@ -47,10 +50,12 @@ export function CoordinatorActions({
     if (r.ok) {
       setStatus(r.data.status);
       setDecisionNote(t('coordinator.decided'));
+      router.refresh();
     } else if (r.error.code === 'ALREADY_DECIDED') {
       const now = r.error.fields?.['status'] as User['status'] | undefined;
       if (now) setStatus(now);
       setDecisionNote(t('coordinator.already', { status: now ? t(`status.${now}`) : '' }));
+      router.refresh();
     } else {
       setDecisionNote(t(errorKey(r)));
     }
@@ -69,15 +74,15 @@ export function CoordinatorActions({
 
   return (
     <div className="flex flex-col gap-6">
-      <ConsoleSection
-        title={t('coordinator.decision')}
-        action={
-          <span data-testid="coordinator-status">
-            <ConsoleStatusPill status={status} />
-          </span>
-        }
-      >
-        {!readOnly && (status === 'pending' || decisionNote) ? (
+      {!readOnly && (status === 'pending' || decisionNote) ? (
+        <ConsoleSection
+          title={t('coordinator.decision')}
+          action={
+            <span data-testid="coordinator-status">
+              <ConsoleStatusPill status={status} />
+            </span>
+          }
+        >
           <div className="flex flex-col gap-4 text-[13.5px] max-w-2xl">
             {status === 'pending' ? (
               <>
@@ -111,8 +116,8 @@ export function CoordinatorActions({
             ) : null}
             {decisionNote ? <output className="text-ink-600">{decisionNote}</output> : null}
           </div>
-        ) : null}
-      </ConsoleSection>
+        </ConsoleSection>
+      ) : null}
 
       {readOnly && domains.length > 0 ? (
         <ConsoleSection title={t('coordinator.domains')}>

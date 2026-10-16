@@ -64,36 +64,36 @@ export default async function ConsoleHomePage() {
                   className="rounded-[12px] border border-(--bd-border) p-4 flex flex-col gap-3"
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <span className="font-display font-bold text-[16px] text-ink-900 min-w-0 truncate">
+                    <Link
+                      className="font-display font-bold text-[16px] text-ink-900 hover:text-primary-600 hover:underline min-w-0 truncate"
+                      href={`/console/orgs/${o.id}`}
+                    >
                       {o.name}
-                    </span>
+                    </Link>
                     <ConsoleStatusPill status={o.status} />
                   </div>
                   <div className="flex gap-6">
-                    <div>
+                    <Link
+                      className="group rounded-[8px] -m-1 p-1 hover:bg-(--bd-border-soft)"
+                      href={`/console/coordinators?org_id=${o.id}`}
+                    >
                       <div className="font-display font-bold text-[24px] leading-none text-ink-900">
                         {o.coordinator_count}
                       </div>
-                      <div className="text-[12px] text-ink-500 mt-1">
+                      <div className="text-[12px] text-ink-500 mt-1 group-hover:underline">
                         {t('home.coordinators_label')}
                       </div>
-                    </div>
-                    <div>
+                    </Link>
+                    <Link
+                      className="group rounded-[8px] -m-1 p-1 hover:bg-(--bd-border-soft)"
+                      href={`/console/coordinators?org_id=${o.id}&status=pending`}
+                    >
                       <div className="font-display font-bold text-[24px] leading-none text-amber-600">
                         {o.pending_count}
                       </div>
-                      <div className="text-[12px] text-ink-500 mt-1">{t('home.pending_label')}</div>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2 mt-auto">
-                    <Link className={buttonClass('soft')} href={`/console/orgs/${o.id}`}>
-                      {t('home.open')}
-                    </Link>
-                    <Link
-                      className={buttonClass('ghost')}
-                      href={`/console/coordinators?org_id=${o.id}&status=pending`}
-                    >
-                      {t('org.view_coordinators')}
+                      <div className="text-[12px] text-ink-500 mt-1 group-hover:underline">
+                        {t('home.pending_label')}
+                      </div>
                     </Link>
                   </div>
                 </li>
@@ -103,7 +103,17 @@ export default async function ConsoleHomePage() {
         </ConsoleSection>
 
         {me.is_network_admin ? (
-          <ConsoleSection title={t('home.pending_orgs')} flush>
+          <ConsoleSection
+            title={t('home.pending_orgs')}
+            flush
+            action={
+              pending.length > 0 ? (
+                <Link className={buttonClass('soft')} href="/console/orgs?status=pending">
+                  {t('home.review')}
+                </Link>
+              ) : null
+            }
+          >
             {pending.length === 0 ? (
               <EmptyState>{t('home.none_pending')}</EmptyState>
             ) : (
@@ -114,12 +124,14 @@ export default async function ConsoleHomePage() {
                     className="flex items-center justify-between gap-3 px-5 py-3 border-b border-(--bd-border-soft) last:border-b-0"
                   >
                     <span className="flex items-center gap-3 min-w-0">
-                      <span className="font-semibold text-ink-900 truncate">{o.name}</span>
+                      <Link
+                        className="font-semibold text-primary-600 hover:underline truncate"
+                        href={`/console/orgs/${o.id}`}
+                      >
+                        {o.name}
+                      </Link>
                       <ConsoleStatusPill status={o.status} />
                     </span>
-                    <Link className={buttonClass('soft')} href={`/console/orgs/${o.id}`}>
-                      {t('home.open')}
-                    </Link>
                   </li>
                 ))}
               </ul>

@@ -100,12 +100,11 @@ describe('<CoordinatorActions />', () => {
     expect(await screen.findByText(messages.console.coordinator.decided)).toBeInTheDocument();
   });
 
-  it('hides the decision controls for a coordinator who is not pending', () => {
+  it('shows no decision card for a coordinator who is not pending', () => {
     renderIt({ ...user, status: 'active' });
     expect(screen.queryByRole('button', { name: messages.console.coordinator.approve })).toBeNull();
-    expect(screen.getByTestId('coordinator-status')).toHaveTextContent(
-      messages.console.status.active,
-    );
+    expect(screen.queryByText(messages.console.coordinator.decision)).toBeNull();
+    expect(screen.queryByTestId('coordinator-status')).toBeNull();
   });
 
   it('toggles a domain and saves the served domains', async () => {
@@ -150,7 +149,7 @@ describe('<CoordinatorActions />', () => {
       ],
       true,
     );
-    expect(screen.getByTestId('coordinator-status')).toBeInTheDocument();
+    expect(screen.queryByTestId('coordinator-status')).toBeNull();
     expect(screen.getByText('Seekers')).toBeInTheDocument();
     expect(screen.queryByText('Providers')).toBeNull();
     expect(screen.queryByRole('button')).toBeNull();

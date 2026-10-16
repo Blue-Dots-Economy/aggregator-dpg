@@ -9,6 +9,7 @@ import { getTranslations } from 'next-intl/server';
 import type { RolesResponse, UserSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
 import { RoleBadges } from '@/components/console/RoleBadges';
+import { networkDomains, servedLabels } from '@/lib/console-domains.server';
 import { StatusFilter } from '@/components/console/StatusFilter';
 import { ConsoleSection, ConsoleStatusPill, EmptyState } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
@@ -27,11 +28,14 @@ export default async function ConsoleCoordinatorsPage({
   const params = await searchParams;
   const status = STATUSES.find((s) => s === params.status);
   const orgId = params.org_id && UUID_RE.test(params.org_id) ? params.org_id : undefined;
-  const page = await consoleRead<UserSearchResponse>('/v1/user/search', {
-    filter: { ...(status ? { status } : {}), ...(orgId ? { org_id: orgId } : {}) },
-    limit: 50,
-    ...(params.cursor ? { cursor: params.cursor } : {}),
-  });
+  const [page, domains] = await Promise.all([
+    consoleRead<UserSearchResponse>('/v1/user/search', {
+      filter: { ...(status ? { status } : {}), ...(orgId ? { org_id: orgId } : {}) },
+      limit: 50,
+      ...(params.cursor ? { cursor: params.cursor } : {}),
+    }),
+    networkDomains(),
+  ]);
   const keep = { ...(status ? { status } : {}), ...(orgId ? { org_id: orgId } : {}) };
   // Roles are null when access control is off: no Access column then.
   const showAccess = page.users.some((u) => Array.isArray(u.roles));
@@ -58,43 +62,40 @@ export default async function ConsoleCoordinatorsPage({
               <table className="bd-table">
                 <thead>
                   <tr>
-                    <th>{t('coordinators.name')}</th>
-                    <th>{t('coordinators.contact')}</th>
+                    <th>{t('coordinators.coordinator')}</th>
+                    <th>{t('coordinators.organisation')}</th>
                     <th>{t('coordinators.status')}</th>
                     <th>{t('coordinators.serves')}</th>
                     {showAccess ? <th>{t('coordinators.access')}</th> : null}
-                    <th />
                   </tr>
                 </thead>
                 <tbody>
                   {page.users.map((u) => (
                     <tr key={u.id}>
-                      <td className="font-semibold text-ink-900">{u.name}</td>
                       <td>
-                        <div>{u.contact.name ?? u.contact.email}</div>
+                        <Link
+                          className="font-semibold text-primary-600 hover:underline"
+                          href={`/console/coordinators/${u.id}`}
+                        >
+                          {u.contact.name ?? u.contact.email}
+                        </Link>
                         {u.contact.name ? (
                           <div className="text-[12px] text-ink-500">{u.contact.email}</div>
                         ) : null}
                       </td>
+                      <td className="text-ink-700">{u.name}</td>
                       <td>
                         <ConsoleStatusPill status={u.status} />
                       </td>
                       <td className="bd-wrap">
-                        {u.serves.length ? u.serves.join(', ') : t('coordinators.every_domain')}
+                        {servedLabels(u.serves, domains)?.join(', ') ??
+                          t('coordinators.every_domain')}
                       </td>
                       {showAccess ? (
                         <td>
                           <RoleBadges roles={u.roles ?? []} names={roleNames} />
                         </td>
                       ) : null}
-                      <td className="text-right">
-                        <Link
-                          className={buttonClass('soft')}
-                          href={`/console/coordinators/${u.id}`}
-                        >
-                          {t('coordinators.open')}
-                        </Link>
-                      </td>
                     </tr>
                   ))}
                 </tbody>

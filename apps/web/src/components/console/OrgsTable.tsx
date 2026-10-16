@@ -1,9 +1,10 @@
 'use client';
 
 /**
- * The network admin's organisation list (user & org Phase 5): approve /
- * reject a pending org, repair an active org's owner access. A decision made
- * elsewhere (409 ALREADY_DECIDED) updates the row in place (C10).
+ * The network admin's organisation list (user & org Phase 5): each name opens
+ * the organisation, and a pending org is approved or rejected in place. A
+ * decision made elsewhere (409 ALREADY_DECIDED) updates the row in place
+ * (C10). Owner access is repaired from the organisation's page.
  */
 
 import { useState } from 'react';
@@ -12,7 +13,6 @@ import { useTranslations } from 'next-intl';
 import type {
   OrgDecisionResponse,
   OrgSearchResponse,
-  OwnerAccessResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { ConsoleStatusPill, EmptyState } from './ConsoleUi';
@@ -48,12 +48,9 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
     }
   }
 
-  async function repair(id: string) {
-    setBusy(id);
-    const r = await sendConsole<OwnerAccessResponse>(`/api/console/org/repair/${id}`, 'POST', {});
-    setBusy(null);
-    note(id, r.ok ? t('orgs.repaired', { status: r.data.status }) : t(errorKey(r)));
-  }
+  // Decisions are the only row actions; the column shows while one is pending
+  // or a decision has just been made.
+  const showActions = rows.some((r) => r.status === 'pending' || notes[r.id]);
 
   if (rows.length === 0) return <EmptyState>{t('orgs.empty')}</EmptyState>;
   return (
@@ -64,7 +61,7 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
             <th>{t('orgs.col_name')}</th>
             <th>{t('orgs.col_status')}</th>
             <th>{t('orgs.col_counts')}</th>
-            <th style={{ textAlign: 'right' }}>{t('orgs.col_actions')}</th>
+            {showActions ? <th style={{ textAlign: 'right' }}>{t('orgs.col_actions')}</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -72,7 +69,7 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
             <tr key={o.id}>
               <td>
                 <Link
-                  className="font-semibold text-ink-900 hover:text-primary-600"
+                  className="font-semibold text-primary-600 hover:underline"
                   href={`/console/orgs/${o.id}`}
                 >
                   {o.name}
@@ -90,10 +87,10 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
                 {t('home.coordinators', { count: o.coordinator_count })} ·{' '}
                 {t('home.pending', { count: o.pending_count })}
               </td>
-              <td>
-                <div className="flex gap-2 justify-end">
+              {showActions ? (
+                <td>
                   {o.status === 'pending' ? (
-                    <>
+                    <div className="flex gap-2 justify-end">
                       <Button disabled={busy === o.id} onClick={() => void decide(o.id, 'approve')}>
                         {t('orgs.approve')}
                       </Button>
@@ -104,15 +101,10 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
                       >
                         {t('orgs.reject')}
                       </Button>
-                    </>
+                    </div>
                   ) : null}
-                  {o.status === 'active' && !o.is_default ? (
-                    <Button kind="ghost" disabled={busy === o.id} onClick={() => void repair(o.id)}>
-                      {t('orgs.repair')}
-                    </Button>
-                  ) : null}
-                </div>
-              </td>
+                </td>
+              ) : null}
             </tr>
           ))}
         </tbody>
