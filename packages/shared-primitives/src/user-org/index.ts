@@ -57,6 +57,12 @@ export const UserSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   rejected_at: z.string().nullable(),
+  /**
+   * Keys of the additional roles the coordinator holds now in its
+   * organisation (RBAC), sorted; on search results only. `null` when access
+   * control is off.
+   */
+  roles: z.array(z.string()).nullable().optional(),
 });
 export type User = z.infer<typeof UserSchema>;
 

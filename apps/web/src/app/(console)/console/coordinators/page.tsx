@@ -1,12 +1,14 @@
 /**
  * Coordinators within reach (user & org Phase 5): filtered by org and status,
- * newest first, paged by the API's cursor.
+ * newest first, paged by the API's cursor. With access control on, an Access
+ * column shows the additional roles each holds (#873).
  */
 
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
-import type { UserSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
-import { consoleRead } from '@/lib/console-api.server';
+import type { RolesResponse, UserSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
+import { RoleBadges } from '@/components/console/RoleBadges';
 import { StatusFilter } from '@/components/console/StatusFilter';
 import { ConsoleSection, ConsoleStatusPill, EmptyState } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
@@ -31,6 +33,10 @@ export default async function ConsoleCoordinatorsPage({
     ...(params.cursor ? { cursor: params.cursor } : {}),
   });
   const keep = { ...(status ? { status } : {}), ...(orgId ? { org_id: orgId } : {}) };
+  // Roles are null when access control is off: no Access column then.
+  const showAccess = page.users.some((u) => Array.isArray(u.roles));
+  const catalogue = showAccess ? await consoleReadOptional<RolesResponse>('/v1/roles') : null;
+  const roleNames = Object.fromEntries((catalogue?.roles ?? []).map((r) => [r.key, r.name]));
   return (
     <>
       <Topbar title={t('coordinators.heading')} subtitle={t('coordinators.subtitle')} />
@@ -56,6 +62,7 @@ export default async function ConsoleCoordinatorsPage({
                     <th>{t('coordinators.contact')}</th>
                     <th>{t('coordinators.status')}</th>
                     <th>{t('coordinators.serves')}</th>
+                    {showAccess ? <th>{t('coordinators.access')}</th> : null}
                     <th />
                   </tr>
                 </thead>
@@ -75,6 +82,11 @@ export default async function ConsoleCoordinatorsPage({
                       <td className="bd-wrap">
                         {u.serves.length ? u.serves.join(', ') : t('coordinators.every_domain')}
                       </td>
+                      {showAccess ? (
+                        <td>
+                          <RoleBadges roles={u.roles ?? []} names={roleNames} />
+                        </td>
+                      ) : null}
                       <td className="text-right">
                         <Link
                           className={buttonClass('soft')}

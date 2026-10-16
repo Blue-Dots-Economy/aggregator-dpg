@@ -621,7 +621,9 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('400 on a cursor whose created-at is not a date (decodeUserCursor)', async () => {
-      const res = await post('/v1/user/search', 'na', { cursor: cursorOf({ c: 'not-a-date', i: 'x' }) });
+      const res = await post('/v1/user/search', 'na', {
+        cursor: cursorOf({ c: 'not-a-date', i: 'x' }),
+      });
       expect(res.statusCode).toBe(400);
     });
   });
@@ -667,7 +669,9 @@ describe('console routes /v1/user, /v1/org', () => {
       TOKENS.coord4 = { sub: 'sub-c4', preferred_username: 'c4@x.org', aggregator_id: C4 };
       const res = await get('/v1/user/read/me', 'coord4' as keyof typeof TOKENS);
       expect(res.statusCode).toBe(200);
-      expect((res.json() as { user: { contact: { name: null; phone: null } } }).user.contact).toMatchObject({
+      expect(
+        (res.json() as { user: { contact: { name: null; phone: null } } }).user.contact,
+      ).toMatchObject({
         name: null,
         phone: null,
       });
@@ -725,7 +729,9 @@ describe('console routes /v1/user, /v1/org', () => {
       _setSignalStackWriter(ss);
       const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: ['seeker'] });
       expect(res.statusCode).toBe(502);
-      expect((res.json() as { error: { code: string } }).error.code).toBe('SIGNALSTACK_PUSH_FAILED');
+      expect((res.json() as { error: { code: string } }).error.code).toBe(
+        'SIGNALSTACK_PUSH_FAILED',
+      );
     });
 
     it('503 when the metadata store update fails', async () => {
@@ -745,13 +751,25 @@ describe('console routes /v1/user, /v1/org', () => {
       });
       const res = await patch(`/v1/user/metadata/update/${C5}`, 'a', { serves: ['seeker'] });
       expect(res.statusCode).toBe(502);
-      expect((res.json() as { error: { code: string } }).error.code).toBe('SIGNALSTACK_PUSH_FAILED');
+      expect((res.json() as { error: { code: string } }).error.code).toBe(
+        'SIGNALSTACK_PUSH_FAILED',
+      );
     });
   });
 
   describe('v1-user: decision-failure outcomes (console-shared throwDecisionFailure)', () => {
     it('409 TARGET_ORG_INACTIVE when the coordinator org is no longer active', async () => {
-      orgs.seed([buildAggregatorOrg({ id: ORG_A, slug: 'org-a', displayName: 'Alpha', status: 'pending', ownerUserId: OWNER_A, ownerEmail: 'a@a.org', ownerKcSub: 'sub-a' })]);
+      orgs.seed([
+        buildAggregatorOrg({
+          id: ORG_A,
+          slug: 'org-a',
+          displayName: 'Alpha',
+          status: 'pending',
+          ownerUserId: OWNER_A,
+          ownerEmail: 'a@a.org',
+          ownerKcSub: 'sub-a',
+        }),
+      ]);
       const res = await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' });
       expect(res.statusCode).toBe(409);
       expect((res.json() as { error: { code: string } }).error.code).toBe('TARGET_ORG_INACTIVE');
@@ -766,7 +784,10 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('503 IDP_UNAVAILABLE when enabling the Keycloak user fails on approval', async () => {
-      idp.enableUser = async () => ({ ok: false, error: { code: 'IDP_UNAVAILABLE', message: 'kc down' } });
+      idp.enableUser = async () => ({
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
+      });
       const res = await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' });
       expect(res.statusCode).toBe(503);
     });
@@ -786,7 +807,10 @@ describe('console routes /v1/user, /v1/org', () => {
 
   describe('console-shared notice and wire mapping edges', () => {
     it('still succeeds when the owner-notice email fails to send', async () => {
-      mailer.send = async () => ({ ok: false, error: { code: 'TRANSPORT_FAILED', message: 'smtp down' } });
+      mailer.send = async () => ({
+        ok: false,
+        error: { code: 'TRANSPORT_FAILED', message: 'smtp down' },
+      });
       const res = await post(`/v1/user/decision/${C2}`, 'na', { decision: 'reject', reason: 'x' });
       expect(res.statusCode).toBe(200);
     });
@@ -854,7 +878,9 @@ describe('console routes /v1/user, /v1/org', () => {
     it('filters org search by name prefix', async () => {
       const res = await post('/v1/org/search', 'na', { filter: { name_prefix: 'Alpha' } });
       expect(res.statusCode).toBe(200);
-      expect((res.json() as { orgs: Array<{ id: string }> }).orgs.map((o) => o.id)).toEqual([ORG_A]);
+      expect((res.json() as { orgs: Array<{ id: string }> }).orgs.map((o) => o.id)).toEqual([
+        ORG_A,
+      ]);
     });
 
     it('pages org search with an opaque cursor', async () => {
@@ -905,13 +931,17 @@ describe('console routes /v1/user, /v1/org', () => {
 
     it('404 when the org update reports the row is gone', async () => {
       orgs.update = async () => storeErr('NOT_FOUND');
-      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { url: 'https://x.example.org' });
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        url: 'https://x.example.org',
+      });
       expect(res.statusCode).toBe(404);
     });
 
     it('503 when the org update store fails', async () => {
       orgs.update = async () => storeErr('DB_UNAVAILABLE');
-      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { url: 'https://x.example.org' });
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        url: 'https://x.example.org',
+      });
       expect(res.statusCode).toBe(503);
     });
   });
@@ -1099,6 +1129,56 @@ describe('console routes /v1/user, /v1/org', () => {
           [],
         );
         expect(store.audit.map((e) => e.event)).toContain('role.revoke_on_leave');
+      });
+
+      // #873: the coordinator list shows who holds which additional role.
+      const rolesById = async (who: keyof typeof TOKENS) => {
+        const res = await post('/v1/user/search', who, {});
+        expect(res.statusCode).toBe(200);
+        const body = res.json() as { users: Array<{ id: string; roles: string[] | null }> };
+        return Object.fromEntries(body.users.map((u) => [u.id, u.roles]));
+      };
+
+      it('lists each coordinator’s live roles in its organisation on search, sorted', async () => {
+        expect((await assign('a', C3, { role_key: 'pii_access', org_id: ORG_A })).statusCode).toBe(
+          200,
+        );
+        expect((await assign('a', C3, { role_key: 'data_export', org_id: ORG_A })).statusCode).toBe(
+          200,
+        );
+        const roles = await rolesById('a');
+        expect(roles[C3]).toEqual(['data_export', 'pii_access']);
+        expect(roles[C1]).toEqual([]);
+      });
+
+      it('drops a revoked role from search, and ignores a role held in another organisation', async () => {
+        expect((await assign('a', C3, { role_key: 'data_export', org_id: ORG_A })).statusCode).toBe(
+          200,
+        );
+        (getRoleStore() as InMemoryRoleStore).seed([
+          { userId: C3, roleKey: 'pii_access', orgId: ORG_B },
+        ]);
+        expect(
+          (
+            await post(`/v1/user/role/revoke/${C3}`, 'a', {
+              role_key: 'data_export',
+              org_id: ORG_A,
+            })
+          ).statusCode,
+        ).toBe(200);
+        expect((await rolesById('na'))[C3]).toEqual([]);
+      });
+
+      it('answers 503 on search when the role store fails', async () => {
+        (getRoleStore() as InMemoryRoleStore).failWith({ code: 'DB_UNAVAILABLE', message: 'down' });
+        expect((await post('/v1/user/search', 'a', {})).statusCode).toBe(503);
+      });
+
+      it('returns null roles on search when access control is off', async () => {
+        _setRbacRuntime(null);
+        const roles = await rolesById('a');
+        expect(Object.values(roles).length).toBeGreaterThan(0);
+        for (const r of Object.values(roles)) expect(r).toBeNull();
       });
 
       it('answers 503 when access control is off', async () => {

@@ -131,6 +131,28 @@ suite('role store (migration 0030) — integration', () => {
     expect(live.ok && live.value.map((r) => r.roleKey)).toEqual(['data_export']);
   });
 
+  it('lists the live roles of several users in one read', async () => {
+    const [a, b, other] = [await newCoordinator(), await newCoordinator(), await newCoordinator()];
+    const audit = { event: 'role.assign', actorUserId: a.id };
+    for (const [u, roleKey] of [
+      [a, 'data_export'],
+      [b, 'pii_access'],
+      [other, 'data_export'],
+    ] as const) {
+      await store.assign(
+        { userId: u.id, roleKey, orgId: defaultOrgId, grantedBy: a.id, expiresAt: null },
+        audit,
+      );
+    }
+    await store.revoke(b.id, 'pii_access', defaultOrgId, a.id, { ...audit, event: 'role.revoke' });
+
+    const live = await store.listLiveForUsers([a.id, b.id], new Date());
+    expect(live.ok && live.value.map((r) => [r.userId, r.roleKey])).toEqual([
+      [a.id, 'data_export'],
+    ]);
+    expect(await store.listLiveForUsers([], new Date())).toEqual({ ok: true, value: [] });
+  });
+
   it('revokes every live role in an organisation with one audit row', async () => {
     const c = await newCoordinator();
     for (const roleKey of ['pii_access', 'data_export']) {

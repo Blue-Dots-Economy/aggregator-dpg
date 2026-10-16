@@ -30,6 +30,7 @@ import {
   type MeResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { getMailer } from '@aggregator-dpg/mailer';
+import { compareCodeUnits } from '@aggregator-dpg/rbac';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
@@ -56,6 +57,8 @@ import {
   toWireUser,
 } from './console-shared.js';
 import { checkCapability, listActorCapabilities, type TargetOrg } from '../services/authz/index.js';
+import { getRbacRuntime } from '../services/authz/runtime.js';
+import { getRoleStore } from '../services/role-store/index.js';
 
 const IdParamsSchema = z.object({ id: z.string().uuid() });
 type IdParams = z.infer<typeof IdParamsSchema>;
@@ -127,7 +130,33 @@ async function showsContact(
   return (await checkCapability(req, actor, 'contact.unmask', { target })).allowed;
 }
 
-async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> { // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
+/**
+ * The additional roles each coordinator holds now in its own organisation,
+ * read in one query for a page of search results (#873).
+ *
+ * @param rows - The coordinators on the page.
+ * @returns Sorted role keys per coordinator id, or null when access control is off.
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function liveRolesOf(rows: readonly Aggregator[]): Promise<Map<string, string[]> | null> {
+  if (!getRbacRuntime()) return null;
+  const live = await getRoleStore().listLiveForUsers(
+    rows.map((r) => r.id),
+    new Date(),
+  );
+  if (!live.ok) dbDown('roleStore.listLiveForUsers', live.error.message);
+  const orgOf = new Map(rows.map((r) => [r.id, r.parentOrgId]));
+  const byUser = new Map<string, string[]>();
+  for (const a of live.value) {
+    if (a.orgId !== orgOf.get(a.userId)) continue;
+    byUser.set(a.userId, [...(byUser.get(a.userId) ?? []), a.roleKey]);
+  }
+  for (const keys of byUser.values()) keys.sort(compareCodeUnits);
+  return byUser;
+}
+
+async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> {
+  // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   const orgStore = getAggregatorOrgStore();
   const orgs: MeOrg[] = [];
   let self: { name: string | null; email: string; phone: string | null } | null = null;
@@ -147,10 +176,7 @@ async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> { //
   if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
   const rootId = root.value?.id ?? null;
   for (const o of actor.orgs) {
-    const found =
-      o.orgType === 'network_facilitator'
-        ? root
-        : await orgStore.findById(o.id); // NOSONAR typescript:S9382 — sequential by design
+    const found = o.orgType === 'network_facilitator' ? root : await orgStore.findById(o.id); // NOSONAR typescript:S9382 — sequential by design
     if (!found.ok) dbDown('orgStore.findById', found.error.message);
     if (!found.value) continue;
     const target: TargetOrg = {
@@ -266,8 +292,12 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
           count: page.value.rows.length,
         });
       }
+      const roles = await liveRolesOf(page.value.rows);
       return reply.status(200).send({
-        users: page.value.rows.map((row) => toWireUser(row, { masked: !plain })),
+        users: page.value.rows.map((row) => ({
+          ...toWireUser(row, { masked: !plain }),
+          roles: roles ? (roles.get(row.id) ?? []) : null,
+        })),
         next_cursor: page.value.nextCursor ? encodeUserCursor(page.value.nextCursor) : null,
       });
     },
