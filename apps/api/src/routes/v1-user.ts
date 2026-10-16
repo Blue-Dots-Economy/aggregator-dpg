@@ -37,7 +37,8 @@ import { errorResponses } from '../errors/openapi.js';
 import { getUserStore, type Coordinator } from '../services/user-store/index.js';
 import { getOrganisationStore, type Organisation } from '../services/organisation-store/index.js';
 import { isNetworkAdmin, requireActor, type Actor } from '../services/auth/actor/index.js';
-import { reachesOrg, scopeOrgFilter } from '../services/authz/scope.js';
+import { narrowOrgFilter } from '../services/authz/scope.js';
+import { inManageScope, manageableOrgIds } from '../services/authz/manage-scope.js';
 import { decideCoordinator } from '../services/decisions/coordinator.js';
 import { mintInviteBatch } from '../services/invites/mint.js';
 import { checkInviteMintRate } from '../services/invite-mint-rate.js';
@@ -69,14 +70,41 @@ function dbDown(subOperation: string, message: string): never {
 }
 
 /**
- * Loads a coordinator within the actor's reach, else 404.
+ * The root organisation's id, or null when there is none yet.
+ *
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function rootOrgId(): Promise<string | null> {
+  const root = await getOrganisationStore().findRoot();
+  if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
+  return root.value?.id ?? null;
+}
+
+/**
+ * The organisations whose coordinators the actor may manage (#873).
+ *
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function manageScope(req: FastifyRequest, actor: Actor): Promise<string[] | null> {
+  return manageableOrgIds(req, actor, await rootOrgId());
+}
+
+/**
+ * Loads a coordinator the actor may manage (in reach, and `org.manage` in its
+ * organisation), else 404 so ids cannot be probed.
  *
  * @throws {HttpError} NOT_FOUND / DB_UNAVAILABLE.
  */
-async function coordinatorInReach(actor: Actor, id: string): Promise<Coordinator> {
+async function coordinatorInReach(
+  req: FastifyRequest,
+  actor: Actor,
+  id: string,
+): Promise<Coordinator> {
   const row = await getUserStore().findById(id);
   if (!row.ok) dbDown('userStore.findById', row.error.message);
-  if (!row.value || !reachesOrg(actor, row.value.parentOrgId)) throw httpError('NOT_FOUND');
+  if (!row.value || !inManageScope(await manageScope(req, actor), row.value.parentOrgId)) {
+    throw httpError('NOT_FOUND');
+  }
   return row.value;
 }
 
@@ -240,7 +268,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
-      const row = await coordinatorInReach(actor, id);
+      const row = await coordinatorInReach(req, actor, id);
       const plain = await showsContact(req, actor, row.parentOrgId ?? null);
       // Contact read audit (design C8): ids only.
       req.log.info({
@@ -271,7 +299,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       const body = req.body as z.infer<typeof UserSearchRequestSchema>;
       const page = await getUserStore().search({
-        orgIds: scopeOrgFilter(actor, body.filter.org_id),
+        orgIds: narrowOrgFilter(await manageScope(req, actor), body.filter.org_id),
         ...(body.filter.status ? { status: body.filter.status } : {}),
         ...(body.filter.serves ? { serves: body.filter.serves } : {}),
         ...(body.cursor ? { cursor: decodeUserCursor(body.cursor) } : {}),
@@ -319,7 +347,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { actor } = await requireActor(req);
       const body = req.body as z.infer<typeof UserInviteRequestSchema>;
-      if (!reachesOrg(actor, body.org_id)) throw httpError('NOT_FOUND');
+      if (!inManageScope(await manageScope(req, actor), body.org_id)) throw httpError('NOT_FOUND');
       if (body.recipients.length > config.INVITE_MINT_MAX_RECIPIENTS) {
         throw httpError('SCHEMA_VALIDATION', {
           detail: `At most ${config.INVITE_MINT_MAX_RECIPIENTS} recipients per request.`,
@@ -388,7 +416,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
       const body = req.body as z.infer<typeof DecisionRequestSchema>;
-      const row = await coordinatorInReach(actor, id);
+      const row = await coordinatorInReach(req, actor, id);
       await guardWriteRate(actor, reply);
 
       const outcome = await decideCoordinator({
@@ -438,7 +466,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
       const body = req.body as z.infer<typeof UserMetadataUpdateRequestSchema>;
-      const row = await coordinatorInReach(actor, id);
+      const row = await coordinatorInReach(req, actor, id);
       await guardWriteRate(actor, reply);
 
       const networkCfg = await getNetworkConfig();

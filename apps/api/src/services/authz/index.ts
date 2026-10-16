@@ -15,6 +15,7 @@ export {
 export type { RbacMode, RbacRuntime, RefreshOutcome } from './runtime.js';
 export {
   actorPermissions,
+  checkAnyCapability,
   checkCapability,
   decisionInput,
   listActorCapabilities,

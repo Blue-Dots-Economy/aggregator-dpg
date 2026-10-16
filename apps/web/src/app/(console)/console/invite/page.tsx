@@ -1,6 +1,6 @@
 /**
  * Invite coordinators (user & org Phase 5): into an active organisation the
- * actor owns (any active org for the network admin); never the Default org.
+ * actor may manage (`org.manage` there, #873); never the Default org.
  */
 
 import { getTranslations } from 'next-intl/server';
@@ -10,7 +10,7 @@ import { InviteForm } from '@/components/console/InviteForm';
 import { ConsoleSection } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
 import { getConsoleActor } from '@/lib/console-actor';
-import { can } from '@/lib/capabilities';
+import { can, canManageOrg } from '@/lib/capabilities';
 import { redirect } from 'next/navigation';
 
 export default async function ConsoleInvitePage() {
@@ -22,7 +22,9 @@ export default async function ConsoleInvitePage() {
     filter: { status: 'active' },
     limit: 100,
   });
-  const orgs = page.orgs.filter((o) => !o.is_default).map((o) => ({ id: o.id, name: o.name }));
+  const orgs = page.orgs
+    .filter((o) => !o.is_default && (!actor.ok || canManageOrg(actor.me, o.id)))
+    .map((o) => ({ id: o.id, name: o.name }));
   return (
     <>
       <Topbar title={t('invite.heading')} subtitle={t('invite.subtitle')} />

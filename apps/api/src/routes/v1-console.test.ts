@@ -1095,7 +1095,8 @@ describe('console routes /v1/user, /v1/org', () => {
       });
 
       it('refuses the wrong account type and assigning to yourself', async () => {
-        const type = await assign('na', OWNER_A, { role_key: 'pii_access', org_id: ORG_A });
+        // Org Onboarder is admin-only; the network admin may assign it (network.administer).
+        const type = await assign('na', C3, { role_key: 'org_onboarder', org_id: ORG_A });
         expect([type.statusCode, reasonOf(type)]).toEqual([409, 'account_type']);
         const self = await assign('na', NA, { role_key: 'org_onboarder', org_id: DEFAULT });
         expect([self.statusCode, reasonOf(self)]).toEqual([409, 'self']);
@@ -1162,7 +1163,7 @@ describe('console routes /v1/user, /v1/org', () => {
             })
           ).statusCode,
         ).toBe(200);
-        expect((await rolesById('na'))[C3]).toEqual([]);
+        expect((await rolesById('a'))[C3]).toEqual([]);
       });
 
       it('answers 503 on search when the role store fails', async () => {
@@ -1182,6 +1183,100 @@ describe('console routes /v1/user, /v1/org', () => {
         expect((await get('/v1/roles', 'a')).statusCode).toBe(503);
         const res = await assign('a', C3, { role_key: 'pii_access', org_id: ORG_A });
         expect(res.statusCode).toBe(503);
+      });
+    });
+
+    // #873: org.manage is the org admin's; the network admin approves and
+    // edits organisations but manages coordinators only in orgs it owns.
+    describe('org.manage stays with the org admin', () => {
+      const searchIds = async (who: keyof typeof TOKENS) => {
+        const res = await post('/v1/user/search', who, {});
+        expect(res.statusCode).toBe(200);
+        return (res.json() as { users: Array<{ id: string }> }).users
+          .map((u) => u.id)
+          .sort((x, y) => x.localeCompare(y));
+      };
+      const C9 = '00000000-0000-4000-8000-0000000000c9';
+
+      it('limits the network admin to coordinators of orgs it owns', async () => {
+        coordinators.seed([coordinator(C9, DEFAULT, 'pending', 9)]);
+        expect(await searchIds('na')).toEqual([C9]);
+        expect((await get(`/v1/user/read/${C9}`, 'na')).statusCode).toBe(200);
+        expect((await get(`/v1/user/read/${C3}`, 'na')).statusCode).toBe(404);
+        expect(
+          (await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' })).statusCode,
+        ).toBe(404);
+        expect(
+          (await patch(`/v1/user/metadata/update/${C3}`, 'na', { serves: [] })).statusCode,
+        ).toBe(404);
+        const invite = await post('/v1/user/create', 'na', {
+          org_id: ORG_A,
+          recipients: [{ email: 'new@x.org' }],
+        });
+        expect(invite.statusCode).toBe(404);
+      });
+
+      it('refuses the network admin Data Export or PII Access in another org', async () => {
+        const res = await post(`/v1/user/role/assign/${C3}`, 'na', {
+          role_key: 'pii_access',
+          org_id: ORG_A,
+        });
+        expect(res.statusCode).toBe(403);
+        expect(permissionOf(res)).toBe('org.manage');
+      });
+
+      it('keeps the owner managing its own coordinators', async () => {
+        expect(await searchIds('a')).toEqual([C1, C3]);
+        expect((await get(`/v1/user/read/${C3}`, 'a')).statusCode).toBe(200);
+        expect((await get(`/v1/user/read/${C2}`, 'a')).statusCode).toBe(404);
+      });
+
+      it('keeps the organisation pages for both: network admin via orgs.onboard, owner via org.manage', async () => {
+        const naOrgs = (await post('/v1/org/search', 'na', {})).json() as {
+          orgs: Array<{ id: string }>;
+        };
+        expect(naOrgs.orgs.map((o) => o.id)).toEqual(expect.arrayContaining([ORG_A, ORG_B]));
+        expect((await get(`/v1/org/read/${ORG_A}`, 'na')).statusCode).toBe(200);
+        expect((await get(`/v1/org/read/${ORG_A}`, 'a')).statusCode).toBe(200);
+        expect((await get(`/v1/org/read/${ORG_B}`, 'a')).statusCode).toBe(404);
+      });
+
+      it('refuses an org route to an admin holding neither permission', async () => {
+        _setRbacRuntime(
+          await testRbacRuntime('enforce', new AuthorizerFake(), []).then(async (rt) => ({
+            ...rt,
+            roles: indexRoles(
+              (await shippedRoles()).map((r) =>
+                r.key === 'org_admin'
+                  ? { ...r, permissions: r.permissions.filter((c) => c !== 'org.manage') }
+                  : r,
+              ),
+            ),
+          })),
+        );
+        const res = await get(`/v1/org/read/${ORG_A}`, 'a');
+        expect(res.statusCode).toBe(403);
+        expect(permissionOf(res)).toBe('org.manage|orgs.onboard');
+      });
+
+      it('only logs the narrower scope in log mode', async () => {
+        _setRbacRuntime(await testRbacRuntime('log'));
+        expect(await searchIds('na')).toEqual([C1, C2, C3]);
+      });
+
+      it('keeps every org in scope for a deployment whose Network Admin keeps org.manage', async () => {
+        _setRbacRuntime({
+          ...(await testRbacRuntime('enforce')),
+          roles: indexRoles(
+            (await shippedRoles()).map((r) =>
+              r.key === 'network_admin'
+                ? { ...r, permissions: [...r.permissions, 'org.manage' as const] }
+                : r,
+            ),
+          ),
+        });
+        expect(await searchIds('na')).toEqual([C1, C2, C3]);
+        expect((await get(`/v1/user/read/${C3}`, 'na')).statusCode).toBe(200);
       });
     });
 
