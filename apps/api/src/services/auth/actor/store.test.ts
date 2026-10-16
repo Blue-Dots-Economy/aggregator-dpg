@@ -170,7 +170,7 @@ describe('StoreActorResolver', () => {
       const r = await resolver.resolve({ subject: SUBJECT });
       expect(r).toEqual({
         ok: true,
-        value: { userId: ADMIN_ID, userType: 'admin', active: false, orgs: [] },
+        value: { userId: ADMIN_ID, userType: 'admin', active: false, orgs: [], roles: [] },
       });
     });
 
