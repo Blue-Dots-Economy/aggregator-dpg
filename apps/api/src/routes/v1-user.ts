@@ -33,11 +33,8 @@ import { getMailer } from '@aggregator-dpg/mailer';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
-import { getAggregatorStore, type Aggregator } from '../services/aggregator-store/index.js';
-import {
-  getAggregatorOrgStore,
-  type AggregatorOrg,
-} from '../services/aggregator-org-store/index.js';
+import { getUserStore, type Aggregator } from '../services/user-store/index.js';
+import { getOrganisationStore, type AggregatorOrg } from '../services/organisation-store/index.js';
 import { isNetworkAdmin, requireActor, type Actor } from '../services/auth/actor/index.js';
 import { reachesOrg, scopeOrgFilter } from '../services/authz/scope.js';
 import { decideCoordinator } from '../services/decisions/coordinator.js';
@@ -73,8 +70,8 @@ function dbDown(subOperation: string, message: string): never {
  * @throws {HttpError} NOT_FOUND / DB_UNAVAILABLE.
  */
 async function coordinatorInReach(actor: Actor, id: string): Promise<Aggregator> {
-  const row = await getAggregatorStore().findById(id);
-  if (!row.ok) dbDown('aggregatorStore.findById', row.error.message);
+  const row = await getUserStore().findById(id);
+  if (!row.ok) dbDown('userStore.findById', row.error.message);
   if (!row.value || !reachesOrg(actor, row.value.parentOrgId)) throw httpError('NOT_FOUND');
   return row.value;
 }
@@ -85,7 +82,7 @@ async function coordinatorInReach(actor: Actor, id: string): Promise<Aggregator>
  * @throws {HttpError} NOT_FOUND / DB_UNAVAILABLE.
  */
 async function loadOrg(id: string): Promise<AggregatorOrg> {
-  const org = await getAggregatorOrgStore().findById(id);
+  const org = await getOrganisationStore().findById(id);
   if (!org.ok) dbDown('orgStore.findById', org.error.message);
   if (!org.value) throw httpError('NOT_FOUND');
   return org.value;
@@ -96,14 +93,15 @@ async function loadOrg(id: string): Promise<AggregatorOrg> {
  *
  * @throws {HttpError} DB_UNAVAILABLE.
  */
-async function meOf(actor: Actor): Promise<MeResponse> { // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
-  const orgStore = getAggregatorOrgStore();
+async function meOf(actor: Actor): Promise<MeResponse> {
+  // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
+  const orgStore = getOrganisationStore();
   const orgs: MeOrg[] = [];
   let self: { name: string | null; email: string; phone: string | null } | null = null;
 
   if (actor.userType === 'coordinator') {
-    const row = await getAggregatorStore().findById(actor.userId);
-    if (!row.ok) dbDown('aggregatorStore.findById', row.error.message);
+    const row = await getUserStore().findById(actor.userId);
+    if (!row.ok) dbDown('userStore.findById', row.error.message);
     if (!row.value) throw httpError('USER_NOT_PROVISIONED');
     self = {
       name: row.value.contact.name ?? null,
@@ -201,14 +199,14 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { actor } = await requireActor(req);
       const body = req.body as z.infer<typeof UserSearchRequestSchema>;
-      const page = await getAggregatorStore().search({
+      const page = await getUserStore().search({
         orgIds: scopeOrgFilter(actor, body.filter.org_id),
         ...(body.filter.status ? { status: body.filter.status } : {}),
         ...(body.filter.serves ? { serves: body.filter.serves } : {}),
         ...(body.cursor ? { cursor: decodeUserCursor(body.cursor) } : {}),
         ...(body.limit ? { limit: body.limit } : {}),
       });
-      if (!page.ok) dbDown('aggregatorStore.search', page.error.message);
+      if (!page.ok) dbDown('userStore.search', page.error.message);
       return reply.status(200).send({
         users: page.value.rows.map(toWireUser),
         next_cursor: page.value.nextCursor ? encodeUserCursor(page.value.nextCursor) : null,
@@ -316,7 +314,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       if (outcome.kind !== 'decided') throwDecisionFailure(outcome);
 
       if (row.parentOrgId) {
-        const org = await getAggregatorOrgStore().findById(row.parentOrgId);
+        const org = await getOrganisationStore().findById(row.parentOrgId);
         if (org.ok && org.value) {
           await notifyOwnerOfAdminAction(
             actor,
@@ -394,11 +392,11 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         throw httpError('SIGNALSTACK_PUSH_FAILED');
       }
 
-      const updated = await getAggregatorStore().update(row.id, {
+      const updated = await getUserStore().update(row.id, {
         serves,
         updatedBy: actor.userId,
       });
-      if (!updated.ok) dbDown('aggregatorStore.update', updated.error.message);
+      if (!updated.ok) dbDown('userStore.update', updated.error.message);
       // Approved meanwhile (the approval pushed the old domains): push again.
       if (row.status !== 'active' && updated.value.status === 'active' && !(await pushDomains())) {
         throw httpError('SIGNALSTACK_PUSH_FAILED', {
@@ -408,7 +406,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       log.info({ status: 'success', fields: ['serves'] });
 
       if (row.parentOrgId) {
-        const org = await getAggregatorOrgStore().findById(row.parentOrgId);
+        const org = await getOrganisationStore().findById(row.parentOrgId);
         if (org.ok && org.value) {
           await notifyOwnerOfAdminAction(
             actor,

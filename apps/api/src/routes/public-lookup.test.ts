@@ -14,11 +14,7 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore, buildAggregator } from '../services/user-store/index.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
@@ -33,7 +29,7 @@ const ORG_ID = 'org-1';
 
 describe('GET /public/v1/aggregators/:orgSlug/lookup', () => {
   let app: FastifyInstance;
-  let aggregatorStore: AggregatorStoreFake;
+  let userStore: UserStoreFake;
   let signalstack: SignalStackWriterFake;
 
   beforeEach(async () => {
@@ -44,8 +40,8 @@ describe('GET /public/v1/aggregators/:orgSlug/lookup', () => {
     process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
     process.env.SIGNALSTACK_ACTING_ORG_ID = 'org_platform';
 
-    aggregatorStore = new AggregatorStoreFake();
-    aggregatorStore.seed([
+    userStore = new UserStoreFake();
+    userStore.seed([
       buildAggregator({
         id: AGG_ID,
         orgSlug: 'acme',
@@ -54,7 +50,7 @@ describe('GET /public/v1/aggregators/:orgSlug/lookup', () => {
         signalstackOrgId: ORG_ID,
       }),
     ]);
-    _setAggregatorStore(aggregatorStore);
+    _setUserStore(userStore);
 
     signalstack = new SignalStackWriterFake();
     _setSignalStackWriter(signalstack);
@@ -64,7 +60,7 @@ describe('GET /public/v1/aggregators/:orgSlug/lookup', () => {
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setSignalStackWriter(null);
   });
 
@@ -142,7 +138,7 @@ describe('GET /public/v1/aggregators/:orgSlug/lookup', () => {
   });
 
   it('503s DB_UNAVAILABLE when the aggregator store lookup fails', async () => {
-    aggregatorStore.findBySlug = async () => ({
+    userStore.findBySlug = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });

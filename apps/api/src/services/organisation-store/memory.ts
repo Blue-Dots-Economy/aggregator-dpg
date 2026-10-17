@@ -5,14 +5,14 @@
  * (partial-slug uniqueness over non-terminal rows, atomic approve/reject
  * guard, lowercased owner email, the Default org skipped by owner lookups,
  * name-sorted active list). It holds aggregator orgs only; the
- * network-facilitator root is a separate slot (see `AggregatorOrgStoreFake`).
+ * network-facilitator root is a separate slot (see `OrganisationStoreFake`).
  * Unit-test use only.
  */
 
 import { randomUUID } from 'node:crypto';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import {
-  AggregatorOrgStoreBase,
+  OrganisationStoreBase,
   DEFAULT_ORG_SLUG,
   type AggregatorOrg,
   type CreateOrgInput,
@@ -26,7 +26,7 @@ import {
 
 const NON_TERMINAL = new Set(['pending', 'active']);
 
-export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
+export class InMemoryOrganisationStore extends OrganisationStoreBase {
   protected readonly byId = new Map<string, AggregatorOrg>();
   /** Owner admin-account id per owner contact (one account per person, 0027). */
   protected readonly adminByContact = new Map<string, string>();

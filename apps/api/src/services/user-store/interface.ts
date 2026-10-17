@@ -230,7 +230,7 @@ export interface OrgCoordinatorCounts {
   pending: number;
 }
 
-/** Outcome of {@link AggregatorStoreBase.deleteIfPending}. */
+/** Outcome of {@link UserStoreBase.deleteIfPending}. */
 export type DeleteIfPendingOutcome = 'deleted' | 'not_pending' | 'aborted';
 
 export interface ListAggregatorsPage {
@@ -257,7 +257,7 @@ export type StoreResult<T> = { ok: true; value: T } | { ok: false; error: StoreE
  * implement every method (no partial stubs). Returns Result<T,StoreError> on
  * every boundary — never throws.
  */
-export abstract class AggregatorStoreBase {
+export abstract class UserStoreBase {
   abstract create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>>;
   abstract findById(id: string): Promise<StoreResult<Aggregator | null>>;
   abstract findBySlug(orgSlug: string): Promise<StoreResult<Aggregator | null>>;

@@ -3,13 +3,13 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { AggregatorStoreFake, _setAggregatorStore } from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore } from '../services/user-store/index.js';
 import {
-  AggregatorOrgStoreFake,
+  OrganisationStoreFake,
   buildAggregatorOrg,
   buildDefaultOrg,
-  _setAggregatorOrgStore,
-} from '../services/aggregator-org-store/index.js';
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 import { verifyApprovalToken } from '../services/approval-token.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
@@ -24,8 +24,8 @@ const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
 
 describe('coordinator submit with an org', () => {
   let app: FastifyInstance;
-  let aggregatorStore: AggregatorStoreFake;
-  let orgStore: AggregatorOrgStoreFake;
+  let userStore: UserStoreFake;
+  let orgStore: OrganisationStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
 
@@ -50,13 +50,13 @@ describe('coordinator submit with an org', () => {
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
-    aggregatorStore = new AggregatorStoreFake();
-    orgStore = new AggregatorOrgStoreFake();
+    userStore = new UserStoreFake();
+    orgStore = new OrganisationStoreFake();
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
 
-    _setAggregatorStore(aggregatorStore);
-    _setAggregatorOrgStore(orgStore);
+    _setUserStore(userStore);
+    _setOrganisationStore(orgStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
     _setConsentLedger(new ConsentLedgerFake());
@@ -72,8 +72,8 @@ describe('coordinator submit with an org', () => {
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
-    _setAggregatorOrgStore(null);
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
     _setAccessTokenVerifier(null);
@@ -114,7 +114,7 @@ describe('coordinator submit with an org', () => {
     });
     expect(res.statusCode).toBe(201);
     const id = (res.json() as { aggregator_id: string }).aggregator_id;
-    const stored = await aggregatorStore.findById(id);
+    const stored = await userStore.findById(id);
     expect(stored.ok && stored.value?.parentOrgId).toBe('org-1');
   });
 
@@ -188,12 +188,12 @@ describe('coordinator submit with an org', () => {
       expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
     });
 
-    it('keeps a Default-org coordinator\'s own org details', async () => {
+    it("keeps a Default-org coordinator's own org details", async () => {
       orgStore.seed([buildDefaultOrg()]);
       const res = await submit({ ...validBody, org_id: DEFAULT_ID, url: 'https://own.example' });
       expect(res.statusCode).toBe(201);
       const id = (res.json() as { aggregator_id: string }).aggregator_id;
-      const stored = await aggregatorStore.findById(id);
+      const stored = await userStore.findById(id);
       expect(stored.ok && stored.value?.parentOrgId).toBe(DEFAULT_ID);
       expect(stored.ok && stored.value?.isDefaultOrg).toBe(true);
       // The Default org has no shared value: the coordinator keeps its own.
@@ -269,7 +269,7 @@ describe('coordinator submit with an org', () => {
       const res = await submit({ ...validBody, org_id: 'org-1', url: 'https://own.example' });
       expect(res.statusCode).toBe(409);
       expect((res.json() as { error: { code: string } }).error.code).toBe('ORG_DETAILS_READ_ONLY');
-      expect((await aggregatorStore.findByContactEmail(validBody.contact.email)).ok).toBe(true);
+      expect((await userStore.findByContactEmail(validBody.contact.email)).ok).toBe(true);
     });
   });
 });

@@ -8,11 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../../services/auth/access-token.js';
-import {
-  AggregatorStoreFake,
-  buildAggregator,
-  _setAggregatorStore,
-} from '../../services/aggregator-store/index.js';
+import { UserStoreFake, buildAggregator, _setUserStore } from '../../services/user-store/index.js';
 import {
   InMemoryCampaignJobStore,
   _setCampaignJobStore,
@@ -47,11 +43,11 @@ describe('campaign submit — requested audit row (#617)', () => {
 
     _setCampaignJobStore(new InMemoryCampaignJobStore());
 
-    const aggStore = new AggregatorStoreFake();
+    const aggStore = new UserStoreFake();
     aggStore.seed([
       buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
     ]);
-    _setAggregatorStore(aggStore);
+    _setUserStore(aggStore);
 
     auditFake = new CampaignAuditWriterFake();
     _setCampaignAuditWriter(auditFake);
@@ -77,7 +73,7 @@ describe('campaign submit — requested audit row (#617)', () => {
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setCampaignJobStore(null);
     _setCampaignAuditWriter(null);
   });

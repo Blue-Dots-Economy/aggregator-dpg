@@ -4,17 +4,13 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
+import { UserStoreFake, buildAggregator, _setUserStore } from '../services/user-store/index.js';
 import {
-  AggregatorStoreFake,
-  buildAggregator,
-  _setAggregatorStore,
-} from '../services/aggregator-store/index.js';
-import {
-  AggregatorOrgStoreFake,
+  OrganisationStoreFake,
   buildAggregatorOrg,
   buildDefaultOrg,
-  _setAggregatorOrgStore,
-} from '../services/aggregator-org-store/index.js';
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 import { IdpAdminFake, _setIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -77,8 +73,8 @@ const auth = (who: keyof typeof TOKENS) => ({ authorization: `Bearer ${who}` });
 
 describe('console routes /v1/user, /v1/org', () => {
   let app: FastifyInstance;
-  let coordinators: AggregatorStoreFake;
-  let orgs: AggregatorOrgStoreFake;
+  let coordinators: UserStoreFake;
+  let orgs: OrganisationStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
 
@@ -108,8 +104,8 @@ describe('console routes /v1/user, /v1/org', () => {
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
-    coordinators = new AggregatorStoreFake();
-    orgs = new AggregatorOrgStoreFake();
+    coordinators = new UserStoreFake();
+    orgs = new OrganisationStoreFake();
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
 
@@ -179,8 +175,8 @@ describe('console routes /v1/user, /v1/org', () => {
       await identities.link(user, 'keycloak', sub);
     }
 
-    _setAggregatorStore(coordinators);
-    _setAggregatorOrgStore(orgs);
+    _setUserStore(coordinators);
+    _setOrganisationStore(orgs);
     _setIdpAdmin(idp);
     _setMailer(mailer);
     _setNetworkConfig(buildBlueDotConfig());
@@ -200,8 +196,8 @@ describe('console routes /v1/user, /v1/org', () => {
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
-    _setAggregatorOrgStore(null);
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
     _setNetworkConfig(null);
@@ -615,7 +611,9 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('400 on a cursor whose created-at is not a date (decodeUserCursor)', async () => {
-      const res = await post('/v1/user/search', 'na', { cursor: cursorOf({ c: 'not-a-date', i: 'x' }) });
+      const res = await post('/v1/user/search', 'na', {
+        cursor: cursorOf({ c: 'not-a-date', i: 'x' }),
+      });
       expect(res.statusCode).toBe(400);
     });
   });
@@ -661,7 +659,9 @@ describe('console routes /v1/user, /v1/org', () => {
       TOKENS.coord4 = { sub: 'sub-c4', preferred_username: 'c4@x.org', aggregator_id: C4 };
       const res = await get('/v1/user/read/me', 'coord4' as keyof typeof TOKENS);
       expect(res.statusCode).toBe(200);
-      expect((res.json() as { user: { contact: { name: null; phone: null } } }).user.contact).toMatchObject({
+      expect(
+        (res.json() as { user: { contact: { name: null; phone: null } } }).user.contact,
+      ).toMatchObject({
         name: null,
         phone: null,
       });
@@ -719,7 +719,9 @@ describe('console routes /v1/user, /v1/org', () => {
       _setSignalStackWriter(ss);
       const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: ['seeker'] });
       expect(res.statusCode).toBe(502);
-      expect((res.json() as { error: { code: string } }).error.code).toBe('SIGNALSTACK_PUSH_FAILED');
+      expect((res.json() as { error: { code: string } }).error.code).toBe(
+        'SIGNALSTACK_PUSH_FAILED',
+      );
     });
 
     it('503 when the metadata store update fails', async () => {
@@ -739,13 +741,25 @@ describe('console routes /v1/user, /v1/org', () => {
       });
       const res = await patch(`/v1/user/metadata/update/${C5}`, 'a', { serves: ['seeker'] });
       expect(res.statusCode).toBe(502);
-      expect((res.json() as { error: { code: string } }).error.code).toBe('SIGNALSTACK_PUSH_FAILED');
+      expect((res.json() as { error: { code: string } }).error.code).toBe(
+        'SIGNALSTACK_PUSH_FAILED',
+      );
     });
   });
 
   describe('v1-user: decision-failure outcomes (console-shared throwDecisionFailure)', () => {
     it('409 TARGET_ORG_INACTIVE when the coordinator org is no longer active', async () => {
-      orgs.seed([buildAggregatorOrg({ id: ORG_A, slug: 'org-a', displayName: 'Alpha', status: 'pending', ownerUserId: OWNER_A, ownerEmail: 'a@a.org', ownerKcSub: 'sub-a' })]);
+      orgs.seed([
+        buildAggregatorOrg({
+          id: ORG_A,
+          slug: 'org-a',
+          displayName: 'Alpha',
+          status: 'pending',
+          ownerUserId: OWNER_A,
+          ownerEmail: 'a@a.org',
+          ownerKcSub: 'sub-a',
+        }),
+      ]);
       const res = await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' });
       expect(res.statusCode).toBe(409);
       expect((res.json() as { error: { code: string } }).error.code).toBe('TARGET_ORG_INACTIVE');
@@ -760,7 +774,10 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('503 IDP_UNAVAILABLE when enabling the Keycloak user fails on approval', async () => {
-      idp.enableUser = async () => ({ ok: false, error: { code: 'IDP_UNAVAILABLE', message: 'kc down' } });
+      idp.enableUser = async () => ({
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
+      });
       const res = await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' });
       expect(res.statusCode).toBe(503);
     });
@@ -780,7 +797,10 @@ describe('console routes /v1/user, /v1/org', () => {
 
   describe('console-shared notice and wire mapping edges', () => {
     it('still succeeds when the owner-notice email fails to send', async () => {
-      mailer.send = async () => ({ ok: false, error: { code: 'TRANSPORT_FAILED', message: 'smtp down' } });
+      mailer.send = async () => ({
+        ok: false,
+        error: { code: 'TRANSPORT_FAILED', message: 'smtp down' },
+      });
       const res = await post(`/v1/user/decision/${C2}`, 'na', { decision: 'reject', reason: 'x' });
       expect(res.statusCode).toBe(200);
     });
@@ -848,7 +868,9 @@ describe('console routes /v1/user, /v1/org', () => {
     it('filters org search by name prefix', async () => {
       const res = await post('/v1/org/search', 'na', { filter: { name_prefix: 'Alpha' } });
       expect(res.statusCode).toBe(200);
-      expect((res.json() as { orgs: Array<{ id: string }> }).orgs.map((o) => o.id)).toEqual([ORG_A]);
+      expect((res.json() as { orgs: Array<{ id: string }> }).orgs.map((o) => o.id)).toEqual([
+        ORG_A,
+      ]);
     });
 
     it('pages org search with an opaque cursor', async () => {
@@ -899,13 +921,17 @@ describe('console routes /v1/user, /v1/org', () => {
 
     it('404 when the org update reports the row is gone', async () => {
       orgs.update = async () => storeErr('NOT_FOUND');
-      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { url: 'https://x.example.org' });
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        url: 'https://x.example.org',
+      });
       expect(res.statusCode).toBe(404);
     });
 
     it('503 when the org update store fails', async () => {
       orgs.update = async () => storeErr('DB_UNAVAILABLE');
-      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { url: 'https://x.example.org' });
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        url: 'https://x.example.org',
+      });
       expect(res.statusCode).toBe(503);
     });
   });

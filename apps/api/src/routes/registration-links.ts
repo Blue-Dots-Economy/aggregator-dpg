@@ -16,7 +16,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { httpError } from '../errors/http-error.js';
@@ -303,8 +303,8 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       // Aggregator org_slug for the URL namespace. Cached per-create only —
       // worst-case one extra row read per link, which is negligible vs the
       // alternative of denormalising org_slug onto every registration_links row.
-      const aggregatorStore = getAggregatorStore();
-      const aggLookup = await aggregatorStore.findById(auth.aggregatorId);
+      const userStore = getUserStore();
+      const aggLookup = await userStore.findById(auth.aggregatorId);
       if (!aggLookup.ok || !aggLookup.value) {
         throw httpError('DB_UNAVAILABLE', {
           cause: new Error(
@@ -691,7 +691,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
  * don't repeat the lookup-or-throw boilerplate.
  */
 async function resolveOrgSlug(aggregatorId: string): Promise<string> {
-  const result = await getAggregatorStore().findById(aggregatorId);
+  const result = await getUserStore().findById(aggregatorId);
   if (!result.ok || !result.value) {
     throw httpError('DB_UNAVAILABLE', {
       cause: new Error(result.ok ? 'aggregator row missing for caller' : result.error.message),

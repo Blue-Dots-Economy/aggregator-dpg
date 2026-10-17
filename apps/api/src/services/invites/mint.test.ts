@@ -14,16 +14,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyBaseLogger } from 'fastify';
 import pino from 'pino';
 import { FakeMailer } from '@aggregator-dpg/mailer';
+import { UserStoreFake, buildAggregator, _setUserStore } from '../user-store/index.js';
 import {
-  AggregatorStoreFake,
-  buildAggregator,
-  _setAggregatorStore,
-} from '../aggregator-store/index.js';
-import {
-  AggregatorOrgStoreFake,
+  OrganisationStoreFake,
   buildAggregatorOrg,
-  _setAggregatorOrgStore,
-} from '../aggregator-org-store/index.js';
+  _setOrganisationStore,
+} from '../organisation-store/index.js';
 import {
   RegistrationInvitesStoreFake,
   buildRegistrationInvite,
@@ -38,8 +34,8 @@ const ORG_ID = '00000000-0000-0000-0000-0000000000aa';
 describe('mintInviteBatch', () => {
   let invites: RegistrationInvitesStoreFake;
   let mailer: FakeMailer;
-  let coordStore: AggregatorStoreFake;
-  let orgStore: AggregatorOrgStoreFake;
+  let coordStore: UserStoreFake;
+  let orgStore: OrganisationStoreFake;
 
   beforeEach(() => {
     _resetInviteTokenKey();
@@ -47,15 +43,15 @@ describe('mintInviteBatch', () => {
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
     invites = new RegistrationInvitesStoreFake();
     mailer = new FakeMailer();
-    coordStore = new AggregatorStoreFake();
-    orgStore = new AggregatorOrgStoreFake();
-    _setAggregatorStore(coordStore);
-    _setAggregatorOrgStore(orgStore);
+    coordStore = new UserStoreFake();
+    orgStore = new OrganisationStoreFake();
+    _setUserStore(coordStore);
+    _setOrganisationStore(orgStore);
   });
 
   afterEach(() => {
-    _setAggregatorStore(null);
-    _setAggregatorOrgStore(null);
+    _setUserStore(null);
+    _setOrganisationStore(null);
   });
 
   const run = (recipients: InviteRecipient[], over: Partial<MintBatchDeps> = {}) =>

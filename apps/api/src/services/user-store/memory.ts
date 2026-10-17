@@ -5,13 +5,13 @@
  * external behaviour: unique slug / phone / email, `serves` from `type`, the
  * fail-closed consent hook, immutable slug on update, and org details rendered from the
  * coordinator's org with the `legacy_org_details` fallback (0028). Org details
- * are seeded per org id (`AggregatorStoreFake.seedOrgDetails`); the Default org
+ * are seeded per org id (`UserStoreFake.seedOrgDetails`); the Default org
  * is {@link MEMORY_DEFAULT_ORG_ID} unless a test changes it.
  */
 
 import { randomUUID } from 'node:crypto';
 import {
-  AggregatorStoreBase,
+  UserStoreBase,
   type Aggregator,
   type CreateAggregatorInput,
   type ListAggregatorsFilter,
@@ -45,7 +45,7 @@ function safeContactId(email: string, phone: string): string | null {
   }
 }
 
-export class InMemoryAggregatorStore extends AggregatorStoreBase {
+export class InMemoryUserStore extends UserStoreBase {
   protected readonly byId = new Map<string, Aggregator>();
   protected readonly bySlug = new Map<string, string>();
   protected readonly byPhone = new Map<string, string>();
@@ -338,9 +338,7 @@ export class InMemoryAggregatorStore extends AggregatorStoreBase {
       rows = rows.filter((r) => r.serves.length === 0 || r.serves.includes(d));
     }
     // Newest first, id as the tie-break (descending), as Postgres orders.
-    rows.sort(
-      (a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : -1),
-    );
+    rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : -1));
     if (filter.cursor) {
       const c = filter.cursor;
       rows = rows.filter(

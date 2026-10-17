@@ -18,7 +18,7 @@
  */
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { z } from 'zod';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
 import { getCampaignJobStore } from '../services/campaign-job-store/index.js';
 import type {
   CampaignChannel,
@@ -212,7 +212,7 @@ async function resolveRequestedBy(
 ): Promise<string> {
   // The requesting aggregator must be active (fail fast, and it supplies the
   // fallback requester/recipient email below).
-  const found = await getAggregatorStore().findById(aggregatorId);
+  const found = await getUserStore().findById(aggregatorId);
   if (!found.ok || found.value?.status !== 'active') {
     throw httpError('FORBIDDEN', {
       detail: 'requesting aggregator is not active',

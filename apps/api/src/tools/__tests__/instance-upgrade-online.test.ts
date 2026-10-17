@@ -3,8 +3,8 @@ import { IdpAdminFake } from '../../services/idp-admin/testing.js';
 import { IdentityStoreFake } from '../../services/identity-store/testing.js';
 import { IDP_PROVIDER } from '../../services/idp-admin/provider.js';
 import { enableOwnersStep, enrichExitCode, enrichIdentities } from '../instance-upgrade-online.js';
-import { buildAggregatorOrg, buildDefaultOrg } from '../../services/aggregator-org-store/index.js';
-import type { AggregatorOrg } from '../../services/aggregator-org-store/index.js';
+import { buildAggregatorOrg, buildDefaultOrg } from '../../services/organisation-store/index.js';
+import type { AggregatorOrg } from '../../services/organisation-store/index.js';
 import { PLACEHOLDER_OWNER_EMAIL } from '../../services/organisation-root.js';
 
 const C1 = '11111111-1111-4111-8111-111111111111';

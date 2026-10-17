@@ -6,7 +6,7 @@
  */
 
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
-import { InMemoryAggregatorStore, MEMORY_DEFAULT_ORG_ID } from './memory.js';
+import { InMemoryUserStore, MEMORY_DEFAULT_ORG_ID } from './memory.js';
 import type { OrgDetailColumns } from './org-details.js';
 import type { Aggregator, CreateAggregatorInput } from './interface.js';
 import { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
@@ -14,7 +14,7 @@ import { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
 export { NO_CONSENT_WRITE };
 import type { BecknContact, ConsentRecord } from '@aggregator-dpg/shared-primitives/aggregator';
 
-export class AggregatorStoreFake extends InMemoryAggregatorStore {
+export class UserStoreFake extends InMemoryUserStore {
   /**
    * Pre-seed the store with rows. Bypasses the invariant + uniqueness checks
    * applied by `create()` — callers are responsible for keeping seeded data
@@ -97,7 +97,7 @@ export class AggregatorStoreFake extends InMemoryAggregatorStore {
    */
   __setUpdatedAt(id: string, date: Date): void {
     const row = this.byId.get(id);
-    if (!row) throw new Error(`AggregatorStoreFake.__setUpdatedAt: id not found: ${id}`);
+    if (!row) throw new Error(`UserStoreFake.__setUpdatedAt: id not found: ${id}`);
     this.byId.set(id, { ...row, updatedAt: date });
   }
 }

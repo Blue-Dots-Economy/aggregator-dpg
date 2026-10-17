@@ -32,7 +32,7 @@ import {
 } from '../../db/account-writes.js';
 import { IDP_PROVIDER } from '../idp-admin/provider.js';
 import {
-  AggregatorOrgStoreBase,
+  OrganisationStoreBase,
   DEFAULT_ORG_SLUG,
   type AggregatorOrg,
   type CreateOrgInput,
@@ -52,7 +52,7 @@ class ConsentHookError extends Error {
   }
 }
 
-export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
+export class PostgresOrganisationStore extends OrganisationStoreBase {
   async create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
     const start = Date.now();
     try {

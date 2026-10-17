@@ -21,7 +21,7 @@ import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { domainRequiresConsent } from '@aggregator-dpg/network-config/interface';
 import { resolveSubmissionShape, publicHintI18nKey } from '../services/registration-mode/index.js';
@@ -579,10 +579,10 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       const ss = getSignalStackWriter();
       let signalstackOrgId: string | null = null;
       if (ss) {
-        const aggLookup = await getAggregatorStore().findById(link.aggregatorId);
+        const aggLookup = await getUserStore().findById(link.aggregatorId);
         if (!aggLookup.ok) {
           throw httpError('DB_UNAVAILABLE', {
-            fields: { sub_operation: 'aggregatorStore.findById' },
+            fields: { sub_operation: 'userStore.findById' },
           });
         }
         if (!aggLookup.value) {

@@ -9,7 +9,7 @@
 
 import { jwtVerify, createRemoteJWKSet, type JWTPayload } from 'jose';
 import type { FastifyRequest } from 'fastify';
-import { getAggregatorStore } from '../aggregator-store/index.js';
+import { getUserStore } from '../user-store/index.js';
 import { getIdpAdmin } from '../idp-admin/index.js';
 import { KC_ATTR } from '../idp-admin/attributes.js';
 import { getSignalStackWriter } from '../signalstack.js';
@@ -256,18 +256,18 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
     return;
   }
 
-  const store = getAggregatorStore();
+  const store = getUserStore();
   const found = await store.findById(ctx.aggregatorId);
   if (!found.ok) {
     log.warn(
-      { status: 'failure', sub_operation: 'aggregatorStore.findById', code: found.error.code },
+      { status: 'failure', sub_operation: 'userStore.findById', code: found.error.code },
       'aggregator lookup failed during signalstack backfill',
     );
     return;
   }
   if (!found.value) {
     log.warn(
-      { status: 'failure', sub_operation: 'aggregatorStore.findById', reason: 'not_found' },
+      { status: 'failure', sub_operation: 'userStore.findById', reason: 'not_found' },
       'aggregator row missing for approved KC user — manual cleanup required',
     );
     return;

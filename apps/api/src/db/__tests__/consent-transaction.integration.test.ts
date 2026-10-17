@@ -18,8 +18,8 @@ import pg from 'pg';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { PostgresConsentLedger } from '@aggregator-dpg/consent-ledger/postgres';
 import { getDb, getPool, closeDb, _setDbClients } from '../client.js';
-import { PostgresAggregatorStore } from '../../services/aggregator-store/postgres.js';
-import { PostgresAggregatorOrgStore } from '../../services/aggregator-org-store/postgres.js';
+import { PostgresUserStore } from '../../services/user-store/postgres.js';
+import { PostgresOrganisationStore } from '../../services/organisation-store/postgres.js';
 import type { RecordConsentHook } from '../../services/consent-ledger/hook.js';
 
 const realUrl = process.env.INTEGRATION_DATABASE_URL;
@@ -45,8 +45,8 @@ function email(): string {
 
 suite('consent in the create transaction (migration 0029) — integration', () => {
   let pool: pg.Pool;
-  const aggStore = new PostgresAggregatorStore();
-  const orgStore = new PostgresAggregatorOrgStore();
+  const aggStore = new PostgresUserStore();
+  const orgStore = new PostgresOrganisationStore();
   let ledger: PostgresConsentLedger;
   let defaultOrgId = '';
 

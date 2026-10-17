@@ -13,11 +13,11 @@ import type { FastifyBaseLogger } from 'fastify';
 import pino from 'pino';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import {
-  AggregatorOrgStoreFake,
+  OrganisationStoreFake,
   buildAggregatorOrg,
   buildDefaultOrg,
-  _setAggregatorOrgStore,
-} from '../../aggregator-org-store/index.js';
+  _setOrganisationStore,
+} from '../../organisation-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../../idp-admin/index.js';
 import { decideOrg, grantOwnerAccess, type OrgDecisionInput } from '../org.js';
 
@@ -26,14 +26,14 @@ const ORG_ID = '33333333-3333-4333-8333-333333333333';
 const ADMIN = '00000000-0000-4000-8000-0000000000a1';
 
 describe('decideOrg', () => {
-  let store: AggregatorOrgStoreFake;
+  let store: OrganisationStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
   let ownerSub: string;
   let groupId: string;
 
   beforeEach(async () => {
-    store = new AggregatorOrgStoreFake();
+    store = new OrganisationStoreFake();
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
     const u = await idp.createUser({ email: 'owner@org.test', enabled: false });
@@ -42,13 +42,13 @@ describe('decideOrg', () => {
     const g = await idp.createGroup('org:example');
     if (!g.ok) throw new Error('seed group');
     groupId = g.value.id;
-    _setAggregatorOrgStore(store);
+    _setOrganisationStore(store);
     _setIdpAdmin(idp);
     _setMailer(mailer);
   });
 
   afterEach(() => {
-    _setAggregatorOrgStore(null);
+    _setOrganisationStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
   });
@@ -131,7 +131,10 @@ describe('decideOrg', () => {
   it('reports unavailable when the compare-and-set itself errors', async () => {
     seedPending();
     store.approve = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'x' } });
-    expect(await decide({ decision: 'approve' })).toEqual({ kind: 'unavailable', dependency: 'db' });
+    expect(await decide({ decision: 'approve' })).toEqual({
+      kind: 'unavailable',
+      dependency: 'db',
+    });
   });
 
   it('answers already_decided when the approve CAS loses to a concurrent decision', async () => {

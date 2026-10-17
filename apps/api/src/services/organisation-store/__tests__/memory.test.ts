@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { InMemoryAggregatorOrgStore } from '../memory.js';
-import { AggregatorOrgStoreFake, buildAggregatorOrg, buildDefaultOrg } from '../testing.js';
+import { InMemoryOrganisationStore } from '../memory.js';
+import { OrganisationStoreFake, buildAggregatorOrg, buildDefaultOrg } from '../testing.js';
 import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
 
-describe('InMemoryAggregatorOrgStore', () => {
+describe('InMemoryOrganisationStore', () => {
   it('creates and finds an org by slug and owner email', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const created = await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 'enable-india',
@@ -22,7 +22,7 @@ describe('InMemoryAggregatorOrgStore', () => {
   });
 
   it('lowercases owner email so lookups are case-insensitive', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 's',
@@ -34,7 +34,7 @@ describe('InMemoryAggregatorOrgStore', () => {
   });
 
   it('rejects a slug already taken by a non-terminal org with DUPLICATE_SLUG', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 'dup',
@@ -52,7 +52,7 @@ describe('InMemoryAggregatorOrgStore', () => {
   });
 
   it('allows a slug previously used only by a rejected org', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const first = await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 'reusable',
@@ -70,7 +70,7 @@ describe('InMemoryAggregatorOrgStore', () => {
   });
 
   it('listActive returns only active orgs, oldest first', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const a = await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 'a',
@@ -89,7 +89,7 @@ describe('InMemoryAggregatorOrgStore', () => {
   });
 
   it('approve is an atomic single-use guard (second approve returns null)', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const a = await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 'a',
@@ -104,7 +104,7 @@ describe('InMemoryAggregatorOrgStore', () => {
   });
 
   it('update patches fields and bumps updatedAt', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const a = await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 'a',
@@ -118,7 +118,7 @@ describe('InMemoryAggregatorOrgStore', () => {
   });
 
   it('reject stamps write-once rejected_at; approve leaves it null (#726)', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const rej = await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 'r',
@@ -144,7 +144,7 @@ describe('InMemoryAggregatorOrgStore', () => {
   });
 
   it('update can revive a rejected org by clearing rejected_at (#726)', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const a = await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 'a',
@@ -159,9 +159,9 @@ describe('InMemoryAggregatorOrgStore', () => {
   });
 });
 
-describe('InMemoryAggregatorOrgStore contact rules', () => {
+describe('InMemoryOrganisationStore contact rules', () => {
   it('fails a non-canonical owner phone like the Postgres store (no row written)', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const r = await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 'bad-phone',
@@ -174,7 +174,7 @@ describe('InMemoryAggregatorOrgStore contact rules', () => {
   });
 
   it('finds an org by its owner phone', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const r = await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 'with-phone',
@@ -187,7 +187,7 @@ describe('InMemoryAggregatorOrgStore contact rules', () => {
   });
 
   it('returns NOT_FOUND from update / approve / reject for an unknown id', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const results = [
       await store.update('missing', { status: 'active' }),
       await store.approve('missing', 'admin'),
@@ -197,9 +197,9 @@ describe('InMemoryAggregatorOrgStore contact rules', () => {
   });
 });
 
-describe('InMemoryAggregatorOrgStore owners (0027)', () => {
+describe('InMemoryOrganisationStore owners (0027)', () => {
   it('gives one owner person one account across orgs, and reports sharing', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const a = await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 'a',
@@ -229,7 +229,7 @@ describe('InMemoryAggregatorOrgStore owners (0027)', () => {
   });
 
   it('resolves an owner lookup to the live org first, then the newest', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const old = await store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug: 'old',
@@ -254,7 +254,7 @@ describe('InMemoryAggregatorOrgStore owners (0027)', () => {
 
 describe('organisations scoping (0028)', () => {
   it('lists active orgs by name, case-insensitively, Default included', async () => {
-    const store = new AggregatorOrgStoreFake();
+    const store = new OrganisationStoreFake();
     store.seed([
       buildAggregatorOrg({ id: 'b', slug: 'b', displayName: 'beta', status: 'active' }),
       buildDefaultOrg(),
@@ -265,14 +265,14 @@ describe('organisations scoping (0028)', () => {
   });
 
   it('never resolves the Default org as an owner match', async () => {
-    const store = new AggregatorOrgStoreFake();
+    const store = new OrganisationStoreFake();
     store.seed([buildDefaultOrg({ ownerEmail: 'ops@x.org', ownerPhone: '+919000000001' })]);
     expect(await store.findByOwnerEmail('ops@x.org')).toEqual({ ok: true, value: null });
     expect(await store.findByOwnerPhone('+919000000001')).toEqual({ ok: true, value: null });
   });
 
   it('finds the Default org and the seeded root', async () => {
-    const store = new AggregatorOrgStoreFake();
+    const store = new OrganisationStoreFake();
     expect(await store.findRoot()).toEqual({ ok: true, value: null });
     store.seed([buildDefaultOrg()]);
     const root = buildAggregatorOrg({ id: 'nf', slug: 'network', status: 'active' });
@@ -286,7 +286,7 @@ describe('organisations scoping (0028)', () => {
   });
 
   it('never deletes the Default org', async () => {
-    const store = new AggregatorOrgStoreFake();
+    const store = new OrganisationStoreFake();
     store.seed([buildDefaultOrg()]);
     await store.deleteById(buildDefaultOrg().id);
     const d = await store.findDefault();
@@ -294,7 +294,7 @@ describe('organisations scoping (0028)', () => {
   });
 
   it('carries url / locations from create', async () => {
-    const store = new AggregatorOrgStoreFake();
+    const store = new OrganisationStoreFake();
     const loc = [{ geo: { type: 'Point' as const, coordinates: [1, 2] }, address: {} }];
     const r = await store.create({
       recordConsent: NO_CONSENT_WRITE,
@@ -310,9 +310,9 @@ describe('organisations scoping (0028)', () => {
   });
 });
 
-describe('InMemoryAggregatorOrgStore — consent hook (0029)', () => {
+describe('InMemoryOrganisationStore — consent hook (0029)', () => {
   it('runs recordConsent with the new org id', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const seen: string[] = [];
     const created = await store.create({
       slug: 'c1',
@@ -326,7 +326,7 @@ describe('InMemoryAggregatorOrgStore — consent hook (0029)', () => {
   });
 
   it('stores nothing and answers CONSENT_WRITE_FAILED when the hook throws', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const created = await store.create({
       slug: 'c2',
       displayName: 'C2',
@@ -342,8 +342,8 @@ describe('InMemoryAggregatorOrgStore — consent hook (0029)', () => {
   });
 });
 
-describe('InMemoryAggregatorOrgStore — listPending, search, delete and details', () => {
-  const mk = (store: InMemoryAggregatorOrgStore, slug: string, email: string, phone?: string) =>
+describe('InMemoryOrganisationStore — listPending, search, delete and details', () => {
+  const mk = (store: InMemoryOrganisationStore, slug: string, email: string, phone?: string) =>
     store.create({
       recordConsent: NO_CONSENT_WRITE,
       slug,
@@ -353,7 +353,7 @@ describe('InMemoryAggregatorOrgStore — listPending, search, delete and details
     });
 
   it('markCoordinator makes a contact count as shared even without a second org', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const a = await mk(store, 'solo', 'solo@x.org', '+919000000041');
     if (!a.ok) throw new Error('seed');
     expect(await store.ownerIsShared(a.value.id)).toEqual({ ok: true, value: false });
@@ -362,10 +362,22 @@ describe('InMemoryAggregatorOrgStore — listPending, search, delete and details
   });
 
   it('listPending filters by updatedBefore and orders oldest first', async () => {
-    const store = new AggregatorOrgStoreFake();
+    const store = new OrganisationStoreFake();
     store.seed([
-      buildAggregatorOrg({ id: 'p1', slug: 'p1', status: 'pending', createdAt: new Date(1000), updatedAt: new Date(1000) }),
-      buildAggregatorOrg({ id: 'p2', slug: 'p2', status: 'pending', createdAt: new Date(2000), updatedAt: new Date(5000) }),
+      buildAggregatorOrg({
+        id: 'p1',
+        slug: 'p1',
+        status: 'pending',
+        createdAt: new Date(1000),
+        updatedAt: new Date(1000),
+      }),
+      buildAggregatorOrg({
+        id: 'p2',
+        slug: 'p2',
+        status: 'pending',
+        createdAt: new Date(2000),
+        updatedAt: new Date(5000),
+      }),
     ]);
     const all = await store.listPending();
     expect(all.ok && all.value.map((o) => o.id)).toEqual(['p1', 'p2']);
@@ -374,7 +386,7 @@ describe('InMemoryAggregatorOrgStore — listPending, search, delete and details
   });
 
   it('deleteById releases the owner account once it owns no other org', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const a = await mk(store, 'only', 'only@x.org', '+919000000042');
     if (!a.ok) throw new Error('seed');
     await store.deleteById(a.value.id);
@@ -384,7 +396,7 @@ describe('InMemoryAggregatorOrgStore — listPending, search, delete and details
   });
 
   it('search scopes by orgIds, status and name prefix, and pages with a cursor', async () => {
-    const store = new AggregatorOrgStoreFake();
+    const store = new OrganisationStoreFake();
     store.seed([
       buildAggregatorOrg({ id: 'a', slug: 'a', displayName: 'Alpha', status: 'active' }),
       buildAggregatorOrg({ id: 'b', slug: 'b', displayName: 'Beta', status: 'active' }),
@@ -407,7 +419,7 @@ describe('InMemoryAggregatorOrgStore — listPending, search, delete and details
   });
 
   it('search breaks a same-name tie by id', async () => {
-    const store = new AggregatorOrgStoreFake();
+    const store = new OrganisationStoreFake();
     store.seed([
       buildAggregatorOrg({ id: 'id-2', slug: 's2', displayName: 'Same', status: 'active' }),
       buildAggregatorOrg({ id: 'id-1', slug: 's1', displayName: 'same', status: 'active' }),
@@ -416,8 +428,8 @@ describe('InMemoryAggregatorOrgStore — listPending, search, delete and details
     expect(r.ok && r.value.rows.map((o) => o.id)).toEqual(['id-1', 'id-2']);
   });
 
-  it('listOwnedBy returns an owner\'s orgs by name', async () => {
-    const store = new AggregatorOrgStoreFake();
+  it("listOwnedBy returns an owner's orgs by name", async () => {
+    const store = new OrganisationStoreFake();
     store.seed([
       buildAggregatorOrg({ id: 'o1', slug: 'o1', displayName: 'Zeta', ownerUserId: 'owner-1' }),
       buildAggregatorOrg({ id: 'o2', slug: 'o2', displayName: 'Acme', ownerUserId: 'owner-1' }),
@@ -428,7 +440,7 @@ describe('InMemoryAggregatorOrgStore — listPending, search, delete and details
   });
 
   it('update patches org-detail columns in place', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const a = await mk(store, 'det', 'det@x.org', '+919000000043');
     if (!a.ok) throw new Error('seed');
     const u = await store.update(a.value.id, {
@@ -445,7 +457,7 @@ describe('InMemoryAggregatorOrgStore — listPending, search, delete and details
   });
 
   it('deleteIfPending deletes a stale pending org, aborts on a false hook, skips a decided org', async () => {
-    const store = new InMemoryAggregatorOrgStore();
+    const store = new InMemoryOrganisationStore();
     const a = await mk(store, 'del', 'del@x.org', '+919000000044');
     const b = await mk(store, 'keep', 'keep@x.org', '+919000000045');
     const c = await mk(store, 'abort', 'abort@x.org', '+919000000046');

@@ -7,14 +7,14 @@
  */
 import { describe, expect, it } from 'vitest';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
-import { InMemoryAggregatorStore } from '../memory.js';
-import { AggregatorStoreFake, buildAggregator, buildCreateAggregatorInput } from '../testing.js';
+import { InMemoryUserStore } from '../memory.js';
+import { UserStoreFake, buildAggregator, buildCreateAggregatorInput } from '../testing.js';
 
 const contactOf = (email: string, phone: string) => ({ name: 'Asha', email, phone });
 
 /** A store holding one coordinator (`a@x.org`, `+919000000001`); returns its id. */
-async function seeded(): Promise<{ store: InMemoryAggregatorStore; id: string }> {
-  const store = new InMemoryAggregatorStore();
+async function seeded(): Promise<{ store: InMemoryUserStore; id: string }> {
+  const store = new InMemoryUserStore();
   const r = await store.create(
     buildCreateAggregatorInput({ orgSlug: 'one', contact: contactOf('a@x.org', '+919000000001') }),
   );
@@ -22,7 +22,7 @@ async function seeded(): Promise<{ store: InMemoryAggregatorStore; id: string }>
   return { store, id: r.value.id };
 }
 
-describe('InMemoryAggregatorStore.create', () => {
+describe('InMemoryUserStore.create', () => {
   it('stores the contact id, lowercased email and phone', async () => {
     const { store, id } = await seeded();
     const found = await store.findById(id);
@@ -43,7 +43,7 @@ describe('InMemoryAggregatorStore.create', () => {
   });
 });
 
-describe('InMemoryAggregatorStore lookups', () => {
+describe('InMemoryUserStore lookups', () => {
   it('returns null for an unknown slug, phone or email', async () => {
     const { store } = await seeded();
     expect(await store.findBySlug('nope')).toEqual({ ok: true, value: null });
@@ -58,7 +58,7 @@ describe('InMemoryAggregatorStore lookups', () => {
   });
 });
 
-describe('InMemoryAggregatorStore.update', () => {
+describe('InMemoryUserStore.update', () => {
   it('re-derives the contact id when the phone changes', async () => {
     const { store, id } = await seeded();
     const r = await store.update(id, {
@@ -87,7 +87,7 @@ describe('InMemoryAggregatorStore.update', () => {
   });
 
   it('returns NOT_FOUND for an unknown id on every write', async () => {
-    const store = new InMemoryAggregatorStore();
+    const store = new InMemoryUserStore();
     const update = await store.update('missing', { name: 'x', updatedBy: 't' });
     const stamp = await store.updateSignalstackOrgId('missing', 'org_1', 't');
     const del = await store.deleteById('missing');
@@ -98,9 +98,9 @@ describe('InMemoryAggregatorStore.update', () => {
   });
 });
 
-describe('InMemoryAggregatorStore — consent hook and serves (0029)', () => {
+describe('InMemoryUserStore — consent hook and serves (0029)', () => {
   it('runs recordConsent with the new id and stores the row', async () => {
-    const store = new InMemoryAggregatorStore();
+    const store = new InMemoryUserStore();
     const seen: string[] = [];
     const r = await store.create(
       buildCreateAggregatorInput({
@@ -115,7 +115,7 @@ describe('InMemoryAggregatorStore — consent hook and serves (0029)', () => {
   });
 
   it('stores nothing and answers CONSENT_WRITE_FAILED when the hook throws', async () => {
-    const store = new InMemoryAggregatorStore();
+    const store = new InMemoryUserStore();
     const input = buildCreateAggregatorInput({
       recordConsent: async () => {
         throw new Error('ledger down');
@@ -134,7 +134,7 @@ describe('InMemoryAggregatorStore — consent hook and serves (0029)', () => {
     ['seeker', ['seeker'], 'seeker'],
     [null, [], null],
   ] as const)('type %s → serves %j, type %s', async (type, serves, readType) => {
-    const store = new InMemoryAggregatorStore();
+    const store = new InMemoryUserStore();
     const r = await store.create(buildCreateAggregatorInput({ type }));
     expect(r.ok && r.value.serves).toEqual(serves);
     expect(r.ok && r.value.type).toBe(readType);
@@ -142,7 +142,7 @@ describe('InMemoryAggregatorStore — consent hook and serves (0029)', () => {
   });
 
   it('a type patch rewrites serves', async () => {
-    const store = new InMemoryAggregatorStore();
+    const store = new InMemoryUserStore();
     const r = await store.create(buildCreateAggregatorInput());
     if (!r.ok) throw new Error('seed');
     const u = await store.update(r.value.id, { type: 'provider', updatedBy: 't' });
@@ -151,17 +151,16 @@ describe('InMemoryAggregatorStore — consent hook and serves (0029)', () => {
   });
 });
 
-describe('InMemoryAggregatorStore CAS, list, search and counts', () => {
-
+describe('InMemoryUserStore CAS, list, search and counts', () => {
   it('approveFromPending / rejectFromPending return null for an already-decided row', async () => {
-    const store = new AggregatorStoreFake();
+    const store = new UserStoreFake();
     store.seed([buildAggregator({ id: 'a1', status: 'active' })]);
     expect(await store.approveFromPending('a1', 't')).toEqual({ ok: true, value: null });
     expect(await store.rejectFromPending('a1', 't')).toEqual({ ok: true, value: null });
   });
 
   it('rejectFromPending stamps inactive + rejected_at for a pending row', async () => {
-    const store = new AggregatorStoreFake();
+    const store = new UserStoreFake();
     store.seed([buildAggregator({ id: 'p1', status: 'pending' })]);
     const r = await store.rejectFromPending('p1', 't');
     expect(r.ok && r.value?.status).toBe('inactive');
@@ -169,7 +168,7 @@ describe('InMemoryAggregatorStore CAS, list, search and counts', () => {
   });
 
   it('list filters by status and updatedBefore, honouring offset and limit', async () => {
-    const store = new AggregatorStoreFake();
+    const store = new UserStoreFake();
     store.seed([
       buildAggregator({ id: 'r1', orgSlug: 's1', status: 'active', createdAt: new Date(3000) }),
       buildAggregator({ id: 'r2', orgSlug: 's2', status: 'active', createdAt: new Date(2000) }),
@@ -183,11 +182,32 @@ describe('InMemoryAggregatorStore CAS, list, search and counts', () => {
   });
 
   it('search scopes by orgIds, status and serves, and pages with a cursor', async () => {
-    const store = new AggregatorStoreFake();
+    const store = new UserStoreFake();
     store.seed([
-      buildAggregator({ id: 'c1', orgSlug: 'o1', parentOrgId: 'org-a', serves: ['seeker'], status: 'active', createdAt: new Date(3000) }),
-      buildAggregator({ id: 'c2', orgSlug: 'o2', parentOrgId: 'org-a', serves: [], status: 'active', createdAt: new Date(2000) }),
-      buildAggregator({ id: 'c3', orgSlug: 'o3', parentOrgId: 'org-b', serves: ['provider'], status: 'pending', createdAt: new Date(1000) }),
+      buildAggregator({
+        id: 'c1',
+        orgSlug: 'o1',
+        parentOrgId: 'org-a',
+        serves: ['seeker'],
+        status: 'active',
+        createdAt: new Date(3000),
+      }),
+      buildAggregator({
+        id: 'c2',
+        orgSlug: 'o2',
+        parentOrgId: 'org-a',
+        serves: [],
+        status: 'active',
+        createdAt: new Date(2000),
+      }),
+      buildAggregator({
+        id: 'c3',
+        orgSlug: 'o3',
+        parentOrgId: 'org-b',
+        serves: ['provider'],
+        status: 'pending',
+        createdAt: new Date(1000),
+      }),
     ]);
     const scoped = await store.search({ orgIds: ['org-a'], serves: 'seeker', limit: 20 });
     // org-a rows serving seeker: c1 (explicit) and c2 (serves-all).
@@ -206,7 +226,7 @@ describe('InMemoryAggregatorStore CAS, list, search and counts', () => {
   });
 
   it('countByOrg tallies totals and pending per requested org', async () => {
-    const store = new AggregatorStoreFake();
+    const store = new UserStoreFake();
     store.seed([
       buildAggregator({ id: 'c1', orgSlug: 'o1', parentOrgId: 'org-a', status: 'active' }),
       buildAggregator({ id: 'c2', orgSlug: 'o2', parentOrgId: 'org-a', status: 'pending' }),
@@ -218,7 +238,7 @@ describe('InMemoryAggregatorStore CAS, list, search and counts', () => {
   });
 
   it('findByParentOrgId returns the org members', async () => {
-    const store = new AggregatorStoreFake();
+    const store = new UserStoreFake();
     store.seed([
       buildAggregator({ id: 'c1', orgSlug: 'o1', parentOrgId: 'org-a' }),
       buildAggregator({ id: 'c2', orgSlug: 'o2', parentOrgId: 'org-b' }),
@@ -228,7 +248,7 @@ describe('InMemoryAggregatorStore CAS, list, search and counts', () => {
   });
 
   it('updateStatus and updateSignalstackOrgId write through', async () => {
-    const store = new AggregatorStoreFake();
+    const store = new UserStoreFake();
     store.seed([buildAggregator({ id: 's1', status: 'pending' })]);
     const st = await store.updateStatus('s1', 'active', 't');
     expect(st.ok && st.value.status).toBe('active');
@@ -237,7 +257,7 @@ describe('InMemoryAggregatorStore CAS, list, search and counts', () => {
   });
 
   it('re-indexes email and phone when an update changes both', async () => {
-    const store = new InMemoryAggregatorStore();
+    const store = new InMemoryUserStore();
     const created = await store.create(
       buildCreateAggregatorInput({
         orgSlug: 'idx',
@@ -257,19 +277,25 @@ describe('InMemoryAggregatorStore CAS, list, search and counts', () => {
   });
 
   it('a serves patch rewrites serves and the derived type', async () => {
-    const store = new InMemoryAggregatorStore();
+    const store = new InMemoryUserStore();
     const r = await store.create(buildCreateAggregatorInput());
     if (!r.ok) throw new Error('seed');
-    const u = await store.update(r.value.id, { serves: ['seeker', 'seeker', 'provider'], updatedBy: 't' });
+    const u = await store.update(r.value.id, {
+      serves: ['seeker', 'seeker', 'provider'],
+      updatedBy: 't',
+    });
     expect(u.ok && u.value.serves).toEqual(['seeker', 'provider']);
     expect(u.ok && u.value.type).toBe('seeker');
   });
 
   it('deleteIfPending deletes a stale pending row, aborts on a false hook, skips a decided row', async () => {
-    const store = new InMemoryAggregatorStore();
+    const store = new InMemoryUserStore();
     const mk = async (slug: string, phone: string) =>
       store.create(
-        buildCreateAggregatorInput({ orgSlug: slug, contact: { name: 'A', email: `${slug}@x.org`, phone } }),
+        buildCreateAggregatorInput({
+          orgSlug: slug,
+          contact: { name: 'A', email: `${slug}@x.org`, phone },
+        }),
       );
     const a = await mk('del', '+919000000021');
     const b = await mk('keep', '+919000000022');
@@ -290,13 +316,18 @@ describe('InMemoryAggregatorStore CAS, list, search and counts', () => {
   });
 
   it('renders an alternate phone and re-renders seeded org details on read', async () => {
-    const store = new AggregatorStoreFake();
+    const store = new UserStoreFake();
     store.seedOrgDetails('org-d', { url: 'https://org-d.example', legalName: 'Org D Ltd' });
     const r = await store.create(
       buildCreateAggregatorInput({
         orgSlug: 'altp',
         orgId: 'org-d',
-        contact: { name: 'A', email: 'altp@x.org', phone: '+919000000031', alternatePhone: '+919000000032' },
+        contact: {
+          name: 'A',
+          email: 'altp@x.org',
+          phone: '+919000000031',
+          alternatePhone: '+919000000032',
+        },
       }),
     );
     expect(r.ok && r.value.contact.alternatePhone).toBe('+919000000032');

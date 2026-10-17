@@ -3,12 +3,12 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { AggregatorStoreFake, _setAggregatorStore } from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore } from '../services/user-store/index.js';
 import {
-  AggregatorOrgStoreFake,
+  OrganisationStoreFake,
   buildAggregatorOrg,
-  _setAggregatorOrgStore,
-} from '../services/aggregator-org-store/index.js';
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 
@@ -17,7 +17,7 @@ const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
 
 describe('cleanup-stale — org prune', () => {
   let app: FastifyInstance;
-  let orgStore: AggregatorOrgStoreFake;
+  let orgStore: OrganisationStoreFake;
   let idp: IdpAdminFake;
 
   beforeEach(async () => {
@@ -25,10 +25,10 @@ describe('cleanup-stale — org prune', () => {
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
-    _setAggregatorStore(new AggregatorStoreFake());
-    orgStore = new AggregatorOrgStoreFake();
+    _setUserStore(new UserStoreFake());
+    orgStore = new OrganisationStoreFake();
     idp = new IdpAdminFake();
-    _setAggregatorOrgStore(orgStore);
+    _setOrganisationStore(orgStore);
     _setIdpAdmin(idp);
     _setAccessTokenVerifier(async (token) => {
       if (token === SERVICE_BEARER) {
@@ -42,8 +42,8 @@ describe('cleanup-stale — org prune', () => {
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
-    _setAggregatorOrgStore(null);
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setIdpAdmin(null);
     _setAccessTokenVerifier(null);
   });

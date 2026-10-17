@@ -5,12 +5,12 @@
  * directly (testing rule).
  */
 
-import { InMemoryAggregatorOrgStore } from './memory.js';
+import { InMemoryOrganisationStore } from './memory.js';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import { DEFAULT_ORG_SLUG, type AggregatorOrg } from './interface.js';
 export { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
 
-export class AggregatorOrgStoreFake extends InMemoryAggregatorOrgStore {
+export class OrganisationStoreFake extends InMemoryOrganisationStore {
   /**
    * Pre-seed rows, bypassing create()'s slug check. Callers are responsible
    * for keeping seeded data internally consistent.

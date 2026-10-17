@@ -4,19 +4,15 @@ import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import {
-  AggregatorOrgStoreFake,
+  OrganisationStoreFake,
   buildAggregatorOrg,
-  _setAggregatorOrgStore,
-} from '../services/aggregator-org-store/index.js';
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 import {
   RegistrationInvitesStoreFake,
   _setRegistrationInvitesStore,
 } from '../services/registration-invites-store/index.js';
-import {
-  AggregatorStoreFake,
-  buildAggregator,
-  _setAggregatorStore,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, buildAggregator, _setUserStore } from '../services/user-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { mintGrantToken, _resetGrantTokenKey } from '../services/grant-token.js';
 import {
@@ -28,10 +24,10 @@ const ORG_ID = '00000000-0000-0000-0000-0000000000d1';
 
 describe('invite mint routes', () => {
   let app: FastifyInstance;
-  let orgStore: AggregatorOrgStoreFake;
+  let orgStore: OrganisationStoreFake;
   let invites: RegistrationInvitesStoreFake;
   let mailer: FakeMailer;
-  let coordinators: AggregatorStoreFake;
+  let coordinators: UserStoreFake;
 
   beforeEach(async () => {
     _resetGrantTokenKey();
@@ -39,7 +35,7 @@ describe('invite mint routes', () => {
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
-    orgStore = new AggregatorOrgStoreFake();
+    orgStore = new OrganisationStoreFake();
     invites = new RegistrationInvitesStoreFake();
     mailer = new FakeMailer();
 
@@ -53,9 +49,9 @@ describe('invite mint routes', () => {
       }),
     ]);
 
-    coordinators = new AggregatorStoreFake();
-    _setAggregatorStore(coordinators);
-    _setAggregatorOrgStore(orgStore);
+    coordinators = new UserStoreFake();
+    _setUserStore(coordinators);
+    _setOrganisationStore(orgStore);
     _setRegistrationInvitesStore(invites);
     _setMailer(mailer);
     _setInviteMintRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
@@ -66,8 +62,8 @@ describe('invite mint routes', () => {
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
-    _setAggregatorOrgStore(null);
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setRegistrationInvitesStore(null);
     _setMailer(null);
     _setInviteMintRateChecker(null);

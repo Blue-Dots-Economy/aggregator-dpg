@@ -23,11 +23,7 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore, buildAggregator } from '../services/user-store/index.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { _setDbClients } from '../db/client.js';
@@ -142,7 +138,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — item_loca
   let fakeDb: ReturnType<typeof buildFakeDb>;
   let app: FastifyInstance;
   let signalstack: SignalStackWriterFake;
-  let aggregatorStore: AggregatorStoreFake;
+  let userStore: UserStoreFake;
 
   beforeEach(async () => {
     // Treat signalstack as enabled so getSignalStackWriter returns our fake.
@@ -153,8 +149,8 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — item_loca
 
     // Aggregator seeded with a signalstackOrgId so the route doesn't bail
     // with SIGNALSTACK_ORG_NOT_REGISTERED before it gets to onboard().
-    aggregatorStore = new AggregatorStoreFake();
-    aggregatorStore.seed([
+    userStore = new UserStoreFake();
+    userStore.seed([
       buildAggregator({
         id: AGG_ID,
         orgSlug: ORG_SLUG,
@@ -163,7 +159,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — item_loca
         signalstackOrgId: ORG_ID,
       }),
     ]);
-    _setAggregatorStore(aggregatorStore);
+    _setUserStore(userStore);
 
     signalstack = new SignalStackWriterFake();
     _setSignalStackWriter(signalstack);
@@ -196,7 +192,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — item_loca
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setSignalStackWriter(null);
     _setNetworkConfig(null);
     _setRegistrationLinksStore(null);

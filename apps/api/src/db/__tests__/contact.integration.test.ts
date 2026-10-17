@@ -34,8 +34,8 @@ import pg from 'pg';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import { getDb, getPool, closeDb, _setDbClients } from '../client.js';
-import { PostgresAggregatorStore } from '../../services/aggregator-store/postgres.js';
-import { PostgresAggregatorOrgStore } from '../../services/aggregator-org-store/postgres.js';
+import { PostgresUserStore } from '../../services/user-store/postgres.js';
+import { PostgresOrganisationStore } from '../../services/organisation-store/postgres.js';
 import { NO_CONSENT_WRITE } from '../../services/consent-ledger/hook.js';
 
 const realUrl = process.env.INTEGRATION_DATABASE_URL;
@@ -315,7 +315,7 @@ suite('contact (migration 0025) — integration', () => {
     it('aggregator store composes the Beckn contact and finds by email/phone', async (ctx) => {
       // Store code is HEAD's: it needs HEAD's schema.
       if (!headSchema) ctx.skip();
-      const store = new PostgresAggregatorStore();
+      const store = new PostgresUserStore();
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const p = phone();
       const created = await store.create({
@@ -360,7 +360,7 @@ suite('contact (migration 0025) — integration', () => {
     it('org store persists the owner name and finds by owner phone', async (ctx) => {
       // Store code is HEAD's: it needs HEAD's schema.
       if (!headSchema) ctx.skip();
-      const store = new PostgresAggregatorOrgStore();
+      const store = new PostgresOrganisationStore();
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const p = phone();
       const created = await store.create({
@@ -468,7 +468,7 @@ suite('contact (migration 0025) — integration', () => {
         [`it-${randomUUID().slice(0, 8)}`, JSON.stringify(legacyContact), JSON.stringify(CONSENT)],
       );
       try {
-        const found = await new PostgresAggregatorStore().findById(ins.rows[0].id);
+        const found = await new PostgresUserStore().findById(ins.rows[0].id);
         expect(found.ok).toBe(true);
         if (!found.ok || !found.value) return;
         expect(JSON.stringify(found.value.contact)).toBe(JSON.stringify(ins.rows[0].contact));
@@ -480,7 +480,7 @@ suite('contact (migration 0025) — integration', () => {
     it('an app-written row serialises exactly as the legacy jsonb would have (D9)', async (ctx) => {
       // Store code is HEAD's: it needs HEAD's schema.
       if (!headSchema) ctx.skip();
-      const store = new PostgresAggregatorStore();
+      const store = new PostgresUserStore();
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const input = { name: 'Asha', email, phone: phone(), gstNumber: 'G1', company: 'Acme' };
       const created = await store.create({
@@ -515,7 +515,7 @@ suite('contact (migration 0025) — integration', () => {
     it('app writes are strict: a second person with the same email is DUPLICATE_EMAIL', async (ctx) => {
       // Store code is HEAD's: it needs HEAD's schema.
       if (!headSchema) ctx.skip();
-      const store = new PostgresAggregatorStore();
+      const store = new PostgresUserStore();
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const base = {
         actorType: 'aggregator' as const,
@@ -550,7 +550,7 @@ suite('contact (migration 0025) — integration', () => {
     it('one coordinator row per person: the same email+phone twice is DUPLICATE_EMAIL', async (ctx) => {
       // Store code is HEAD's: it needs HEAD's schema.
       if (!headSchema) ctx.skip();
-      const store = new PostgresAggregatorStore();
+      const store = new PostgresUserStore();
       const person = {
         name: 'Twice',
         email: `it-${randomUUID().slice(0, 8)}@example.org`,
@@ -594,8 +594,8 @@ suite('contact (migration 0025) — integration', () => {
       if (!headSchema) ctx.skip();
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const p = phone();
-      const aggStore = new PostgresAggregatorStore();
-      const orgStore = new PostgresAggregatorOrgStore();
+      const aggStore = new PostgresUserStore();
+      const orgStore = new PostgresOrganisationStore();
       const coord = await aggStore.create({
         recordConsent: NO_CONSENT_WRITE,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,
@@ -653,7 +653,7 @@ suite('contact (migration 0025) — integration', () => {
     it('findByOwnerPhone matches contact_phone_unique (any status); deleting the org frees the phone', async (ctx) => {
       // Store code is HEAD's: it needs HEAD's schema.
       if (!headSchema) ctx.skip();
-      const store = new PostgresAggregatorOrgStore();
+      const store = new PostgresOrganisationStore();
       const p = phone();
       const created = await store.create({
         recordConsent: NO_CONSENT_WRITE,
@@ -779,7 +779,7 @@ suite('contact (migration 0025) — integration', () => {
 
     it('still garbage-collects a contact when its last row is deleted', async (ctx) => {
       if (legacy) ctx.skip();
-      const store = new PostgresAggregatorStore();
+      const store = new PostgresUserStore();
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const created = await store.create({
         recordConsent: NO_CONSENT_WRITE,
@@ -802,8 +802,8 @@ suite('contact (migration 0025) — integration', () => {
   });
   describe('app writes', () => {
     it("refuses to move a coordinator onto another person's contact (ContactTakenError)", async () => {
-      const aggStore = new PostgresAggregatorStore();
-      const orgStore = new PostgresAggregatorOrgStore();
+      const aggStore = new PostgresUserStore();
+      const orgStore = new PostgresOrganisationStore();
       const ownerEmail = `it-${randomUUID().slice(0, 8)}@example.org`;
       const ownerPhone = phone();
       const org = await orgStore.create({

@@ -4,21 +4,17 @@ import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import {
-  AggregatorOrgStoreFake,
+  OrganisationStoreFake,
   buildAggregatorOrg,
   buildDefaultOrg,
-  _setAggregatorOrgStore,
-  AggregatorOrgStoreBase,
+  _setOrganisationStore,
+  OrganisationStoreBase,
   type AggregatorOrg,
   type CreateOrgInput,
   type OrgStoreResult,
-} from '../services/aggregator-org-store/index.js';
+} from '../services/organisation-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
-import {
-  AggregatorStoreFake,
-  buildAggregator,
-  _setAggregatorStore,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, buildAggregator, _setUserStore } from '../services/user-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -40,11 +36,11 @@ const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
 
 describe('aggregator-orgs routes', () => {
   let app: FastifyInstance;
-  let orgStore: AggregatorOrgStoreFake;
+  let orgStore: OrganisationStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
   let consentLedger: ConsentLedgerFake;
-  let aggregatorStore: AggregatorStoreFake;
+  let userStore: UserStoreFake;
 
   beforeEach(async () => {
     _resetTokenKey();
@@ -54,7 +50,7 @@ describe('aggregator-orgs routes', () => {
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
-    orgStore = new AggregatorOrgStoreFake();
+    orgStore = new OrganisationStoreFake();
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
     consentLedger = new ConsentLedgerFake();
@@ -72,9 +68,9 @@ describe('aggregator-orgs routes', () => {
     );
     loadConsentConfigMock.mockImplementation(actualLoader.loadConsentConfig);
 
-    aggregatorStore = new AggregatorStoreFake();
-    _setAggregatorStore(aggregatorStore);
-    _setAggregatorOrgStore(orgStore);
+    userStore = new UserStoreFake();
+    _setUserStore(userStore);
+    _setOrganisationStore(orgStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
     _setConsentLedger(consentLedger);
@@ -90,7 +86,7 @@ describe('aggregator-orgs routes', () => {
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorOrgStore(null);
+    _setOrganisationStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
     _setConsentLedger(null);
@@ -108,7 +104,7 @@ describe('aggregator-orgs routes', () => {
 
   describe('one person per email/phone across coordinators and org owners (contact, 0025)', () => {
     it('409 OWNER_ALREADY_REGISTERED before any write when a coordinator holds the owner email', async () => {
-      aggregatorStore.seed([
+      userStore.seed([
         buildAggregator({
           contact: { name: 'Ravi', email: 'ravi@enable.org', phone: '+919999900000' },
         }),
@@ -130,7 +126,7 @@ describe('aggregator-orgs routes', () => {
     });
 
     it('409 PHONE_EXISTS when a coordinator holds the owner phone', async () => {
-      aggregatorStore.seed([
+      userStore.seed([
         buildAggregator({
           contact: { name: 'Someone', email: 'someone@else.org', phone: '+919876500000' },
         }),
@@ -742,7 +738,7 @@ describe('aggregator-orgs routes', () => {
 
   it('maps a DUPLICATE_SLUG store error to ORG_SLUG_TAKEN (409)', async () => {
     // A store stub that always reports a slug collision on create.
-    class DupSlugStore extends AggregatorOrgStoreBase {
+    class DupSlugStore extends OrganisationStoreBase {
       async create(_i: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
         return { ok: false, error: { code: 'DUPLICATE_SLUG', message: 'taken' } };
       }
@@ -795,7 +791,7 @@ describe('aggregator-orgs routes', () => {
         return { ok: true, value: 'not_pending' };
       }
     }
-    _setAggregatorOrgStore(new DupSlugStore());
+    _setOrganisationStore(new DupSlugStore());
     const res = await app.inject({
       method: 'POST',
       url: '/v1/orgs/create',
@@ -812,9 +808,9 @@ describe('aggregator-orgs routes', () => {
   ] as const)(
     'maps a %s store error (a race past the pre-check) to %s (409)',
     async (storeCode, httpCode) => {
-      const racing = new AggregatorOrgStoreFake();
+      const racing = new OrganisationStoreFake();
       racing.create = async () => ({ ok: false, error: { code: storeCode, message: 'race' } });
-      _setAggregatorOrgStore(racing);
+      _setOrganisationStore(racing);
       const res = await app.inject({
         method: 'POST',
         url: '/v1/orgs/create',
@@ -884,7 +880,7 @@ describe('aggregator-orgs routes', () => {
           error: { code: 'DB_UNAVAILABLE' as const, message: 'db down' },
         });
       if (method === 'findByOwnerPhone') orgStore.findByOwnerPhone = down;
-      else aggregatorStore[method] = down;
+      else userStore[method] = down;
       const res = await app.inject({
         method: 'POST',
         url: '/v1/orgs/create',

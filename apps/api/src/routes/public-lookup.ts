@@ -15,7 +15,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { httpError } from '../errors/http-error.js';
@@ -121,10 +121,10 @@ export async function registerPublicLookupRoute(app: FastifyInstance): Promise<v
       // missing signalstack_org_id both surface as 404 — the lookup
       // endpoint is opaque about whether a given slug exists yet, by
       // design (anonymous enumeration prevention).
-      const aggLookup = await getAggregatorStore().findBySlug(orgSlug);
+      const aggLookup = await getUserStore().findBySlug(orgSlug);
       if (!aggLookup.ok) {
         throw httpError('DB_UNAVAILABLE', {
-          fields: { sub_operation: 'aggregatorStore.findBySlug' },
+          fields: { sub_operation: 'userStore.findBySlug' },
         });
       }
       if (!aggLookup.value || !aggLookup.value.signalstackOrgId) {

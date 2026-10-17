@@ -16,8 +16,8 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { getDb, getPool, closeDb, _setDbClients } from '../client.js';
-import { PostgresAggregatorStore } from '../../services/aggregator-store/postgres.js';
-import { PostgresAggregatorOrgStore } from '../../services/aggregator-org-store/postgres.js';
+import { PostgresUserStore } from '../../services/user-store/postgres.js';
+import { PostgresOrganisationStore } from '../../services/organisation-store/postgres.js';
 import { PostgresIdentityStore } from '../../services/identity-store/postgres.js';
 import { NO_CONSENT_WRITE } from '../../services/consent-ledger/hook.js';
 
@@ -43,8 +43,8 @@ function email(): string {
 
 suite('users (migration 0027) — integration', () => {
   let pool: pg.Pool;
-  const aggStore = new PostgresAggregatorStore();
-  const orgStore = new PostgresAggregatorOrgStore();
+  const aggStore = new PostgresUserStore();
+  const orgStore = new PostgresOrganisationStore();
   const identities = new PostgresIdentityStore();
   /** The Default org (0028): every coordinator needs an org. */
   let defaultOrgId = '';

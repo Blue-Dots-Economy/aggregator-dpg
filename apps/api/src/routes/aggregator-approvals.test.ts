@@ -2,17 +2,13 @@ import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { SignJWT } from 'jose';
 import { buildApp } from '../app.js';
+import { UserStoreFake, _setUserStore, buildAggregator } from '../services/user-store/index.js';
 import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../services/aggregator-store/index.js';
-import {
-  AggregatorOrgStoreFake,
+  OrganisationStoreFake,
   buildAggregatorOrg,
   buildDefaultOrg,
-  _setAggregatorOrgStore,
-} from '../services/aggregator-org-store/index.js';
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import {
@@ -29,7 +25,7 @@ import { SignalStackWriterBase } from '@aggregator-dpg/signalstack-writer/interf
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import { getIdentityStore } from '../services/identity-store/index.js';
-import { MEMORY_DEFAULT_ORG_ID } from '../services/aggregator-store/memory.js';
+import { MEMORY_DEFAULT_ORG_ID } from '../services/user-store/memory.js';
 
 /** The Default org every coordinator here belongs to unless a test moves it. */
 const DEFAULT_ORG = MEMORY_DEFAULT_ORG_ID;
@@ -39,17 +35,17 @@ const aggregatorId = '11111111-1111-1111-1111-111111111111';
 
 describe('admin approval routes', () => {
   let app: FastifyInstance;
-  let aggregatorStore: AggregatorStoreFake;
+  let userStore: UserStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
   let signalstack: SignalStackWriterFake;
-  let orgStore: AggregatorOrgStoreFake;
+  let orgStore: OrganisationStoreFake;
   let kcUserId: string;
 
   /** Moves a seeded coordinator to another org (the store has no org patch since 0028). */
   function setCoordinatorOrg(id: string, orgId: string): void {
-    const row = aggregatorStore.findByIdSync(id);
-    aggregatorStore.seed([{ ...row, parentOrgId: orgId, isDefaultOrg: orgId === DEFAULT_ORG }]);
+    const row = userStore.findByIdSync(id);
+    userStore.seed([{ ...row, parentOrgId: orgId, isDefaultOrg: orgId === DEFAULT_ORG }]);
   }
 
   beforeEach(async () => {
@@ -69,8 +65,8 @@ describe('admin approval routes', () => {
     process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
     process.env.SIGNALSTACK_ACTING_ORG_ID = 'org_platform';
 
-    aggregatorStore = new AggregatorStoreFake();
-    aggregatorStore.seed([
+    userStore = new UserStoreFake();
+    userStore.seed([
       buildAggregator({
         id: aggregatorId,
         orgSlug: 'trrain-abcd',
@@ -85,7 +81,7 @@ describe('admin approval routes', () => {
         status: 'pending',
       }),
     ]);
-    _setAggregatorStore(aggregatorStore);
+    _setUserStore(userStore);
 
     idp = new IdpAdminFake();
     const created = await idp.createUser({
@@ -105,10 +101,10 @@ describe('admin approval routes', () => {
     signalstack = new SignalStackWriterFake();
     _setSignalStackWriter(signalstack);
 
-    orgStore = new AggregatorOrgStoreFake();
+    orgStore = new OrganisationStoreFake();
     // Every coordinator has an org since 0028; the seeded one is in Default.
     orgStore.seed([buildDefaultOrg()]);
-    _setAggregatorOrgStore(orgStore);
+    _setOrganisationStore(orgStore);
 
     // Approval flow now reads cfg.domainIds from the network config —
     // pin a blue_dot-shaped config so the legacy `['seeker','provider']`
@@ -121,12 +117,12 @@ describe('admin approval routes', () => {
   afterAll(async () => {
     await app?.close();
     _setApprovalVerifyRateChecker(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
     _setSignalStackWriter(null);
     _setNetworkConfig(null);
-    _setAggregatorOrgStore(null);
+    _setOrganisationStore(null);
   });
 
   it('GET /read/:id returns a 429 HTML page when the verify rate limit is exceeded', async () => {
@@ -167,7 +163,7 @@ describe('admin approval routes', () => {
     expect(res.statusCode).toBe(429);
     expect(res.body).toContain('Too many attempts');
     // The limit fires before any decision is applied.
-    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    const dbAfter = await userStore.findById(aggregatorId);
     if (dbAfter.ok && dbAfter.value) expect(dbAfter.value.status).toBe('pending');
   });
 
@@ -215,7 +211,7 @@ describe('admin approval routes', () => {
   });
 
   it('GET /read/:id shows already-approved when aggregator.status=active', async () => {
-    await aggregatorStore.updateStatus(aggregatorId, 'active', 'admin');
+    await userStore.updateStatus(aggregatorId, 'active', 'admin');
     const { token } = await mintApprovalToken({
       org: DEFAULT_ORG,
       aggregatorId,
@@ -230,7 +226,7 @@ describe('admin approval routes', () => {
   });
 
   it('GET /read/:id shows already-rejected when aggregator.status=inactive', async () => {
-    await aggregatorStore.updateStatus(aggregatorId, 'inactive', 'admin');
+    await userStore.updateStatus(aggregatorId, 'inactive', 'admin');
     const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'reject' });
     const res = await app.inject({
       method: 'GET',
@@ -275,7 +271,7 @@ describe('admin approval routes', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Application approved');
 
-    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    const dbAfter = await userStore.findById(aggregatorId);
     expect(dbAfter.ok).toBe(true);
     if (dbAfter.ok && dbAfter.value) {
       expect(dbAfter.value.status).toBe('active');
@@ -393,7 +389,7 @@ describe('admin approval routes', () => {
       expect(after.value.attributes?.signalstack_org_id).toBeUndefined();
     }
     // DB status stays pending — admin can re-click to retry.
-    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    const dbAfter = await userStore.findById(aggregatorId);
     if (dbAfter.ok && dbAfter.value) {
       expect(dbAfter.value.status).toBe('pending');
       expect(dbAfter.value.signalstackOrgId).toBeNull();
@@ -435,7 +431,7 @@ describe('admin approval routes', () => {
     if (afterFirst.ok && afterFirst.value) {
       expect(afterFirst.value.enabled).toBe(false);
     }
-    const dbAfterFirst = await aggregatorStore.findById(aggregatorId);
+    const dbAfterFirst = await userStore.findById(aggregatorId);
     if (dbAfterFirst.ok && dbAfterFirst.value) {
       expect(dbAfterFirst.value.status).toBe('pending');
     }
@@ -450,7 +446,7 @@ describe('admin approval routes', () => {
     expect(second.statusCode).toBe(200);
     expect(second.body).toContain('Application approved');
 
-    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    const dbAfter = await userStore.findById(aggregatorId);
     if (dbAfter.ok && dbAfter.value) {
       expect(dbAfter.value.status).toBe('active');
       expect(dbAfter.value.signalstackOrgId).not.toBeNull();
@@ -510,7 +506,7 @@ describe('admin approval routes', () => {
     expect(second.statusCode).toBe(200);
     expect(second.body).toContain('Application approved');
 
-    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    const dbAfter = await userStore.findById(aggregatorId);
     if (dbAfter.ok && dbAfter.value) {
       expect(dbAfter.value.status).toBe('active');
       expect(dbAfter.value.signalstackOrgId).not.toBeNull();
@@ -539,7 +535,7 @@ describe('admin approval routes', () => {
     if (after.ok && after.value) {
       expect(after.value.attributes?.signalstack_org_id).toBeUndefined();
     }
-    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    const dbAfter = await userStore.findById(aggregatorId);
     if (dbAfter.ok && dbAfter.value) {
       expect(dbAfter.value.signalstackOrgId).toBeNull();
     }
@@ -580,7 +576,7 @@ describe('admin approval routes', () => {
     })();
 
   const seedAggregatorWithType = (type: string | null) => {
-    aggregatorStore.seed([
+    userStore.seed([
       buildAggregator({
         id: aggregatorId,
         orgSlug: 'trrain-abcd',
@@ -649,7 +645,7 @@ describe('admin approval routes', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Application rejected');
 
-    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    const dbAfter = await userStore.findById(aggregatorId);
     if (dbAfter.ok && dbAfter.value) {
       expect(dbAfter.value.status).toBe('inactive');
     }
@@ -729,7 +725,7 @@ describe('admin approval routes', () => {
   async function seedPendingAggregator(): Promise<{ id: string }> {
     resendIdCounter++;
     const id = `aaaaaaaa-bbbb-cccc-dddd-${String(resendIdCounter).padStart(12, '0')}`;
-    aggregatorStore.seed([
+    userStore.seed([
       buildAggregator({
         id,
         orgSlug: `resend-org-${resendIdCounter}`,
@@ -864,7 +860,7 @@ describe('admin approval routes', () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.body).toContain('Token does not match this organisation.');
-    const stored = await aggregatorStore.findById(aggregatorId);
+    const stored = await userStore.findById(aggregatorId);
     expect(stored.ok && stored.value?.status).toBe('pending');
   });
 
@@ -880,7 +876,7 @@ describe('admin approval routes', () => {
 
   it('renew shows already-decided for an active record', async () => {
     const { id } = await seedPendingAggregator();
-    await aggregatorStore.updateStatus(id, 'active', 'admin');
+    await userStore.updateStatus(id, 'active', 'admin');
     const expired = await mintExpiredApproveToken(id);
     const res = await app.inject({
       method: 'POST',
@@ -920,7 +916,7 @@ describe('admin approval routes', () => {
     });
     expect(res.statusCode).toBe(400);
     // The coordinator must still be pending (decision aborted).
-    const stored = await aggregatorStore.findById(aggregatorId);
+    const stored = await userStore.findById(aggregatorId);
     expect(stored.ok && stored.value?.status).toBe('pending');
   });
 
@@ -938,7 +934,7 @@ describe('admin approval routes', () => {
       payload: { token, decision: 'approve' },
     });
     expect(res.statusCode).toBe(200);
-    const stored = await aggregatorStore.findById(aggregatorId);
+    const stored = await userStore.findById(aggregatorId);
     expect(stored.ok && stored.value?.status).toBe('active');
   });
 
@@ -959,7 +955,7 @@ describe('admin approval routes', () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.body).toContain('Organisation unavailable');
-      const stored = await aggregatorStore.findById(aggregatorId);
+      const stored = await userStore.findById(aggregatorId);
       expect(stored.ok && stored.value?.status).toBe('pending');
     }
   });
@@ -981,7 +977,7 @@ describe('admin approval routes', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Application approved');
-    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    const dbAfter = await userStore.findById(aggregatorId);
     if (dbAfter.ok && dbAfter.value) expect(dbAfter.value.status).toBe('active');
   });
 
@@ -990,7 +986,7 @@ describe('admin approval routes', () => {
       ok: false,
       error: { code: 'IDP_UNAVAILABLE', message: 'attr write failed' },
     });
-    aggregatorStore.updateSignalstackOrgId = async () => ({
+    userStore.updateSignalstackOrgId = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db write failed' },
     });
@@ -1009,7 +1005,7 @@ describe('admin approval routes', () => {
   });
 
   it('approve returns 503 without side effects when the atomic CAS update fails', async () => {
-    aggregatorStore.approveFromPending = async () => ({
+    userStore.approveFromPending = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'cas failed' },
     });
@@ -1032,7 +1028,7 @@ describe('admin approval routes', () => {
     // Simulates a second in-flight request winning the CAS between our
     // pending-check read and the update — the store reports success but a
     // null value, meaning some other request already flipped the row.
-    aggregatorStore.approveFromPending = async () => ({ ok: true, value: null });
+    userStore.approveFromPending = async () => ({ ok: true, value: null });
     const { token } = await mintApprovalToken({
       org: DEFAULT_ORG,
       aggregatorId,
@@ -1065,13 +1061,13 @@ describe('admin approval routes', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Application approved');
-    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    const dbAfter = await userStore.findById(aggregatorId);
     expect(dbAfter.ok && dbAfter.value?.status).toBe('active');
   });
 
   it('reject returns 503 without side effects when the status write fails', async () => {
     // Reject now stamps write-once rejected_at via update() (#726), not updateStatus.
-    aggregatorStore.update = async () => ({
+    userStore.update = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });
@@ -1114,12 +1110,12 @@ describe('admin approval routes', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Application rejected');
-    const dbAfter = await aggregatorStore.findById(aggregatorId);
+    const dbAfter = await userStore.findById(aggregatorId);
     expect(dbAfter.ok && dbAfter.value?.status).toBe('inactive');
   });
 
   it('503s when loading the aggregator record fails (store unavailable)', async () => {
-    aggregatorStore.findById = async () => ({
+    userStore.findById = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });
@@ -1189,7 +1185,7 @@ describe('admin approval routes', () => {
   });
 
   it('falls back to the KC first+last name when the aggregator has no contact.name', async () => {
-    aggregatorStore.seed([
+    userStore.seed([
       buildAggregator({
         id: aggregatorId,
         orgSlug: 'trrain-abcd',
@@ -1213,7 +1209,7 @@ describe('admin approval routes', () => {
   });
 
   it('falls back to the KC email when neither contact.name nor KC first/last name are set', async () => {
-    aggregatorStore.seed([
+    userStore.seed([
       buildAggregator({
         id: aggregatorId,
         orgSlug: 'trrain-abcd',
@@ -1255,11 +1251,15 @@ describe('admin approval routes', () => {
   });
 
   it('GET /read/:id returns 503 when loading the aggregator record fails', async () => {
-    aggregatorStore.findById = async () => ({
+    userStore.findById = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });
-    const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'GET',
       url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}`,
@@ -1268,7 +1268,7 @@ describe('admin approval routes', () => {
   });
 
   it('GET /read/:id renders the invited-email line when the coordinator was invited', async () => {
-    aggregatorStore.seed([
+    userStore.seed([
       buildAggregator({
         id: aggregatorId,
         orgSlug: 'trrain-abcd',
@@ -1280,7 +1280,11 @@ describe('admin approval routes', () => {
         inviteEmail: 'invited@trrain.org',
       }),
     ]);
-    const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'GET',
       url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}`,
@@ -1303,14 +1307,18 @@ describe('admin approval routes', () => {
     // The route loads the aggregator (ok twice: its own lookup + the decision
     // service's), but the post-CAS re-read finds the row gone, so the decision
     // service returns `not_found`.
-    aggregatorStore.approveFromPending = async () => ({ ok: true, value: null });
+    userStore.approveFromPending = async () => ({ ok: true, value: null });
     let calls = 0;
-    const orig = aggregatorStore.findById.bind(aggregatorStore);
-    aggregatorStore.findById = async (id: string) => {
+    const orig = userStore.findById.bind(userStore);
+    userStore.findById = async (id: string) => {
       calls += 1;
       return calls >= 3 ? { ok: true, value: null } : orig(id);
     };
-    const { token } = await mintApprovalToken({ org: DEFAULT_ORG, aggregatorId, intent: 'approve' });
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
@@ -1331,7 +1339,7 @@ describe('admin approval routes', () => {
 
   it('POST /renew/:id mints a fresh token from the token org for an org-less coordinator', async () => {
     const id = `aaaaaaaa-bbbb-cccc-dddd-${String(900).padStart(12, '0')}`;
-    aggregatorStore.seed([
+    userStore.seed([
       buildAggregator({
         id,
         orgSlug: 'orgless-abcd',

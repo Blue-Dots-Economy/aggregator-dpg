@@ -21,11 +21,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
-import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore, buildAggregator } from '../services/user-store/index.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import {
@@ -145,7 +141,7 @@ async function bootApp(): Promise<{ app: FastifyInstance; store: TrackingRegistr
       decision_made: 'approved',
     };
   });
-  const aggStore = new AggregatorStoreFake();
+  const aggStore = new UserStoreFake();
   aggStore.seed([
     buildAggregator({
       id: AGG_ID,
@@ -155,7 +151,7 @@ async function bootApp(): Promise<{ app: FastifyInstance; store: TrackingRegistr
       signalstackOrgId: ORG_ID,
     }),
   ]);
-  _setAggregatorStore(aggStore);
+  _setUserStore(aggStore);
   const store = new TrackingRegistrationLinksStore();
   _setRegistrationLinksStore(store);
   _setDbClients(null, buildMetricsStubDb() as never);
@@ -173,7 +169,7 @@ describe('POST /v1/links/create — registration_mode', () => {
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setRegistrationLinksStore(null);
     _setNetworkConfig(null);
     _setDbClients(null, null);
@@ -239,7 +235,7 @@ describe('POST /v1/links/create — AGGREGATOR_ONBOARDING_ENABLED gate (#637)', 
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setRegistrationLinksStore(null);
     _setNetworkConfig(null);
     _setDbClients(null, null);
@@ -344,7 +340,7 @@ describe('PATCH /v1/links/:id — registration_mode immutability', () => {
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setRegistrationLinksStore(null);
     _setNetworkConfig(null);
     _setDbClients(null, null);
@@ -549,7 +545,7 @@ const TOKEN_NO_AGG_TYPE = 'full-no-agg-type';
 
 async function bootFullApp(opts: {
   store: FullRegistrationLinksStore;
-  aggregatorStore?: AggregatorStoreFake;
+  userStore?: UserStoreFake;
   metricsRows?: MetricsRow[];
 }): Promise<FastifyInstance> {
   _resetJwks();
@@ -587,10 +583,10 @@ async function bootFullApp(opts: {
     throw new Error('invalid token');
   });
 
-  const aggregatorStore =
-    opts.aggregatorStore ??
+  const userStore =
+    opts.userStore ??
     (() => {
-      const s = new AggregatorStoreFake();
+      const s = new UserStoreFake();
       s.seed([
         buildAggregator({
           id: AGG_ID,
@@ -602,7 +598,7 @@ async function bootFullApp(opts: {
       ]);
       return s;
     })();
-  _setAggregatorStore(aggregatorStore);
+  _setUserStore(userStore);
   _setRegistrationLinksStore(opts.store);
   _setDbClients(null, buildMetricsDb(opts.metricsRows ?? []) as never);
 
@@ -612,7 +608,7 @@ async function bootFullApp(opts: {
 async function teardownFullApp(app: FastifyInstance | undefined): Promise<void> {
   await app?.close();
   _setAccessTokenVerifier(null);
-  _setAggregatorStore(null);
+  _setUserStore(null);
   _setRegistrationLinksStore(null);
   _setNetworkConfig(null);
   _setDbClients(null, null);
@@ -734,9 +730,9 @@ describe('POST /v1/links/create — full lifecycle', () => {
   });
 
   it('503 DB_UNAVAILABLE when the caller aggregator row cannot be loaded', async () => {
-    const emptyAggStore = new AggregatorStoreFake();
+    const emptyAggStore = new UserStoreFake();
     await app.close();
-    app = await bootFullApp({ store, aggregatorStore: emptyAggStore });
+    app = await bootFullApp({ store, userStore: emptyAggStore });
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',

@@ -12,10 +12,7 @@
 import { sql } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import { logger } from '../logger.js';
-import {
-  getAggregatorOrgStore,
-  type AggregatorOrg,
-} from '../services/aggregator-org-store/index.js';
+import { getOrganisationStore, type AggregatorOrg } from '../services/organisation-store/index.js';
 import { grantOwnerAccess } from '../services/decisions/org.js';
 import { PLACEHOLDER_OWNER_EMAIL } from '../services/organisation-root.js';
 import { getDb } from '../db/client.js';
@@ -259,7 +256,7 @@ export async function enableOwnersStep(
 
 /** Every active aggregator org, paged through the store. */
 async function activeOrgs(): Promise<AggregatorOrg[]> {
-  const store = getAggregatorOrgStore();
+  const store = getOrganisationStore();
   const all: AggregatorOrg[] = [];
   let cursor: { name: string; id: string } | undefined;
   for (;;) {

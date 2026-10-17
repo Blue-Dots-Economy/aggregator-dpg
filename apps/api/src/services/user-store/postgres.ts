@@ -30,7 +30,7 @@ import {
   consentRecord,
   registrationInvites,
 } from '../../db/schema.js';
-import { DEFAULT_ORG_SLUG } from '../aggregator-org-store/interface.js';
+import { DEFAULT_ORG_SLUG } from '../organisation-store/interface.js';
 import { renderOrgDetails } from './org-details.js';
 import { servesOf } from './serves.js';
 import {
@@ -49,7 +49,7 @@ import {
   pgConstraint,
 } from '../../db/pg-error.js';
 import {
-  AggregatorStoreBase,
+  UserStoreBase,
   type Aggregator,
   type CreateAggregatorInput,
   type ListAggregatorsFilter,
@@ -74,7 +74,7 @@ class ConsentHookError extends Error {
   }
 }
 
-export class PostgresAggregatorStore extends AggregatorStoreBase {
+export class PostgresUserStore extends UserStoreBase {
   async create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
     const start = Date.now();
     let created: Aggregator | null;
@@ -116,7 +116,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     } catch (err: unknown) {
       if (err instanceof ConsentHookError) {
         logger.error({
-          operation: 'aggregatorStore.create',
+          operation: 'userStore.create',
           status: 'failure',
           error: 'CONSENT_WRITE_FAILED',
           error_type: (err.cause as Error | undefined)?.name ?? 'unknown',
@@ -127,13 +127,13 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
           error: { code: 'CONSENT_WRITE_FAILED', message: 'consent could not be recorded' },
         };
       }
-      return this.mapWriteError('aggregatorStore.create', err, input.orgSlug, start);
+      return this.mapWriteError('userStore.create', err, input.orgSlug, start);
     }
     if (!created) {
       return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'no row returned' } };
     }
     logger.info({
-      operation: 'aggregatorStore.create',
+      operation: 'userStore.create',
       status: 'success',
       latency_ms: Date.now() - start,
       aggregator_id: created.id,
@@ -142,17 +142,17 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
   }
 
   async findById(id: string): Promise<StoreResult<Aggregator | null>> {
-    return this.findOne('aggregatorStore.findById', eq(users.id, id));
+    return this.findOne('userStore.findById', eq(users.id, id));
   }
 
   async findBySlug(orgSlug: string): Promise<StoreResult<Aggregator | null>> {
-    return this.findOne('aggregatorStore.findBySlug', eq(users.signalstackOrgSlug, orgSlug));
+    return this.findOne('userStore.findBySlug', eq(users.signalstackOrgSlug, orgSlug));
   }
 
   async findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>> {
     // `contact_id = (subselect)` keeps both lookups on their unique indexes.
     return this.findOne(
-      'aggregatorStore.findByContactPhone',
+      'userStore.findByContactPhone',
       eq(
         users.contactId,
         sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.phone} = ${phone})`,
@@ -163,7 +163,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
   async findByContactEmail(email: string): Promise<StoreResult<Aggregator | null>> {
     const e = email.trim().toLowerCase();
     return this.findOne(
-      'aggregatorStore.findByContactEmail',
+      'userStore.findByContactEmail',
       eq(
         users.contactId,
         sql`(SELECT ${contact.id} FROM ${contact} WHERE ${contact.email} = ${e})`,
@@ -176,7 +176,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       const rows = await this.selectJoined().where(coordinator(eq(users.orgId, orgId)));
       return { ok: true, value: rows.map(toDomain) };
     } catch (err: unknown) {
-      return this.mapReadError('aggregatorStore.findByParentOrgId', err);
+      return this.mapReadError('userStore.findByParentOrgId', err);
     }
   }
 
@@ -202,7 +202,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       const total = totals[0]?.total ?? 0;
       return { ok: true, value: { rows: rows.map(toDomain), total } };
     } catch (err: unknown) {
-      return this.mapReadError('aggregatorStore.list', err);
+      return this.mapReadError('userStore.list', err);
     }
   }
 
@@ -244,7 +244,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
     } catch (err: unknown) {
       if (err instanceof ContactTakenError) {
         logger.warn({
-          operation: 'aggregatorStore.update',
+          operation: 'userStore.update',
           status: 'failure',
           error: 'CONTACT_TAKEN',
           aggregator_id: id,
@@ -253,14 +253,14 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       }
       if (err instanceof SharedContactError) {
         logger.warn({
-          operation: 'aggregatorStore.update',
+          operation: 'userStore.update',
           status: 'failure',
           error: 'SHARED_CONTACT',
           aggregator_id: id,
         });
         return { ok: false, error: { code: 'DUPLICATE', message: err.message } };
       }
-      return this.mapWriteError('aggregatorStore.update', err, id, Date.now());
+      return this.mapWriteError('userStore.update', err, id, Date.now());
     }
     if (!updated) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
     return { ok: true, value: updated };
@@ -283,9 +283,9 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
         .returning({ id: users.id });
       // No row → not pending (a concurrent approval already committed).
       if (!rows[0]) return { ok: true, value: null };
-      return this.reread('aggregatorStore.approveFromPending', id);
+      return this.reread('userStore.approveFromPending', id);
     } catch (err: unknown) {
-      return this.mapWriteError('aggregatorStore.approveFromPending', err, id, Date.now());
+      return this.mapWriteError('userStore.approveFromPending', err, id, Date.now());
     }
   }
 
@@ -306,10 +306,10 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
         .where(coordinator(eq(users.id, id)))
         .returning({ id: users.id });
       if (!rows[0]) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
-      const updated = await this.reread('aggregatorStore.updateSignalstackOrgId', id);
+      const updated = await this.reread('userStore.updateSignalstackOrgId', id);
       if (updated.ok) {
         logger.info({
-          operation: 'aggregatorStore.updateSignalstackOrgId',
+          operation: 'userStore.updateSignalstackOrgId',
           status: 'success',
           latency_ms: Date.now() - start,
           aggregator_id: id,
@@ -317,7 +317,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       }
       return updated;
     } catch (err: unknown) {
-      return this.mapWriteError('aggregatorStore.updateSignalstackOrgId', err, id, start);
+      return this.mapWriteError('userStore.updateSignalstackOrgId', err, id, start);
     }
   }
 
@@ -332,7 +332,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       }
       return { ok: true, value: undefined };
     } catch (err: unknown) {
-      return this.mapReadError('aggregatorStore.deleteById', err);
+      return this.mapReadError('userStore.deleteById', err);
     }
   }
 
@@ -346,9 +346,9 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
         .returning({ id: users.id });
       // No row → not pending (a concurrent decision already committed).
       if (!rows[0]) return { ok: true, value: null };
-      return this.reread('aggregatorStore.rejectFromPending', id);
+      return this.reread('userStore.rejectFromPending', id);
     } catch (err: unknown) {
-      return this.mapWriteError('aggregatorStore.rejectFromPending', err, id, Date.now());
+      return this.mapWriteError('userStore.rejectFromPending', err, id, Date.now());
     }
   }
 
@@ -375,7 +375,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       return { ok: true, value: outcome };
     } catch (err: unknown) {
       if (err === ABORT) return { ok: true, value: 'aborted' };
-      return this.mapWriteError('aggregatorStore.deleteIfPending', err, id, Date.now());
+      return this.mapWriteError('userStore.deleteIfPending', err, id, Date.now());
     }
   }
 
@@ -417,7 +417,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
         },
       };
     } catch (err: unknown) {
-      return this.mapReadError('aggregatorStore.search', err);
+      return this.mapReadError('userStore.search', err);
     }
   }
 
@@ -438,7 +438,7 @@ export class PostgresAggregatorStore extends AggregatorStoreBase {
       for (const r of rows) if (r.orgId) out[r.orgId] = { total: r.total, pending: r.pending };
       return { ok: true, value: out };
     } catch (err: unknown) {
-      return this.mapReadError('aggregatorStore.countByOrg', err);
+      return this.mapReadError('userStore.countByOrg', err);
     }
   }
 

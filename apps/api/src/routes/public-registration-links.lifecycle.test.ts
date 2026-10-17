@@ -19,11 +19,7 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore, buildAggregator } from '../services/user-store/index.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { _setDbClients } from '../db/client.js';
@@ -140,7 +136,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
   let fakeDb: ReturnType<typeof buildFakeDb>;
   let app: FastifyInstance;
   let signalstack: SignalStackWriterFake;
-  let aggregatorStore: AggregatorStoreFake;
+  let userStore: UserStoreFake;
 
   beforeEach(async () => {
     // Treat signalstack as enabled so getSignalStackWriter returns our fake.
@@ -151,8 +147,8 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
 
     // Aggregator seeded with a signalstackOrgId so the route doesn't bail
     // with SIGNALSTACK_ORG_NOT_REGISTERED before it gets to onboard().
-    aggregatorStore = new AggregatorStoreFake();
-    aggregatorStore.seed([
+    userStore = new UserStoreFake();
+    userStore.seed([
       buildAggregator({
         id: AGG_ID,
         orgSlug: ORG_SLUG,
@@ -161,7 +157,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
         signalstackOrgId: ORG_ID,
       }),
     ]);
-    _setAggregatorStore(aggregatorStore);
+    _setUserStore(userStore);
 
     signalstack = new SignalStackWriterFake();
     _setSignalStackWriter(signalstack);
@@ -194,7 +190,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setSignalStackWriter(null);
     _setNetworkConfig(null);
     _setRegistrationLinksStore(null);
@@ -366,7 +362,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
   });
 
   it('404s when the live link points at an aggregator that no longer exists', async () => {
-    _setAggregatorStore(new AggregatorStoreFake());
+    _setUserStore(new UserStoreFake());
     const r = await app.inject({
       method: 'POST',
       url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
@@ -377,7 +373,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
   });
 
   it('503s (DB_UNAVAILABLE) when the aggregator lookup fails', async () => {
-    aggregatorStore.findById = async () => ({
+    userStore.findById = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });
@@ -391,7 +387,7 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
   });
 
   it('503s (SIGNALSTACK_ORG_NOT_REGISTERED) when the aggregator has no signalstack org id on file', async () => {
-    aggregatorStore.seed([
+    userStore.seed([
       buildAggregator({
         id: AGG_ID,
         orgSlug: ORG_SLUG,

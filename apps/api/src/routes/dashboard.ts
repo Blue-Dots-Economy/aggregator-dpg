@@ -16,7 +16,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { errorResponses } from '../errors/openapi.js';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
@@ -406,15 +406,15 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
 async function resolveActingOrgId(auth: AuthContext, log: FastifyRequest['log']): Promise<string> {
   let actingOrgId: string | null = auth.signalstackOrgId ?? null;
   if (!actingOrgId) {
-    const row = await getAggregatorStore().findById(auth.aggregatorId);
+    const row = await getUserStore().findById(auth.aggregatorId);
     if (!row.ok) {
       log.error({
         status: 'failure',
-        sub: 'aggregatorStore.findById',
+        sub: 'userStore.findById',
         code: row.error.code,
       });
       throw httpError('DB_UNAVAILABLE', {
-        fields: { sub_operation: 'aggregatorStore.findById' },
+        fields: { sub_operation: 'userStore.findById' },
       });
     }
     actingOrgId = row.value?.signalstackOrgId ?? null;

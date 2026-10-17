@@ -1,17 +1,13 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore, buildAggregator } from '../services/user-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import {
-  AggregatorOrgStoreFake,
-  _setAggregatorOrgStore,
+  OrganisationStoreFake,
+  _setOrganisationStore,
   buildDefaultOrg,
-} from '../services/aggregator-org-store/index.js';
+} from '../services/organisation-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -35,7 +31,7 @@ const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
 
 describe('POST /v1/aggregator-registrations/create', () => {
   let app: FastifyInstance;
-  let aggregatorStore: AggregatorStoreFake;
+  let userStore: UserStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
   let consentLedger: ConsentLedgerFake;
@@ -48,7 +44,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
-    aggregatorStore = new AggregatorStoreFake();
+    userStore = new UserStoreFake();
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
     consentLedger = new ConsentLedgerFake();
@@ -66,11 +62,11 @@ describe('POST /v1/aggregator-registrations/create', () => {
     _setSubmitRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
     _setNetworkConfig(buildBlueDotConfig());
 
-    _setAggregatorStore(aggregatorStore);
+    _setUserStore(userStore);
     // These bodies register under the Default org (the only active org here).
-    const orgStore = new AggregatorOrgStoreFake();
+    const orgStore = new OrganisationStoreFake();
     orgStore.seed([buildDefaultOrg()]);
-    _setAggregatorOrgStore(orgStore);
+    _setOrganisationStore(orgStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
     _setConsentLedger(consentLedger);
@@ -88,8 +84,8 @@ describe('POST /v1/aggregator-registrations/create', () => {
     await app?.close();
     _setSubmitRateChecker(null);
     _setNetworkConfig(null);
-    _setAggregatorStore(null);
-    _setAggregatorOrgStore(null);
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
     _setConsentLedger(null);
@@ -129,7 +125,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(body.org_slug).toMatch(/^trrain-[0-9a-f]{4}$/);
     expect(body.message).toContain('Registration submitted');
 
-    const stored = await aggregatorStore.findById(body.aggregator_id);
+    const stored = await userStore.findById(body.aggregator_id);
     if (stored.ok) expect(stored.value?.orgSlug).toBe(body.org_slug);
 
     const kcUser = await idp.findByEmail(validBody.contact.email);
@@ -181,7 +177,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(body.error.code).toBe('SCHEMA_VALIDATION');
     expect(body.error.fields).toMatchObject({ type: 'invalid' });
     // Nothing was created.
-    const all = await aggregatorStore.list({ status: 'pending', limit: 10, offset: 0 });
+    const all = await userStore.list({ status: 'pending', limit: 10, offset: 0 });
     expect(all.ok && all.value.rows.length).toBe(0);
   });
 
@@ -246,7 +242,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     const body = res.json() as { error: { code: string } };
     expect(body.error.code).toBe('CONSENT_WRITE_FAILED');
     // One transaction (0029): the row never existed, so nothing is left behind.
-    const found = await aggregatorStore.findByContactEmail('ledger-fail@trrain.org');
+    const found = await userStore.findByContactEmail('ledger-fail@trrain.org');
     expect(found.ok && found.value).toBeNull();
   });
 
@@ -352,7 +348,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     // No aggregator row should remain — the route rolls it back when KC
     // creation fails.
     const allByPrefix = await Promise.all(
-      ['trrain-0001', 'trrain-0002', 'trrain-0003'].map((s) => aggregatorStore.findBySlug(s)),
+      ['trrain-0001', 'trrain-0002', 'trrain-0003'].map((s) => userStore.findBySlug(s)),
     );
     for (const r of allByPrefix) if (r.ok) expect(r.value).toBeNull();
 
@@ -363,7 +359,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     status?: 'pending' | 'inactive' | 'active';
     rejectedAt?: Date;
   }) {
-    const created = await aggregatorStore.create({
+    const created = await userStore.create({
       recordConsent: NO_CONSENT_WRITE,
       orgSlug: 'trrain-aaaa',
       name: 'TRRAIN',
@@ -382,13 +378,13 @@ describe('POST /v1/aggregator-registrations/create', () => {
     const id = created.value.id;
     if (overrides?.status === 'inactive') {
       // Mirror the reject path: stamp write-once rejected_at (#726).
-      await aggregatorStore.update(id, {
+      await userStore.update(id, {
         status: 'inactive',
         rejectedAt: overrides.rejectedAt ?? new Date(),
         updatedBy: 'admin',
       });
     } else if (overrides?.status && overrides.status !== 'pending') {
-      await aggregatorStore.updateStatus(id, overrides.status, 'admin');
+      await userStore.updateStatus(id, overrides.status, 'admin');
     }
     await idp.createUser({
       email: 'asha@trrain.org',
@@ -435,7 +431,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     expect(err.error.code).toBe('REGISTRATION_COOLING');
     expect(err.error.fields?.retry_after).toBeTruthy();
     // Row untouched — no revive, no email.
-    const stored = await aggregatorStore.findById(id);
+    const stored = await userStore.findById(id);
     if (stored.ok) expect(stored.value?.status).toBe('inactive');
     expect(mailer.outbox.length).toBe(0);
   });
@@ -455,7 +451,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     const body = res.json() as { aggregator_id: string; status: string };
     expect(body.aggregator_id).toBe(id);
     expect(body.status).toBe('pending');
-    const stored = await aggregatorStore.findById(id);
+    const stored = await userStore.findById(id);
     if (stored.ok) {
       expect(stored.value?.status).toBe('pending');
       expect(stored.value?.rejectedAt).toBeNull();
@@ -491,7 +487,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     });
     expect(res.statusCode).toBe(200);
     // The on-file record is unchanged — the submitted phone/name are ignored.
-    const stored = await aggregatorStore.findById(id);
+    const stored = await userStore.findById(id);
     if (stored.ok && stored.value) {
       expect(stored.value.contact.phone).toBe('+919876543210');
       expect(stored.value.name).toBe('TRRAIN');
@@ -517,7 +513,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
   });
 
   it('503 DB_UNAVAILABLE when findByContactEmail fails', async () => {
-    aggregatorStore.findByContactEmail = async () => ({
+    userStore.findByContactEmail = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });
@@ -532,7 +528,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
   });
 
   it('503 DB_UNAVAILABLE when findByContactPhone fails', async () => {
-    aggregatorStore.findByContactPhone = async () => ({
+    userStore.findByContactPhone = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });
@@ -550,7 +546,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     // A prior aggregator row already holds this phone (e.g. KC user was
     // separately cleaned up but the DB row remains) — the DB-level phone
     // uniqueness check must still catch it before any KC calls happen.
-    aggregatorStore.seed([
+    userStore.seed([
       buildAggregator({
         id: '33333333-3333-3333-3333-333333333333',
         orgSlug: 'other-org',
@@ -605,23 +601,20 @@ describe('POST /v1/aggregator-registrations/create', () => {
     ['CHECK_VIOLATION', 400, 'SCHEMA_VALIDATION'],
     ['DB_UNAVAILABLE', 503, 'DB_UNAVAILABLE'],
     ['NOT_FOUND', 503, 'DB_UNAVAILABLE'],
-  ] as const)(
-    'maps aggregatorStore.create error %s to %d %s',
-    async (storeCode, status, errCode) => {
-      aggregatorStore.create = async () => ({
-        ok: false,
-        error: { code: storeCode, message: 'store error' },
-      });
-      const res = await app.inject({
-        method: 'POST',
-        url: '/v1/aggregator-registrations/create',
-        headers: AUTH_HEADER,
-        payload: validBody,
-      });
-      expect(res.statusCode).toBe(status);
-      expect((res.json() as { error: { code: string } }).error.code).toBe(errCode);
-    },
-  );
+  ] as const)('maps userStore.create error %s to %d %s', async (storeCode, status, errCode) => {
+    userStore.create = async () => ({
+      ok: false,
+      error: { code: storeCode, message: 'store error' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(status);
+    expect((res.json() as { error: { code: string } }).error.code).toBe(errCode);
+  });
 
   it('500 CONSENT_WRITE_FAILED (rolled back) when the consent config fails to load', async () => {
     loadConsentConfigMock.mockRejectedValueOnce(new Error('disk error'));
@@ -636,7 +629,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     });
     expect(res.statusCode).toBe(500);
     expect((res.json() as { error: { code: string } }).error.code).toBe('CONSENT_WRITE_FAILED');
-    const found = await aggregatorStore.findByContactEmail('consent-fail@trrain.org');
+    const found = await userStore.findByContactEmail('consent-fail@trrain.org');
     expect(found.ok && found.value).toBeNull();
   });
 
@@ -653,7 +646,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     });
     expect(res.statusCode).toBe(409);
     expect((res.json() as { error: { code: string } }).error.code).toBe('USER_EXISTS');
-    const found = await aggregatorStore.findByContactEmail('race@trrain.org');
+    const found = await userStore.findByContactEmail('race@trrain.org');
     expect(found.ok && found.value).toBeNull();
   });
 
@@ -674,7 +667,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     });
     expect(res.statusCode).toBe(201);
     const { aggregator_id } = res.json() as { aggregator_id: string };
-    const stored = await aggregatorStore.findById(aggregator_id);
+    const stored = await userStore.findById(aggregator_id);
     if (stored.ok && stored.value) {
       const validTill = new Date(stored.value.consent?.valid_till ?? 0).getTime();
       const now = Date.now();
@@ -709,7 +702,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     });
     expect(res.statusCode).toBe(400);
     expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
-    const found = await aggregatorStore.findByContactEmail('expired-consent@trrain.org');
+    const found = await userStore.findByContactEmail('expired-consent@trrain.org');
     expect(found.ok && found.value).toBeNull();
     expect(consentLedger.list()).toHaveLength(before);
   });

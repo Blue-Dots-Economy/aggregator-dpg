@@ -1,16 +1,12 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import {
-  AggregatorStoreFake,
-  buildAggregator,
-  _setAggregatorStore,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, buildAggregator, _setUserStore } from '../services/user-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import {
-  AggregatorOrgStoreFake,
-  _setAggregatorOrgStore,
-} from '../services/aggregator-org-store/index.js';
+  OrganisationStoreFake,
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 
@@ -19,7 +15,7 @@ const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
 
 describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
   let app: FastifyInstance;
-  let aggregatorStore: AggregatorStoreFake;
+  let userStore: UserStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
 
@@ -28,13 +24,13 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
-    aggregatorStore = new AggregatorStoreFake();
+    userStore = new UserStoreFake();
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
 
-    _setAggregatorStore(aggregatorStore);
+    _setUserStore(userStore);
     // The stale-org prune always runs since 0028; no stale orgs here.
-    _setAggregatorOrgStore(new AggregatorOrgStoreFake());
+    _setOrganisationStore(new OrganisationStoreFake());
     _setIdpAdmin(idp);
     _setMailer(mailer);
     _setAccessTokenVerifier(async (token) => {
@@ -49,8 +45,8 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
-    _setAggregatorOrgStore(null);
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
     _setAccessTokenVerifier(null);
@@ -77,7 +73,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
       status: 'pending',
       updatedAt: new Date('2020-01-01T00:00:00Z'),
     });
-    aggregatorStore.seed([fresh, stale]);
+    userStore.seed([fresh, stale]);
     // KC user is keyed by the stored aggregator_id attribute (not email).
     await idp.createUser({
       email: 'stale@x.org',
@@ -99,9 +95,9 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     const goneKc = await idp.findByEmail('stale@x.org');
     if (goneKc.ok) expect(goneKc.value).toBeNull();
 
-    const staleRow = await aggregatorStore.findById(stale.id);
+    const staleRow = await userStore.findById(stale.id);
     if (staleRow.ok) expect(staleRow.value).toBeNull();
-    const freshRow = await aggregatorStore.findById(fresh.id);
+    const freshRow = await userStore.findById(fresh.id);
     if (freshRow.ok) expect(freshRow.value).not.toBeNull();
   });
 
@@ -114,7 +110,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
   });
 
   it('returns zero counts when nothing is stale', async () => {
-    aggregatorStore.seed([
+    userStore.seed([
       buildAggregator({
         id: '33333333-3333-3333-3333-333333333333',
         orgSlug: 'recent-cccc',
@@ -169,7 +165,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
       status: 'pending',
       updatedAt: new Date('2020-01-01T00:00:00Z'),
     });
-    aggregatorStore.seed([stale]);
+    userStore.seed([stale]);
     // Prune resolves the KC user by the stored aggregator_id attribute; patch
     // findByAttribute to error, simulating Keycloak unreachable during lookup.
     const originalFindByAttribute = idp.findByAttribute.bind(idp);
@@ -198,7 +194,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     expect(body.pruned).toBe(0);
     expect(body.prunedIds).not.toContain(stale.id);
     // DB row still present — re-tryable on next pass.
-    const row = await aggregatorStore.findById(stale.id);
+    const row = await userStore.findById(stale.id);
     if (row.ok) expect(row.value).not.toBeNull();
   });
 
@@ -212,7 +208,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
       status: 'pending',
       updatedAt: new Date('2020-01-01T00:00:00Z'),
     });
-    aggregatorStore.seed([stale]);
+    userStore.seed([stale]);
     await idp.createUser({
       email: 'delete-fail@x.org',
       enabled: false,
@@ -232,7 +228,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     const body = res.json() as { pruned: number; prunedIds: string[] };
     expect(body.pruned).toBe(0);
     expect(body.prunedIds).not.toContain(stale.id);
-    const row = await aggregatorStore.findById(stale.id);
+    const row = await userStore.findById(stale.id);
     if (row.ok) expect(row.value).not.toBeNull();
   });
 
@@ -246,8 +242,8 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
       status: 'pending',
       updatedAt: new Date('2020-01-01T00:00:00Z'),
     });
-    aggregatorStore.seed([stale]);
-    aggregatorStore.deleteIfPending = async () => ({
+    userStore.seed([stale]);
+    userStore.deleteIfPending = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db delete failed' },
     });
@@ -273,7 +269,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
       status: 'pending',
       updatedAt: new Date('2020-01-01T00:00:00Z'),
     });
-    aggregatorStore.seed([stale]);
+    userStore.seed([stale]);
     const user = await idp.createUser({
       email: 'raced@x.org',
       enabled: false,
@@ -283,7 +279,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     // An approval lands between the page read and the delete.
     const lookup = idp.findByAttribute.bind(idp);
     idp.findByAttribute = async (key, value) => {
-      await aggregatorStore.approveFromPending(stale.id, 'admin-1');
+      await userStore.approveFromPending(stale.id, 'admin-1');
       return lookup(key, value);
     };
 
@@ -294,14 +290,14 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
     });
     expect(res.statusCode).toBe(200);
     expect((res.json() as { pruned: number }).pruned).toBe(0);
-    const row = await aggregatorStore.findById(stale.id);
+    const row = await userStore.findById(stale.id);
     expect(row.ok && row.value?.status).toBe('active');
     const kc = await idp.findById(user.value.id);
     expect(kc.ok && kc.value).toBeTruthy();
   });
 
   it('503s when the aggregator store list fails', async () => {
-    aggregatorStore.list = async () => ({
+    userStore.list = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'list failed' },
     });
@@ -329,7 +325,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
         updatedAt: new Date('2020-01-01T00:00:00Z'),
       }),
     );
-    aggregatorStore.seed(rows);
+    userStore.seed(rows);
     const res = await app.inject({
       method: 'POST',
       url: '/admin/v1/aggregator-registrations/cleanup-stale',

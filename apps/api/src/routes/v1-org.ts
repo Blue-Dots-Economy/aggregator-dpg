@@ -28,12 +28,12 @@ import {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
 import {
-  getAggregatorOrgStore,
+  getOrganisationStore,
   type AggregatorOrg,
   type UpdateOrgPatch,
-} from '../services/aggregator-org-store/index.js';
+} from '../services/organisation-store/index.js';
 import { isNetworkAdmin, requireActor, type Actor } from '../services/auth/actor/index.js';
 import { reachableOrgIds, reachesOrg } from '../services/authz/scope.js';
 import { decideOrg, grantOwnerAccess } from '../services/decisions/org.js';
@@ -71,7 +71,7 @@ interface FoundOrg {
  * @throws {HttpError} NOT_FOUND / DB_UNAVAILABLE.
  */
 async function orgInReach(actor: Actor, id: string): Promise<FoundOrg> {
-  const store = getAggregatorOrgStore();
+  const store = getOrganisationStore();
   const found = await store.findById(id);
   if (!found.ok) dbDown('orgStore.findById', found.error.message);
   if (found.value) {
@@ -120,8 +120,8 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
       const { org, orgType } = await orgInReach(actor, id);
-      const counts = await getAggregatorStore().countByOrg([org.id]);
-      if (!counts.ok) dbDown('aggregatorStore.countByOrg', counts.error.message);
+      const counts = await getUserStore().countByOrg([org.id]);
+      if (!counts.ok) dbDown('userStore.countByOrg', counts.error.message);
       const c = counts.value[org.id];
       req.log.info({
         operation: 'console.org.read',
@@ -153,7 +153,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { actor } = await requireActor(req);
       const body = req.body as z.infer<typeof OrgSearchRequestSchema>;
-      const page = await getAggregatorOrgStore().search({
+      const page = await getOrganisationStore().search({
         orgIds: reachableOrgIds(actor),
         ...(body.filter.status ? { status: body.filter.status } : {}),
         ...(body.filter.name_prefix ? { namePrefix: body.filter.name_prefix } : {}),
@@ -162,8 +162,8 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       });
       if (!page.ok) dbDown('orgStore.search', page.error.message);
       const ids = page.value.rows.map((o) => o.id);
-      const counts = await getAggregatorStore().countByOrg(ids);
-      if (!counts.ok) dbDown('aggregatorStore.countByOrg', counts.error.message);
+      const counts = await getUserStore().countByOrg(ids);
+      if (!counts.ok) dbDown('userStore.countByOrg', counts.error.message);
       return reply.status(200).send({
         orgs: page.value.rows.map((o) => ({
           ...toWireOrg(o),
@@ -206,7 +206,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       if (body.legal_name !== undefined) patch.legalName = body.legal_name;
       if (body.gst_number !== undefined) patch.gstNumber = body.gst_number;
 
-      const updated = await getAggregatorOrgStore().update(org.id, patch);
+      const updated = await getOrganisationStore().update(org.id, patch);
       if (!updated.ok) {
         if (updated.error.code === 'DUPLICATE_NAME') throw httpError('ORG_NAME_TAKEN');
         if (updated.error.code === 'NOT_FOUND') throw httpError('NOT_FOUND');

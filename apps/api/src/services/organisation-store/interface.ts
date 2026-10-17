@@ -7,7 +7,7 @@
  * atomic compare-and-set single-use guard (spec A3). Returns
  * `OrgStoreResult<T>` on every boundary — never throws.
  *
- * **Scope:** every method except {@link AggregatorOrgStoreBase.findRoot} sees
+ * **Scope:** every method except {@link OrganisationStoreBase.findRoot} sees
  * `aggregator` orgs only, so the network-facilitator root never reaches a
  * caller that lists, selects or owns orgs. The owner lookups also skip the
  * Default org, which the network admin owns.
@@ -136,7 +136,7 @@ export interface SearchOrgsPage {
   nextCursor: OrgCursor | null;
 }
 
-/** Outcome of {@link AggregatorOrgStoreBase.deleteIfPending}. */
+/** Outcome of {@link OrganisationStoreBase.deleteIfPending}. */
 export type OrgDeleteIfPendingOutcome = 'deleted' | 'not_pending' | 'aborted';
 
 export type OrgStoreError =
@@ -157,7 +157,7 @@ export type OrgStoreResult<T> = { ok: true; value: T } | { ok: false; error: Org
  * Abstract org persistence port. Concrete implementations must implement every
  * method (no partial stubs) and preserve the exact signatures.
  */
-export abstract class AggregatorOrgStoreBase {
+export abstract class OrganisationStoreBase {
   abstract create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>>;
   abstract findById(id: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
   abstract findBySlug(slug: string): Promise<OrgStoreResult<AggregatorOrg | null>>;

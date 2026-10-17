@@ -23,7 +23,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
+import { getOrganisationStore } from '../services/organisation-store/index.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { mintInviteBatch } from '../services/invites/mint.js';
 import { verifyGrantToken } from '../services/grant-token.js';
@@ -99,7 +99,7 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
       }
       const orgId = grant.org;
 
-      const orgStore = getAggregatorOrgStore();
+      const orgStore = getOrganisationStore();
       const org = await orgStore.findById(orgId);
       if (!org.ok) {
         throw httpError('DB_UNAVAILABLE', {

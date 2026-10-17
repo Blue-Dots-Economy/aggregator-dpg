@@ -4,10 +4,10 @@ import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import {
-  AggregatorOrgStoreFake,
+  OrganisationStoreFake,
   buildAggregatorOrg,
-  _setAggregatorOrgStore,
-} from '../services/aggregator-org-store/index.js';
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { mintApprovalToken, _resetTokenKey } from '../services/approval-token.js';
@@ -15,7 +15,7 @@ import { _resetJwks } from '../services/auth/access-token.js';
 
 describe('aggregator-org-approvals routes', () => {
   let app: FastifyInstance;
-  let orgStore: AggregatorOrgStoreFake;
+  let orgStore: OrganisationStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
 
@@ -27,11 +27,11 @@ describe('aggregator-org-approvals routes', () => {
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
-    orgStore = new AggregatorOrgStoreFake();
+    orgStore = new OrganisationStoreFake();
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
 
-    _setAggregatorOrgStore(orgStore);
+    _setOrganisationStore(orgStore);
     _setIdpAdmin(idp);
     _setMailer(mailer);
 
@@ -40,7 +40,7 @@ describe('aggregator-org-approvals routes', () => {
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorOrgStore(null);
+    _setOrganisationStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
   });
@@ -281,7 +281,10 @@ describe('aggregator-org-approvals routes', () => {
   it('GET read returns 503 when the org store is unavailable', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000c1';
     orgStore.seed([buildAggregatorOrg({ id: orgId, slug: 'c1', status: 'pending' })]);
-    orgStore.findById = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } });
+    orgStore.findById = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'down' },
+    });
     const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'approve' });
     const res = await app.inject({
       method: 'GET',
@@ -363,7 +366,10 @@ describe('aggregator-org-approvals routes', () => {
 
   it('POST decision returns 503 when the org store is unavailable', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000e3';
-    orgStore.findById = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } });
+    orgStore.findById = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'down' },
+    });
     const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'approve' });
     const res = await app.inject({
       method: 'POST',
@@ -381,8 +387,15 @@ describe('aggregator-org-approvals routes', () => {
   it('POST renew returns 503 when the org store is unavailable', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000f1';
     orgStore.seed([buildAggregatorOrg({ id: orgId, slug: 'f1', status: 'pending' })]);
-    orgStore.findById = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'down' } });
-    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'approve', ttlSec: -1 });
+    orgStore.findById = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'down' },
+    });
+    const { token } = await mintApprovalToken({
+      aggregatorId: orgId,
+      intent: 'approve',
+      ttlSec: -1,
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/orgs/renew/${orgId}`,
@@ -393,7 +406,11 @@ describe('aggregator-org-approvals routes', () => {
 
   it('POST renew returns 404 for an unknown org', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000f2';
-    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'approve', ttlSec: -1 });
+    const { token } = await mintApprovalToken({
+      aggregatorId: orgId,
+      intent: 'approve',
+      ttlSec: -1,
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/orgs/renew/${orgId}`,
