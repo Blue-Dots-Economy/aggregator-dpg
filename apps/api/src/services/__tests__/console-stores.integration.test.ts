@@ -18,8 +18,8 @@ import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { _setDbClients, closeDb, getPool } from '../../db/client.js';
-import { PostgresAggregatorStore, buildCreateAggregatorInput } from '../aggregator-store/index.js';
-import { PostgresAggregatorOrgStore } from '../aggregator-org-store/index.js';
+import { PostgresUserStore, buildCreateCoordinatorInput } from '../user-store/index.js';
+import { PostgresOrganisationStore } from '../organisation-store/index.js';
 import { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
 
 const adminUrl = process.env.INTEGRATION_DATABASE_URL;
@@ -35,8 +35,8 @@ suite('console store methods (Postgres)', () => {
   let admin: pg.Client;
   let pool: pg.Pool;
   let dbName = '';
-  const coordinators = new PostgresAggregatorStore();
-  const orgs = new PostgresAggregatorOrgStore();
+  const coordinators = new PostgresUserStore();
+  const orgs = new PostgresOrganisationStore();
   const ids = { orgA: '', orgB: '', orgP: '', c1: '', c2: '', c3: '' };
 
   async function org(slug: string, name: string, email: string, phone: string): Promise<string> {
@@ -53,7 +53,7 @@ suite('console store methods (Postgres)', () => {
 
   async function coordinator(n: number, orgId: string, type: string | null): Promise<string> {
     const r = await coordinators.create(
-      buildCreateAggregatorInput({
+      buildCreateCoordinatorInput({
         orgSlug: `coord-${n}`,
         name: `Coordinator ${n}`,
         type,

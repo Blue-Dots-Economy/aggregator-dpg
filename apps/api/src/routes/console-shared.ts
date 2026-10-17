@@ -13,10 +13,10 @@ import { getMailer } from '@aggregator-dpg/mailer';
 import type { Org, User } from '@aggregator-dpg/shared-primitives/user-org';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
-import type { Aggregator } from '../services/aggregator-store/index.js';
-import type { AggregatorOrg } from '../services/aggregator-org-store/index.js';
-import type { CoordinatorCursor } from '../services/aggregator-store/interface.js';
-import type { OrgCursor } from '../services/aggregator-org-store/interface.js';
+import type { Coordinator } from '../services/user-store/index.js';
+import type { Organisation } from '../services/organisation-store/index.js';
+import type { CoordinatorCursor } from '../services/user-store/interface.js';
+import type { OrgCursor } from '../services/organisation-store/interface.js';
 import { isNetworkAdmin, type Actor } from '../services/auth/actor/index.js';
 import { checkConsoleWriteRate } from '../services/console-rate.js';
 import { renderOrgAdminAction } from '../services/email-templates/index.js';
@@ -33,7 +33,7 @@ export function consoleUrl(): string {
  * @param a - The coordinator.
  * @returns The `UserSchema` shape.
  */
-export function toWireUser(a: Aggregator): User {
+export function toWireUser(a: Coordinator): User {
   return {
     id: a.id,
     user_type: 'coordinator',
@@ -61,7 +61,7 @@ export function toWireUser(a: Aggregator): User {
  * @returns The `OrgSchema` shape.
  */
 export function toWireOrg(
-  o: AggregatorOrg,
+  o: Organisation,
   orgType: 'network_facilitator' | 'aggregator' = 'aggregator',
 ): Org {
   return {
@@ -81,7 +81,7 @@ export function toWireOrg(
 }
 
 /** The owner's contact on the wire. */
-export function ownerContact(o: AggregatorOrg): {
+export function ownerContact(o: Organisation): {
   name: string | null;
   email: string;
   phone: string | null;
@@ -195,7 +195,7 @@ export function throwDecisionFailure(
  */
 export async function notifyOwnerOfAdminAction(
   actor: Actor,
-  org: AggregatorOrg,
+  org: Organisation,
   action: string,
   log: FastifyBaseLogger,
 ): Promise<void> {

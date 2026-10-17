@@ -1,5 +1,5 @@
 /**
- * Aggregator store contract.
+ * Coordinator store contract.
  *
  * Persistence port for coordinator rows of the `users` table — the
  * registration-essential row a coordinator has after signup.
@@ -44,7 +44,7 @@ export interface LegacyOrgDetails {
   gstNumber?: string | null;
 }
 
-export interface Aggregator {
+export interface Coordinator {
   id: string;
   orgSlug: string;
   /** Always `'aggregator'` since 0029 (the column is gone; the API still returns it). */
@@ -121,7 +121,7 @@ export interface Aggregator {
   rejectedAt: Date | null;
 }
 
-export interface CreateAggregatorInput {
+export interface CreateCoordinatorInput {
   orgSlug: string;
   name: string;
   /** The domain served; `null` = every domain (stored as `serves = '{}'`). */
@@ -170,7 +170,7 @@ export interface CreateAggregatorInput {
  * (`url`, `locations`, company / GST) and the org link are not patchable here
  * (0028).
  */
-export interface UpdateAggregatorPatch {
+export interface UpdateCoordinatorPatch {
   name?: string;
   type?: RoleType | null;
   /**
@@ -186,7 +186,7 @@ export interface UpdateAggregatorPatch {
   updatedBy: string;
 }
 
-export interface ListAggregatorsFilter {
+export interface ListCoordinatorsFilter {
   limit?: number;
   offset?: number;
   status?: AggregatorStatus;
@@ -220,7 +220,7 @@ export interface SearchCoordinatorsFilter {
 
 /** One page of a coordinator search; `nextCursor` is null on the last page. */
 export interface SearchCoordinatorsPage {
-  rows: Aggregator[];
+  rows: Coordinator[];
   nextCursor: CoordinatorCursor | null;
 }
 
@@ -230,11 +230,11 @@ export interface OrgCoordinatorCounts {
   pending: number;
 }
 
-/** Outcome of {@link AggregatorStoreBase.deleteIfPending}. */
+/** Outcome of {@link UserStoreBase.deleteIfPending}. */
 export type DeleteIfPendingOutcome = 'deleted' | 'not_pending' | 'aborted';
 
-export interface ListAggregatorsPage {
-  rows: Aggregator[];
+export interface ListCoordinatorsPage {
+  rows: Coordinator[];
   total: number;
 }
 
@@ -257,12 +257,12 @@ export type StoreResult<T> = { ok: true; value: T } | { ok: false; error: StoreE
  * implement every method (no partial stubs). Returns Result<T,StoreError> on
  * every boundary — never throws.
  */
-export abstract class AggregatorStoreBase {
-  abstract create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>>;
-  abstract findById(id: string): Promise<StoreResult<Aggregator | null>>;
-  abstract findBySlug(orgSlug: string): Promise<StoreResult<Aggregator | null>>;
-  abstract findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>>;
-  abstract findByContactEmail(email: string): Promise<StoreResult<Aggregator | null>>;
+export abstract class UserStoreBase {
+  abstract create(input: CreateCoordinatorInput): Promise<StoreResult<Coordinator>>;
+  abstract findById(id: string): Promise<StoreResult<Coordinator | null>>;
+  abstract findBySlug(orgSlug: string): Promise<StoreResult<Coordinator | null>>;
+  abstract findByContactPhone(phone: string): Promise<StoreResult<Coordinator | null>>;
+  abstract findByContactEmail(email: string): Promise<StoreResult<Coordinator | null>>;
   /**
    * Returns every coordinator whose `org_id` matches the given org id — the
    * spec §10 org-view query. `org_id` is the single authority for the
@@ -271,14 +271,14 @@ export abstract class AggregatorStoreBase {
    * @param orgId - `organisations.id`.
    * @returns The org's coordinators (possibly empty); never throws.
    */
-  abstract findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>>;
-  abstract list(filter: ListAggregatorsFilter): Promise<StoreResult<ListAggregatorsPage>>;
-  abstract update(id: string, patch: UpdateAggregatorPatch): Promise<StoreResult<Aggregator>>;
+  abstract findByParentOrgId(orgId: string): Promise<StoreResult<Coordinator[]>>;
+  abstract list(filter: ListCoordinatorsFilter): Promise<StoreResult<ListCoordinatorsPage>>;
+  abstract update(id: string, patch: UpdateCoordinatorPatch): Promise<StoreResult<Coordinator>>;
   abstract updateStatus(
     id: string,
     status: AggregatorStatus,
     updatedBy: string,
-  ): Promise<StoreResult<Aggregator>>;
+  ): Promise<StoreResult<Coordinator>>;
   /**
    * Atomic compare-and-set `pending`→`active`. Returns the updated row, or
    * `null` inside `ok` when the row was not `pending` (a concurrent approval
@@ -286,14 +286,14 @@ export abstract class AggregatorStoreBase {
    * applicant email) on the single winner and avoids the read-then-write
    * TOCTOU of {@link updateStatus}.
    *
-   * @param id - Aggregator UUID.
+   * @param id - Coordinator UUID.
    * @param updatedBy - Audit actor.
    * @returns The updated row, or `null` when the row was not pending.
    */
   abstract approveFromPending(
     id: string,
     updatedBy: string,
-  ): Promise<StoreResult<Aggregator | null>>;
+  ): Promise<StoreResult<Coordinator | null>>;
   /**
    * Stamps the signalstack organisation id on an aggregator row.
    *
@@ -302,7 +302,7 @@ export abstract class AggregatorStoreBase {
    * `requireApproved`. Idempotent: re-writing the same value is a no-op,
    * so repeated approvals/backfills do not bump audit fields meaningfully.
    *
-   * @param id - Aggregator UUID.
+   * @param id - Coordinator UUID.
    * @param signalstackOrgId - Org id returned by the upsert call.
    * @param updatedBy - Audit field; the actor that triggered the write.
    */
@@ -310,7 +310,7 @@ export abstract class AggregatorStoreBase {
     id: string,
     signalstackOrgId: string,
     updatedBy: string,
-  ): Promise<StoreResult<Aggregator>>;
+  ): Promise<StoreResult<Coordinator>>;
   abstract deleteById(id: string): Promise<StoreResult<void>>;
   /**
    * Atomic compare-and-set `pending`→`inactive` with a write-once
@@ -325,7 +325,7 @@ export abstract class AggregatorStoreBase {
   abstract rejectFromPending(
     id: string,
     updatedBy: string,
-  ): Promise<StoreResult<Aggregator | null>>;
+  ): Promise<StoreResult<Coordinator | null>>;
   /**
    * Deletes a coordinator only while it is still `pending` and older than
    * `cutoff`, holding the row until `beforeCommit` (the Keycloak user delete)

@@ -12,10 +12,7 @@
 import { sql } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import { logger } from '../logger.js';
-import {
-  getAggregatorOrgStore,
-  type AggregatorOrg,
-} from '../services/aggregator-org-store/index.js';
+import { getOrganisationStore, type Organisation } from '../services/organisation-store/index.js';
 import { grantOwnerAccess } from '../services/decisions/org.js';
 import { PLACEHOLDER_OWNER_EMAIL } from '../services/organisation-root.js';
 import { getDb } from '../db/client.js';
@@ -188,9 +185,9 @@ export interface EnableOwnersReport {
 export interface EnableOwnersDeps {
   idp: IdpAdminAdapter;
   /** Active aggregator orgs. */
-  listActiveOrgs: () => Promise<AggregatorOrg[]>;
+  listActiveOrgs: () => Promise<Organisation[]>;
   /** Grants access (enable, role, group); idempotent. */
-  grant: (org: AggregatorOrg) => Promise<{ status: 'granted' | 'partial' | 'no_login' }>;
+  grant: (org: Organisation) => Promise<{ status: 'granted' | 'partial' | 'no_login' }>;
   pause?: (ms: number) => Promise<void>;
 }
 
@@ -258,9 +255,9 @@ export async function enableOwnersStep(
 }
 
 /** Every active aggregator org, paged through the store. */
-async function activeOrgs(): Promise<AggregatorOrg[]> {
-  const store = getAggregatorOrgStore();
-  const all: AggregatorOrg[] = [];
+async function activeOrgs(): Promise<Organisation[]> {
+  const store = getOrganisationStore();
+  const all: Organisation[] = [];
   let cursor: { name: string; id: string } | undefined;
   for (;;) {
     const page = await store.search({

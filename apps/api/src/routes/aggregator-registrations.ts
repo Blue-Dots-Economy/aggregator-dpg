@@ -1,5 +1,5 @@
 /**
- * Aggregator registration endpoints.
+ * Coordinator registration endpoints.
  *
  * Public submission flow:
  *   1. Validate body against `RegistrationPayloadSchema` (Zod) AND
@@ -35,14 +35,14 @@ import { z } from 'zod';
 import { RegistrationPayloadSchema } from '@aggregator-dpg/shared-primitives/aggregator';
 import type { BecknContact, BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getRegistrationValidator } from '../services/registration-validator.js';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
 import { stampConsent } from '../services/registration-consent.js';
 import type {
-  Aggregator,
+  Coordinator,
   LegacyOrgDetails,
   RecordConsentHook,
-} from '../services/aggregator-store/interface.js';
-import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
+} from '../services/user-store/interface.js';
+import { getOrganisationStore } from '../services/organisation-store/index.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { verifyInviteToken } from '../services/invite-token.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
@@ -162,7 +162,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         // row and re-mint the link to the reviewer using STORED values — the
         // anonymous submit carries no proof of identity, so honouring the
         // resubmitted name/phone would let a stranger hijack the record.
-        const reclaimReview = async (row: Aggregator): Promise<FastifyReply> => {
+        const reclaimReview = async (row: Coordinator): Promise<FastifyReply> => {
           await sendAdminReviewEmail(
             {
               aggregatorId: row.id,
@@ -258,7 +258,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           phone: phoneE164,
         };
 
-        const aggregatorStore = getAggregatorStore();
+        const userStore = getUserStore();
         const idp = getIdpAdmin();
 
         // Server-stamp the consent timestamp so the recorded value reflects
@@ -299,7 +299,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         // for provenance so the approving owner can see who was originally targeted.
         let inviteEmailClaim: string | null = null;
         {
-          const orgStore = getAggregatorOrgStore();
+          const orgStore = getOrganisationStore();
           const reqInvite = (req.body as { invite?: string }).invite;
 
           // Invite-bound path (#700): when the submission carries an invite token
@@ -435,11 +435,11 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         // generated-column UNIQUEs (contact_phone / contact_email) and Keycloak
         // attribute lookups together give us a deterministic 409 instead of a
         // race between `aggregators` and Keycloak.
-        const dbEmail = await aggregatorStore.findByContactEmail(contact.email);
+        const dbEmail = await userStore.findByContactEmail(contact.email);
         if (!dbEmail.ok) {
           throw httpError('DB_UNAVAILABLE', {
             cause: new Error(dbEmail.error.message),
-            fields: { sub_operation: 'aggregatorStore.findByContactEmail' },
+            fields: { sub_operation: 'userStore.findByContactEmail' },
           });
         }
         if (dbEmail.value !== null) {
@@ -456,7 +456,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
                 fields: { email: contact.email, retry_after: retryAfter },
               });
             }
-            const revived = await aggregatorStore.update(existing.id, {
+            const revived = await userStore.update(existing.id, {
               status: 'pending',
               rejectedAt: null,
               updatedBy: 'self',
@@ -464,7 +464,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             if (!revived.ok) {
               throw httpError('DB_UNAVAILABLE', {
                 cause: new Error(revived.error.message),
-                fields: { sub_operation: 'aggregatorStore.reviveRejected' },
+                fields: { sub_operation: 'userStore.reviveRejected' },
               });
             }
             return reclaimReview(existing);
@@ -477,11 +477,11 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           return reclaimReview(existing);
         }
 
-        const dbPhone = await aggregatorStore.findByContactPhone(phoneE164);
+        const dbPhone = await userStore.findByContactPhone(phoneE164);
         if (!dbPhone.ok) {
           throw httpError('DB_UNAVAILABLE', {
             cause: new Error(dbPhone.error.message),
-            fields: { sub_operation: 'aggregatorStore.findByContactPhone' },
+            fields: { sub_operation: 'userStore.findByContactPhone' },
           });
         }
         if (dbPhone.value !== null) {
@@ -497,7 +497,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
                 fields: { phone: phoneE164, retry_after: retryAfter },
               });
             }
-            const revived = await aggregatorStore.update(existingPhone.id, {
+            const revived = await userStore.update(existingPhone.id, {
               status: 'pending',
               rejectedAt: null,
               updatedBy: 'self',
@@ -505,7 +505,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             if (!revived.ok) {
               throw httpError('DB_UNAVAILABLE', {
                 cause: new Error(revived.error.message),
-                fields: { sub_operation: 'aggregatorStore.reviveRejected' },
+                fields: { sub_operation: 'userStore.reviveRejected' },
               });
             }
             return reclaimReview(existingPhone);
@@ -552,7 +552,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           log,
         });
 
-        const aggregator = await createAggregatorWithSlug(aggregatorStore, body.name, {
+        const aggregator = await createAggregatorWithSlug(userStore, body.name, {
           type: body.type,
           contact,
           consent: serverConsent,
@@ -602,7 +602,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           attributes: kcAttributes,
         });
         if (!kcResult.ok) {
-          await aggregatorStore.deleteById(aggregatorId);
+          await userStore.deleteById(aggregatorId);
           if (kcResult.error.code === 'USER_EXISTS') {
             throw httpError('USER_EXISTS', {
               cause: kcResult.error,
@@ -755,7 +755,7 @@ async function aggregatorConsentWriter({
  * the (also vanishingly rare) random-suffix collision.
  */
 async function createAggregatorWithSlug(
-  store: ReturnType<typeof getAggregatorStore>,
+  store: ReturnType<typeof getUserStore>,
   name: string,
   extras: {
     type: ReturnType<typeof RegistrationPayloadSchema.parse>['type'];
@@ -849,7 +849,7 @@ async function resolveOwnerRouting(
   parentOrgId: string | null,
 ): Promise<{ org?: string; recipientEmail?: string }> {
   if (!parentOrgId) return {};
-  const org = await getAggregatorOrgStore().findById(parentOrgId);
+  const org = await getOrganisationStore().findById(parentOrgId);
   if (org.ok && org.value?.isDefault) {
     const owner = defaultOrgOwnerEmail();
     return { org: parentOrgId, ...(owner ? { recipientEmail: owner } : {}) };

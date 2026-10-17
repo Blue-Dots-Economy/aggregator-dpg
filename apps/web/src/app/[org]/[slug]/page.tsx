@@ -89,7 +89,7 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
   }
 
   // 2. Schema arrives inlined in the resolve response (sourced from the
-  // network config). Aggregator no longer keeps per-domain schema files
+  // network config). Coordinator no longer keeps per-domain schema files
   // on disk — signalstack network.json is the single source of truth.
   // Defence in depth: bail if the API returned a non-null but non-object
   // schema (malformed). `null` is valid for `account_only` links and
@@ -113,7 +113,7 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
   // rendered in that path. Cast to satisfy the view prop's RJSFSchema
   // type; the view ignores it when submissionShape === 'account_only'.
   const schema: RJSFSchema = resolved.schema ?? ({} as RJSFSchema);
-  // Aggregator-side optional UI schema overlay (e.g. widget hints,
+  // Coordinator-side optional UI schema overlay (e.g. widget hints,
   // ordering). Lives under config/<network>/schemas/participant/.
   // Optional — RJSF renders defaults when absent. Skip the disk read
   // entirely for account_only links since no RJSF form is rendered.

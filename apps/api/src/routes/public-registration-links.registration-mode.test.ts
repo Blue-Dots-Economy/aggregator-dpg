@@ -25,11 +25,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { _setDbClients } from '../db/client.js';
@@ -147,9 +143,9 @@ async function bootApp(): Promise<{
   process.env.SIGNALSTACK_ITEM_NETWORK = 'blue_dot';
   _setNetworkConfig(buildBlueDotConfig());
 
-  const aggStore = new AggregatorStoreFake();
+  const aggStore = new UserStoreFake();
   aggStore.seed([
-    buildAggregator({
+    buildCoordinator({
       id: AGG_ID,
       orgSlug: ORG_SLUG,
       name: 'Acme',
@@ -157,7 +153,7 @@ async function bootApp(): Promise<{
       signalstackOrgId: ORG_ID,
     }),
   ]);
-  _setAggregatorStore(aggStore);
+  _setUserStore(aggStore);
 
   const signalstack = new SignalStackWriterFake();
   _setSignalStackWriter(signalstack);
@@ -184,7 +180,7 @@ async function bootApp(): Promise<{
 async function teardown(app: FastifyInstance | undefined): Promise<void> {
   await app?.close();
   _setSignalStackWriter(null);
-  _setAggregatorStore(null);
+  _setUserStore(null);
   _setRegistrationLinksStore(null);
   _setNetworkConfig(null);
   _setDbClients(null, null);

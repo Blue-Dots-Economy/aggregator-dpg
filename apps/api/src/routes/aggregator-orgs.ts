@@ -19,9 +19,9 @@
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { coolingRetryAfter } from '../services/registration-cooling.js';
-import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
-import type { AggregatorOrg } from '../services/aggregator-org-store/interface.js';
+import { getOrganisationStore } from '../services/organisation-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
+import type { Organisation } from '../services/organisation-store/interface.js';
 import { resolveProfileRef } from '../services/schema-ref.js';
 import { getIdpAdmin, KC_ATTR, OWNER_CREATED_BY } from '../services/idp-admin/index.js';
 import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
@@ -196,7 +196,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
       }
       const phoneE164 = phoneResult.value;
 
-      const orgStore = getAggregatorOrgStore();
+      const orgStore = getOrganisationStore();
       const idp = getIdpAdmin();
       const ownerEmail = body.owner.email.toLowerCase();
 
@@ -204,7 +204,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
       // without touching its fields. Shared by the still-pending reclaim and the
       // rejected-then-cooling-elapsed revive path (#726): both re-use the SAME
       // row, leaving the disabled KC owner + mirrored group intact.
-      const reclaimOrgReview = async (row: AggregatorOrg): Promise<FastifyReply> => {
+      const reclaimOrgReview = async (row: Organisation): Promise<FastifyReply> => {
         await sendOrgReviewEmail(
           {
             orgId: row.id,
@@ -231,7 +231,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
       // approved. Soft-fail on the mail send, matching the approval path: the
       // org is live either way, so a mail outage must not surface as a
       // registration failure. Nothing about the row is touched.
-      const resendOwnerInvite = async (row: AggregatorOrg): Promise<FastifyReply> => {
+      const resendOwnerInvite = async (row: Organisation): Promise<FastifyReply> => {
         // Bound per OWNER ADDRESS, fail-closed, before anything is minted.
         // The route's inherited submit limiter is keyed `ip|email` and fails
         // open, so rotating IPs buys a fresh bucket and a Redis outage removes
@@ -601,7 +601,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           fields: { reason: auth.error.code },
         });
       }
-      const page = await getAggregatorOrgStore().listActive();
+      const page = await getOrganisationStore().listActive();
       if (!page.ok) {
         throw httpError('DB_UNAVAILABLE', {
           cause: new Error(page.error.message),
@@ -712,12 +712,12 @@ async function findOwnerContactClash(
   ownerEmail: string,
   phoneE164: string,
 ): Promise<'email' | 'phone' | null> {
-  const aggregators = getAggregatorStore();
+  const aggregators = getUserStore();
   const byEmail = await aggregators.findByContactEmail(ownerEmail);
   if (!byEmail.ok) {
     throw httpError('DB_UNAVAILABLE', {
       cause: new Error(byEmail.error.message),
-      fields: { sub_operation: 'aggregatorStore.findByContactEmail' },
+      fields: { sub_operation: 'userStore.findByContactEmail' },
     });
   }
   if (byEmail.value) return 'email';
@@ -726,12 +726,12 @@ async function findOwnerContactClash(
   if (!byPhone.ok) {
     throw httpError('DB_UNAVAILABLE', {
       cause: new Error(byPhone.error.message),
-      fields: { sub_operation: 'aggregatorStore.findByContactPhone' },
+      fields: { sub_operation: 'userStore.findByContactPhone' },
     });
   }
   if (byPhone.value) return 'phone';
 
-  const orgByPhone = await getAggregatorOrgStore().findByOwnerPhone(phoneE164);
+  const orgByPhone = await getOrganisationStore().findByOwnerPhone(phoneE164);
   if (!orgByPhone.ok) {
     throw httpError('DB_UNAVAILABLE', {
       cause: new Error(orgByPhone.error.message),
@@ -766,7 +766,7 @@ async function discardHalfCreatedOrg(
       );
     }
   }
-  const d = await getAggregatorOrgStore().deleteById(orgId);
+  const d = await getOrganisationStore().deleteById(orgId);
   if (!d.ok) {
     log.warn(
       {

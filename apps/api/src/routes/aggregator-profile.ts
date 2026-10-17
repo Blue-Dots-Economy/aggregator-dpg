@@ -1,5 +1,5 @@
 /**
- * Aggregator profile endpoints (post-login).
+ * Coordinator profile endpoints (post-login).
  *
  *   GET /v1/aggregators/profile/me
  *     Returns the `aggregators` row (registration-essential fields) plus an
@@ -40,8 +40,8 @@ import { ConsentRecordSchema } from '@aggregator-dpg/shared-primitives/aggregato
 import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { BecknContactSchema, BecknLocationSchema } from '@aggregator-dpg/shared-primitives/beckn';
 import { authenticate, type AuthContext } from '../services/auth/access-token.js';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
-import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
+import { getOrganisationStore } from '../services/organisation-store/index.js';
 import { getIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
@@ -138,9 +138,9 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
       const log = req.log.child({ operation: 'aggregator-profile.read', actor: auth.userId });
       const start = Date.now();
 
-      const aggregatorStore = getAggregatorStore();
+      const userStore = getUserStore();
 
-      const aggregator = await aggregatorStore.findById(auth.aggregatorId);
+      const aggregator = await userStore.findById(auth.aggregatorId);
       if (!aggregator.ok) {
         throw httpError('DB_UNAVAILABLE', { cause: new Error(aggregator.error.message) });
       }
@@ -214,7 +214,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
       // output), so the typed body can be consumed directly here.
       const body = req.body as z.infer<typeof ProfileUpdateBodySchema>;
 
-      const aggregatorStore = getAggregatorStore();
+      const userStore = getUserStore();
 
       // Org details are shared by every coordinator of the org: a CHANGE to any
       // of them is refused before any write (Keycloak or DB). Sending back the
@@ -225,11 +225,11 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         body.aggregator.contact?.company !== undefined ||
         body.aggregator.contact?.gstNumber !== undefined;
       if (sentOrgDetails) {
-        const current = await aggregatorStore.findById(auth.aggregatorId);
+        const current = await userStore.findById(auth.aggregatorId);
         if (!current.ok) {
           throw httpError('DB_UNAVAILABLE', {
             cause: new Error(current.error.message),
-            fields: { sub_operation: 'aggregatorStore.findById' },
+            fields: { sub_operation: 'userStore.findById' },
           });
         }
         const now = current.value;
@@ -304,14 +304,14 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         }
       }
 
-      // ─── 2. Aggregator-table updates ──────────────────────────────────────
-      const patch: Parameters<typeof aggregatorStore.update>[1] = {
+      // ─── 2. Coordinator-table updates ──────────────────────────────────────
+      const patch: Parameters<typeof userStore.update>[1] = {
         updatedBy: auth.userId,
       };
       if (body.aggregator.name !== undefined) patch.name = body.aggregator.name;
       if (normalisedContact !== undefined) patch.contact = normalisedContact;
 
-      const result = await aggregatorStore.update(auth.aggregatorId, patch);
+      const result = await userStore.update(auth.aggregatorId, patch);
       if (!result.ok && normalisedContact && previousPhone !== undefined) {
         // Keycloak was written first; put it back so it never runs ahead of
         // the database. Best-effort — logged if it fails.
@@ -345,7 +345,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
       );
 
       // Echo the post-write row so the client doesn't need an extra GET.
-      const aggregator = await aggregatorStore.findById(auth.aggregatorId);
+      const aggregator = await userStore.findById(auth.aggregatorId);
       if (!aggregator.ok || !aggregator.value) {
         throw httpError('INTERNAL', { detail: 'Post-write read failed.' });
       }
@@ -456,10 +456,10 @@ async function assertContactChangeAllowed(
   selfId: string,
   next: { email: string; phone: string },
 ): Promise<string> {
-  const aggregators = getAggregatorStore();
-  const orgs = getAggregatorOrgStore();
+  const aggregators = getUserStore();
+  const orgs = getOrganisationStore();
 
-  const me = valueOrUnavailable('aggregatorStore.findById', await aggregators.findById(selfId));
+  const me = valueOrUnavailable('userStore.findById', await aggregators.findById(selfId));
   if (!me) throw httpError('NOT_FOUND');
   const email = next.email.trim().toLowerCase();
   const phoneClash = () => httpError('PHONE_EXISTS', { fields: { phone: next.phone } });
@@ -471,11 +471,11 @@ async function assertContactChangeAllowed(
     !!o && o.contactId !== me.contactId;
 
   const byPhone = await aggregators.findByContactPhone(next.phone);
-  if (otherCoordinator(valueOrUnavailable('aggregatorStore.findByContactPhone', byPhone))) {
+  if (otherCoordinator(valueOrUnavailable('userStore.findByContactPhone', byPhone))) {
     throw phoneClash();
   }
   const byEmail = await aggregators.findByContactEmail(email);
-  if (otherCoordinator(valueOrUnavailable('aggregatorStore.findByContactEmail', byEmail))) {
+  if (otherCoordinator(valueOrUnavailable('userStore.findByContactEmail', byEmail))) {
     throw emailClash();
   }
   const ownerByPhone = await orgs.findByOwnerPhone(next.phone);

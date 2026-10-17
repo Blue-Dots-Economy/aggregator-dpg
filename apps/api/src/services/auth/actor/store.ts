@@ -6,8 +6,8 @@
  * tests.
  */
 
-import { getAggregatorStore, type Aggregator } from '../../aggregator-store/index.js';
-import { getAggregatorOrgStore, type AggregatorOrg } from '../../aggregator-org-store/index.js';
+import { getUserStore, type Coordinator } from '../../user-store/index.js';
+import { getOrganisationStore, type Organisation } from '../../organisation-store/index.js';
 import { getIdentityStore } from '../../identity-store/index.js';
 import { IDP_PROVIDER } from '../../idp-admin/provider.js';
 import {
@@ -24,7 +24,7 @@ const unavailable = (message: string): ActorResult => ({
 });
 
 /** The coordinator actor of a stored coordinator row. */
-function coordinatorActor(row: Aggregator): Actor {
+function coordinatorActor(row: Coordinator): Actor {
   const orgs: ActorOrg[] = row.parentOrgId
     ? [
         {
@@ -39,7 +39,7 @@ function coordinatorActor(row: Aggregator): Actor {
 }
 
 /** An owned aggregator org as an actor org. */
-function ownedOrg(org: AggregatorOrg): ActorOrg {
+function ownedOrg(org: Organisation): ActorOrg {
   return { id: org.id, orgType: 'aggregator', relation: 'owner', isDefault: org.isDefault };
 }
 
@@ -55,11 +55,11 @@ export class StoreActorResolver extends ActorResolverBase {
 
     // A recorded coordinator login without the claim (a realm missing the
     // mapper): still a coordinator, never an admin.
-    const asCoordinator = await getAggregatorStore().findById(userId);
+    const asCoordinator = await getUserStore().findById(userId);
     if (!asCoordinator.ok) return unavailable(asCoordinator.error.message);
     if (asCoordinator.value) return this.coordinator(userId);
 
-    const orgStore = getAggregatorOrgStore();
+    const orgStore = getOrganisationStore();
     const [owned, root] = await Promise.all([orgStore.listOwnedBy(userId), orgStore.findRoot()]);
     if (!owned.ok) return unavailable(owned.error.message);
     if (!root.ok) return unavailable(root.error.message);
@@ -94,7 +94,7 @@ export class StoreActorResolver extends ActorResolverBase {
   }
 
   private async coordinator(id: string): Promise<ActorResult> {
-    const row = await getAggregatorStore().findById(id);
+    const row = await getUserStore().findById(id);
     if (!row.ok) return unavailable(row.error.message);
     if (!row.value) return { ok: true, value: null };
     return { ok: true, value: coordinatorActor(row.value) };

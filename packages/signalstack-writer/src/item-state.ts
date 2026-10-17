@@ -10,7 +10,7 @@
 /**
  * Builds the profile `item_state` from a submitted row or form body.
  *
- * Aggregator participant schemas use the same field names as signalstack's
+ * Coordinator participant schemas use the same field names as signalstack's
  * profile item_state, so the body flows through unchanged. The one exception is
  * the phone field: signalstack validates it against the network's own pattern
  * (purple_dot expects `^[0-9]{10}$`, blue_dot expects E.164), so the raw value

@@ -17,13 +17,13 @@ import type { FastifyBaseLogger } from 'fastify';
 import { getMailer } from '@aggregator-dpg/mailer';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
 import { config } from '../../config.js';
-import { getAggregatorOrgStore, type AggregatorOrg } from '../aggregator-org-store/index.js';
+import { getOrganisationStore, type Organisation } from '../organisation-store/index.js';
 import { getIdpAdmin, OWNER_REALM_ROLE } from '../idp-admin/index.js';
 import { renderApplicantRejected, renderOrgOwnerApproved } from '../email-templates/index.js';
 import { deciderOf, type Decision } from './coordinator.js';
 
 /** The `already_decided` outcome of a decided org. */
-function alreadyDecided(org: AggregatorOrg): OrgDecisionOutcome {
+function alreadyDecided(org: Organisation): OrgDecisionOutcome {
   return {
     kind: 'already_decided',
     status: org.status,
@@ -86,7 +86,7 @@ export function ownerSignInUrl(): string {
  * @returns Per-step results.
  */
 export async function grantOwnerAccess( // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
-  org: AggregatorOrg,
+  org: Organisation,
   log: FastifyBaseLogger,
 ): Promise<OwnerAccessResult> {
   const sub = org.ownerKcSub;
@@ -141,9 +141,10 @@ export async function grantOwnerAccess( // NOSONAR typescript:S3776 — inherent
  * @param input - The org, the decision and who takes it.
  * @returns The outcome; never throws.
  */
-export async function decideOrg(input: OrgDecisionInput): Promise<OrgDecisionOutcome> { // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
+export async function decideOrg(input: OrgDecisionInput): Promise<OrgDecisionOutcome> {
+  // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   const log = input.log.child({ operation: 'org-decision', org_id: input.orgId });
-  const store = getAggregatorOrgStore();
+  const store = getOrganisationStore();
   const found = await store.findById(input.orgId);
   if (!found.ok) return { kind: 'unavailable', dependency: 'db' };
   if (!found.value || found.value.isDefault) return { kind: 'not_found' };

@@ -23,8 +23,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
-import type { AggregatorOrg } from '../services/aggregator-org-store/index.js';
+import { getOrganisationStore } from '../services/organisation-store/index.js';
+import type { Organisation } from '../services/organisation-store/index.js';
 import { formatApprovalTtl } from '../services/approval-token.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
 import { mintReviewToken } from '../services/registration-notify.js';
@@ -118,7 +118,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         return sendPage(reply, verified.page);
       }
 
-      const lookup = await getAggregatorOrgStore().findById(orgId);
+      const lookup = await getOrganisationStore().findById(orgId);
       if (!lookup.ok) return sendPage(reply, orgUnavailablePage());
       if (!lookup.value) return sendPage(reply, orgNotFoundPage());
 
@@ -243,7 +243,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       });
       if (!verified.ok) return sendPage(reply, verified.page);
 
-      const lookup = await getAggregatorOrgStore().findById(orgId);
+      const lookup = await getOrganisationStore().findById(orgId);
       if (!lookup.ok) return sendPage(reply, orgUnavailablePage());
       if (!lookup.value) return sendPage(reply, orgNotFoundPage());
 
@@ -280,7 +280,7 @@ type ResultView = { status: 'success' | 'error' | 'info'; title: string; message
  * @param status - The org's lifecycle status.
  * @returns A result-page view for terminal states, else `null`.
  */
-function orgDecidedView(status: AggregatorOrg['status']): ResultView | null {
+function orgDecidedView(status: Organisation['status']): ResultView | null {
   if (status === 'pending') return null;
   if (status === 'active' || status === 'retired') {
     return {

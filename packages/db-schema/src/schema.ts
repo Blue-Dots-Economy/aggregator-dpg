@@ -1,5 +1,5 @@
 /**
- * Postgres schema definitions for the Aggregator API.
+ * Postgres schema definitions for the Coordinator API.
  *
  * Tables:
  *   - `contact`: one row per person (name, email, phone), keyed by the
@@ -436,7 +436,7 @@ export const organisations = pgTable(
     uniqueIndex('organisations_slug_live_unique')
       .on(table.slug)
       .where(sql`status IN ('pending','active')`),
-    // Aggregator org names are unique (case-insensitive) over non-terminal rows.
+    // Coordinator org names are unique (case-insensitive) over non-terminal rows.
     uniqueIndex('organisations_name_live_unique')
       .on(sql`lower(${table.name})`)
       .where(sql`org_type = 'aggregator' AND status IN ('pending','active')`),
@@ -592,7 +592,7 @@ export const linkSubmissions = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // Metrics Aggregator pickup: NULLS FIRST surfaces unrolled rows first.
+    // Metrics Coordinator pickup: NULLS FIRST surfaces unrolled rows first.
     index('link_submissions_rollup_pickup_idx').on(table.rolledUpAt, table.createdAt),
     index('link_submissions_link_idx').on(table.linkId),
     index('link_submissions_user_created_idx').on(table.userId, table.createdAt),
@@ -702,7 +702,7 @@ export const onboarding = pgTable(
       .on(table.batchId)
       .where(sql`${table.source} = 'bulk'`),
     // Link: one row per (aggregator, link, period). UPSERT target for
-    // Metrics Aggregator hour-bucket rollups.
+    // Metrics Coordinator hour-bucket rollups.
     uniqueIndex('onboarding_link_rollup_unique')
       .on(table.userId, table.linkId, table.periodStart)
       .where(sql`${table.source} = 'link'`),

@@ -49,7 +49,7 @@ export function randomSuffix(bytes = 2): string {
  * `slugify(name)-<hex>`. Call this once at INSERT — the slug is immutable
  * afterwards (DB trigger `aggregators_lock_slug` enforces it).
  *
- * @param name - Aggregator display name from the registration payload.
+ * @param name - Coordinator display name from the registration payload.
  * @param bytes - Random suffix length in bytes (default 2 → 4 hex chars).
  */
 export function slugFromName(name: string, bytes = 2): string {
