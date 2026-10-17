@@ -43,7 +43,7 @@ const { _setAccessTokenVerifier, _resetJwks } = await import('../services/auth/a
 const { _setSignalStackWriter } = await import('../services/signalstack.js');
 const { _setNetworkConfig } = await import('../services/network-config.js');
 const { buildBlueDotConfig } = await import('@aggregator-dpg/network-config/testing');
-const { UserStoreFake, _setUserStore, buildAggregator } =
+const { UserStoreFake, _setUserStore, buildCoordinator } =
   await import('../services/user-store/index.js');
 const { IdpAdminFake, _setIdpAdmin } = await import('../services/idp-admin/index.js');
 const { SignalStackWriterFake } = await import('@aggregator-dpg/signalstack-writer/testing');
@@ -89,7 +89,7 @@ describe('POST /v1/dashboard/export/profiles unowned-id warning', () => {
 
     const userStore = new UserStoreFake();
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: AGG_A,
         orgSlug: 'agg-a',
         name: 'Agg A',

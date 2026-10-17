@@ -3,8 +3,8 @@ import { IdpAdminFake } from '../../services/idp-admin/testing.js';
 import { IdentityStoreFake } from '../../services/identity-store/testing.js';
 import { IDP_PROVIDER } from '../../services/idp-admin/provider.js';
 import { enableOwnersStep, enrichExitCode, enrichIdentities } from '../instance-upgrade-online.js';
-import { buildAggregatorOrg, buildDefaultOrg } from '../../services/organisation-store/index.js';
-import type { AggregatorOrg } from '../../services/organisation-store/index.js';
+import { buildOrganisation, buildDefaultOrg } from '../../services/organisation-store/index.js';
+import type { Organisation } from '../../services/organisation-store/index.js';
 import { PLACEHOLDER_OWNER_EMAIL } from '../../services/organisation-root.js';
 
 const C1 = '11111111-1111-4111-8111-111111111111';
@@ -116,13 +116,13 @@ describe('enableOwnersStep', () => {
   let idp: IdpAdminFake;
   const granted: string[] = [];
 
-  const org = (id: string, over: Partial<AggregatorOrg> = {}) =>
-    buildAggregatorOrg({ id, slug: `o-${id.slice(0, 4)}`, status: 'active', ...over });
+  const org = (id: string, over: Partial<Organisation> = {}) =>
+    buildOrganisation({ id, slug: `o-${id.slice(0, 4)}`, status: 'active', ...over });
 
-  const deps = (orgs: AggregatorOrg[], status: 'granted' | 'partial' = 'granted') => ({
+  const deps = (orgs: Organisation[], status: 'granted' | 'partial' = 'granted') => ({
     idp,
     listActiveOrgs: () => Promise.resolve(orgs),
-    grant: (o: AggregatorOrg) => {
+    grant: (o: Organisation) => {
       granted.push(o.id);
       return Promise.resolve({ status });
     },

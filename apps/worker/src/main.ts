@@ -3,7 +3,7 @@
  *
  * Wires BullMQ workers for the onboarding pipeline. At slice 9 this
  * exposes only the File Processor (`bulk-file-process` queue). Subsequent
- * slices add the Row Processor, Finaliser, and Metrics Aggregator workers
+ * slices add the Row Processor, Finaliser, and Metrics Coordinator workers
  * alongside.
  */
 

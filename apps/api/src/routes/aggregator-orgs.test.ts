@@ -5,16 +5,16 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import {
   OrganisationStoreFake,
-  buildAggregatorOrg,
+  buildOrganisation,
   buildDefaultOrg,
   _setOrganisationStore,
   OrganisationStoreBase,
-  type AggregatorOrg,
+  type Organisation,
   type CreateOrgInput,
   type OrgStoreResult,
 } from '../services/organisation-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
-import { UserStoreFake, buildAggregator, _setUserStore } from '../services/user-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -105,7 +105,7 @@ describe('aggregator-orgs routes', () => {
   describe('one person per email/phone across coordinators and org owners (contact, 0025)', () => {
     it('409 OWNER_ALREADY_REGISTERED before any write when a coordinator holds the owner email', async () => {
       userStore.seed([
-        buildAggregator({
+        buildCoordinator({
           contact: { name: 'Ravi', email: 'ravi@enable.org', phone: '+919999900000' },
         }),
       ]);
@@ -127,7 +127,7 @@ describe('aggregator-orgs routes', () => {
 
     it('409 PHONE_EXISTS when a coordinator holds the owner phone', async () => {
       userStore.seed([
-        buildAggregator({
+        buildCoordinator({
           contact: { name: 'Someone', email: 'someone@else.org', phone: '+919876500000' },
         }),
       ]);
@@ -143,7 +143,7 @@ describe('aggregator-orgs routes', () => {
 
     it("409 PHONE_EXISTS when another org's owner holds the phone", async () => {
       orgStore.seed([
-        buildAggregatorOrg({
+        buildOrganisation({
           id: 'o-other',
           slug: 'other-org',
           displayName: 'Other Org',
@@ -344,8 +344,8 @@ describe('aggregator-orgs routes', () => {
 
   it('GET /v1/orgs lists only active orgs', async () => {
     orgStore.seed([
-      buildAggregatorOrg({ id: 'o-active', slug: 'a', displayName: 'A', status: 'active' }),
-      buildAggregatorOrg({ id: 'o-pending', slug: 'b', displayName: 'B', status: 'pending' }),
+      buildOrganisation({ id: 'o-active', slug: 'a', displayName: 'A', status: 'active' }),
+      buildOrganisation({ id: 'o-pending', slug: 'b', displayName: 'B', status: 'pending' }),
     ]);
     const res = await app.inject({ method: 'GET', url: '/v1/orgs', headers: AUTH_HEADER });
     expect(res.statusCode).toBe(200);
@@ -357,8 +357,8 @@ describe('aggregator-orgs routes', () => {
   it('GET /v1/orgs sorts by name and hides Default once a real org is active (0028)', async () => {
     orgStore.seed([
       buildDefaultOrg(),
-      buildAggregatorOrg({ id: 'o-z', slug: 'z', displayName: 'zeta Org', status: 'active' }),
-      buildAggregatorOrg({ id: 'o-a', slug: 'a', displayName: 'Alpha Org', status: 'active' }),
+      buildOrganisation({ id: 'o-z', slug: 'z', displayName: 'zeta Org', status: 'active' }),
+      buildOrganisation({ id: 'o-a', slug: 'a', displayName: 'Alpha Org', status: 'active' }),
     ]);
     const res = await app.inject({ method: 'GET', url: '/v1/orgs', headers: AUTH_HEADER });
     const body = res.json() as { orgs: { slug: string }[] };
@@ -431,7 +431,7 @@ describe('aggregator-orgs routes', () => {
 
   it('re-mints the review link for a pending org on resubmit — no field overwrite (§7)', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-reclaim',
         slug: 'enable-india-abcd',
         displayName: 'Old Name',
@@ -457,7 +457,7 @@ describe('aggregator-orgs routes', () => {
 
   it('returns 409 REGISTRATION_COOLING for a rejected org inside the cooling window', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-cooling',
         slug: 'enable-india-rej1',
         ownerEmail: 'ravi@enable.org',
@@ -482,7 +482,7 @@ describe('aggregator-orgs routes', () => {
 
   it('revives a rejected org once the cooling window has elapsed', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-revive',
         slug: 'enable-india-rej2',
         displayName: 'Old Name',
@@ -513,7 +513,7 @@ describe('aggregator-orgs routes', () => {
 
   it('sends the owner a sign-in link when the org is already ACTIVE', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-active-owner',
         slug: 'enable-india-live',
         displayName: 'Old Name',
@@ -548,7 +548,7 @@ describe('aggregator-orgs routes', () => {
     // Each admitted resend mints another independent 90-day grant, so the cap
     // has to be enforced before minting — not just before mailing.
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-active-throttled',
         slug: 'enable-india-live6',
         ownerEmail: 'throttled@enable.org',
@@ -583,7 +583,7 @@ describe('aggregator-orgs routes', () => {
     // The org form is anonymous. Keying on submitted input would let an
     // attacker rotate the payload email and get an unused bucket every time.
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-active-keyed',
         slug: 'enable-india-live7',
         ownerEmail: 'stored-owner@enable.org',
@@ -608,7 +608,7 @@ describe('aggregator-orgs routes', () => {
     // The org form is anonymous. Honouring the submitted address would hand a
     // stranger a 90-day credential that mints coordinator invites for this org.
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-active-hijack',
         slug: 'enable-india-live2',
         ownerEmail: 'real-owner@enable.org',
@@ -629,7 +629,7 @@ describe('aggregator-orgs routes', () => {
   it('still rejects a resubmit against a RETIRED org with OWNER_ALREADY_REGISTERED', async () => {
     // A dead org must never be handed a working credential.
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-retired-owner',
         slug: 'enable-india-dead',
         ownerEmail: 'retired-owner@enable.org',
@@ -653,7 +653,7 @@ describe('aggregator-orgs routes', () => {
     // them a second is on its way when the send just failed leaves them
     // waiting instead of contacting support.
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-active-nolie',
         slug: 'enable-india-live4',
         ownerEmail: 'active-nolie@enable.org',
@@ -676,7 +676,7 @@ describe('aggregator-orgs routes', () => {
 
   it('reports mail_sent true on the happy path', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-active-sent',
         slug: 'enable-india-live5',
         ownerEmail: 'active-sent@enable.org',
@@ -696,7 +696,7 @@ describe('aggregator-orgs routes', () => {
     // Soft-fail, matching the approval path: the org is live either way, so a
     // mail outage must not surface as a registration failure.
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-active-mailfail',
         slug: 'enable-india-live3',
         ownerEmail: 'active-mailfail@enable.org',
@@ -718,7 +718,7 @@ describe('aggregator-orgs routes', () => {
     // An existing active org already owns the name — a different owner submits
     // the same display_name (different case) and must be blocked.
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-name-owner',
         slug: 'enable-india-live',
         displayName: 'Enable India',
@@ -739,52 +739,52 @@ describe('aggregator-orgs routes', () => {
   it('maps a DUPLICATE_SLUG store error to ORG_SLUG_TAKEN (409)', async () => {
     // A store stub that always reports a slug collision on create.
     class DupSlugStore extends OrganisationStoreBase {
-      async create(_i: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
+      async create(_i: CreateOrgInput): Promise<OrgStoreResult<Organisation>> {
         return { ok: false, error: { code: 'DUPLICATE_SLUG', message: 'taken' } };
       }
-      async findById(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+      async findById(): Promise<OrgStoreResult<Organisation | null>> {
         return { ok: true, value: null };
       }
-      async findBySlug(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+      async findBySlug(): Promise<OrgStoreResult<Organisation | null>> {
         return { ok: true, value: null };
       }
-      async findDefault(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+      async findDefault(): Promise<OrgStoreResult<Organisation | null>> {
         return { ok: true, value: null };
       }
-      async findRoot(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+      async findRoot(): Promise<OrgStoreResult<Organisation | null>> {
         return { ok: true, value: null };
       }
       async ownerIsShared(): Promise<OrgStoreResult<boolean>> {
         return { ok: true, value: false };
       }
-      async findByOwnerEmail(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+      async findByOwnerEmail(): Promise<OrgStoreResult<Organisation | null>> {
         return { ok: true, value: null };
       }
-      async findByOwnerPhone(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+      async findByOwnerPhone(): Promise<OrgStoreResult<Organisation | null>> {
         return { ok: true, value: null };
       }
-      async listActive(): Promise<OrgStoreResult<AggregatorOrg[]>> {
+      async listActive(): Promise<OrgStoreResult<Organisation[]>> {
         return { ok: true, value: [] };
       }
-      async listPending(): Promise<OrgStoreResult<AggregatorOrg[]>> {
+      async listPending(): Promise<OrgStoreResult<Organisation[]>> {
         return { ok: true, value: [] };
       }
       async deleteById(): Promise<OrgStoreResult<void>> {
         return { ok: true, value: undefined };
       }
-      async update(): Promise<OrgStoreResult<AggregatorOrg>> {
+      async update(): Promise<OrgStoreResult<Organisation>> {
         return { ok: false, error: { code: 'NOT_FOUND', message: 'x' } };
       }
-      async approve(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+      async approve(): Promise<OrgStoreResult<Organisation | null>> {
         return { ok: true, value: null };
       }
-      async reject(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+      async reject(): Promise<OrgStoreResult<Organisation | null>> {
         return { ok: true, value: null };
       }
-      async listOwnedBy(): Promise<OrgStoreResult<AggregatorOrg[]>> {
+      async listOwnedBy(): Promise<OrgStoreResult<Organisation[]>> {
         return { ok: true, value: [] };
       }
-      async search(): Promise<OrgStoreResult<{ rows: AggregatorOrg[]; nextCursor: null }>> {
+      async search(): Promise<OrgStoreResult<{ rows: Organisation[]; nextCursor: null }>> {
         return { ok: true, value: { rows: [], nextCursor: null } };
       }
       async deleteIfPending(): Promise<OrgStoreResult<'not_pending'>> {

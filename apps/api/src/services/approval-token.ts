@@ -55,7 +55,7 @@ export interface MintResult {
 /**
  * Issues a signed approval token bound to an aggregator + intent.
  *
- * @param input - Aggregator id, intent, optional TTL.
+ * @param input - Coordinator id, intent, optional TTL.
  * @returns Token string and absolute expiry timestamp.
  */
 export async function mintApprovalToken(input: MintInput): Promise<MintResult> {

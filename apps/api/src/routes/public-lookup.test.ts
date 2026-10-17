@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { UserStoreFake, _setUserStore, buildAggregator } from '../services/user-store/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
@@ -42,7 +42,7 @@ describe('GET /public/v1/aggregators/:orgSlug/lookup', () => {
 
     userStore = new UserStoreFake();
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: AGG_ID,
         orgSlug: 'acme',
         name: 'Acme Aggregator',

@@ -31,7 +31,7 @@ import { errorResponses } from '../errors/openapi.js';
 import { getUserStore } from '../services/user-store/index.js';
 import {
   getOrganisationStore,
-  type AggregatorOrg,
+  type Organisation,
   type UpdateOrgPatch,
 } from '../services/organisation-store/index.js';
 import { isNetworkAdmin, requireActor, type Actor } from '../services/auth/actor/index.js';
@@ -60,7 +60,7 @@ function dbDown(subOperation: string, message: string): never {
 
 /** An org found for the actor, with its type. */
 interface FoundOrg {
-  org: AggregatorOrg;
+  org: Organisation;
   orgType: 'network_facilitator' | 'aggregator';
 }
 

@@ -14,10 +14,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyBaseLogger } from 'fastify';
 import pino from 'pino';
 import { FakeMailer } from '@aggregator-dpg/mailer';
-import { UserStoreFake, buildAggregator, _setUserStore } from '../user-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../user-store/index.js';
 import {
   OrganisationStoreFake,
-  buildAggregatorOrg,
+  buildOrganisation,
   _setOrganisationStore,
 } from '../organisation-store/index.js';
 import {
@@ -98,7 +98,7 @@ describe('mintInviteBatch', () => {
 
   it('reports own-org coordinators under existing, mails nothing', async () => {
     coordStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: 'c1',
         contact: { name: 'Asha', email: 'member@x.org', phone: '+919000000001' },
         parentOrgId: ORG_ID,
@@ -113,7 +113,7 @@ describe('mintInviteBatch', () => {
 
   it("another org's coordinator gets the you-already-have-an-account mail (sent)", async () => {
     coordStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: 'c2',
         contact: { name: 'Bo', email: 'other@x.org', phone: '+919000000002' },
         parentOrgId: 'some-other-org',
@@ -127,7 +127,7 @@ describe('mintInviteBatch', () => {
   });
 
   it('an existing org owner is treated as another account (sent)', async () => {
-    orgStore.seed([buildAggregatorOrg({ id: 'o1', slug: 'o1', ownerEmail: 'owner2@x.org' })]);
+    orgStore.seed([buildOrganisation({ id: 'o1', slug: 'o1', ownerEmail: 'owner2@x.org' })]);
     const s = await run([{ email: 'owner2@x.org' }]);
     expect(s.sent).toBe(1);
     expect(mailer.outbox).toHaveLength(1);
@@ -135,7 +135,7 @@ describe('mintInviteBatch', () => {
 
   it('the root owner is treated as another account', async () => {
     orgStore.seedRoot(
-      buildAggregatorOrg({ id: 'root', slug: 'network', ownerEmail: 'admin@x.org' }),
+      buildOrganisation({ id: 'root', slug: 'network', ownerEmail: 'admin@x.org' }),
     );
     const s = await run([{ email: 'admin@x.org' }]);
     expect(s.sent).toBe(1);
@@ -143,7 +143,7 @@ describe('mintInviteBatch', () => {
 
   it('the Default org owner is treated as another account', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'def',
         slug: 'default',
         ownerEmail: 'defowner@x.org',
@@ -156,7 +156,7 @@ describe('mintInviteBatch', () => {
   });
 
   it('refreshes (resent) for an existing-account address with a pending invite', async () => {
-    orgStore.seed([buildAggregatorOrg({ id: 'o2', slug: 'o2', ownerEmail: 'own@x.org' })]);
+    orgStore.seed([buildOrganisation({ id: 'o2', slug: 'o2', ownerEmail: 'own@x.org' })]);
     invites.seed([buildRegistrationInvite({ jti: 'j2', parentOrgId: ORG_ID, email: 'own@x.org' })]);
     mailer.failOnce({ code: 'TRANSPORT_FAILED', message: 'smtp down' });
     const s = await run([{ email: 'own@x.org' }]);
@@ -202,7 +202,7 @@ describe('mintInviteBatch', () => {
     });
 
     it('store_error on the existing-account path when the invite row cannot be kept', async () => {
-      orgStore.seed([buildAggregatorOrg({ id: 'o3', slug: 'o3', ownerEmail: 'own3@x.org' })]);
+      orgStore.seed([buildOrganisation({ id: 'o3', slug: 'o3', ownerEmail: 'own3@x.org' })]);
       invites.create = async () => ({
         ok: false,
         error: { code: 'DB_UNAVAILABLE', message: 'down' },

@@ -24,7 +24,7 @@ export function _setUserStore(s: UserStoreBase | null): void {
 }
 
 export { UserStoreBase } from './interface.js';
-export type { Aggregator, CreateAggregatorInput, StoreError, StoreResult } from './interface.js';
+export type { Coordinator, CreateCoordinatorInput, StoreError, StoreResult } from './interface.js';
 export { InMemoryUserStore } from './memory.js';
 export { PostgresUserStore } from './postgres.js';
-export { UserStoreFake, buildAggregator, buildCreateAggregatorInput } from './testing.js';
+export { UserStoreFake, buildCoordinator, buildCreateCoordinatorInput } from './testing.js';

@@ -21,7 +21,7 @@ import type { SQL } from 'drizzle-orm';
 import { PostgresUserStore } from '../postgres.js';
 import { _setDbClients } from '../../../db/client.js';
 import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
-import type { Aggregator, CreateAggregatorInput } from '../interface.js';
+import type { Coordinator, CreateCoordinatorInput } from '../interface.js';
 
 // ─── Fake Drizzle chain ─────────────────────────────────────────────────────
 
@@ -146,7 +146,7 @@ afterEach(() => {
 
 // ─── Row fixture ────────────────────────────────────────────────────────────
 
-function makeRow(overrides: Partial<Aggregator> = {}): Aggregator {
+function makeRow(overrides: Partial<Coordinator> = {}): Coordinator {
   const createdAt = overrides.createdAt ?? new Date('2026-01-01T00:00:00Z');
   return {
     id: '00000000-0000-0000-0000-000000000001',
@@ -179,7 +179,7 @@ function makeRow(overrides: Partial<Aggregator> = {}): Aggregator {
   };
 }
 
-function makeInput(overrides: Partial<CreateAggregatorInput> = {}): CreateAggregatorInput {
+function makeInput(overrides: Partial<CreateCoordinatorInput> = {}): CreateCoordinatorInput {
   return {
     orgSlug: 'test-org',
     name: 'Test Org',

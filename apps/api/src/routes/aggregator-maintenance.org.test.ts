@@ -6,7 +6,7 @@ import { buildApp } from '../app.js';
 import { UserStoreFake, _setUserStore } from '../services/user-store/index.js';
 import {
   OrganisationStoreFake,
-  buildAggregatorOrg,
+  buildOrganisation,
   _setOrganisationStore,
 } from '../services/organisation-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
@@ -61,7 +61,7 @@ describe('cleanup-stale — org prune', () => {
     if (!group.ok) throw new Error('seed group');
 
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-stale',
         slug: 'stale',
         ownerEmail: 'stale.owner@x.org',
@@ -72,7 +72,7 @@ describe('cleanup-stale — org prune', () => {
         updatedAt: new Date('2020-01-01T00:00:00Z'),
       }),
       // A fresh pending org (updated now) that must survive the cutoff.
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-fresh',
         slug: 'fresh',
         ownerEmail: 'fresh@x.org',
@@ -114,7 +114,7 @@ describe('cleanup-stale — org prune', () => {
     if (!group.ok) throw new Error('seed group');
     // Same owner person: a stale pending org and a live, approved one.
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-stale2',
         slug: 'stale2',
         ownerEmail: 'two.orgs@x.org',
@@ -123,7 +123,7 @@ describe('cleanup-stale — org prune', () => {
         status: 'pending',
         updatedAt: new Date('2020-01-01T00:00:00Z'),
       }),
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-live2',
         slug: 'live2',
         displayName: 'Live Two',
@@ -150,7 +150,7 @@ describe('cleanup-stale — org prune', () => {
 
   it('prunes a stale pending org with no owner KC user on file (ownerKcSub unset)', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-no-owner',
         slug: 'no-owner',
         ownerEmail: 'never-signed-in@x.org',
@@ -188,7 +188,7 @@ describe('cleanup-stale — org prune', () => {
     });
 
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-group-fail',
         slug: 'group-fail',
         ownerEmail: 'group-fail-owner@x.org',

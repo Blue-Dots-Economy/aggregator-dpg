@@ -50,17 +50,17 @@ import {
 } from '../../db/pg-error.js';
 import {
   UserStoreBase,
-  type Aggregator,
-  type CreateAggregatorInput,
-  type ListAggregatorsFilter,
-  type ListAggregatorsPage,
+  type Coordinator,
+  type CreateCoordinatorInput,
+  type ListCoordinatorsFilter,
+  type ListCoordinatorsPage,
   type DeleteIfPendingOutcome,
   type OrgCoordinatorCounts,
   type SearchCoordinatorsFilter,
   type SearchCoordinatorsPage,
   type StoreError,
   type StoreResult,
-  type UpdateAggregatorPatch,
+  type UpdateCoordinatorPatch,
 } from './interface.js';
 
 /** Ledger sources that record a registration consent (the others are attestations). */
@@ -75,9 +75,9 @@ class ConsentHookError extends Error {
 }
 
 export class PostgresUserStore extends UserStoreBase {
-  async create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
+  async create(input: CreateCoordinatorInput): Promise<StoreResult<Coordinator>> {
     const start = Date.now();
-    let created: Aggregator | null;
+    let created: Coordinator | null;
     try {
       // The contact and the row that references it are written atomically.
       created = await getDb().transaction(async (tx) => {
@@ -141,15 +141,15 @@ export class PostgresUserStore extends UserStoreBase {
     return { ok: true, value: created };
   }
 
-  async findById(id: string): Promise<StoreResult<Aggregator | null>> {
+  async findById(id: string): Promise<StoreResult<Coordinator | null>> {
     return this.findOne('userStore.findById', eq(users.id, id));
   }
 
-  async findBySlug(orgSlug: string): Promise<StoreResult<Aggregator | null>> {
+  async findBySlug(orgSlug: string): Promise<StoreResult<Coordinator | null>> {
     return this.findOne('userStore.findBySlug', eq(users.signalstackOrgSlug, orgSlug));
   }
 
-  async findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>> {
+  async findByContactPhone(phone: string): Promise<StoreResult<Coordinator | null>> {
     // `contact_id = (subselect)` keeps both lookups on their unique indexes.
     return this.findOne(
       'userStore.findByContactPhone',
@@ -160,7 +160,7 @@ export class PostgresUserStore extends UserStoreBase {
     );
   }
 
-  async findByContactEmail(email: string): Promise<StoreResult<Aggregator | null>> {
+  async findByContactEmail(email: string): Promise<StoreResult<Coordinator | null>> {
     const e = email.trim().toLowerCase();
     return this.findOne(
       'userStore.findByContactEmail',
@@ -171,7 +171,7 @@ export class PostgresUserStore extends UserStoreBase {
     );
   }
 
-  async findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>> {
+  async findByParentOrgId(orgId: string): Promise<StoreResult<Coordinator[]>> {
     try {
       const rows = await this.selectJoined().where(coordinator(eq(users.orgId, orgId)));
       return { ok: true, value: rows.map(toDomain) };
@@ -180,7 +180,7 @@ export class PostgresUserStore extends UserStoreBase {
     }
   }
 
-  async list(filter: ListAggregatorsFilter): Promise<StoreResult<ListAggregatorsPage>> {
+  async list(filter: ListCoordinatorsFilter): Promise<StoreResult<ListCoordinatorsPage>> {
     const limit = Math.max(1, Math.min(1000, filter.limit ?? 50));
     const offset = Math.max(0, filter.offset ?? 0);
     try {
@@ -206,7 +206,7 @@ export class PostgresUserStore extends UserStoreBase {
     }
   }
 
-  async update(id: string, patch: UpdateAggregatorPatch): Promise<StoreResult<Aggregator>> {
+  async update(id: string, patch: UpdateCoordinatorPatch): Promise<StoreResult<Coordinator>> {
     // Typed, so a renamed column can never be dropped silently by `.set()`.
     const updates: Partial<typeof users.$inferInsert> = {
       updatedBy: patch.updatedBy,
@@ -218,7 +218,7 @@ export class PostgresUserStore extends UserStoreBase {
     if (patch.status !== undefined) updates.status = patch.status;
     if (patch.rejectedAt !== undefined) updates.rejectedAt = patch.rejectedAt;
 
-    let updated: Aggregator | null;
+    let updated: Coordinator | null;
     try {
       updated = await getDb().transaction(async (tx) => {
         if (patch.contact !== undefined) {
@@ -270,11 +270,14 @@ export class PostgresUserStore extends UserStoreBase {
     id: string,
     status: AggregatorStatus,
     updatedBy: string,
-  ): Promise<StoreResult<Aggregator>> {
+  ): Promise<StoreResult<Coordinator>> {
     return this.update(id, { status, updatedBy });
   }
 
-  async approveFromPending(id: string, updatedBy: string): Promise<StoreResult<Aggregator | null>> {
+  async approveFromPending(
+    id: string,
+    updatedBy: string,
+  ): Promise<StoreResult<Coordinator | null>> {
     try {
       const rows = await getDb()
         .update(users)
@@ -293,7 +296,7 @@ export class PostgresUserStore extends UserStoreBase {
     id: string,
     signalstackOrgId: string,
     updatedBy: string,
-  ): Promise<StoreResult<Aggregator>> {
+  ): Promise<StoreResult<Coordinator>> {
     const start = Date.now();
     try {
       const rows = await getDb()
@@ -336,7 +339,7 @@ export class PostgresUserStore extends UserStoreBase {
     }
   }
 
-  async rejectFromPending(id: string, updatedBy: string): Promise<StoreResult<Aggregator | null>> {
+  async rejectFromPending(id: string, updatedBy: string): Promise<StoreResult<Coordinator | null>> {
     try {
       const now = new Date();
       const rows = await getDb()
@@ -488,7 +491,7 @@ export class PostgresUserStore extends UserStoreBase {
   }
 
   /** Reads one joined row through `db` (used inside write transactions). */
-  private async readIn(db: DbExecutor, id: string): Promise<Aggregator | null> {
+  private async readIn(db: DbExecutor, id: string): Promise<Coordinator | null> {
     const [row] = await this.selectJoined(db)
       .where(coordinator(eq(users.id, id)))
       .limit(1);
@@ -496,7 +499,7 @@ export class PostgresUserStore extends UserStoreBase {
   }
 
   /** Returns the first row matching `predicate`, or `null`. */
-  private async findOne(op: string, predicate: SQL): Promise<StoreResult<Aggregator | null>> {
+  private async findOne(op: string, predicate: SQL): Promise<StoreResult<Coordinator | null>> {
     try {
       const [row] = await this.selectJoined().where(coordinator(predicate)).limit(1);
       return { ok: true, value: row ? toDomain(row) : null };
@@ -510,7 +513,7 @@ export class PostgresUserStore extends UserStoreBase {
    * contact is not in `RETURNING`). A row that vanished in between is
    * reported as `NOT_FOUND`.
    */
-  private async reread(op: string, id: string): Promise<StoreResult<Aggregator>> {
+  private async reread(op: string, id: string): Promise<StoreResult<Coordinator>> {
     const found = await this.findOne(op, eq(users.id, id));
     if (!found.ok) return found;
     if (!found.value) return { ok: false, error: { code: 'NOT_FOUND', message: id } };
@@ -647,7 +650,7 @@ function composeContact(
  * the row's `accepted_at` (G14). `null` when there is no registration row or
  * it has no `valid_till`.
  */
-function composeConsent(c: JoinedRow['consent']): Aggregator['consent'] {
+function composeConsent(c: JoinedRow['consent']): Coordinator['consent'] {
   if (c?.till == null) return null;
   return {
     value: true,
@@ -656,7 +659,7 @@ function composeConsent(c: JoinedRow['consent']): Aggregator['consent'] {
   };
 }
 
-function toDomain(row: JoinedRow): Aggregator {
+function toDomain(row: JoinedRow): Coordinator {
   const { a, o } = row;
   const details = renderOrgDetails(o, a.legacyOrgDetails);
   const composed = composeContact(row, details.company, details.gstNumber);

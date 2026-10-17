@@ -55,7 +55,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
   const [attested, setAttested] = useState(false);
   const rawProfile = useProfileRaw();
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Aggregator registered participant focus, mirrored from the
+  // Coordinator registered participant focus, mirrored from the
   // `aggregator_type` KC claim. Falls back to the network's first declared
   // domain (networks.json order) while the profile loads — the upload submit
   // path is gated by the API anyway, so a transient mismatch is harmless.

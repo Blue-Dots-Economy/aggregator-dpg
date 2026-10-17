@@ -6,8 +6,8 @@
  * tests.
  */
 
-import { getUserStore, type Aggregator } from '../../user-store/index.js';
-import { getOrganisationStore, type AggregatorOrg } from '../../organisation-store/index.js';
+import { getUserStore, type Coordinator } from '../../user-store/index.js';
+import { getOrganisationStore, type Organisation } from '../../organisation-store/index.js';
 import { getIdentityStore } from '../../identity-store/index.js';
 import { IDP_PROVIDER } from '../../idp-admin/provider.js';
 import {
@@ -24,7 +24,7 @@ const unavailable = (message: string): ActorResult => ({
 });
 
 /** The coordinator actor of a stored coordinator row. */
-function coordinatorActor(row: Aggregator): Actor {
+function coordinatorActor(row: Coordinator): Actor {
   const orgs: ActorOrg[] = row.parentOrgId
     ? [
         {
@@ -39,7 +39,7 @@ function coordinatorActor(row: Aggregator): Actor {
 }
 
 /** An owned aggregator org as an actor org. */
-function ownedOrg(org: AggregatorOrg): ActorOrg {
+function ownedOrg(org: Organisation): ActorOrg {
   return { id: org.id, orgType: 'aggregator', relation: 'owner', isDefault: org.isDefault };
 }
 

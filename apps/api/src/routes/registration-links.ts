@@ -300,7 +300,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         });
       }
 
-      // Aggregator org_slug for the URL namespace. Cached per-create only —
+      // Coordinator org_slug for the URL namespace. Cached per-create only —
       // worst-case one extra row read per link, which is negligible vs the
       // alternative of denormalising org_slug onto every registration_links row.
       const userStore = getUserStore();

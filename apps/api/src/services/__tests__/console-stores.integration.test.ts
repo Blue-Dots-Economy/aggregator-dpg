@@ -18,7 +18,7 @@ import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { _setDbClients, closeDb, getPool } from '../../db/client.js';
-import { PostgresUserStore, buildCreateAggregatorInput } from '../user-store/index.js';
+import { PostgresUserStore, buildCreateCoordinatorInput } from '../user-store/index.js';
 import { PostgresOrganisationStore } from '../organisation-store/index.js';
 import { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
 
@@ -53,7 +53,7 @@ suite('console store methods (Postgres)', () => {
 
   async function coordinator(n: number, orgId: string, type: string | null): Promise<string> {
     const r = await coordinators.create(
-      buildCreateAggregatorInput({
+      buildCreateCoordinatorInput({
         orgSlug: `coord-${n}`,
         name: `Coordinator ${n}`,
         type,

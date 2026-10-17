@@ -1,5 +1,5 @@
 /**
- * Aggregator registration endpoints.
+ * Coordinator registration endpoints.
  *
  * Public submission flow:
  *   1. Validate body against `RegistrationPayloadSchema` (Zod) AND
@@ -38,7 +38,7 @@ import { getRegistrationValidator } from '../services/registration-validator.js'
 import { getUserStore } from '../services/user-store/index.js';
 import { stampConsent } from '../services/registration-consent.js';
 import type {
-  Aggregator,
+  Coordinator,
   LegacyOrgDetails,
   RecordConsentHook,
 } from '../services/user-store/interface.js';
@@ -162,7 +162,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         // row and re-mint the link to the reviewer using STORED values — the
         // anonymous submit carries no proof of identity, so honouring the
         // resubmitted name/phone would let a stranger hijack the record.
-        const reclaimReview = async (row: Aggregator): Promise<FastifyReply> => {
+        const reclaimReview = async (row: Coordinator): Promise<FastifyReply> => {
           await sendAdminReviewEmail(
             {
               aggregatorId: row.id,

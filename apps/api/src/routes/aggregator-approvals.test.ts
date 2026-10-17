@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { SignJWT } from 'jose';
 import { buildApp } from '../app.js';
-import { UserStoreFake, _setUserStore, buildAggregator } from '../services/user-store/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 import {
   OrganisationStoreFake,
-  buildAggregatorOrg,
+  buildOrganisation,
   buildDefaultOrg,
   _setOrganisationStore,
 } from '../services/organisation-store/index.js';
@@ -67,7 +67,7 @@ describe('admin approval routes', () => {
 
     userStore = new UserStoreFake();
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: aggregatorId,
         orgSlug: 'trrain-abcd',
         actorType: 'aggregator',
@@ -577,7 +577,7 @@ describe('admin approval routes', () => {
 
   const seedAggregatorWithType = (type: string | null) => {
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: aggregatorId,
         orgSlug: 'trrain-abcd',
         actorType: 'aggregator',
@@ -726,7 +726,7 @@ describe('admin approval routes', () => {
     resendIdCounter++;
     const id = `aaaaaaaa-bbbb-cccc-dddd-${String(resendIdCounter).padStart(12, '0')}`;
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id,
         orgSlug: `resend-org-${resendIdCounter}`,
         actorType: 'aggregator',
@@ -922,7 +922,7 @@ describe('admin approval routes', () => {
 
   it('allows the decision when the token org claim matches parent_org_id', async () => {
     setCoordinatorOrg(aggregatorId, 'org-A');
-    orgStore.seed([buildAggregatorOrg({ id: 'org-A', slug: 'a', status: 'active' })]);
+    orgStore.seed([buildOrganisation({ id: 'org-A', slug: 'a', status: 'active' })]);
     const { token } = await mintApprovalToken({
       aggregatorId,
       intent: 'approve',
@@ -946,7 +946,7 @@ describe('admin approval routes', () => {
   it('renders TARGET_ORG_INACTIVE when the bound org is re-validated as inactive at decision time', async () => {
     {
       setCoordinatorOrg(aggregatorId, 'org-A');
-      orgStore.seed([buildAggregatorOrg({ id: 'org-A', slug: 'a', status: 'pending' })]);
+      orgStore.seed([buildOrganisation({ id: 'org-A', slug: 'a', status: 'pending' })]);
       const { token } = await mintApprovalToken({ aggregatorId, intent: 'approve', org: 'org-A' });
       const res = await app.inject({
         method: 'POST',
@@ -1186,7 +1186,7 @@ describe('admin approval routes', () => {
 
   it('falls back to the KC first+last name when the aggregator has no contact.name', async () => {
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: aggregatorId,
         orgSlug: 'trrain-abcd',
         actorType: 'aggregator',
@@ -1210,7 +1210,7 @@ describe('admin approval routes', () => {
 
   it('falls back to the KC email when neither contact.name nor KC first/last name are set', async () => {
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: aggregatorId,
         orgSlug: 'trrain-abcd',
         actorType: 'aggregator',
@@ -1269,7 +1269,7 @@ describe('admin approval routes', () => {
 
   it('GET /read/:id renders the invited-email line when the coordinator was invited', async () => {
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: aggregatorId,
         orgSlug: 'trrain-abcd',
         actorType: 'aggregator',
@@ -1340,7 +1340,7 @@ describe('admin approval routes', () => {
   it('POST /renew/:id mints a fresh token from the token org for an org-less coordinator', async () => {
     const id = `aaaaaaaa-bbbb-cccc-dddd-${String(900).padStart(12, '0')}`;
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id,
         orgSlug: 'orgless-abcd',
         actorType: 'aggregator',

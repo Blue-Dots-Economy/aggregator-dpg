@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
-import { UserStoreFake, buildAggregator, _setUserStore } from '../services/user-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import {
   InMemoryCampaignJobStore,
   _setCampaignJobStore,
@@ -45,7 +45,7 @@ describe('POST /v1/campaign/export', () => {
 
     const aggStore = new UserStoreFake();
     aggStore.seed([
-      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
+      buildCoordinator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
     ]);
     _setUserStore(aggStore);
 
@@ -194,7 +194,7 @@ describe('POST /v1/campaign/export', () => {
   it('returns 403 AGGREGATOR_INACTIVE when the requesting aggregator is not active', async () => {
     const aggStore = new UserStoreFake();
     aggStore.seed([
-      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'inactive' }),
+      buildCoordinator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'inactive' }),
     ]);
     _setUserStore(aggStore);
     const res = await post({ item_ids: [VALID_UUID] });
@@ -205,7 +205,7 @@ describe('POST /v1/campaign/export', () => {
 
   it('returns 403 RECIPIENT_UNRESOLVED when neither token nor aggregator has an email', async () => {
     const aggStore = new UserStoreFake();
-    aggStore.seed([buildAggregator({ id: 'agg-1', contactEmail: '', status: 'active' })]);
+    aggStore.seed([buildCoordinator({ id: 'agg-1', contactEmail: '', status: 'active' })]);
     _setUserStore(aggStore);
     const res = await post({ item_ids: [VALID_UUID] });
     expect(res.statusCode).toBe(403);

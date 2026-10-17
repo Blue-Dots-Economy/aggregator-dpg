@@ -14,7 +14,7 @@ import pino from 'pino';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import {
   OrganisationStoreFake,
-  buildAggregatorOrg,
+  buildOrganisation,
   buildDefaultOrg,
   _setOrganisationStore,
 } from '../../organisation-store/index.js';
@@ -55,7 +55,7 @@ describe('decideOrg', () => {
 
   const seedPending = (over = {}) =>
     store.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: ORG_ID,
         slug: 'example',
         status: 'pending',
@@ -193,7 +193,7 @@ describe('grantOwnerAccess', () => {
   afterEach(() => _setIdpAdmin(null));
 
   it('skips entirely when the owner has no recorded login', async () => {
-    const org = buildAggregatorOrg({ ownerKcSub: null });
+    const org = buildOrganisation({ ownerKcSub: null });
     expect(await grantOwnerAccess(org, log)).toEqual({
       status: 'no_login',
       enable: 'skipped',
@@ -203,19 +203,19 @@ describe('grantOwnerAccess', () => {
   });
 
   it('grants with the group skipped when the org has no group', async () => {
-    const org = buildAggregatorOrg({ ownerKcSub: ownerSub, kcGroupId: null });
+    const org = buildOrganisation({ ownerKcSub: ownerSub, kcGroupId: null });
     const r = await grantOwnerAccess(org, log);
     expect(r).toEqual({ status: 'granted', enable: 'ok', role: 'ok', group: 'skipped' });
   });
 
   it('fully grants enable, role and group when all succeed', async () => {
-    const org = buildAggregatorOrg({ ownerKcSub: ownerSub, kcGroupId: groupId });
+    const org = buildOrganisation({ ownerKcSub: ownerSub, kcGroupId: groupId });
     const r = await grantOwnerAccess(org, log);
     expect(r).toEqual({ status: 'granted', enable: 'ok', role: 'ok', group: 'ok' });
   });
 
   it('reports partial when the role assignment fails', async () => {
-    const org = buildAggregatorOrg({ ownerKcSub: ownerSub, kcGroupId: groupId });
+    const org = buildOrganisation({ ownerKcSub: ownerSub, kcGroupId: groupId });
     idp.assignRealmRole = async () => ({
       ok: false,
       error: { code: 'BAD_REQUEST', message: 'nope' },
@@ -225,14 +225,14 @@ describe('grantOwnerAccess', () => {
   });
 
   it('reports partial when the user enable fails', async () => {
-    const org = buildAggregatorOrg({ ownerKcSub: ownerSub, kcGroupId: groupId });
+    const org = buildOrganisation({ ownerKcSub: ownerSub, kcGroupId: groupId });
     idp.enableUser = async () => ({ ok: false, error: { code: 'BAD_REQUEST', message: 'nope' } });
     const r = await grantOwnerAccess(org, log);
     expect(r).toMatchObject({ status: 'partial', enable: 'failed', role: 'ok', group: 'ok' });
   });
 
   it('reports partial when adding the user to the group fails', async () => {
-    const org = buildAggregatorOrg({ ownerKcSub: ownerSub, kcGroupId: groupId });
+    const org = buildOrganisation({ ownerKcSub: ownerSub, kcGroupId: groupId });
     idp.addUserToGroup = async () => ({
       ok: false,
       error: { code: 'BAD_REQUEST', message: 'nope' },

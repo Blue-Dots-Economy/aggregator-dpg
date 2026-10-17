@@ -33,8 +33,8 @@ import { getMailer } from '@aggregator-dpg/mailer';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
-import { getUserStore, type Aggregator } from '../services/user-store/index.js';
-import { getOrganisationStore, type AggregatorOrg } from '../services/organisation-store/index.js';
+import { getUserStore, type Coordinator } from '../services/user-store/index.js';
+import { getOrganisationStore, type Organisation } from '../services/organisation-store/index.js';
 import { isNetworkAdmin, requireActor, type Actor } from '../services/auth/actor/index.js';
 import { reachesOrg, scopeOrgFilter } from '../services/authz/scope.js';
 import { decideCoordinator } from '../services/decisions/coordinator.js';
@@ -69,7 +69,7 @@ function dbDown(subOperation: string, message: string): never {
  *
  * @throws {HttpError} NOT_FOUND / DB_UNAVAILABLE.
  */
-async function coordinatorInReach(actor: Actor, id: string): Promise<Aggregator> {
+async function coordinatorInReach(actor: Actor, id: string): Promise<Coordinator> {
   const row = await getUserStore().findById(id);
   if (!row.ok) dbDown('userStore.findById', row.error.message);
   if (!row.value || !reachesOrg(actor, row.value.parentOrgId)) throw httpError('NOT_FOUND');
@@ -81,7 +81,7 @@ async function coordinatorInReach(actor: Actor, id: string): Promise<Aggregator>
  *
  * @throws {HttpError} NOT_FOUND / DB_UNAVAILABLE.
  */
-async function loadOrg(id: string): Promise<AggregatorOrg> {
+async function loadOrg(id: string): Promise<Organisation> {
   const org = await getOrganisationStore().findById(id);
   if (!org.ok) dbDown('orgStore.findById', org.error.message);
   if (!org.value) throw httpError('NOT_FOUND');

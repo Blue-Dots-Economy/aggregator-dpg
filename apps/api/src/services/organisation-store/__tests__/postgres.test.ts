@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { PostgresOrganisationStore } from '../postgres.js';
 import { _setDbClients } from '../../../db/client.js';
 import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
-import type { AggregatorOrg, CreateOrgInput } from '../interface.js';
+import type { Organisation, CreateOrgInput } from '../interface.js';
 
 // ─── Fake Drizzle chain ─────────────────────────────────────────────────────
 
@@ -109,7 +109,7 @@ afterEach(() => {
   _setDbClients(null, null);
 });
 
-function makeRow(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
+function makeRow(overrides: Partial<Organisation> = {}): Organisation {
   const createdAt = overrides.createdAt ?? new Date('2026-01-01T00:00:00Z');
   return {
     id: '00000000-0000-0000-0000-0000000000a1',

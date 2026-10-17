@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import {
   OrganisationStoreFake,
-  buildAggregatorOrg,
+  buildOrganisation,
   _setOrganisationStore,
 } from '../services/organisation-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
@@ -56,7 +56,7 @@ describe('aggregator-org-approvals routes', () => {
     const group = await idp.createGroup('org-x', { org_id: orgId });
     if (!group.ok) throw new Error('seed');
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: orgId,
         slug: 'x',
         ownerEmail: 'owner@x.org',
@@ -97,7 +97,7 @@ describe('aggregator-org-approvals routes', () => {
     const owner = await idp.createUser({ email: 'o2@x.org', enabled: false });
     if (!owner.ok) throw new Error('seed');
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: orgId,
         slug: 'y',
         ownerEmail: 'o2@x.org',
@@ -123,7 +123,7 @@ describe('aggregator-org-approvals routes', () => {
 
   it('reject sets the org inactive', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000a3';
-    orgStore.seed([buildAggregatorOrg({ id: orgId, slug: 'z', status: 'pending' })]);
+    orgStore.seed([buildOrganisation({ id: orgId, slug: 'z', status: 'pending' })]);
     const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'reject' });
     const res = await app.inject({
       method: 'POST',
@@ -138,7 +138,7 @@ describe('aggregator-org-approvals routes', () => {
   it('reject notifies the owner and includes the reason', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000b1';
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: orgId,
         slug: 'notify',
         status: 'pending',
@@ -168,7 +168,7 @@ describe('aggregator-org-approvals routes', () => {
   it('reject still notifies when no reason is given', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000b2';
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: orgId,
         slug: 'noreason',
         status: 'pending',
@@ -190,7 +190,7 @@ describe('aggregator-org-approvals routes', () => {
   it('GET read page renders the confirm page for a pending org', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000a4';
     orgStore.seed([
-      buildAggregatorOrg({ id: orgId, slug: 'w', displayName: 'Wonder Org', status: 'pending' }),
+      buildOrganisation({ id: orgId, slug: 'w', displayName: 'Wonder Org', status: 'pending' }),
     ]);
     const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'approve' });
     const res = await app.inject({
@@ -203,7 +203,7 @@ describe('aggregator-org-approvals routes', () => {
 
   it('GET read page with an expired token offers inline regenerate (§7)', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000a5';
-    orgStore.seed([buildAggregatorOrg({ id: orgId, slug: 'ex', status: 'pending' })]);
+    orgStore.seed([buildOrganisation({ id: orgId, slug: 'ex', status: 'pending' })]);
     const { token } = await mintApprovalToken({
       aggregatorId: orgId,
       intent: 'approve',
@@ -224,7 +224,7 @@ describe('aggregator-org-approvals routes', () => {
   it('POST renew re-arms an expired token and shows the confirm page inline', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000a6';
     orgStore.seed([
-      buildAggregatorOrg({ id: orgId, slug: 'rs', displayName: 'Renew Org', status: 'pending' }),
+      buildOrganisation({ id: orgId, slug: 'rs', displayName: 'Renew Org', status: 'pending' }),
     ]);
     const { token } = await mintApprovalToken({
       aggregatorId: orgId,
@@ -245,7 +245,7 @@ describe('aggregator-org-approvals routes', () => {
 
   it('POST renew on an already-approved org is a no-op', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000a7';
-    orgStore.seed([buildAggregatorOrg({ id: orgId, slug: 'done', status: 'active' })]);
+    orgStore.seed([buildOrganisation({ id: orgId, slug: 'done', status: 'active' })]);
     const { token } = await mintApprovalToken({
       aggregatorId: orgId,
       intent: 'approve',
@@ -280,7 +280,7 @@ describe('aggregator-org-approvals routes', () => {
 
   it('GET read returns 503 when the org store is unavailable', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000c1';
-    orgStore.seed([buildAggregatorOrg({ id: orgId, slug: 'c1', status: 'pending' })]);
+    orgStore.seed([buildOrganisation({ id: orgId, slug: 'c1', status: 'pending' })]);
     orgStore.findById = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'down' },
@@ -309,7 +309,7 @@ describe('aggregator-org-approvals routes', () => {
     ['inactive', 'Already rejected'],
   ] as const)('GET read shows already-decided for a %s org', async (status, text) => {
     const orgId = `00000000-0000-0000-0000-0000000000d${status.length}`;
-    orgStore.seed([buildAggregatorOrg({ id: orgId, slug: `d-${status}`, status })]);
+    orgStore.seed([buildOrganisation({ id: orgId, slug: `d-${status}`, status })]);
     const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'approve' });
     const res = await app.inject({
       method: 'GET',
@@ -340,7 +340,7 @@ describe('aggregator-org-approvals routes', () => {
   it('POST decision reject notes a failed owner notification', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000e1';
     orgStore.seed([
-      buildAggregatorOrg({ id: orgId, slug: 'e1', status: 'pending', ownerEmail: 'o@e1.org' }),
+      buildOrganisation({ id: orgId, slug: 'e1', status: 'pending', ownerEmail: 'o@e1.org' }),
     ]);
     mailer.send = async () => ({ ok: false, error: { code: 'TRANSPORT_FAILED', message: 'down' } });
     const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'reject' });
@@ -386,7 +386,7 @@ describe('aggregator-org-approvals routes', () => {
 
   it('POST renew returns 503 when the org store is unavailable', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000f1';
-    orgStore.seed([buildAggregatorOrg({ id: orgId, slug: 'f1', status: 'pending' })]);
+    orgStore.seed([buildOrganisation({ id: orgId, slug: 'f1', status: 'pending' })]);
     orgStore.findById = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'down' },

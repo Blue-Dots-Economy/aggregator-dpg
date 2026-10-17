@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { UserStoreFake, _setUserStore, buildAggregator } from '../services/user-store/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import {
   OrganisationStoreFake,
@@ -547,7 +547,7 @@ describe('POST /v1/aggregator-registrations/create', () => {
     // separately cleaned up but the DB row remains) — the DB-level phone
     // uniqueness check must still catch it before any KC calls happen.
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: '33333333-3333-3333-3333-333333333333',
         orgSlug: 'other-org',
         contact: { name: 'Other', phone: '+919876543210', email: 'other@other.org' },

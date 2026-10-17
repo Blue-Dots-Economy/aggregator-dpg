@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { InMemoryUserStore, MEMORY_DEFAULT_ORG_ID } from '../memory.js';
-import { UserStoreFake, buildAggregator, buildCreateAggregatorInput } from '../testing.js';
+import { UserStoreFake, buildCoordinator, buildCreateCoordinatorInput } from '../testing.js';
 import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
 
 const CONSENT = {
@@ -34,16 +34,16 @@ describe('aggregator store org link (0028)', () => {
 
   it('marks a Default-org coordinator', async () => {
     const store = new InMemoryUserStore();
-    const r = await store.create(buildCreateAggregatorInput({ orgId: MEMORY_DEFAULT_ORG_ID }));
+    const r = await store.create(buildCreateCoordinatorInput({ orgId: MEMORY_DEFAULT_ORG_ID }));
     expect(r.ok && r.value.isDefaultOrg).toBe(true);
   });
 
   it("findByParentOrgId returns only that org's coordinators", async () => {
     const store = new UserStoreFake();
     store.seed([
-      buildAggregator({ id: 'c1', orgSlug: 'c1', contactEmail: 'c1@x.org', parentOrgId: 'org-1' }),
-      buildAggregator({ id: 'c2', orgSlug: 'c2', contactEmail: 'c2@x.org', parentOrgId: 'org-2' }),
-      buildAggregator({ id: 'c3', orgSlug: 'c3', contactEmail: 'c3@x.org', parentOrgId: 'org-1' }),
+      buildCoordinator({ id: 'c1', orgSlug: 'c1', contactEmail: 'c1@x.org', parentOrgId: 'org-1' }),
+      buildCoordinator({ id: 'c2', orgSlug: 'c2', contactEmail: 'c2@x.org', parentOrgId: 'org-2' }),
+      buildCoordinator({ id: 'c3', orgSlug: 'c3', contactEmail: 'c3@x.org', parentOrgId: 'org-1' }),
     ]);
     const list = await store.findByParentOrgId('org-1');
     expect(list.ok && list.value.map((a) => a.id).sort()).toEqual(['c1', 'c3']);
@@ -64,7 +64,7 @@ describe('org-detail rendering (0028)', () => {
       legalName: 'Org Pvt Ltd',
       gstNumber: '29ABCDE1234F1Z5',
     });
-    const r = await store.create(buildCreateAggregatorInput({ orgId: 'org-1' }));
+    const r = await store.create(buildCreateCoordinatorInput({ orgId: 'org-1' }));
     if (!r.ok) throw new Error('create failed');
     expect(r.value.url).toBe('https://org.example');
     expect(r.value.locations).toEqual([loc('Org street')]);
@@ -76,7 +76,7 @@ describe('org-detail rendering (0028)', () => {
     const store = new UserStoreFake();
     store.seedOrgDetails('org-1', { url: 'https://org.example' });
     const r = await store.create(
-      buildCreateAggregatorInput({
+      buildCreateCoordinatorInput({
         orgId: 'org-1',
         legacyOrgDetails: { url: 'https://own.example', locations: [loc('Own street')] },
       }),
@@ -91,7 +91,7 @@ describe('org-detail rendering (0028)', () => {
   it('renders empty values when neither has one, and never stores submitted company / GST', async () => {
     const store = new UserStoreFake();
     const r = await store.create(
-      buildCreateAggregatorInput({
+      buildCreateCoordinatorInput({
         orgId: 'org-1',
         contact: {
           name: 'A',
@@ -112,7 +112,7 @@ describe('org-detail rendering (0028)', () => {
     const store = new UserStoreFake();
     store.seedOrgDetails('org-1', {});
     const r = await store.create(
-      buildCreateAggregatorInput({
+      buildCreateCoordinatorInput({
         orgId: 'org-1',
         legacyOrgDetails: { url: null, locations: [] },
       }),
@@ -124,7 +124,7 @@ describe('org-detail rendering (0028)', () => {
 
   it('re-renders on every read, as the Postgres join does', async () => {
     const store = new UserStoreFake();
-    const r = await store.create(buildCreateAggregatorInput({ orgId: 'org-late' }));
+    const r = await store.create(buildCreateCoordinatorInput({ orgId: 'org-late' }));
     if (!r.ok) throw new Error('create failed');
     expect(r.value.url).toBeNull();
     store.seedOrgDetails('org-late', { url: 'https://late.example' });

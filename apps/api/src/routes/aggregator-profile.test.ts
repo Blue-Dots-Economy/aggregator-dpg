@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { UserStoreFake, _setUserStore, buildAggregator } from '../services/user-store/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import {
   OrganisationStoreFake,
-  buildAggregatorOrg,
+  buildOrganisation,
   _setOrganisationStore,
 } from '../services/organisation-store/index.js';
 
@@ -24,7 +24,7 @@ describe('aggregator profile routes', () => {
     process.env.KEYCLOAK_REALM = 'bluedots';
 
     userStore = new UserStoreFake();
-    userStore.seed([buildAggregator({ id: aggregatorId, orgSlug: 'trrain-zzzz' })]);
+    userStore.seed([buildCoordinator({ id: aggregatorId, orgSlug: 'trrain-zzzz' })]);
     _setUserStore(userStore);
     orgStore = new OrganisationStoreFake();
     _setOrganisationStore(orgStore);
@@ -224,7 +224,7 @@ describe('aggregator profile routes', () => {
 
   it('PATCH 409 PHONE_EXISTS (before any Keycloak write) when an org owner holds the phone', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         ownerEmail: 'boss@else.org',
         ownerPhone: '+919876543299',
         status: 'active',
@@ -252,7 +252,7 @@ describe('aggregator profile routes', () => {
 
   it('PATCH 409 PHONE_EXISTS (before any Keycloak write) when another coordinator holds the phone', async () => {
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: '00000000-0000-0000-0000-00000000beef',
         orgSlug: 'other-coord',
         contact: { name: 'Other', phone: '+919876543288', email: 'other@x.org' },
@@ -274,7 +274,7 @@ describe('aggregator profile routes', () => {
 
   it('PATCH 409 USER_EXISTS (before any Keycloak write) when an org owner holds the email', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         ownerEmail: 'boss@else.org',
         ownerPhone: '+919876543277',
         status: 'active',
@@ -303,7 +303,7 @@ describe('aggregator profile routes', () => {
   it('PATCH 409 CONFLICT before any Keycloak write when the contact is shared with an org owner', async () => {
     const shared = 'c'.repeat(64);
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: aggregatorId,
         orgSlug: 'trrain-zzzz',
         contactId: shared,
@@ -311,7 +311,7 @@ describe('aggregator profile routes', () => {
       }),
     ]);
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         contactId: shared,
         ownerEmail: 'both@trrain.org',
         ownerPhone: '+919876543201',
@@ -393,7 +393,7 @@ describe('aggregator profile routes', () => {
 
   it('PATCH 409 USER_EXISTS (before any Keycloak write) when another coordinator holds the email', async () => {
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: '00000000-0000-0000-0000-00000000cafe',
         orgSlug: 'other-coord-email',
         contact: { name: 'Other', phone: '+919876543255', email: 'taken@x.org' },

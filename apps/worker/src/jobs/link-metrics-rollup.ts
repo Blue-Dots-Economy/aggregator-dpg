@@ -1,5 +1,5 @@
 /**
- * Link Metrics Aggregator — periodic rollup of `link_submissions` into
+ * Link Metrics Coordinator — periodic rollup of `link_submissions` into
  * `onboarding`.
  *
  * Per onboarding-implementation.md §4.3:

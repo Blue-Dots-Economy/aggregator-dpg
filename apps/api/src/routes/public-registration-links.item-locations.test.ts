@@ -23,7 +23,7 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { UserStoreFake, _setUserStore, buildAggregator } from '../services/user-store/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { _setDbClients } from '../db/client.js';
@@ -147,11 +147,11 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — item_loca
     process.env.SIGNALSTACK_ACTING_ORG_ID = 'org_platform';
     process.env.SIGNALSTACK_ITEM_NETWORK = 'blue_dot';
 
-    // Aggregator seeded with a signalstackOrgId so the route doesn't bail
+    // Coordinator seeded with a signalstackOrgId so the route doesn't bail
     // with SIGNALSTACK_ORG_NOT_REGISTERED before it gets to onboard().
     userStore = new UserStoreFake();
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: AGG_ID,
         orgSlug: ORG_SLUG,
         name: 'Acme Aggregator',

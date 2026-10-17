@@ -145,7 +145,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         limit,
         ...(status ? { status } : {}),
         domain,
-        // Aggregator dashboard shows only draft + live profiles; paused +
+        // Coordinator dashboard shows only draft + live profiles; paused +
         // retired are excluded server-side by signalstack (#lifecycle-filter).
         // A caller-supplied `?lifecycle=` narrows to that single lifecycle
         // (server-side pagination over the filtered set); absent ⇒ draft+live.

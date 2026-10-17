@@ -23,7 +23,7 @@ export function _setOrganisationStore(s: OrganisationStoreBase | null): void {
 
 export { OrganisationStoreBase, DEFAULT_ORG_SLUG } from './interface.js';
 export type {
-  AggregatorOrg,
+  Organisation,
   CreateOrgInput,
   UpdateOrgPatch,
   OrgStoreError,
@@ -31,4 +31,4 @@ export type {
 } from './interface.js';
 export { InMemoryOrganisationStore } from './memory.js';
 export { PostgresOrganisationStore } from './postgres.js';
-export { OrganisationStoreFake, buildAggregatorOrg, buildDefaultOrg } from './testing.js';
+export { OrganisationStoreFake, buildOrganisation, buildDefaultOrg } from './testing.js';

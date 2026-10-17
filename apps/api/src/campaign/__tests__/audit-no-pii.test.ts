@@ -58,7 +58,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../../services/auth/access-token.js';
 import { _setNetworkConfig } from '../../services/network-config.js';
-import { UserStoreFake, buildAggregator, _setUserStore } from '../../services/user-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../../services/user-store/index.js';
 import {
   InMemoryCampaignJobStore,
   _setCampaignJobStore,
@@ -123,7 +123,7 @@ describe('audit rows never contain a participant PII value (#617)', () => {
 
     const aggStore = new UserStoreFake();
     aggStore.seed([
-      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
+      buildCoordinator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
     ]);
     _setUserStore(aggStore);
 

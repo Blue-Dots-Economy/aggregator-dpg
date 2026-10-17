@@ -390,7 +390,7 @@ export interface RootIdpReport {
  * The name is `org-<slug>-<first 8 of the org id>`: the root's and the Default
  * org's slugs are the same on every instance (`default`, the brand slug), so a
  * plain `org-<slug>` would collide on a realm shared by several instances or
- * with a group left by a recreated database. (Aggregator orgs' slugs already
+ * with a group left by a recreated database. (Coordinator orgs' slugs already
  * carry a random suffix.)
  *
  * @returns The group id, or `null` (counted as a failure, retried next boot).

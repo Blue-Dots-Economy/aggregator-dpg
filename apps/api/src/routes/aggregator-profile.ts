@@ -1,5 +1,5 @@
 /**
- * Aggregator profile endpoints (post-login).
+ * Coordinator profile endpoints (post-login).
  *
  *   GET /v1/aggregators/profile/me
  *     Returns the `aggregators` row (registration-essential fields) plus an
@@ -304,7 +304,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         }
       }
 
-      // ─── 2. Aggregator-table updates ──────────────────────────────────────
+      // ─── 2. Coordinator-table updates ──────────────────────────────────────
       const patch: Parameters<typeof userStore.update>[1] = {
         updatedBy: auth.userId,
       };

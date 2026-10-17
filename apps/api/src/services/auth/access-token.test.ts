@@ -7,7 +7,7 @@ import type { FastifyRequest } from 'fastify';
 import { requireApproved, _setAccessTokenVerifier, _resetJwks } from './access-token.js';
 import { getIdentityStore } from '../identity-store/index.js';
 import type { IdentityStoreFake } from '../identity-store/testing.js';
-import { UserStoreFake, _setUserStore, buildAggregator } from '../user-store/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../user-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../idp-admin/index.js';
 import { _setSignalStackWriter } from '../signalstack.js';
 import { _setNetworkConfig } from '../network-config.js';
@@ -42,7 +42,7 @@ describe('requireApproved + signalstack backfill', () => {
 
     store = new UserStoreFake();
     store.seed([
-      buildAggregator({
+      buildCoordinator({
         id: aggregatorId,
         orgSlug: 'trrain-abcd',
         name: 'TRRAIN',

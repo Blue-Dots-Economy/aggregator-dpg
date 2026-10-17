@@ -12,10 +12,10 @@
 import { randomUUID } from 'node:crypto';
 import {
   UserStoreBase,
-  type Aggregator,
-  type CreateAggregatorInput,
-  type ListAggregatorsFilter,
-  type ListAggregatorsPage,
+  type Coordinator,
+  type CreateCoordinatorInput,
+  type ListCoordinatorsFilter,
+  type ListCoordinatorsPage,
   type DeleteIfPendingOutcome,
   type OrgCoordinatorCounts,
   type SearchCoordinatorsFilter,
@@ -23,7 +23,7 @@ import {
   type StoreError,
   type StoreResult,
   type LegacyOrgDetails,
-  type UpdateAggregatorPatch,
+  type UpdateCoordinatorPatch,
 } from './interface.js';
 import type { AggregatorStatus, BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
 import { renderOrgDetails, type OrgDetailColumns } from './org-details.js';
@@ -46,7 +46,7 @@ function safeContactId(email: string, phone: string): string | null {
 }
 
 export class InMemoryUserStore extends UserStoreBase {
-  protected readonly byId = new Map<string, Aggregator>();
+  protected readonly byId = new Map<string, Coordinator>();
   protected readonly bySlug = new Map<string, string>();
   protected readonly byPhone = new Map<string, string>();
   protected readonly byEmail = new Map<string, string>();
@@ -69,7 +69,7 @@ export class InMemoryUserStore extends UserStoreBase {
     orgId: string,
     legacy: LegacyOrgDetails | null,
     submitted: BecknContact,
-  ): { url: string | null; locations: Aggregator['locations']; contact: BecknContact } {
+  ): { url: string | null; locations: Coordinator['locations']; contact: BecknContact } {
     const d = renderOrgDetails(this.orgDetails.get(orgId) ?? null, legacy);
     const { name, email, phone, alternatePhone } = submitted;
     return {
@@ -92,7 +92,7 @@ export class InMemoryUserStore extends UserStoreBase {
    * org has no seeded details and that hold no legacy values are returned as
    * stored (rows seeded directly by tests keep their own url / locations).
    */
-  protected view(row: Aggregator): Aggregator {
+  protected view(row: Coordinator): Coordinator {
     const orgId = row.parentOrgId;
     const legacy = this.legacy.get(row.id) ?? null;
     if (!orgId || (!this.orgDetails.has(orgId) && !legacy)) return row;
@@ -101,11 +101,11 @@ export class InMemoryUserStore extends UserStoreBase {
   }
 
   /** {@link view} for a possibly-missing row. */
-  protected viewOrNull(row: Aggregator | undefined): Aggregator | null {
+  protected viewOrNull(row: Coordinator | undefined): Coordinator | null {
     return row ? this.view(row) : null;
   }
 
-  async create(input: CreateAggregatorInput): Promise<StoreResult<Aggregator>> {
+  async create(input: CreateCoordinatorInput): Promise<StoreResult<Coordinator>> {
     if (this.bySlug.has(input.orgSlug)) {
       return errResult('DUPLICATE_SLUG', `slug already exists: ${input.orgSlug}`);
     }
@@ -136,7 +136,7 @@ export class InMemoryUserStore extends UserStoreBase {
     this.legacy.set(id, input.legacyOrgDetails ?? null);
     const rendered = this.render(input.orgId, input.legacyOrgDetails ?? null, input.contact);
     const serves = servesOf(input.type);
-    const row: Aggregator = {
+    const row: Coordinator = {
       id,
       orgSlug: input.orgSlug,
       actorType: 'aggregator',
@@ -168,26 +168,26 @@ export class InMemoryUserStore extends UserStoreBase {
     return { ok: true, value: this.view(row) };
   }
 
-  findById(id: string): Promise<StoreResult<Aggregator | null>> {
+  findById(id: string): Promise<StoreResult<Coordinator | null>> {
     return Promise.resolve({ ok: true, value: this.viewOrNull(this.byId.get(id)) });
   }
 
-  findBySlug(orgSlug: string): Promise<StoreResult<Aggregator | null>> {
+  findBySlug(orgSlug: string): Promise<StoreResult<Coordinator | null>> {
     const id = this.bySlug.get(orgSlug);
     return Promise.resolve({ ok: true, value: id ? this.viewOrNull(this.byId.get(id)) : null });
   }
 
-  findByContactPhone(phone: string): Promise<StoreResult<Aggregator | null>> {
+  findByContactPhone(phone: string): Promise<StoreResult<Coordinator | null>> {
     const id = this.byPhone.get(phone);
     return Promise.resolve({ ok: true, value: id ? this.viewOrNull(this.byId.get(id)) : null });
   }
 
-  findByContactEmail(email: string): Promise<StoreResult<Aggregator | null>> {
+  findByContactEmail(email: string): Promise<StoreResult<Coordinator | null>> {
     const id = this.byEmail.get(email.toLowerCase());
     return Promise.resolve({ ok: true, value: id ? this.viewOrNull(this.byId.get(id)) : null });
   }
 
-  findByParentOrgId(orgId: string): Promise<StoreResult<Aggregator[]>> {
+  findByParentOrgId(orgId: string): Promise<StoreResult<Coordinator[]>> {
     return Promise.resolve({
       ok: true,
       value: [...this.byId.values()]
@@ -196,7 +196,7 @@ export class InMemoryUserStore extends UserStoreBase {
     });
   }
 
-  list(filter: ListAggregatorsFilter): Promise<StoreResult<ListAggregatorsPage>> {
+  list(filter: ListCoordinatorsFilter): Promise<StoreResult<ListCoordinatorsPage>> {
     const limit = Math.max(1, Math.min(1000, filter.limit ?? 50));
     const offset = Math.max(0, filter.offset ?? 0);
     let rows = [...this.byId.values()];
@@ -215,7 +215,7 @@ export class InMemoryUserStore extends UserStoreBase {
     });
   }
 
-  update(id: string, patch: UpdateAggregatorPatch): Promise<StoreResult<Aggregator>> {
+  update(id: string, patch: UpdateCoordinatorPatch): Promise<StoreResult<Coordinator>> {
     const existing = this.byId.get(id);
     if (!existing) return Promise.resolve(errResult('NOT_FOUND', id));
 
@@ -240,7 +240,7 @@ export class InMemoryUserStore extends UserStoreBase {
     if (!nextId)
       return Promise.resolve(errResult('CHECK_VIOLATION', 'contactId: phone must be canonical'));
 
-    const next: Aggregator = {
+    const next: Coordinator = {
       ...existing,
       name: patch.name ?? existing.name,
       ...(patch.type !== undefined
@@ -266,11 +266,14 @@ export class InMemoryUserStore extends UserStoreBase {
     id: string,
     status: AggregatorStatus,
     updatedBy: string,
-  ): Promise<StoreResult<Aggregator>> {
+  ): Promise<StoreResult<Coordinator>> {
     return this.update(id, { status, updatedBy });
   }
 
-  async approveFromPending(id: string, updatedBy: string): Promise<StoreResult<Aggregator | null>> {
+  async approveFromPending(
+    id: string,
+    updatedBy: string,
+  ): Promise<StoreResult<Coordinator | null>> {
     const existing = this.byId.get(id);
     // Only pending → active; anything else means already decided.
     if (!existing || existing.status !== 'pending') return { ok: true, value: null };
@@ -281,10 +284,10 @@ export class InMemoryUserStore extends UserStoreBase {
     id: string,
     signalstackOrgId: string,
     updatedBy: string,
-  ): Promise<StoreResult<Aggregator>> {
+  ): Promise<StoreResult<Coordinator>> {
     const existing = this.byId.get(id);
     if (!existing) return Promise.resolve(errResult('NOT_FOUND', id));
-    const next: Aggregator = {
+    const next: Coordinator = {
       ...existing,
       signalstackOrgId,
       updatedBy,
@@ -304,7 +307,7 @@ export class InMemoryUserStore extends UserStoreBase {
     return Promise.resolve({ ok: true, value: undefined });
   }
 
-  async rejectFromPending(id: string, updatedBy: string): Promise<StoreResult<Aggregator | null>> {
+  async rejectFromPending(id: string, updatedBy: string): Promise<StoreResult<Coordinator | null>> {
     const existing = this.byId.get(id);
     // Only pending → inactive; anything else means already decided.
     if (existing?.status !== 'pending') return { ok: true, value: null };
@@ -372,14 +375,14 @@ export class InMemoryUserStore extends UserStoreBase {
 
   // ─── Index maintenance ────────────────────────────────────────────────────
 
-  protected indexInsert(row: Aggregator): void {
+  protected indexInsert(row: Coordinator): void {
     this.byId.set(row.id, row);
     this.bySlug.set(row.orgSlug, row.id);
     this.byPhone.set(row.contactPhone, row.id);
     this.byEmail.set(row.contactEmail, row.id);
   }
 
-  protected indexReplace(prev: Aggregator, next: Aggregator): void {
+  protected indexReplace(prev: Coordinator, next: Coordinator): void {
     this.byId.set(next.id, next);
     if (prev.contactPhone !== next.contactPhone) {
       this.byPhone.delete(prev.contactPhone);

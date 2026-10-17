@@ -1,5 +1,5 @@
 /**
- * Aggregator-specific DTOs and Zod schemas — actor / role / status enums,
+ * Coordinator-specific DTOs and Zod schemas — actor / role / status enums,
  * consent records, and the registration payload shape that drives the
  * `aggregators` table.
  *
@@ -24,7 +24,7 @@ export const ActorTypeSchema = z.enum(['aggregator', 'seeker', 'provider']);
 export type ActorType = z.infer<typeof ActorTypeSchema>;
 
 /**
- * Aggregator participant focus / domain id. Open string — the
+ * Coordinator participant focus / domain id. Open string — the
  * signalstack network's `network.json` declares the valid values per
  * deployment (blue_dot: seeker/provider; yellow_dot: learner/tutor;
  * etc.). Callers validate against `getNetworkConfig().domainIds` at
@@ -76,7 +76,7 @@ export const RegistrationPayloadSchema = z
   .object({
     name: z.string().min(2).max(200),
     /**
-     * Aggregator's domain focus — `seeker` or `provider`. Mirrored to the
+     * Coordinator's domain focus — `seeker` or `provider`. Mirrored to the
      * Keycloak `aggregator_type` user attribute and published in the JWT
      * claim of the same name. Routes that write participant data compare
      * the request body to that claim.

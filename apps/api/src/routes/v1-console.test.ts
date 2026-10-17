@@ -4,10 +4,10 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { UserStoreFake, buildAggregator, _setUserStore } from '../services/user-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import {
   OrganisationStoreFake,
-  buildAggregatorOrg,
+  buildOrganisation,
   buildDefaultOrg,
   _setOrganisationStore,
 } from '../services/organisation-store/index.js';
@@ -84,7 +84,7 @@ describe('console routes /v1/user, /v1/org', () => {
     status: 'pending' | 'active' | 'inactive' | 'retired',
     n: number,
   ) {
-    return buildAggregator({
+    return buildCoordinator({
       id,
       orgSlug: `coord-${n}`,
       name: `Coordinator ${n}`,
@@ -110,7 +110,7 @@ describe('console routes /v1/user, /v1/org', () => {
     mailer = new FakeMailer();
 
     orgs.seedRoot(
-      buildAggregatorOrg({
+      buildOrganisation({
         id: ROOT,
         slug: 'network',
         displayName: 'The Network',
@@ -121,7 +121,7 @@ describe('console routes /v1/user, /v1/org', () => {
     );
     orgs.seed([
       { ...buildDefaultOrg(), ownerUserId: NA, ownerEmail: 'na@net.org' },
-      buildAggregatorOrg({
+      buildOrganisation({
         id: ORG_A,
         slug: 'org-a',
         displayName: 'Alpha',
@@ -130,7 +130,7 @@ describe('console routes /v1/user, /v1/org', () => {
         ownerEmail: 'a@a.org',
         ownerKcSub: 'sub-a',
       }),
-      buildAggregatorOrg({
+      buildOrganisation({
         id: ORG_B,
         slug: 'org-b',
         displayName: 'Beta',
@@ -138,7 +138,7 @@ describe('console routes /v1/user, /v1/org', () => {
         ownerUserId: OWNER_B,
         ownerEmail: 'b@b.org',
       }),
-      buildAggregatorOrg({
+      buildOrganisation({
         id: ORG_P,
         slug: 'org-p',
         displayName: 'Pending Org',
@@ -750,7 +750,7 @@ describe('console routes /v1/user, /v1/org', () => {
   describe('v1-user: decision-failure outcomes (console-shared throwDecisionFailure)', () => {
     it('409 TARGET_ORG_INACTIVE when the coordinator org is no longer active', async () => {
       orgs.seed([
-        buildAggregatorOrg({
+        buildOrganisation({
           id: ORG_A,
           slug: 'org-a',
           displayName: 'Alpha',

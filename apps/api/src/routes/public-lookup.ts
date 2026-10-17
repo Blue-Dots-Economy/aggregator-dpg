@@ -4,7 +4,7 @@
  *   GET /public/v1/aggregators/:orgSlug/lookup?email&phone_number&network&domain
  *
  * No JWT — same anonymous access model as the public registration link
- * resolve route. Aggregator scope comes from the `orgSlug` path segment;
+ * resolve route. Coordinator scope comes from the `orgSlug` path segment;
  * the signalstack probe runs under that aggregator's `signalstack_org_id`
  * (no item ever created — signals' `submit_mode: account_only` path).
  *

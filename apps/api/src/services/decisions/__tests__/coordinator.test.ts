@@ -8,7 +8,7 @@ import pino from 'pino';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
-import { UserStoreFake, buildAggregator, _setUserStore } from '../../user-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../../user-store/index.js';
 import {
   OrganisationStoreFake,
   buildDefaultOrg,
@@ -37,7 +37,7 @@ describe('decideCoordinator', () => {
   beforeEach(async () => {
     store = new UserStoreFake();
     store.seed([
-      buildAggregator({
+      buildCoordinator({
         id: ID,
         status: 'pending',
         parentOrgId: buildDefaultOrg().id,
@@ -217,7 +217,7 @@ describe('decideCoordinator', () => {
 
   it('dates an already-rejected row with no rejected_at from updated_at', async () => {
     store.seed([
-      buildAggregator({
+      buildCoordinator({
         id: ID,
         status: 'inactive',
         rejectedAt: null,

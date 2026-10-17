@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
-import { UserStoreFake, buildAggregator, _setUserStore } from '../services/user-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import {
   InMemoryCampaignJobStore,
   _setCampaignJobStore,
@@ -85,7 +85,7 @@ describe('POST /v1/campaign/voice', () => {
 
     const aggStore = new UserStoreFake();
     aggStore.seed([
-      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
+      buildCoordinator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
     ]);
     _setUserStore(aggStore);
 
@@ -256,7 +256,7 @@ describe('POST /v1/campaign/voice', () => {
   it('returns 403 FORBIDDEN AGGREGATOR_INACTIVE when the requesting aggregator is not active', async () => {
     const aggStore = new UserStoreFake();
     aggStore.seed([
-      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'pending' }),
+      buildCoordinator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'pending' }),
     ]);
     _setUserStore(aggStore);
 
@@ -268,7 +268,7 @@ describe('POST /v1/campaign/voice', () => {
 
   it('returns 403 FORBIDDEN RECIPIENT_UNRESOLVED when the token has no email and the aggregator has no contact_email', async () => {
     const aggStore = new UserStoreFake();
-    aggStore.seed([buildAggregator({ id: 'agg-1', contactEmail: '', status: 'active' })]);
+    aggStore.seed([buildCoordinator({ id: 'agg-1', contactEmail: '', status: 'active' })]);
     _setUserStore(aggStore);
     // The default 'good' verifier already omits an `email` claim.
 

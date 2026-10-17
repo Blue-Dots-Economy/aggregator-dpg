@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { InMemoryOrganisationStore } from '../memory.js';
-import { OrganisationStoreFake, buildAggregatorOrg, buildDefaultOrg } from '../testing.js';
+import { OrganisationStoreFake, buildOrganisation, buildDefaultOrg } from '../testing.js';
 import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
 
 describe('InMemoryOrganisationStore', () => {
@@ -256,9 +256,9 @@ describe('organisations scoping (0028)', () => {
   it('lists active orgs by name, case-insensitively, Default included', async () => {
     const store = new OrganisationStoreFake();
     store.seed([
-      buildAggregatorOrg({ id: 'b', slug: 'b', displayName: 'beta', status: 'active' }),
+      buildOrganisation({ id: 'b', slug: 'b', displayName: 'beta', status: 'active' }),
       buildDefaultOrg(),
-      buildAggregatorOrg({ id: 'a', slug: 'a', displayName: 'Alpha', status: 'active' }),
+      buildOrganisation({ id: 'a', slug: 'a', displayName: 'Alpha', status: 'active' }),
     ]);
     const r = await store.listActive();
     expect(r.ok && r.value.map((o) => o.displayName)).toEqual(['Alpha', 'beta', 'Default']);
@@ -275,7 +275,7 @@ describe('organisations scoping (0028)', () => {
     const store = new OrganisationStoreFake();
     expect(await store.findRoot()).toEqual({ ok: true, value: null });
     store.seed([buildDefaultOrg()]);
-    const root = buildAggregatorOrg({ id: 'nf', slug: 'network', status: 'active' });
+    const root = buildOrganisation({ id: 'nf', slug: 'network', status: 'active' });
     store.seedRoot(root);
     const d = await store.findDefault();
     expect(d.ok && d.value?.isDefault).toBe(true);
@@ -364,14 +364,14 @@ describe('InMemoryOrganisationStore — listPending, search, delete and details'
   it('listPending filters by updatedBefore and orders oldest first', async () => {
     const store = new OrganisationStoreFake();
     store.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'p1',
         slug: 'p1',
         status: 'pending',
         createdAt: new Date(1000),
         updatedAt: new Date(1000),
       }),
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'p2',
         slug: 'p2',
         status: 'pending',
@@ -398,9 +398,9 @@ describe('InMemoryOrganisationStore — listPending, search, delete and details'
   it('search scopes by orgIds, status and name prefix, and pages with a cursor', async () => {
     const store = new OrganisationStoreFake();
     store.seed([
-      buildAggregatorOrg({ id: 'a', slug: 'a', displayName: 'Alpha', status: 'active' }),
-      buildAggregatorOrg({ id: 'b', slug: 'b', displayName: 'Beta', status: 'active' }),
-      buildAggregatorOrg({ id: 'c', slug: 'c', displayName: 'Gamma', status: 'pending' }),
+      buildOrganisation({ id: 'a', slug: 'a', displayName: 'Alpha', status: 'active' }),
+      buildOrganisation({ id: 'b', slug: 'b', displayName: 'Beta', status: 'active' }),
+      buildOrganisation({ id: 'c', slug: 'c', displayName: 'Gamma', status: 'pending' }),
     ]);
     const scoped = await store.search({ orgIds: ['a', 'b'], limit: 20 });
     expect(scoped.ok && scoped.value.rows.map((o) => o.id)).toEqual(['a', 'b']);
@@ -421,8 +421,8 @@ describe('InMemoryOrganisationStore — listPending, search, delete and details'
   it('search breaks a same-name tie by id', async () => {
     const store = new OrganisationStoreFake();
     store.seed([
-      buildAggregatorOrg({ id: 'id-2', slug: 's2', displayName: 'Same', status: 'active' }),
-      buildAggregatorOrg({ id: 'id-1', slug: 's1', displayName: 'same', status: 'active' }),
+      buildOrganisation({ id: 'id-2', slug: 's2', displayName: 'Same', status: 'active' }),
+      buildOrganisation({ id: 'id-1', slug: 's1', displayName: 'same', status: 'active' }),
     ]);
     const r = await store.search({ orgIds: null, limit: 20 });
     expect(r.ok && r.value.rows.map((o) => o.id)).toEqual(['id-1', 'id-2']);
@@ -431,9 +431,9 @@ describe('InMemoryOrganisationStore — listPending, search, delete and details'
   it("listOwnedBy returns an owner's orgs by name", async () => {
     const store = new OrganisationStoreFake();
     store.seed([
-      buildAggregatorOrg({ id: 'o1', slug: 'o1', displayName: 'Zeta', ownerUserId: 'owner-1' }),
-      buildAggregatorOrg({ id: 'o2', slug: 'o2', displayName: 'Acme', ownerUserId: 'owner-1' }),
-      buildAggregatorOrg({ id: 'o3', slug: 'o3', displayName: 'Other', ownerUserId: 'owner-2' }),
+      buildOrganisation({ id: 'o1', slug: 'o1', displayName: 'Zeta', ownerUserId: 'owner-1' }),
+      buildOrganisation({ id: 'o2', slug: 'o2', displayName: 'Acme', ownerUserId: 'owner-1' }),
+      buildOrganisation({ id: 'o3', slug: 'o3', displayName: 'Other', ownerUserId: 'owner-2' }),
     ]);
     const r = await store.listOwnedBy('owner-1');
     expect(r.ok && r.value.map((o) => o.displayName)).toEqual(['Acme', 'Zeta']);

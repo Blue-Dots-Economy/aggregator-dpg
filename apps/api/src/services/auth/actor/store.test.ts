@@ -11,10 +11,10 @@
  * @module @aggregator-dpg/api
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { UserStoreFake, buildAggregator, _setUserStore } from '../../user-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../../user-store/index.js';
 import {
   OrganisationStoreFake,
-  buildAggregatorOrg,
+  buildOrganisation,
   _setOrganisationStore,
 } from '../../organisation-store/index.js';
 import { IdentityStoreFake } from '../../identity-store/testing.js';
@@ -49,7 +49,7 @@ describe('StoreActorResolver', () => {
 
   describe('claimed coordinator (aggregator_id present)', () => {
     it('resolves to the coordinator when the recorded login is this subject', async () => {
-      coordStore.seed([buildAggregator({ id: COORD_ID, status: 'active' })]);
+      coordStore.seed([buildCoordinator({ id: COORD_ID, status: 'active' })]);
       identity.seed([{ userId: COORD_ID, provider: IDP_PROVIDER, subject: SUBJECT }]);
       const r = await resolver.resolve({ aggregatorId: COORD_ID, subject: SUBJECT });
       expect(r).toEqual({
@@ -59,14 +59,14 @@ describe('StoreActorResolver', () => {
     });
 
     it('resolves a coordinator with no parent org to an empty orgs list', async () => {
-      coordStore.seed([buildAggregator({ id: COORD_ID, status: 'active', parentOrgId: null })]);
+      coordStore.seed([buildCoordinator({ id: COORD_ID, status: 'active', parentOrgId: null })]);
       identity.seed([{ userId: COORD_ID, provider: IDP_PROVIDER, subject: SUBJECT }]);
       const r = await resolver.resolve({ aggregatorId: COORD_ID, subject: SUBJECT });
       expect(r.ok && r.value?.orgs).toEqual([]);
     });
 
     it('resolves to null when the subject does not match the recorded login', async () => {
-      coordStore.seed([buildAggregator({ id: COORD_ID, status: 'active' })]);
+      coordStore.seed([buildCoordinator({ id: COORD_ID, status: 'active' })]);
       identity.seed([{ userId: COORD_ID, provider: IDP_PROVIDER, subject: 'someone-else' }]);
       expect(await resolver.resolve({ aggregatorId: COORD_ID, subject: SUBJECT })).toEqual({
         ok: true,
@@ -120,7 +120,7 @@ describe('StoreActorResolver', () => {
     });
 
     it('resolves a recorded login that is a coordinator (no claim, missing mapper)', async () => {
-      coordStore.seed([buildAggregator({ id: COORD_ID, status: 'active' })]);
+      coordStore.seed([buildCoordinator({ id: COORD_ID, status: 'active' })]);
       identity.seed([{ userId: COORD_ID, provider: IDP_PROVIDER, subject: SUBJECT }]);
       const r = await resolver.resolve({ subject: SUBJECT });
       expect(r).toEqual({
@@ -142,7 +142,7 @@ describe('StoreActorResolver', () => {
 
     it('resolves an admin owning active orgs, the root marking the network admin', async () => {
       identity.seed([{ userId: ADMIN_ID, provider: IDP_PROVIDER, subject: SUBJECT }]);
-      const root = buildAggregatorOrg({
+      const root = buildOrganisation({
         id: 'root-1',
         slug: 'network',
         ownerUserId: ADMIN_ID,
@@ -150,8 +150,8 @@ describe('StoreActorResolver', () => {
       });
       orgStore.seedRoot(root);
       orgStore.seed([
-        buildAggregatorOrg({ id: 'org-a', slug: 'a', ownerUserId: ADMIN_ID, status: 'active' }),
-        buildAggregatorOrg({ id: 'org-b', slug: 'b', ownerUserId: ADMIN_ID, status: 'inactive' }),
+        buildOrganisation({ id: 'org-a', slug: 'a', ownerUserId: ADMIN_ID, status: 'active' }),
+        buildOrganisation({ id: 'org-b', slug: 'b', ownerUserId: ADMIN_ID, status: 'inactive' }),
       ]);
       const r = await resolver.resolve({ subject: SUBJECT });
       expect(r.ok).toBe(true);

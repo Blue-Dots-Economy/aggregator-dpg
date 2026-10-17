@@ -25,7 +25,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { UserStoreFake, _setUserStore, buildAggregator } from '../services/user-store/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { _setDbClients } from '../db/client.js';
@@ -145,7 +145,7 @@ async function bootApp(): Promise<{
 
   const aggStore = new UserStoreFake();
   aggStore.seed([
-    buildAggregator({
+    buildCoordinator({
       id: AGG_ID,
       orgSlug: ORG_SLUG,
       name: 'Acme',

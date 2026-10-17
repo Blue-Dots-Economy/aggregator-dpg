@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { UserStoreFake, buildAggregator, _setUserStore } from '../services/user-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import {
   OrganisationStoreFake,
@@ -54,7 +54,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
 
   it('prunes only stale pending registrations and their KC users', async () => {
     // Fresh pending — last touched now, well within the grace window → survives.
-    const fresh = buildAggregator({
+    const fresh = buildCoordinator({
       id: '11111111-1111-1111-1111-111111111111',
       orgSlug: 'fresh-aaaa',
       contact: { name: 'Fresh', phone: '+919000000001', email: 'fresh@x.org' },
@@ -64,7 +64,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
       updatedAt: new Date(),
     });
     // Stale pending — last touched in 2020, far past TTL + grace → pruned.
-    const stale = buildAggregator({
+    const stale = buildCoordinator({
       id: '22222222-2222-2222-2222-222222222222',
       orgSlug: 'stale-bbbb',
       contact: { name: 'Stale', phone: '+919000000002', email: 'stale@x.org' },
@@ -111,7 +111,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
 
   it('returns zero counts when nothing is stale', async () => {
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: '33333333-3333-3333-3333-333333333333',
         orgSlug: 'recent-cccc',
         contact: { name: 'Recent', phone: '+919000000003', email: 'recent@x.org' },
@@ -156,7 +156,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
 
   it('skips (does not prune) a stale row when the KC user lookup fails', async () => {
     // Stale pending row — old enough to be pruned.
-    const stale = buildAggregator({
+    const stale = buildCoordinator({
       id: '44444444-4444-4444-4444-444444444444',
       orgSlug: 'stale-dddd',
       contact: { name: 'LookupFail', phone: '+919000000004', email: 'lookup-fail@x.org' },
@@ -199,7 +199,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
   });
 
   it('skips (does not prune) a stale row when the KC user delete fails', async () => {
-    const stale = buildAggregator({
+    const stale = buildCoordinator({
       id: '55555555-5555-5555-5555-555555555555',
       orgSlug: 'stale-eeee',
       contact: { name: 'DeleteFail', phone: '+919000000005', email: 'delete-fail@x.org' },
@@ -233,7 +233,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
   });
 
   it('skips (does not prune) a stale row when the DB row delete fails', async () => {
-    const stale = buildAggregator({
+    const stale = buildCoordinator({
       id: '66666666-6666-6666-6666-666666666666',
       orgSlug: 'stale-ffff',
       contact: { name: 'DbFail', phone: '+919000000006', email: 'db-fail@x.org' },
@@ -260,7 +260,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
   });
 
   it('leaves a row decided during the prune, and its KC user, in place', async () => {
-    const stale = buildAggregator({
+    const stale = buildCoordinator({
       id: '77777777-7777-7777-7777-777777777777',
       orgSlug: 'stale-gggg',
       contact: { name: 'Raced', phone: '+919000000007', email: 'raced@x.org' },
@@ -313,7 +313,7 @@ describe('POST /admin/v1/aggregator-registrations/cleanup-stale', () => {
 
   it('warns (but still 200s) when the stale-pending page hits the 1000-row cap', async () => {
     const rows = Array.from({ length: 1000 }, (_, i) =>
-      buildAggregator({
+      buildCoordinator({
         id: `77777777-7777-7777-7777-${String(i).padStart(12, '0')}`,
         orgSlug: `cap-org-${i}`,
         contact: {

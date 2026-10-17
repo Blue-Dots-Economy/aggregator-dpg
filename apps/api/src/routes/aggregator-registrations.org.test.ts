@@ -6,7 +6,7 @@ import { buildApp } from '../app.js';
 import { UserStoreFake, _setUserStore } from '../services/user-store/index.js';
 import {
   OrganisationStoreFake,
-  buildAggregatorOrg,
+  buildOrganisation,
   buildDefaultOrg,
   _setOrganisationStore,
 } from '../services/organisation-store/index.js';
@@ -104,7 +104,7 @@ describe('coordinator submit with an org', () => {
 
   it('sets parent_org_id from the chosen active org', async () => {
     orgStore.seed([
-      buildAggregatorOrg({ id: 'org-1', slug: 'o', status: 'active', ownerEmail: 'owner@o.org' }),
+      buildOrganisation({ id: 'org-1', slug: 'o', status: 'active', ownerEmail: 'owner@o.org' }),
     ]);
     const res = await app.inject({
       method: 'POST',
@@ -120,7 +120,7 @@ describe('coordinator submit with an org', () => {
 
   it('returns OWNER_ALREADY_REGISTERED when the coordinator email is an org owner', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'org-1',
         slug: 'o',
         status: 'active',
@@ -139,7 +139,7 @@ describe('coordinator submit with an org', () => {
 
   it('throttles a submit when the rate checker denies (429)', async () => {
     orgStore.seed([
-      buildAggregatorOrg({ id: 'org-1', slug: 'o', status: 'active', ownerEmail: 'owner@o.org' }),
+      buildOrganisation({ id: 'org-1', slug: 'o', status: 'active', ownerEmail: 'owner@o.org' }),
     ]);
     _setSubmitRateChecker(async () => ({ allowed: false, retryAfterSeconds: 42 }));
     const res = await app.inject({
@@ -209,7 +209,7 @@ describe('coordinator submit with an org', () => {
     it('is not selectable once a real org is active', async () => {
       orgStore.seed([
         buildDefaultOrg(),
-        buildAggregatorOrg({ id: 'org-1', slug: 'o', status: 'active', ownerEmail: 'o@o.org' }),
+        buildOrganisation({ id: 'org-1', slug: 'o', status: 'active', ownerEmail: 'o@o.org' }),
       ]);
       const res = await submit({ ...validBody, org_id: DEFAULT_ID });
       expect(res.statusCode).toBe(409);
@@ -264,7 +264,7 @@ describe('coordinator submit with an org', () => {
 
     it("refuses url / locations for a real org (they are the org's; Phase 5)", async () => {
       orgStore.seed([
-        buildAggregatorOrg({ id: 'org-1', slug: 'o', status: 'active', ownerEmail: 'o@o.org' }),
+        buildOrganisation({ id: 'org-1', slug: 'o', status: 'active', ownerEmail: 'o@o.org' }),
       ]);
       const res = await submit({ ...validBody, org_id: 'org-1', url: 'https://own.example' });
       expect(res.statusCode).toBe(409);

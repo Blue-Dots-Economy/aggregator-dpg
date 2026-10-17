@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import { InMemoryUserStore } from '../memory.js';
-import { UserStoreFake, buildAggregator, buildCreateAggregatorInput } from '../testing.js';
+import { UserStoreFake, buildCoordinator, buildCreateCoordinatorInput } from '../testing.js';
 
 const contactOf = (email: string, phone: string) => ({ name: 'Asha', email, phone });
 
@@ -16,7 +16,7 @@ const contactOf = (email: string, phone: string) => ({ name: 'Asha', email, phon
 async function seeded(): Promise<{ store: InMemoryUserStore; id: string }> {
   const store = new InMemoryUserStore();
   const r = await store.create(
-    buildCreateAggregatorInput({ orgSlug: 'one', contact: contactOf('a@x.org', '+919000000001') }),
+    buildCreateCoordinatorInput({ orgSlug: 'one', contact: contactOf('a@x.org', '+919000000001') }),
   );
   if (!r.ok) throw new Error('seed failed');
   return { store, id: r.value.id };
@@ -37,7 +37,7 @@ describe('InMemoryUserStore.create', () => {
     ['CHECK_VIOLATION', { orgSlug: 'two', contact: contactOf('b@x.org', '9000000002') }],
   ] as const)('returns %s', async (code, overrides) => {
     const { store } = await seeded();
-    const r = await store.create(buildCreateAggregatorInput(overrides));
+    const r = await store.create(buildCreateCoordinatorInput(overrides));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe(code);
   });
@@ -76,7 +76,7 @@ describe('InMemoryUserStore.update', () => {
   ] as const)('returns %s', async (code, next) => {
     const { store, id } = await seeded();
     await store.create(
-      buildCreateAggregatorInput({
+      buildCreateCoordinatorInput({
         orgSlug: 'two',
         contact: contactOf('b@x.org', '+919000000002'),
       }),
@@ -103,7 +103,7 @@ describe('InMemoryUserStore — consent hook and serves (0029)', () => {
     const store = new InMemoryUserStore();
     const seen: string[] = [];
     const r = await store.create(
-      buildCreateAggregatorInput({
+      buildCreateCoordinatorInput({
         recordConsent: async (_tx, id) => {
           seen.push(id);
         },
@@ -116,7 +116,7 @@ describe('InMemoryUserStore — consent hook and serves (0029)', () => {
 
   it('stores nothing and answers CONSENT_WRITE_FAILED when the hook throws', async () => {
     const store = new InMemoryUserStore();
-    const input = buildCreateAggregatorInput({
+    const input = buildCreateCoordinatorInput({
       recordConsent: async () => {
         throw new Error('ledger down');
       },
@@ -135,7 +135,7 @@ describe('InMemoryUserStore — consent hook and serves (0029)', () => {
     [null, [], null],
   ] as const)('type %s → serves %j, type %s', async (type, serves, readType) => {
     const store = new InMemoryUserStore();
-    const r = await store.create(buildCreateAggregatorInput({ type }));
+    const r = await store.create(buildCreateCoordinatorInput({ type }));
     expect(r.ok && r.value.serves).toEqual(serves);
     expect(r.ok && r.value.type).toBe(readType);
     expect(r.ok && r.value.actorType).toBe('aggregator');
@@ -143,7 +143,7 @@ describe('InMemoryUserStore — consent hook and serves (0029)', () => {
 
   it('a type patch rewrites serves', async () => {
     const store = new InMemoryUserStore();
-    const r = await store.create(buildCreateAggregatorInput());
+    const r = await store.create(buildCreateCoordinatorInput());
     if (!r.ok) throw new Error('seed');
     const u = await store.update(r.value.id, { type: 'provider', updatedBy: 't' });
     expect(u.ok && u.value.serves).toEqual(['provider']);
@@ -154,14 +154,14 @@ describe('InMemoryUserStore — consent hook and serves (0029)', () => {
 describe('InMemoryUserStore CAS, list, search and counts', () => {
   it('approveFromPending / rejectFromPending return null for an already-decided row', async () => {
     const store = new UserStoreFake();
-    store.seed([buildAggregator({ id: 'a1', status: 'active' })]);
+    store.seed([buildCoordinator({ id: 'a1', status: 'active' })]);
     expect(await store.approveFromPending('a1', 't')).toEqual({ ok: true, value: null });
     expect(await store.rejectFromPending('a1', 't')).toEqual({ ok: true, value: null });
   });
 
   it('rejectFromPending stamps inactive + rejected_at for a pending row', async () => {
     const store = new UserStoreFake();
-    store.seed([buildAggregator({ id: 'p1', status: 'pending' })]);
+    store.seed([buildCoordinator({ id: 'p1', status: 'pending' })]);
     const r = await store.rejectFromPending('p1', 't');
     expect(r.ok && r.value?.status).toBe('inactive');
     expect(r.ok && r.value?.rejectedAt).toBeInstanceOf(Date);
@@ -170,9 +170,9 @@ describe('InMemoryUserStore CAS, list, search and counts', () => {
   it('list filters by status and updatedBefore, honouring offset and limit', async () => {
     const store = new UserStoreFake();
     store.seed([
-      buildAggregator({ id: 'r1', orgSlug: 's1', status: 'active', createdAt: new Date(3000) }),
-      buildAggregator({ id: 'r2', orgSlug: 's2', status: 'active', createdAt: new Date(2000) }),
-      buildAggregator({ id: 'r3', orgSlug: 's3', status: 'pending', createdAt: new Date(1000) }),
+      buildCoordinator({ id: 'r1', orgSlug: 's1', status: 'active', createdAt: new Date(3000) }),
+      buildCoordinator({ id: 'r2', orgSlug: 's2', status: 'active', createdAt: new Date(2000) }),
+      buildCoordinator({ id: 'r3', orgSlug: 's3', status: 'pending', createdAt: new Date(1000) }),
     ]);
     const active = await store.list({ status: 'active', limit: 1, offset: 1 });
     expect(active.ok && active.value.total).toBe(2);
@@ -184,7 +184,7 @@ describe('InMemoryUserStore CAS, list, search and counts', () => {
   it('search scopes by orgIds, status and serves, and pages with a cursor', async () => {
     const store = new UserStoreFake();
     store.seed([
-      buildAggregator({
+      buildCoordinator({
         id: 'c1',
         orgSlug: 'o1',
         parentOrgId: 'org-a',
@@ -192,7 +192,7 @@ describe('InMemoryUserStore CAS, list, search and counts', () => {
         status: 'active',
         createdAt: new Date(3000),
       }),
-      buildAggregator({
+      buildCoordinator({
         id: 'c2',
         orgSlug: 'o2',
         parentOrgId: 'org-a',
@@ -200,7 +200,7 @@ describe('InMemoryUserStore CAS, list, search and counts', () => {
         status: 'active',
         createdAt: new Date(2000),
       }),
-      buildAggregator({
+      buildCoordinator({
         id: 'c3',
         orgSlug: 'o3',
         parentOrgId: 'org-b',
@@ -228,9 +228,9 @@ describe('InMemoryUserStore CAS, list, search and counts', () => {
   it('countByOrg tallies totals and pending per requested org', async () => {
     const store = new UserStoreFake();
     store.seed([
-      buildAggregator({ id: 'c1', orgSlug: 'o1', parentOrgId: 'org-a', status: 'active' }),
-      buildAggregator({ id: 'c2', orgSlug: 'o2', parentOrgId: 'org-a', status: 'pending' }),
-      buildAggregator({ id: 'c3', orgSlug: 'o3', parentOrgId: 'org-z', status: 'pending' }),
+      buildCoordinator({ id: 'c1', orgSlug: 'o1', parentOrgId: 'org-a', status: 'active' }),
+      buildCoordinator({ id: 'c2', orgSlug: 'o2', parentOrgId: 'org-a', status: 'pending' }),
+      buildCoordinator({ id: 'c3', orgSlug: 'o3', parentOrgId: 'org-z', status: 'pending' }),
     ]);
     const counts = await store.countByOrg(['org-a', 'org-b']);
     expect(counts.ok && counts.value['org-a']).toEqual({ total: 2, pending: 1 });
@@ -240,8 +240,8 @@ describe('InMemoryUserStore CAS, list, search and counts', () => {
   it('findByParentOrgId returns the org members', async () => {
     const store = new UserStoreFake();
     store.seed([
-      buildAggregator({ id: 'c1', orgSlug: 'o1', parentOrgId: 'org-a' }),
-      buildAggregator({ id: 'c2', orgSlug: 'o2', parentOrgId: 'org-b' }),
+      buildCoordinator({ id: 'c1', orgSlug: 'o1', parentOrgId: 'org-a' }),
+      buildCoordinator({ id: 'c2', orgSlug: 'o2', parentOrgId: 'org-b' }),
     ]);
     const r = await store.findByParentOrgId('org-a');
     expect(r.ok && r.value.map((x) => x.id)).toEqual(['c1']);
@@ -249,7 +249,7 @@ describe('InMemoryUserStore CAS, list, search and counts', () => {
 
   it('updateStatus and updateSignalstackOrgId write through', async () => {
     const store = new UserStoreFake();
-    store.seed([buildAggregator({ id: 's1', status: 'pending' })]);
+    store.seed([buildCoordinator({ id: 's1', status: 'pending' })]);
     const st = await store.updateStatus('s1', 'active', 't');
     expect(st.ok && st.value.status).toBe('active');
     const sig = await store.updateSignalstackOrgId('s1', 'org_x', 't');
@@ -259,7 +259,7 @@ describe('InMemoryUserStore CAS, list, search and counts', () => {
   it('re-indexes email and phone when an update changes both', async () => {
     const store = new InMemoryUserStore();
     const created = await store.create(
-      buildCreateAggregatorInput({
+      buildCreateCoordinatorInput({
         orgSlug: 'idx',
         contact: { name: 'A', email: 'before@x.org', phone: '+919000000011' },
       }),
@@ -278,7 +278,7 @@ describe('InMemoryUserStore CAS, list, search and counts', () => {
 
   it('a serves patch rewrites serves and the derived type', async () => {
     const store = new InMemoryUserStore();
-    const r = await store.create(buildCreateAggregatorInput());
+    const r = await store.create(buildCreateCoordinatorInput());
     if (!r.ok) throw new Error('seed');
     const u = await store.update(r.value.id, {
       serves: ['seeker', 'seeker', 'provider'],
@@ -292,7 +292,7 @@ describe('InMemoryUserStore CAS, list, search and counts', () => {
     const store = new InMemoryUserStore();
     const mk = async (slug: string, phone: string) =>
       store.create(
-        buildCreateAggregatorInput({
+        buildCreateCoordinatorInput({
           orgSlug: slug,
           contact: { name: 'A', email: `${slug}@x.org`, phone },
         }),
@@ -319,7 +319,7 @@ describe('InMemoryUserStore CAS, list, search and counts', () => {
     const store = new UserStoreFake();
     store.seedOrgDetails('org-d', { url: 'https://org-d.example', legalName: 'Org D Ltd' });
     const r = await store.create(
-      buildCreateAggregatorInput({
+      buildCreateCoordinatorInput({
         orgSlug: 'altp',
         orgId: 'org-d',
         contact: {

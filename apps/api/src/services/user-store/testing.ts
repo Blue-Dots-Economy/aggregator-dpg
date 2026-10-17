@@ -8,7 +8,7 @@
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import { InMemoryUserStore, MEMORY_DEFAULT_ORG_ID } from './memory.js';
 import type { OrgDetailColumns } from './org-details.js';
-import type { Aggregator, CreateAggregatorInput } from './interface.js';
+import type { Coordinator, CreateCoordinatorInput } from './interface.js';
 import { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
 
 export { NO_CONSENT_WRITE };
@@ -20,7 +20,7 @@ export class UserStoreFake extends InMemoryUserStore {
    * applied by `create()` — callers are responsible for keeping seeded data
    * internally consistent.
    */
-  seed(rows: Aggregator[]): void {
+  seed(rows: Coordinator[]): void {
     for (const r of rows) this.indexInsert(r);
   }
 
@@ -69,7 +69,7 @@ export class UserStoreFake extends InMemoryUserStore {
    * @returns The row.
    * @throws Error when absent.
    */
-  findByIdSync(id: string): Aggregator {
+  findByIdSync(id: string): Coordinator {
     const row = this.byId.get(id);
     if (!row) throw new Error(`no aggregator ${id}`);
     return row;
@@ -92,7 +92,7 @@ export class UserStoreFake extends InMemoryUserStore {
    * Use this to back-date a row for stale-pending cleanup tests without going
    * through the public `update()` API (which stamps `updatedAt` to `now`).
    *
-   * @param id - Aggregator UUID to back-date.
+   * @param id - Coordinator UUID to back-date.
    * @param date - The timestamp to set on `updatedAt`.
    */
   __setUpdatedAt(id: string, date: Date): void {
@@ -115,7 +115,7 @@ const DEFAULT_CONSENT: ConsentRecord = {
 };
 
 /** Test data builder with deterministic defaults. */
-export function buildAggregator(overrides: Partial<Aggregator> = {}): Aggregator {
+export function buildCoordinator(overrides: Partial<Coordinator> = {}): Coordinator {
   const createdAt = overrides.createdAt ?? new Date('2026-01-01T00:00:00Z');
   const contact = overrides.contact ?? DEFAULT_CONTACT;
   return {
@@ -149,9 +149,9 @@ export function buildAggregator(overrides: Partial<Aggregator> = {}): Aggregator
   };
 }
 
-export function buildCreateAggregatorInput(
-  overrides: Partial<CreateAggregatorInput> = {},
-): CreateAggregatorInput {
+export function buildCreateCoordinatorInput(
+  overrides: Partial<CreateCoordinatorInput> = {},
+): CreateCoordinatorInput {
   return {
     orgSlug: 'test-org-0001',
     name: 'Test Org',

@@ -3,10 +3,10 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { UserStoreFake, buildAggregator, _setUserStore } from '../services/user-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import {
   OrganisationStoreFake,
-  buildAggregatorOrg,
+  buildOrganisation,
   _setOrganisationStore,
 } from '../services/organisation-store/index.js';
 import {
@@ -92,7 +92,7 @@ describe('coordinator submit with an invite token (#700)', () => {
       throw new Error('invalid token');
     });
     orgStore.seed([
-      buildAggregatorOrg({ id: ORG_ID, slug: 'o', status: 'active', ownerEmail: 'owner@o.org' }),
+      buildOrganisation({ id: ORG_ID, slug: 'o', status: 'active', ownerEmail: 'owner@o.org' }),
     ]);
 
     app = await buildApp();
@@ -191,7 +191,7 @@ describe('coordinator submit with an invite token (#700)', () => {
 
   it('rejects when the claim org is not active (409)', async () => {
     orgStore.seed([
-      buildAggregatorOrg({ id: ORG_ID, slug: 'o', status: 'inactive', ownerEmail: 'owner@o.org' }),
+      buildOrganisation({ id: ORG_ID, slug: 'o', status: 'inactive', ownerEmail: 'owner@o.org' }),
     ]);
     const token = await seedInviteAndToken();
     const res = await post({ ...validBody, invite: token });
@@ -204,7 +204,7 @@ describe('coordinator submit with an invite token (#700)', () => {
     // after the invite validations but before any provisioning. The invite must
     // stay pending so the coordinator can retry, not lose their one-time link.
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         contactPhone: '+919876543210',
         contactEmail: 'other@x.org',
         contact: { name: 'X', phone: '+919876543210', email: 'other@x.org' },
@@ -265,7 +265,7 @@ describe('coordinator submit with an invite token (#700)', () => {
     const token = await seedInviteAndToken();
     // Occupy the phone so the submit fails AFTER the invite has been claimed.
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         contact: { name: 'Other', phone: validBody.contact.phone, email: 'other@x.org' },
       }),
     ]);
@@ -279,7 +279,7 @@ describe('coordinator submit with an invite token (#700)', () => {
     // ...and it still works once the collision is gone.
     userStore.reset();
     orgStore.seed([
-      buildAggregatorOrg({ id: ORG_ID, slug: 'o', status: 'active', ownerEmail: 'owner@o.org' }),
+      buildOrganisation({ id: ORG_ID, slug: 'o', status: 'active', ownerEmail: 'owner@o.org' }),
     ]);
     const retry = await post({ ...validBody, invite: token });
     expect(retry.statusCode).toBe(201);

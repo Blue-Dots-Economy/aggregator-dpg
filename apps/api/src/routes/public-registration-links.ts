@@ -13,7 +13,7 @@
  *     row, and returns the submission id.
  *
  * Security model: (org_slug, slug) pair is the access token. No JWT
- * required. Aggregator scoping is implicit via the link row.
+ * required. Coordinator scoping is implicit via the link row.
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';

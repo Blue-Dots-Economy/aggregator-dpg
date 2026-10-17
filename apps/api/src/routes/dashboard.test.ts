@@ -5,7 +5,7 @@ import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-tok
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
-import { UserStoreFake, _setUserStore, buildAggregator } from '../services/user-store/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
 import { err } from '@aggregator-dpg/shared-primitives/result';
@@ -79,14 +79,14 @@ describe('GET /v1/dashboard', () => {
 
     userStore = new UserStoreFake();
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: AGG_A,
         orgSlug: 'agg-a',
         name: 'Agg A',
         status: 'active',
         signalstackOrgId: ORG_A,
       }),
-      buildAggregator({
+      buildCoordinator({
         id: AGG_B,
         orgSlug: 'agg-b',
         name: 'Agg B',
@@ -522,7 +522,7 @@ describe('POST /v1/dashboard/export/profiles', () => {
 
     userStore = new UserStoreFake();
     userStore.seed([
-      buildAggregator({
+      buildCoordinator({
         id: AGG_A,
         orgSlug: 'agg-a',
         name: 'Agg A',

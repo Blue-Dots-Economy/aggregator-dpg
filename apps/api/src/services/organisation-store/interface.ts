@@ -1,5 +1,5 @@
 /**
- * Aggregator-org store contract — the org system of record (spec §5.1).
+ * Coordinator-org store contract — the org system of record (spec §5.1).
  *
  * Belongs to `@aggregator-dpg/api`. The org is a row of `organisations`
  * (migration 0028); the Keycloak group is a future-authz mirror that this
@@ -19,7 +19,7 @@ import type { RecordConsentHook } from '../consent-ledger/hook.js';
 /** Slug of the fixed Default org that holds formerly-flat coordinators (0028). */
 export const DEFAULT_ORG_SLUG = 'default';
 
-export interface AggregatorOrg {
+export interface Organisation {
   id: string;
   slug: string;
   displayName: string;
@@ -132,7 +132,7 @@ export interface SearchOrgsFilter {
 
 /** One page of an org search; `nextCursor` is null on the last page. */
 export interface SearchOrgsPage {
-  rows: AggregatorOrg[];
+  rows: Organisation[];
   nextCursor: OrgCursor | null;
 }
 
@@ -158,10 +158,10 @@ export type OrgStoreResult<T> = { ok: true; value: T } | { ok: false; error: Org
  * method (no partial stubs) and preserve the exact signatures.
  */
 export abstract class OrganisationStoreBase {
-  abstract create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>>;
-  abstract findById(id: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
-  abstract findBySlug(slug: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
-  abstract findByOwnerEmail(email: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
+  abstract create(input: CreateOrgInput): Promise<OrgStoreResult<Organisation>>;
+  abstract findById(id: string): Promise<OrgStoreResult<Organisation | null>>;
+  abstract findBySlug(slug: string): Promise<OrgStoreResult<Organisation | null>>;
+  abstract findByOwnerEmail(email: string): Promise<OrgStoreResult<Organisation | null>>;
   /**
    * Finds an org whose owner holds this phone. Backs the org-create pre-check
    * that keeps one phone per person across coordinators and org owners (the
@@ -170,27 +170,27 @@ export abstract class OrganisationStoreBase {
    * @param phone - Canonical (`normalisePhone`) phone.
    * @returns The first matching org, or `null`.
    */
-  abstract findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
+  abstract findByOwnerPhone(phone: string): Promise<OrgStoreResult<Organisation | null>>;
   /**
    * Lists active aggregator orgs (the registration dropdown), Default
    * included, sorted by name (case-insensitive).
    *
    * @returns Active aggregator orgs, possibly empty.
    */
-  abstract listActive(): Promise<OrgStoreResult<AggregatorOrg[]>>;
+  abstract listActive(): Promise<OrgStoreResult<Organisation[]>>;
   /**
    * The fixed Default org (0028), or `null` when absent (a database not yet
    * migrated, or a test that did not seed it).
    *
    * @returns The Default org.
    */
-  abstract findDefault(): Promise<OrgStoreResult<AggregatorOrg | null>>;
+  abstract findDefault(): Promise<OrgStoreResult<Organisation | null>>;
   /**
    * The network-facilitator root (0028) — the only method that returns it.
    *
    * @returns The root org, or `null` when absent.
    */
-  abstract findRoot(): Promise<OrgStoreResult<AggregatorOrg | null>>;
+  abstract findRoot(): Promise<OrgStoreResult<Organisation | null>>;
   /**
    * Lists `pending` orgs, optionally only those last updated before `updatedBefore`.
    * Drives the §7 stale-pending cleanup; the age filter keeps the row cap
@@ -199,8 +199,8 @@ export abstract class OrganisationStoreBase {
    * @param updatedBefore - When set, only rows with `updated_at < updatedBefore`.
    * @returns Matching `pending` rows (may be empty).
    */
-  abstract listPending(updatedBefore?: Date): Promise<OrgStoreResult<AggregatorOrg[]>>;
-  abstract update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<AggregatorOrg>>;
+  abstract listPending(updatedBefore?: Date): Promise<OrgStoreResult<Organisation[]>>;
+  abstract update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<Organisation>>;
   /**
    * Hard-deletes an org row by id. Used by the §7 stale-pending cleanup after
    * its mirrored KC group + owner user have been removed.
@@ -229,7 +229,7 @@ export abstract class OrganisationStoreBase {
    *   for an emailed link, else the admin's user id).
    * @returns The updated row, or `null` when the row was not pending.
    */
-  abstract approve(id: string, updatedBy: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
+  abstract approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>>;
   /**
    * Atomic compare-and-set pending→inactive (== rejected). Same null-on-race
    * semantics as {@link approve}.
@@ -238,14 +238,14 @@ export abstract class OrganisationStoreBase {
    * @param updatedBy - The decider (see {@link approve}).
    * @returns The updated row, or `null` when the row was not pending.
    */
-  abstract reject(id: string, updatedBy: string): Promise<OrgStoreResult<AggregatorOrg | null>>;
+  abstract reject(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>>;
   /**
    * The aggregator orgs (Default included) an admin account owns.
    *
    * @param ownerUserId - The admin `users.id`.
    * @returns The owned orgs, by name; empty when none.
    */
-  abstract listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<AggregatorOrg[]>>;
+  abstract listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<Organisation[]>>;
   /**
    * Scoped, keyset-paged org search by name (aggregator orgs only).
    *
