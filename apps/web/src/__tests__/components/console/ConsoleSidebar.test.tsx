@@ -4,7 +4,7 @@
  * portal. Hooks the shared shell reads are mocked, as in `Sidebar.test.tsx`.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 
 const { useAuth, useThemeMode, useAggregatorConfig, usePathname } = vi.hoisted(() => ({
   useAuth: vi.fn(),
@@ -55,7 +55,6 @@ describe('<ConsoleSidebar />', () => {
       ['nav.organisations', '/console/orgs'],
       ['nav.coordinators', '/console/coordinators'],
       ['nav.access', '/console/access/roles'],
-      ['nav.account', '/console/account'],
     ]);
     expect(within(aside()).getByText('Blue Dots')).toBeInTheDocument();
     expect(within(aside()).getByText('nav.portal_label')).toBeInTheDocument();
@@ -66,7 +65,7 @@ describe('<ConsoleSidebar />', () => {
     const hrefs = within(aside())
       .getAllByRole('link')
       .map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual(['/console', '/console/account']);
+    expect(hrefs).toEqual(['/console']);
   });
 
   it('marks home active only on /console itself', () => {
@@ -91,6 +90,34 @@ describe('<ConsoleSidebar />', () => {
     expect(within(aside()).getByText('nav.network_admin')).toBeInTheDocument();
     expect(within(aside()).getByRole('button', { name: 'sign_out' })).toBeInTheDocument();
     expect(within(aside()).queryByText('contact_support')).toBeNull();
+  });
+
+  it('has no account-details pop-up, and the card is plain text, without `details`', () => {
+    render(<ConsoleSidebar isNetworkAdmin account={account} />);
+    expect(within(aside()).queryByRole('button', { name: /Asha Rao/ })).toBeNull();
+  });
+
+  it('opens the account-details pop-up on click, independently of sign-out, and replaces the old My account page', () => {
+    const signOut = vi.fn();
+    useAuth.mockReturnValue({ signOut, supportEnabled: false });
+    const withDetails = {
+      ...account,
+      details: [{ label: 'Email', value: 'asha@example.org' }],
+    };
+    render(<ConsoleSidebar isNetworkAdmin account={withDetails} />);
+    const toggle = within(aside()).getByRole('button', { name: /Asha Rao/ });
+
+    expect(screen.queryByText('asha@example.org')).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.getByText('Email')).toBeInTheDocument();
+    expect(screen.getByText('asha@example.org')).toBeInTheDocument();
+
+    fireEvent.click(within(aside()).getByRole('button', { name: 'sign_out' }));
+    expect(signOut).toHaveBeenCalledOnce();
+    expect(screen.getByText('asha@example.org')).toBeInTheDocument(); // sign-out didn't close it
+
+    fireEvent.click(toggle);
+    expect(screen.queryByText('asha@example.org')).toBeNull();
   });
 
   it('never offers Invite from the sidebar: it lives on the Coordinators page instead (#873)', () => {

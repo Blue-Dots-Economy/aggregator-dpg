@@ -641,7 +641,6 @@
       "coordinators": "Coordinators",
       "invite": "Invite coordinators",
       "access": "Roles and permissions",
-      "account": "My account",
       "sign_out": "Sign out",
       "portal_label": "Organisation console",
       "network_admin": "Network admin",
@@ -737,12 +736,9 @@
       "subtitle": "Invite coordinators to one of your organisations by email."
     },
     "account": {
-      "heading": "My account",
       "name": "Name",
       "email": "Email",
-      "phone": "Phone",
-      "read_only": "Contact details can't be changed here yet.",
-      "subtitle": "The details you sign in with."
+      "phone": "Phone"
     },
     "status": {
       "pending": "Pending",
