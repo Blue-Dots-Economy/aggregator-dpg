@@ -5,19 +5,19 @@
  * directly (testing rule).
  */
 
-import { InMemoryAggregatorOrgStore } from './memory.js';
+import { InMemoryOrganisationStore } from './memory.js';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
-import { DEFAULT_ORG_SLUG, type AggregatorOrg } from './interface.js';
+import { DEFAULT_ORG_SLUG, type Organisation } from './interface.js';
 export { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
 
-export class AggregatorOrgStoreFake extends InMemoryAggregatorOrgStore {
+export class OrganisationStoreFake extends InMemoryOrganisationStore {
   /**
    * Pre-seed rows, bypassing create()'s slug check. Callers are responsible
    * for keeping seeded data internally consistent.
    *
    * @param rows - Rows to insert before the test runs.
    */
-  seed(rows: AggregatorOrg[]): void {
+  seed(rows: Organisation[]): void {
     for (const r of rows) this.byId.set(r.id, r);
   }
 
@@ -26,7 +26,7 @@ export class AggregatorOrgStoreFake extends InMemoryAggregatorOrgStore {
    *
    * @param row - The root org.
    */
-  seedRoot(row: AggregatorOrg): void {
+  seedRoot(row: Organisation): void {
     this.root = row;
   }
 
@@ -38,12 +38,12 @@ export class AggregatorOrgStoreFake extends InMemoryAggregatorOrgStore {
 }
 
 /**
- * Deterministic test data builder for an {@link AggregatorOrg}.
+ * Deterministic test data builder for an {@link Organisation}.
  *
  * @param overrides - Field overrides; defaults are valid and snapshot-stable.
  * @returns A fully-populated org row.
  */
-export function buildAggregatorOrg(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
+export function buildOrganisation(overrides: Partial<Organisation> = {}): Organisation {
   const createdAt = overrides.createdAt ?? new Date('2026-01-01T00:00:00Z');
   const ownerEmail = overrides.ownerEmail ?? 'owner@test.local';
   const ownerPhone = overrides.ownerPhone !== undefined ? overrides.ownerPhone : null;
@@ -83,8 +83,8 @@ export function buildAggregatorOrg(overrides: Partial<AggregatorOrg> = {}): Aggr
  * @param overrides - Field overrides.
  * @returns The Default org row.
  */
-export function buildDefaultOrg(overrides: Partial<AggregatorOrg> = {}): AggregatorOrg {
-  return buildAggregatorOrg({
+export function buildDefaultOrg(overrides: Partial<Organisation> = {}): Organisation {
+  return buildOrganisation({
     id: '00000000-0000-0000-0000-0000000000d0',
     slug: DEFAULT_ORG_SLUG,
     displayName: 'Default',

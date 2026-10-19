@@ -71,7 +71,7 @@ export function useOnboardingSummary() {
 }
 
 /**
- * Aggregator-wide onboarding counters grouped by entry source
+ * Coordinator-wide onboarding counters grouped by entry source
  * (`bulk` / `link`). Drives the dashboard's "joins by entry mode" card.
  */
 export function useOnboardingBySource() {

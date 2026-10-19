@@ -1,5 +1,5 @@
 /**
- * Unit tests for the Link Metrics Aggregator rollup job.
+ * Unit tests for the Link Metrics Coordinator rollup job.
  *
  * `rollupLinkMetrics` reads unrolled `link_submissions` rows, aggregates them
  * into hourly (aggregator, link, hour) buckets, UPSERTs each bucket into

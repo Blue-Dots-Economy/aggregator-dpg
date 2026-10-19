@@ -17,8 +17,8 @@ import type { FastifyBaseLogger } from 'fastify';
 import { getMailer } from '@aggregator-dpg/mailer';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
 import { config } from '../../config.js';
-import { getAggregatorStore, type Aggregator } from '../aggregator-store/index.js';
-import { getAggregatorOrgStore } from '../aggregator-org-store/index.js';
+import { getUserStore, type Coordinator } from '../user-store/index.js';
+import { getOrganisationStore } from '../organisation-store/index.js';
 import { getIdpAdmin, KC_ATTR, type IdpUser } from '../idp-admin/index.js';
 import { getSignalStackWriter } from '../signalstack.js';
 import { getNetworkConfig } from '../network-config.js';
@@ -87,7 +87,7 @@ export function deciderOf(updatedBy: string | null): 'link' | 'console' | null {
 }
 
 /** The `already_decided` outcome of a decided row. */
-function alreadyDecided(row: Aggregator): DecisionOutcome {
+function alreadyDecided(row: Coordinator): DecisionOutcome {
   return {
     kind: 'already_decided',
     status: row.status,
@@ -106,10 +106,10 @@ function alreadyDecided(row: Aggregator): DecisionOutcome {
 export async function loadCoordinatorAndUser(
   aggregatorId: string,
 ): Promise<
-  | { ok: true; aggregator: Aggregator; kcUser: IdpUser }
+  | { ok: true; aggregator: Coordinator; kcUser: IdpUser }
   | { ok: false; reason: 'not_found' | 'db' | 'idp' | 'idp_missing' }
 > {
-  const stored = await getAggregatorStore().findById(aggregatorId);
+  const stored = await getUserStore().findById(aggregatorId);
   if (!stored.ok) return { ok: false, reason: 'db' };
   if (!stored.value) return { ok: false, reason: 'not_found' };
   const kc = await getIdpAdmin().findByAttribute(KC_ATTR.AGGREGATOR_ID, aggregatorId);
@@ -120,7 +120,7 @@ export async function loadCoordinatorAndUser(
 }
 
 /** Display name preference: the contact's name, the Keycloak names, the email. */
-function applicantName(aggregator: Aggregator, kcUser: IdpUser): string {
+function applicantName(aggregator: Coordinator, kcUser: IdpUser): string {
   if (aggregator.contact.name) return aggregator.contact.name;
   const parts = [kcUser.firstName, kcUser.lastName].filter((p): p is string => Boolean(p));
   return parts.length > 0 ? parts.join(' ') : kcUser.email;
@@ -151,17 +151,17 @@ export async function decideCoordinator(input: CoordinatorDecisionInput): Promis
 
 async function approve( // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   input: CoordinatorDecisionInput,
-  aggregator: Aggregator,
+  aggregator: Coordinator,
   kcUser: IdpUser,
   log: FastifyBaseLogger,
 ): Promise<DecisionOutcome> {
-  const store = getAggregatorStore();
+  const store = getUserStore();
   const idp = getIdpAdmin();
 
   // The target org must still be active (a row can sit pending while its org
   // is rejected or retired).
   if (aggregator.parentOrgId) {
-    const org = await getAggregatorOrgStore().findById(aggregator.parentOrgId);
+    const org = await getOrganisationStore().findById(aggregator.parentOrgId);
     if (!org.ok) return { kind: 'unavailable', dependency: 'db' };
     if (org.value?.status !== 'active') return { kind: 'org_inactive' };
   }
@@ -291,11 +291,11 @@ async function compensate(kcUserId: string, log: FastifyBaseLogger): Promise<voi
 
 async function reject(
   input: CoordinatorDecisionInput,
-  aggregator: Aggregator,
+  aggregator: Coordinator,
   kcUser: IdpUser,
   log: FastifyBaseLogger,
 ): Promise<DecisionOutcome> {
-  const store = getAggregatorStore();
+  const store = getUserStore();
   // Compare-and-set first (write-once rejected_at): only the winner continues.
   const cas = await store.rejectFromPending(aggregator.id, input.decidedBy);
   if (!cas.ok) {

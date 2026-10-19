@@ -4,7 +4,7 @@
  *   GET /public/v1/aggregators/:orgSlug/lookup?email&phone_number&network&domain
  *
  * No JWT — same anonymous access model as the public registration link
- * resolve route. Aggregator scope comes from the `orgSlug` path segment;
+ * resolve route. Coordinator scope comes from the `orgSlug` path segment;
  * the signalstack probe runs under that aggregator's `signalstack_org_id`
  * (no item ever created — signals' `submit_mode: account_only` path).
  *
@@ -15,7 +15,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { httpError } from '../errors/http-error.js';
@@ -121,10 +121,10 @@ export async function registerPublicLookupRoute(app: FastifyInstance): Promise<v
       // missing signalstack_org_id both surface as 404 — the lookup
       // endpoint is opaque about whether a given slug exists yet, by
       // design (anonymous enumeration prevention).
-      const aggLookup = await getAggregatorStore().findBySlug(orgSlug);
+      const aggLookup = await getUserStore().findBySlug(orgSlug);
       if (!aggLookup.ok) {
         throw httpError('DB_UNAVAILABLE', {
-          fields: { sub_operation: 'aggregatorStore.findBySlug' },
+          fields: { sub_operation: 'userStore.findBySlug' },
         });
       }
       if (!aggLookup.value || !aggLookup.value.signalstackOrgId) {

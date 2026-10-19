@@ -265,7 +265,6 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     // only a genuine platform fault is `system_error`.
     const category = categoriseSignalsRejection(push);
     outcome = { outcome: 'failed', category, reasons: signalsRejectionReasons(push, category) };
-
   }
 
   return await commit(job, outcome, log);
@@ -569,7 +568,7 @@ export async function pushToSignalStack(
       ? (job.payload[phoneSourceKey] as string)
       : phone;
   const pushPhone = phone ?? phoneFromBody;
-  // Aggregator-level consent captured at registration is the legal basis for
+  // Coordinator-level consent captured at registration is the legal basis for
   // the bulk-row push — there is no per-row consent column in the bulk CSV
   // contract. `terms_accepted`/`privacy_accepted` booleans are the OLD
   // signals contract; signals now records consent only via `compliance`
@@ -616,7 +615,7 @@ export async function pushToSignalStack(
     // Always pass the row's profile cells through verbatim. Signals
     // accepts partial item_state and classifies the resulting item as
     // `draft` when required fields are missing — that's signals' job,
-    // not ours. Aggregator stays a thin pass-through.
+    // not ours. Coordinator stays a thin pass-through.
     profile: buildSignalStackItemState(job.payload, pushPhone, domainCfg.identity.phone),
   });
   if (!result.success) {

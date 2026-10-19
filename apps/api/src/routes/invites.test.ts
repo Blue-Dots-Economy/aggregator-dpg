@@ -4,19 +4,15 @@ import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import {
-  AggregatorOrgStoreFake,
-  buildAggregatorOrg,
-  _setAggregatorOrgStore,
-} from '../services/aggregator-org-store/index.js';
+  OrganisationStoreFake,
+  buildOrganisation,
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 import {
   RegistrationInvitesStoreFake,
   _setRegistrationInvitesStore,
 } from '../services/registration-invites-store/index.js';
-import {
-  AggregatorStoreFake,
-  buildAggregator,
-  _setAggregatorStore,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { mintGrantToken, _resetGrantTokenKey } from '../services/grant-token.js';
 import {
@@ -28,10 +24,10 @@ const ORG_ID = '00000000-0000-0000-0000-0000000000d1';
 
 describe('invite mint routes', () => {
   let app: FastifyInstance;
-  let orgStore: AggregatorOrgStoreFake;
+  let orgStore: OrganisationStoreFake;
   let invites: RegistrationInvitesStoreFake;
   let mailer: FakeMailer;
-  let coordinators: AggregatorStoreFake;
+  let coordinators: UserStoreFake;
 
   beforeEach(async () => {
     _resetGrantTokenKey();
@@ -39,12 +35,12 @@ describe('invite mint routes', () => {
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
-    orgStore = new AggregatorOrgStoreFake();
+    orgStore = new OrganisationStoreFake();
     invites = new RegistrationInvitesStoreFake();
     mailer = new FakeMailer();
 
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: ORG_ID,
         slug: 'o',
         displayName: 'Joint Facilitation Centre',
@@ -53,9 +49,9 @@ describe('invite mint routes', () => {
       }),
     ]);
 
-    coordinators = new AggregatorStoreFake();
-    _setAggregatorStore(coordinators);
-    _setAggregatorOrgStore(orgStore);
+    coordinators = new UserStoreFake();
+    _setUserStore(coordinators);
+    _setOrganisationStore(orgStore);
     _setRegistrationInvitesStore(invites);
     _setMailer(mailer);
     _setInviteMintRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
@@ -66,8 +62,8 @@ describe('invite mint routes', () => {
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
-    _setAggregatorOrgStore(null);
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setRegistrationInvitesStore(null);
     _setMailer(null);
     _setInviteMintRateChecker(null);
@@ -130,7 +126,7 @@ describe('invite mint routes', () => {
 
   it('reports an own-org coordinator as existing and mails nothing (C9)', async () => {
     coordinators.seed([
-      buildAggregator({
+      buildCoordinator({
         id: '00000000-0000-4000-8000-00000000c001',
         orgSlug: 'own-c',
         parentOrgId: ORG_ID,
@@ -149,7 +145,7 @@ describe('invite mint routes', () => {
 
   it('answers another account as sent and mails "already have an account", no invite (C9)', async () => {
     coordinators.seed([
-      buildAggregator({
+      buildCoordinator({
         id: '00000000-0000-4000-8000-00000000c002',
         orgSlug: 'other-c',
         parentOrgId: '00000000-0000-0000-0000-0000000000d2',
@@ -199,7 +195,7 @@ describe('invite mint routes', () => {
 
   it('rejects minting for the Default org, which has no owner console (409, 0028)', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: ORG_ID,
         slug: 'default',
         status: 'active',
@@ -216,7 +212,7 @@ describe('invite mint routes', () => {
 
   it('rejects minting for a non-active org (409)', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: ORG_ID,
         slug: 'o',
         status: 'inactive',

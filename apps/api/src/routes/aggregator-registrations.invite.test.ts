@@ -3,16 +3,12 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import {
-  AggregatorStoreFake,
-  buildAggregator,
-  _setAggregatorStore,
-} from '../services/aggregator-store/index.js';
-import {
-  AggregatorOrgStoreFake,
-  buildAggregatorOrg,
-  _setAggregatorOrgStore,
-} from '../services/aggregator-org-store/index.js';
+  OrganisationStoreFake,
+  buildOrganisation,
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 import {
   RegistrationInvitesStoreFake,
   buildRegistrationInvite,
@@ -34,8 +30,8 @@ const INVITE_EMAIL = 'asha@trrain.org';
 
 describe('coordinator submit with an invite token (#700)', () => {
   let app: FastifyInstance;
-  let aggregatorStore: AggregatorStoreFake;
-  let orgStore: AggregatorOrgStoreFake;
+  let userStore: UserStoreFake;
+  let orgStore: OrganisationStoreFake;
   let invites: RegistrationInvitesStoreFake;
 
   const validBody = {
@@ -79,12 +75,12 @@ describe('coordinator submit with an invite token (#700)', () => {
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
-    aggregatorStore = new AggregatorStoreFake();
-    orgStore = new AggregatorOrgStoreFake();
+    userStore = new UserStoreFake();
+    orgStore = new OrganisationStoreFake();
     invites = new RegistrationInvitesStoreFake();
 
-    _setAggregatorStore(aggregatorStore);
-    _setAggregatorOrgStore(orgStore);
+    _setUserStore(userStore);
+    _setOrganisationStore(orgStore);
     _setRegistrationInvitesStore(invites);
     _setIdpAdmin(new IdpAdminFake());
     _setMailer(new FakeMailer());
@@ -96,7 +92,7 @@ describe('coordinator submit with an invite token (#700)', () => {
       throw new Error('invalid token');
     });
     orgStore.seed([
-      buildAggregatorOrg({ id: ORG_ID, slug: 'o', status: 'active', ownerEmail: 'owner@o.org' }),
+      buildOrganisation({ id: ORG_ID, slug: 'o', status: 'active', ownerEmail: 'owner@o.org' }),
     ]);
 
     app = await buildApp();
@@ -104,8 +100,8 @@ describe('coordinator submit with an invite token (#700)', () => {
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
-    _setAggregatorOrgStore(null);
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setRegistrationInvitesStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
@@ -125,11 +121,11 @@ describe('coordinator submit with an invite token (#700)', () => {
 
   it('accepts a valid invite: stamps parent_org_id from the claim and consumes the invite', async () => {
     const token = await seedInviteAndToken();
-    aggregatorStore.seedInviteEmail('inv-1', INVITE_EMAIL);
+    userStore.seedInviteEmail('inv-1', INVITE_EMAIL);
     const res = await post({ ...validBody, invite: token });
     expect(res.statusCode).toBe(201);
     const id = (res.json() as { aggregator_id: string }).aggregator_id;
-    const stored = await aggregatorStore.findById(id);
+    const stored = await userStore.findById(id);
     expect(stored.ok && stored.value?.parentOrgId).toBe(ORG_ID);
     // The row links the consumed invite (0029); the invited address is read
     // through it (the fake mirrors the Postgres join).
@@ -142,7 +138,7 @@ describe('coordinator submit with an invite token (#700)', () => {
 
   it('allows registering with a different email and records the invited one (#701)', async () => {
     const token = await seedInviteAndToken();
-    aggregatorStore.seedInviteEmail('inv-1', INVITE_EMAIL);
+    userStore.seedInviteEmail('inv-1', INVITE_EMAIL);
     const res = await post({
       ...validBody,
       contact: { ...validBody.contact, email: 'my-own@trrain.org' },
@@ -150,7 +146,7 @@ describe('coordinator submit with an invite token (#700)', () => {
     });
     expect(res.statusCode).toBe(201);
     const id = (res.json() as { aggregator_id: string }).aggregator_id;
-    const stored = await aggregatorStore.findById(id);
+    const stored = await userStore.findById(id);
     // Registered with the entered email; invited email kept as provenance.
     expect(stored.ok && stored.value?.contact.email).toBe('my-own@trrain.org');
     // The row links the consumed invite (0029); the invited address is read
@@ -195,7 +191,7 @@ describe('coordinator submit with an invite token (#700)', () => {
 
   it('rejects when the claim org is not active (409)', async () => {
     orgStore.seed([
-      buildAggregatorOrg({ id: ORG_ID, slug: 'o', status: 'inactive', ownerEmail: 'owner@o.org' }),
+      buildOrganisation({ id: ORG_ID, slug: 'o', status: 'inactive', ownerEmail: 'owner@o.org' }),
     ]);
     const token = await seedInviteAndToken();
     const res = await post({ ...validBody, invite: token });
@@ -207,8 +203,8 @@ describe('coordinator submit with an invite token (#700)', () => {
     // Seed a conflicting phone so the submit fails on the phone pre-check —
     // after the invite validations but before any provisioning. The invite must
     // stay pending so the coordinator can retry, not lose their one-time link.
-    aggregatorStore.seed([
-      buildAggregator({
+    userStore.seed([
+      buildCoordinator({
         contactPhone: '+919876543210',
         contactEmail: 'other@x.org',
         contact: { name: 'X', phone: '+919876543210', email: 'other@x.org' },
@@ -258,7 +254,7 @@ describe('coordinator submit with an invite token (#700)', () => {
     }
     // Only the winner's row exists — the other four created nothing.
     const created = await Promise.all(
-      [1, 2, 3, 4, 5].map((n) => aggregatorStore.findByContactEmail(`p${n}@x.org`)),
+      [1, 2, 3, 4, 5].map((n) => userStore.findByContactEmail(`p${n}@x.org`)),
     );
     expect(created.filter((r) => r.ok && r.value !== null)).toHaveLength(1);
     const inv = await invites.findByJti('inv-1');
@@ -268,8 +264,8 @@ describe('coordinator submit with an invite token (#700)', () => {
   it('releases the claim when provisioning fails, so the invite stays usable (H4)', async () => {
     const token = await seedInviteAndToken();
     // Occupy the phone so the submit fails AFTER the invite has been claimed.
-    aggregatorStore.seed([
-      buildAggregator({
+    userStore.seed([
+      buildCoordinator({
         contact: { name: 'Other', phone: validBody.contact.phone, email: 'other@x.org' },
       }),
     ]);
@@ -281,9 +277,9 @@ describe('coordinator submit with an invite token (#700)', () => {
     expect(inv.ok && inv.value?.status).toBe('pending');
     expect(inv.ok && inv.value?.consumedAt).toBeNull();
     // ...and it still works once the collision is gone.
-    aggregatorStore.reset();
+    userStore.reset();
     orgStore.seed([
-      buildAggregatorOrg({ id: ORG_ID, slug: 'o', status: 'active', ownerEmail: 'owner@o.org' }),
+      buildOrganisation({ id: ORG_ID, slug: 'o', status: 'active', ownerEmail: 'owner@o.org' }),
     ]);
     const retry = await post({ ...validBody, invite: token });
     expect(retry.statusCode).toBe(201);

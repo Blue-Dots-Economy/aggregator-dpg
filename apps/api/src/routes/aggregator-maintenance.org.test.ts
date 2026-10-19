@@ -3,12 +3,12 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
-import { AggregatorStoreFake, _setAggregatorStore } from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore } from '../services/user-store/index.js';
 import {
-  AggregatorOrgStoreFake,
-  buildAggregatorOrg,
-  _setAggregatorOrgStore,
-} from '../services/aggregator-org-store/index.js';
+  OrganisationStoreFake,
+  buildOrganisation,
+  _setOrganisationStore,
+} from '../services/organisation-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 
@@ -17,7 +17,7 @@ const AUTH_HEADER = { authorization: `Bearer ${SERVICE_BEARER}` };
 
 describe('cleanup-stale — org prune', () => {
   let app: FastifyInstance;
-  let orgStore: AggregatorOrgStoreFake;
+  let orgStore: OrganisationStoreFake;
   let idp: IdpAdminFake;
 
   beforeEach(async () => {
@@ -25,10 +25,10 @@ describe('cleanup-stale — org prune', () => {
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
 
-    _setAggregatorStore(new AggregatorStoreFake());
-    orgStore = new AggregatorOrgStoreFake();
+    _setUserStore(new UserStoreFake());
+    orgStore = new OrganisationStoreFake();
     idp = new IdpAdminFake();
-    _setAggregatorOrgStore(orgStore);
+    _setOrganisationStore(orgStore);
     _setIdpAdmin(idp);
     _setAccessTokenVerifier(async (token) => {
       if (token === SERVICE_BEARER) {
@@ -42,8 +42,8 @@ describe('cleanup-stale — org prune', () => {
 
   afterAll(async () => {
     await app?.close();
-    _setAggregatorStore(null);
-    _setAggregatorOrgStore(null);
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setIdpAdmin(null);
     _setAccessTokenVerifier(null);
   });
@@ -61,7 +61,7 @@ describe('cleanup-stale — org prune', () => {
     if (!group.ok) throw new Error('seed group');
 
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-stale',
         slug: 'stale',
         ownerEmail: 'stale.owner@x.org',
@@ -72,7 +72,7 @@ describe('cleanup-stale — org prune', () => {
         updatedAt: new Date('2020-01-01T00:00:00Z'),
       }),
       // A fresh pending org (updated now) that must survive the cutoff.
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-fresh',
         slug: 'fresh',
         ownerEmail: 'fresh@x.org',
@@ -114,7 +114,7 @@ describe('cleanup-stale — org prune', () => {
     if (!group.ok) throw new Error('seed group');
     // Same owner person: a stale pending org and a live, approved one.
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-stale2',
         slug: 'stale2',
         ownerEmail: 'two.orgs@x.org',
@@ -123,7 +123,7 @@ describe('cleanup-stale — org prune', () => {
         status: 'pending',
         updatedAt: new Date('2020-01-01T00:00:00Z'),
       }),
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-live2',
         slug: 'live2',
         displayName: 'Live Two',
@@ -150,7 +150,7 @@ describe('cleanup-stale — org prune', () => {
 
   it('prunes a stale pending org with no owner KC user on file (ownerKcSub unset)', async () => {
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-no-owner',
         slug: 'no-owner',
         ownerEmail: 'never-signed-in@x.org',
@@ -188,7 +188,7 @@ describe('cleanup-stale — org prune', () => {
     });
 
     orgStore.seed([
-      buildAggregatorOrg({
+      buildOrganisation({
         id: 'o-group-fail',
         slug: 'group-fail',
         ownerEmail: 'group-fail-owner@x.org',

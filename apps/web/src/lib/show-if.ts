@@ -7,7 +7,7 @@
  * Signals-DPG implementation so the aggregator's registration-link / profile
  * forms behave identically to the signals UI when rendering the same schema.
  *
- * Belongs to the `web` app (portal + BFF) of the Aggregator DPG.
+ * Belongs to the `web` app (portal + BFF) of the Coordinator DPG.
  *
  * @module apps/web/lib/show-if
  */

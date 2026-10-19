@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Aggregator-wide onboarding metrics section for the Onboarding page.
+ * Coordinator-wide onboarding metrics section for the Onboarding page.
  *
  * Renders the onboarding summary (Total / Verified / Failed / Skipped stat
  * cards) and the joins-by-entry-mode share bar. Data comes from the
@@ -125,7 +125,7 @@ function OnboardingStatCard({
 }
 
 /**
- * Aggregator-wide onboarding metrics: summary stat cards + joins-by-mode bar.
+ * Coordinator-wide onboarding metrics: summary stat cards + joins-by-mode bar.
  *
  * @returns The onboarding metrics section for the Onboarding page.
  */

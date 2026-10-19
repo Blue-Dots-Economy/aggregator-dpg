@@ -6,7 +6,7 @@
  *
  * Reads only from the `onboarding` rollup table. Bulk rows are written by
  * the Finaliser (one per upload). Link rows are written by the Metrics
- * Aggregator (one per (aggregator, link, hour-bucket)).
+ * Coordinator (one per (aggregator, link, hour-bucket)).
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';

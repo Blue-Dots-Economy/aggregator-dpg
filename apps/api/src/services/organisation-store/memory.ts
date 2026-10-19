@@ -5,16 +5,16 @@
  * (partial-slug uniqueness over non-terminal rows, atomic approve/reject
  * guard, lowercased owner email, the Default org skipped by owner lookups,
  * name-sorted active list). It holds aggregator orgs only; the
- * network-facilitator root is a separate slot (see `AggregatorOrgStoreFake`).
+ * network-facilitator root is a separate slot (see `OrganisationStoreFake`).
  * Unit-test use only.
  */
 
 import { randomUUID } from 'node:crypto';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import {
-  AggregatorOrgStoreBase,
+  OrganisationStoreBase,
   DEFAULT_ORG_SLUG,
-  type AggregatorOrg,
+  type Organisation,
   type CreateOrgInput,
   type OrgStoreError,
   type OrgStoreResult,
@@ -26,16 +26,16 @@ import {
 
 const NON_TERMINAL = new Set(['pending', 'active']);
 
-export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
-  protected readonly byId = new Map<string, AggregatorOrg>();
+export class InMemoryOrganisationStore extends OrganisationStoreBase {
+  protected readonly byId = new Map<string, Organisation>();
   /** Owner admin-account id per owner contact (one account per person, 0027). */
   protected readonly adminByContact = new Map<string, string>();
   /** Contacts that also hold a coordinator account (see {@link markCoordinator}). */
   protected readonly coordinatorContacts = new Set<string>();
   /** The network-facilitator root, when a test seeds one. */
-  protected root: AggregatorOrg | null = null;
+  protected root: Organisation | null = null;
 
-  async create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
+  async create(input: CreateOrgInput): Promise<OrgStoreResult<Organisation>> {
     const slugTaken = [...this.byId.values()].some(
       (o) => o.slug === input.slug && NON_TERMINAL.has(o.status),
     );
@@ -69,7 +69,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       ownerUserId = randomUUID();
       this.adminByContact.set(id, ownerUserId);
     }
-    const row: AggregatorOrg = {
+    const row: Organisation = {
       id: orgId,
       slug: input.slug,
       displayName: input.displayName,
@@ -98,18 +98,18 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
     return { ok: true, value: row };
   }
 
-  findById(id: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  findById(id: string): Promise<OrgStoreResult<Organisation | null>> {
     return Promise.resolve({ ok: true, value: this.byId.get(id) ?? null });
   }
 
-  findBySlug(slug: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  findBySlug(slug: string): Promise<OrgStoreResult<Organisation | null>> {
     return Promise.resolve({
       ok: true,
       value: [...this.byId.values()].find((o) => o.slug === slug) ?? null,
     });
   }
 
-  findByOwnerEmail(email: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  findByOwnerEmail(email: string): Promise<OrgStoreResult<Organisation | null>> {
     const target = email.toLowerCase();
     return Promise.resolve({
       ok: true,
@@ -117,7 +117,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
     });
   }
 
-  findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  findByOwnerPhone(phone: string): Promise<OrgStoreResult<Organisation | null>> {
     return Promise.resolve({
       ok: true,
       value: pickOwned((o) => o.ownerPhone === phone && !o.isDefault, this.byId),
@@ -136,25 +136,25 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
     this.coordinatorContacts.add(contactIdValue);
   }
 
-  listActive(): Promise<OrgStoreResult<AggregatorOrg[]>> {
+  listActive(): Promise<OrgStoreResult<Organisation[]>> {
     const rows = [...this.byId.values()]
       .filter((o) => o.status === 'active')
       .sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
     return Promise.resolve({ ok: true, value: rows });
   }
 
-  findDefault(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  findDefault(): Promise<OrgStoreResult<Organisation | null>> {
     return Promise.resolve({
       ok: true,
       value: [...this.byId.values()].find((o) => o.slug === DEFAULT_ORG_SLUG) ?? null,
     });
   }
 
-  findRoot(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  findRoot(): Promise<OrgStoreResult<Organisation | null>> {
     return Promise.resolve({ ok: true, value: this.root });
   }
 
-  listPending(updatedBefore?: Date): Promise<OrgStoreResult<AggregatorOrg[]>> {
+  listPending(updatedBefore?: Date): Promise<OrgStoreResult<Organisation[]>> {
     const before = updatedBefore?.getTime();
     const rows = [...this.byId.values()]
       .filter((o) => o.status === 'pending')
@@ -176,7 +176,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
     return Promise.resolve({ ok: true, value: undefined });
   }
 
-  update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<AggregatorOrg>> {
+  update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<Organisation>> {
     const existing = this.byId.get(id);
     if (!existing) return Promise.resolve(err('NOT_FOUND', id));
     if (patch.displayName !== undefined) {
@@ -188,7 +188,7 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
       );
       if (taken) return Promise.resolve(err('DUPLICATE_NAME', 'organisation name already in use'));
     }
-    const next: AggregatorOrg = {
+    const next: Organisation = {
       ...existing,
       displayName: patch.displayName ?? existing.displayName,
       url: patch.url !== undefined ? patch.url : existing.url,
@@ -208,15 +208,15 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
     return Promise.resolve({ ok: true, value: next });
   }
 
-  async approve(id: string, updatedBy: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  async approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
     return this.casFromPending(id, 'active', updatedBy);
   }
 
-  async reject(id: string, updatedBy: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  async reject(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
     return this.casFromPending(id, 'inactive', updatedBy);
   }
 
-  listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<AggregatorOrg[]>> {
+  listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<Organisation[]>> {
     const rows = [...this.byId.values()].filter((o) => o.ownerUserId === ownerUserId).sort(byName);
     return Promise.resolve({ ok: true, value: rows });
   }
@@ -272,13 +272,13 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
 
   private casFromPending(
     id: string,
-    next: AggregatorOrg['status'],
+    next: Organisation['status'],
     updatedBy: string,
-  ): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  ): Promise<OrgStoreResult<Organisation | null>> {
     const existing = this.byId.get(id);
     if (!existing) return Promise.resolve(err('NOT_FOUND', id));
     if (existing.status !== 'pending') return Promise.resolve({ ok: true, value: null });
-    const updated: AggregatorOrg = {
+    const updated: Organisation = {
       ...existing,
       status: next,
       updatedAt: new Date(),
@@ -295,10 +295,10 @@ export class InMemoryAggregatorOrgStore extends AggregatorOrgStoreBase {
  * The org an owner match resolves to, as in Postgres: live first, then newest.
  */
 function pickOwned(
-  match: (o: AggregatorOrg) => boolean,
-  byId: Map<string, AggregatorOrg>,
-): AggregatorOrg | null {
-  const live = (o: AggregatorOrg) => (NON_TERMINAL.has(o.status) ? 0 : 1);
+  match: (o: Organisation) => boolean,
+  byId: Map<string, Organisation>,
+): Organisation | null {
+  const live = (o: Organisation) => (NON_TERMINAL.has(o.status) ? 0 : 1);
   return (
     [...byId.values()]
       .filter(match)
@@ -311,7 +311,7 @@ function err<T>(code: OrgStoreError['code'], message: string): OrgStoreResult<T>
 }
 
 /** Orders orgs as Postgres does: lower(name), then id. */
-function byName(a: AggregatorOrg, b: AggregatorOrg): number {
+function byName(a: Organisation, b: Organisation): number {
   const an = a.displayName.toLowerCase();
   const bn = b.displayName.toLowerCase();
   if (an !== bn) return an < bn ? -1 : 1;

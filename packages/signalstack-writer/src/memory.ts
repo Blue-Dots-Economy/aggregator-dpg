@@ -66,7 +66,7 @@ export class InMemorySignalStackWriter extends SignalStackWriterBase {
   protected readonly users: Map<string, StoredUser> = new Map();
   protected readonly profiles: Map<string, StoredProfile> = new Map();
   /**
-   * Aggregator org table keyed by `external_id` (our Postgres aggregator
+   * Coordinator org table keyed by `external_id` (our Postgres aggregator
    * UUID). Mirrors signalstack's dedupe key so repeated upserts with the
    * same input return the same `org_id` and never create duplicates.
    */

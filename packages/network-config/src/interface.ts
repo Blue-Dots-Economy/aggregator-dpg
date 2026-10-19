@@ -19,7 +19,7 @@ import { z } from 'zod';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 
-// ─── Aggregator YAML schema ──────────────────────────────────────────────────
+// ─── Coordinator YAML schema ──────────────────────────────────────────────────
 
 /**
  * Per-domain identity selectors. Bridge the schema's field names to the

@@ -31,14 +31,14 @@ import { z } from 'zod';
 import { config } from '../config.js';
 import { ERR } from '../errors/codes.js';
 import { formatApprovalTtl } from '../services/approval-token.js';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
 import { mintReviewToken } from '../services/registration-notify.js';
 import { sendHtml, sendPage, missingTokenPage, verifyTokenForId } from './approval-shared.js';
 import { checkApprovalVerifyRate } from '../services/approval-verify-rate.js';
 import { decideCoordinator, LINK_DECIDER } from '../services/decisions/coordinator.js';
-import type { Aggregator } from '../services/aggregator-store/index.js';
+import type { Coordinator } from '../services/user-store/index.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import { recordLoginIdentity } from '../services/identity-store/record.js';
 import type { IdpUser } from '../services/idp-admin/index.js';
@@ -434,7 +434,7 @@ interface PriorDecision {
  * and was later retired) so the approve button doesn't reactivate a retired
  * account behind the admin's back.
  */
-function decisionFromStatus(status: Aggregator['status']): PriorDecision | null {
+function decisionFromStatus(status: Coordinator['status']): PriorDecision | null {
   switch (status) {
     case 'active':
     case 'retired':
@@ -466,11 +466,11 @@ function alreadyDecidedView(prior: PriorDecision): {
   };
 }
 
-type LookupOk = { ok: true; aggregator: Aggregator; kcUser: IdpUser };
+type LookupOk = { ok: true; aggregator: Coordinator; kcUser: IdpUser };
 type LookupErr = { ok: false; status: number; html: string };
 
 async function loadAggregatorAndUser(aggregatorId: string): Promise<LookupOk | LookupErr> {
-  const store = getAggregatorStore();
+  const store = getUserStore();
   const idp = getIdpAdmin();
 
   const stored = await store.findById(aggregatorId);

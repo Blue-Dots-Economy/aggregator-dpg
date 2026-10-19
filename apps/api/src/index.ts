@@ -4,5 +4,5 @@
  */
 
 export type { Config } from './config.js';
-export type { Aggregator } from './services/aggregator-store/index.js';
+export type { Coordinator } from './services/user-store/index.js';
 export { buildApp } from './app.js';

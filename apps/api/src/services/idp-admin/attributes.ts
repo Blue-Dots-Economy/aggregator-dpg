@@ -1,5 +1,5 @@
 /**
- * Canonical Keycloak user-attribute names used across the Aggregator API.
+ * Canonical Keycloak user-attribute names used across the Coordinator API.
  *
  * Centralised so a typo in one call site can't silently desynchronise the
  * data we read with the data we write.
@@ -73,4 +73,3 @@ export const OWNER_REALM_ROLE = 'org_owner';
 
 /** {@link KC_ATTR.CREATED_BY} value on owner users the aggregator created. */
 export const OWNER_CREATED_BY = 'aggregator-owner';
-

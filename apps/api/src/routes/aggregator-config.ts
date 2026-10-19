@@ -1,5 +1,5 @@
 /**
- * Aggregator config read endpoint.
+ * Coordinator config read endpoint.
  *
  *   GET /v1/aggregator-config
  *     Returns the public surface of the resolved aggregator + network

@@ -8,16 +8,12 @@ import pino from 'pino';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../../user-store/index.js';
 import {
-  AggregatorStoreFake,
-  buildAggregator,
-  _setAggregatorStore,
-} from '../../aggregator-store/index.js';
-import {
-  AggregatorOrgStoreFake,
+  OrganisationStoreFake,
   buildDefaultOrg,
-  _setAggregatorOrgStore,
-} from '../../aggregator-org-store/index.js';
+  _setOrganisationStore,
+} from '../../organisation-store/index.js';
 import { IdpAdminFake, KC_ATTR, _setIdpAdmin } from '../../idp-admin/index.js';
 import { _setNetworkConfig } from '../../network-config.js';
 import { _setSignalStackWriter } from '../../signalstack.js';
@@ -33,22 +29,22 @@ const ID = '11111111-1111-4111-8111-111111111111';
 const log = pino({ level: 'silent' }) as unknown as FastifyBaseLogger;
 
 describe('decideCoordinator', () => {
-  let store: AggregatorStoreFake;
+  let store: UserStoreFake;
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
   let kcId: string;
 
   beforeEach(async () => {
-    store = new AggregatorStoreFake();
+    store = new UserStoreFake();
     store.seed([
-      buildAggregator({
+      buildCoordinator({
         id: ID,
         status: 'pending',
         parentOrgId: buildDefaultOrg().id,
         isDefaultOrg: true,
       }),
     ]);
-    const orgs = new AggregatorOrgStoreFake();
+    const orgs = new OrganisationStoreFake();
     orgs.seed([buildDefaultOrg()]);
     idp = new IdpAdminFake();
     const user = await idp.createUser({
@@ -59,8 +55,8 @@ describe('decideCoordinator', () => {
     if (!user.ok) throw new Error('seed failed');
     kcId = user.value.id;
     mailer = new FakeMailer();
-    _setAggregatorStore(store);
-    _setAggregatorOrgStore(orgs);
+    _setUserStore(store);
+    _setOrganisationStore(orgs);
     _setIdpAdmin(idp);
     _setMailer(mailer);
     _setNetworkConfig(buildBlueDotConfig());
@@ -68,8 +64,8 @@ describe('decideCoordinator', () => {
   });
 
   afterEach(() => {
-    _setAggregatorStore(null);
-    _setAggregatorOrgStore(null);
+    _setUserStore(null);
+    _setOrganisationStore(null);
     _setIdpAdmin(null);
     _setMailer(null);
     _setNetworkConfig(null);
@@ -149,16 +145,16 @@ describe('decideCoordinator', () => {
   });
 
   it('refuses to approve into an inactive org', async () => {
-    const orgs = new AggregatorOrgStoreFake();
+    const orgs = new OrganisationStoreFake();
     orgs.seed([{ ...buildDefaultOrg(), status: 'inactive' }]);
-    _setAggregatorOrgStore(orgs);
+    _setOrganisationStore(orgs);
     expect(await decide('approve')).toEqual({ kind: 'org_inactive' });
   });
 
   it('reports unavailable db when the org read fails during approve', async () => {
-    const orgs = new AggregatorOrgStoreFake();
+    const orgs = new OrganisationStoreFake();
     orgs.findById = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'x' } });
-    _setAggregatorOrgStore(orgs);
+    _setOrganisationStore(orgs);
     expect(await decide('approve')).toEqual({ kind: 'unavailable', dependency: 'db' });
   });
 
@@ -221,7 +217,7 @@ describe('decideCoordinator', () => {
 
   it('dates an already-rejected row with no rejected_at from updated_at', async () => {
     store.seed([
-      buildAggregator({
+      buildCoordinator({
         id: ID,
         status: 'inactive',
         rejectedAt: null,
@@ -255,13 +251,13 @@ describe('deciderOf', () => {
 
 describe('loadCoordinatorAndUser', () => {
   it('returns not_found when the coordinator row is missing', async () => {
-    const store = new AggregatorStoreFake();
-    _setAggregatorStore(store);
+    const store = new UserStoreFake();
+    _setUserStore(store);
     _setIdpAdmin(new IdpAdminFake());
     const r = await loadCoordinatorAndUser('11111111-1111-4111-8111-111111111111');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe('not_found');
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setIdpAdmin(null);
   });
 });

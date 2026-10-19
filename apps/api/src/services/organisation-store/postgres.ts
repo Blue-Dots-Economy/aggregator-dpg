@@ -32,9 +32,9 @@ import {
 } from '../../db/account-writes.js';
 import { IDP_PROVIDER } from '../idp-admin/provider.js';
 import {
-  AggregatorOrgStoreBase,
+  OrganisationStoreBase,
   DEFAULT_ORG_SLUG,
-  type AggregatorOrg,
+  type Organisation,
   type CreateOrgInput,
   type OrgStoreError,
   type OrgStoreResult,
@@ -52,8 +52,8 @@ class ConsentHookError extends Error {
   }
 }
 
-export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
-  async create(input: CreateOrgInput): Promise<OrgStoreResult<AggregatorOrg>> {
+export class PostgresOrganisationStore extends OrganisationStoreBase {
+  async create(input: CreateOrgInput): Promise<OrgStoreResult<Organisation>> {
     const start = Date.now();
     try {
       const created = await getDb().transaction(async (tx) => {
@@ -120,15 +120,15 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     }
   }
 
-  async findById(id: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  async findById(id: string): Promise<OrgStoreResult<Organisation | null>> {
     return this.findOne(eq(organisations.id, id));
   }
 
-  async findBySlug(slug: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  async findBySlug(slug: string): Promise<OrgStoreResult<Organisation | null>> {
     return this.findOne(eq(organisations.slug, slug));
   }
 
-  async findByOwnerEmail(email: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  async findByOwnerEmail(email: string): Promise<OrgStoreResult<Organisation | null>> {
     const e = email.trim().toLowerCase();
     // The owner's admin account by its contact's email (contact_email_unique),
     // then its orgs. One owner may own several orgs (a rejected one and a new
@@ -137,7 +137,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     return this.findOne(eq(contact.email, e), true);
   }
 
-  async findByOwnerPhone(phone: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  async findByOwnerPhone(phone: string): Promise<OrgStoreResult<Organisation | null>> {
     // Same shape as findByOwnerEmail, keyed on contact_phone_unique.
     return this.findOne(eq(contact.phone, phone), true);
   }
@@ -164,7 +164,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     }
   }
 
-  async listActive(): Promise<OrgStoreResult<AggregatorOrg[]>> {
+  async listActive(): Promise<OrgStoreResult<Organisation[]>> {
     try {
       const rows = await this.selectJoined()
         .where(scoped(eq(organisations.status, 'active')))
@@ -175,7 +175,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     }
   }
 
-  async listPending(updatedBefore?: Date): Promise<OrgStoreResult<AggregatorOrg[]>> {
+  async listPending(updatedBefore?: Date): Promise<OrgStoreResult<Organisation[]>> {
     try {
       const where = updatedBefore
         ? and(eq(organisations.status, 'pending'), lt(organisations.updatedAt, updatedBefore))
@@ -187,11 +187,11 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     }
   }
 
-  async findDefault(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  async findDefault(): Promise<OrgStoreResult<Organisation | null>> {
     return this.findOne(eq(organisations.slug, DEFAULT_ORG_SLUG));
   }
 
-  async findRoot(): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  async findRoot(): Promise<OrgStoreResult<Organisation | null>> {
     try {
       const [row] = await this.selectJoined()
         .where(eq(organisations.orgType, 'network_facilitator'))
@@ -202,7 +202,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     }
   }
 
-  async update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<AggregatorOrg>> {
+  async update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<Organisation>> {
     // The owner's IdP login lives on the owner's account, not the org row.
     const { ownerKcSub, displayName, ...rest } = patch;
     const columns = displayName === undefined ? rest : { ...rest, name: displayName };
@@ -238,15 +238,15 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     }
   }
 
-  async approve(id: string, updatedBy: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  async approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
     return this.casFromPending(id, 'active', updatedBy);
   }
 
-  async reject(id: string, updatedBy: string): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  async reject(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
     return this.casFromPending(id, 'inactive', updatedBy);
   }
 
-  async listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<AggregatorOrg[]>> {
+  async listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<Organisation[]>> {
     try {
       const rows = await this.selectJoined()
         .where(scoped(eq(organisations.orgOwner, ownerUserId)))
@@ -338,7 +338,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
     id: string,
     next: 'active' | 'inactive',
     updatedBy: string,
-  ): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  ): Promise<OrgStoreResult<Organisation | null>> {
     try {
       const [row] = await getDb()
         .update(organisations)
@@ -378,7 +378,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   }
 
   /** Reads one joined row through `db` (used inside write transactions). */
-  private async readIn(db: DbExecutor, id: string): Promise<AggregatorOrg | null> {
+  private async readIn(db: DbExecutor, id: string): Promise<Organisation | null> {
     const [row] = await this.selectJoined(db)
       .where(scoped(eq(organisations.id, id)))
       .limit(1);
@@ -396,7 +396,7 @@ export class PostgresAggregatorOrgStore extends AggregatorOrgStoreBase {
   private async findOne(
     predicate: SQL,
     byOwner = false,
-  ): Promise<OrgStoreResult<AggregatorOrg | null>> {
+  ): Promise<OrgStoreResult<Organisation | null>> {
     try {
       const q = this.selectJoined().where(
         scoped(
@@ -426,7 +426,7 @@ type JoinedRow = {
   ownerKcSub: string | null;
 };
 
-function toDomain(row: JoinedRow): AggregatorOrg {
+function toDomain(row: JoinedRow): Organisation {
   const { o, c } = row;
   return {
     id: o.id,

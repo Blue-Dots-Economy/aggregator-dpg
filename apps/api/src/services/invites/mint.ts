@@ -19,8 +19,8 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { MailerAdapter } from '@aggregator-dpg/mailer';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
 import { config } from '../../config.js';
-import { getAggregatorStore } from '../aggregator-store/index.js';
-import { getAggregatorOrgStore } from '../aggregator-org-store/index.js';
+import { getUserStore } from '../user-store/index.js';
+import { getOrganisationStore } from '../organisation-store/index.js';
 import type { getRegistrationInvitesStore } from '../registration-invites-store/index.js';
 import { mintInviteToken } from '../invite-token.js';
 import { renderCoordinatorInvite, renderInviteExistingAccount } from '../email-templates/index.js';
@@ -123,14 +123,14 @@ type AccountMatch =
  * owners (an email is one person across both roles; `contact_email_unique`).
  */
 async function accountFor(email: string, orgId: string): Promise<AccountMatch> {
-  const coordinator = await getAggregatorStore().findByContactEmail(email);
+  const coordinator = await getUserStore().findByContactEmail(email);
   if (!coordinator.ok) return { kind: 'error' };
   if (coordinator.value) {
     return coordinator.value.parentOrgId === orgId
       ? { kind: 'own_coordinator', status: coordinator.value.status }
       : { kind: 'other_account' };
   }
-  const orgStore = getAggregatorOrgStore();
+  const orgStore = getOrganisationStore();
   const [owner, root, def] = await Promise.all([
     orgStore.findByOwnerEmail(email),
     orgStore.findRoot(),
@@ -152,7 +152,8 @@ async function accountFor(email: string, orgId: string): Promise<AccountMatch> {
  * @param deps - Store, mailer, org, recipients, and token settings.
  * @returns Per-batch counts, the invalid list and own-org existing members.
  */
-export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary> { // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
+export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary> {
+  // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   const { invites, mailer, orgId, orgName, inviterEmail, recipients, ttlSec, createdBy, log } =
     deps;
   const summary: MintSummary = { sent: 0, resent: 0, invalid: [], existing: [] };
@@ -194,7 +195,8 @@ export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary>
         orgName,
         signInUrl: `${config.PUBLIC_PORTAL_URL}/login`,
       });
-      const send = await mailer.send({ // NOSONAR typescript:S9382 — sequential by design
+      const send = await mailer.send({
+        // NOSONAR typescript:S9382 — sequential by design
         to: email,
         subject: mail.subject,
         html: mail.html,
@@ -227,7 +229,8 @@ export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary>
       expiresOn: formatExpiryDate(expiresAt),
       ...(recipient.name ? { recipientName: recipient.name } : {}),
     });
-    const send = await mailer.send({ // NOSONAR typescript:S9382 — sequential by design
+    const send = await mailer.send({
+      // NOSONAR typescript:S9382 — sequential by design
       to: email,
       subject: mail.subject,
       html: mail.html,

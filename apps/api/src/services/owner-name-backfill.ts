@@ -196,7 +196,7 @@ export async function listOwnerNameCandidatesFromDb(): Promise<OwnerNameCandidat
       userIdentities,
       and(eq(userIdentities.userId, users.id), eq(userIdentities.provider, IDP_PROVIDER)),
     )
-    // Aggregator orgs only: the network admin's root / Default orgs have no
+    // Coordinator orgs only: the network admin's root / Default orgs have no
     // Keycloak owner to read a name from.
     .where(and(isNull(contact.name), eq(organisations.orgType, 'aggregator')));
   return rows.flatMap((r) =>
