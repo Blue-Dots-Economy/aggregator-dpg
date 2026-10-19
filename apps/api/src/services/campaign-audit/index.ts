@@ -4,10 +4,9 @@
  *
  * Audit failures NEVER fail a campaign or delay a response unreasonably
  * (#617). Every write this module performs happens after the triggering
- * operation is already durable — the job is committed and enqueued, or (for
- * the dump route) the response has already been prepared — so nothing this
- * module does can prevent that operation from proceeding, and a failure here
- * is observability, not control flow.
+ * operation is already durable — the job is committed and enqueued — so
+ * nothing this module does can prevent that operation from proceeding, and
+ * a failure here is observability, not control flow.
  *
  * @module @aggregator-dpg/api
  */
@@ -66,7 +65,7 @@ export function _setCampaignAuditWriter(w: CampaignAuditWriterBase | null): void
 export interface SafeAuditContext {
   /** `operation` field on the emitted log line, e.g. `campaignAudit.requested`. */
   operation: string;
-  /** The job id (or a generated id for the synchronous dump route) this write is for. */
+  /** The job id this write is for. */
   correlation_id: string;
   /** The audited channel. */
   channel: AuditChannel;

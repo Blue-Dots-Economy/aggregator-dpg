@@ -238,27 +238,6 @@ const ConfigSchema = z.object({
   CAMPAIGN_VOICE_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
   /** BullMQ attempts for a voice campaign job (retry count on transient failure). */
   CAMPAIGN_VOICE_ATTEMPTS: z.coerce.number().int().positive().default(3),
-  /**
-   * Non-PII dump download API (#692). The Signals `signals-s3-export` cron
-   * writes three fixed keys — `[<prefix>/]<network>/<instance_id>/<table>.ndjson.gz`
-   * — into this deployment's own S3 bucket (`S3_BUCKET`); there is no manifest
-   * and no dated run folder, so the key root must be configured, never probed.
-   * A wrong value must 404, not silently serve a different dataset.
-   */
-  CAMPAIGN_DUMP_PREFIX: z.string().default(''),
-  /**
-   * The Signals instance whose dump this deployment serves. One aggregator
-   * deployment serves exactly one Signals instance, so this needs no request
-   * parameter — but it has no default, and the route returns 503
-   * DUMP_NOT_CONFIGURED when it is unset rather than failing the whole API to
-   * boot on deployments that do not use the campaign manager.
-   */
-  CAMPAIGN_DUMP_INSTANCE_ID: z.string().optional(),
-  /**
-   * Lifetime of the pre-signed dump URLs. The caller is a machine that
-   * downloads immediately, so this is far shorter than a human-facing link.
-   */
-  CAMPAIGN_DUMP_URL_TTL_SECONDS: z.coerce.number().int().positive().default(600),
   // ─── Campaign email channel (#578) ──────────────────────────────────────
   // Deliberately its own knobs, not shared with the export channel above: an
   // email blast and a PII export have different safe volumes and cadences.
@@ -456,15 +435,13 @@ export function campaignManagerAllowedAzp(): string[] {
 
 /**
  * Keycloak `preferred_username` that identifies the campaign-manager system
- * caller on the non-PII dump route (#692).
+ * caller, rejected by `requireCampaignAuth` on the org-scoped campaign routes.
  *
- * The dump endpoint is whole-network and has no org scoping, so the calling
- * identity is its only control. The `campaign-manager` client serves two
- * identities — a coordinator via the password grant and the system caller via
- * client_credentials — which share one `azp`, so `azp` alone cannot separate
- * them. `preferred_username` can: Keycloak sets it to
- * `service-account-<client-id>` for the service account, and realm usernames
- * are unique, so no human can hold that value.
+ * The `campaign-manager` client serves two identities — a coordinator via the
+ * password grant and the system caller via client_credentials — which share
+ * one `azp`, so `azp` alone cannot separate them. `preferred_username` can:
+ * Keycloak sets it to `service-account-<client-id>` for the service account,
+ * and realm usernames are unique, so no human can hold that value.
  *
  * Read from the live environment at **call time**, mirroring
  * {@link campaignManagerAllowedAzp}: it must be independently settable across
@@ -479,22 +456,6 @@ export function campaignDumpServiceAccount(): string {
   // "off" state to fall into, but an empty expected username would match a
   // token with no `preferred_username` claim at all. Fall back to the default.
   return process.env.CAMPAIGN_DUMP_SERVICE_ACCOUNT?.trim() || 'service-account-campaign-manager';
-}
-
-/**
- * The Signals instance whose non-PII dump this deployment serves (#692).
- *
- * Read from the live environment at **call time**, mirroring
- * {@link campaignDumpServiceAccount}: the dump route consults it per request and
- * it must be independently settable across test cases in one Vitest worker,
- * where the frozen `config` snapshot cannot change after first import.
- *
- * @returns The configured instance id, or `undefined` when unset or blank — the
- *   route turns that into `503 DUMP_NOT_CONFIGURED`.
- */
-export function campaignDumpInstanceId(): string | undefined {
-  const raw = process.env.CAMPAIGN_DUMP_INSTANCE_ID?.trim();
-  return raw && raw.length > 0 ? raw : undefined;
 }
 
 /**

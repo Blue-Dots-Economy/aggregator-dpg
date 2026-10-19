@@ -9,9 +9,9 @@
  * record or decrypts a contact field — `campaign-export.ts`'s own module doc
  * says so explicitly ("The decrypt → CSV → S3 → email-link work runs in
  * `apps/worker`"). The API only ever sees `item_ids` (uuids), a free-form
- * `metadata` list, and an opaque `content` object; `RequestedAuditInput` and
- * `DumpAuditInput` are built from those plus the verified auth context and
- * deployment config — never from a participant record, because the API never
+ * `metadata` list, and an opaque `content` object; `RequestedAuditInput` is
+ * built from those plus the verified auth context and deployment config —
+ * never from a participant record, because the API never
  * has one. So there is no Signals fake to seed here, and a "poll cycle" adds
  * nothing: `GET /v1/campaign/export/:id` (see `submit-job.audit.test.ts`'s
  * "does not write an audit row for a status poll") writes no row at all.
@@ -28,10 +28,7 @@
  * This test drives PII through every value the request body can carry
  * (`content` fields AND a non-`purpose` metadata key that today's code never
  * reads) and asserts none of it appears in the serialised rows — it would
- * fail the moment such a change landed. It also covers the dump route's
- * `DumpAuditInput`, which carries no caller-supplied value at all (a GET with
- * no body), so its assertion is structural: `details` may only hold the
- * fixed, non-PII shape `{ files, bytes }` (see `DumpAuditInput.details`).
+ * fail the moment such a change landed.
  *
  * Fix-round-1 additions (review of the first version of this file found the
  * guarantee false for voice): a voice-channel case drives PII through
@@ -51,7 +48,6 @@
 process.env.SIGNALSTACK_BASE_URL = 'http://signals.local';
 process.env.SIGNALSTACK_ADMIN_KEY = 'k';
 process.env.SIGNALSTACK_ACTING_ORG_ID = 'svc';
-process.env.CAMPAIGN_DUMP_INSTANCE_ID = 'blue_dot_up';
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
@@ -87,19 +83,6 @@ vi.mock('../../services/rate-limiter/index.js', () => ({
   consume: consumeMock,
 }));
 
-// S3 is mocked for the dump route — see campaign-dump.test.ts for why all
-// four named exports must be present.
-const { headObjectMock, signDownloadUrlMock } = vi.hoisted(() => ({
-  headObjectMock: vi.fn(),
-  signDownloadUrlMock: vi.fn(),
-}));
-vi.mock('../../services/object-storage/index.js', () => ({
-  headObject: headObjectMock,
-  signDownloadUrl: signDownloadUrlMock,
-  signBulkUploadUrl: vi.fn(),
-  signErrorsCsvDownloadUrl: vi.fn(),
-}));
-
 describe('audit rows never contain a participant PII value (#617)', () => {
   let app: FastifyInstance;
   let audit: CampaignAuditWriterFake;
@@ -107,17 +90,6 @@ describe('audit rows never contain a participant PII value (#617)', () => {
   beforeEach(async () => {
     enqueueCampaignProcessMock.mockReset().mockResolvedValue(undefined);
     consumeMock.mockReset().mockResolvedValue({ allowed: true, count: 1, retryAfterSeconds: 0 });
-
-    headObjectMock.mockReset().mockResolvedValue({
-      etag: 'e',
-      contentLength: 100,
-      lastModified: new Date('2026-09-02T00:00:00.000Z'),
-    });
-    signDownloadUrlMock.mockReset().mockImplementation(async (key: string) => ({
-      url: `https://s3.public.example/${key}`,
-      key,
-      expiresAt: '2026-09-02T00:10:00.000Z',
-    }));
 
     _setCampaignJobStore(new InMemoryCampaignJobStore());
 
@@ -134,7 +106,6 @@ describe('audit rows never contain a participant PII value (#617)', () => {
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'aggregator';
-    process.env.CAMPAIGN_DUMP_INSTANCE_ID = 'blue_dot_up';
     _setAccessTokenVerifier(async (token) => {
       switch (token) {
         case 'coordinator':
@@ -143,12 +114,6 @@ describe('audit rows never contain a participant PII value (#617)', () => {
             aggregator_id: 'agg-1',
             signalstack_org_id: 'org_5d3b7fa4-x',
             azp: 'campaign-manager',
-          };
-        case 'system':
-          return {
-            sub: 'sa-uuid',
-            azp: 'campaign-manager',
-            preferred_username: 'service-account-campaign-manager',
           };
         default:
           throw new Error('invalid token');
@@ -185,15 +150,6 @@ describe('audit rows never contain a participant PII value (#617)', () => {
       url: '/v1/campaign/voice',
       headers: { authorization: 'Bearer coordinator' },
       payload: payload as object,
-    });
-  }
-
-  /** Issues the dump request with the system service-account token. */
-  function getDump() {
-    return app.inject({
-      method: 'GET',
-      url: '/v1/campaign/dump',
-      headers: { authorization: 'Bearer system' },
     });
   }
 
@@ -244,36 +200,6 @@ describe('audit rows never contain a participant PII value (#617)', () => {
     // `purpose` itself being empty.
     const row = audit.rows[0] as { purpose?: string };
     expect(row.purpose).toBe('quarterly outreach audit');
-  });
-
-  it('never puts a request-supplied PII value into the dump audit row, and `details` stays to the fixed non-PII shape', async () => {
-    // The dump route takes no request body, so there is no caller-supplied
-    // injection vector to drive through it (unlike export/email/voice). The
-    // structural assertion below is the meaningful guard here: `details` may
-    // only ever be the fixed `{ files, bytes }` shape, never e.g. a sample of
-    // a served object's content.
-    const res = await getDump();
-    expect(res.statusCode).toBe(200);
-    const rows = audit.rows.filter((r) => r.kind === 'dump');
-    expect(rows).toHaveLength(1);
-
-    assertNoPii(audit.rows);
-
-    const details = (rows[0] as { details?: Record<string, unknown> }).details;
-    expect(details && Object.keys(details).sort()).toEqual(['bytes', 'files']);
-    expect(typeof details?.files).toBe('number');
-    expect(typeof details?.bytes).toBe('number');
-  });
-
-  it('holds across a failed dump attempt too', async () => {
-    headObjectMock.mockRejectedValueOnce(new Error('s3 down'));
-    const res = await getDump();
-    expect(res.statusCode).toBe(503);
-    const rows = audit.rows.filter((r) => r.kind === 'dump');
-    expect(rows).toHaveLength(1);
-    expect((rows[0] as { outcome?: string }).outcome).toBe('failed');
-
-    assertNoPii(audit.rows);
   });
 
   it('never puts a request-supplied PII value into the voice audit row, even via content.variables (fix-round-1)', async () => {
