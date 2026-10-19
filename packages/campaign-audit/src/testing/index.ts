@@ -13,14 +13,11 @@ import {
   CampaignAuditWriterBase,
   type RequestedAuditInput,
   type CompletedAuditInput,
-  type DumpAuditInput,
 } from '../interface.js';
 
 /** One captured row, tagged with which method produced it. */
 export type AuditRow =
-  | ({ kind: 'requested' } & RequestedAuditInput)
-  | ({ kind: 'completed' } & CompletedAuditInput)
-  | ({ kind: 'dump' } & DumpAuditInput);
+  ({ kind: 'requested' } & RequestedAuditInput) | ({ kind: 'completed' } & CompletedAuditInput);
 
 /**
  * In-memory {@link CampaignAuditWriterBase} for unit tests.
@@ -60,20 +57,6 @@ export class CampaignAuditWriterFake extends CampaignAuditWriterBase {
   override async recordCompleted(input: CompletedAuditInput): Promise<Result<void, BaseError>> {
     if (this.failWith) throw this.failWith;
     this.rows.push({ kind: 'completed', ...input });
-    return ok(undefined);
-  }
-
-  /**
-   * Captures a `dump` row in `rows`, tagged `kind: 'dump'`.
-   *
-   * Throws `failWith` instead of recording anything when it is set.
-   *
-   * @param input - The dump-audit fields to capture.
-   * @returns `ok(undefined)` once the row has been pushed onto `rows`.
-   */
-  override async recordDumpAccess(input: DumpAuditInput): Promise<Result<void, BaseError>> {
-    if (this.failWith) throw this.failWith;
-    this.rows.push({ kind: 'dump', ...input });
     return ok(undefined);
   }
 
@@ -124,26 +107,6 @@ export function buildCompletedAudit(over: Partial<CompletedAuditInput> = {}): Co
     resolvedCount: 3,
     skippedCount: 0,
     failedCount: 0,
-    ...over,
-  };
-}
-
-/**
- * Builds a valid `dump` input. Defaults are deterministic and contain no
- * participant PII.
- *
- * @param over - Fields to override on top of the defaults.
- * @returns A complete {@link DumpAuditInput}.
- */
-export function buildDumpAudit(over: Partial<DumpAuditInput> = {}): DumpAuditInput {
-  return {
-    correlationId: '00000000-0000-4000-8000-000000000009',
-    actorUserId: 'service-account-campaign-manager',
-    actorAzp: 'campaign-manager',
-    outcome: 'succeeded',
-    completedAt: new Date('2026-09-02T10:00:00.000Z'),
-    endpoint: 'GET /v1/campaign/dump',
-    details: { files: 3, bytes: 1024 },
     ...over,
   };
 }

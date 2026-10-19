@@ -49,7 +49,7 @@ export function _setCampaignAuditWriter(w: CampaignAuditWriterBase | null): void
 export interface SafeAuditContext {
   /** `operation` field on the emitted log line, e.g. `campaignAudit.requested`. */
   operation: string;
-  /** The job id (or a generated id for the synchronous dump route) this write is for. */
+  /** The job id this write is for. */
   correlation_id: string;
   /** The audited channel. */
   channel: AuditChannel;

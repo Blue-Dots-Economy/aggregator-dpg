@@ -639,7 +639,6 @@ describe('runCampaignJob completed audit (#617)', () => {
       recordRequested: async () => ok(undefined),
       recordCompleted: async () =>
         err(new UpstreamError('insert failed', { code: 'CAMPAIGN_AUDIT_INSERT_FAILED' })),
-      recordDumpAccess: async () => ok(undefined),
     } as CampaignAuditWriterBase;
     const h = harness(job(), {}, {}, undefined, audit);
     h.deps.log.error = (o) => errors.push(o);
