@@ -1,13 +1,18 @@
 /**
  * Coordinators within reach (user & org Phase 5): filtered by org and status,
  * newest first, paged by the API's cursor. With access control on, an Access
- * column shows the additional roles each holds (#873).
+ * column shows the additional roles each holds (#873). Inviting lives here
+ * too, as a button beside the status filter, gated the same as the old
+ * sidebar entry (`canInvite`) — never offered to a network admin who can
+ * only view.
  */
 
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import type { RolesResponse, UserSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
+import { getConsoleActor } from '@/lib/console-actor';
+import { canInvite } from '@/lib/capabilities';
 import { RoleBadges } from '@/components/console/RoleBadges';
 import { networkDomains, servedLabels } from '@/lib/console-domains.server';
 import { StatusFilter } from '@/components/console/StatusFilter';
@@ -28,14 +33,17 @@ export default async function ConsoleCoordinatorsPage({
   const params = await searchParams;
   const status = STATUSES.find((s) => s === params.status);
   const orgId = params.org_id && UUID_RE.test(params.org_id) ? params.org_id : undefined;
-  const [page, domains] = await Promise.all([
+  const [page, domains, actor] = await Promise.all([
     consoleRead<UserSearchResponse>('/v1/user/search', {
       filter: { ...(status ? { status } : {}), ...(orgId ? { org_id: orgId } : {}) },
       limit: 50,
       ...(params.cursor ? { cursor: params.cursor } : {}),
     }),
     networkDomains(),
+    getConsoleActor(),
   ]);
+  // Same gate the sidebar link used to apply, now checked here instead.
+  const showInvite = actor.ok && canInvite(actor.me);
   const keep = { ...(status ? { status } : {}), ...(orgId ? { org_id: orgId } : {}) };
   // Roles are null when access control is off: no Access column then.
   const showAccess = page.users.some((u) => Array.isArray(u.roles));
@@ -48,11 +56,20 @@ export default async function ConsoleCoordinatorsPage({
         <ConsoleSection
           flush
           action={
-            <StatusFilter
-              action="/console/coordinators"
-              value={status ?? ''}
-              hidden={orgId ? { org_id: orgId } : {}}
-            />
+            <div className="flex flex-wrap items-center gap-3">
+              <StatusFilter
+                action="/console/coordinators"
+                value={status ?? ''}
+                hidden={orgId ? { org_id: orgId } : {}}
+              />
+              {/* Was a sidebar nav item; moved beside the filter it's most used with. */}
+              {showInvite ? (
+                <Link className={buttonClass('primary')} href="/console/invite">
+                  <I.mail size={14} />
+                  {t('nav.invite')}
+                </Link>
+              ) : null}
+            </div>
           }
         >
           {page.users.length === 0 ? (

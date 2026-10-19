@@ -39,6 +39,12 @@ export interface SidebarAccount {
   /** First line, also the source of the two-letter badge. */
   title: string;
   subtitle: string;
+  /**
+   * Extra label/value rows shown in a pop-up above the card when it's
+   * clicked (e.g. contact details). Omit to leave the card non-interactive,
+   * as before — the sign-out button is unaffected either way.
+   */
+  details?: ReadonlyArray<{ label: string; value: string }>;
 }
 
 /** Whether `n` is the current page's link. */
@@ -145,6 +151,27 @@ function SidebarPanel({
   const { signOut, supportEnabled } = useAuth();
   const initials = account.title.slice(0, 2).toUpperCase();
 
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const accountRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!detailsOpen) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (
+        e instanceof KeyboardEvent
+          ? e.key === 'Escape'
+          : !accountRef.current?.contains(e.target as Node)
+      ) {
+        setDetailsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, [detailsOpen]);
+
   return (
     <>
       <div className="px-5 pt-6 pb-5 flex items-start gap-2">
@@ -206,17 +233,55 @@ function SidebarPanel({
           </div>
         )}
 
-        <div className="p-3 shrink-0">
+        <div className="p-3 shrink-0 relative" ref={accountRef}>
+          {account.details && account.details.length > 0 && detailsOpen && (
+            <div className="absolute bottom-full left-0 right-0 mb-2 rounded-[12px] bg-(--bd-card) border border-(--bd-border) shadow-xl p-3 flex flex-col gap-3">
+              {account.details.map((d) => (
+                <div key={d.label} className="min-w-0">
+                  <div className="text-[10.5px] uppercase tracking-[0.06em] font-semibold text-(--bd-fg-muted)">
+                    {d.label}
+                  </div>
+                  <div className="mt-0.5 text-[13px] text-(--bd-fg) wrap-break-word">{d.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="rounded-[12px] bg-linear-to-br from-(--bd-tint-primary) to-(--bd-card) border border-(--bd-border) p-3 flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-(--bd-brand) text-white flex items-center justify-center font-display font-bold text-[12px] shrink-0">
-              {initials}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-semibold text-(--bd-fg) truncate">
-                {account.title}
-              </div>
-              <div className="text-[11px] text-(--bd-fg-muted) truncate">{account.subtitle}</div>
-            </div>
+            {account.details && account.details.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setDetailsOpen((v) => !v)}
+                aria-expanded={detailsOpen}
+                aria-haspopup="dialog"
+                className="flex items-center gap-2.5 min-w-0 flex-1 text-left"
+              >
+                <div className="w-8 h-8 rounded-lg bg-(--bd-brand) text-white flex items-center justify-center font-display font-bold text-[12px] shrink-0">
+                  {initials}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-semibold text-(--bd-fg) truncate">
+                    {account.title}
+                  </div>
+                  <div className="text-[11px] text-(--bd-fg-muted) truncate">
+                    {account.subtitle}
+                  </div>
+                </div>
+              </button>
+            ) : (
+              <>
+                <div className="w-8 h-8 rounded-lg bg-(--bd-brand) text-white flex items-center justify-center font-display font-bold text-[12px] shrink-0">
+                  {initials}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-semibold text-(--bd-fg) truncate">
+                    {account.title}
+                  </div>
+                  <div className="text-[11px] text-(--bd-fg-muted) truncate">
+                    {account.subtitle}
+                  </div>
+                </div>
+              </>
+            )}
             <button
               type="button"
               onClick={() => {
