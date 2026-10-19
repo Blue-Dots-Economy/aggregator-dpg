@@ -64,26 +64,40 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
   // 1. Resolve link metadata via the public API.
   const apiBase = process.env.API_BASE_URL ?? 'http://localhost:4000';
   let resolved: ResolveResponse;
+  // The fetch is the only thing guarded here. `notFound()` signals Next by
+  // THROWING, so calling it inside the try would hand that signal straight to
+  // the catch below, which would swallow it and render a transport error with
+  // HTTP 200 instead of a 404. Resolve the status first, act on it after.
+  let res: Response;
   try {
-    const res = await fetch(
+    res = await fetch(
       `${apiBase}/public/v1/aggregators/${encodeURIComponent(org)}/links/${encodeURIComponent(slug)}`,
       { cache: 'no-store' },
     );
-    if (res.status === 404) notFound();
-    if (!res.ok) {
-      return (
-        <ErrorShell
-          title="Link unavailable"
-          message={`The registration link is not currently active (HTTP ${res.status}).`}
-        />
-      );
-    }
-    resolved = (await res.json()) as ResolveResponse;
   } catch (err) {
     return (
       <ErrorShell
         title="Cannot reach registration service"
         message={err instanceof Error ? err.message : 'Network error.'}
+      />
+    );
+  }
+  if (res.status === 404) notFound();
+  if (!res.ok) {
+    return (
+      <ErrorShell
+        title="Link unavailable"
+        message={`The registration link is not currently active (HTTP ${res.status}).`}
+      />
+    );
+  }
+  try {
+    resolved = (await res.json()) as ResolveResponse;
+  } catch (err) {
+    return (
+      <ErrorShell
+        title="Cannot reach registration service"
+        message={err instanceof Error ? err.message : 'Malformed response.'}
       />
     );
   }
