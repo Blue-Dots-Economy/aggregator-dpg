@@ -91,6 +91,21 @@ describe('PublicRegistrationPage (server component)', () => {
     expect(notFound).toHaveBeenCalled();
   });
 
+  it('renders an ErrorShell when the resolve response body is malformed', async () => {
+    // 200 with a body that is not JSON. Parsing is guarded separately from the
+    // fetch so a bad payload still shows the service page instead of throwing
+    // past the route.
+    globalThis.fetch = vi.fn(
+      async () => new Response('<html>not json</html>', { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    const el = await PublicRegistrationPage({
+      params: Promise.resolve({ org: 'acme', slug: 'winter25' }),
+    });
+    expect(el.props.title).toBe('Cannot reach registration service');
+    expect(notFound).not.toHaveBeenCalled();
+  });
+
   it('renders an ErrorShell for a non-ok, non-404 upstream response', async () => {
     globalThis.fetch = vi.fn(
       async () => new Response('server error', { status: 500 }),
