@@ -54,7 +54,6 @@ describe('<ConsoleSidebar />', () => {
       ['nav.home', '/console'],
       ['nav.organisations', '/console/orgs'],
       ['nav.coordinators', '/console/coordinators'],
-      ['nav.invite', '/console/invite'],
       ['nav.access', '/console/access/roles'],
       ['nav.account', '/console/account'],
     ]);
@@ -94,8 +93,8 @@ describe('<ConsoleSidebar />', () => {
     expect(within(aside()).queryByText('contact_support')).toBeNull();
   });
 
-  it('shows Coordinators without Invite when the caller may view but not invite (#873)', () => {
-    render(<ConsoleSidebar isNetworkAdmin canManage canInvite={false} account={account} />);
+  it('never offers Invite from the sidebar: it lives on the Coordinators page instead (#873)', () => {
+    render(<ConsoleSidebar isNetworkAdmin canManage account={account} />);
     const hrefs = within(aside())
       .getAllByRole('link')
       .map((a) => a.getAttribute('href'));
