@@ -28,14 +28,18 @@ export function getSignalStackWriter(): SignalStackWriterBase | null {
 
   if (config.SIGNALSTACK_AUTH_MODE === 'bearer') {
     const { SIGNALSTACK_CLIENT_ID: clientId, SIGNALSTACK_CLIENT_SECRET: clientSecret } = config;
-    const { KEYCLOAK_URL: keycloakUrl, KEYCLOAK_REALM: keycloakRealm } = config;
+    const { KEYCLOAK_URL: keycloakUrl } = config;
+    // Signals is a shared service and trusts one issuer, which is not
+    // necessarily the realm this app authenticates its own users against.
+    // Falls back to KEYCLOAK_REALM when both live in the same realm.
+    const keycloakRealm = config.SIGNALSTACK_KEYCLOAK_REALM || config.KEYCLOAK_REALM;
     if (!clientId || !clientSecret || !keycloakUrl || !keycloakRealm) {
       logger.warn({
         status: 'warn',
         sub: 'signalstack.init',
         message:
           'SIGNALSTACK_AUTH_MODE=bearer requires SIGNALSTACK_CLIENT_ID, SIGNALSTACK_CLIENT_SECRET, ' +
-          'KEYCLOAK_URL, and KEYCLOAK_REALM — push disabled',
+          'KEYCLOAK_URL, and SIGNALSTACK_KEYCLOAK_REALM (or KEYCLOAK_REALM) — push disabled',
       });
       writer = null;
       return null;
