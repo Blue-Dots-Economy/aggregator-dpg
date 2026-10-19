@@ -16,7 +16,7 @@ import pg from 'pg';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { CAPABILITIES, loadRbacFile, permissionDefinitions } from '@aggregator-dpg/rbac';
 import { getDb, getPool, closeDb, _setDbClients } from '../../../db/client.js';
-import { PostgresAggregatorStore } from '../../aggregator-store/postgres.js';
+import { PostgresUserStore } from '../../user-store/postgres.js';
 import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
 import { PostgresRbacCatalogue } from '../../rbac-catalogue/postgres.js';
 import { PostgresRoleStore } from '../postgres.js';
@@ -32,7 +32,7 @@ const DAY = 24 * 60 * 60 * 1000;
 suite('role store (migration 0030) — integration', () => {
   let pool: pg.Pool;
   const store = new PostgresRoleStore();
-  const aggStore = new PostgresAggregatorStore();
+  const aggStore = new PostgresUserStore();
   let defaultOrgId = '';
 
   beforeAll(async () => {

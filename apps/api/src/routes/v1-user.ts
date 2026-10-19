@@ -104,7 +104,7 @@ async function loadOrg(id: string): Promise<Organisation> {
  */
 async function aggregatorTarget(orgId: string | null): Promise<TargetOrg | undefined> {
   if (!orgId) return undefined;
-  const root = await getAggregatorOrgStore().findRoot();
+  const root = await getOrganisationStore().findRoot();
   if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
   return { id: orgId, orgType: 'aggregator', ancestorIds: root.value ? [root.value.id] : [] };
 }
@@ -145,10 +145,7 @@ async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> {
   if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
   const rootId = root.value?.id ?? null;
   for (const o of actor.orgs) {
-    const found =
-      o.orgType === 'network_facilitator'
-        ? root
-        : await orgStore.findById(o.id); // NOSONAR typescript:S9382 — sequential by design
+    const found = o.orgType === 'network_facilitator' ? root : await orgStore.findById(o.id); // NOSONAR typescript:S9382 — sequential by design
     if (!found.ok) dbDown('orgStore.findById', found.error.message);
     if (!found.value) continue;
     const target: TargetOrg = {

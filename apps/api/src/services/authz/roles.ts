@@ -13,8 +13,8 @@
 import type { FastifyRequest } from 'fastify';
 import type { Membership, OrgType, RoleDefinition, UserType } from '@aggregator-dpg/rbac';
 import { baseRoleOf } from '@aggregator-dpg/rbac';
-import { getAggregatorStore } from '../aggregator-store/index.js';
-import { getAggregatorOrgStore } from '../aggregator-org-store/index.js';
+import { getUserStore } from '../user-store/index.js';
+import { getOrganisationStore } from '../organisation-store/index.js';
 import type { Actor } from '../auth/actor/index.js';
 import { getRoleStore, type UserRoleRecord } from '../role-store/index.js';
 import { actorPermissions, checkCapability, type TargetOrg } from './guard.js';
@@ -67,7 +67,7 @@ function runtimeOrFail(): RoleOutcome<RbacRuntime> {
 
 /** The root organisation's id, every aggregator organisation's ancestor. */
 async function rootId(): Promise<RoleOutcome<string | null>> {
-  const root = await getAggregatorOrgStore().findRoot();
+  const root = await getOrganisationStore().findRoot();
   if (!root.ok) return fail({ kind: 'unavailable', message: root.error.message });
   return { ok: true, value: root.value?.id ?? null };
 }
@@ -82,7 +82,7 @@ async function rootId(): Promise<RoleOutcome<string | null>> {
  * @returns The target user.
  */
 export async function userInReach(actor: Actor, id: string): Promise<RoleOutcome<TargetUser>> {
-  const coord = await getAggregatorStore().findById(id);
+  const coord = await getUserStore().findById(id);
   if (!coord.ok) return fail({ kind: 'unavailable', message: coord.error.message });
   if (coord.value) {
     const orgId = coord.value.parentOrgId;
@@ -96,7 +96,7 @@ export async function userInReach(actor: Actor, id: string): Promise<RoleOutcome
       },
     };
   }
-  const orgStore = getAggregatorOrgStore();
+  const orgStore = getOrganisationStore();
   const [owned, root] = await Promise.all([orgStore.listOwnedBy(id), orgStore.findRoot()]);
   if (!owned.ok) return fail({ kind: 'unavailable', message: owned.error.message });
   if (!root.ok) return fail({ kind: 'unavailable', message: root.error.message });
