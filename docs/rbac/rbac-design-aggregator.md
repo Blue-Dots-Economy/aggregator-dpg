@@ -193,6 +193,30 @@ sequenceDiagram
 | OPA down                            | Deny (`503` in enforce mode)                                                                                                                                                                  |
 | Mode                                | `RBAC_MODE`: `off`, `log` (decide and log, never block), `enforce`. Role and custom-role writes are checked strictly: refused in `log` too, since they have no pre-RBAC behaviour to preserve |
 
+### Route declarations
+
+Each route sets `config.rbac` in one of two forms (`services/authz/route-access.ts`):
+
+| Form                                    | Caller must                                     | Notes                                                                           |
+| --------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------- |
+| `{ capability, strict? }`               | Hold the permission                             | `strict: true` refuses a deny in `log` mode too; used by the custom-role routes |
+| `{ access: 'self' \| 'signed_in' \| …}` | Meet the access kind below; no permission check | For routes that are not about a permission                                      |
+
+| `access`     | Meaning                                       | Checked by RBAC                                                                                                   |
+| ------------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `self`       | An active account acting on its own record    | The caller resolves to a known account, and it is active; else `unknown_actor`, `actor_unavailable` or `inactive` |
+| `signed_in`  | Any known account                             | The caller resolves to a known account; active or not does not matter                                             |
+| `service`    | A Keycloak service-account token, no end user | `preferred_username` starts with `service-account-`; else `not_service_account`                                   |
+| `link_token` | A signed approval, grant or invite link       | Nothing: the route verifies the token itself                                                                      |
+| `public`     | Anyone; rate limits apply                     | Nothing                                                                                                           |
+
+With RBAC off nothing is checked; a failed check is logged in `log` mode and answered `403 FORBIDDEN` in `enforce` mode. `strict` applies to the `capability` form only: the role assign and revoke routes are `signed_in`, and their strict check runs inside the handler (`services/authz/roles.ts`).
+
+| Log `operation` | Written when                                                     | Carries                                                                                                             |
+| --------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `rbac.access`   | A `self`, `signed_in` or `service` check fails                   | The `access` value, route, method, user id, mode, reason; `status` is `skipped` in `log` and `failure` in `enforce` |
+| `rbac.decide`   | A permission is decided (`capability` routes and handler checks) | The permission, route, method, user id, mode, allow, reasons, latency; an allow at `debug`, a deny at `warn`        |
+
 ---
 
 ## 4. Managing roles
