@@ -7,6 +7,8 @@
  * read-only roles and permissions view `network.administer` (RBAC; the API
  * also checks them). Inviting coordinators is offered from the Coordinators
  * page itself (next to the status filter), not as its own sidebar entry.
+ * "My account" has no nav entry either — its details open from the account
+ * card at the foot of the sidebar (`SidebarAccount.details`).
  */
 
 import { useTranslations } from 'next-intl';
@@ -50,7 +52,6 @@ export function ConsoleSidebar({
           },
         ]
       : []),
-    { to: '/console/account', label: t('nav.account'), icon: 'user' },
   ];
   return <AppSidebar nav={nav} portalLabel={t('nav.portal_label')} account={account} />;
 }

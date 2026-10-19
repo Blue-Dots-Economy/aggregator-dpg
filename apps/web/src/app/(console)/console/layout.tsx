@@ -61,6 +61,11 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
           account={{
             title: name,
             subtitle: me.is_network_admin ? t('nav.network_admin') : t('nav.org_owner'),
+            details: [
+              { label: t('account.name'), value: me.user.contact.name ?? '—' },
+              { label: t('account.email'), value: me.user.contact.email },
+              { label: t('account.phone'), value: me.user.contact.phone ?? '—' },
+            ],
           }}
         />
         <main className="flex-1 min-w-0 overflow-x-hidden">
