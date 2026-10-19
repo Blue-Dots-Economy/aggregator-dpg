@@ -250,19 +250,27 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         ...(body.limit ? { limit: body.limit } : {}),
       });
       if (!page.ok) dbDown('userStore.search', page.error.message);
-      const plain = await showsContact(req, actor);
-      if (plain && page.value.rows.length > 0) {
+      // Unmasking is decided per organisation, never once for the page: a
+      // caller may hold `contact.unmask` in one of its orgs and not another.
+      const plainIn = new Map<string | null, boolean>();
+      for (const row of page.value.rows) {
+        const orgId = row.parentOrgId ?? null;
+        if (!plainIn.has(orgId)) plainIn.set(orgId, await showsContact(req, actor, orgId)); // NOSONAR typescript:S9382 — one check per distinct org
+      }
+      const isPlain = (row: Coordinator) => plainIn.get(row.parentOrgId ?? null) === true;
+      const plainCount = page.value.rows.filter(isPlain).length;
+      if (plainCount > 0) {
         // Plain contact in a list: audited by count, never values (H-6).
         req.log.info({
           operation: 'console.user.search',
           status: 'success',
           actor_id: actor.userId,
           contact: 'plain',
-          count: page.value.rows.length,
+          count: plainCount,
         });
       }
       return reply.status(200).send({
-        users: page.value.rows.map((row) => toWireUser(row, { masked: !plain })),
+        users: page.value.rows.map((row) => toWireUser(row, { masked: !isPlain(row) })),
         next_cursor: page.value.nextCursor ? encodeUserCursor(page.value.nextCursor) : null,
       });
     },

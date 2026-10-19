@@ -114,12 +114,4 @@ export abstract class RoleStoreBase {
     revokedBy: string | null,
     audit: AuditEntry,
   ): Promise<RoleStoreResult<number>>;
-
-  /**
-   * Appends an audit row.
-   *
-   * @param entry - The audit row.
-   * @returns Nothing.
-   */
-  abstract recordAudit(entry: AuditEntry): Promise<RoleStoreResult<void>>;
 }

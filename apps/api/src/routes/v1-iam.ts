@@ -12,7 +12,9 @@
  * `requireActor()` admits admins only. The assign and revoke routes declare
  * `signed_in`: the permission they need is the role's own `assigned_by`,
  * checked in the target organisation by `services/authz/roles.ts` together
- * with the other rules. Every change is written to `iam_audit`.
+ * with the other rules. Every write is checked strictly — refused in `log`
+ * mode too, since these routes have no pre-RBAC behaviour to preserve. Every
+ * change is written to `iam_audit`.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -266,7 +268,7 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/roles/create',
     {
-      config: { rbac: { capability: 'network.administer' } },
+      config: { rbac: { capability: 'network.administer', strict: true } },
       schema: {
         tags: ['console'],
         summary: 'Create a custom role from existing permissions',
@@ -302,7 +304,7 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
   app.patch(
     '/v1/roles/update/:key',
     {
-      config: { rbac: { capability: 'network.administer' } },
+      config: { rbac: { capability: 'network.administer', strict: true } },
       schema: {
         tags: ['console'],
         summary: 'Change a custom role',
@@ -340,7 +342,7 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/roles/delete/:key',
     {
-      config: { rbac: { capability: 'network.administer' } },
+      config: { rbac: { capability: 'network.administer', strict: true } },
       schema: {
         tags: ['console'],
         summary: 'Delete a custom role no live assignment uses',

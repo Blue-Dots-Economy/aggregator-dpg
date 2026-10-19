@@ -54,6 +54,12 @@ export interface CheckOptions {
   target?: TargetOrg | undefined;
   /** Clock, for role expiry. Injectable for tests. */
   now?: number | undefined;
+  /**
+   * Deny in `log` mode too. For checks on surfaces that did not exist before
+   * RBAC (the role and custom-role writes): there is no legacy behaviour for
+   * `log` to preserve, so an IAM write is never open while RBAC is on.
+   */
+  strict?: boolean | undefined;
 }
 
 /** Who the token says the caller is. */
@@ -207,7 +213,8 @@ export async function checkCapability(
     options.now ?? Date.now(),
   );
   const decision = await decide(rt.authorizer, input);
-  return outcome(req, rt.mode, capability, actor.userId, decision, start);
+  const mode = options.strict ? 'enforce' : rt.mode;
+  return outcome(req, mode, capability, actor.userId, decision, start);
 }
 
 /**
@@ -217,14 +224,14 @@ export async function checkCapability(
  * @param req - The request (for its logger and route).
  * @param identity - Claims from the verified token.
  * @param capability - The permission the route declares.
- * @param now - Clock, for role expiry. Injectable for tests.
+ * @param options - `strict` (deny in `log` mode too) and a clock for tests.
  * @returns Whether to continue, the mode, and the decision.
  */
 export async function requirePermission(
   req: GuardRequest,
   identity: TokenIdentity,
   capability: Capability,
-  now: number = Date.now(),
+  options: Omit<CheckOptions, 'target'> = {},
 ): Promise<GuardOutcome> {
   const rt = getRbacRuntime();
   if (!rt) return { allowed: true, mode: 'off' };
@@ -233,14 +240,14 @@ export async function requirePermission(
   if ('reason' in resolved) {
     return outcome(
       req,
-      rt.mode,
+      options.strict ? 'enforce' : rt.mode,
       capability,
       identity.aggregatorId,
       { allow: false, reasons: [resolved.reason] },
       start,
     );
   }
-  return checkCapability(req, resolved.actor, capability, { now });
+  return checkCapability(req, resolved.actor, capability, options);
 }
 
 /**
@@ -278,30 +285,4 @@ export async function listActorCapabilities(
     error_type: res.error.code,
   });
   return [];
-}
-
-/**
- * The permissions a resolved actor holds in each organisation it belongs to
- * or owns, for the portal. Never throws.
- *
- * @param req - The request (for its logger).
- * @param actor - The resolved actor.
- * @param rootId - The root organisation's id (every aggregator organisation's ancestor), when known.
- * @returns Permissions per organisation id; `null` when RBAC is off.
- */
-export async function permissionsByOrg(
-  req: GuardRequest,
-  actor: Actor,
-  rootId: string | null,
-): Promise<Record<string, Capability[]> | null> {
-  if (!getRbacRuntime()) return null;
-  const out: Record<string, Capability[]> = {};
-  for (const o of actor.orgs) {
-    const ancestorIds = o.orgType === 'aggregator' && rootId ? [rootId] : [];
-    out[o.id] =
-      (await listActorCapabilities(req, actor, {
-        target: { id: o.id, orgType: o.orgType, ancestorIds },
-      })) ?? [];
-  }
-  return out;
 }

@@ -391,8 +391,8 @@ const ConfigSchema = z.object({
    * `enforce`: a deny returns 403. Flip per instance after a clean log window.
    */
   RBAC_MODE: z.enum(['off', 'log', 'enforce']).default('off'),
-  /** Base URL of the OPA sidecar. */
-  OPA_URL: z.string().default('http://localhost:8181'),
+  /** Base URL of the OPA sidecar. Validated as a URL so a typo fails at boot, not per request. */
+  OPA_URL: z.string().url().default('http://localhost:8181'),
   /** Per-attempt timeout for an OPA decision. */
   OPA_TIMEOUT_MS: z.coerce.number().int().positive().default(500),
   /** Retries after the first OPA attempt, for transient failures. */

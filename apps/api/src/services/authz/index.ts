@@ -18,7 +18,6 @@ export {
   checkCapability,
   decisionInput,
   listActorCapabilities,
-  permissionsByOrg,
   requirePermission,
   resolveCaller,
 } from './guard.js';

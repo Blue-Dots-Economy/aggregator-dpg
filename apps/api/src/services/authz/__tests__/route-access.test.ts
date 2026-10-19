@@ -229,7 +229,10 @@ describe('declared route table', () => {
     await app.ready();
     await app.close();
     const table = Object.fromEntries(
-      listDeclaredRoutes().map(([k, d]) => [k, 'capability' in d ? d.capability : d.access]),
+      listDeclaredRoutes().map(([k, d]) => [
+        k,
+        'capability' in d ? `${d.capability}${d.strict ? ' (strict)' : ''}` : d.access,
+      ]),
     );
     expect(Object.keys(table).length).toBeGreaterThanOrEqual(45);
     expect(table).toMatchSnapshot();

@@ -643,7 +643,9 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
   app.get(
     '/v1/bulk-uploads/:id/errors.csv',
     {
-      config: { rbac: { capability: 'profiles.onboard' } },
+      // The report carries the submitted participant contact data, so it
+      // needs the same permission as the other decrypted-profile exports.
+      config: { rbac: { capability: 'profiles.view_pii' } },
       schema: {
         tags: ['bulk-uploads'],
         summary: 'Download per-row error CSV',

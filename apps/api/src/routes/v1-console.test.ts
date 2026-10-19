@@ -1022,6 +1022,84 @@ describe('console routes /v1/user, /v1/org', () => {
       for (const u of list.users) expect(u.contact.email).toMatch(/^.\*\*\*@/);
     });
 
+    it("unmasks a search row only where the caller holds contact.unmask in that row's org", async () => {
+      // OWNER_A owns ORG_A and ORG_B, and holds contact.unmask in ORG_A only.
+      orgs.seed([
+        buildOrganisation({
+          id: ORG_B,
+          slug: 'org-b',
+          displayName: 'Beta',
+          status: 'active',
+          ownerUserId: OWNER_A,
+          ownerEmail: 'a@a.org',
+        }),
+      ]);
+      const shipped = await shippedRoles();
+      const roles = shipped.map((r) =>
+        r.key === 'org_admin'
+          ? { ...r, permissions: r.permissions.filter((c) => c !== 'contact.unmask') }
+          : r,
+      );
+      const pii = shipped.find((r) => r.key === 'pii_access')!;
+      roles.push({
+        ...pii,
+        key: 'contact_viewer',
+        isBuiltin: false,
+        accountType: 'admin',
+        maxDays: null,
+        permissions: ['contact.unmask'],
+      });
+      _setRbacRuntime({
+        mode: 'enforce',
+        roles: indexRoles(roles),
+        authorizer: new AuthorizerFake(),
+      });
+      (getRoleStore() as InMemoryRoleStore).seed([
+        { userId: OWNER_A, roleKey: 'contact_viewer', orgId: ORG_A },
+      ]);
+
+      const list = (await post('/v1/user/search', 'a', { filter: {} })).json() as {
+        users: Array<{ id: string; contact: { email: string } }>;
+      };
+      const email = Object.fromEntries(list.users.map((u) => [u.id, u.contact.email]));
+      expect(email[C1]).toBe('c1@x.org');
+      expect(email[C3]).toBe('c3@x.org');
+      expect(email[C2]).toMatch(/^.\*\*\*@/);
+    });
+
+    describe('IAM writes in log mode', () => {
+      it('refuses an assignment without the role’s assigned_by permission', async () => {
+        const roles = (await shippedRoles()).map((r) =>
+          r.key === 'org_admin'
+            ? { ...r, permissions: r.permissions.filter((c) => c !== 'org.manage') }
+            : r,
+        );
+        _setRbacRuntime({
+          mode: 'log',
+          roles: indexRoles(roles),
+          authorizer: new AuthorizerFake(),
+        });
+        const body = { role_key: 'pii_access', org_id: ORG_A };
+        expect((await post(`/v1/user/role/assign/${C3}`, 'a', body)).statusCode).toBe(403);
+        expect((await post(`/v1/user/role/revoke/${C3}`, 'a', body)).statusCode).toBe(403);
+      });
+
+      it('refuses custom-role writes to a caller without network.administer', async () => {
+        _setRbacRuntime(await testRbacRuntime('log'));
+        const created = await post('/v1/roles/create', 'a', {
+          key: 'helper',
+          name: 'Helper',
+          description: 'x',
+          account_type: 'coordinator',
+          assignable_org_types: ['aggregator'],
+          assigned_by: 'org.manage',
+          permissions: ['profiles.view'],
+        });
+        expect(created.statusCode).toBe(403);
+        expect((await post('/v1/roles/delete/data_export', 'a', {})).statusCode).toBe(403);
+      });
+    });
+
     describe('roles API', () => {
       const reasonOf = (res: { json(): unknown }) =>
         (res.json() as { error: { fields?: { reason?: string } } }).error.fields?.reason;

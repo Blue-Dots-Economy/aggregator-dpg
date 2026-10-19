@@ -16,6 +16,7 @@ import {
 import type { BulkUploadStatus } from '../../../../services/onboarding.service';
 import { onboardingService } from '../../../../services/onboarding.service';
 import type { BulkAttestationContent } from '../../../../lib/bulk-attestation.server';
+import { useCan } from '../../../../lib/auth-context';
 
 // Module-level so its identity is stable across CSVUpload re-renders. Defining
 // it inline re-created the component every render, remounting the toast and
@@ -343,6 +344,7 @@ export function RecentUploadsBody() {
 function UploadRow({ upload }: { upload: BulkUploadStatus }) {
   const t = useTranslations('onboarding');
   const format = useFormatter();
+  const can = useCan();
   const [downloading, setDownloading] = useState(false);
 
   const onDownloadErrors = async () => {
@@ -399,15 +401,20 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
       </td>
       <td className="text-[12px]">
         {upload.status === 'completed' && upload.failed > 0 && upload.errors_csv_s3_key ? (
-          <button
-            type="button"
-            onClick={onDownloadErrors}
-            disabled={downloading}
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-(--bd-primary-50) text-primary-600 font-semibold hover:bg-(--bd-primary-100) disabled:opacity-60"
-          >
-            <I.download size={12} />
-            {downloading ? t('csv.recent.signing') : 'errors.csv'}
-          </button>
+          // The report carries submitted contact data: PII Access only.
+          can('profiles.view_pii') ? (
+            <button
+              type="button"
+              onClick={onDownloadErrors}
+              disabled={downloading}
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-(--bd-primary-50) text-primary-600 font-semibold hover:bg-(--bd-primary-100) disabled:opacity-60"
+            >
+              <I.download size={12} />
+              {downloading ? t('csv.recent.signing') : 'errors.csv'}
+            </button>
+          ) : (
+            <span className="text-ink-300">—</span>
+          )
         ) : upload.status === 'completed' ? (
           <span className="text-emerald-600">{t('csv.recent.all_rows_passed')}</span>
         ) : upload.status_reason ? (

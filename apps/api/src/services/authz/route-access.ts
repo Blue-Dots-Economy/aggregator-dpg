@@ -20,6 +20,8 @@ import { recordLoginIdentity } from '../identity-store/record.js';
  * Who may call a route.
  *
  * - `capability`: an end user holding it (organisation set ∩ role, reach).
+ *   With `strict`, a deny is refused in `log` mode too: for routes that did
+ *   not exist before RBAC, which have no legacy behaviour to preserve.
  * - `self`: an active account acting on its own record.
  * - `signed_in`: any known account.
  * - `service`: a Keycloak service-account token (no end user).
@@ -27,7 +29,7 @@ import { recordLoginIdentity } from '../identity-store/record.js';
  * - `public`: anyone; rate limits apply.
  */
 export type RouteAccess =
-  | { capability: Capability }
+  | { capability: Capability; strict?: true }
   | { access: 'self' | 'signed_in' | 'service' | 'link_token' | 'public' };
 
 declare module 'fastify' {
@@ -153,7 +155,8 @@ function refuse(
  * own auth wrapper.
  *
  * Does nothing when RBAC is off. In `log` mode a failure is logged and the
- * request continues; in `enforce` mode it becomes `403 FORBIDDEN`.
+ * request continues; in `enforce` mode it becomes `403 FORBIDDEN`. A `strict`
+ * capability is refused in `log` mode too.
  *
  * @param req - The request; its route's `config.rbac` is read.
  * @param caller - Facts from the verified token.
@@ -175,7 +178,7 @@ export async function enforceRouteAccess(req: FastifyRequest, caller: RouteCalle
   }
 
   if ('capability' in decl) {
-    const out = await requirePermission(req, caller, decl.capability);
+    const out = await requirePermission(req, caller, decl.capability, { strict: decl.strict });
     if (!out.allowed) throw httpError('FORBIDDEN', { fields: { permission: decl.capability } });
     return;
   }
@@ -209,7 +212,7 @@ export async function enforceActorRouteAccess(req: FastifyRequest, actor: Actor)
   const decl = req.routeOptions.config.rbac;
   if (!decl) return;
   if ('capability' in decl) {
-    const out = await checkCapability(req, actor, decl.capability);
+    const out = await checkCapability(req, actor, decl.capability, { strict: decl.strict });
     if (!out.allowed) throw httpError('FORBIDDEN', { fields: { permission: decl.capability } });
     return;
   }

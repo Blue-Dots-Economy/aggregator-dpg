@@ -92,6 +92,8 @@ flowchart LR
 | `agreement.manage`       | ✓             | -         | -             | -           | -          | -           |
 | `network.administer`     | ✓             | -         | -             | -           | -          | -           |
 
+**Change from today's access, at `RBAC_MODE=enforce`.** No admin role holds `profiles.view_pii`, and PII Access is a coordinator role, so once an instance enforces, no admin (the network admin included) can export decrypted participant details (`POST /v1/campaign/export`, `POST /v1/dashboard/export/profiles`) or download a bulk upload's `errors.csv`. This is by design: decrypted data is reached only by a named coordinator holding PII Access for at most 90 days. Org Admin also no longer approves other organisations (`orgs.onboard`; assign Org Onboarder), and a coordinator no longer downloads masked lists (`profiles.export`; assign Data Export). The backfill (`scripts/sql/rbac-backfill-roles.sql`) restores the coordinator side only.
+
 Base roles come from the user-org model and are never assigned by hand. Additional roles are assigned in an organisation the user belongs to or owns, and combine with the base role: an owner of a Super Aggregator holds Org Admin and Org Onboarder; a coordinator who exports lists holds Coordinator and Data Export. `profiles.act_on_behalf` is in no built-in role: only service clients use it.
 
 ---
@@ -106,7 +108,6 @@ Base roles come from the user-org model and are never assigned by hand. Addition
 | Nobody assigns to themselves | Holds for every role                                                                                                                                                  |
 | Account type                 | A role is assigned only to users of its account type: admin roles to org owners, coordinator roles to coordinators                                                    |
 | Assignable organisations     | A role is assigned only in the organisation types it lists; PII Access is never assigned in the root, so personal data is never reachable through it                  |
-| Separation of duties         | Org Admin and PII Access are never held by the same user in the same organisation                                                                                     |
 | Expiry                       | A role with a maximum validity (PII Access, 90 days) is assigned with an expiry no later than that; it stops counting when it expires                                 |
 | Built-in roles are fixed     | Their permissions come from code and are re-applied at every start; change access by adding roles, not by editing built-ins                                           |
 

@@ -6,8 +6,8 @@
  * it is not a base role, the target belongs to or owns the organisation, the
  * caller holds the role's `assigned_by` permission there, the target is not
  * the caller, the account type matches, the organisation type is assignable,
- * separation of duties holds, and the expiry is within `max_days`. Every
- * change is audited. Base roles follow membership and are never assigned.
+ * and the expiry is within `max_days`. Every change is audited. Base roles
+ * follow membership and are never assigned.
  */
 
 import type { FastifyRequest } from 'fastify';
@@ -19,7 +19,7 @@ import type { Actor } from '../auth/actor/index.js';
 import { getRoleStore, type UserRoleRecord } from '../role-store/index.js';
 import { actorPermissions, checkCapability, type TargetOrg } from './guard.js';
 import { reachesOrg } from './scope.js';
-import { getRbacRuntime, refreshRbacCatalogue, type RbacRuntime } from './runtime.js';
+import { getRbacRuntime, type RbacRuntime } from './runtime.js';
 import { logger } from '../../logger.js';
 
 /** Why a role change did not happen. */
@@ -33,21 +33,10 @@ export type RoleFailure =
 
 /** The rule an assignment broke. */
 export type RoleRefusal =
-  | 'base_role'
-  | 'not_member'
-  | 'self'
-  | 'account_type'
-  | 'org_type'
-  | 'separation_of_duties'
-  | 'days_exceed_max';
+  'base_role' | 'not_member' | 'self' | 'account_type' | 'org_type' | 'days_exceed_max';
 
 /** Result of a rule-checked operation. */
 export type RoleOutcome<T> = { ok: true; value: T } | { ok: false; failure: RoleFailure };
-
-/** Roles never held together by one user in one organisation (catalogue §4). */
-export const SEPARATION_OF_DUTIES: ReadonlyArray<readonly [string, string]> = [
-  ['org_admin', 'pii_access'],
-];
 
 /** A user's organisations, as the roles API sees them. */
 export interface TargetUser {
@@ -120,35 +109,10 @@ function targetOf(m: Membership, root: string | null): TargetOrg {
   };
 }
 
-/** The role keys the user holds in an organisation: its base role and live additional roles. */
-function heldKeys(
-  rt: RbacRuntime,
-  user: TargetUser,
-  orgId: string,
-  live: readonly UserRoleRecord[],
-): Set<string> {
-  const keys = new Set<string>();
-  const m = user.memberships.find((x) => x.orgId === orgId);
-  const base = m ? baseRoleOf(rt.roles, m) : undefined;
-  if (base) keys.add(base.key);
-  for (const r of live) if (r.orgId === orgId) keys.add(r.roleKey);
-  return keys;
-}
-
 /** The role rules that need no request: everything after reach and the caller's permission. */
-function ruleRefusal(
-  role: RoleDefinition,
-  user: TargetUser,
-  m: Membership,
-  held: Set<string>,
-): RoleRefusal | null {
+function ruleRefusal(role: RoleDefinition, user: TargetUser, m: Membership): RoleRefusal | null {
   if (role.accountType !== user.userType) return 'account_type';
   if (!role.assignableOrgTypes.includes(m.orgType)) return 'org_type';
-  for (const [a, b] of SEPARATION_OF_DUTIES) {
-    if ((role.key === a && held.has(b)) || (role.key === b && held.has(a))) {
-      return 'separation_of_duties';
-    }
-  }
   return null;
 }
 
@@ -181,9 +145,6 @@ export async function listUserRoles(
   if (!root.ok) return root;
   const all = await getRoleStore().listForUser(userId);
   if (!all.ok) return fail({ kind: 'unavailable', message: all.error.message });
-  const live = all.value.filter(
-    (r) => r.revokedAt === null && (r.expiresAt === null || r.expiresAt > now),
-  );
   const base: UserRoles['base'] = [];
   const assignable: UserRoles['assignable'] = [];
   for (const m of user.value.memberships) {
@@ -193,10 +154,9 @@ export async function listUserRoles(
     const callerHolds = new Set(
       actorPermissions(rt.value.roles, actor, targetOf(m, root.value), now.getTime()),
     );
-    const held = heldKeys(rt.value, user.value, m.orgId, live);
     for (const role of rt.value.roles.byKey.values()) {
       if (role.baseFor || !role.assignedBy || !callerHolds.has(role.assignedBy)) continue;
-      if (ruleRefusal(role, user.value, m, held) === null) {
+      if (ruleRefusal(role, user.value, m) === null) {
         assignable.push({ roleKey: role.key, orgId: m.orgId });
       }
     }
@@ -244,18 +204,12 @@ export async function assignRole(
   const check = await checkCapability(req, actor, role.assignedBy, {
     target: targetOf(m, root.value),
     now: now.getTime(),
+    strict: true,
   });
   if (!check.allowed) return fail({ kind: 'forbidden', permission: role.assignedBy });
 
   if (userId === actor.userId) return fail({ kind: 'not_allowed', reason: 'self' });
-  const live = await getRoleStore().listLive(userId, now);
-  if (!live.ok) return fail({ kind: 'unavailable', message: live.error.message });
-  const refusal = ruleRefusal(
-    role,
-    user.value,
-    m,
-    heldKeys(rt.value, user.value, m.orgId, live.value),
-  );
+  const refusal = ruleRefusal(role, user.value, m);
   if (refusal) return fail({ kind: 'not_allowed', reason: refusal });
 
   const days = input.days ?? role.maxDays ?? null;
@@ -308,6 +262,7 @@ export async function revokeRole(
   if (!root.ok) return root;
   const check = await checkCapability(req, actor, role.assignedBy, {
     target: targetOf(m, root.value),
+    strict: true,
   });
   if (!check.allowed) return fail({ kind: 'forbidden', permission: role.assignedBy });
   const revoked = await getRoleStore().revoke(userId, roleKey, orgId, actor.userId, {
@@ -362,9 +317,4 @@ export async function revokeRolesOnLeave(
       reason,
     });
   }
-}
-
-/** Reloads this replica's role snapshot after a role write (R6). */
-export async function reloadRolesNow(): Promise<void> {
-  await refreshRbacCatalogue();
 }

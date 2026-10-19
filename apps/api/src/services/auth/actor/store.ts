@@ -10,6 +10,7 @@ import { getUserStore, type Coordinator } from '../../user-store/index.js';
 import { getOrganisationStore, type Organisation } from '../../organisation-store/index.js';
 import { getIdentityStore } from '../../identity-store/index.js';
 import { getRoleStore } from '../../role-store/index.js';
+import { getRbacRuntime } from '../../authz/runtime.js';
 import { IDP_PROVIDER } from '../../idp-admin/provider.js';
 import {
   ActorResolverBase,
@@ -51,10 +52,13 @@ function ownedOrg(org: Organisation): ActorOrg {
 
 /**
  * Adds the user's live additional roles (`user_role`) to a resolved actor.
+ * Skipped with RBAC off: nothing reads them, and an instance that never turns
+ * RBAC on should not pay a query per request or fail on the role table.
  *
- * @returns The actor with `roles`, or `UNAVAILABLE` when the store failed.
+ * @returns The actor (with `roles` when RBAC is on), or `UNAVAILABLE` when the store failed.
  */
 async function withRoles(actor: Actor): Promise<ActorResult> {
+  if (!getRbacRuntime()) return { ok: true, value: actor };
   const live = await getRoleStore().listLive(actor.userId, new Date());
   if (!live.ok) return unavailable(live.error.message);
   return {

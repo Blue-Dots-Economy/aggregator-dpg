@@ -148,12 +148,4 @@ export class InMemoryRoleStore extends RoleStoreBase {
     if (n > 0) this.audit.push(audit);
     return { ok: true, value: n };
   }
-
-  /** {@inheritDoc RoleStoreBase.recordAudit} */
-  async recordAudit(entry: AuditEntry): Promise<RoleStoreResult<void>> {
-    const failed = this.fail();
-    if (failed) return failed;
-    this.audit.push(entry);
-    return { ok: true, value: undefined };
-  }
 }

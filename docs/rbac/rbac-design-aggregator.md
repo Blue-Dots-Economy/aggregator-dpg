@@ -185,13 +185,13 @@ sequenceDiagram
 | 4    | OPA allows when the user is active and holds the route's permission; it also refuses `profiles.view_pii` through the root organisation                                                                                                                                                                                                                               |
 | 5    | `scope.ts` checks and filters reach; out of reach is 404                                                                                                                                                                                                                                                                                                             |
 
-| Behaviour                           | Detail                                                                                       |
-| ----------------------------------- | -------------------------------------------------------------------------------------------- |
-| Every route declares its permission | `config.rbac` on the route; a route without one stops the boot; a snapshot test lists them   |
-| Lists                               | The handler keeps only organisations where the user holds the permission (`scope.ts` filter) |
-| Portal UI                           | `GET /v1/user/read/me` returns the user's permissions per organisation; menus follow them    |
-| OPA down                            | Deny (`503` in enforce mode)                                                                 |
-| Mode                                | `RBAC_MODE`: `off`, `log` (decide and log, never block), `enforce`                           |
+| Behaviour                           | Detail                                                                                                                                                                                        |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Every route declares its permission | `config.rbac` on the route; a route without one stops the boot; a snapshot test lists them                                                                                                    |
+| Lists                               | The handler keeps only organisations where the user holds the permission (`scope.ts` filter)                                                                                                  |
+| Portal UI                           | `GET /v1/user/read/me` returns the user's permissions per organisation; menus follow them                                                                                                     |
+| OPA down                            | Deny (`503` in enforce mode)                                                                                                                                                                  |
+| Mode                                | `RBAC_MODE`: `off`, `log` (decide and log, never block), `enforce`. Role and custom-role writes are checked strictly: refused in `log` too, since they have no pre-RBAC behaviour to preserve |
 
 ---
 
@@ -205,7 +205,7 @@ sequenceDiagram
 | `POST /v1/user/role/assign/:id`                                                      | The role's `assigned_by` | Assign an additional role in an organisation the user belongs to or owns, with an expiry when the role has `max_days` |
 | `POST /v1/user/role/revoke/:id`                                                      | The role's `assigned_by` | Revoke an assignment                                                                                                  |
 
-Every assignment checks, in order: the target is in reach (else 404), the role is not a base role, the target belongs to or owns the organisation, the caller holds the role's `assigned_by` permission there, the target is not the caller, the account type matches, the organisation type is assignable, separation of duties holds, and the expiry is within `max_days`. Each write and its `iam_audit` row commit together.
+Every assignment checks, in order: the target is in reach (else 404), the role is not a base role, the target belongs to or owns the organisation, the caller holds the role's `assigned_by` permission there, the target is not the caller, the account type matches, the organisation type is assignable, and the expiry is within `max_days`. Each write and its `iam_audit` row commit together.
 
 | Console page      | Who                      | Shows                                                                                        |
 | ----------------- | ------------------------ | -------------------------------------------------------------------------------------------- |

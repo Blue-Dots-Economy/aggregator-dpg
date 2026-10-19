@@ -175,14 +175,4 @@ export class PostgresRoleStore extends RoleStoreBase {
       return dbFailure('roleStore.revokeAllInOrg', e);
     }
   }
-
-  /** {@inheritDoc RoleStoreBase.recordAudit} */
-  async recordAudit(entry: AuditEntry): Promise<RoleStoreResult<void>> {
-    try {
-      await getDb().insert(iamAudit).values(auditValues(entry));
-      return { ok: true, value: undefined };
-    } catch (e) {
-      return dbFailure('roleStore.recordAudit', e);
-    }
-  }
 }

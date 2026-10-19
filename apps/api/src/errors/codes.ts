@@ -606,7 +606,7 @@ export const ERR = {
     status: 409,
     title: 'Role cannot be assigned',
     detail: 'This role cannot be given to this user in this organisation.',
-    hint: 'A role rule refused it; see fields.reason (base_role, not_member, self, account_type, org_type, separation_of_duties, days_exceed_max). Rules: docs/rbac/rbac-permissions-and-roles.md §4.',
+    hint: 'A role rule refused it; see fields.reason (base_role, not_member, self, account_type, org_type, days_exceed_max). Rules: docs/rbac/rbac-permissions-and-roles.md §4.',
   },
 } as const satisfies Record<string, ErrorCatalogueEntry>;
 
