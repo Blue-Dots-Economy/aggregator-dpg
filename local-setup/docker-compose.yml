@@ -597,7 +597,7 @@ services:
   # OPA (RBAC decisions) for aggregator-api, from ../policy/rbac. Deployments
   # run it as a sidecar in the api pod (bluedots-automation).
   opa:
-    image: openpolicyagent/opa:1.21.1
+    image: openpolicyagent/opa:1.21.1@sha256:d3a9a6bd4fbcb0f4403294b0d0b239b07be163ac118a46df7d50045b52e52053
     container_name: sd-aggregator-opa
     restart: unless-stopped
     command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=error", "--ignore=*_test.rego", "--ignore=vectors.json", "/policy"]
