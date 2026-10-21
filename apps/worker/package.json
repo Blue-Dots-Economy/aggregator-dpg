@@ -28,7 +28,7 @@
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "bullmq": "^6.3.9",
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.6",
     "drizzle-orm": "^0.45.3",
     "ioredis": "^6.0.0",
     "papaparse": "^5.7.0",
