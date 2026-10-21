@@ -55,17 +55,23 @@ describe('<OrgEditForm />', () => {
     expect(screen.getByLabelText(messages.console.org.name)).not.toBeDisabled();
     expect(screen.getByLabelText(messages.console.org.url)).toHaveValue('https://acme.example');
     expect(screen.getByText('1 Main St, Bengaluru, KA')).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: messages.console.org.save }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: messages.console.org.save })).toBeInTheDocument();
     expect(screen.queryByText(messages.console.org.read_only)).toBeNull();
   });
 
-  it('shows the read-only notice and hides the save button when not editable', () => {
-    renderForm(baseOrg, false, false);
+  it('shows read-only details as text, with no inputs or save button', () => {
+    renderForm({ ...baseOrg, gst_number: null }, false, false);
     expect(screen.getByText(messages.console.org.read_only)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: messages.console.org.save })).toBeNull();
-    expect(screen.getByLabelText(messages.console.org.name)).toBeDisabled();
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.getByText('Acme Org')).toBeInTheDocument();
+    expect(screen.getByText('1 Main St, Bengaluru, KA')).toBeInTheDocument();
+    expect(screen.getByText('—')).toBeInTheDocument();
+  });
+
+  it('shows "no locations" when a read-only org has none', () => {
+    renderForm({ ...baseOrg, locations: [] }, false, false);
+    expect(screen.getByText(messages.console.org.no_locations)).toBeInTheDocument();
   });
 
   it('disables the name and shows the admin-only hint when the owner cannot rename', () => {
@@ -83,7 +89,9 @@ describe('<OrgEditForm />', () => {
     global.fetch = respond({}, 200) as never;
     renderForm(baseOrg, true, true);
     fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(messages.console.org.saved));
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent(messages.console.org.saved),
+    );
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -95,7 +103,9 @@ describe('<OrgEditForm />', () => {
       target: { value: 'New Legal Ltd' },
     });
     fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(messages.console.org.saved));
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent(messages.console.org.saved),
+    );
     expect(global.fetch).toHaveBeenCalledWith(
       `/api/console/org/metadata/${baseOrg.id}`,
       expect.objectContaining({

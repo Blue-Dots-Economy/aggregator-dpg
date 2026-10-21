@@ -11,7 +11,8 @@ import { useState, type SubmitEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import type { Org } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
-import { Card } from '../ui/Card';
+import { I } from '../../icons';
+import { ConsoleSection, DetailList } from './ConsoleUi';
 import { Input } from '../ui/Input';
 import { Label } from '../ui/Label';
 import { errorKey, sendConsole } from '../../lib/console-client';
@@ -67,74 +68,82 @@ export function OrgEditForm({
     )
     .filter(Boolean);
 
+  if (!editable) {
+    // Read-only (the Default org, the root): plain text, not disabled inputs.
+    return (
+      <ConsoleSection title={t('org.details')}>
+        <p className="text-[13px] text-ink-500 mb-4">{t('org.read_only')}</p>
+        <DetailList
+          items={[
+            { label: t('org.name'), value: current.name },
+            { label: t('org.url'), value: current.url ?? '—' },
+            { label: t('org.legal_name'), value: current.legal_name ?? '—' },
+            { label: t('org.gst_number'), value: current.gst_number ?? '—' },
+            {
+              label: t('org.locations'),
+              value: addresses.length ? addresses.join('; ') : t('org.no_locations'),
+            },
+          ]}
+        />
+      </ConsoleSection>
+    );
+  }
+
   return (
-    <Card className="p-4">
-      <h2 className="font-display text-[16px] font-bold text-ink-900 mb-3">{t('org.details')}</h2>
-      {!editable ? <p className="text-[13px] text-ink-600 mb-3">{t('org.read_only')}</p> : null}
-      <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-3 max-w-xl">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="org-name">{t('org.name')}</Label>
-          <Input
-            id="org-name"
-            value={name}
-            disabled={!editable || !canRename}
-            onChange={(e) => setName(e.target.value)}
-          />
-          {editable && !canRename ? (
-            <span className="text-[12px] text-ink-500">{t('org.name_admin_only')}</span>
-          ) : null}
+    <ConsoleSection title={t('org.details')}>
+      <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="org-name">{t('org.name')}</Label>
+            <Input
+              id="org-name"
+              value={name}
+              disabled={!canRename}
+              onChange={(e) => setName(e.target.value)}
+            />
+            {!canRename ? (
+              <span className="text-[12px] text-ink-500">{t('org.name_admin_only')}</span>
+            ) : null}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="org-url">{t('org.url')}</Label>
+            <Input id="org-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="org-legal">{t('org.legal_name')}</Label>
+            <Input
+              id="org-legal"
+              value={legalName}
+              onChange={(e) => setLegalName(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="org-gst">{t('org.gst_number')}</Label>
+            <Input id="org-gst" value={gst} onChange={(e) => setGst(e.target.value)} />
+          </div>
         </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="org-url">{t('org.url')}</Label>
-          <Input
-            id="org-url"
-            type="url"
-            value={url}
-            disabled={!editable}
-            onChange={(e) => setUrl(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="org-legal">{t('org.legal_name')}</Label>
-          <Input
-            id="org-legal"
-            value={legalName}
-            disabled={!editable}
-            onChange={(e) => setLegalName(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="org-gst">{t('org.gst_number')}</Label>
-          <Input
-            id="org-gst"
-            value={gst}
-            disabled={!editable}
-            onChange={(e) => setGst(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-1 text-[13.5px]">
+        <div className="flex flex-col gap-1.5 text-[13.5px]">
           <span className="bd-label">{t('org.locations')}</span>
           {addresses.length ? (
-            <ul className="list-disc pl-5">
+            <ul className="flex flex-col gap-1">
               {addresses.map((a, i) => (
-                <li key={`${a}-${i}`}>{a}</li>
+                <li key={`${a}-${i}`} className="flex items-start gap-2 text-ink-700">
+                  <I.globe size={14} className="mt-0.5 shrink-0 text-ink-400" />
+                  {a}
+                </li>
               ))}
             </ul>
           ) : (
-            <span className="text-ink-600">{t('org.no_locations')}</span>
+            <span className="text-ink-500">{t('org.no_locations')}</span>
           )}
         </div>
-        {editable ? (
-          <div className="flex items-center gap-3">
-            <Button type="submit" disabled={busy}>
-              {t('org.save')}
-            </Button>
-            {message ? (
-              <output className="text-[13px] text-ink-600">{message}</output>
-            ) : null}
-          </div>
-        ) : null}
+        <div className="flex items-center gap-3">
+          <Button type="submit" disabled={busy}>
+            {t('org.save')}
+          </Button>
+          {message ? <output className="text-[13px] text-ink-600">{message}</output> : null}
+        </div>
       </form>
-    </Card>
+    </ConsoleSection>
   );
 }

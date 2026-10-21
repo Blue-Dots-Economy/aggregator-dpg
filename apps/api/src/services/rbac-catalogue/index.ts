@@ -34,6 +34,7 @@ export type {
   CatalogueSnapshot,
   CatalogueStoreError,
   CatalogueStoreResult,
+  StoredPermission,
 } from './interface.js';
 export { InMemoryRbacCatalogue } from './memory.js';
 export { PostgresRbacCatalogue } from './postgres.js';

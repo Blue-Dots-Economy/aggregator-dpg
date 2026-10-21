@@ -1,9 +1,9 @@
 /**
  * In-memory RBAC catalogue (`@aggregator-dpg/api`) for unit tests.
  *
- * Mirrors the Postgres store over migration-seeded data: `setRoles` stands in
- * for the seed, the revision changes on every write, and `failWith` makes
- * later calls fail, to test boot and refresh paths.
+ * Mirrors the Postgres store over migration-seeded data: `setRoles` and
+ * `setPermissions` stand in for the seed, the revision changes on every write,
+ * and `failWith` makes later calls fail, to test boot and refresh paths.
  */
 
 import type { RoleDefinition } from '@aggregator-dpg/rbac/interface';
@@ -12,10 +12,12 @@ import {
   type CatalogueSnapshot,
   type CatalogueStoreError,
   type CatalogueStoreResult,
+  type StoredPermission,
 } from './interface.js';
 
 /** Array-backed {@link RbacCatalogueBase}. */
 export class InMemoryRbacCatalogue extends RbacCatalogueBase {
+  permissions: StoredPermission[] = [];
   private roles: RoleDefinition[] = [];
   private rev = 0;
   private failure: CatalogueStoreError | null = null;
@@ -34,6 +36,16 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
   setRoles(roles: readonly RoleDefinition[]): void {
     this.roles = structuredClone(roles) as RoleDefinition[];
     this.rev += 1;
+  }
+
+  /**
+   * Replaces the stored permissions, as the migration seed would (test setup
+   * only).
+   *
+   * @param permissions - The new permission rows.
+   */
+  setPermissions(permissions: readonly StoredPermission[]): void {
+    this.permissions = structuredClone(permissions) as StoredPermission[];
   }
 
   /** The stored roles (a copy). */
@@ -58,6 +70,16 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
   /** {@inheritDoc RbacCatalogueBase.revision} */
   async revision(): Promise<CatalogueStoreResult<string>> {
     return this.fail() ?? { ok: true, value: `r${this.rev}` };
+  }
+
+  /** {@inheritDoc RbacCatalogueBase.listPermissions} */
+  async listPermissions(): Promise<CatalogueStoreResult<StoredPermission[]>> {
+    return (
+      this.fail() ?? {
+        ok: true,
+        value: structuredClone(this.permissions).sort((a, b) => a.key.localeCompare(b.key)),
+      }
+    );
   }
 
   /** Role keys with a live assignment, consulted by `deleteRole` (tests set it). */

@@ -2,9 +2,9 @@
 // what, reach (out of reach → 404), and the decision / edit flows.
 
 import { describe, it, expect, beforeEach, afterAll, afterEach } from 'vitest';
-import { indexRoles } from '@aggregator-dpg/rbac';
-import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
-import { _setRbacRuntime } from '../services/authz/runtime.js';
+import { CAPABILITIES, indexRoles, permissionDefinitions } from '@aggregator-dpg/rbac';
+import { AuthorizerFake, buildRole } from '@aggregator-dpg/rbac/testing';
+import { _setRbacRuntime, refreshRbacCatalogue } from '../services/authz/runtime.js';
 import { shippedRoles, testRbacRuntime } from '../services/authz/testing.js';
 import { getRoleStore, type InMemoryRoleStore } from '../services/role-store/index.js';
 import { getRbacCatalogue, type InMemoryRbacCatalogue } from '../services/rbac-catalogue/index.js';
@@ -1180,7 +1180,8 @@ describe('console routes /v1/user, /v1/org', () => {
       });
 
       it('refuses the wrong account type and assigning to yourself', async () => {
-        const type = await assign('na', OWNER_A, { role_key: 'pii_access', org_id: ORG_A });
+        // Org Onboarder is admin-only; the network admin may assign it (network.administer).
+        const type = await assign('na', C3, { role_key: 'org_onboarder', org_id: ORG_A });
         expect([type.statusCode, reasonOf(type)]).toEqual([409, 'account_type']);
         const self = await assign('na', NA, { role_key: 'org_onboarder', org_id: DEFAULT });
         expect([self.statusCode, reasonOf(self)]).toEqual([409, 'self']);
@@ -1212,11 +1213,315 @@ describe('console routes /v1/user, /v1/org', () => {
         expect(store.audit.map((e) => e.event)).toContain('role.revoke_on_leave');
       });
 
+      // #873: the coordinator list shows who holds which additional role.
+      const rolesById = async (who: keyof typeof TOKENS) => {
+        const res = await post('/v1/user/search', who, {});
+        expect(res.statusCode).toBe(200);
+        const body = res.json() as { users: Array<{ id: string; roles: string[] | null }> };
+        return Object.fromEntries(body.users.map((u) => [u.id, u.roles]));
+      };
+
+      it('lists each coordinator’s live roles in its organisation on search, sorted', async () => {
+        expect((await assign('a', C3, { role_key: 'pii_access', org_id: ORG_A })).statusCode).toBe(
+          200,
+        );
+        expect((await assign('a', C3, { role_key: 'data_export', org_id: ORG_A })).statusCode).toBe(
+          200,
+        );
+        const roles = await rolesById('a');
+        expect(roles[C3]).toEqual(['data_export', 'pii_access']);
+        expect(roles[C1]).toEqual([]);
+      });
+
+      it('drops a revoked role from search, and ignores a role held in another organisation', async () => {
+        expect((await assign('a', C3, { role_key: 'data_export', org_id: ORG_A })).statusCode).toBe(
+          200,
+        );
+        (getRoleStore() as InMemoryRoleStore).seed([
+          { userId: C3, roleKey: 'pii_access', orgId: ORG_B },
+        ]);
+        expect(
+          (
+            await post(`/v1/user/role/revoke/${C3}`, 'a', {
+              role_key: 'data_export',
+              org_id: ORG_A,
+            })
+          ).statusCode,
+        ).toBe(200);
+        expect((await rolesById('a'))[C3]).toEqual([]);
+      });
+
+      it('answers 503 on search when the role store fails', async () => {
+        (getRoleStore() as InMemoryRoleStore).failWith({ code: 'DB_UNAVAILABLE', message: 'down' });
+        expect((await post('/v1/user/search', 'a', {})).statusCode).toBe(503);
+      });
+
+      it('returns null roles on search when access control is off', async () => {
+        _setRbacRuntime(null);
+        const roles = await rolesById('a');
+        expect(Object.values(roles).length).toBeGreaterThan(0);
+        for (const r of Object.values(roles)) expect(r).toBeNull();
+      });
+
       it('answers 503 when access control is off', async () => {
         _setRbacRuntime(null);
         expect((await get('/v1/roles', 'a')).statusCode).toBe(503);
         const res = await assign('a', C3, { role_key: 'pii_access', org_id: ORG_A });
         expect(res.statusCode).toBe(503);
+      });
+    });
+
+    // #873: org.manage is the org admin's; the network admin approves and
+    // edits organisations but manages coordinators only in orgs it owns.
+    describe('org.manage stays with the org admin', () => {
+      const searchIds = async (who: keyof typeof TOKENS) => {
+        const res = await post('/v1/user/search', who, {});
+        expect(res.statusCode).toBe(200);
+        return (res.json() as { users: Array<{ id: string }> }).users
+          .map((u) => u.id)
+          .sort((x, y) => x.localeCompare(y));
+      };
+      const C9 = '00000000-0000-4000-8000-0000000000c9';
+
+      it('lets the network admin view every org’s coordinators but change only its own', async () => {
+        coordinators.seed([coordinator(C9, DEFAULT, 'pending', 9)]);
+        await idp.createUser({
+          email: 'c9@x.org',
+          enabled: false,
+          attributes: { [KC_ATTR.AGGREGATOR_ID]: C9 },
+        });
+        expect(await searchIds('na')).toEqual([C1, C2, C3, C9]);
+        expect((await get(`/v1/user/read/${C3}`, 'na')).statusCode).toBe(200);
+        // Its own (Default) org: the network admin still decides.
+        expect(
+          (await post(`/v1/user/decision/${C9}`, 'na', { decision: 'reject' })).statusCode,
+        ).toBe(200);
+        expect(
+          (await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' })).statusCode,
+        ).toBe(404);
+        expect(
+          (await patch(`/v1/user/metadata/update/${C3}`, 'na', { serves: [] })).statusCode,
+        ).toBe(404);
+        const invite = await post('/v1/user/create', 'na', {
+          org_id: ORG_A,
+          recipients: [{ email: 'new@x.org' }],
+        });
+        expect(invite.statusCode).toBe(404);
+      });
+
+      it('limits an owner’s view to its own coordinators', async () => {
+        coordinators.seed([coordinator(C9, DEFAULT, 'pending', 9)]);
+        expect(await searchIds('b')).toEqual([C2]);
+        expect((await get(`/v1/user/read/${C3}`, 'b')).statusCode).toBe(404);
+      });
+
+      it('refuses the network admin Data Export or PII Access in another org', async () => {
+        const res = await post(`/v1/user/role/assign/${C3}`, 'na', {
+          role_key: 'pii_access',
+          org_id: ORG_A,
+        });
+        expect(res.statusCode).toBe(403);
+        expect(permissionOf(res)).toBe('org.manage');
+      });
+
+      it('keeps the owner managing its own coordinators', async () => {
+        expect(await searchIds('a')).toEqual([C1, C3]);
+        expect((await get(`/v1/user/read/${C3}`, 'a')).statusCode).toBe(200);
+        expect((await get(`/v1/user/read/${C2}`, 'a')).statusCode).toBe(404);
+      });
+
+      it('keeps the organisation pages for both: network admin via orgs.onboard, owner via org.manage', async () => {
+        const naOrgs = (await post('/v1/org/search', 'na', {})).json() as {
+          orgs: Array<{ id: string }>;
+        };
+        expect(naOrgs.orgs.map((o) => o.id)).toEqual(expect.arrayContaining([ORG_A, ORG_B]));
+        expect((await get(`/v1/org/read/${ORG_A}`, 'na')).statusCode).toBe(200);
+        expect((await get(`/v1/org/read/${ORG_A}`, 'a')).statusCode).toBe(200);
+        expect((await get(`/v1/org/read/${ORG_B}`, 'a')).statusCode).toBe(404);
+      });
+
+      it('refuses an org route to an admin holding neither permission', async () => {
+        _setRbacRuntime(
+          await testRbacRuntime('enforce', new AuthorizerFake(), []).then(async (rt) => ({
+            ...rt,
+            roles: indexRoles(
+              (await shippedRoles()).map((r) =>
+                r.key === 'org_admin'
+                  ? { ...r, permissions: r.permissions.filter((c) => c !== 'org.manage') }
+                  : r,
+              ),
+            ),
+          })),
+        );
+        const res = await get(`/v1/org/read/${ORG_A}`, 'a');
+        expect(res.statusCode).toBe(403);
+        expect(permissionOf(res)).toBe('org.manage|orgs.onboard');
+      });
+
+      it('only logs the narrower scope in log mode', async () => {
+        _setRbacRuntime(await testRbacRuntime('log'));
+        expect(await searchIds('na')).toEqual([C1, C2, C3]);
+      });
+
+      it('keeps every org in scope for a deployment whose Network Admin keeps org.manage', async () => {
+        _setRbacRuntime({
+          ...(await testRbacRuntime('enforce')),
+          roles: indexRoles(
+            (await shippedRoles()).map((r) =>
+              r.key === 'network_admin'
+                ? { ...r, permissions: [...r.permissions, 'org.manage' as const] }
+                : r,
+            ),
+          ),
+        });
+        expect(await searchIds('na')).toEqual([C1, C2, C3]);
+        expect((await get(`/v1/user/read/${C3}`, 'na')).statusCode).toBe(200);
+      });
+    });
+
+    // #871: the network admin's read-only view of the roles and permissions.
+    describe('catalogue view /v1/rbac/*', () => {
+      type Row = { key: string } & Record<string, unknown>;
+      const rolesOf = async (who: keyof typeof TOKENS) =>
+        ((await get('/v1/rbac/roles', who)).json() as { roles: Row[] }).roles;
+      const permissionsOf = async (who: keyof typeof TOKENS) =>
+        ((await get('/v1/rbac/permissions', who)).json() as { permissions: Row[] }).permissions;
+
+      beforeEach(async () => {
+        const cat = getRbacCatalogue() as InMemoryRbacCatalogue;
+        cat.setRoles(await shippedRoles());
+        cat.setPermissions(
+          permissionDefinitions(CAPABILITIES).map((p) => ({ ...p, deprecated: false })),
+        );
+      });
+
+      it('lists every enforced role with who holds it, where, and how it is given', async () => {
+        const roles = await rolesOf('na');
+        expect(roles.map((r) => r.key)).toEqual([
+          'coordinator',
+          'data_export',
+          'network_admin',
+          'org_admin',
+          'org_onboarder',
+          'pii_access',
+        ]);
+        expect(roles.find((r) => r.key === 'network_admin')).toMatchObject({
+          name: 'Network Admin',
+          is_builtin: true,
+          held_by: 'org_owners',
+          held_in: ['network_facilitator'],
+          granted: { via: 'membership', membership: 'root_owner' },
+          max_days: null,
+        });
+        expect(roles.find((r) => r.key === 'pii_access')).toEqual({
+          key: 'pii_access',
+          name: 'PII Access',
+          description: 'Sees and exports decrypted profile details.',
+          is_builtin: true,
+          held_by: 'coordinators',
+          held_in: ['aggregator'],
+          granted: { via: 'assignment', assigned_by: 'org.manage' },
+          max_days: 90,
+          permissions: ['profiles.view_pii'],
+        });
+      });
+
+      it('lists every permission, and "granted by roles" matches the roles table', async () => {
+        const roles = await rolesOf('na');
+        const permissions = await permissionsOf('na');
+        expect(permissions.map((p) => p.key)).toEqual(
+          [...CAPABILITIES].sort((a, b) => a.localeCompare(b)),
+        );
+        for (const p of permissions) {
+          const granting = roles
+            .filter((r) => (r.permissions as string[]).includes(p.key))
+            .map((r) => r.key);
+          expect(p.granted_by_roles, p.key).toEqual(granting);
+        }
+        expect(permissions.find((p) => p.key === 'profiles.view_pii')).toEqual({
+          key: 'profiles.view_pii',
+          description: 'See and export decrypted details',
+          resource: 'profiles',
+          action: 'view_pii',
+          personal_data: true,
+          retired: false,
+          granted_by_roles: ['pii_access'],
+        });
+        expect(permissions.find((p) => p.key === 'profiles.view')).toMatchObject({
+          personal_data: false,
+        });
+      });
+
+      it('keeps a permission the code retired, flagged', async () => {
+        // A retired permission is one still stored (a migration marked it
+        // deprecated), no longer in the code's catalogue; the view flags it.
+        const cat = getRbacCatalogue() as InMemoryRbacCatalogue;
+        cat.setPermissions(
+          permissionDefinitions(CAPABILITIES).map((p) => ({
+            ...p,
+            deprecated: p.key === 'agreement.manage',
+          })),
+        );
+        const retired = (await permissionsOf('na')).find((p) => p.key === 'agreement.manage');
+        expect(retired).toMatchObject({ retired: true, granted_by_roles: ['network_admin'] });
+      });
+
+      it('shows a role change after the catalogue refresh, with no restart', async () => {
+        const store = getRbacCatalogue() as InMemoryRbacCatalogue;
+        const revision = await store.revision();
+        _setRbacRuntime({
+          ...(await testRbacRuntime('enforce')),
+          catalogueRevision: revision.ok ? revision.value : '',
+        });
+        store.setRoles([
+          ...store.storedRoles(),
+          buildRole({ key: 'verifier', name: 'Verifier', permissions: ['profiles.verify'] }),
+        ]);
+        expect((await rolesOf('na')).map((r) => r.key)).not.toContain('verifier');
+        expect(await refreshRbacCatalogue()).toBe('reloaded');
+        expect((await rolesOf('na')).find((r) => r.key === 'verifier')).toMatchObject({
+          is_builtin: false,
+          permissions: ['profiles.verify'],
+        });
+        expect(
+          (await permissionsOf('na')).find((p) => p.key === 'profiles.verify')?.granted_by_roles,
+        ).toContain('verifier');
+      });
+
+      it('refuses an organisation owner and a coordinator', async () => {
+        for (const url of ['/v1/rbac/roles', '/v1/rbac/permissions']) {
+          const owner = await get(url, 'a');
+          expect(owner.statusCode).toBe(403);
+          expect(permissionOf(owner)).toBe('network.administer');
+          expect((await get(url, 'coord')).statusCode).toBe(403);
+        }
+      });
+
+      it('answers 404 to an owner when access is only logged', async () => {
+        _setRbacRuntime(await testRbacRuntime('log'));
+        for (const url of ['/v1/rbac/roles', '/v1/rbac/permissions']) {
+          expect((await get(url, 'a')).statusCode).toBe(404);
+          expect((await get(url, 'na')).statusCode).toBe(200);
+        }
+      });
+
+      it('answers 503 when access control is off, or the catalogue cannot be read', async () => {
+        const store = getRbacCatalogue() as InMemoryRbacCatalogue;
+        store.failWith({ code: 'DB_UNAVAILABLE', message: 'down' });
+        expect((await get('/v1/rbac/permissions', 'na')).statusCode).toBe(503);
+        store.failWith(null);
+        _setRbacRuntime(null);
+        expect((await get('/v1/rbac/roles', 'na')).statusCode).toBe(503);
+        expect((await get('/v1/rbac/permissions', 'na')).statusCode).toBe(503);
+      });
+
+      it('accepts no writes', async () => {
+        for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
+          for (const url of ['/v1/rbac/roles', '/v1/rbac/permissions']) {
+            const res = await app.inject({ method, url, headers: auth('na'), payload: {} });
+            expect(res.statusCode, `${method} ${url}`).toBe(404);
+          }
+        }
       });
     });
 
@@ -1233,8 +1538,13 @@ describe('console routes /v1/user, /v1/org', () => {
         (res.json() as { error: { code: string } }).error.code;
 
       beforeEach(async () => {
-        // The catalogue as migration 0031 leaves it at start: the built-in roles seeded.
-        (getRbacCatalogue() as InMemoryRbacCatalogue).setRoles(await shippedRoles());
+        // The catalogue as the API leaves it at start: permissions and built-in
+        // roles seeded by migration (modelled here on the in-memory fake).
+        const cat = getRbacCatalogue() as InMemoryRbacCatalogue;
+        cat.setRoles(await shippedRoles());
+        cat.setPermissions(
+          permissionDefinitions(CAPABILITIES).map((p) => ({ ...p, deprecated: false })),
+        );
       });
 
       it('lets the network admin create a role that owners can then assign', async () => {
@@ -1312,66 +1622,6 @@ describe('console routes /v1/user, /v1/org', () => {
     it('shows contacts plain to a role with contact.unmask', async () => {
       const one = (await get(`/v1/user/read/${C1}`, 'a')).json() as { contact: { email: string } };
       expect(one.contact.email).toBe('c1@x.org');
-    });
-  });
-
-  // The deploy-time CUSTOM-ROLES switch off: the authoring routes are not
-  // registered (404), GET /v1/roles stays (built-in only), and an inert custom
-  // assignment is filtered out of the user-roles read.
-  describe('with CUSTOM-ROLES disabled (deploy-time off)', () => {
-    const verifier = {
-      key: 'verifier',
-      name: 'Verifier',
-      description: 'x',
-      account_type: 'coordinator',
-      assignable_org_types: ['aggregator'],
-      assigned_by: 'org.manage',
-      permissions: ['profiles.verify'],
-    };
-
-    beforeEach(async () => {
-      config.RBAC_CUSTOM_ROLES_ENABLED = false;
-      app = await buildApp();
-      _setRbacRuntime(await testRbacRuntime('enforce'));
-    });
-    afterEach(() => _setRbacRuntime(null));
-
-    it('404s the three role-authoring routes (not registered)', async () => {
-      expect((await post('/v1/roles/create', 'na', verifier)).statusCode).toBe(404);
-      expect((await patch('/v1/roles/update/verifier', 'na', { max_days: 10 })).statusCode).toBe(
-        404,
-      );
-      expect((await post('/v1/roles/delete/verifier', 'na', {})).statusCode).toBe(404);
-    });
-
-    it('keeps GET /v1/roles registered and built-in only', async () => {
-      const res = await get('/v1/roles', 'a');
-      expect(res.statusCode).toBe(200);
-      const keys = (res.json() as { roles: Array<{ key: string }> }).roles.map((r) => r.key);
-      expect(keys).toEqual([
-        'coordinator',
-        'data_export',
-        'network_admin',
-        'org_admin',
-        'org_onboarder',
-        'pii_access',
-      ]);
-    });
-
-    it('filters an inert custom-role assignment from GET /v1/user/roles/:id', async () => {
-      // A held custom role the built-in-only snapshot does not know about.
-      (getRoleStore() as InMemoryRoleStore).seed([
-        { userId: C3, roleKey: 'verifier', orgId: ORG_A },
-        { userId: C3, roleKey: 'data_export', orgId: ORG_A },
-      ]);
-      const res = (await get(`/v1/user/roles/${C3}`, 'a')).json() as {
-        base: Array<{ role_key: string; org_id: string }>;
-        additional: Array<{ role_key: string }>;
-      };
-      expect(res.base).toEqual([{ role_key: 'coordinator', org_id: ORG_A }]);
-      const additional = res.additional.map((a) => a.role_key);
-      expect(additional).not.toContain('verifier');
-      expect(additional).toEqual(['data_export']);
     });
   });
 });

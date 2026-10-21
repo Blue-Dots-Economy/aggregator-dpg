@@ -69,11 +69,17 @@ describe('<OrgsTable />', () => {
     expect(screen.getByText(/3 coordinators/)).toBeInTheDocument();
   });
 
-  it('shows approve/reject only for pending and repair only for active non-default', () => {
+  it('shows approve/reject for a pending org, and no other row action', () => {
     renderTable([pendingOrg, activeOrg]);
-    expect(screen.getByRole('button', { name: messages.console.orgs.approve })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: messages.console.orgs.reject })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: messages.console.orgs.repair })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: messages.console.orgs.approve })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: messages.console.orgs.reject })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: messages.console.orgs.repair })).toBeNull();
+  });
+
+  it('drops the actions column when nothing is pending', () => {
+    renderTable([activeOrg]);
+    expect(screen.queryByText(messages.console.orgs.col_actions)).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
   });
 
   it('approves a pending org and updates its status in place', async () => {
@@ -111,23 +117,5 @@ describe('<OrgsTable />', () => {
     renderTable([pendingOrg]);
     fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.approve }));
     expect(await screen.findByText(messages.console.errors.generic)).toBeInTheDocument();
-  });
-
-  it('repairs an active org and reports the resulting owner access', async () => {
-    global.fetch = respond(
-      { id: activeOrg.id, status: 'granted', enable: 'ok', role: 'ok', group: 'ok' },
-      200,
-    ) as never;
-    renderTable([activeOrg]);
-    fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.repair }));
-    await waitFor(() =>
-      expect(
-        screen.getByText(messages.console.orgs.repaired.replace('{status}', 'granted')),
-      ).toBeInTheDocument(),
-    );
-    expect(global.fetch).toHaveBeenCalledWith(
-      `/api/console/org/repair/${activeOrg.id}`,
-      expect.objectContaining({ method: 'POST' }),
-    );
   });
 });

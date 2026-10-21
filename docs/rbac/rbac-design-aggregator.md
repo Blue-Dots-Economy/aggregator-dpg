@@ -6,14 +6,14 @@ Access control for the aggregator portal and API, on the user and organisation m
 
 ## Highlights
 
-| Item              | Decision                                                                                                                                                                                                |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Model             | NIST core RBAC per organisation, on the user-org model: base roles come from membership (`users.org_id`, `organisations.org_owner`); `user_role` holds additional roles (decisions D5, D7)              |
-| Access            | Union of the permissions of the user's base and additional roles in the organisation acted on or its ancestors                                                                                          |
-| Built-in roles    | Defined in code (`BUILTIN_ROLES` in `packages/rbac`), seeded into the database by migration `0031_rbac_seed.sql` and changed with a new migration; custom roles live only in the database (decision D6) |
-| Decide            | Per request: the actor resolver reads the user, their memberships and their additional roles; OPA decides the permission (403); `scope.ts` decides reach (404)                                          |
-| Time-bound access | PII Access is a role assigned with an expiry (90 days at most)                                                                                                                                          |
-| Scope             | aggregator-dpg; signals-dpg unchanged in v1                                                                                                                                                             |
+| Item              | Decision                                                                                                                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Model             | NIST core RBAC per organisation, on the user-org model: base roles come from membership (`users.org_id`, `organisations.org_owner`); `user_role` holds additional roles (decisions D5, D7) |
+| Access            | Union of the permissions of the user's base and additional roles in the organisation acted on or its ancestors                                                                             |
+| Built-in roles    | Defined in `config/rbac.yaml`, re-applied at every start; custom roles live only in the database (decision D6)                                                                             |
+| Decide            | Per request: the actor resolver reads the user, their memberships and their additional roles; OPA decides the permission (403); `scope.ts` decides reach (404)                             |
+| Time-bound access | PII Access is a role assigned with an expiry (90 days at most)                                                                                                                             |
+| Scope             | aggregator-dpg; signals-dpg unchanged in v1                                                                                                                                                |
 
 ---
 
@@ -185,14 +185,13 @@ sequenceDiagram
 | 4    | OPA allows when the user is active and holds the route's permission; it also refuses `profiles.view_pii` through the root organisation                                                                                                                                                                                                                               |
 | 5    | `scope.ts` checks and filters reach; out of reach is 404                                                                                                                                                                                                                                                                                                             |
 
-| Behaviour                           | Detail                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Every route declares its permission | `config.rbac` on the route; a route without one stops the boot; a snapshot test lists them                                                                                                                                                                                                                                                                                                                                       |
-| Lists                               | The handler keeps only organisations where the user holds the permission (`scope.ts` filter)                                                                                                                                                                                                                                                                                                                                     |
-| Portal UI                           | `GET /v1/user/read/me` returns the user's permissions per organisation; menus follow them                                                                                                                                                                                                                                                                                                                                        |
-| OPA down                            | Deny (`503` in enforce mode)                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Mode                                | `RBAC_MODE`: `off`, `log` (decide and log, never block), `enforce`. Role and custom-role writes are checked strictly: refused in `log` too, since they have no pre-RBAC behaviour to preserve                                                                                                                                                                                                                                    |
-| CUSTOM-ROLES toggle                 | `RBAC_CUSTOM_ROLES_ENABLED` (default `false`, opt-in): when off the role snapshot is built-in-only (so any existing custom-role assignment is inert via `effectivePermissions`), the three authoring routes are not registered (404, absent from OpenAPI), and `GET /v1/aggregator-config` reports `features.custom_roles: false`. Subordinate to `RBAC_MODE`: with `RBAC_MODE=off` nothing is loaded and the flag has no effect |
+| Behaviour                           | Detail                                                                                                                                                                                        |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Every route declares its permission | `config.rbac` on the route; a route without one stops the boot; a snapshot test lists them                                                                                                    |
+| Lists                               | The handler keeps only organisations where the user holds the permission (`scope.ts` filter)                                                                                                  |
+| Portal UI                           | `GET /v1/user/read/me` returns the user's permissions per organisation; menus follow them                                                                                                     |
+| OPA down                            | Deny (`503` in enforce mode)                                                                                                                                                                  |
+| Mode                                | `RBAC_MODE`: `off`, `log` (decide and log, never block), `enforce`. Role and custom-role writes are checked strictly: refused in `log` too, since they have no pre-RBAC behaviour to preserve |
 
 ### Route declarations
 
@@ -222,21 +221,22 @@ With RBAC off nothing is checked; a failed check is logged in `log` mode and ans
 
 ## 4. Managing roles
 
-| Endpoint                                                                             | Permission               | Does                                                                                                                  |
-| ------------------------------------------------------------------------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `GET /v1/roles`                                                                      | `org.manage`             | Every role with its permissions, and the permission catalogue a custom role is composed from                          |
-| `POST /v1/roles/create`, `PATCH /v1/roles/update/:key`, `POST /v1/roles/delete/:key` | `network.administer`     | Custom roles; built-in roles are refused                                                                              |
-| `GET /v1/user/roles/:id`                                                             | `org.manage`             | A user's roles: base roles (derived) and additional roles, live and past                                              |
-| `POST /v1/user/role/assign/:id`                                                      | The role's `assigned_by` | Assign an additional role in an organisation the user belongs to or owns, with an expiry when the role has `max_days` |
-| `POST /v1/user/role/revoke/:id`                                                      | The role's `assigned_by` | Revoke an assignment                                                                                                  |
+| Endpoint                                                                             | Permission                               | Does                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------ | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/roles`                                                                      | `org.manage`                             | Every role with its permissions, and the permission catalogue a custom role is composed from                                                                                                                      |
+| `POST /v1/roles/create`, `PATCH /v1/roles/update/:key`, `POST /v1/roles/delete/:key` | `network.administer`                     | Custom roles; built-in roles are refused. No console page calls them (#871)                                                                                                                                       |
+| `GET /v1/rbac/roles`, `GET /v1/rbac/permissions`                                     | `network.administer`, network admin only | Read-only (#871): every enforced role (who holds it, where, how it is given, longest validity, permissions) and every permission (personal-data and retired flags, the roles that grant it); anyone else gets 404 |
+| `GET /v1/user/roles/:id`                                                             | `org.manage`                             | A user's roles: base roles (derived) and additional roles, live and past                                                                                                                                          |
+| `POST /v1/user/role/assign/:id`                                                      | The role's `assigned_by`                 | Assign an additional role in an organisation the user belongs to or owns, with an expiry when the role has `max_days`                                                                                             |
+| `POST /v1/user/role/revoke/:id`                                                      | The role's `assigned_by`                 | Revoke an assignment                                                                                                                                                                                              |
 
 Every assignment checks, in order: the target is in reach (else 404), the role is not a base role, the target belongs to or owns the organisation, the caller holds the role's `assigned_by` permission there, the target is not the caller, the account type matches, the organisation type is assignable, and the expiry is within `max_days`. Each write and its `iam_audit` row commit together.
 
-| Console page      | Who                      | Shows                                                                                        |
-| ----------------- | ------------------------ | -------------------------------------------------------------------------------------------- |
-| Coordinator page  | Org Admin, Network Admin | The coordinator's roles: assign and revoke PII Access, Data Export, custom coordinator roles |
-| Organisation page | Network Admin            | The owner's roles: Org Onboarder, custom admin roles                                         |
-| Roles             | Network Admin            | Built-in roles (read-only) and custom roles (create, edit, delete)                           |
+| Console page          | Who                      | Shows                                                                                                                 |
+| --------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Coordinator page      | Org Admin, Network Admin | The coordinator's roles: assign and revoke PII Access, Data Export, custom coordinator roles                          |
+| Organisation page     | Network Admin            | The owner's roles: Org Onboarder, custom admin roles                                                                  |
+| Roles and permissions | Network Admin            | Read-only (#871): the roles table and the permissions table, from `GET /v1/rbac/*`; no create, edit, delete or assign |
 
 ---
 
@@ -244,19 +244,22 @@ Every assignment checks, in order: the target is in reach (else 404), the role i
 
 ```mermaid
 flowchart LR
-    M["Migration 0031<br/>permissions + built-in roles"]
+    C["Code catalogue<br/>15 permissions"]
+    Y["config/rbac.yaml<br/>built-in roles"]
     T[("permission · role<br/>role_permission")]
     S["Role snapshot<br/>per API replica"]
-    M -->|1 seed| T
-    T -->|2 load| S
-    T -->|3 every 30 s| S
+    C -->|1 sync| T
+    Y -->|2 sync| T
+    T -->|3 load| S
+    T -->|4 every 30 s| S
 ```
 
-| Step | What happens                                                                                                                                                                                                                                                               |
-| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | Migration `0031_rbac_seed.sql` seeds the permission catalogue (from code's `CAPABILITIES`) and the built-in roles (`BUILTIN_ROLES`) with their permissions, idempotently; a build-time drift test asserts the seed still matches code. Custom roles are written at runtime |
-| 2    | At start the API loads every role and its permissions into a snapshot; an invalid catalogue stops the boot                                                                                                                                                                 |
-| 3    | Each replica re-reads a checksum of `role` and `role_permission` every `RBAC_CATALOGUE_REFRESH_MS` (default 30 000) and reloads when it changed; the replica that edited a custom role reloads at once. An invalid change keeps the last good snapshot                     |
+| Step | What happens                                                                                                                                                                                                                                    |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | At start the API upserts every permission the code knows and marks the rest `deprecated`                                                                                                                                                        |
+| 2    | It upserts the built-in roles and their permissions from `rbac.yaml`, under an advisory lock; custom roles are not touched                                                                                                                      |
+| 3    | It loads every role and its permissions into a snapshot; an invalid built-in role stops the boot                                                                                                                                                |
+| 4    | Each replica re-reads a checksum of `role` and `role_permission` every `RBAC_CATALOGUE_REFRESH_MS` (default 30 000) and reloads when it changed; the replica that edited a role reloads at once. An invalid change keeps the last good snapshot |
 
 Memberships and additional roles are not cached: they are read with the user on every request, so an assignment or revocation applies on the next request.
 
@@ -302,57 +305,20 @@ Blue: aggregator-dpg. Grey: outside it.
 
 ## 7. Decision record
 
-| #   | Decision                                                                              | Chosen                                                                                                                                                                  | Why                                                                                                                                                                |
-| --- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| D1  | Permission for reading and searching organisations (`/v1/org/read`, `/v1/org/search`) | `org.manage`                                                                                                                                                            | Only Admins call these routes, and every Admin holds `org.manage`                                                                                                  |
-| D2  | Permission for repairing an owner's access (`/v1/org/access/repair`)                  | `network.administer`                                                                                                                                                    | Only the network admin may repair access; `orgs.onboard` is also held by Org Onboarders                                                                            |
-| D3  | Where reach is decided                                                                | `scope.ts`, outside OPA                                                                                                                                                 | Out of reach answers 404 (no existence oracle); `scope.ts` also filters lists, which OPA cannot                                                                    |
-| D4  | How the Default organisation is restricted                                            | A rule on that organisation (`isDefault`): its owner approves coordinators but cannot invite into it or edit it                                                         | The restriction belongs to the Default organisation, not to a role                                                                                                 |
-| D5  | Access model                                                                          | NIST core RBAC per organisation: permissions grouped into roles, roles assigned to users in organisations, access = union of live roles                                 | The standard model (NIST INCITS 359, Superset / Flask-AppBuilder, multi-tenant SaaS practice); organisation kinds differ by which roles are assignable there       |
-| D6  | Where built-in and custom roles are defined                                           | Built-in roles in code (`BUILTIN_ROLES`, `packages/rbac`), seeded by migration `0031_rbac_seed.sql` and changed with a new migration; custom roles only in the database | Built-in roles stay reviewed and identical on every instance (Superset's rule: do not edit the built-ins); custom roles change without a release                   |
-| D7  | How base roles relate to membership                                                   | Derived from `users.org_id` and `organisations.org_owner`, never stored; `user_role` holds additional roles only                                                        | One source of truth for membership, as the user-org model and Phase 5's resolver already have it; the planned `user_orgs.role` becomes a foreign key to `role.key` |
+| #   | Decision                                                                              | Chosen                                                                                                                                  | Why                                                                                                                                                                |
+| --- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| D1  | Permission for reading and searching organisations (`/v1/org/read`, `/v1/org/search`) | `org.manage`                                                                                                                            | Only Admins call these routes, and every Admin holds `org.manage`                                                                                                  |
+| D2  | Permission for repairing an owner's access (`/v1/org/access/repair`)                  | `network.administer`                                                                                                                    | Only the network admin may repair access; `orgs.onboard` is also held by Org Onboarders                                                                            |
+| D3  | Where reach is decided                                                                | `scope.ts`, outside OPA                                                                                                                 | Out of reach answers 404 (no existence oracle); `scope.ts` also filters lists, which OPA cannot                                                                    |
+| D4  | How the Default organisation is restricted                                            | A rule on that organisation (`isDefault`): its owner approves coordinators but cannot invite into it or edit it                         | The restriction belongs to the Default organisation, not to a role                                                                                                 |
+| D5  | Access model                                                                          | NIST core RBAC per organisation: permissions grouped into roles, roles assigned to users in organisations, access = union of live roles | The standard model (NIST INCITS 359, Superset / Flask-AppBuilder, multi-tenant SaaS practice); organisation kinds differ by which roles are assignable there       |
+| D6  | Where built-in and custom roles are defined                                           | Built-in roles in `config/rbac.yaml`, re-applied at every start; custom roles only in the database                                      | Built-in roles stay reviewed and identical on every instance (Superset's rule: do not edit the built-ins); custom roles change without a release                   |
+| D7  | How base roles relate to membership                                                   | Derived from `users.org_id` and `organisations.org_owner`, never stored; `user_role` holds additional roles only                        | One source of truth for membership, as the user-org model and Phase 5's resolver already have it; the planned `user_orgs.role` becomes a foreign key to `role.key` |
 
 | #   | Revisit when                                                                                                                              | Changing it means                                                                                                 |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | D3  | Reach needs rules OPA should own (per-organisation sharing, reach that depends on roles), or Signals adopts the policy without `scope.ts` | Send the target's organisation chain to OPA and move the reach rules into the policy; map a reach deny to 404     |
 | D4  | Other organisations need "approve but not invite or edit", or a role should manage members without editing settings                       | Split `org.manage` into `org.members` and `org.settings` and adjust the built-in roles; drop the `isDefault` rule |
-
----
-
-## 7a. Known limitation — admin-held profile and campaign capabilities are unreachable
-
-`network_admin` and `org_admin` are granted profile and campaign permissions
-(`profiles.view`, `profiles.export`, `profiles.onboard`, `profiles.retire`,
-`campaigns.run`, and for the network admin `profiles.verify` / `profiles.move`)
-that **no admin can currently exercise**. RBAC is not what stops them.
-
-Every `/v1/dashboard/*`, `/v1/campaign/*`, `/v1/bulk-uploads/*` and `/v1/links/*`
-route authenticates through `authenticate()`, which requires an `aggregator_id`
-token claim. That claim comes from a Keycloak user attribute written only when a
-**coordinator** is approved; org owners and the network admin never have it, so
-those routes answer `403 MISSING_AGGREGATOR_ID` before any capability check
-runs. The console routes (`/v1/user/*`, `/v1/org/*`, `/v1/roles*`) resolve the
-caller with `requireActor()` instead and work normally, which is why
-`org.manage`, `orgs.onboard`, `contact.unmask` and `network.administer` are the
-only admin-held capabilities that do anything today.
-
-Consequences worth knowing:
-
-- Turning `RBAC_MODE=enforce` does **not** change this. It predates RBAC and is
-  a property of the legacy auth layer RBAC was deliberately layered on top of
-  rather than replacing.
-- Granting an admin a role carrying those permissions conveys nothing. The
-  console marks a permission no route enforces at all (see `enforced` on
-  `GET /v1/roles`), but it cannot show "enforced, yet unreachable for your
-  account type" — these capabilities _are_ enforced, for coordinators.
-- In particular no administrator can export participant details:
-  `profiles.view_pii` is held only by `pii_access`, which is
-  `account_type: coordinator` and so can never be assigned to an admin.
-
-Closing the gap means resolving an actor for admins on those routes instead of
-demanding `aggregator_id` — a change to the legacy auth path across roughly
-fifteen routes, with its own test pass. It is deliberately **not** bundled into
-the RBAC work. Until then, treat profile and campaign work as coordinator-only.
 
 ---
 

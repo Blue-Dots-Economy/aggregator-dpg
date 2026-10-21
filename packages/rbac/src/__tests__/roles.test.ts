@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
+import { type ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 import type { RoleDefinition } from '../interface.js';
 import { BUILTIN_ROLES } from '../builtin-roles.js';
 import { assertRoleCatalogue, roleCatalogueIssues } from '../roles.js';
@@ -16,7 +16,6 @@ const MATRIX: Record<string, string[]> = {
     'campaigns.run',
     'contact.unmask',
     'network.administer',
-    'org.manage',
     'orgs.block',
     'orgs.onboard',
     'profiles.export',

@@ -39,6 +39,7 @@ import { registerAggregatorProfileRoutes } from './routes/aggregator-profile.js'
 import { registerV1UserRoutes } from './routes/v1-user.js';
 import { registerV1OrgRoutes } from './routes/v1-org.js';
 import { registerV1IamRoutes } from './routes/v1-iam.js';
+import { registerV1RbacCatalogueRoutes } from './routes/v1-rbac-catalogue.js';
 import { registerBulkUploadsRoutes } from './routes/bulk-uploads.js';
 import { registerRegistrationLinksRoutes } from './routes/registration-links.js';
 import { registerPublicRegistrationLinkRoutes } from './routes/public-registration-links.js';
@@ -240,6 +241,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   registerV1UserRoutes(app);
   registerV1OrgRoutes(app);
   registerV1IamRoutes(app);
+  registerV1RbacCatalogueRoutes(app);
   await registerBulkUploadsRoutes(app);
   await registerRegistrationLinksRoutes(app);
   await registerPublicRegistrationLinkRoutes(app);
