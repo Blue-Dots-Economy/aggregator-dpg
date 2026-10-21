@@ -272,6 +272,13 @@ export const PermissionSchema = z.object({
   action: z.string(),
   description: z.string(),
   sensitive: z.boolean(),
+  /**
+   * Whether anything in this build actually checks the permission. The
+   * catalogue runs ahead of the routes, so a role may grant a permission that
+   * nothing enforces yet; the console marks those rather than implying power
+   * the grant does not confer.
+   */
+  enforced: z.boolean(),
 });
 export type Permission = z.infer<typeof PermissionSchema>;
 

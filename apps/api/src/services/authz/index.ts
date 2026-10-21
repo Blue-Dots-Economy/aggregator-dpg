@@ -34,6 +34,7 @@ export {
   callerFromAuth,
   enforceActorRouteAccess,
   enforceRouteAccess,
+  enforcedCapabilities,
   isServiceAccount,
   listDeclaredRoutes,
 } from './route-access.js';

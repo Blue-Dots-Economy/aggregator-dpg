@@ -4,6 +4,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyRequest, RouteOptions } from 'fastify';
+import { CAPABILITIES } from '@aggregator-dpg/rbac';
 import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
 import { buildApp } from '../../../app.js';
 import { config } from '../../../config.js';
@@ -11,6 +12,7 @@ import {
   assertRouteDeclared,
   enforceActorRouteAccess,
   enforceRouteAccess,
+  enforcedCapabilities,
   isServiceAccount,
   listDeclaredRoutes,
   _resetDeclaredRoutes,
@@ -243,5 +245,32 @@ describe('declared route table', () => {
     );
     expect(Object.keys(table).length).toBeGreaterThanOrEqual(45);
     expect(table).toMatchSnapshot();
+  });
+
+  // The catalogue deliberately runs ahead of the routes. Pinning the set keeps
+  // that visible: adding the missing route drops a capability from this list
+  // and the console stops marking it "not enforced yet" on its own.
+  it('names the capabilities nothing enforces yet', async () => {
+    const prev = config.RBAC_CUSTOM_ROLES_ENABLED;
+    config.RBAC_CUSTOM_ROLES_ENABLED = true;
+    _resetDeclaredRoutes();
+    const app = await buildApp();
+    await app.ready();
+    await app.close();
+    config.RBAC_CUSTOM_ROLES_ENABLED = prev;
+
+    const enforced = enforcedCapabilities();
+    const reserved = CAPABILITIES.filter((c) => !enforced.has(c));
+
+    expect([...reserved].sort()).toEqual([
+      'agreement.manage',
+      'orgs.block',
+      'profiles.act_on_behalf',
+      'profiles.move',
+      'profiles.retire',
+      'profiles.verify',
+    ]);
+    // Checked inside a handler, not declared on a route — still enforced.
+    expect(enforced.has('contact.unmask')).toBe(true);
   });
 });

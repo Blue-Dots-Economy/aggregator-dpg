@@ -7974,6 +7974,9 @@
                           },
                           "sensitive": {
                             "type": "boolean"
+                          },
+                          "enforced": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -7981,7 +7984,8 @@
                           "resource",
                           "action",
                           "description",
-                          "sensitive"
+                          "sensitive",
+                          "enforced"
                         ],
                         "additionalProperties": false
                       }

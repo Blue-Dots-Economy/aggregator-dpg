@@ -262,6 +262,11 @@ export function RolesAdmin({
                   />
                   <span>{p.key}</span>
                   <span className="text-[12px] text-ink-500">{p.description}</span>
+                  {p.enforced ? null : (
+                    <span className="text-[12px] text-ink-500 italic">
+                      {t('roles_admin.not_enforced')}
+                    </span>
+                  )}
                 </label>
               ))}
             </fieldset>

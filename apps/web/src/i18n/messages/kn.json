@@ -779,7 +779,8 @@
       "org_network_facilitator": "The network organisation",
       "assigned_by": "Assigned by holders of",
       "max_days": "Longest validity (days, empty = none)",
-      "permissions": "Permissions"
+      "permissions": "Permissions",
+      "not_enforced": "not enforced yet"
     }
   }
 }

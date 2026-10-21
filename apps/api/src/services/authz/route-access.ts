@@ -109,6 +109,34 @@ export function _resetDeclaredRoutes(): void {
 }
 
 /**
+ * Capabilities a handler checks itself rather than declaring on its route.
+ *
+ * `contact.unmask` does not gate a route — it decides whether a response shows
+ * contact details plain or masked (`showsContact` in `v1-user.ts`), so it never
+ * appears in a `config.rbac` declaration yet is very much enforced.
+ */
+const HANDLER_CHECKED: readonly Capability[] = ['contact.unmask'];
+
+/**
+ * The capabilities this build actually enforces somewhere.
+ *
+ * The catalogue deliberately runs ahead of the routes — a permission can exist,
+ * be granted by a role, and have nothing that checks it yet. Granting such a
+ * role conveys no power, which is misleading unless the console says so. This
+ * derives the answer from the registered routes rather than a hand-kept list,
+ * so adding the missing route flips it with no further edit.
+ *
+ * @returns Every capability named by a route declaration or checked in a handler.
+ */
+export function enforcedCapabilities(): ReadonlySet<Capability> {
+  const out = new Set<Capability>(HANDLER_CHECKED);
+  for (const decl of declared.values()) {
+    if ('capability' in decl) out.add(decl.capability);
+  }
+  return out;
+}
+
+/**
  * `onRoute` hook: refuses to register a route without a valid `config.rbac`.
  *
  * @param route - The route being registered.

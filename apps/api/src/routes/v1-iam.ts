@@ -43,6 +43,7 @@ import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { requireActor } from '../services/auth/actor/index.js';
 import { getRbacRuntime } from '../services/authz/runtime.js';
+import { enforcedCapabilities } from '../services/authz/route-access.js';
 import {
   assignRole,
   listUserRoles,
@@ -164,9 +165,17 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
       const rt = getRbacRuntime();
       if (!rt) throw httpError('RBAC_NOT_ENABLED');
       const roles = [...rt.roles.byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
-      return reply
-        .status(200)
-        .send({ roles: roles.map(toWireRole), permissions: permissionDefinitions(CAPABILITIES) });
+      // Derived from the registered routes, so a permission that nothing
+      // checks yet is reported as such instead of implying power it does
+      // not confer.
+      const enforced = enforcedCapabilities();
+      return reply.status(200).send({
+        roles: roles.map(toWireRole),
+        permissions: permissionDefinitions(CAPABILITIES).map((p) => ({
+          ...p,
+          enforced: enforced.has(p.key),
+        })),
+      });
     },
   );
 
