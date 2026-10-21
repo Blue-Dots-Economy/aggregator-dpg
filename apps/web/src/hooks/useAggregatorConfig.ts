@@ -198,6 +198,14 @@ export interface AggregatorConfigPayload {
     display_name?: string;
   };
   domains: AggregatorConfigDomain[];
+  /**
+   * Deploy-time capability flags resolved by the api. Always present in the
+   * `/v1/aggregator-config` payload; mirrored here so config-gated surfaces
+   * read one source. `custom_roles` gates the console Roles admin UI and its
+   * BFF proxies — when false the whole custom-roles capability is turned off
+   * for the deployment.
+   */
+  features: { custom_roles: boolean };
   dashboardBuckets?: DashboardBuckets;
   /** Per-link registration modes declared by the network (admin dropdown source). */
   registration_modes?: Record<string, RegistrationModeConfig>;
@@ -227,6 +235,9 @@ export const DEFAULT_AGGREGATOR_CONFIG: AggregatorConfigPayload = {
     { id: 'seeker', label: 'Seekers', plural_label: 'Seekers', item_type: 'profile_1.0' },
     { id: 'provider', label: 'Providers', plural_label: 'Providers', item_type: 'job_posting_1.0' },
   ],
+  // Fail-safe: if the api field is somehow absent, the custom-roles capability
+  // is treated as off rather than silently exposing the admin UI.
+  features: { custom_roles: false },
 };
 
 export function useAggregatorConfig() {

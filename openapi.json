@@ -17784,6 +17784,18 @@
                       "additionalProperties": {
                         "type": "string"
                       }
+                    },
+                    "features": {
+                      "type": "object",
+                      "properties": {
+                        "custom_roles": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "custom_roles"
+                      ],
+                      "additionalProperties": true
                     }
                   },
                   "required": [
@@ -17792,7 +17804,8 @@
                     "network",
                     "domains",
                     "registration_modes",
-                    "signals_ui_urls"
+                    "signals_ui_urls",
+                    "features"
                   ],
                   "additionalProperties": true
                 }

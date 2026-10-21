@@ -90,6 +90,31 @@ Org owners and the network admin sign in to the same portal (the Keycloak gate a
 - **Owner access.** Org approval enables the owner's Keycloak user, grants `org_owner` and adds the group (`grantOwnerAccess`); `POST /v1/org/access/repair/:id` re-runs it; the release's one-off `train enable-owners` does it for owners approved before Phase 5. No invite grant is minted any more (approval, expired-grant recovery and the "already registered" resend all mail the sign-in link); grants already sent work until they expire.
 - **Paging is keyset with an opaque cursor** (base64url JSON): coordinators by `(date_trunc('milliseconds', created_at) desc, id desc)` — the cursor is a JS `Date`, and rows inserted in one transaction share an instant, so both sides compare at millisecond precision — orgs by `(lower(name), id)`.
 
+## CUSTOM-ROLES deploy toggle (`RBAC_CUSTOM_ROLES_ENABLED`)
+
+A deploy-time switch for the network-admin role-authoring capability, **default
+`false` (opt-in)**, `config.ts` next to `RBAC_MODE`. It is **subordinate to
+`RBAC_MODE`**: with `RBAC_MODE=off` nothing is loaded and this flag has no
+effect. When it is off (and RBAC is on), the full-off semantics are:
+
+- **One gating point:** `loadSnapshot` (`services/authz/runtime.ts`) drops
+  non-built-in roles, so the in-process snapshot is built-in-only everywhere —
+  at boot (`initRbac`) and on every refresh (`refreshOnce`). Existing custom-role
+  **assignments go inert automatically** because `effectivePermissions`
+  (`packages/rbac`) skips any held role absent from the snapshot; the rows are
+  **not** deleted and revive if the flag is turned on.
+- **Authoring routes are not registered.** `POST /v1/roles/create`,
+  `PATCH /v1/roles/update/:key`, `POST /v1/roles/delete/:key` exist only when the
+  flag is on — off they 404 and are absent from the OpenAPI spec. `GET /v1/roles`
+  stays registered (built-in-only via the snapshot). The three
+  `custom-roles.ts` functions also carry a `custom_roles_disabled` guard that
+  maps to the same 404 (defense in depth; the primary gate is not-registering).
+- **`GET /v1/user/roles/:id` filters inert assignments.** When off, `listUserRoles`
+  drops `additional` rows whose role is not in the (built-in-only) snapshot, so
+  the read matches what actually grants anything.
+- **Surfaced to web:** `GET /v1/aggregator-config` always carries
+  `features: { custom_roles: <flag> }` (always-present, like `signals_ui_urls`).
+
 ## Bulk-upload: the API only validates, reserves, and enqueues
 
 Streaming CSV parsing is entirely `apps/worker`'s job (see `apps/worker/CLAUDE.md`). The API side (`routes/bulk-uploads.ts`) does: presigned S3 PUT → `/start` validates the object exists via `headObject` (size-0 check + `BULK_UPLOAD_MAX_BYTES` as belt-and-braces, since a presigned PUT can't itself cap size) → `store.markUploaded` → `enqueueBulkFileProcess` (`services/bulk-queue/index.ts`, `jobId = uploadId` for idempotent enqueue — a retry of `/start` can't double-enqueue). If enqueue fails after `markUploaded` succeeds, the row is left `uploaded` with no active job — recovery relies on the worker's stuck-job watchdog (`cron-watchdog.ts`, see `apps/worker/CLAUDE.md`), not a retry here.

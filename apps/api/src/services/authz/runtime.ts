@@ -75,7 +75,11 @@ function unavailable(op: string, message: string): ConfigError {
 }
 
 /**
- * Loads every role and checks the role rules.
+ * Loads every role and checks the role rules. When
+ * `RBAC_CUSTOM_ROLES_ENABLED` is false, non-built-in roles are dropped before
+ * indexing, so the in-process snapshot is built-in-only everywhere — the single
+ * gating point that makes existing custom-role assignments inert
+ * (`effectivePermissions` skips any held role absent from the snapshot).
  *
  * @param store - The catalogue store.
  * @returns The indexed roles and their revision.
@@ -86,8 +90,11 @@ async function loadSnapshot(
 ): Promise<{ roles: RoleIndex; revision: string }> {
   const loaded = await store.load();
   if (!loaded.ok) throw unavailable('load', loaded.error.message);
-  assertRoleCatalogue(loaded.value.roles, `database catalogue (revision ${loaded.value.revision})`);
-  return { roles: indexRoles(loaded.value.roles), revision: loaded.value.revision };
+  const roles = config.RBAC_CUSTOM_ROLES_ENABLED
+    ? loaded.value.roles
+    : loaded.value.roles.filter((r) => r.isBuiltin);
+  assertRoleCatalogue(roles, `database catalogue (revision ${loaded.value.revision})`);
+  return { roles: indexRoles(roles), revision: loaded.value.revision };
 }
 
 /**
@@ -108,6 +115,18 @@ export async function initRbac(
   stopRbacRefresh();
   if (mode === 'off') {
     runtime = null;
+    // A moot combination worth surfacing once at boot: CUSTOM-ROLES is
+    // subordinate to RBAC_MODE, so with RBAC off the capability does nothing
+    // despite being enabled. Warn so an operator is not left expecting role
+    // authoring to work.
+    if (config.RBAC_CUSTOM_ROLES_ENABLED) {
+      logger.warn({
+        operation: 'rbac.init',
+        status: 'skipped',
+        mode,
+        error: 'RBAC_CUSTOM_ROLES_ENABLED has no effect while RBAC_MODE=off',
+      });
+    }
     logger.info({ operation: 'rbac.init', status: 'skipped', mode });
     return;
   }

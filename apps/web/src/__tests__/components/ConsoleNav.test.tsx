@@ -28,4 +28,11 @@ describe('<ConsoleNav />', () => {
     render(<ConsoleNav isNetworkAdmin={false} />);
     expect(screen.queryByText('nav.roles')).not.toBeInTheDocument();
   });
+
+  it('hides the roles page when the custom-roles capability is off (network admin)', () => {
+    // The layout passes canAdministerRoles=false when features.custom_roles is
+    // false, even for a network admin, so the Roles entry disappears.
+    render(<ConsoleNav isNetworkAdmin canAdministerRoles={false} />);
+    expect(screen.queryByText('nav.roles')).not.toBeInTheDocument();
+  });
 });

@@ -14,6 +14,7 @@ import { getSession } from '@/lib/server-session';
 import { getConsoleActor } from '@/lib/console-actor';
 import { ConsoleNav } from '@/components/console/ConsoleNav';
 import { can } from '@/lib/capabilities';
+import { customRolesEnabled } from '@/lib/features.server';
 
 export default async function ConsoleLayout({ children }: Readonly<{ children: ReactNode }>) {
   const session = await getSession();
@@ -36,13 +37,20 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
   }
   if (actor.me.kind === 'coordinator') redirect('/dashboard');
 
+  // The Roles admin is also gated on the deploy-time custom-roles capability
+  // (api is the single source of truth). Both the capability check and the
+  // flag must pass, so the entry disappears when the feature is off.
+  const customRoles = await customRolesEnabled();
+
   return (
     <div className="flex flex-col lg:flex-row min-h-dvh">
       <ConsoleNav
         isNetworkAdmin={actor.me.is_network_admin}
         canManage={can(actor.me.capabilities, 'org.manage')}
         canAdministerRoles={
-          actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer')
+          customRoles &&
+          actor.me.is_network_admin &&
+          can(actor.me.capabilities, 'network.administer')
         }
       />
       <main className="flex-1 min-w-0 overflow-x-hidden">

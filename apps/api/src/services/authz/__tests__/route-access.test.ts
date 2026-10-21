@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyRequest, RouteOptions } from 'fastify';
 import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
 import { buildApp } from '../../../app.js';
+import { config } from '../../../config.js';
 import {
   assertRouteDeclared,
   enforceActorRouteAccess,
@@ -222,12 +223,18 @@ describe('enforceActorRouteAccess', () => {
 
 describe('declared route table', () => {
   // Building the app runs the boot check on every route; this snapshot makes
-  // any change to a route's access visible in review (#805).
+  // any change to a route's access visible in review (#805). Built with the
+  // CUSTOM-ROLES flag on so the full surface — including the authoring routes
+  // that are omitted when it is off — stays visible here; their conditional
+  // registration is covered by the v1-console route tests.
   it('declares every route of the app', async () => {
+    const prev = config.RBAC_CUSTOM_ROLES_ENABLED;
+    config.RBAC_CUSTOM_ROLES_ENABLED = true;
     _resetDeclaredRoutes();
     const app = await buildApp();
     await app.ready();
     await app.close();
+    config.RBAC_CUSTOM_ROLES_ENABLED = prev;
     const table = Object.fromEntries(
       listDeclaredRoutes().map(([k, d]) => [
         k,
