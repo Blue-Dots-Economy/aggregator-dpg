@@ -6,14 +6,14 @@ Access control for the aggregator portal and API, on the user and organisation m
 
 ## Highlights
 
-| Item              | Decision                                                                                                                                                                                   |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Model             | NIST core RBAC per organisation, on the user-org model: base roles come from membership (`users.org_id`, `organisations.org_owner`); `user_role` holds additional roles (decisions D5, D7) |
-| Access            | Union of the permissions of the user's base and additional roles in the organisation acted on or its ancestors                                                                             |
+| Item              | Decision                                                                                                                                                                                                |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model             | NIST core RBAC per organisation, on the user-org model: base roles come from membership (`users.org_id`, `organisations.org_owner`); `user_role` holds additional roles (decisions D5, D7)              |
+| Access            | Union of the permissions of the user's base and additional roles in the organisation acted on or its ancestors                                                                                          |
 | Built-in roles    | Defined in code (`BUILTIN_ROLES` in `packages/rbac`), seeded into the database by migration `0031_rbac_seed.sql` and changed with a new migration; custom roles live only in the database (decision D6) |
-| Decide            | Per request: the actor resolver reads the user, their memberships and their additional roles; OPA decides the permission (403); `scope.ts` decides reach (404)                             |
-| Time-bound access | PII Access is a role assigned with an expiry (90 days at most)                                                                                                                             |
-| Scope             | aggregator-dpg; signals-dpg unchanged in v1                                                                                                                                                |
+| Decide            | Per request: the actor resolver reads the user, their memberships and their additional roles; OPA decides the permission (403); `scope.ts` decides reach (404)                                          |
+| Time-bound access | PII Access is a role assigned with an expiry (90 days at most)                                                                                                                                          |
+| Scope             | aggregator-dpg; signals-dpg unchanged in v1                                                                                                                                                             |
 
 ---
 
@@ -252,11 +252,11 @@ flowchart LR
     T -->|3 every 30 s| S
 ```
 
-| Step | What happens                                                                                                                                                                                                                                    |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Step | What happens                                                                                                                                                                                                                                                               |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1    | Migration `0031_rbac_seed.sql` seeds the permission catalogue (from code's `CAPABILITIES`) and the built-in roles (`BUILTIN_ROLES`) with their permissions, idempotently; a build-time drift test asserts the seed still matches code. Custom roles are written at runtime |
-| 2    | At start the API loads every role and its permissions into a snapshot; an invalid catalogue stops the boot                                                                                                                                      |
-| 3    | Each replica re-reads a checksum of `role` and `role_permission` every `RBAC_CATALOGUE_REFRESH_MS` (default 30 000) and reloads when it changed; the replica that edited a custom role reloads at once. An invalid change keeps the last good snapshot |
+| 2    | At start the API loads every role and its permissions into a snapshot; an invalid catalogue stops the boot                                                                                                                                                                 |
+| 3    | Each replica re-reads a checksum of `role` and `role_permission` every `RBAC_CATALOGUE_REFRESH_MS` (default 30 000) and reloads when it changed; the replica that edited a custom role reloads at once. An invalid change keeps the last good snapshot                     |
 
 Memberships and additional roles are not cached: they are read with the user on every request, so an assignment or revocation applies on the next request.
 
@@ -302,20 +302,57 @@ Blue: aggregator-dpg. Grey: outside it.
 
 ## 7. Decision record
 
-| #   | Decision                                                                              | Chosen                                                                                                                                  | Why                                                                                                                                                                |
-| --- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| D1  | Permission for reading and searching organisations (`/v1/org/read`, `/v1/org/search`) | `org.manage`                                                                                                                            | Only Admins call these routes, and every Admin holds `org.manage`                                                                                                  |
-| D2  | Permission for repairing an owner's access (`/v1/org/access/repair`)                  | `network.administer`                                                                                                                    | Only the network admin may repair access; `orgs.onboard` is also held by Org Onboarders                                                                            |
-| D3  | Where reach is decided                                                                | `scope.ts`, outside OPA                                                                                                                 | Out of reach answers 404 (no existence oracle); `scope.ts` also filters lists, which OPA cannot                                                                    |
-| D4  | How the Default organisation is restricted                                            | A rule on that organisation (`isDefault`): its owner approves coordinators but cannot invite into it or edit it                         | The restriction belongs to the Default organisation, not to a role                                                                                                 |
-| D5  | Access model                                                                          | NIST core RBAC per organisation: permissions grouped into roles, roles assigned to users in organisations, access = union of live roles | The standard model (NIST INCITS 359, Superset / Flask-AppBuilder, multi-tenant SaaS practice); organisation kinds differ by which roles are assignable there       |
+| #   | Decision                                                                              | Chosen                                                                                                                                                                  | Why                                                                                                                                                                |
+| --- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| D1  | Permission for reading and searching organisations (`/v1/org/read`, `/v1/org/search`) | `org.manage`                                                                                                                                                            | Only Admins call these routes, and every Admin holds `org.manage`                                                                                                  |
+| D2  | Permission for repairing an owner's access (`/v1/org/access/repair`)                  | `network.administer`                                                                                                                                                    | Only the network admin may repair access; `orgs.onboard` is also held by Org Onboarders                                                                            |
+| D3  | Where reach is decided                                                                | `scope.ts`, outside OPA                                                                                                                                                 | Out of reach answers 404 (no existence oracle); `scope.ts` also filters lists, which OPA cannot                                                                    |
+| D4  | How the Default organisation is restricted                                            | A rule on that organisation (`isDefault`): its owner approves coordinators but cannot invite into it or edit it                                                         | The restriction belongs to the Default organisation, not to a role                                                                                                 |
+| D5  | Access model                                                                          | NIST core RBAC per organisation: permissions grouped into roles, roles assigned to users in organisations, access = union of live roles                                 | The standard model (NIST INCITS 359, Superset / Flask-AppBuilder, multi-tenant SaaS practice); organisation kinds differ by which roles are assignable there       |
 | D6  | Where built-in and custom roles are defined                                           | Built-in roles in code (`BUILTIN_ROLES`, `packages/rbac`), seeded by migration `0031_rbac_seed.sql` and changed with a new migration; custom roles only in the database | Built-in roles stay reviewed and identical on every instance (Superset's rule: do not edit the built-ins); custom roles change without a release                   |
-| D7  | How base roles relate to membership                                                   | Derived from `users.org_id` and `organisations.org_owner`, never stored; `user_role` holds additional roles only                        | One source of truth for membership, as the user-org model and Phase 5's resolver already have it; the planned `user_orgs.role` becomes a foreign key to `role.key` |
+| D7  | How base roles relate to membership                                                   | Derived from `users.org_id` and `organisations.org_owner`, never stored; `user_role` holds additional roles only                                                        | One source of truth for membership, as the user-org model and Phase 5's resolver already have it; the planned `user_orgs.role` becomes a foreign key to `role.key` |
 
 | #   | Revisit when                                                                                                                              | Changing it means                                                                                                 |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | D3  | Reach needs rules OPA should own (per-organisation sharing, reach that depends on roles), or Signals adopts the policy without `scope.ts` | Send the target's organisation chain to OPA and move the reach rules into the policy; map a reach deny to 404     |
 | D4  | Other organisations need "approve but not invite or edit", or a role should manage members without editing settings                       | Split `org.manage` into `org.members` and `org.settings` and adjust the built-in roles; drop the `isDefault` rule |
+
+---
+
+## 7a. Known limitation — admin-held profile and campaign capabilities are unreachable
+
+`network_admin` and `org_admin` are granted profile and campaign permissions
+(`profiles.view`, `profiles.export`, `profiles.onboard`, `profiles.retire`,
+`campaigns.run`, and for the network admin `profiles.verify` / `profiles.move`)
+that **no admin can currently exercise**. RBAC is not what stops them.
+
+Every `/v1/dashboard/*`, `/v1/campaign/*`, `/v1/bulk-uploads/*` and `/v1/links/*`
+route authenticates through `authenticate()`, which requires an `aggregator_id`
+token claim. That claim comes from a Keycloak user attribute written only when a
+**coordinator** is approved; org owners and the network admin never have it, so
+those routes answer `403 MISSING_AGGREGATOR_ID` before any capability check
+runs. The console routes (`/v1/user/*`, `/v1/org/*`, `/v1/roles*`) resolve the
+caller with `requireActor()` instead and work normally, which is why
+`org.manage`, `orgs.onboard`, `contact.unmask` and `network.administer` are the
+only admin-held capabilities that do anything today.
+
+Consequences worth knowing:
+
+- Turning `RBAC_MODE=enforce` does **not** change this. It predates RBAC and is
+  a property of the legacy auth layer RBAC was deliberately layered on top of
+  rather than replacing.
+- Granting an admin a role carrying those permissions conveys nothing. The
+  console marks a permission no route enforces at all (see `enforced` on
+  `GET /v1/roles`), but it cannot show "enforced, yet unreachable for your
+  account type" — these capabilities _are_ enforced, for coordinators.
+- In particular no administrator can export participant details:
+  `profiles.view_pii` is held only by `pii_access`, which is
+  `account_type: coordinator` and so can never be assigned to an admin.
+
+Closing the gap means resolving an actor for admins on those routes instead of
+demanding `aggregator_id` — a change to the legacy auth path across roughly
+fifteen routes, with its own test pass. It is deliberately **not** bundled into
+the RBAC work. Until then, treat profile and campaign work as coordinator-only.
 
 ---
 
