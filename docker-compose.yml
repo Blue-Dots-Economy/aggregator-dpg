@@ -569,6 +569,12 @@ services:
       # cert, or NODE_EXTRA_CA_CERTS for a real internal CA.
       NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-1}
       INSTANCE_ENV: ${INSTANCE_ENV:-production}
+      # RBAC (docs/rbac/rbac-design-aggregator.md). `off` loads nothing; `log`
+      # decides and logs would-denies; `enforce` returns 403. Decisions come
+      # from the `opa` service below. `log` here so local runs exercise the
+      # policy without blocking anything; set RBAC_MODE=off to skip it.
+      RBAC_MODE: ${RBAC_MODE:-log}
+      OPA_URL: ${OPA_URL:-http://opa:8181}
     # No host port mapping — exposed only via nginx at /backend/.
     # See `extra_hosts` rationale on the web service: api hits Keycloak via
     # the public URL for both admin REST + JWKS, so we short-circuit DNS to
@@ -596,6 +602,31 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+      # So the first requests are not denied because OPA is still starting.
+      opa:
+        condition: service_healthy
+
+  # ── OPA (RBAC decisions) ──────────────────────────────────────────────────
+  # Serves POST /v1/data/rbac/decision from policy/rbac/*.rego. Only queried
+  # when the api runs with RBAC_MODE=log|enforce. Deployments run it as a
+  # sidecar in the api pod (bluedots-automation).
+  opa:
+    image: openpolicyagent/opa:1.21.1@sha256:d3a9a6bd4fbcb0f4403294b0d0b239b07be163ac118a46df7d50045b52e52053
+    container_name: aggregator-opa
+    restart: unless-stopped
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=error", "--ignore=*_test.rego", "--ignore=vectors.json", "/policy"]
+    # Host port for hybrid dev (`pnpm dev` on the host, OPA_URL defaults to
+    # http://localhost:8181). Loopback only.
+    ports:
+      - "127.0.0.1:8181:8181"
+    volumes:
+      - ./policy/rbac:/policy:ro
+    healthcheck:
+      test: ["CMD", "/opa", "eval", "--fail", "--data", "/policy", "--ignore", "*_test.rego", "--ignore", "vectors.json", "data.rbac.not_through_root"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   # ── Bulk-upload + cron worker ────────────────────────────────────────────
   # BullMQ consumer for: bulk-file-process, bulk-row-process, bulk-finalise,

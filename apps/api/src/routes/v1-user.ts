@@ -35,7 +35,12 @@ import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { getUserStore, type Coordinator } from '../services/user-store/index.js';
 import { getOrganisationStore, type Organisation } from '../services/organisation-store/index.js';
-import { isNetworkAdmin, requireActor, type Actor } from '../services/auth/actor/index.js';
+import {
+  isNetworkAdmin,
+  requireActor,
+  type Actor,
+  type ActorOrg,
+} from '../services/auth/actor/index.js';
 import { reachesOrg, scopeOrgFilter } from '../services/authz/scope.js';
 import { decideCoordinator } from '../services/decisions/coordinator.js';
 import { mintInviteBatch } from '../services/invites/mint.js';
@@ -52,6 +57,12 @@ import {
   throwDecisionFailure,
   toWireUser,
 } from './console-shared.js';
+import {
+  checkCapability,
+  listActorCapabilities,
+  listCapabilitiesForTargets,
+  type TargetOrg,
+} from '../services/authz/index.js';
 
 const IdParamsSchema = z.object({ id: z.string().uuid() });
 type IdParams = z.infer<typeof IdParamsSchema>;
@@ -93,7 +104,37 @@ async function loadOrg(id: string): Promise<Organisation> {
  *
  * @throws {HttpError} DB_UNAVAILABLE.
  */
-async function meOf(actor: Actor): Promise<MeResponse> {
+/**
+ * The aggregator organisation a request acts on, with the root as its
+ * ancestor (RBAC: a role held in the root applies below it).
+ *
+ * @param orgId - The organisation, or null for none.
+ * @returns The target, or undefined for none.
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function aggregatorTarget(orgId: string | null): Promise<TargetOrg | undefined> {
+  if (!orgId) return undefined;
+  const root = await getOrganisationStore().findRoot();
+  if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
+  return { id: orgId, orgType: 'aggregator', ancestorIds: root.value ? [root.value.id] : [] };
+}
+
+/**
+ * Whether contact details are shown plain to this actor (RBAC
+ * `contact.unmask`; handoff H-6), in the target user's organisation when one
+ * is given. True when access control is off or only logging, so behaviour
+ * changes only under `enforce`.
+ */
+async function showsContact(
+  req: FastifyRequest,
+  actor: Actor,
+  orgId: string | null = null,
+): Promise<boolean> {
+  const target = await aggregatorTarget(orgId);
+  return (await checkCapability(req, actor, 'contact.unmask', { target })).allowed;
+}
+
+async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> {
   // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   const orgStore = getOrganisationStore();
   const orgs: MeOrg[] = [];
@@ -110,23 +151,44 @@ async function meOf(actor: Actor): Promise<MeResponse> {
     };
   }
 
+  const root = await orgStore.findRoot();
+  if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
+  const rootId = root.value?.id ?? null;
+  // Resolve every organisation and its target first, then ask the decision
+  // engine once per distinct question — this route is loaded on every portal
+  // render, so one OPA round-trip per organisation added up (#884 review).
+  const resolved: Array<{ org: ActorOrg; found: Organisation; target: TargetOrg }> = [];
   for (const o of actor.orgs) {
-    const found =
-      o.orgType === 'network_facilitator'
-        ? await orgStore.findRoot() // NOSONAR typescript:S9382 — sequential by design
-        : await orgStore.findById(o.id); // NOSONAR typescript:S9382 — sequential by design
+    const found = o.orgType === 'network_facilitator' ? root : await orgStore.findById(o.id); // NOSONAR typescript:S9382 — sequential by design
     if (!found.ok) dbDown('orgStore.findById', found.error.message);
     if (!found.value) continue;
+    resolved.push({
+      org: o,
+      found: found.value,
+      target: {
+        id: o.id,
+        orgType: o.orgType,
+        ancestorIds: o.orgType === 'aggregator' && rootId ? [rootId] : [],
+      },
+    });
+  }
+  const capabilitiesByOrg = await listCapabilitiesForTargets(
+    req,
+    actor,
+    resolved.map((r) => r.target),
+  );
+  for (const { org: o, found } of resolved) {
     orgs.push({
-      id: found.value.id,
-      name: found.value.displayName,
-      slug: found.value.slug,
+      id: found.id,
+      name: found.displayName,
+      slug: found.slug,
       org_type: o.orgType,
       role: o.relation,
-      is_default: found.value.isDefault,
+      is_default: found.isDefault,
+      capabilities: capabilitiesByOrg ? (capabilitiesByOrg.get(o.id) ?? []) : null,
     });
     // An admin's own contact is its orgs' owner contact (one person).
-    if (!self && o.relation === 'owner') self = ownerContact(found.value);
+    if (!self && o.relation === 'owner') self = ownerContact(found);
   }
   if (!self) throw httpError('USER_NOT_PROVISIONED');
 
@@ -135,6 +197,7 @@ async function meOf(actor: Actor): Promise<MeResponse> {
     user: { id: actor.userId, contact: self },
     orgs,
     is_network_admin: isNetworkAdmin(actor),
+    capabilities: await listActorCapabilities(req, actor),
   };
 }
 
@@ -147,6 +210,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/user/read/me',
     {
+      config: { rbac: { access: 'signed_in' } },
       schema: {
         tags: ['console'],
         summary: 'The signed-in user: kind, organisations and network-admin flag',
@@ -155,13 +219,14 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { actor } = await requireActor(req, { allowCoordinator: true });
-      return reply.status(200).send(await meOf(actor));
+      return reply.status(200).send(await meOf(req, actor));
     },
   );
 
   app.get(
     '/v1/user/read/:id',
     {
+      config: { rbac: { capability: 'org.manage' } },
       schema: {
         tags: ['console'],
         summary: 'One coordinator within reach',
@@ -173,20 +238,23 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
       const row = await coordinatorInReach(actor, id);
+      const plain = await showsContact(req, actor, row.parentOrgId ?? null);
       // Contact read audit (design C8): ids only.
       req.log.info({
         operation: 'console.user.read',
         status: 'success',
         actor_id: actor.userId,
         target_id: row.id,
+        contact: plain ? 'plain' : 'masked',
       });
-      return reply.status(200).send(toWireUser(row));
+      return reply.status(200).send(toWireUser(row, { masked: !plain }));
     },
   );
 
   app.post(
     '/v1/user/search',
     {
+      config: { rbac: { capability: 'org.manage' } },
       schema: {
         tags: ['console'],
         summary: 'Coordinators within reach, newest first',
@@ -207,8 +275,27 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         ...(body.limit ? { limit: body.limit } : {}),
       });
       if (!page.ok) dbDown('userStore.search', page.error.message);
+      // Unmasking is decided per organisation, never once for the page: a
+      // caller may hold `contact.unmask` in one of its orgs and not another.
+      const plainIn = new Map<string | null, boolean>();
+      for (const row of page.value.rows) {
+        const orgId = row.parentOrgId ?? null;
+        if (!plainIn.has(orgId)) plainIn.set(orgId, await showsContact(req, actor, orgId)); // NOSONAR typescript:S9382 — one check per distinct org
+      }
+      const isPlain = (row: Coordinator) => plainIn.get(row.parentOrgId ?? null) === true;
+      const plainCount = page.value.rows.filter(isPlain).length;
+      if (plainCount > 0) {
+        // Plain contact in a list: audited by count, never values (H-6).
+        req.log.info({
+          operation: 'console.user.search',
+          status: 'success',
+          actor_id: actor.userId,
+          contact: 'plain',
+          count: plainCount,
+        });
+      }
       return reply.status(200).send({
-        users: page.value.rows.map(toWireUser),
+        users: page.value.rows.map((row) => toWireUser(row, { masked: !isPlain(row) })),
         next_cursor: page.value.nextCursor ? encodeUserCursor(page.value.nextCursor) : null,
       });
     },
@@ -217,6 +304,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/user/create',
     {
+      config: { rbac: { capability: 'org.manage' } },
       schema: {
         tags: ['console'],
         summary: 'Invite coordinators into an organisation',
@@ -283,6 +371,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/user/decision/:id',
     {
+      config: { rbac: { capability: 'org.manage' } },
       schema: {
         tags: ['console'],
         summary: 'Approve or reject a pending coordinator',
@@ -335,6 +424,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.patch(
     '/v1/user/metadata/update/:id',
     {
+      config: { rbac: { capability: 'org.manage' } },
       schema: {
         tags: ['console'],
         summary: "Change a coordinator's served domains",
@@ -416,7 +506,11 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
           );
         }
       }
-      return reply.status(200).send(toWireUser(updated.value));
+      return reply.status(200).send(
+        toWireUser(updated.value, {
+          masked: !(await showsContact(req, actor, row.parentOrgId ?? null)),
+        }),
+      );
     },
   );
 }

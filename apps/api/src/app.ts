@@ -38,6 +38,7 @@ import { registerAggregatorApprovalRoutes } from './routes/aggregator-approvals.
 import { registerAggregatorProfileRoutes } from './routes/aggregator-profile.js';
 import { registerV1UserRoutes } from './routes/v1-user.js';
 import { registerV1OrgRoutes } from './routes/v1-org.js';
+import { registerV1IamRoutes } from './routes/v1-iam.js';
 import { registerBulkUploadsRoutes } from './routes/bulk-uploads.js';
 import { registerRegistrationLinksRoutes } from './routes/registration-links.js';
 import { registerPublicRegistrationLinkRoutes } from './routes/public-registration-links.js';
@@ -54,6 +55,7 @@ import { registerCampaignDumpRoutes } from './routes/campaign-dump.js';
 import { ERR } from './errors/codes.js';
 import { HttpError } from './errors/http-error.js';
 import { coerceToHttpError, toEnvelope, toLogPayload } from './errors/serialize.js';
+import { assertRouteDeclared } from './services/authz/index.js';
 
 const REQUEST_ID_HEADER = 'x-request-id';
 const pkg = createRequire(import.meta.url)('../package.json') as { version: string };
@@ -202,6 +204,10 @@ export async function buildApp(): Promise<FastifyInstance> {
     });
   }
 
+  // RBAC: every route must declare its access in `config.rbac`; a route
+  // without one stops the app from booting (docs/rbac/rbac-design-aggregator.md).
+  app.addHook('onRoute', assertRouteDeclared);
+
   app.addHook('onRequest', async (req, reply) => {
     reply.header(REQUEST_ID_HEADER, req.id);
     req.log.info(
@@ -233,6 +239,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   registerAggregatorProfileRoutes(app);
   registerV1UserRoutes(app);
   registerV1OrgRoutes(app);
+  registerV1IamRoutes(app);
   await registerBulkUploadsRoutes(app);
   await registerRegistrationLinksRoutes(app);
   await registerPublicRegistrationLinkRoutes(app);

@@ -21,6 +21,7 @@ import {
 } from './services/organisation-root.js';
 import { getIdpAdmin } from './services/idp-admin/index.js';
 import { setApprovalBrand } from './views/approval-pages.js';
+import { initRbac, stopRbacRefresh } from './services/authz/index.js';
 import { setEmailBrand } from './services/email-templates/shared.js';
 import {
   loadEmailMessageOverrides,
@@ -38,6 +39,17 @@ async function main(): Promise<void> {
   }
 
   const app = await buildApp();
+
+  // RBAC: load the catalogue snapshot once (built-in roles are seeded by
+  // migration 0031). A no-op with RBAC_MODE=off; with log/enforce an
+  // unreadable or invalid catalogue stops boot rather than failing requests
+  // later.
+  try {
+    await initRbac();
+  } catch (err) {
+    logger.error({ err }, 'failed to initialise rbac');
+    process.exit(1);
+  }
 
   // Seed the admin-approval HTML pages with the active deployment's
   // brand so the email-triggered approve/reject flow renders the same
@@ -103,6 +115,7 @@ async function main(): Promise<void> {
       // Redis, the shared API Redis, and the BullMQ enqueue queue were all
       // previously leaked on SIGTERM (only Fastify + the PG pool were closed).
       await app.close();
+      stopRbacRefresh();
       await closeDb();
       await Promise.allSettled([
         closeRateLimiter(),

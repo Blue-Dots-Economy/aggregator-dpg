@@ -552,6 +552,62 @@ export const ERR = {
     detail: 'The combination of fields supplied is not allowed by the API.',
     hint: 'A field combination violates a business invariant (e.g. profile fields on an account_only link). Inspect detail for the specific rule.',
   },
+  RBAC_NOT_ENABLED: {
+    code: 'RBAC_NOT_ENABLED',
+    status: 503,
+    title: 'Access control is off',
+    detail: 'Access control is not enabled on this instance, so roles cannot be changed.',
+    hint: 'RBAC_MODE=off: the role catalogue is not loaded. Set RBAC_MODE=log or enforce (docs/rbac/).',
+  },
+  ROLE_UNKNOWN: {
+    code: 'ROLE_UNKNOWN',
+    status: 400,
+    title: 'Unknown role',
+    detail: 'That role does not exist on this instance.',
+    hint: 'role_key is not a key of the role table (built-in roles are seeded by migration 0031).',
+  },
+  ROLE_EXISTS: {
+    code: 'ROLE_EXISTS',
+    status: 409,
+    title: 'Role already exists',
+    detail: 'A role with that key already exists.',
+    hint: 'Role keys are unique across built-in and custom roles.',
+  },
+  ROLE_BUILTIN: {
+    code: 'ROLE_BUILTIN',
+    status: 409,
+    title: 'Built-in role',
+    detail: 'Built-in roles cannot be changed or deleted here.',
+    hint: 'Built-in roles are seeded by migration 0031 and changed by a new migration; create a custom role instead.',
+  },
+  ROLE_IN_USE: {
+    code: 'ROLE_IN_USE',
+    status: 409,
+    title: 'Role in use',
+    detail: 'This role is assigned to someone, so it cannot be deleted.',
+    hint: 'Revoke its live assignments first.',
+  },
+  ROLE_LIMIT_REACHED: {
+    code: 'ROLE_LIMIT_REACHED',
+    status: 409,
+    title: 'Too many custom roles',
+    detail: 'This instance already has the most custom roles allowed.',
+    hint: 'MAX_CUSTOM_ROLES (50); delete an unused custom role first.',
+  },
+  ROLE_INVALID: {
+    code: 'ROLE_INVALID',
+    status: 400,
+    title: 'Invalid role',
+    detail: 'The role breaks a role rule.',
+    hint: 'See fields.issues; rules: docs/rbac/rbac-permissions-and-roles.md §4.',
+  },
+  ROLE_ASSIGNMENT_NOT_ALLOWED: {
+    code: 'ROLE_ASSIGNMENT_NOT_ALLOWED',
+    status: 409,
+    title: 'Role cannot be assigned',
+    detail: 'This role cannot be given to this user in this organisation.',
+    hint: 'A role rule refused it; see fields.reason (base_role, not_member, self, account_type, org_type, days_exceed_max). Rules: docs/rbac/rbac-permissions-and-roles.md §4.',
+  },
 } as const satisfies Record<string, ErrorCatalogueEntry>;
 
 export type ErrorCode = keyof typeof ERR;

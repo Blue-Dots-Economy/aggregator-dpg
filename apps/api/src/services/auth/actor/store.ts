@@ -9,6 +9,8 @@
 import { getUserStore, type Coordinator } from '../../user-store/index.js';
 import { getOrganisationStore, type Organisation } from '../../organisation-store/index.js';
 import { getIdentityStore } from '../../identity-store/index.js';
+import { getRoleStore } from '../../role-store/index.js';
+import { getRbacRuntime } from '../../authz/runtime.js';
 import { IDP_PROVIDER } from '../../idp-admin/provider.js';
 import {
   ActorResolverBase,
@@ -40,7 +42,36 @@ function coordinatorActor(row: Coordinator): Actor {
 
 /** An owned aggregator org as an actor org. */
 function ownedOrg(org: Organisation): ActorOrg {
-  return { id: org.id, orgType: 'aggregator', relation: 'owner', isDefault: org.isDefault };
+  return {
+    id: org.id,
+    orgType: 'aggregator',
+    relation: 'owner',
+    isDefault: org.isDefault,
+  };
+}
+
+/**
+ * Adds the user's live additional roles (`user_role`) to a resolved actor.
+ * Skipped with RBAC off: nothing reads them, and an instance that never turns
+ * RBAC on should not pay a query per request or fail on the role table.
+ *
+ * @returns The actor (with `roles` when RBAC is on), or `UNAVAILABLE` when the store failed.
+ */
+async function withRoles(actor: Actor): Promise<ActorResult> {
+  if (!getRbacRuntime()) return { ok: true, value: actor };
+  const live = await getRoleStore().listLive(actor.userId, new Date());
+  if (!live.ok) return unavailable(live.error.message);
+  return {
+    ok: true,
+    value: {
+      ...actor,
+      roles: live.value.map((r) => ({
+        roleKey: r.roleKey,
+        orgId: r.orgId,
+        expiresAt: r.expiresAt ? r.expiresAt.getTime() : null,
+      })),
+    },
+  };
 }
 
 /** Resolves actors from the application's stores. */
@@ -74,10 +105,7 @@ export class StoreActorResolver extends ActorResolverBase {
       });
     }
     for (const org of owned.value) if (org.status === 'active') orgs.push(ownedOrg(org));
-    return {
-      ok: true,
-      value: { userId, userType: 'admin', active: orgs.length > 0, orgs },
-    };
+    return withRoles({ userId, userType: 'admin', active: orgs.length > 0, orgs });
   }
 
   /**
@@ -97,6 +125,6 @@ export class StoreActorResolver extends ActorResolverBase {
     const row = await getUserStore().findById(id);
     if (!row.ok) return unavailable(row.error.message);
     if (!row.value) return { ok: true, value: null };
-    return { ok: true, value: coordinatorActor(row.value) };
+    return withRoles(coordinatorActor(row.value));
   }
 }

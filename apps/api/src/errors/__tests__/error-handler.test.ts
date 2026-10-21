@@ -9,12 +9,12 @@ describe('global error handler envelope', () => {
   beforeEach(async () => {
     app = await buildApp();
     // Register a synthetic route that throws each kind of error.
-    app.post('/__test/throw', async (req) => {
+    app.post('/__test/throw', { config: { rbac: { access: 'public' } } }, async (req) => {
       const code = (req.body as { code?: string })?.code ?? 'INTERNAL';
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       throw httpError(code as any);
     });
-    app.post('/__test/native-throw', async () => {
+    app.post('/__test/native-throw', { config: { rbac: { access: 'public' } } }, async () => {
       throw new Error('boom from inside');
     });
   });

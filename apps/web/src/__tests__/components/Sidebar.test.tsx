@@ -14,17 +14,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, fireEvent, within } from '@testing-library/react';
 
-const { useAuth, useThemeMode, useAggregatorConfig, useDashboard, useProfileRaw, usePathname } =
-  vi.hoisted(() => ({
-    useAuth: vi.fn(),
-    useThemeMode: vi.fn(),
-    useAggregatorConfig: vi.fn(),
-    useDashboard: vi.fn(),
-    useProfileRaw: vi.fn(),
-    usePathname: vi.fn(),
-  }));
+const {
+  useAuth,
+  useCan,
+  useThemeMode,
+  useAggregatorConfig,
+  useDashboard,
+  useProfileRaw,
+  usePathname,
+} = vi.hoisted(() => ({
+  useAuth: vi.fn(),
+  useCan: vi.fn(),
+  useThemeMode: vi.fn(),
+  useAggregatorConfig: vi.fn(),
+  useDashboard: vi.fn(),
+  useProfileRaw: vi.fn(),
+  usePathname: vi.fn(),
+}));
 
-vi.mock('@/lib/auth-context', () => ({ useAuth }));
+vi.mock('@/lib/auth-context', () => ({ useAuth, useCan }));
 vi.mock('@/lib/theme-mode', () => ({ useThemeMode }));
 vi.mock('@/hooks/useAggregatorConfig', () => ({
   useAggregatorConfig,
@@ -67,6 +75,7 @@ import { Sidebar } from '@/components/shell/Sidebar';
 
 function mockDefaults() {
   usePathname.mockReturnValue('/onboarding');
+  useCan.mockReturnValue(() => true);
   useAuth.mockReturnValue({
     user: { id: 'u1', org: 'Acme Org', name: 'Acme', email: 'a@a.com', phone: '' },
     signOut: vi.fn(),
@@ -355,5 +364,12 @@ describe('<Sidebar /> mobile navigation drawer', () => {
     } finally {
       window.matchMedia = original;
     }
+  });
+
+  it('hides Onboarding without profiles.onboard (RBAC)', () => {
+    mockDefaults();
+    useCan.mockReturnValue((c: string) => c !== 'profiles.onboard');
+    render(<Sidebar />);
+    expect(screen.queryAllByText('Onboarding')).toHaveLength(0);
   });
 });

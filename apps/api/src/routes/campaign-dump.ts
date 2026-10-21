@@ -84,6 +84,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
   app.get(
     '/v1/campaign/dump',
     {
+      config: { rbac: { access: 'service' } },
       schema: {
         tags: ['campaign'],
         summary: 'Download the latest non-PII Signals dump',

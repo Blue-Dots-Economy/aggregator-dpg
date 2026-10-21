@@ -8,10 +8,13 @@
  * The shape mirrors the RBAC work's `ActorResolverBase`
  * (`resolve({ aggregatorId?, subject })` → `{ userId, userType, active, orgs }`)
  * so RBAC can adopt this resolver or replace it behind the same contract
- * (`docs/plans/phase-5-rbac-handoff.md`, H-3). RBAC adds `grants`.
+ * (`docs/rbac/phase-5-rbac-handoff.md`, H-3). RBAC adds the user's additional
+ * roles (`user_role`); base roles follow `orgs` (design decision D7).
  *
  * Never throws across the service boundary.
  */
+
+import type { HeldRole } from '@aggregator-dpg/rbac/interface';
 
 /** How the actor relates to an organisation. */
 export type ActorOrgRelation = 'member' | 'owner';
@@ -40,6 +43,11 @@ export interface Actor {
    * (`owner`), the root among them for the network admin.
    */
   orgs: ActorOrg[];
+  /**
+   * The user's live additional roles (`user_role`: not revoked, not expired
+   * when read). Absent: none.
+   */
+  roles?: HeldRole[];
 }
 
 /** Input of {@link ActorResolverBase.resolve}: verified token claims. */
