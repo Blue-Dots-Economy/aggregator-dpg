@@ -391,6 +391,19 @@ const ConfigSchema = z.object({
    * `enforce`: a deny returns 403. Flip per instance after a clean log window.
    */
   RBAC_MODE: z.enum(['off', 'log', 'enforce']).default('off'),
+  /**
+   * Deploy-time switch for the CUSTOM-ROLES capability (network-admin role
+   * authoring). `false` (default, opt-in) builds the role snapshot from the
+   * built-in roles alone, so any existing custom-role assignment is inert, the
+   * role-authoring routes are not registered (404), and `GET
+   * /v1/aggregator-config` reports `features.custom_roles: false`. Independent
+   * of — and subordinate to — `RBAC_MODE`: with `RBAC_MODE=off` nothing is
+   * loaded and this flag has no effect.
+   */
+  RBAC_CUSTOM_ROLES_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
   /** Base URL of the OPA sidecar. Validated as a URL so a typo fails at boot, not per request. */
   OPA_URL: z.string().url().default('http://localhost:8181'),
   /** Per-attempt timeout for an OPA decision. */

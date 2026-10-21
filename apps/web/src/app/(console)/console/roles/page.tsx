@@ -10,6 +10,7 @@ import type { RolesResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleReadOptional } from '@/lib/console-api.server';
 import { can } from '@/lib/capabilities';
+import { customRolesEnabled } from '@/lib/features.server';
 import { Card } from '@/components/ui/Card';
 import { RolesAdmin } from '@/components/console/RolesAdmin';
 
@@ -18,6 +19,10 @@ export default async function ConsoleRolesPage() {
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   if (!actor.me.is_network_admin || !can(actor.me.capabilities, 'network.administer')) notFound();
+  // Defense in depth alongside the capability gate: when the deploy-time
+  // custom-roles capability is off the api does not register the roles routes,
+  // so the page is out of reach — answer "not found" like anything else is.
+  if (!(await customRolesEnabled())) notFound();
   const data = await consoleReadOptional<RolesResponse>('/v1/roles');
   return (
     <div className="flex flex-col gap-4">

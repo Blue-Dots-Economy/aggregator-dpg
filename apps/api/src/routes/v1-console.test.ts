@@ -10,6 +10,7 @@ import { getRoleStore, type InMemoryRoleStore } from '../services/role-store/ind
 import { getRbacCatalogue, type InMemoryRbacCatalogue } from '../services/rbac-catalogue/index.js';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
+import { config } from '../config.js';
 import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import {
   OrganisationStoreFake,
@@ -104,11 +105,16 @@ describe('console routes /v1/user, /v1/org', () => {
     });
   }
 
+  const savedCustomRoles = config.RBAC_CUSTOM_ROLES_ENABLED;
+
   beforeEach(async () => {
     _resetJwks();
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
+    // The role-authoring routes and the full user-roles read assume the
+    // CUSTOM-ROLES capability is on; the off behaviour is covered on its own.
+    config.RBAC_CUSTOM_ROLES_ENABLED = true;
 
     coordinators = new UserStoreFake();
     orgs = new OrganisationStoreFake();
@@ -213,6 +219,7 @@ describe('console routes /v1/user, /v1/org', () => {
     _setInviteMintRateChecker(null);
     _setInviteIpRateChecker(null);
     _setAccessTokenVerifier(null);
+    config.RBAC_CUSTOM_ROLES_ENABLED = savedCustomRoles;
   });
 
   const get = (url: string, who: keyof typeof TOKENS) =>
@@ -1309,6 +1316,66 @@ describe('console routes /v1/user, /v1/org', () => {
     it('shows contacts plain to a role with contact.unmask', async () => {
       const one = (await get(`/v1/user/read/${C1}`, 'a')).json() as { contact: { email: string } };
       expect(one.contact.email).toBe('c1@x.org');
+    });
+  });
+
+  // The deploy-time CUSTOM-ROLES switch off: the authoring routes are not
+  // registered (404), GET /v1/roles stays (built-in only), and an inert custom
+  // assignment is filtered out of the user-roles read.
+  describe('with CUSTOM-ROLES disabled (deploy-time off)', () => {
+    const verifier = {
+      key: 'verifier',
+      name: 'Verifier',
+      description: 'x',
+      account_type: 'coordinator',
+      assignable_org_types: ['aggregator'],
+      assigned_by: 'org.manage',
+      permissions: ['profiles.verify'],
+    };
+
+    beforeEach(async () => {
+      config.RBAC_CUSTOM_ROLES_ENABLED = false;
+      app = await buildApp();
+      _setRbacRuntime(await testRbacRuntime('enforce'));
+    });
+    afterEach(() => _setRbacRuntime(null));
+
+    it('404s the three role-authoring routes (not registered)', async () => {
+      expect((await post('/v1/roles/create', 'na', verifier)).statusCode).toBe(404);
+      expect((await patch('/v1/roles/update/verifier', 'na', { max_days: 10 })).statusCode).toBe(
+        404,
+      );
+      expect((await post('/v1/roles/delete/verifier', 'na', {})).statusCode).toBe(404);
+    });
+
+    it('keeps GET /v1/roles registered and built-in only', async () => {
+      const res = await get('/v1/roles', 'a');
+      expect(res.statusCode).toBe(200);
+      const keys = (res.json() as { roles: Array<{ key: string }> }).roles.map((r) => r.key);
+      expect(keys).toEqual([
+        'coordinator',
+        'data_export',
+        'network_admin',
+        'org_admin',
+        'org_onboarder',
+        'pii_access',
+      ]);
+    });
+
+    it('filters an inert custom-role assignment from GET /v1/user/roles/:id', async () => {
+      // A held custom role the built-in-only snapshot does not know about.
+      (getRoleStore() as InMemoryRoleStore).seed([
+        { userId: C3, roleKey: 'verifier', orgId: ORG_A },
+        { userId: C3, roleKey: 'data_export', orgId: ORG_A },
+      ]);
+      const res = (await get(`/v1/user/roles/${C3}`, 'a')).json() as {
+        base: Array<{ role_key: string; org_id: string }>;
+        additional: Array<{ role_key: string }>;
+      };
+      expect(res.base).toEqual([{ role_key: 'coordinator', org_id: ORG_A }]);
+      const additional = res.additional.map((a) => a.role_key);
+      expect(additional).not.toContain('verifier');
+      expect(additional).toEqual(['data_export']);
     });
   });
 });

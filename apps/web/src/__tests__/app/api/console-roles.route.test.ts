@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/upstream-client', () => ({ callApi: vi.fn() }));
+vi.mock('@/lib/features.server', () => ({ customRolesEnabled: vi.fn() }));
 
 import { POST as assign } from '@/app/api/console/user/role/assign/[id]/route';
 import { POST as revoke } from '@/app/api/console/user/role/revoke/[id]/route';
 import { callApi } from '@/lib/upstream-client';
+import { customRolesEnabled } from '@/lib/features.server';
 
 const ID = '00000000-0000-4000-8000-0000000000c1';
 const ORG = '00000000-0000-4000-8000-00000000000a';
@@ -35,6 +37,18 @@ describe('console role BFF routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.PUBLIC_PORTAL_URL;
+  });
+
+  // Role assignment is a separate concern from the custom-roles capability:
+  // built-in roles are still assignable when custom roles are off, so these
+  // proxies must NOT short-circuit on the flag (unlike the create/update/delete
+  // custom-role proxies). This guards against accidentally gating them.
+  it.each(cases)('%s still forwards when custom roles are off', async (_n, h, path) => {
+    vi.mocked(customRolesEnabled).mockResolvedValue(false);
+    vi.mocked(callApi).mockResolvedValue(ok({ ok: true }));
+    const res = await call(h, ID);
+    expect(res.status).toBe(200);
+    expect(callApi).toHaveBeenCalledWith(path, { method: 'POST', body: JSON.parse(BODY) });
   });
 
   it.each(cases)('%s forwards with the caller token', async (_n, h, path) => {

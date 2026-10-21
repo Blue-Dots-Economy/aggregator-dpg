@@ -20,6 +20,7 @@ import { getRoleStore, type UserRoleRecord } from '../role-store/index.js';
 import { actorPermissions, checkCapability, type TargetOrg } from './guard.js';
 import { reachesOrg } from './scope.js';
 import { getRbacRuntime, type RbacRuntime } from './runtime.js';
+import { config } from '../../config.js';
 import { logger } from '../../logger.js';
 
 /** Why a role change did not happen. */
@@ -145,6 +146,13 @@ export async function listUserRoles(
   if (!root.ok) return root;
   const all = await getRoleStore().listForUser(userId);
   if (!all.ok) return fail({ kind: 'unavailable', message: all.error.message });
+  // With CUSTOM-ROLES off the snapshot is built-in-only, so a held custom role
+  // grants nothing (`effectivePermissions` skips it). Drop those inert
+  // assignments from the read too, so what the console shows matches reality;
+  // the rows stay in the store and revive if the flag is turned on.
+  const additional = config.RBAC_CUSTOM_ROLES_ENABLED
+    ? all.value
+    : all.value.filter((a) => rt.value.roles.byKey.has(a.roleKey));
   const base: UserRoles['base'] = [];
   const assignable: UserRoles['assignable'] = [];
   for (const m of user.value.memberships) {
@@ -161,7 +169,7 @@ export async function listUserRoles(
       }
     }
   }
-  return { ok: true, value: { base, additional: all.value, assignable } };
+  return { ok: true, value: { base, additional, assignable } };
 }
 
 /** What an assignment request asks for. */

@@ -16,13 +16,18 @@ import {
   _setRbacRuntime,
 } from '../runtime.js';
 import { InMemoryRbacCatalogue, _setRbacCatalogue } from '../../rbac-catalogue/index.js';
+import { config } from '../../../config.js';
 
 const savedRoot = process.env.CONFIG_ROOT;
+const savedCustomRoles = config.RBAC_CUSTOM_ROLES_ENABLED;
 let store: InMemoryRbacCatalogue;
 
 beforeEach(() => {
   store = new InMemoryRbacCatalogue();
   _setRbacCatalogue(store);
+  // Most tests here exercise the full catalogue (built-in + custom); the
+  // built-in-only filtering is covered on its own below.
+  config.RBAC_CUSTOM_ROLES_ENABLED = true;
 });
 
 afterEach(() => {
@@ -30,6 +35,7 @@ afterEach(() => {
   _setRbacRuntime(null);
   _setRbacCatalogue(null);
   process.env.CONFIG_ROOT = savedRoot;
+  config.RBAC_CUSTOM_ROLES_ENABLED = savedCustomRoles;
   vi.useRealTimers();
 });
 
@@ -165,6 +171,27 @@ describe('refreshRbacCatalogue', () => {
     stopRbacRefresh();
     store.setRoles(builtins);
     await vi.advanceTimersByTimeAsync(5000);
+    expect(roleKeys()).toContain('viewer');
+  });
+});
+
+describe('CUSTOM-ROLES flag gates the snapshot', () => {
+  it('loads built-in roles only when the flag is off', async () => {
+    config.RBAC_CUSTOM_ROLES_ENABLED = false;
+    await initRbac('log', 0);
+    const builtins = roleKeys();
+    expect(builtins).not.toContain('viewer');
+    // A stored custom role is dropped on load, so a refresh never adds it.
+    store.setRoles([...store.storedRoles(), viewer]);
+    expect(await refreshRbacCatalogue()).toBe('reloaded');
+    expect(roleKeys()).toEqual(builtins);
+    expect(roleKeys()).not.toContain('viewer');
+  });
+
+  it('includes custom roles when the flag is on', async () => {
+    // beforeEach sets the flag on.
+    store.setRoles([...store.storedRoles(), viewer]);
+    await initRbac('log', 0);
     expect(roleKeys()).toContain('viewer');
   });
 });
