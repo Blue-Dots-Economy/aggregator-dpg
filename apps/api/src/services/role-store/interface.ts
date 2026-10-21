@@ -60,6 +60,19 @@ export abstract class RoleStoreBase {
   abstract listLive(userId: string, now: Date): Promise<RoleStoreResult<UserRoleRecord[]>>;
 
   /**
+   * Returns the live assignments of several users in one read, for a list
+   * page; an empty list of users reads nothing.
+   *
+   * @param userIds - The users.
+   * @param now - The current time.
+   * @returns The live assignments of any of the users, in no particular order.
+   */
+  abstract listLiveForUsers(
+    userIds: readonly string[],
+    now: Date,
+  ): Promise<RoleStoreResult<UserRoleRecord[]>>;
+
+  /**
    * Returns every assignment of the user, newest first.
    *
    * @param userId - The user.

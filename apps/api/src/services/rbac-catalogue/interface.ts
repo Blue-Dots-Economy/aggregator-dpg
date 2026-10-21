@@ -26,6 +26,20 @@ export interface CatalogueSnapshot {
   revision: string;
 }
 
+/**
+ * One stored permission row. `key` is a plain string: a retired permission is
+ * no longer a `Capability` in code.
+ */
+export interface StoredPermission {
+  key: string;
+  resource: string;
+  action: string;
+  description: string;
+  sensitive: boolean;
+  /** Removed from the code's catalogue; marked deprecated, never deleted. */
+  deprecated: boolean;
+}
+
 /** Abstract contract for the stored RBAC catalogue. */
 export abstract class RbacCatalogueBase {
   /**
@@ -41,6 +55,13 @@ export abstract class RbacCatalogueBase {
    * @returns The current revision.
    */
   abstract revision(): Promise<CatalogueStoreResult<string>>;
+
+  /**
+   * Reads every stored permission, deprecated ones included, sorted by key.
+   *
+   * @returns The permission rows.
+   */
+  abstract listPermissions(): Promise<CatalogueStoreResult<StoredPermission[]>>;
 
   /**
    * Inserts a custom role with its permissions and audits it.

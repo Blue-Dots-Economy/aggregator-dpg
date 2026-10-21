@@ -19,13 +19,14 @@ import type {
 } from '@aggregator-dpg/rbac/interface';
 import { compareCodeUnits } from '@aggregator-dpg/rbac';
 import { getDb } from '../../db/client.js';
-import { iamAudit, role, rolePermission, userRole } from '../../db/schema.js';
+import { iamAudit, permission, role, rolePermission, userRole } from '../../db/schema.js';
 import { pgErrorCode } from '../../db/pg-error.js';
 import { logger } from '../../logger.js';
 import {
   RbacCatalogueBase,
   type CatalogueSnapshot,
   type CatalogueStoreResult,
+  type StoredPermission,
 } from './interface.js';
 
 /** Checksum of the role tables; any row change moves it. */
@@ -217,6 +218,17 @@ export class PostgresRbacCatalogue extends RbacCatalogueBase {
       return { ok: true, value: revisionOf(await getDb().execute(REVISION)) };
     } catch (e) {
       return dbFailure('rbacCatalogue.revision', e);
+    }
+  }
+
+  /** {@inheritDoc RbacCatalogueBase.listPermissions} */
+  async listPermissions(): Promise<CatalogueStoreResult<StoredPermission[]>> {
+    try {
+      // Sorted here, not by the database's collation, so every store orders alike.
+      const rows = await getDb().select().from(permission);
+      return { ok: true, value: rows.sort((a, b) => a.key.localeCompare(b.key)) };
+    } catch (e) {
+      return dbFailure('rbacCatalogue.listPermissions', e);
     }
   }
 }

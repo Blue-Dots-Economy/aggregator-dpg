@@ -81,6 +81,16 @@ describe('assertRouteDeclared', () => {
     );
   });
 
+  it('accepts an any-of declaration and refuses an empty or unknown one', () => {
+    expect(() =>
+      assertRouteDeclared(route({ anyCapability: ['org.manage', 'orgs.onboard'] })),
+    ).not.toThrow();
+    expect(() => assertRouteDeclared(route({ anyCapability: [] }))).toThrow(/empty anyCapability/);
+    expect(() =>
+      assertRouteDeclared(route({ anyCapability: ['org.manage', 'nope'] } as never)),
+    ).toThrow(/unknown capability/);
+  });
+
   it('skips HEAD and plugin routes', () => {
     expect(() => assertRouteDeclared(route(undefined, 'HEAD'))).not.toThrow();
     expect(() =>
@@ -128,6 +138,42 @@ describe('enforceRouteAccess', () => {
     await expect(
       enforceRouteAccess(req({ capability: 'profiles.view_pii' }).r, caller),
     ).resolves.toBeUndefined();
+  });
+
+  it('lets a caller holding any one of the capabilities through', async () => {
+    setup('enforce');
+    await expect(
+      enforceRouteAccess(req({ anyCapability: ['profiles.view_pii', 'profiles.view'] }).r, caller),
+    ).resolves.toBeUndefined();
+  });
+
+  it('returns 403 naming every capability when none is held', async () => {
+    setup('enforce');
+    await expect(
+      enforceRouteAccess(
+        req({ anyCapability: ['profiles.view_pii', 'profiles.export'] }).r,
+        caller,
+      ),
+    ).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+      fields: { permission: 'profiles.view_pii|profiles.export' },
+    });
+  });
+
+  it('only logs a missing any-of capability, or an unknown caller, in log mode', async () => {
+    setup('log');
+    const any = req({ anyCapability: ['profiles.view_pii', 'profiles.export'] });
+    await expect(enforceRouteAccess(any.r, caller)).resolves.toBeUndefined();
+    const unknown = req({ anyCapability: ['profiles.view'] });
+    await expect(enforceRouteAccess(unknown.r, { subject: 'nobody' })).resolves.toBeUndefined();
+    expect(unknown.warn).toHaveBeenCalled();
+  });
+
+  it('refuses an unknown caller on an any-of route in enforce mode', async () => {
+    setup('enforce');
+    await expect(
+      enforceRouteAccess(req({ anyCapability: ['profiles.view'] }).r, { subject: 'nobody' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
   it('requires a service account for service routes', async () => {
@@ -205,6 +251,25 @@ describe('enforceActorRouteAccess', () => {
     ).rejects.toMatchObject({ code: 'FORBIDDEN', fields: { permission: 'network.administer' } });
   });
 
+  it('checks an any-of console route on the resolved actor', async () => {
+    setup('enforce');
+    await expect(
+      enforceActorRouteAccess(
+        req({ anyCapability: ['network.administer', 'org.manage'] }).r,
+        buildAdminActor(),
+      ),
+    ).resolves.toBeUndefined();
+    await expect(
+      enforceActorRouteAccess(
+        req({ anyCapability: ['network.administer', 'orgs.onboard'] }).r,
+        buildAdminActor(),
+      ),
+    ).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+      fields: { permission: 'network.administer|orgs.onboard' },
+    });
+  });
+
   it('only logs a missing console capability in log mode', async () => {
     setup('log');
     await expect(
@@ -229,6 +294,13 @@ describe('declared route table', () => {
   // CUSTOM-ROLES flag on so the full surface — including the authoring routes
   // that are omitted when it is off — stays visible here; their conditional
   // registration is covered by the v1-console route tests.
+  /** One label per declaration: its capability, any-of list, or access kind. */
+  const routeAccessLabel = (d: RouteAccess): string => {
+    if ('capability' in d) return `${d.capability}${d.strict ? ' (strict)' : ''}`;
+    if ('anyCapability' in d) return d.anyCapability.join('|');
+    return d.access;
+  };
+
   it('declares every route of the app', async () => {
     const prev = config.RBAC_CUSTOM_ROLES_ENABLED;
     config.RBAC_CUSTOM_ROLES_ENABLED = true;
@@ -238,10 +310,7 @@ describe('declared route table', () => {
     await app.close();
     config.RBAC_CUSTOM_ROLES_ENABLED = prev;
     const table = Object.fromEntries(
-      listDeclaredRoutes().map(([k, d]) => [
-        k,
-        'capability' in d ? `${d.capability}${d.strict ? ' (strict)' : ''}` : d.access,
-      ]),
+      listDeclaredRoutes().map(([k, d]) => [k, routeAccessLabel(d)]),
     );
     expect(Object.keys(table).length).toBeGreaterThanOrEqual(45);
     expect(table).toMatchSnapshot();

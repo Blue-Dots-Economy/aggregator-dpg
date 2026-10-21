@@ -22,11 +22,36 @@ import {
 } from '../../hooks/useAggregatorConfig';
 import { cn } from '../../lib/cn';
 
-interface NavItem {
+/** One sidebar link. */
+export interface NavItem {
   to: string;
   label: string;
   icon: IconName;
   badge?: number;
+  /** Active only on `to` itself, not below it (a home link). */
+  exact?: boolean;
+  /** Path whose subtree marks the link active, when it differs from `to`. */
+  match?: string;
+}
+
+/** The account card at the foot of the sidebar. */
+export interface SidebarAccount {
+  /** First line, also the source of the two-letter badge. */
+  title: string;
+  subtitle: string;
+  /**
+   * Extra label/value rows shown in a pop-up above the card when it's
+   * clicked (e.g. contact details). Omit to leave the card non-interactive,
+   * as before — the sign-out button is unaffected either way.
+   */
+  details?: ReadonlyArray<{ label: string; value: string }>;
+}
+
+/** Whether `n` is the current page's link. */
+function isNavActive(n: NavItem, pathname: string | null): boolean {
+  if (n.exact) return pathname === n.to;
+  const base = n.match ?? n.to;
+  return pathname === base || Boolean(pathname?.startsWith(`${base}/`));
 }
 
 /**
@@ -59,13 +84,14 @@ function buildNavBase(): Omit<NavItem, 'label'>[] {
 function BrandMark({
   cfg,
   mode,
+  portalLabel,
   compact = false,
 }: {
   cfg: AggregatorConfigPayload;
   mode: 'light' | 'dark';
+  portalLabel: string;
   compact?: boolean;
 }) {
-  const t = useTranslations('nav');
   if (cfg.brand.logo?.default) {
     return (
       <Image
@@ -88,9 +114,7 @@ function BrandMark({
           {cfg.brand.short_name}
         </div>
         {!compact && (
-          <div className="text-[12px] text-(--bd-fg-muted) leading-tight mt-0.5">
-            {t('portal_label')}
-          </div>
+          <div className="text-[12px] text-(--bd-fg-muted) leading-tight mt-0.5">{portalLabel}</div>
         )}
       </div>
     </div>
@@ -100,6 +124,7 @@ function BrandMark({
 interface SidebarPanelProps {
   brand: ReactNode;
   nav: NavItem[];
+  account: SidebarAccount;
   pathname: string | null;
   /** Rendered beside the brand — the drawer's close button on mobile. */
   headerAction?: ReactNode;
@@ -116,14 +141,36 @@ interface SidebarPanelProps {
 function SidebarPanel({
   brand,
   nav,
+  account,
   pathname,
   headerAction,
   onNavigate,
   onOpenSupport,
 }: SidebarPanelProps) {
   const t = useTranslations('nav');
-  const { user, signOut, supportEnabled } = useAuth();
-  const orgInitials = (user?.org ?? 'TR').slice(0, 2).toUpperCase();
+  const { signOut, supportEnabled } = useAuth();
+  const initials = account.title.slice(0, 2).toUpperCase();
+
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const accountRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!detailsOpen) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (
+        e instanceof KeyboardEvent
+          ? e.key === 'Escape'
+          : !accountRef.current?.contains(e.target as Node)
+      ) {
+        setDetailsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, [detailsOpen]);
 
   return (
     <>
@@ -139,7 +186,7 @@ function SidebarPanel({
         <nav className="flex flex-col gap-0.5">
           {nav.map((n) => {
             const Ic = I[n.icon];
-            const isActive = pathname === n.to || pathname?.startsWith(`${n.to}/`);
+            const isActive = isNavActive(n, pathname);
             return (
               <Link
                 key={n.to}
@@ -186,19 +233,55 @@ function SidebarPanel({
           </div>
         )}
 
-        <div className="p-3 shrink-0">
+        <div className="p-3 shrink-0 relative" ref={accountRef}>
+          {account.details && account.details.length > 0 && detailsOpen && (
+            <div className="absolute bottom-full left-0 right-0 mb-2 rounded-[12px] bg-(--bd-card) border border-(--bd-border) shadow-xl p-3 flex flex-col gap-3">
+              {account.details.map((d) => (
+                <div key={d.label} className="min-w-0">
+                  <div className="text-[10.5px] uppercase tracking-[0.06em] font-semibold text-(--bd-fg-muted)">
+                    {d.label}
+                  </div>
+                  <div className="mt-0.5 text-[13px] text-(--bd-fg) wrap-break-word">{d.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="rounded-[12px] bg-linear-to-br from-(--bd-tint-primary) to-(--bd-card) border border-(--bd-border) p-3 flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-(--bd-brand) text-white flex items-center justify-center font-display font-bold text-[12px] shrink-0">
-              {orgInitials}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-semibold text-(--bd-fg) truncate">
-                {user?.org ?? 'TRRAIN'}
-              </div>
-              <div className="text-[11px] text-(--bd-fg-muted) truncate">
-                {t('aggregator_sublabel')}
-              </div>
-            </div>
+            {account.details && account.details.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setDetailsOpen((v) => !v)}
+                aria-expanded={detailsOpen}
+                aria-haspopup="dialog"
+                className="flex items-center gap-2.5 min-w-0 flex-1 text-left"
+              >
+                <div className="w-8 h-8 rounded-lg bg-(--bd-brand) text-white flex items-center justify-center font-display font-bold text-[12px] shrink-0">
+                  {initials}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-semibold text-(--bd-fg) truncate">
+                    {account.title}
+                  </div>
+                  <div className="text-[11px] text-(--bd-fg-muted) truncate">
+                    {account.subtitle}
+                  </div>
+                </div>
+              </button>
+            ) : (
+              <>
+                <div className="w-8 h-8 rounded-lg bg-(--bd-brand) text-white flex items-center justify-center font-display font-bold text-[12px] shrink-0">
+                  {initials}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-semibold text-(--bd-fg) truncate">
+                    {account.title}
+                  </div>
+                  <div className="text-[11px] text-(--bd-fg-muted) truncate">
+                    {account.subtitle}
+                  </div>
+                </div>
+              </>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -217,16 +300,28 @@ function SidebarPanel({
   );
 }
 
+/** What {@link AppSidebar} shows. */
+export interface AppSidebarProps {
+  nav: NavItem[];
+  /** Under the brand name when the brand has no logo, e.g. "Aggregator Portal". */
+  portalLabel: string;
+  account: SidebarAccount;
+}
+
 /**
- * Portal navigation shell.
+ * Navigation shell shared by the coordinator portal and the organisation
+ * console: brand, links, Contact support (when enabled) and the account card.
+ * Reads `useAuth()`, so it must sit inside an `AuthProvider`.
  *
  * From `lg` up this is the fixed left sidebar. Below `lg` the sidebar is
  * hidden and a slim bar (menu button + brand) opens the same sidebar contents
  * as a slide-in drawer (#793). The drawer closes on Escape, backdrop tap,
  * following a link, or the viewport growing to desktop width; while open it
  * locks page scroll and keeps keyboard focus inside itself.
+ *
+ * @param props - The links, the label under the brand and the account card.
  */
-export function Sidebar() {
+export function AppSidebar({ nav, portalLabel, account }: AppSidebarProps) {
   const t = useTranslations('nav');
   const pathname = usePathname();
   const { mode } = useThemeMode();
@@ -236,44 +331,10 @@ export function Sidebar() {
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const drawerId = useId();
-  // Brand + domain labels come from the aggregator config so the
-  // sidebar adapts to whichever signalstack network the deployment is
-  // bound to (blue / purple / yellow / ...) without code changes.
+  // Brand comes from the aggregator config so the sidebar adapts to whichever
+  // signalstack network the deployment is bound to (blue / purple / yellow /
+  // ...) without code changes.
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Dashboard rollup feeds the participant-count badge. Domain follows
-  // the aggregator's registered focus; falls back to the first domain
-  // declared by the network when the profile is still resolving.
-  const profileType = useProfileRaw().data?.type;
-  // No 'seeker' fallback — until both profile + live network config have
-  // loaded, `activeDomain` is undefined and useDashboard skips the
-  // fetch (prevents a stale `?domain=seeker` request on cold mount).
-  const activeDomain = profileType ?? cfg.domains[0]?.id;
-  const { data: dashboard } = useDashboard(activeDomain ? { domain: activeDomain } : undefined);
-  // Plan-C / by_domain dashboard shape: every served domain ships under
-  // `by_domain[<id>]`; the badge mirrors the active aggregator's domain
-  // rollup so the sidebar count stays in sync with /dashboard.
-  const participantsBadge = activeDomain
-    ? dashboard?.by_domain[activeDomain]?.rollup.total_items
-    : undefined;
-
-  const can = useCan();
-  // Resolve translated labels here so brand interpolation and locale switching
-  // work correctly; buildNavBase() supplies the stable route/icon skeleton.
-  const navLabels: Record<string, string> = {
-    '/dashboard': t('my', { brand: cfg.brand.short_name }),
-    '/onboarding': t('onboarding'),
-    '/profile': t('profile'),
-  };
-  // RBAC: onboarding needs `profiles.onboard`; the API also checks it.
-  const nav: NavItem[] = buildNavBase()
-    .filter((n) => n.to !== '/onboarding' || can('profiles.onboard'))
-    .map((n) => ({
-      ...n,
-      label: navLabels[n.to] ?? n.to,
-      ...(n.to === '/dashboard' && participantsBadge !== undefined
-        ? { badge: participantsBadge }
-        : {}),
-    }));
 
   // While the drawer is open: lock background scroll, move focus into the
   // drawer, trap Tab inside it, close on Escape, and close if the viewport
@@ -347,14 +408,15 @@ export function Sidebar() {
           <I.menu size={20} />
         </button>
         <div className="min-w-0 flex-1">
-          <BrandMark cfg={cfg} mode={mode} compact />
+          <BrandMark cfg={cfg} mode={mode} portalLabel={portalLabel} compact />
         </div>
       </header>
 
       <aside className="hidden lg:flex w-[252px] shrink-0 bg-(--bd-card) border-r border-(--bd-border) flex-col h-screen sticky top-0">
         <SidebarPanel
-          brand={<BrandMark cfg={cfg} mode={mode} />}
+          brand={<BrandMark cfg={cfg} mode={mode} portalLabel={portalLabel} />}
           nav={nav}
+          account={account}
           pathname={pathname}
           onOpenSupport={openSupport}
         />
@@ -377,8 +439,9 @@ export function Sidebar() {
             className="absolute inset-y-0 left-0 w-[252px] max-w-[85vw] bg-(--bd-card) border-r border-(--bd-border) flex flex-col overflow-y-auto shadow-xl"
           >
             <SidebarPanel
-              brand={<BrandMark cfg={cfg} mode={mode} />}
+              brand={<BrandMark cfg={cfg} mode={mode} portalLabel={portalLabel} />}
               nav={nav}
+              account={account}
               pathname={pathname}
               onNavigate={closeMenu}
               onOpenSupport={openSupport}
@@ -400,5 +463,57 @@ export function Sidebar() {
 
       <SupportDialog open={supportOpen} onOpenChange={setSupportOpen} />
     </>
+  );
+}
+
+/**
+ * The coordinator portal's sidebar: Onboarding (with `profiles.onboard`),
+ * Profile and the participant dashboard with its count badge.
+ */
+export function Sidebar() {
+  const t = useTranslations('nav');
+  const { user } = useAuth();
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  // Dashboard rollup feeds the participant-count badge. Domain follows
+  // the aggregator's registered focus; falls back to the first domain
+  // declared by the network when the profile is still resolving.
+  const profileType = useProfileRaw().data?.type;
+  // No 'seeker' fallback — until both profile + live network config have
+  // loaded, `activeDomain` is undefined and useDashboard skips the
+  // fetch (prevents a stale `?domain=seeker` request on cold mount).
+  const activeDomain = profileType ?? cfg.domains[0]?.id;
+  const { data: dashboard } = useDashboard(activeDomain ? { domain: activeDomain } : undefined);
+  // Plan-C / by_domain dashboard shape: every served domain ships under
+  // `by_domain[<id>]`; the badge mirrors the active aggregator's domain
+  // rollup so the sidebar count stays in sync with /dashboard.
+  const participantsBadge = activeDomain
+    ? dashboard?.by_domain[activeDomain]?.rollup.total_items
+    : undefined;
+
+  const can = useCan();
+  // Resolve translated labels here so brand interpolation and locale switching
+  // work correctly; buildNavBase() supplies the stable route/icon skeleton.
+  const navLabels: Record<string, string> = {
+    '/dashboard': t('my', { brand: cfg.brand.short_name }),
+    '/onboarding': t('onboarding'),
+    '/profile': t('profile'),
+  };
+  // RBAC: onboarding needs `profiles.onboard`; the API also checks it.
+  const nav: NavItem[] = buildNavBase()
+    .filter((n) => n.to !== '/onboarding' || can('profiles.onboard'))
+    .map((n) => ({
+      ...n,
+      label: navLabels[n.to] ?? n.to,
+      ...(n.to === '/dashboard' && participantsBadge !== undefined
+        ? { badge: participantsBadge }
+        : {}),
+    }));
+
+  return (
+    <AppSidebar
+      nav={nav}
+      portalLabel={t('portal_label')}
+      account={{ title: user?.org ?? 'TRRAIN', subtitle: t('aggregator_sublabel') }}
+    />
   );
 }

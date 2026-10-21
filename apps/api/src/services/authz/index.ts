@@ -14,10 +14,12 @@ export {
 export type { RbacMode, RbacRuntime, RefreshOutcome } from './runtime.js';
 export {
   actorPermissions,
+  checkAnyCapability,
   checkCapability,
   decisionInput,
   listActorCapabilities,
   listCapabilitiesForTargets,
+  permissionsByOrg,
   requirePermission,
   resolveCaller,
 } from './guard.js';

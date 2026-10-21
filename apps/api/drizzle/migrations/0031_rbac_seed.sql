@@ -79,7 +79,6 @@ INSERT INTO role_permission (role_key, permission_key) VALUES
   ('network_admin', 'campaigns.run'),
   ('network_admin', 'orgs.onboard'),
   ('network_admin', 'orgs.block'),
-  ('network_admin', 'org.manage'),
   ('network_admin', 'contact.unmask'),
   ('network_admin', 'agreement.manage'),
   ('network_admin', 'network.administer'),
