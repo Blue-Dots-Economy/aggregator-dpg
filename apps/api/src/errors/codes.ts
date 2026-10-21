@@ -564,7 +564,7 @@ export const ERR = {
     status: 400,
     title: 'Unknown role',
     detail: 'That role does not exist on this instance.',
-    hint: 'role_key is not a key of the role table (built-in roles: config/rbac.yaml).',
+    hint: 'role_key is not a key of the role table (built-in roles are seeded by migration 0031).',
   },
   ROLE_EXISTS: {
     code: 'ROLE_EXISTS',
@@ -578,7 +578,7 @@ export const ERR = {
     status: 409,
     title: 'Built-in role',
     detail: 'Built-in roles cannot be changed or deleted here.',
-    hint: 'Built-in roles come from config/rbac.yaml and are re-applied at every start; create a custom role instead.',
+    hint: 'Built-in roles are seeded by migration 0031 and changed by a new migration; create a custom role instead.',
   },
   ROLE_IN_USE: {
     code: 'ROLE_IN_USE',

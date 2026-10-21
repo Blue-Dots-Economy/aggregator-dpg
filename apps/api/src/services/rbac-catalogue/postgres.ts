@@ -1,37 +1,32 @@
 /**
- * Postgres RBAC catalogue (`@aggregator-dpg/api`, migration 0030).
+ * Postgres RBAC catalogue (`@aggregator-dpg/api`, migrations 0030/0031).
  *
- * `sync` writes the permissions and the built-in roles in one transaction
- * under an advisory lock, so replicas starting together sync once. `load`
- * reads every role, its permissions and the revision in one read-only
- * REPEATABLE READ transaction, so the snapshot and its revision always match.
- * The revision is an md5 over `role` and `role_permission`, so any insert,
- * update or delete changes it. Logs SQLSTATE only — never the driver message.
+ * The built-in roles and the permission catalogue are seeded by migration
+ * `0031_rbac_seed.sql`. `load` reads every role, its permissions and the
+ * revision in one read-only REPEATABLE READ transaction, so the snapshot and
+ * its revision always match. The revision is an md5 over `role` and
+ * `role_permission`, so any insert, update or delete changes it. Logs SQLSTATE
+ * only — never the driver message.
  */
 
-import { and, eq, gt, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, or, sql } from 'drizzle-orm';
 import type {
   BaseFor,
   Capability,
   OrgType,
-  PermissionDefinition,
   RoleDefinition,
   UserType,
 } from '@aggregator-dpg/rbac/interface';
 import { compareCodeUnits } from '@aggregator-dpg/rbac';
 import { getDb } from '../../db/client.js';
-import { iamAudit, permission, role, rolePermission, userRole } from '../../db/schema.js';
+import { iamAudit, role, rolePermission, userRole } from '../../db/schema.js';
 import { pgErrorCode } from '../../db/pg-error.js';
 import { logger } from '../../logger.js';
 import {
   RbacCatalogueBase,
   type CatalogueSnapshot,
   type CatalogueStoreResult,
-  type SyncResult,
 } from './interface.js';
-
-/** Advisory-lock key for the sync, shared by every replica. */
-const SYNC_LOCK = sql`select pg_advisory_xact_lock(hashtext('aggregator-dpg:rbac-catalogue-sync'))`;
 
 /** Checksum of the role tables; any row change moves it. */
 const REVISION = sql`select md5(
@@ -71,106 +66,6 @@ function roleValues(r: RoleDefinition) {
 
 /** Postgres-backed {@link RbacCatalogueBase}. */
 export class PostgresRbacCatalogue extends RbacCatalogueBase {
-  /** {@inheritDoc RbacCatalogueBase.sync} */
-  async sync(
-    permissions: PermissionDefinition[],
-    builtinRoles: RoleDefinition[],
-    source: string,
-  ): Promise<CatalogueStoreResult<SyncResult>> {
-    try {
-      const result = await getDb().transaction(async (tx) => {
-        await tx.execute(SYNC_LOCK);
-        const before = revisionOf(await tx.execute(REVISION));
-        let changed = 0;
-        let retired = 0;
-
-        // Permissions: upsert the code's, deprecate the rest (never delete:
-        // role_permission and role.assigned_by reference them).
-        for (const p of permissions) {
-          const res = await tx
-            .insert(permission)
-            .values({ ...p, deprecated: false })
-            .onConflictDoUpdate({
-              target: permission.key,
-              set: {
-                resource: p.resource,
-                action: p.action,
-                description: p.description,
-                sensitive: p.sensitive,
-                deprecated: false,
-              },
-            })
-            .returning({ key: permission.key });
-          changed += res.length;
-        }
-        const keys = permissions.map((p) => p.key);
-        const dep = await tx
-          .update(permission)
-          .set({ deprecated: true })
-          .where(and(notInArray(permission.key, keys), eq(permission.deprecated, false)))
-          .returning({ key: permission.key });
-        retired += dep.length;
-
-        // Built-in roles: upsert each with exactly its permissions.
-        for (const r of builtinRoles) {
-          await tx
-            .insert(role)
-            .values(roleValues(r))
-            .onConflictDoUpdate({
-              target: role.key,
-              set: { ...roleValues(r), updatedAt: new Date() },
-            });
-          await tx.delete(rolePermission).where(eq(rolePermission.roleKey, r.key));
-          if (r.permissions.length > 0) {
-            await tx
-              .insert(rolePermission)
-              .values(r.permissions.map((permissionKey) => ({ roleKey: r.key, permissionKey })));
-          }
-        }
-
-        // Built-in roles gone from the file: remove unless assigned.
-        const builtinKeys = builtinRoles.map((r) => r.key);
-        const stale = await tx
-          .select({ key: role.key })
-          .from(role)
-          .where(and(eq(role.isBuiltin, true), notInArray(role.key, builtinKeys)));
-        const keptInUse: string[] = [];
-        if (stale.length > 0) {
-          const staleKeys = stale.map((s) => s.key);
-          const used = await tx
-            .selectDistinct({ key: userRole.roleKey })
-            .from(userRole)
-            .where(inArray(userRole.roleKey, staleKeys));
-          const usedKeys = new Set(used.map((u) => u.key));
-          const removable = staleKeys.filter((k) => !usedKeys.has(k));
-          keptInUse.push(...staleKeys.filter((k) => usedKeys.has(k)));
-          if (removable.length > 0) {
-            await tx.delete(role).where(inArray(role.key, removable));
-            retired += removable.length;
-          }
-        }
-
-        const after = revisionOf(await tx.execute(REVISION));
-        if (after !== before || retired > 0) {
-          await tx.insert(iamAudit).values({
-            event: 'catalogue.sync',
-            actorUserId: null,
-            details: {
-              source,
-              builtin_roles: builtinKeys,
-              retired,
-              kept_in_use: keptInUse,
-            },
-          });
-        }
-        return { changed: after === before ? 0 : changed, retired, keptInUse };
-      });
-      return { ok: true, value: result };
-    } catch (e) {
-      return dbFailure('rbacCatalogue.sync', e);
-    }
-  }
-
   /** {@inheritDoc RbacCatalogueBase.load} */
   async load(): Promise<CatalogueStoreResult<CatalogueSnapshot>> {
     try {

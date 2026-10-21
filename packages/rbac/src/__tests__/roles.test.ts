@@ -1,19 +1,15 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 import type { RoleDefinition } from '../interface.js';
-import { parseRbacFile, roleCatalogueIssues } from '../roles.js';
+import { BUILTIN_ROLES } from '../builtin-roles.js';
+import { assertRoleCatalogue, roleCatalogueIssues } from '../roles.js';
 import { buildRole } from '../testing/index.js';
 
-const shippedPath = fileURLToPath(new URL('../../../../config/rbac.yaml', import.meta.url));
-const raw = () => load(readFileSync(shippedPath, 'utf8')) as Record<string, unknown>;
-const shipped = (): RoleDefinition[] => parseRbacFile(raw(), 'test');
+const shipped = (): RoleDefinition[] => structuredClone(BUILTIN_ROLES) as RoleDefinition[];
 const role = (key: string) => shipped().find((r) => r.key === key)!;
 
 // Expectations come from docs/rbac/rbac-permissions-and-roles.md §3, not from
-// the file, so the file is tested against the catalogue.
+// the const, so the built-ins are tested against the catalogue.
 const MATRIX: Record<string, string[]> = {
   network_admin: [
     'agreement.manage',
@@ -45,7 +41,7 @@ const MATRIX: Record<string, string[]> = {
   data_export: ['profiles.export'],
 };
 
-describe('shipped config/rbac.yaml', () => {
+describe('BUILTIN_ROLES', () => {
   it('holds exactly the six built-in roles of the catalogue', () => {
     expect(shipped().map((r) => r.key)).toEqual(Object.keys(MATRIX).sort());
   });
@@ -170,23 +166,16 @@ describe('role rules', () => {
   });
 });
 
-describe('parseRbacFile', () => {
-  it('refuses an unknown permission and an old version', () => {
-    const bad = raw();
-    (bad['roles'] as Record<string, { permissions: string[] }>)['coordinator']!.permissions.push(
-      'profiles.teleport',
-    );
-    expect(() => parseRbacFile(bad, 'test')).toThrow(ConfigError);
-    expect(() => parseRbacFile({ ...raw(), version: 1 }, 'test')).toThrow(/Invalid rbac config/);
+describe('assertRoleCatalogue', () => {
+  it('accepts the built-in roles', () => {
+    expect(() => assertRoleCatalogue(shipped(), 'test')).not.toThrow();
   });
 
-  it('refuses a file that breaks a role rule, listing it', () => {
-    const bad = raw();
-    (bad['roles'] as Record<string, { assigned_by: string | null }>)['data_export']!.assigned_by =
-      null;
+  it('throws RBAC_CONFIG_INVALID listing the broken rule', () => {
+    const roles = [...shipped(), buildRole({ key: 'bad', assignedBy: null })];
     try {
-      parseRbacFile(bad, 'test');
-      expect.unreachable('file should be rejected');
+      assertRoleCatalogue(roles, 'test');
+      expect.unreachable('broken catalogue should be rejected');
     } catch (e) {
       expect((e as ConfigError).code).toBe('RBAC_CONFIG_INVALID');
       expect(JSON.stringify((e as ConfigError).details)).toMatch(/needs assigned_by/);

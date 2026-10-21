@@ -2,10 +2,11 @@
  * RBAC runtime state for `@aggregator-dpg/api`: the mode, the role snapshot
  * and the decision engine (design §5).
  *
- * At every start with RBAC on, the API syncs the permission catalogue from
- * code and the built-in roles from `config/rbac.yaml` into the database, then
- * loads every role into a snapshot. A timer re-reads the catalogue revision
- * and reloads when it changed. An invalid catalogue stops the boot; on a later
+ * The built-in roles and the permission catalogue are seeded into the database
+ * by migration `0031_rbac_seed.sql`; with RBAC on the API just loads every
+ * role (built-in and custom) into a snapshot. A timer re-reads the catalogue
+ * revision and reloads when it changed, so a custom-role write on another
+ * instance propagates here. An invalid catalogue stops the boot; on a later
  * refresh the last good snapshot stays in place, so an edit can never widen or
  * drop access by accident.
  *
@@ -13,19 +14,14 @@
  * instance without an OPA sidecar boots as before.
  */
 
-import { join } from 'node:path';
 import {
-  CAPABILITIES,
   OpaAuthorizer,
   assertRoleCatalogue,
   indexRoles,
-  loadRbacFile,
-  permissionDefinitions,
   type AuthorizerBase,
   type RoleIndex,
 } from '@aggregator-dpg/rbac';
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
-import { resolveConfigDir, resolveConfigRoot } from '@aggregator-dpg/network-config/paths';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
 import { getRbacCatalogue, type RbacCatalogueBase } from '../rbac-catalogue/index.js';
@@ -49,22 +45,6 @@ export type RefreshOutcome = 'off' | 'unchanged' | 'reloaded' | 'failed';
 let runtime: RbacRuntime | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 let refreshing: Promise<RefreshOutcome> | null = null;
-
-/**
- * Returns the `rbac.yaml` candidates, most specific first: the active
- * network/brand directory, the network directory, then the config root.
- *
- * @param env - Env-var bag; defaults to `process.env`.
- * @returns Absolute candidate paths, without duplicates.
- */
-export function rbacConfigCandidates(env: NodeJS.ProcessEnv = process.env): string[] {
-  const root = resolveConfigRoot(env);
-  const active = resolveConfigDir(env);
-  const network = join(root, env.AGGREGATOR_NETWORK?.trim() || 'blue_dot');
-  return [
-    ...new Set([join(active, 'rbac.yaml'), join(network, 'rbac.yaml'), join(root, 'rbac.yaml')]),
-  ];
-}
 
 /** A store failure at boot is a configuration problem: the API cannot decide. */
 function unavailable(op: string, message: string): ConfigError {
@@ -98,15 +78,15 @@ async function loadSnapshot(
 }
 
 /**
- * Syncs the catalogue, loads the role snapshot and builds the OPA engine,
- * unless `RBAC_MODE` is `off`; then starts the refresh timer. Called once at
- * boot.
+ * Loads the role snapshot and builds the OPA engine, unless `RBAC_MODE` is
+ * `off`; then starts the refresh timer. Called once at boot. The built-in
+ * roles and the permission catalogue are already in the database (migration
+ * `0031_rbac_seed.sql`), so there is no file load and no sync here.
  *
  * @param mode - Defaults to `RBAC_MODE`.
  * @param refreshMs - Refresh interval; defaults to `RBAC_CATALOGUE_REFRESH_MS`,
  *   `0` disables the timer.
- * @throws {ConfigError} When `rbac.yaml` is missing or invalid, or the
- *   catalogue cannot be synced, read or validated.
+ * @throws {ConfigError} When the catalogue cannot be read or is invalid.
  */
 export async function initRbac(
   mode: RbacMode = config.RBAC_MODE,
@@ -130,18 +110,7 @@ export async function initRbac(
     logger.info({ operation: 'rbac.init', status: 'skipped', mode });
     return;
   }
-  const file = await loadRbacFile(rbacConfigCandidates());
   const store = getRbacCatalogue();
-  const synced = await store.sync(permissionDefinitions(CAPABILITIES), file.roles, file.path);
-  if (!synced.ok) throw unavailable('sync', synced.error.message);
-  if (synced.value.keptInUse.length > 0) {
-    logger.warn({
-      operation: 'rbac.catalogue.sync',
-      status: 'skipped',
-      error: 'built-in roles removed from rbac.yaml are still assigned',
-      roles: synced.value.keptInUse,
-    });
-  }
   const snapshot = await loadSnapshot(store);
   runtime = {
     mode,
@@ -162,9 +131,6 @@ export async function initRbac(
     operation: 'rbac.init',
     status: 'success',
     mode,
-    source: file.path,
-    synced: synced.value.changed,
-    retired: synced.value.retired,
     roles: snapshot.roles.byKey.size,
     catalogue_revision: snapshot.revision,
     refresh_ms: refreshMs,

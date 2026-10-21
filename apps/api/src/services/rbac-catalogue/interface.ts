@@ -1,16 +1,16 @@
 /**
- * RBAC catalogue store contract (`@aggregator-dpg/api`, migration 0030).
+ * RBAC catalogue store contract (`@aggregator-dpg/api`, migrations 0030/0031).
  *
- * The `permission`, `role` and `role_permission` tables. At start the API
- * syncs the permissions from code and the built-in roles from
- * `config/rbac.yaml`; it then loads every role into a snapshot and re-reads a
- * checksum on a timer to reload when a role changed (design §5).
+ * The `permission`, `role` and `role_permission` tables. The built-in roles
+ * and the permission catalogue are seeded by migration `0031_rbac_seed.sql`;
+ * this store loads every role into a snapshot, re-reads a checksum on a timer
+ * to reload when a role changed, and writes custom roles (design §5).
  *
  * Every method returns a `Result`-style union and never throws across the
  * service boundary.
  */
 
-import type { PermissionDefinition, RoleDefinition } from '@aggregator-dpg/rbac/interface';
+import type { RoleDefinition } from '@aggregator-dpg/rbac/interface';
 
 /** Errors a catalogue-store call can report. */
 export type CatalogueStoreError = { code: 'DB_UNAVAILABLE'; message: string };
@@ -26,37 +26,8 @@ export interface CatalogueSnapshot {
   revision: string;
 }
 
-/** What a sync changed. */
-export interface SyncResult {
-  /** Permissions and built-in roles written (0 when nothing differed). */
-  changed: number;
-  /** Permissions marked deprecated; built-in roles removed. */
-  retired: number;
-  /** Built-in roles no longer in the file but still assigned, so kept. */
-  keptInUse: string[];
-}
-
 /** Abstract contract for the stored RBAC catalogue. */
 export abstract class RbacCatalogueBase {
-  /**
-   * Brings the stored catalogue in line with the code and the file, in one
-   * transaction under an advisory lock: every permission in `permissions` is
-   * upserted and every other one marked deprecated; every built-in role in
-   * `builtinRoles` is upserted with exactly its permissions; a built-in role
-   * missing from the file is removed unless it is assigned. Custom roles are
-   * never touched. Audited when anything changed.
-   *
-   * @param permissions - The code's permission catalogue.
-   * @param builtinRoles - The built-in roles from `rbac.yaml`.
-   * @param source - The `rbac.yaml` path, for the audit.
-   * @returns What changed.
-   */
-  abstract sync(
-    permissions: PermissionDefinition[],
-    builtinRoles: RoleDefinition[],
-    source: string,
-  ): Promise<CatalogueStoreResult<SyncResult>>;
-
   /**
    * Reads every role with its permissions, and the revision, consistently.
    *

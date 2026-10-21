@@ -7,7 +7,6 @@
 export {
   initRbac,
   getRbacRuntime,
-  rbacConfigCandidates,
   refreshRbacCatalogue,
   stopRbacRefresh,
   _setRbacRuntime,

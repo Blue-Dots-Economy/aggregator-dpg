@@ -40,9 +40,10 @@ async function main(): Promise<void> {
 
   const app = await buildApp();
 
-  // RBAC: load and validate rbac.yaml once. A no-op with RBAC_MODE=off; with
-  // log/enforce a missing or invalid file stops boot rather than failing
-  // requests later.
+  // RBAC: load the catalogue snapshot once (built-in roles are seeded by
+  // migration 0031). A no-op with RBAC_MODE=off; with log/enforce an
+  // unreadable or invalid catalogue stops boot rather than failing requests
+  // later.
   try {
     await initRbac();
   } catch (err) {

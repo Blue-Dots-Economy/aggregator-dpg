@@ -1,8 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
-import { parseRbacFile } from '../roles.js';
+import { BUILTIN_ROLES } from '../builtin-roles.js';
 import {
   baseRoleOf,
   effectivePermissions,
@@ -13,9 +10,8 @@ import {
 } from '../permissions.js';
 import { buildRole } from '../testing/index.js';
 
-const shippedPath = fileURLToPath(new URL('../../../../config/rbac.yaml', import.meta.url));
 const index = indexRoles([
-  ...parseRbacFile(load(readFileSync(shippedPath, 'utf8')), 'test'),
+  ...BUILTIN_ROLES,
   buildRole({
     key: 'admin_actor',
     accountType: 'admin',

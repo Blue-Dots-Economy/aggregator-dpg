@@ -2,7 +2,7 @@
 // what, reach (out of reach → 404), and the decision / edit flows.
 
 import { describe, it, expect, beforeEach, afterAll, afterEach } from 'vitest';
-import { CAPABILITIES, indexRoles, permissionDefinitions } from '@aggregator-dpg/rbac';
+import { indexRoles } from '@aggregator-dpg/rbac';
 import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
 import { _setRbacRuntime } from '../services/authz/runtime.js';
 import { shippedRoles, testRbacRuntime } from '../services/authz/testing.js';
@@ -1233,12 +1233,8 @@ describe('console routes /v1/user, /v1/org', () => {
         (res.json() as { error: { code: string } }).error.code;
 
       beforeEach(async () => {
-        // The catalogue as the API leaves it at start: permissions and built-in roles synced.
-        await getRbacCatalogue().sync(
-          permissionDefinitions(CAPABILITIES),
-          await shippedRoles(),
-          'test',
-        );
+        // The catalogue as migration 0031 leaves it at start: the built-in roles seeded.
+        (getRbacCatalogue() as InMemoryRbacCatalogue).setRoles(await shippedRoles());
       });
 
       it('lets the network admin create a role that owners can then assign', async () => {
