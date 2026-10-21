@@ -178,16 +178,27 @@ async function refreshOnce(): Promise<RefreshOutcome> {
 
 /**
  * Reloads the snapshot when the catalogue revision changed. Runs on the timer
- * and right after a role write on this replica; overlapping calls share one
- * run.
+ * and right after a role write on this replica.
  *
- * @returns What the refresh did.
+ * A caller that arrives while a refresh is in flight is **queued behind** it
+ * rather than joined to it. Joining looked cheaper, but a refresh reads the
+ * revision when it starts: a writer that joined a run begun before its own
+ * commit would be told "unchanged" and keep the pre-write snapshot until the
+ * next timer tick. Queueing guarantees every caller observes a read taken
+ * after it asked.
+ *
+ * @returns What the refresh did for this caller.
  */
 export function refreshRbacCatalogue(): Promise<RefreshOutcome> {
-  refreshing ??= refreshOnce().finally(() => {
-    refreshing = null;
+  const run = (): Promise<RefreshOutcome> => refreshOnce();
+  const next: Promise<RefreshOutcome> = refreshing ? refreshing.then(run, run) : run();
+  refreshing = next;
+  void next.finally(() => {
+    // Only the last queued run clears the chain, so a caller that arrives
+    // mid-flight still lands behind it.
+    if (refreshing === next) refreshing = null;
   });
-  return refreshing;
+  return next;
 }
 
 /** Stops the refresh timer (shutdown, re-init, tests). */

@@ -115,13 +115,42 @@ describe('refreshRbacCatalogue', () => {
     expect(getRbacRuntime()).toBe(before);
   });
 
-  it('shares one run between overlapping calls', async () => {
+  it('queues an overlapping call behind the one in flight', async () => {
     await initRbac('log', 0);
     store.setRoles([...store.storedRoles(), viewer]);
     const load = vi.spyOn(store, 'load');
     const [a, b] = await Promise.all([refreshRbacCatalogue(), refreshRbacCatalogue()]);
-    expect([a, b]).toEqual(['reloaded', 'reloaded']);
+    // The first run applies the change; the second re-reads and finds nothing
+    // left to do. Only one load, because the revision already matched.
+    expect([a, b]).toEqual(['reloaded', 'unchanged']);
     expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not hand a writer a read taken before its write', async () => {
+    await initRbac('log', 0);
+    // Hold the first refresh open, then "commit" a role while it is in flight.
+    let release = (): void => {};
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
+    // The in-flight run reads the revision as it was before the write — the
+    // exact race that joining used to paper over.
+    const preWrite = getRbacRuntime()?.catalogueRevision ?? '';
+    const revision = vi.spyOn(store, 'revision');
+    revision.mockImplementationOnce(async () => {
+      await held;
+      return { ok: true as const, value: preWrite };
+    });
+
+    const inFlight = refreshRbacCatalogue();
+    store.setRoles([...store.storedRoles(), viewer]);
+    const writer = refreshRbacCatalogue();
+    release();
+
+    await inFlight;
+    // Joining would have reported `unchanged` off the pre-write read.
+    expect(await writer).toBe('reloaded');
+    expect(getRbacRuntime()?.roles.byKey.has(viewer.key)).toBe(true);
   });
 
   it('runs on the timer and stops with stopRbacRefresh', async () => {
