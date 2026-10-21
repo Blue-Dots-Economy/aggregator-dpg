@@ -5,7 +5,12 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
-import { checkCapability, decisionInput, requirePermission } from '../guard.js';
+import {
+  checkCapability,
+  decisionInput,
+  listCapabilitiesForTargets,
+  requirePermission,
+} from '../guard.js';
 import { _setRbacRuntime } from '../runtime.js';
 import { shippedRoleIndex } from '../testing.js';
 import {
@@ -187,5 +192,51 @@ describe('checkCapability', () => {
   it('lets an aggregator admin manage its organisation', async () => {
     setup('enforce');
     expect((await checkCapability(req(), buildAdminActor(), 'org.manage')).allowed).toBe(true);
+  });
+});
+
+describe('listCapabilitiesForTargets', () => {
+  const owned = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `org-${i}`,
+      orgType: 'aggregator' as const,
+      relation: 'owner' as const,
+      isDefault: false,
+    }));
+
+  it('asks once for organisations that pose the same question', async () => {
+    const { authorizer } = setup('enforce', null);
+    const actor = buildAdminActor({ orgs: owned(5) });
+    const targets = actor.orgs.map((o) => ({ id: o.id, orgType: o.orgType, ancestorIds: [] }));
+
+    const out = await listCapabilitiesForTargets(req(), actor, targets);
+
+    // Same role in all five organisations ⇒ one engine call, five answers.
+    expect(authorizer.listCalls).toHaveLength(1);
+    expect(out?.size).toBe(5);
+    expect(out?.get('org-0')).toEqual(out?.get('org-4'));
+    expect(out?.get('org-0')).toContain('org.manage');
+  });
+
+  it('asks separately when the organisation type differs', async () => {
+    const { authorizer } = setup('enforce', null);
+    const actor = buildAdminActor({
+      orgs: [
+        { id: 'nf', orgType: 'network_facilitator', relation: 'owner', isDefault: false },
+        { id: 'agg', orgType: 'aggregator', relation: 'owner', isDefault: false },
+      ],
+    });
+    const targets = actor.orgs.map((o) => ({ id: o.id, orgType: o.orgType, ancestorIds: [] }));
+
+    const out = await listCapabilitiesForTargets(req(), actor, targets);
+
+    expect(authorizer.listCalls).toHaveLength(2);
+    expect(out?.get('nf')).toContain('network.administer');
+    expect(out?.get('agg')).not.toContain('network.administer');
+  });
+
+  it('returns null when RBAC is off', async () => {
+    _setRbacRuntime(null);
+    expect(await listCapabilitiesForTargets(req(), buildAdminActor(), [])).toBeNull();
   });
 });

@@ -35,7 +35,12 @@ import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { getUserStore, type Coordinator } from '../services/user-store/index.js';
 import { getOrganisationStore, type Organisation } from '../services/organisation-store/index.js';
-import { isNetworkAdmin, requireActor, type Actor } from '../services/auth/actor/index.js';
+import {
+  isNetworkAdmin,
+  requireActor,
+  type Actor,
+  type ActorOrg,
+} from '../services/auth/actor/index.js';
 import { reachesOrg, scopeOrgFilter } from '../services/authz/scope.js';
 import { decideCoordinator } from '../services/decisions/coordinator.js';
 import { mintInviteBatch } from '../services/invites/mint.js';
@@ -52,7 +57,12 @@ import {
   throwDecisionFailure,
   toWireUser,
 } from './console-shared.js';
-import { checkCapability, listActorCapabilities, type TargetOrg } from '../services/authz/index.js';
+import {
+  checkCapability,
+  listActorCapabilities,
+  listCapabilitiesForTargets,
+  type TargetOrg,
+} from '../services/authz/index.js';
 
 const IdParamsSchema = z.object({ id: z.string().uuid() });
 type IdParams = z.infer<typeof IdParamsSchema>;
@@ -144,26 +154,41 @@ async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> {
   const root = await orgStore.findRoot();
   if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
   const rootId = root.value?.id ?? null;
+  // Resolve every organisation and its target first, then ask the decision
+  // engine once per distinct question — this route is loaded on every portal
+  // render, so one OPA round-trip per organisation added up (#884 review).
+  const resolved: Array<{ org: ActorOrg; found: Organisation; target: TargetOrg }> = [];
   for (const o of actor.orgs) {
     const found = o.orgType === 'network_facilitator' ? root : await orgStore.findById(o.id); // NOSONAR typescript:S9382 — sequential by design
     if (!found.ok) dbDown('orgStore.findById', found.error.message);
     if (!found.value) continue;
-    const target: TargetOrg = {
-      id: o.id,
-      orgType: o.orgType,
-      ancestorIds: o.orgType === 'aggregator' && rootId ? [rootId] : [],
-    };
+    resolved.push({
+      org: o,
+      found: found.value,
+      target: {
+        id: o.id,
+        orgType: o.orgType,
+        ancestorIds: o.orgType === 'aggregator' && rootId ? [rootId] : [],
+      },
+    });
+  }
+  const capabilitiesByOrg = await listCapabilitiesForTargets(
+    req,
+    actor,
+    resolved.map((r) => r.target),
+  );
+  for (const { org: o, found } of resolved) {
     orgs.push({
-      id: found.value.id,
-      name: found.value.displayName,
-      slug: found.value.slug,
+      id: found.id,
+      name: found.displayName,
+      slug: found.slug,
       org_type: o.orgType,
       role: o.relation,
-      is_default: found.value.isDefault,
-      capabilities: await listActorCapabilities(req, actor, { target }),
+      is_default: found.isDefault,
+      capabilities: capabilitiesByOrg ? (capabilitiesByOrg.get(o.id) ?? []) : null,
     });
     // An admin's own contact is its orgs' owner contact (one person).
-    if (!self && o.relation === 'owner') self = ownerContact(found.value);
+    if (!self && o.relation === 'owner') self = ownerContact(found);
   }
   if (!self) throw httpError('USER_NOT_PROVISIONED');
 

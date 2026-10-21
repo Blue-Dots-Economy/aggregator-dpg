@@ -26,6 +26,8 @@ import type {
 export class AuthorizerFake extends InMemoryAuthorizer {
   /** Every input passed to `decide`, in order. */
   readonly calls: DecisionInput[] = [];
+  /** Every input passed to `listCapabilities`, in order. */
+  readonly listCalls: CapabilityListInput[] = [];
   private failure: BaseError | null = null;
 
   /**
@@ -58,6 +60,7 @@ export class AuthorizerFake extends InMemoryAuthorizer {
   override async listCapabilities(
     input: CapabilityListInput,
   ): Promise<Result<Capability[], BaseError>> {
+    this.listCalls.push(input);
     if (this.failure) return err(this.failure);
     return super.listCapabilities(input);
   }

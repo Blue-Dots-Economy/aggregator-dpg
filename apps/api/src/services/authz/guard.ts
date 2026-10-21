@@ -286,3 +286,45 @@ export async function listActorCapabilities(
   });
   return [];
 }
+
+/**
+ * Lists the permissions a resolved actor holds in each of several
+ * organisations, asking the engine once per *distinct* question.
+ *
+ * `listCapabilities` is decided purely from the actor's expanded permissions
+ * and the organisation's type, so two targets that produce the same pair ask
+ * the same question. An owner of many organisations normally holds the same
+ * role in each, which collapses to a single call instead of one per
+ * organisation on a route the portal loads on every render.
+ *
+ * @param req - The request (for its logger).
+ * @param actor - The resolved actor.
+ * @param targets - The organisations to answer for.
+ * @param now - Clock, for role expiry. Injectable for tests.
+ * @returns Permissions per organisation id; `null` when RBAC is off.
+ */
+export async function listCapabilitiesForTargets(
+  req: GuardRequest,
+  actor: Actor,
+  targets: readonly TargetOrg[],
+  now: number = Date.now(),
+): Promise<Map<string, Capability[]> | null> {
+  if (!getRbacRuntime()) return null;
+  const out = new Map<string, Capability[]>();
+  // Key the memo on what the engine actually sees, not on the organisation:
+  // same permissions + same org type ⇒ same answer.
+  const answers = new Map<string, Promise<Capability[] | null>>();
+  for (const target of targets) {
+    const rt = getRbacRuntime();
+    if (!rt) return null;
+    const permissions = actorPermissions(rt.roles, actor, target, now);
+    const key = JSON.stringify([permissions, target.orgType]);
+    let answer = answers.get(key);
+    if (!answer) {
+      answer = listActorCapabilities(req, actor, { target, now });
+      answers.set(key, answer);
+    }
+    out.set(target.id, (await answer) ?? []);
+  }
+  return out;
+}
