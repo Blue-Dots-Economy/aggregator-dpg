@@ -27,7 +27,8 @@ function makeRedis(execResult: unknown) {
   const decrby = vi.fn().mockResolvedValue(0);
   const on = vi.fn();
   const quit = vi.fn().mockResolvedValue(undefined);
-  return { multi, incrby, expire, exec, decrby, on, quit };
+  // `status` mirrors ioredis: consume() waits for a connecting socket.
+  return { multi, incrby, expire, exec, decrby, on, quit, status: 'ready' };
 }
 
 describe('checkConsoleWriteRate', () => {
@@ -37,7 +38,8 @@ describe('checkConsoleWriteRate', () => {
   });
 
   it('delegates to an installed override and skips Redis', async () => {
-    const { checkConsoleWriteRate, _setConsoleWriteRateChecker } = await import('./console-rate.js');
+    const { checkConsoleWriteRate, _setConsoleWriteRateChecker } =
+      await import('./console-rate.js');
     const checker = vi.fn(async () => ({ allowed: false, retryAfterSeconds: 42 }));
     _setConsoleWriteRateChecker(checker);
     const r = await checkConsoleWriteRate('actor-1');
