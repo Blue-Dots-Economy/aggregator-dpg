@@ -1,27 +1,24 @@
 /**
  * In-memory RBAC catalogue (`@aggregator-dpg/api`) for unit tests.
  *
- * Mirrors the Postgres store: a sync replaces the built-in roles and keeps
- * custom ones; the revision changes on every write. `failWith` makes later
- * calls fail, to test boot and refresh paths.
+ * Mirrors the Postgres store over migration-seeded data: `setRoles` stands in
+ * for the seed, the revision changes on every write, and `failWith` makes
+ * later calls fail, to test boot and refresh paths.
  */
 
-import type { PermissionDefinition, RoleDefinition } from '@aggregator-dpg/rbac/interface';
+import type { RoleDefinition } from '@aggregator-dpg/rbac/interface';
 import {
   RbacCatalogueBase,
   type CatalogueSnapshot,
   type CatalogueStoreError,
   type CatalogueStoreResult,
-  type SyncResult,
 } from './interface.js';
 
-/** Array-backed {@link RbacCatalogueBase}; `syncs` lists every sync source. */
+/** Array-backed {@link RbacCatalogueBase}. */
 export class InMemoryRbacCatalogue extends RbacCatalogueBase {
-  permissions: PermissionDefinition[] = [];
   private roles: RoleDefinition[] = [];
   private rev = 0;
   private failure: CatalogueStoreError | null = null;
-  readonly syncs: string[] = [];
 
   /** Makes every later call fail with `error` (`null` restores). */
   failWith(error: CatalogueStoreError | null): void {
@@ -29,12 +26,13 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
   }
 
   /**
-   * Replaces the stored roles, as an edit would (test setup only).
+   * Replaces the stored roles, as the migration seed or an edit would (test
+   * setup only).
    *
    * @param roles - The new roles.
    */
-  setRoles(roles: RoleDefinition[]): void {
-    this.roles = structuredClone(roles);
+  setRoles(roles: readonly RoleDefinition[]): void {
+    this.roles = structuredClone(roles) as RoleDefinition[];
     this.rev += 1;
   }
 
@@ -45,24 +43,6 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
 
   private fail(): CatalogueStoreResult<never> | null {
     return this.failure ? { ok: false, error: this.failure } : null;
-  }
-
-  /** {@inheritDoc RbacCatalogueBase.sync} */
-  async sync(
-    permissions: PermissionDefinition[],
-    builtinRoles: RoleDefinition[],
-    source: string,
-  ): Promise<CatalogueStoreResult<SyncResult>> {
-    const failed = this.fail();
-    if (failed) return failed;
-    this.permissions = structuredClone(permissions);
-    const custom = this.roles.filter((r) => !r.isBuiltin);
-    const before = JSON.stringify(this.roles.filter((r) => r.isBuiltin));
-    this.roles = [...structuredClone(builtinRoles), ...custom];
-    const changed = before === JSON.stringify(builtinRoles) ? 0 : builtinRoles.length;
-    if (changed > 0) this.rev += 1;
-    this.syncs.push(source);
-    return { ok: true, value: { changed, retired: 0, keptInUse: [] } };
   }
 
   /** {@inheritDoc RbacCatalogueBase.load} */

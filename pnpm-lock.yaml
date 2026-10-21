@@ -714,9 +714,6 @@ importers:
       '@aggregator-dpg/shared-primitives':
         specifier: workspace:*
         version: link:../shared-primitives
-      js-yaml:
-        specifier: ^5.4.1
-        version: 5.4.3
       zod:
         specifier: ^3.24.0
         version: 3.25.76
@@ -724,9 +721,6 @@ importers:
       '@aggregator-dpg/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
-      '@types/js-yaml':
-        specifier: ^4.0.9
-        version: 4.0.9
       '@types/node':
         specifier: ^26.4.1
         version: 26.6.4

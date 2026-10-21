@@ -1,48 +1,17 @@
 /**
  * Role definitions and their rules (`@aggregator-dpg/rbac`).
  *
- * `config/rbac.yaml` (version 2) holds the built-in roles; custom roles live
- * only in the database. Both pass the same checks, so a broken file stops the
- * boot and a broken catalogue is never loaded. Rules:
- * `docs/rbac/rbac-permissions-and-roles.md` §3–§4.
+ * The built-in roles are the typed `BUILTIN_ROLES` const (seeded into the
+ * database by migration `0031_rbac_seed.sql`); custom roles live only in the
+ * database. Both pass the same checks here, so a broken catalogue is never
+ * loaded. Rules: `docs/rbac/rbac-permissions-and-roles.md` §3–§4.
  *
  * @module @aggregator-dpg/rbac/roles
  */
 
-import { z } from 'zod';
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
-import {
-  BaseForSchema,
-  CapabilitySchema,
-  OrgTypeSchema,
-  UserTypeSchema,
-  type BaseFor,
-  type RoleDefinition,
-} from './interface.js';
+import { BaseForSchema, type BaseFor, type RoleDefinition } from './interface.js';
 import { NOT_THROUGH_ROOT } from './catalogue.js';
-
-const KeySchema = z
-  .string()
-  .min(1)
-  .regex(/^[a-z][a-z0-9_]*$/, 'lower-case letters, digits and underscores');
-
-/** One built-in role as written in `rbac.yaml`. */
-const FileRoleSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().default(''),
-  account_type: UserTypeSchema,
-  base_for: BaseForSchema.nullable().default(null),
-  assignable_org_types: z.array(OrgTypeSchema).min(1),
-  assigned_by: CapabilitySchema.nullable().default(null),
-  max_days: z.number().int().positive().nullable().default(null),
-  permissions: z.array(CapabilitySchema),
-});
-
-/** Zod schema for the whole `rbac.yaml` document. */
-export const RbacFileSchema = z.object({
-  version: z.literal(2),
-  roles: z.record(KeySchema, FileRoleSchema),
-});
 
 /** The account type each base role's holders have. */
 const BASE_ACCOUNT: Record<BaseFor, 'admin' | 'coordinator'> = {
@@ -114,38 +83,4 @@ export function assertRoleCatalogue(roles: readonly RoleDefinition[], source: st
       details: { source, issues },
     });
   }
-}
-
-/**
- * Validates a parsed `rbac.yaml` and returns its built-in roles.
- *
- * @param raw - The parsed YAML.
- * @param source - Where it came from, for the error.
- * @returns The built-in roles, sorted by key.
- * @throws {ConfigError} `RBAC_CONFIG_INVALID` for a malformed file or a broken rule.
- */
-export function parseRbacFile(raw: unknown, source: string): RoleDefinition[] {
-  const parsed = RbacFileSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ConfigError(`Invalid rbac config at ${source}`, {
-      code: 'RBAC_CONFIG_INVALID',
-      details: { source, issues: parsed.error.issues },
-    });
-  }
-  const roles: RoleDefinition[] = Object.entries(parsed.data.roles)
-    .map(([key, r]) => ({
-      key,
-      name: r.name,
-      description: r.description,
-      isBuiltin: true,
-      accountType: r.account_type,
-      baseFor: r.base_for,
-      assignableOrgTypes: r.assignable_org_types,
-      assignedBy: r.assigned_by,
-      maxDays: r.max_days,
-      permissions: r.permissions,
-    }))
-    .sort((a, b) => a.key.localeCompare(b.key));
-  assertRoleCatalogue(roles, source);
-  return roles;
 }

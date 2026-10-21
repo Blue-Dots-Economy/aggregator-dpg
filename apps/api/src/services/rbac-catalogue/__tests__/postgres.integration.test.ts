@@ -1,13 +1,15 @@
 /**
- * Real-Postgres integration tests for migration 0030 (`permission`, `role`,
- * `role_permission`, `user_role`, `iam_audit`) and the Postgres catalogue
- * store (`@aggregator-dpg/api`). Runs only with `INTEGRATION_DATABASE_URL` set
- * (the `db-integration` CI job).
+ * Real-Postgres integration tests for migrations 0030/0031 (`permission`,
+ * `role`, `role_permission`, `user_role`, `iam_audit` and the built-in seed)
+ * and the Postgres catalogue store (`@aggregator-dpg/api`). Runs only with
+ * `INTEGRATION_DATABASE_URL` set (the `db-integration` CI job).
  *
- * Covers what a fake cannot: the migration from scratch, a sync that lands
- * once when replicas race, a revision that changes with every role edit,
- * custom roles surviving a sync, permission deprecation, and the table
- * constraints.
+ * The drift tests are the build-time guard that replaced the old runtime
+ * checksum: against the migrated database they assert the seeded `permission`
+ * rows equal `permissionDefinitions(CAPABILITIES)` and the seeded built-in
+ * roles equal `BUILTIN_ROLES` and pass `roleCatalogueIssues`. The rest covers
+ * what a fake cannot: the revision changing with every role edit, the table
+ * constraints, and the custom-role lifecycle.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import path from 'node:path';
@@ -15,10 +17,10 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import {
+  BUILTIN_ROLES,
   CAPABILITIES,
-  loadRbacFile,
   permissionDefinitions,
-  type RoleDefinition,
+  roleCatalogueIssues,
 } from '@aggregator-dpg/rbac';
 import { buildRole } from '@aggregator-dpg/rbac/testing';
 import { getDb, getPool, closeDb, _setDbClients } from '../../../db/client.js';
@@ -29,12 +31,13 @@ const suite = realUrl ? describe : describe.skip;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.resolve(here, '../../../../drizzle/migrations');
-const SHIPPED = path.resolve(here, '../../../../../../config/rbac.yaml');
 const PERMS = permissionDefinitions(CAPABILITIES);
+const byKey = <T extends { key: string }>(rs: readonly T[]): T[] =>
+  [...rs].sort((a, b) => a.key.localeCompare(b.key));
 
-suite('rbac catalogue (migration 0030) — integration', () => {
+suite('rbac catalogue (migrations 0030/0031) — integration', () => {
   let pool: pg.Pool;
-  let builtins: RoleDefinition[];
+  const builtins = byKey(BUILTIN_ROLES);
   const store = new PostgresRbacCatalogue();
 
   async function revision(): Promise<string> {
@@ -51,7 +54,6 @@ suite('rbac catalogue (migration 0030) — integration', () => {
     getPool({ url: realUrl! });
     await migrate(getDb(), { migrationsFolder: MIGRATIONS_DIR });
     pool = new pg.Pool({ connectionString: realUrl, max: 4 });
-    builtins = (await loadRbacFile([SHIPPED])).roles;
   });
 
   afterAll(async () => {
@@ -73,36 +75,42 @@ suite('rbac catalogue (migration 0030) — integration', () => {
     ]);
   });
 
-  it('syncs once when several replicas race, and audits it once', async () => {
-    const results = await Promise.all(
-      [1, 2, 3].map(() => new PostgresRbacCatalogue().sync(PERMS, builtins, SHIPPED)),
+  it('seeds the permission catalogue equal to the code (drift guard)', async () => {
+    const p = await pool.query(
+      `SELECT key, resource, action, description, sensitive
+         FROM permission WHERE NOT deprecated ORDER BY key`,
     );
-    expect(results.every((r) => r.ok)).toBe(true);
-    expect(results.filter((r) => r.ok && r.value.changed > 0)).toHaveLength(1);
-    const audit = await pool.query(`SELECT details FROM iam_audit WHERE event = 'catalogue.sync'`);
-    expect(audit.rows).toHaveLength(1);
-  });
-
-  it('loads back exactly the built-in roles of rbac.yaml', async () => {
-    const loaded = await store.load();
-    expect(loaded.ok).toBe(true);
-    if (!loaded.ok) return;
-    expect(loaded.value.revision).toMatch(/^[0-9a-f]{32}$/);
-    const byKey = (rs: RoleDefinition[]) => [...rs].sort((a, b) => a.key.localeCompare(b.key));
-    expect(byKey(loaded.value.roles)).toEqual(
-      byKey(builtins).map((r) => ({ ...r, permissions: [...r.permissions].sort() })),
-    );
-  });
-
-  it('stores the permission catalogue with its fields', async () => {
-    const p = await pool.query(`SELECT * FROM permission WHERE key = 'profiles.view_pii'`);
-    expect(p.rows[0]).toMatchObject({
+    expect(p.rows).toEqual(byKey(PERMS));
+    const pii = await pool.query(`SELECT * FROM permission WHERE key = 'profiles.view_pii'`);
+    expect(pii.rows[0]).toMatchObject({
       resource: 'profiles',
       action: 'view_pii',
       sensitive: true,
       deprecated: false,
     });
-    expect((await pool.query(`SELECT count(*)::int AS n FROM permission`)).rows[0].n).toBe(15);
+  });
+
+  it('seeds exactly the built-in roles of BUILTIN_ROLES', async () => {
+    const loaded = await store.load();
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.value.revision).toMatch(/^[0-9a-f]{32}$/);
+    const seeded = byKey(loaded.value.roles.filter((r) => r.isBuiltin));
+    expect(seeded).toEqual(
+      builtins.map((r) => ({ ...r, permissions: [...r.permissions].sort() })),
+    );
+  });
+
+  it('seeds built-in roles that pass the catalogue rules and reference known permissions', async () => {
+    const loaded = await store.load();
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    const seeded = loaded.value.roles.filter((r) => r.isBuiltin);
+    expect(roleCatalogueIssues(seeded)).toEqual([]);
+    const known = new Set<string>(CAPABILITIES);
+    for (const r of seeded) {
+      for (const permissionKey of r.permissions) expect(known.has(permissionKey)).toBe(true);
+    }
   });
 
   it('changes the revision on a role edit and back on its reversal', async () => {
@@ -113,54 +121,6 @@ suite('rbac catalogue (migration 0030) — integration', () => {
       `DELETE FROM role_permission WHERE role_key = 'coordinator' AND permission_key = 'profiles.export'`,
     );
     expect(await revision()).toBe(before);
-  });
-
-  it('keeps a custom role across a sync and resets an edited built-in role', async () => {
-    const viewer = buildRole({ key: 'viewer', permissions: ['profiles.view'] });
-    await pool.query(
-      `INSERT INTO role (key, name, account_type, assignable_org_types, assigned_by)
-       VALUES ('viewer', 'Viewer', 'coordinator', '{aggregator}', 'org.manage')`,
-    );
-    await pool.query(`INSERT INTO role_permission VALUES ('viewer', 'profiles.view')`);
-    await pool.query(`INSERT INTO role_permission VALUES ('coordinator', 'profiles.export')`);
-    const r = await store.sync(PERMS, builtins, SHIPPED);
-    expect(r.ok && r.value.changed).toBeGreaterThan(0);
-    expect(await roleKeys()).toContain(viewer.key);
-    const coord = await pool.query(
-      `SELECT array_agg(permission_key ORDER BY permission_key) AS p FROM role_permission WHERE role_key = 'coordinator'`,
-    );
-    expect(coord.rows[0].p).toEqual(['campaigns.run', 'profiles.onboard', 'profiles.view']);
-  });
-
-  it('writes nothing and audits nothing when already in sync', async () => {
-    const before = (await pool.query(`SELECT count(*)::int AS n FROM iam_audit`)).rows[0].n;
-    const r = await store.sync(PERMS, builtins, SHIPPED);
-    expect(r).toEqual({ ok: true, value: { changed: 0, retired: 0, keptInUse: [] } });
-    expect((await pool.query(`SELECT count(*)::int AS n FROM iam_audit`)).rows[0].n).toBe(before);
-  });
-
-  it('marks a permission the code dropped as deprecated, and restores it', async () => {
-    const fewer = PERMS.filter((p) => p.key !== 'agreement.manage');
-    const r = await store.sync(fewer, builtins, SHIPPED);
-    expect(r.ok && r.value.retired).toBe(1);
-    expect(
-      (await pool.query(`SELECT deprecated FROM permission WHERE key = 'agreement.manage'`)).rows[0]
-        .deprecated,
-    ).toBe(true);
-    await store.sync(PERMS, builtins, SHIPPED);
-    expect(
-      (await pool.query(`SELECT deprecated FROM permission WHERE key = 'agreement.manage'`)).rows[0]
-        .deprecated,
-    ).toBe(false);
-  });
-
-  it('removes a built-in role gone from the file unless it is assigned', async () => {
-    const withExtra = [...builtins, { ...buildRole({ key: 'temp_builtin' }), isBuiltin: true }];
-    await store.sync(PERMS, withExtra, SHIPPED);
-    expect(await roleKeys()).toContain('temp_builtin');
-    const r = await store.sync(PERMS, builtins, SHIPPED);
-    expect(r.ok && r.value.retired).toBe(1);
-    expect(await roleKeys()).not.toContain('temp_builtin');
   });
 
   it('enforces the role constraints', async () => {
@@ -181,7 +141,7 @@ suite('rbac catalogue (migration 0030) — integration', () => {
       ),
     ).rejects.toThrow(/role_key_chk/);
     await expect(
-      pool.query(`INSERT INTO role_permission VALUES ('viewer', 'profiles.teleport')`),
+      pool.query(`INSERT INTO role_permission VALUES ('gone', 'profiles.teleport')`),
     ).rejects.toThrow(/foreign key/);
     await expect(pool.query(`DELETE FROM permission WHERE key = 'profiles.view'`)).rejects.toThrow(
       /foreign key/,
@@ -200,6 +160,7 @@ suite('rbac catalogue (migration 0030) — integration', () => {
 
     expect(await store.createRole(role, admin)).toEqual({ ok: true, value: { created: true } });
     expect(await store.createRole(role, admin)).toEqual({ ok: true, value: { created: false } });
+    expect(await roleKeys()).toContain('auditor');
     const changed = await store.updateRole(
       { ...role, permissions: ['profiles.verify', 'profiles.view'] },
       admin,

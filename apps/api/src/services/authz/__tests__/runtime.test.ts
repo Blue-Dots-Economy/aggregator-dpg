@@ -1,27 +1,27 @@
 /**
  * Unit tests for RBAC boot-time init and the role snapshot refresh
- * (`@aggregator-dpg/api`; design §5).
+ * (`@aggregator-dpg/api`; design §5). The built-in roles are seeded into the
+ * database by migration 0031; here the in-memory catalogue stands in for that
+ * seed via `setRoles(BUILTIN_ROLES)`.
  */
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { BUILTIN_ROLES } from '@aggregator-dpg/rbac';
 import { buildRole } from '@aggregator-dpg/rbac/testing';
 import {
   getRbacRuntime,
   initRbac,
-  rbacConfigCandidates,
   refreshRbacCatalogue,
   stopRbacRefresh,
   _setRbacRuntime,
 } from '../runtime.js';
 import { InMemoryRbacCatalogue, _setRbacCatalogue } from '../../rbac-catalogue/index.js';
 
-const savedRoot = process.env.CONFIG_ROOT;
 let store: InMemoryRbacCatalogue;
 
 beforeEach(() => {
   store = new InMemoryRbacCatalogue();
+  // The catalogue as migration 0031 leaves it at start: the built-in roles seeded.
+  store.setRoles(BUILTIN_ROLES);
   _setRbacCatalogue(store);
 });
 
@@ -29,49 +29,20 @@ afterEach(() => {
   stopRbacRefresh();
   _setRbacRuntime(null);
   _setRbacCatalogue(null);
-  process.env.CONFIG_ROOT = savedRoot;
   vi.useRealTimers();
 });
 
 const viewer = buildRole({ key: 'viewer', permissions: ['profiles.view'] });
 const roleKeys = () => [...getRbacRuntime()!.roles.byKey.keys()].sort();
 
-describe('rbacConfigCandidates', () => {
-  it('lists brand, network and root, most specific first', () => {
-    expect(
-      rbacConfigCandidates({
-        CONFIG_ROOT: '/c',
-        AGGREGATOR_NETWORK: 'purple_dot',
-        AGGREGATOR_BRAND: 'upsdm',
-      }),
-    ).toEqual(['/c/purple_dot/upsdm/rbac.yaml', '/c/purple_dot/rbac.yaml', '/c/rbac.yaml']);
-  });
-
-  it('drops the duplicate when there is no brand', () => {
-    expect(rbacConfigCandidates({ CONFIG_ROOT: '/c', AGGREGATOR_NETWORK: 'blue_dot' })).toEqual([
-      '/c/blue_dot/rbac.yaml',
-      '/c/rbac.yaml',
-    ]);
-  });
-});
-
 describe('initRbac', () => {
   it('loads nothing when off', async () => {
     await initRbac('off');
     expect(getRbacRuntime()).toBeNull();
-    expect(store.syncs).toEqual([]);
   });
 
-  it('syncs the permissions and built-in roles, then loads them', async () => {
+  it('loads the seeded built-in roles', async () => {
     await initRbac('enforce', 0);
-    expect(store.syncs).toHaveLength(1);
-    expect(store.syncs[0]).toMatch(/rbac\.yaml$/);
-    expect(store.permissions).toHaveLength(15);
-    expect(store.permissions.find((p) => p.key === 'profiles.view_pii')).toMatchObject({
-      resource: 'profiles',
-      action: 'view_pii',
-      sensitive: true,
-    });
     expect(roleKeys()).toEqual([
       'coordinator',
       'data_export',
@@ -83,16 +54,10 @@ describe('initRbac', () => {
     expect(getRbacRuntime()).toMatchObject({ mode: 'enforce', catalogueRevision: 'r1' });
   });
 
-  it('keeps custom roles across a sync', async () => {
-    await initRbac('log', 0);
+  it('loads custom roles alongside the built-ins', async () => {
     store.setRoles([...store.storedRoles(), viewer]);
     await initRbac('log', 0);
     expect(roleKeys()).toContain('viewer');
-  });
-
-  it('fails boot when no rbac.yaml exists', async () => {
-    process.env.CONFIG_ROOT = mkdtempSync(join(tmpdir(), 'rbac-root-'));
-    await expect(initRbac('enforce', 0)).rejects.toMatchObject({ code: 'RBAC_CONFIG_NOT_FOUND' });
   });
 
   it('fails boot when the store is down', async () => {
@@ -100,8 +65,7 @@ describe('initRbac', () => {
     await expect(initRbac('log', 0)).rejects.toMatchObject({ code: 'RBAC_CATALOGUE_UNAVAILABLE' });
   });
 
-  it('fails boot when a stored custom role breaks a rule', async () => {
-    await initRbac('log', 0);
+  it('fails boot when a stored role breaks a rule', async () => {
     store.setRoles([...store.storedRoles(), buildRole({ key: 'bad', assignedBy: null })]);
     await expect(initRbac('log', 0)).rejects.toMatchObject({ code: 'RBAC_CONFIG_INVALID' });
   });

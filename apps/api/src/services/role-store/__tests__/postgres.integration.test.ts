@@ -14,11 +14,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { CAPABILITIES, loadRbacFile, permissionDefinitions } from '@aggregator-dpg/rbac';
 import { getDb, getPool, closeDb, _setDbClients } from '../../../db/client.js';
 import { PostgresUserStore } from '../../user-store/postgres.js';
 import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
-import { PostgresRbacCatalogue } from '../../rbac-catalogue/postgres.js';
 import { PostgresRoleStore } from '../postgres.js';
 
 const realUrl = process.env.INTEGRATION_DATABASE_URL;
@@ -26,7 +24,6 @@ const suite = realUrl ? describe : describe.skip;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.resolve(here, '../../../../drizzle/migrations');
-const SHIPPED = path.resolve(here, '../../../../../../config/rbac.yaml');
 const DAY = 24 * 60 * 60 * 1000;
 
 suite('role store (migration 0030) — integration', () => {
@@ -42,8 +39,7 @@ suite('role store (migration 0030) — integration', () => {
     pool = new pg.Pool({ connectionString: realUrl, max: 4 });
     defaultOrgId = (await pool.query(`SELECT id FROM organisations WHERE slug = 'default'`)).rows[0]
       .id;
-    const { roles } = await loadRbacFile([SHIPPED]);
-    await new PostgresRbacCatalogue().sync(permissionDefinitions(CAPABILITIES), roles, SHIPPED);
+    // The built-in roles (pii_access, data_export, …) are seeded by migration 0031.
   });
 
   afterAll(async () => {

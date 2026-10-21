@@ -1,13 +1,12 @@
 /**
  * Test helpers for RBAC in `@aggregator-dpg/api`: a runtime built the way
- * `initRbac` builds it, from the shipped `config/rbac.yaml` built-in roles
+ * `initRbac` builds it, from the `BUILTIN_ROLES` seeded by migration 0031
  * (plus any custom roles a test adds), with an in-process decision engine.
  */
 
-import { join } from 'node:path';
 import {
+  BUILTIN_ROLES,
   indexRoles,
-  loadRbacFile,
   type AuthorizerBase,
   type RoleDefinition,
   type RoleIndex,
@@ -16,12 +15,12 @@ import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
 import type { RbacMode, RbacRuntime } from './runtime.js';
 
 /**
- * The shipped built-in roles from `$CONFIG_ROOT/rbac.yaml`.
+ * The built-in roles seeded by migration 0031, as a fresh mutable copy.
  *
  * @returns The built-in role definitions.
  */
 export async function shippedRoles(): Promise<RoleDefinition[]> {
-  return (await loadRbacFile([join(process.env.CONFIG_ROOT ?? '', 'rbac.yaml')])).roles;
+  return structuredClone(BUILTIN_ROLES) as RoleDefinition[];
 }
 
 /**

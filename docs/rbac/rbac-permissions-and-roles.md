@@ -65,6 +65,8 @@ flowchart LR
 
 ## 3. Built-in roles
 
+The six built-in roles are defined once in code (`BUILTIN_ROLES` in `packages/rbac`) and seeded into the database by migration `0031_rbac_seed.sql` alongside the permission catalogue. They are identical on every instance and change only with a release (a new migration) — there is no per-network or per-brand override. Custom roles live only in the database.
+
 | Role          | Kind                                         | Account type | Assignable in            | Who holds it                                                         | Expiry          |
 | ------------- | -------------------------------------------- | ------------ | ------------------------ | -------------------------------------------------------------------- | --------------- |
 | Network Admin | Base: root owner                             | admin        | root organisation        | The root's owner (`organisations.org_owner` of the root)             | -               |
@@ -109,7 +111,7 @@ Base roles come from the user-org model and are never assigned by hand. Addition
 | Account type                 | A role is assigned only to users of its account type: admin roles to org owners, coordinator roles to coordinators                                                    |
 | Assignable organisations     | A role is assigned only in the organisation types it lists; PII Access is never assigned in the root, so personal data is never reachable through it                  |
 | Expiry                       | A role with a maximum validity (PII Access, 90 days) is assigned with an expiry no later than that; it stops counting when it expires                                 |
-| Built-in roles are fixed     | Their permissions come from code and are re-applied at every start; change access by adding roles, not by editing built-ins                                           |
+| Built-in roles are fixed     | Their permissions come from code (`BUILTIN_ROLES` in `packages/rbac`) and are seeded into the database by migration `0031_rbac_seed.sql`; change a built-in with a new migration, or change access by adding roles, not by editing built-ins |
 
 ---
 
