@@ -26,6 +26,25 @@ const FETCH_TIMEOUT_MS = 5000;
 const DEFAULT_FEATURES: AggregatorFeatures = { custom_roles: false };
 
 /**
+ * Logs a warning without ever throwing.
+ *
+ * The logger writes through a transport worker, and that worker can exit
+ * under the dev server — a `logger.warn` inside the catch below then threw
+ * `the worker has exited`, which escalated a recoverable fetch failure into an
+ * uncaught exception and a spurious 404 on the role-mutation proxies. The
+ * fail-safe return must survive a broken logger.
+ *
+ * @param payload - Structured log fields.
+ */
+function warnSafe(payload: Record<string, unknown>): void {
+  try {
+    logger.warn(payload);
+  } catch {
+    /* logging must never break the request */
+  }
+}
+
+/**
  * Reads the deploy-time capability flags from the aggregator api.
  *
  * Best-effort: on timeout, a non-2xx response, a malformed body, or an absent
@@ -50,7 +69,7 @@ export const getAggregatorFeatures = cache(
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
       if (!res.ok) {
-        logger.warn({
+        warnSafe({
           operation: 'features.getAggregatorFeatures',
           status: 'failure',
           error: `HTTP ${res.status}`,
@@ -61,7 +80,7 @@ export const getAggregatorFeatures = cache(
       const cfg = (await res.json()) as { features?: { custom_roles?: unknown } };
       return { custom_roles: cfg.features?.custom_roles === true };
     } catch (err) {
-      logger.warn({
+      warnSafe({
         operation: 'features.getAggregatorFeatures',
         status: 'failure',
         error: err instanceof Error ? err.message : String(err),

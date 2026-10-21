@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+// The logger writes through a transport worker that can exit under the dev
+// server; a throwing `warn` must not escape the fail-safe path.
+const warn = vi.fn();
+vi.mock('@/lib/logger', () => ({ logger: { warn: (...a: unknown[]) => warn(...a) } }));
+
 import { getAggregatorFeatures, customRolesEnabled } from '@/lib/features.server';
 
 const json = (body: unknown, status = 200) =>
@@ -57,5 +62,27 @@ describe('features.server', () => {
       .fn()
       .mockRejectedValue(new Error('ECONNREFUSED')) as unknown as typeof fetch;
     await expect(customRolesEnabled()).resolves.toBe(false);
+  });
+
+  it('still fails safe when the logger itself throws on the error path', async () => {
+    warn.mockImplementation(() => {
+      throw new Error('the worker has exited');
+    });
+    globalThis.fetch = vi
+      .fn()
+      .mockRejectedValue(new Error('ECONNREFUSED')) as unknown as typeof fetch;
+    await expect(getAggregatorFeatures()).resolves.toEqual({ custom_roles: false });
+    warn.mockReset();
+  });
+
+  it('still fails safe when the logger throws on a non-2xx response', async () => {
+    warn.mockImplementation(() => {
+      throw new Error('the worker has exited');
+    });
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response('nope', { status: 503 })) as unknown as typeof fetch;
+    await expect(getAggregatorFeatures()).resolves.toEqual({ custom_roles: false });
+    warn.mockReset();
   });
 });
