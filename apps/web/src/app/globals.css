@@ -268,6 +268,28 @@ body {
 }
 .bd-table tbody tr:hover { background: var(--bd-table-head-bg); }
 .bd-table tbody tr:last-child td { border-bottom: 0; }
+/* A cell holding prose (a description) wraps instead of widening the table. */
+.bd-table tbody td.bd-wrap {
+  white-space: normal;
+  min-width: 220px;
+}
+
+/* A card or row a link can point at (#id): clears the sticky mobile bar and
+   rings + flashes when it is the target, so the reader sees where they landed.
+   `.bd-anchor-on` is set from the hash by the page: client-side navigation does
+   not update `:target`. */
+.bd-anchor { scroll-margin-top: 80px; }
+.bd-anchor:target,
+.bd-anchor-on {
+  /* Inset, so a row inside a clipped (overflow-hidden) card still shows it. */
+  box-shadow: inset 0 0 0 2px var(--bd-primary);
+  animation: bd-anchor-flash 1.6s ease-out;
+}
+@keyframes bd-anchor-flash {
+  from { background: var(--bd-primary-50); }
+}
+/* A table row cannot carry the inset ring reliably; its cells are tinted. */
+.bd-table tbody tr.bd-anchor-on td { background: var(--bd-primary-50); }
 
 /* Frozen select + identity columns (dashboard participant table). Only from
    `md` up — on a phone two frozen columns would take most of the viewport and

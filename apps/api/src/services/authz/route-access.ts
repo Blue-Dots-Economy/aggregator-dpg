@@ -11,7 +11,13 @@ import { CapabilitySchema, type Capability } from '@aggregator-dpg/rbac';
 import { httpError } from '../../errors/http-error.js';
 import type { AnyAuthContext, AuthContext } from '../auth/access-token.js';
 import type { Actor } from '../auth/actor/interface.js';
-import { checkCapability, requirePermission, resolveCaller, type TokenIdentity } from './guard.js';
+import {
+  checkAnyCapability,
+  checkCapability,
+  requirePermission,
+  resolveCaller,
+  type TokenIdentity,
+} from './guard.js';
 import { getRbacRuntime } from './runtime.js';
 import { recordLoginIdentity } from '../identity-store/record.js';
 
@@ -20,6 +26,8 @@ import { recordLoginIdentity } from '../identity-store/record.js';
  *
  * - `capability`: an end user holding it (organisation set ∩ role, reach).
  *   With `strict`, a deny is refused in `log` mode too.
+ * - `anyCapability`: an end user holding at least one of them, for a route an
+ *   organisation's owner and the network admin share.
  * - `self`: an active account acting on its own record.
  * - `signed_in`: any known account.
  * - `service`: a Keycloak service-account token (no end user).
@@ -28,6 +36,7 @@ import { recordLoginIdentity } from '../identity-store/record.js';
  */
 export type RouteAccess =
   | { capability: Capability; strict?: true }
+  | { anyCapability: readonly Capability[] }
   | { access: 'self' | 'signed_in' | 'service' | 'link_token' | 'public' };
 
 declare module 'fastify' {
@@ -146,7 +155,12 @@ export function assertRouteDeclared(route: RouteOptions): void {
   if (!decl) {
     throw new Error(`RBAC: route ${methods.join(',')} ${url} has no config.rbac declaration`);
   }
-  if ('capability' in decl && !CapabilitySchema.safeParse(decl.capability).success) {
+  const named =
+    'capability' in decl ? [decl.capability] : 'anyCapability' in decl ? decl.anyCapability : [];
+  if ('anyCapability' in decl && named.length === 0) {
+    throw new Error(`RBAC: route ${methods.join(',')} ${url} declares an empty anyCapability`);
+  }
+  if (named.some((c) => !CapabilitySchema.safeParse(c).success)) {
     throw new Error(`RBAC: route ${methods.join(',')} ${url} declares unknown capability`);
   }
   for (const m of methods) if (m !== 'HEAD') declared.set(`${m} ${url}`, decl);
@@ -171,6 +185,18 @@ function refuse(
     reasons: [reason],
   });
   if (mode === 'enforce') throw httpError('FORBIDDEN', { fields: { permission: access } });
+}
+
+/** Refuses (403 in `enforce` mode) an actor holding none of `capabilities`. */
+async function enforceAny(
+  req: FastifyRequest,
+  actor: Actor,
+  capabilities: readonly Capability[],
+): Promise<void> {
+  const out = await checkAnyCapability(req, actor, capabilities);
+  if (!out.allowed) {
+    throw httpError('FORBIDDEN', { fields: { permission: capabilities.join('|') } });
+  }
 }
 
 /**
@@ -201,6 +227,15 @@ export async function enforceRouteAccess(req: FastifyRequest, caller: RouteCalle
   if ('capability' in decl) {
     const out = await requirePermission(req, caller, decl.capability, { strict: decl.strict });
     if (!out.allowed) throw httpError('FORBIDDEN', { fields: { permission: decl.capability } });
+    return;
+  }
+  if ('anyCapability' in decl) {
+    const resolved = await resolveCaller(caller);
+    if ('reason' in resolved) {
+      refuse(req, decl.anyCapability.join('|'), resolved.reason, caller.aggregatorId, rt.mode);
+      return;
+    }
+    await enforceAny(req, resolved.actor, decl.anyCapability);
     return;
   }
   if (decl.access === 'service') {
@@ -235,6 +270,10 @@ export async function enforceActorRouteAccess(req: FastifyRequest, actor: Actor)
   if ('capability' in decl) {
     const out = await checkCapability(req, actor, decl.capability, { strict: decl.strict });
     if (!out.allowed) throw httpError('FORBIDDEN', { fields: { permission: decl.capability } });
+    return;
+  }
+  if ('anyCapability' in decl) {
+    await enforceAny(req, actor, decl.anyCapability);
     return;
   }
   if (decl.access === 'self' && !actor.active)

@@ -1,9 +1,10 @@
 'use client';
 
 /**
- * The network admin's organisation list: approve or reject a pending org, and
- * repair an active org's owner access. A 409 ALREADY_DECIDED response updates
- * the row in place.
+ * The network admin's organisation list. Each name opens the organisation, and
+ * a pending org is approved or rejected in place. A 409 ALREADY_DECIDED
+ * response updates the row in place. Owner access is repaired on the
+ * organisation's page.
  */
 
 import { useState } from 'react';
@@ -12,9 +13,9 @@ import { useTranslations } from 'next-intl';
 import type {
   OrgDecisionResponse,
   OrgSearchResponse,
-  OwnerAccessResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
+import { ConsoleStatusPill, EmptyState } from './ConsoleUi';
 import { errorKey, sendConsole } from '../../lib/console-client';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
@@ -47,56 +48,67 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
     }
   }
 
-  async function repair(id: string) {
-    setBusy(id);
-    const r = await sendConsole<OwnerAccessResponse>(`/api/console/org/repair/${id}`, 'POST', {});
-    setBusy(null);
-    note(id, r.ok ? t('orgs.repaired', { status: r.data.status }) : t(errorKey(r)));
-  }
+  // Decisions are the only row actions; the column shows while one is pending
+  // or a decision has just been made.
+  const showActions = rows.some((r) => r.status === 'pending' || notes[r.id]);
 
-  if (rows.length === 0) return <p className="text-[13.5px] text-ink-600">{t('orgs.empty')}</p>;
+  if (rows.length === 0) return <EmptyState>{t('orgs.empty')}</EmptyState>;
   return (
-    <table className="w-full text-[13.5px]">
-      <tbody>
-        {rows.map((o) => (
-          <tr key={o.id} className="border-t border-(--bd-border) align-top">
-            <td className="py-2">
-              <Link className="text-primary-600 underline" href={`/console/orgs/${o.id}`}>
-                {o.name}
-              </Link>
-              {notes[o.id] ? (
-                <output className="text-[12.5px] text-ink-600 mt-1 block">{notes[o.id]}</output>
-              ) : null}
-            </td>
-            <td>{t(`status.${o.status}`)}</td>
-            <td>
-              {t('home.coordinators', { count: o.coordinator_count })} ·{' '}
-              {t('home.pending', { count: o.pending_count })}
-            </td>
-            <td className="flex gap-2 py-2 justify-end">
-              {o.status === 'pending' ? (
-                <>
-                  <Button disabled={busy === o.id} onClick={() => void decide(o.id, 'approve')}>
-                    {t('orgs.approve')}
-                  </Button>
-                  <Button
-                    kind="danger"
-                    disabled={busy === o.id}
-                    onClick={() => void decide(o.id, 'reject')}
-                  >
-                    {t('orgs.reject')}
-                  </Button>
-                </>
-              ) : null}
-              {o.status === 'active' && !o.is_default ? (
-                <Button kind="ghost" disabled={busy === o.id} onClick={() => void repair(o.id)}>
-                  {t('orgs.repair')}
-                </Button>
-              ) : null}
-            </td>
+    <div className="overflow-x-auto scroll-x">
+      <table className="bd-table">
+        <thead>
+          <tr>
+            <th>{t('orgs.col_name')}</th>
+            <th>{t('orgs.col_status')}</th>
+            <th>{t('orgs.col_counts')}</th>
+            {showActions ? <th style={{ textAlign: 'right' }}>{t('orgs.col_actions')}</th> : null}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((o) => (
+            <tr key={o.id}>
+              <td>
+                <Link
+                  className="font-semibold text-primary-600 hover:underline"
+                  href={`/console/orgs/${o.id}`}
+                >
+                  {o.name}
+                </Link>
+                {notes[o.id] ? (
+                  <output className="text-[12.5px] text-ink-500 mt-1 block whitespace-normal">
+                    {notes[o.id]}
+                  </output>
+                ) : null}
+              </td>
+              <td>
+                <ConsoleStatusPill status={o.status} />
+              </td>
+              <td className="text-ink-600">
+                {t('home.coordinators', { count: o.coordinator_count })} ·{' '}
+                {t('home.pending', { count: o.pending_count })}
+              </td>
+              {showActions ? (
+                <td>
+                  {o.status === 'pending' ? (
+                    <div className="flex gap-2 justify-end">
+                      <Button disabled={busy === o.id} onClick={() => void decide(o.id, 'approve')}>
+                        {t('orgs.approve')}
+                      </Button>
+                      <Button
+                        kind="danger"
+                        disabled={busy === o.id}
+                        onClick={() => void decide(o.id, 'reject')}
+                      >
+                        {t('orgs.reject')}
+                      </Button>
+                    </div>
+                  ) : null}
+                </td>
+              ) : null}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

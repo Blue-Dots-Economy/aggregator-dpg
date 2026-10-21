@@ -9,7 +9,8 @@ import { useState, type SubmitEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import type { UserInviteResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
-import { Card } from '../ui/Card';
+import { I } from '../../icons';
+import { ConsoleSection } from './ConsoleUi';
 import { errorKey, sendConsole } from '../../lib/console-client';
 
 export function InviteForm({ orgs }: Readonly<{ orgs: Array<{ id: string; name: string }> }>) {
@@ -45,12 +46,12 @@ export function InviteForm({ orgs }: Readonly<{ orgs: Array<{ id: string; name: 
   }
 
   return (
-    <Card className="p-4">
+    <ConsoleSection>
       <form
         onSubmit={(e) => void onSubmit(e)}
-        className="flex flex-col gap-3 max-w-xl text-[13.5px]"
+        className="flex flex-col gap-4 max-w-2xl text-[13.5px]"
       >
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1.5">
           <span className="bd-label">{t('invite.org')}</span>
           <select className="bd-input" value={orgId} onChange={(e) => setOrgId(e.target.value)}>
             {orgs.map((o) => (
@@ -60,17 +61,17 @@ export function InviteForm({ orgs }: Readonly<{ orgs: Array<{ id: string; name: 
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1.5">
           <span className="bd-label">{t('invite.recipients')}</span>
           <textarea
-            className="bd-input min-h-[120px]"
+            className="bd-input min-h-[140px]"
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
           <span className="text-[12px] text-ink-500">{t('invite.recipients_hint')}</span>
         </label>
         <div>
-          <Button type="submit" disabled={busy || !orgId}>
+          <Button type="submit" disabled={busy || !orgId} icon={<I.send size={15} />}>
             {t('invite.send')}
           </Button>
         </div>
@@ -80,7 +81,7 @@ export function InviteForm({ orgs }: Readonly<{ orgs: Array<{ id: string; name: 
           </p>
         ) : null}
         {result ? (
-          <output className="flex flex-col gap-1">
+          <output className="flex flex-col gap-1 rounded-[12px] bg-(--bd-primary-50) px-4 py-3 text-ink-700">
             <span>{t('invite.result', { sent: result.sent, resent: result.resent })}</span>
             {result.invalid.length ? (
               <span>
@@ -95,6 +96,6 @@ export function InviteForm({ orgs }: Readonly<{ orgs: Array<{ id: string; name: 
           </output>
         ) : null}
       </form>
-    </Card>
+    </ConsoleSection>
   );
 }

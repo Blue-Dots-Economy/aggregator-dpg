@@ -1,8 +1,9 @@
 'use client';
 
 /**
- * A plain GET form that filters a console list by status. Works without
- * JavaScript; the page re-reads on the server.
+ * A plain GET form that filters a console list by status; the page re-reads on
+ * the server. It applies when the status changes. The Apply button shows only
+ * without JavaScript.
  */
 
 import { useTranslations } from 'next-intl';
@@ -21,13 +22,20 @@ export function StatusFilter({
 }>) {
   const t = useTranslations('console');
   return (
-    <form method="get" action={action} className="flex items-end gap-2 text-[13.5px]">
+    <form method="get" action={action} className="flex items-center gap-2 text-[13.5px]">
       {Object.entries(hidden).map(([k, v]) => (
         <input key={k} type="hidden" name={k} value={v} />
       ))}
-      <label className="flex flex-col gap-1">
-        <span className="bd-label">{t('coordinators.status_filter')}</span>
-        <select name="status" defaultValue={value} className="bd-input">
+      <label className="flex items-center gap-2">
+        <span className="text-[13px] font-medium text-(--bd-fg-muted)">
+          {t('coordinators.status_filter')}
+        </span>
+        <select
+          name="status"
+          defaultValue={value}
+          className="bd-input min-w-[150px]"
+          onChange={(e) => e.currentTarget.form?.requestSubmit()}
+        >
           <option value="">{t('coordinators.all')}</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
@@ -36,9 +44,11 @@ export function StatusFilter({
           ))}
         </select>
       </label>
-      <Button type="submit" kind="ghost">
-        OK
-      </Button>
+      <noscript>
+        <Button type="submit" kind="ghost">
+          {t('coordinators.apply')}
+        </Button>
+      </noscript>
     </form>
   );
 }

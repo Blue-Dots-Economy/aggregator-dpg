@@ -45,7 +45,18 @@ export function reachesOrg(actor: Actor, orgId: string | null): boolean {
  * @returns The ids to search, or `null` for every org.
  */
 export function scopeOrgFilter(actor: Actor, requested?: string): string[] | null {
-  const ids = reachableOrgIds(actor);
+  return narrowOrgFilter(reachableOrgIds(actor), requested);
+}
+
+/**
+ * Narrows a requested org filter to a set of orgs: one outside the set yields
+ * "no orgs" (an empty page).
+ *
+ * @param ids - The allowed org ids, or `null` for every org.
+ * @param requested - The `org_id` filter, if any.
+ * @returns The ids to search, or `null` for every org.
+ */
+export function narrowOrgFilter(ids: string[] | null, requested?: string): string[] | null {
   if (requested === undefined) return ids;
   return ids === null || ids.includes(requested) ? [requested] : [];
 }

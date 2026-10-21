@@ -30,6 +30,7 @@ import {
   type MeResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { getMailer } from '@aggregator-dpg/mailer';
+import { compareCodeUnits } from '@aggregator-dpg/rbac';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
@@ -41,7 +42,12 @@ import {
   type Actor,
   type ActorOrg,
 } from '../services/auth/actor/index.js';
-import { reachesOrg, scopeOrgFilter } from '../services/authz/scope.js';
+import { narrowOrgFilter } from '../services/authz/scope.js';
+import {
+  inManageScope,
+  manageableOrgIds,
+  type ScopePurpose,
+} from '../services/authz/manage-scope.js';
 import { decideCoordinator } from '../services/decisions/coordinator.js';
 import { mintInviteBatch } from '../services/invites/mint.js';
 import { checkInviteMintRate } from '../services/invite-mint-rate.js';
@@ -63,6 +69,8 @@ import {
   listCapabilitiesForTargets,
   type TargetOrg,
 } from '../services/authz/index.js';
+import { getRbacRuntime } from '../services/authz/runtime.js';
+import { getRoleStore } from '../services/role-store/index.js';
 
 const IdParamsSchema = z.object({ id: z.string().uuid() });
 type IdParams = z.infer<typeof IdParamsSchema>;
@@ -76,14 +84,47 @@ function dbDown(subOperation: string, message: string): never {
 }
 
 /**
- * Loads a coordinator within the actor's reach, else 404.
+ * The root organisation's id, or null when there is none yet.
+ *
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function rootOrgId(): Promise<string | null> {
+  const root = await getOrganisationStore().findRoot();
+  if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
+  return root.value?.id ?? null;
+}
+
+/**
+ * The organisations whose coordinators the actor may manage, or with
+ * `view` only read (the network admin sees every organisation's) (#873).
+ *
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function manageScope(
+  req: FastifyRequest,
+  actor: Actor,
+  purpose: ScopePurpose = 'manage',
+): Promise<string[] | null> {
+  return manageableOrgIds(req, actor, await rootOrgId(), purpose);
+}
+
+/**
+ * Loads a coordinator the actor may manage (in reach, and `org.manage` in its
+ * organisation) or, for `view`, read; else 404 so ids cannot be probed.
  *
  * @throws {HttpError} NOT_FOUND / DB_UNAVAILABLE.
  */
-async function coordinatorInReach(actor: Actor, id: string): Promise<Coordinator> {
+async function coordinatorInReach(
+  req: FastifyRequest,
+  actor: Actor,
+  id: string,
+  purpose: ScopePurpose = 'manage',
+): Promise<Coordinator> {
   const row = await getUserStore().findById(id);
   if (!row.ok) dbDown('userStore.findById', row.error.message);
-  if (!row.value || !reachesOrg(actor, row.value.parentOrgId)) throw httpError('NOT_FOUND');
+  if (!row.value || !inManageScope(await manageScope(req, actor, purpose), row.value.parentOrgId)) {
+    throw httpError('NOT_FOUND');
+  }
   return row.value;
 }
 
@@ -128,12 +169,35 @@ async function showsContact(
 }
 
 /**
+ * Reads the additional roles each coordinator on a search page holds in its own organisation.
+ *
+ * @param rows - The coordinators on the page.
+ * @returns Sorted role keys per coordinator id, or null when access control is off.
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function liveRolesOf(rows: readonly Coordinator[]): Promise<Map<string, string[]> | null> {
+  if (!getRbacRuntime()) return null;
+  const live = await getRoleStore().listLiveForUsers(
+    rows.map((r) => r.id),
+    new Date(),
+  );
+  if (!live.ok) dbDown('roleStore.listLiveForUsers', live.error.message);
+  const orgOf = new Map(rows.map((r) => [r.id, r.parentOrgId]));
+  const byUser = new Map<string, string[]>();
+  for (const a of live.value) {
+    if (a.orgId !== orgOf.get(a.userId)) continue;
+    byUser.set(a.userId, [...(byUser.get(a.userId) ?? []), a.roleKey]);
+  }
+  for (const keys of byUser.values()) keys.sort(compareCodeUnits);
+  return byUser;
+}
+
+/**
  * Builds the `read/me` answer for an actor.
  *
  * @throws {HttpError} DB_UNAVAILABLE.
  */
-async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> {
-  // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
+async function meOf(/* NOSONAR */ req: FastifyRequest, actor: Actor): Promise<MeResponse> {
   const orgStore = getOrganisationStore();
   const orgs: MeOrg[] = [];
   let self: { name: string | null; email: string; phone: string | null } | null = null;
@@ -167,6 +231,8 @@ async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> {
         ancestorIds: o.orgType === 'aggregator' && rootId ? [rootId] : [],
       },
     });
+    // An admin's own contact is its orgs' owner contact (one person).
+    if (!self && o.relation === 'owner') self = ownerContact(found.value);
   }
   const capabilitiesByOrg = await listCapabilitiesForTargets(
     req,
@@ -183,8 +249,6 @@ async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> {
       is_default: found.isDefault,
       capabilities: capabilitiesByOrg ? (capabilitiesByOrg.get(o.id) ?? []) : null,
     });
-    // An admin's own contact is its orgs' owner contact (one person).
-    if (!self && o.relation === 'owner') self = ownerContact(found);
   }
   if (!self) throw httpError('USER_NOT_PROVISIONED');
 
@@ -222,7 +286,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.get(
     '/v1/user/read/:id',
     {
-      config: { rbac: { capability: 'org.manage' } },
+      config: { rbac: { anyCapability: ['org.manage', 'network.administer'] } },
       schema: {
         tags: ['console'],
         summary: 'One coordinator within reach',
@@ -233,7 +297,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
-      const row = await coordinatorInReach(actor, id);
+      const row = await coordinatorInReach(req, actor, id, 'view');
       const plain = await showsContact(req, actor, row.parentOrgId ?? null);
       // Audit the contact read: ids only.
       req.log.info({
@@ -250,7 +314,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/user/search',
     {
-      config: { rbac: { capability: 'org.manage' } },
+      config: { rbac: { anyCapability: ['org.manage', 'network.administer'] } },
       schema: {
         tags: ['console'],
         summary: 'Coordinators within reach, newest first',
@@ -264,7 +328,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       const body = req.body as z.infer<typeof UserSearchRequestSchema>;
       const page = await getUserStore().search({
-        orgIds: scopeOrgFilter(actor, body.filter.org_id),
+        orgIds: narrowOrgFilter(await manageScope(req, actor, 'view'), body.filter.org_id),
         ...(body.filter.status ? { status: body.filter.status } : {}),
         ...(body.filter.serves ? { serves: body.filter.serves } : {}),
         ...(body.cursor ? { cursor: decodeUserCursor(body.cursor) } : {}),
@@ -290,8 +354,12 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
           count: plainCount,
         });
       }
+      const roles = await liveRolesOf(page.value.rows);
       return reply.status(200).send({
-        users: page.value.rows.map((row) => toWireUser(row, { masked: !isPlain(row) })),
+        users: page.value.rows.map((row) => ({
+          ...toWireUser(row, { masked: !isPlain(row) }),
+          roles: roles ? (roles.get(row.id) ?? []) : null,
+        })),
         next_cursor: page.value.nextCursor ? encodeUserCursor(page.value.nextCursor) : null,
       });
     },
@@ -316,7 +384,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { actor } = await requireActor(req);
       const body = req.body as z.infer<typeof UserInviteRequestSchema>;
-      if (!reachesOrg(actor, body.org_id)) throw httpError('NOT_FOUND');
+      if (!inManageScope(await manageScope(req, actor), body.org_id)) throw httpError('NOT_FOUND');
       if (body.recipients.length > config.INVITE_MINT_MAX_RECIPIENTS) {
         throw httpError('SCHEMA_VALIDATION', {
           detail: `At most ${config.INVITE_MINT_MAX_RECIPIENTS} recipients per request.`,
@@ -386,7 +454,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
       const body = req.body as z.infer<typeof DecisionRequestSchema>;
-      const row = await coordinatorInReach(actor, id);
+      const row = await coordinatorInReach(req, actor, id);
       await guardWriteRate(actor, reply);
 
       const outcome = await decideCoordinator({
@@ -436,7 +504,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
       const body = req.body as z.infer<typeof UserMetadataUpdateRequestSchema>;
-      const row = await coordinatorInReach(actor, id);
+      const row = await coordinatorInReach(req, actor, id);
       await guardWriteRate(actor, reply);
 
       const networkCfg = await getNetworkConfig();
