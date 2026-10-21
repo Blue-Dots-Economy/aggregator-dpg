@@ -115,6 +115,18 @@ export async function initRbac(
   stopRbacRefresh();
   if (mode === 'off') {
     runtime = null;
+    // A moot combination worth surfacing once at boot: CUSTOM-ROLES is
+    // subordinate to RBAC_MODE, so with RBAC off the capability does nothing
+    // despite being enabled. Warn so an operator is not left expecting role
+    // authoring to work.
+    if (config.RBAC_CUSTOM_ROLES_ENABLED) {
+      logger.warn({
+        operation: 'rbac.init',
+        status: 'skipped',
+        mode,
+        error: 'RBAC_CUSTOM_ROLES_ENABLED has no effect while RBAC_MODE=off',
+      });
+    }
     logger.info({ operation: 'rbac.init', status: 'skipped', mode });
     return;
   }

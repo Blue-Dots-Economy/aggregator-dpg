@@ -12,6 +12,7 @@
  */
 
 import 'server-only';
+import { cache } from 'react';
 import { logger } from './logger';
 
 /** Deploy-time capability flags surfaced by `GET /v1/aggregator-config`. */
@@ -31,38 +32,45 @@ const DEFAULT_FEATURES: AggregatorFeatures = { custom_roles: false };
  * `features` block, returns {@link DEFAULT_FEATURES} (everything off) so a
  * gated surface stays hidden. Never throws.
  *
+ * Wrapped in React's `cache()` (as `server-session.ts` does) so the console
+ * layout, the roles page and the role-mutation proxies share one upstream call
+ * per server request instead of each paying the fetch — a slow api then adds
+ * its latency once, not N times, to a render.
+ *
  * @returns The resolved feature flags, or the fail-safe default.
  */
-export async function getAggregatorFeatures(): Promise<AggregatorFeatures> {
-  const base = process.env.API_BASE_URL ?? 'http://localhost:4000';
-  const start = Date.now();
-  try {
-    const res = await fetch(`${base}/v1/aggregator-config`, {
-      method: 'GET',
-      cache: 'no-store',
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!res.ok) {
+export const getAggregatorFeatures = cache(
+  async function getAggregatorFeatures(): Promise<AggregatorFeatures> {
+    const base = process.env.API_BASE_URL ?? 'http://localhost:4000';
+    const start = Date.now();
+    try {
+      const res = await fetch(`${base}/v1/aggregator-config`, {
+        method: 'GET',
+        cache: 'no-store',
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (!res.ok) {
+        logger.warn({
+          operation: 'features.getAggregatorFeatures',
+          status: 'failure',
+          error: `HTTP ${res.status}`,
+          latency_ms: Date.now() - start,
+        });
+        return DEFAULT_FEATURES;
+      }
+      const cfg = (await res.json()) as { features?: { custom_roles?: unknown } };
+      return { custom_roles: cfg.features?.custom_roles === true };
+    } catch (err) {
       logger.warn({
         operation: 'features.getAggregatorFeatures',
         status: 'failure',
-        error: `HTTP ${res.status}`,
+        error: err instanceof Error ? err.message : String(err),
         latency_ms: Date.now() - start,
       });
       return DEFAULT_FEATURES;
     }
-    const cfg = (await res.json()) as { features?: { custom_roles?: unknown } };
-    return { custom_roles: cfg.features?.custom_roles === true };
-  } catch (err) {
-    logger.warn({
-      operation: 'features.getAggregatorFeatures',
-      status: 'failure',
-      error: err instanceof Error ? err.message : String(err),
-      latency_ms: Date.now() - start,
-    });
-    return DEFAULT_FEATURES;
-  }
-}
+  },
+);
 
 /**
  * Whether the custom-roles capability is enabled for this deployment.
