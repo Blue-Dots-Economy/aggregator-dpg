@@ -9,13 +9,27 @@
  *
  * @module apps/web/src/components/consent/ConsentGate
  */
-import { useEffect, useRef, useState, type JSX } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type JSX,
+  type RefObject,
+  type UIEvent,
+} from 'react';
 import { useTranslations } from 'next-intl';
-import { ArrowDown, Check, X } from 'lucide-react';
+import { ArrowDown, Check, Maximize2, Minimize2, X } from 'lucide-react';
+import { cn } from '../../lib/cn';
 import { MarkdownContent } from '../forms/MarkdownContent';
 import { ConsentProgressTracker } from './ConsentProgressTracker';
 import { useReadProgress } from './read-progress';
 import type { ConsentDoc } from './consent-docs';
+
+/** Type scale for the expanded reader, merged over the MarkdownContent defaults. */
+const EXPANDED_PROSE =
+  'text-[18px] leading-8 space-y-4 [&_h1]:text-2xl [&_h2]:text-xl [&_h3]:text-lg [&_table]:text-[15px] [&_code]:text-[15px]';
 
 /** Props for {@link ConsentGate}. */
 export interface ConsentGateProps {
@@ -58,6 +72,89 @@ export function ConsentGate({
       onAccept={onAccept}
       onCancel={onCancel}
     />
+  );
+}
+
+/** What {@link useFullScreenReader} hands back to the dialog. */
+interface FullScreenReader {
+  /** Whether the gate is in full-screen reading mode. */
+  expanded: boolean;
+  /** Switches full-screen reading mode on or off. */
+  toggleExpanded: () => void;
+  /** Attach to the reader's `onScroll`, so its position survives the switch. */
+  onReaderScroll: (e: UIEvent<HTMLElement>) => void;
+}
+
+/**
+ * Full-screen reading mode for the gate (desktop only — the phone sheet is
+ * already ~92dvh).
+ *
+ * Toggling reflows the text, so a raw scrollTop would land the reader
+ * somewhere else. The scroll *fraction* is kept instead: tracked on every
+ * scroll, restored right after the layout switch, before paint. Esc leaves
+ * full screen; it never dismisses the gate itself.
+ *
+ * @param readerRef - The scrollable reader element.
+ * @returns The mode, its toggle, and the reader's scroll handler.
+ */
+function useFullScreenReader(readerRef: RefObject<HTMLElement | null>): FullScreenReader {
+  const [expanded, setExpanded] = useState(false);
+  const scrollFraction = useRef(0);
+
+  useLayoutEffect(() => {
+    const el = readerRef.current;
+    if (!el) return;
+    const max = el.scrollHeight - el.clientHeight;
+    if (max > 0) el.scrollTop = scrollFraction.current * max;
+  }, [readerRef, expanded]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setExpanded(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [expanded]);
+
+  const toggleExpanded = useCallback(() => setExpanded((v) => !v), []);
+  const onReaderScroll = useCallback((e: UIEvent<HTMLElement>) => {
+    const el = e.currentTarget;
+    const max = el.scrollHeight - el.clientHeight;
+    scrollFraction.current = max > 0 ? el.scrollTop / max : 0;
+  }, []);
+
+  return { expanded, toggleExpanded, onReaderScroll };
+}
+
+/** Props for {@link ExpandToggle}. */
+interface ExpandToggleProps {
+  expanded: boolean;
+  onToggle: () => void;
+}
+
+/**
+ * Header button that switches the gate in and out of full screen. Hidden
+ * below `sm`, where the gate is already a near-full-height sheet.
+ *
+ * @param props - Current mode and the toggle callback.
+ * @returns The toggle button.
+ */
+function ExpandToggle({ expanded, onToggle }: Readonly<ExpandToggleProps>): JSX.Element {
+  const t = useTranslations('consent_gate');
+  const label = expanded ? t('collapse') : t('expand');
+  const Icon = expanded ? Minimize2 : Maximize2;
+  return (
+    <button
+      type="button"
+      aria-pressed={expanded}
+      aria-label={label}
+      title={label}
+      onClick={onToggle}
+      className="hidden shrink-0 rounded-lg p-1.5 text-ink-500 transition-colors hover:bg-slate-100 hover:text-ink-900 sm:inline-flex"
+    >
+      <Icon className="h-5 w-5" aria-hidden="true" />
+    </button>
   );
 }
 
@@ -119,6 +216,7 @@ function ConsentGateDialog({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [agreed, setAgreed] = useState(false);
   const progress = useReadProgress(readerRef, docs);
+  const { expanded, toggleExpanded, onReaderScroll } = useFullScreenReader(readerRef);
 
   // Move focus into the dialog on mount, the same way ConsentModal does: a
   // hard-blocking modal that leaves focus wherever it was tells keyboard and
@@ -134,7 +232,12 @@ function ConsentGateDialog({
   }, [onCancel]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-4">
+    <div
+      className={cn(
+        'fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-4',
+        expanded && 'sm:p-0',
+      )}
+    >
       {/* Inert backdrop: present for the scrim only. Clicking it must not
           dismiss — losing a half-read consent flow by mis-tapping is worse
           than having to use the close button. */}
@@ -143,33 +246,48 @@ function ConsentGateDialog({
         role="dialog"
         aria-modal="true"
         aria-label={t('title')}
-        className="relative z-10 flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-[20px] bg-white shadow-2xl sm:max-w-lg sm:rounded-2xl"
+        className={cn(
+          'relative z-10 flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-[20px] bg-white shadow-2xl sm:max-w-lg sm:rounded-2xl',
+          expanded && 'sm:h-dvh sm:max-h-none sm:max-w-none sm:rounded-none',
+        )}
       >
-        <div className="flex shrink-0 items-start justify-between gap-4 px-5 pb-3 pt-5 sm:px-6 sm:pt-6">
-          <div className="min-w-0">
+        <div
+          className={cn(
+            'flex shrink-0 items-start justify-between gap-4 px-5 pb-3 pt-5 sm:px-6 sm:pt-6',
+            expanded && 'sm:items-center sm:pb-2 sm:pt-4',
+          )}
+        >
+          <div className={cn('min-w-0', expanded && 'sm:flex sm:items-baseline sm:gap-3')}>
             <p className="text-[11px] font-bold uppercase tracking-wide text-(--bd-primary-600)">
               {t('eyebrow')}
             </p>
             <h2 className="mt-0.5 font-display text-xl font-bold leading-tight text-ink-900">
               {t('title')}
             </h2>
-            <p className="mt-1 text-sm text-ink-500">{t('description')}</p>
+            <p className={cn('mt-1 text-sm text-ink-500', expanded && 'sm:hidden')}>
+              {t('description')}
+            </p>
           </div>
-          {onCancel && (
-            <button
-              ref={closeButtonRef}
-              type="button"
-              aria-label={t('close')}
-              onClick={onCancel}
-              className="shrink-0 rounded-lg p-1.5 text-ink-500 transition-colors hover:bg-slate-100 hover:text-ink-900"
-            >
-              <X className="h-5 w-5" aria-hidden="true" />
-            </button>
-          )}
+          <div className="flex shrink-0 items-center gap-1">
+            <ExpandToggle expanded={expanded} onToggle={toggleExpanded} />
+            {onCancel && (
+              <button
+                ref={closeButtonRef}
+                type="button"
+                aria-label={t('close')}
+                onClick={onCancel}
+                className="shrink-0 rounded-lg p-1.5 text-ink-500 transition-colors hover:bg-slate-100 hover:text-ink-900"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="shrink-0 px-4 pb-1 pt-3 sm:px-6">
-          <ConsentProgressTracker docs={docs} progress={progress} />
+        <div className={cn('shrink-0 px-4 pb-1 pt-3 sm:px-6', expanded && 'sm:pt-1')}>
+          <div className={expanded ? 'mx-auto w-full max-w-md' : undefined}>
+            <ConsentProgressTracker docs={docs} progress={progress} />
+          </div>
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col px-5 pt-3 sm:px-6">
@@ -195,6 +313,7 @@ function ConsentGateDialog({
             // rule's default allowlist just doesn't include `region`.
             // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
             tabIndex={0}
+            onScroll={onReaderScroll}
             // `relative`: read-progress.ts measures each section via a
             // getBoundingClientRect delta, which is correct regardless of
             // which ancestor is positioned — this class isn't load-bearing
@@ -203,7 +322,10 @@ function ConsentGateDialog({
             // would expect from `data-consent-section` children measured
             // against it, rather than leaving that an implicit accident of
             // the dialog panel above being `relative`.
-            className="relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-(--bd-border) bg-[#FBFCFF] p-4"
+            className={cn(
+              'relative min-h-0 flex-1 overflow-y-auto rounded-xl border border-(--bd-border) bg-[#FBFCFF] p-4',
+              expanded && 'sm:px-10 sm:py-8',
+            )}
           >
             {docs.map((doc, i) => (
               <section
@@ -211,10 +333,18 @@ function ConsentGateDialog({
                 data-consent-section={doc.id}
                 className={i > 0 ? 'mt-6 border-t border-slate-300 pt-5' : undefined}
               >
-                <h3 className="mb-2 font-display text-[17px] font-bold text-ink-900">
+                <h3
+                  className={cn(
+                    'mb-2 font-display text-[17px] font-bold text-ink-900',
+                    expanded && 'sm:mb-3 sm:text-2xl',
+                  )}
+                >
                   {doc.title}
                 </h3>
-                <MarkdownContent content={doc.body} />
+                <MarkdownContent
+                  content={doc.body}
+                  className={expanded ? EXPANDED_PROSE : undefined}
+                />
               </section>
             ))}
           </section>
@@ -234,39 +364,51 @@ function ConsentGateDialog({
             {progress.allRead ? t('hint_done') : t('hint_scroll')}
           </p>
 
-          <label
-            className={`mt-2.5 flex items-start gap-3 rounded-xl border p-3 transition-colors ${
-              progress.allRead
-                ? 'border-(--bd-primary-600) bg-white'
-                : 'border-(--bd-border) bg-slate-50 opacity-60'
-            }`}
+          <div
+            className={cn(
+              'mt-2.5 flex flex-col gap-3',
+              expanded && 'sm:flex-row sm:items-center sm:gap-6',
+            )}
           >
-            <input
-              type="checkbox"
-              checked={agreed}
-              disabled={!progress.allRead}
-              onChange={(e) => setAgreed(e.target.checked)}
-              className="mt-0.5 h-[19px] w-[19px] shrink-0 accent-(--bd-primary-600)"
-            />
-            <span className="text-[13px] leading-relaxed text-ink-700">{agreeLabel}</span>
-          </label>
+            <label
+              className={cn(
+                'flex items-start gap-3 rounded-xl border p-3 transition-colors',
+                progress.allRead
+                  ? 'border-(--bd-primary-600) bg-white'
+                  : 'border-(--bd-border) bg-slate-50 opacity-60',
+                expanded && 'sm:flex-1',
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={agreed}
+                disabled={!progress.allRead}
+                onChange={(e) => setAgreed(e.target.checked)}
+                className="mt-0.5 h-[19px] w-[19px] shrink-0 accent-(--bd-primary-600)"
+              />
+              <span className="text-[13px] leading-relaxed text-ink-700">{agreeLabel}</span>
+            </label>
 
-          <button
-            type="button"
-            disabled={!progress.allRead || !agreed}
-            onClick={onAccept}
-            // Disabled keeps the brand colour and label (never swaps to a
-            // colour pair that can turn illegible or vanish) and only fades
-            // opacity, the same idea the sibling Signals gate uses for its
-            // CTA — so the button still reads as present-but-inactive rather
-            // than gone. `--bd-primary-200` is not a token this repo
-            // defines, so its previous `disabled:bg-(--bd-primary-200)` fell
-            // back to `transparent`, leaving white text on the panel's own
-            // near-white background: not just pale, but actually invisible.
-            className="mt-3 w-full rounded-xl bg-(--bd-primary-600) py-3.5 text-[15px] font-bold text-white transition-all disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {t('accept')}
-          </button>
+            <button
+              type="button"
+              disabled={!progress.allRead || !agreed}
+              onClick={onAccept}
+              // Disabled keeps the brand colour and label (never swaps to a
+              // colour pair that can turn illegible or vanish) and only fades
+              // opacity, the same idea the sibling Signals gate uses for its
+              // CTA — so the button still reads as present-but-inactive rather
+              // than gone. `--bd-primary-200` is not a token this repo
+              // defines, so its previous `disabled:bg-(--bd-primary-200)` fell
+              // back to `transparent`, leaving white text on the panel's own
+              // near-white background: not just pale, but actually invisible.
+              className={cn(
+                'w-full rounded-xl bg-(--bd-primary-600) py-3.5 text-[15px] font-bold text-white transition-all disabled:cursor-not-allowed disabled:opacity-60',
+                expanded && 'sm:w-auto sm:shrink-0 sm:px-10',
+              )}
+            >
+              {t('accept')}
+            </button>
+          </div>
         </div>
       </div>
     </div>

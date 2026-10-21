@@ -276,3 +276,60 @@ describe('<ConsentGate />', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('<ConsentGate /> expand to full screen', () => {
+  const panel = () => screen.getByRole('dialog');
+
+  it('toggles the panel between its normal size and full screen', () => {
+    render(
+      <Wrapper>
+        <ConsentGate open docs={docs} agreeLabel="I agree" onAccept={vi.fn()} />
+      </Wrapper>,
+    );
+    const expand = screen.getByRole('button', { name: 'Expand to full screen' });
+    expect(expand).toHaveAttribute('aria-pressed', 'false');
+    expect(panel()).not.toHaveClass('sm:h-dvh');
+
+    fireEvent.click(expand);
+    const collapse = screen.getByRole('button', { name: 'Exit full screen' });
+    expect(collapse).toHaveAttribute('aria-pressed', 'true');
+    expect(panel()).toHaveClass('sm:h-dvh', 'sm:max-w-none');
+
+    fireEvent.click(collapse);
+    expect(screen.getByRole('button', { name: 'Expand to full screen' })).toBeInTheDocument();
+    expect(panel()).not.toHaveClass('sm:h-dvh');
+  });
+
+  it('Escape leaves full screen but never dismisses the gate', () => {
+    const onCancel = vi.fn();
+    render(
+      <Wrapper>
+        <ConsentGate open docs={docs} agreeLabel="I agree" onAccept={vi.fn()} onCancel={onCancel} />
+      </Wrapper>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Expand to full screen' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(panel()).not.toHaveClass('sm:h-dvh');
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(panel()).toBeInTheDocument();
+  });
+
+  it('keeps read progress and the ticked agreement across expand and collapse', () => {
+    render(
+      <Wrapper>
+        <ConsentGate open docs={docs} agreeLabel="I agree" onAccept={vi.fn()} />
+      </Wrapper>,
+    );
+    fireEvent.scroll(stubScroller(600, 200, 400));
+    fireEvent.click(screen.getByRole('checkbox'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand to full screen' }));
+    expect(screen.getByRole('checkbox')).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Accept & continue' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Exit full screen' }));
+    expect(screen.getByRole('checkbox')).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Accept & continue' })).toBeEnabled();
+  });
+});

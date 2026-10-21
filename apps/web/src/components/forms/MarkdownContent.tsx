@@ -10,11 +10,14 @@
 import type { JSX } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { cn } from '../../lib/cn';
 
 /** Props for {@link MarkdownContent}. */
 export interface MarkdownContentProps {
   /** GFM Markdown string to render. */
   content: string;
+  /** Extra classes merged over the defaults (tailwind-merge), e.g. a larger type scale. */
+  className?: string | undefined;
 }
 
 /**
@@ -23,14 +26,18 @@ export interface MarkdownContentProps {
  * @param props - The Markdown content string to render.
  * @returns A div containing the rendered Markdown.
  */
-export function MarkdownContent({ content }: MarkdownContentProps): JSX.Element {
+export function MarkdownContent({
+  content,
+  className,
+}: Readonly<MarkdownContentProps>): JSX.Element {
   // The web app does not ship @tailwindcss/typography, and Tailwind's preflight
   // strips default heading/list styling — so every element is styled explicitly
   // via arbitrary variants (descendant selectors so nested inline elements are
   // covered too). Mirrors the Signals-DPG consent Markdown renderer.
   return (
     <div
-      className="text-[14px] leading-relaxed text-ink-700 space-y-3
+      className={cn(
+        `text-[14px] leading-relaxed text-ink-700 space-y-3
         [&_h1]:text-xl [&_h1]:font-bold [&_h1]:text-ink-900 [&_h1]:mt-1
         [&_h2]:text-lg [&_h2]:font-bold [&_h2]:text-ink-900 [&_h2]:mt-1
         [&_h3]:text-[15px] [&_h3]:font-semibold [&_h3]:text-ink-900 [&_h3]:mt-4 [&_h3]:mb-1
@@ -46,7 +53,9 @@ export function MarkdownContent({ content }: MarkdownContentProps): JSX.Element 
         [&_img]:max-w-full [&_img]:rounded [&_img]:my-2
         [&_blockquote]:border-l-4 [&_blockquote]:border-slate-200 [&_blockquote]:pl-4 [&_blockquote]:italic
         [&_code]:bg-slate-100 [&_code]:rounded-sm [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[13px]
-        [&_hr]:border-slate-200 [&_hr]:my-4"
+        [&_hr]:border-slate-200 [&_hr]:my-4`,
+        className,
+      )}
     >
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
