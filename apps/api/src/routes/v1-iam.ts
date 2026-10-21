@@ -38,6 +38,7 @@ import {
   type Role as WireRole,
   type RoleAssignment as WireAssignment,
 } from '@aggregator-dpg/shared-primitives/user-org';
+import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { requireActor } from '../services/auth/actor/index.js';
@@ -67,6 +68,10 @@ function throwCustomFailure(f: CustomRoleFailure): never {
   switch (f.kind) {
     case 'rbac_off':
       throw httpError('RBAC_NOT_ENABLED');
+    // Defense in depth: the routes are not registered when the flag is off, so
+    // this maps to the same 404 a missing route returns if a call reaches it.
+    case 'custom_roles_disabled':
+      throw httpError('NOT_FOUND');
     case 'not_found':
       throw httpError('NOT_FOUND');
     case 'exists':
@@ -264,6 +269,13 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
       return reply.status(200).send({ revoked: res.value });
     },
   );
+
+  // CUSTOM-ROLES authoring (design §4). Registered only when the deploy-time
+  // `RBAC_CUSTOM_ROLES_ENABLED` flag is on; left off (the default) these routes
+  // do not exist — a request 404s and they are absent from the OpenAPI spec.
+  // The primary gate is not-registering here; `custom-roles.ts` carries a
+  // defense-in-depth guard that answers the same 404 if a call ever reaches it.
+  if (!config.RBAC_CUSTOM_ROLES_ENABLED) return;
 
   app.post(
     '/v1/roles/create',

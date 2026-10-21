@@ -28,7 +28,7 @@ import type {
 } from '@aggregator-dpg/network-config/interface';
 import { errorResponses } from '../errors/openapi.js';
 import { getNetworkConfig } from '../services/network-config.js';
-import { enabledRegistrationModes, signalsUiUrls } from '../config.js';
+import { config, enabledRegistrationModes, signalsUiUrls } from '../config.js';
 import { signalsCtaEnabled } from '../services/registration-mode/index.js';
 
 /**
@@ -99,6 +99,13 @@ interface PublicAggregatorConfig {
    * response path has any business adding one that is not.
    */
   signals_ui_urls: Readonly<Record<string, string>>;
+  /**
+   * Deploy-time capability flags the web app reads to show or hide features.
+   * Always present (like `signals_ui_urls`), so the client reads a concrete
+   * boolean rather than inferring the default from an absent key. `custom_roles`
+   * mirrors `RBAC_CUSTOM_ROLES_ENABLED` — the network-admin role-authoring UI.
+   */
+  features: { custom_roles: boolean };
 }
 
 const AggregatorConfigResponseSchema = z
@@ -169,6 +176,9 @@ const AggregatorConfigResponseSchema = z
     // working config into a 500. Tightening this needs the two validators
     // reconciled first — tracked as a follow-up, not done here.
     signals_ui_urls: z.record(z.string(), z.string()),
+    // Deploy-time capability flags. Always present (follows the signals_ui_urls
+    // pattern, not the omitted-when-absent attribution pattern).
+    features: z.object({ custom_roles: z.boolean() }).passthrough(),
   })
   .passthrough();
 
@@ -264,6 +274,7 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
             ]),
         ),
         signals_ui_urls: signalsUiUrls,
+        features: { custom_roles: config.RBAC_CUSTOM_ROLES_ENABLED },
       };
       return reply.header('Cache-Control', 'public, max-age=60').send(payload);
     },

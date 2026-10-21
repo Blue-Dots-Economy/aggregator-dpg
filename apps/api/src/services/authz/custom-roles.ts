@@ -19,6 +19,7 @@ import {
   type RoleDefinition,
   type UserType,
 } from '@aggregator-dpg/rbac';
+import { config } from '../../config.js';
 import type { Actor } from '../auth/actor/index.js';
 import { getRbacCatalogue } from '../rbac-catalogue/index.js';
 import { getRbacRuntime, refreshRbacCatalogue } from './runtime.js';
@@ -29,6 +30,7 @@ export const MAX_CUSTOM_ROLES = 50;
 /** Why a custom-role change did not happen. */
 export type CustomRoleFailure =
   | { kind: 'rbac_off' }
+  | { kind: 'custom_roles_disabled' }
   | { kind: 'not_found' }
   | { kind: 'exists' }
   | { kind: 'builtin' }
@@ -101,6 +103,7 @@ export async function createCustomRole(
   actor: Actor,
   input: CustomRoleInput,
 ): Promise<CustomRoleOutcome<RoleDefinition>> {
+  if (!config.RBAC_CUSTOM_ROLES_ENABLED) return fail({ kind: 'custom_roles_disabled' });
   const rt = getRbacRuntime();
   if (!rt) return fail({ kind: 'rbac_off' });
   const def = toDefinition(input);
@@ -131,6 +134,7 @@ export async function updateCustomRole(
   key: string,
   patch: Partial<Omit<CustomRoleInput, 'key' | 'accountType'>>,
 ): Promise<CustomRoleOutcome<RoleDefinition>> {
+  if (!config.RBAC_CUSTOM_ROLES_ENABLED) return fail({ kind: 'custom_roles_disabled' });
   const rt = getRbacRuntime();
   if (!rt) return fail({ kind: 'rbac_off' });
   const existing = rt.roles.byKey.get(key);
@@ -167,6 +171,7 @@ export async function deleteCustomRole(
   actor: Actor,
   key: string,
 ): Promise<CustomRoleOutcome<void>> {
+  if (!config.RBAC_CUSTOM_ROLES_ENABLED) return fail({ kind: 'custom_roles_disabled' });
   const rt = getRbacRuntime();
   if (!rt) return fail({ kind: 'rbac_off' });
   const existing = rt.roles.byKey.get(key);
