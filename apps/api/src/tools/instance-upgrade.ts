@@ -1,8 +1,7 @@
 /**
- * Release-train operator entry (`@aggregator-dpg/api`; design:
- * docs/plans/user-org-migrate-tool-simplification.md; runbook:
- * docs/user-org-migration-runbook.md). Shipped in the API image and run as a
- * one-off Job with the API's own ConfigMap and Secret:
+ * Instance-upgrade operator tool (`@aggregator-dpg/api`). Runbook:
+ * docs/user-org-migration-runbook.md. Shipped in the API image and run as a
+ * one-off Job with the API's ConfigMap and Secret:
  *
  *   node dist/tools/instance-upgrade.js check [--fix <name> [--id <uuid> | --org-id <uuid>] [--dry-run]]
  *   node dist/tools/instance-upgrade.js run (--snapshot-taken <id> | --dry-run)
@@ -11,13 +10,12 @@
  *   node dist/tools/instance-upgrade.js enable-owners [--dry-run] [--rate <n per second>]
  *   node dist/tools/instance-upgrade.js run-all --snapshot-taken <id>
  *
- * `check` is read-only (fixes excepted). `run` takes a database from 0022 to
- * the latest shipped migration in ONE transaction that also runs every verify
- * gate and commits only when all pass. `check` and `run` need only
- * `DATABASE_URL` and `AGGREGATOR_NETWORK` (+ `AGGREGATOR_BRAND`); `enrich` and
- * `enable-owners` (Phase 5: existing org owners sign in) need the full API
- * environment. Output is counts, check ids, error codes and
- * database ids — never row data. Exit codes: 0 ok, 1 refused / failed, 2 usage.
+ * `check` is read-only, except for fixes. `run` migrates a database from 0022 to
+ * the latest migration in one transaction, runs every verify gate, and commits
+ * only when all pass. `check` and `run` need only `DATABASE_URL` and
+ * `AGGREGATOR_NETWORK` (`AGGREGATOR_BRAND` is optional). `enrich` and
+ * `enable-owners` need the full API environment. Output is counts, check ids, error codes and
+ * database ids, never row data. Exit codes: 0 ok, 1 refused or failed, 2 usage.
  */
 
 import { existsSync, realpathSync } from 'node:fs';
@@ -49,13 +47,13 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const log = pino({ base: { service: 'train' } });
 
-/** The shipped migrations: `<app>/drizzle/migrations` next to `dist/` / `src/`. */
+/** Path of the shipped migrations: `<app>/drizzle/migrations`. */
 const MIGRATIONS = path.resolve(__dirname, '../../drizzle/migrations');
 
-/** The verify scripts of every phase in the instance upgrade, in order (a test ties it to `scripts/sql`). */
+/** Verify scripts of every upgrade phase, in order. A test checks them against `scripts/sql`. */
 export const VERIFY_FILES = ['users-verify.sql', 'organisation-verify.sql', 'cleanup-verify.sql'];
 
-/** Documented fixes: script, and the parameter flag it takes (if any). */
+/** Documented fixes: the script and the parameter flag it takes, if any. */
 const FIXES: Record<string, { file: string; param?: { flag: string; setting: string } }> = {
   'retire-registration': {
     file: 'retire-registration.sql',
@@ -68,10 +66,10 @@ const FIXES: Record<string, { file: string; param?: { flag: string; setting: str
   'expire-stale-presigns': { file: 'expire-stale-presigns.sql' },
 };
 
-/** A refusal: printed as `REFUSED: …`, exit 1. Nothing was changed. */
+/** A refusal. Printed as `REFUSED: …` with exit code 1; nothing was changed. */
 class Refusal extends Error {}
 
-/** The operator SQL: `TRAIN_SQL_DIR`, else `<app>/sql` in the image, else the checkout's `scripts/sql`. */
+/** Operator SQL directory: `TRAIN_SQL_DIR`, else `<app>/sql` (image), else `scripts/sql`. */
 function sqlDir(): string {
   if (process.env.TRAIN_SQL_DIR) return process.env.TRAIN_SQL_DIR;
   const inImage = path.resolve(__dirname, '../../sql');
@@ -98,8 +96,8 @@ function required(name: string): string {
 }
 
 /**
- * A pool whose every connection carries the 0029 backfill network / brand as
- * session settings, applied inside `connect` so no query runs before them.
+ * Creates a pool whose connections carry the backfill network and brand as
+ * session settings, set on connect before any query.
  */
 function openPool(): pg.Pool {
   const network = env('AGGREGATOR_NETWORK') ?? '';
@@ -138,7 +136,7 @@ function openPool(): pg.Pool {
   });
 }
 
-/** Reads the level and refuses foreign rows (an applied migration not shipped). */
+/** Reads the upgrade level. Refuses when an applied migration is not shipped. */
 async function levelOf(db: Queryable): Promise<UpgradeLevel> {
   const journal = await readJournal(MIGRATIONS);
   const applied = await readApplied(db);
@@ -166,7 +164,7 @@ function report(title: string, rows: CheckRow[]): CheckRow[] {
 async function verifyGates(db: Queryable): Promise<CheckRow[]> {
   const failing: CheckRow[] = [];
   for (const file of VERIFY_FILES) {
-    failing.push(...report(file, await runChecks(db, path.join(sqlDir(), file)))); // NOSONAR typescript:S9382 — sequential by design
+    failing.push(...report(file, await runChecks(db, path.join(sqlDir(), file)))); // NOSONAR typescript:S9382 — check files run in order
   }
   return failing;
 }
@@ -175,7 +173,7 @@ async function verifyGates(db: Queryable): Promise<CheckRow[]> {
 async function counts(db: Queryable, file: string): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   for (const stmt of sqlStatements(await readFile(path.join(sqlDir(), file), 'utf8'))) {
-    const r = await db.query<{ key: string; n: string }>(stmt); // NOSONAR typescript:S9382 — sequential by design
+    const r = await db.query<{ key: string; n: string }>(stmt); // NOSONAR typescript:S9382 — statements run in order
     for (const row of r.rows) result.set(row.key, Number(row.n));
   }
   return result;
@@ -200,7 +198,7 @@ async function banner(pool: pg.Pool, command: string, level: UpgradeLevel): Prom
   );
 }
 
-/** F19: the Keycloak realm can do what org approval needs. Read-only. */
+/** Checks that the Keycloak realm supports org approval. Read-only. */
 async function keycloakCheck(): Promise<boolean> {
   const base = env('KEYCLOAK_URL')?.replace(/\/$/, '');
   const realm = env('KEYCLOAK_REALM');
@@ -220,7 +218,7 @@ async function keycloakCheck(): Promise<boolean> {
   }
 }
 
-/** The F19 calls; throws when Keycloak cannot be reached after one retry. */
+/** Keycloak calls for the realm check. Throws when Keycloak is unreachable after one retry. */
 async function keycloakRoles(
   base: string,
   realm: string,
@@ -267,10 +265,7 @@ async function keycloakRoles(
   return ok;
 }
 
-/**
- * Whether a `run` (or a boot migration) holds the migration lock right now —
- * e.g. a run still committing after its terminal was lost.
- */
+/** Whether a `run` or a boot migration holds the migration lock now. */
 async function migrationInProgress(pool: pg.Pool): Promise<boolean> {
   const c = await pool.connect();
   try {
@@ -288,14 +283,14 @@ async function migrationInProgress(pool: pg.Pool): Promise<boolean> {
 async function foreignSessions(db: Queryable): Promise<string[]> {
   const sessions = await otherSessions(db);
   const tools = sessions.filter((s) => s.tool).reduce((n, s) => n + s.count, 0);
-  // Our own pool holds at most one other connection.
+  // This tool's pool holds at most one other connection.
   if (tools > 1)
     out(`  other train sessions: ${tools} (another operator, or an orphan of a killed run)`);
   return sessions.filter((s) => !s.tool).map((s) => `${s.applicationName}:${s.count}`);
 }
 
 /** Runs a documented fix in one transaction; `--dry-run` rolls it back. */
-async function fix(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR typescript:S3776 — inherently branchy migration step; splitting would obscure it
+async function fix(/* NOSONAR typescript:S3776 */ pool: pg.Pool, args: string[]): Promise<number> {
   const name = flag(args, '--fix') ?? '';
   const spec = FIXES[name];
   if (!spec) throw new Refusal(`unknown fix "${name}" (${Object.keys(FIXES).join(', ')})`);
@@ -310,7 +305,7 @@ async function fix(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR 
   try {
     await client.query('BEGIN');
     await client.query(`SET LOCAL lock_timeout = '10s'`);
-    // Never alongside a `run` (or a boot migration) on the same database.
+    // Wait for any `run` or boot migration; fails after the lock timeout.
     await client.query(`SELECT pg_advisory_xact_lock(${MIGRATION_LOCK_SQL_KEY})`);
     if ((await levelOf(client)).state !== 'start') {
       throw new Refusal('the level moved: fixes apply to a database at 0022 only');
@@ -320,7 +315,7 @@ async function fix(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR 
     for (const stmt of sqlStatements(
       await readFile(path.join(sqlDir(), 'fixes', spec.file), 'utf8'),
     )) {
-      const r = await client.query(stmt); // NOSONAR typescript:S9382 — sequential by design
+      const r = await client.query(stmt); // NOSONAR typescript:S9382 — statements run in order
       if (r.command === 'UPDATE' || r.command === 'DELETE')
         out(`  ${r.command.toLowerCase()}d ${r.rowCount ?? 0} row(s)`);
     }
@@ -331,7 +326,7 @@ async function fix(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR 
     await client.query('ROLLBACK').catch(() => undefined);
     if (err instanceof Refusal) throw err;
     const e = err as { code?: string; message?: string };
-    // Our fixes RAISE their own refusals (no row data); anything else: code only.
+    // Fixes raise their own refusals. Other errors print the code only.
     out(
       `fix ${name}: FAILED ${e.code === 'P0001' ? (e.message ?? '') : (e.code ?? 'error')} — nothing changed`,
     );
@@ -342,7 +337,7 @@ async function fix(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR 
   }
 }
 
-async function check(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR typescript:S3776 — inherently branchy migration step; splitting would obscure it
+async function check(/* NOSONAR */ pool: pg.Pool, args: string[]): Promise<number> {
   if (await migrationInProgress(pool)) {
     out(
       'MIGRATION IN PROGRESS — a `run` (or a boot migration) holds the lock; wait, then `check` again',
@@ -391,17 +386,14 @@ async function check(pool: pg.Pool, args: string[]): Promise<number> { // NOSONA
   const ok = failing.length === 0 && kcOk;
   const kcNote = kcOk ? '' : ' + keycloak';
   out(
-    ok
-      ? 'CHECK PASSED — ready for `run`'
-      : `CHECK FAILED — ${failing.length} blocker(s)${kcNote}`,
+    ok ? 'CHECK PASSED — ready for `run`' : `CHECK FAILED — ${failing.length} blocker(s)${kcNote}`,
   );
   return ok ? 0 : 1;
 }
 
 /**
- * Reads the level after a COMMIT that errored. The old transaction holds the
- * migration lock until it commits or aborts, so taking that lock first waits
- * for the real outcome instead of reading a level that is about to change.
+ * Reads the level after a COMMIT that errored. Takes the migration lock first,
+ * so it waits for the old transaction to finish.
  */
 async function levelAfterCommit(pool: pg.Pool): Promise<UpgradeLevel | null> {
   try {
@@ -436,7 +428,7 @@ async function gatesInside(
   return failing.length === 0 && differ.length === 0;
 }
 
-async function run(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR typescript:S3776 — inherently branchy migration step; splitting would obscure it
+async function run(/* NOSONAR typescript:S3776 */ pool: pg.Pool, args: string[]): Promise<number> {
   const dryRun = args.includes('--dry-run');
   const snapshot = flag(args, '--snapshot-taken')?.trim();
   if (!dryRun && !snapshot)
@@ -466,10 +458,10 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR 
   let committing = false;
   try {
     await client.query('BEGIN');
-    // The timeout first, so a stuck boot pod holding the lock fails us fast too.
+    // Set the timeout first, so a lock held by a stuck boot pod fails fast.
     await client.query(`SET LOCAL lock_timeout = '10s'`);
     await client.query(`SELECT pg_advisory_xact_lock(${MIGRATION_LOCK_SQL_KEY})`);
-    // In the transaction itself, so a pooler cannot lose them; then asserted.
+    // Set inside the transaction so a pooler cannot drop them, then checked.
     await client.query(
       `SELECT set_config('aggregator_dpg.network', $1, true),
               set_config('aggregator_dpg.brand', $2, true),
@@ -484,7 +476,7 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR 
         'the session settings did not hold — connect straight to Postgres, not via a pooler',
       );
     }
-    // Re-read inside the lock: another runner may have moved the level.
+    // Re-read inside the lock; another runner may have changed the level.
     const inside = await levelOf(client);
     if (inside.state !== level.state || inside.appliedTag !== level.appliedTag)
       throw new Refusal(`the level moved to ${inside.appliedTag ?? 'nothing'}`);
@@ -518,9 +510,8 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR 
       out(`DRY RUN PASSED in ${Date.now() - started} ms — rolled back: nothing was applied`);
       return 0;
     }
-    // Last look before the point of no return: anything that connected while
-    // the instance upgrade ran (a self-healing deployment, a restarted worker) would run
-    // old code on the new schema.
+    // Check again before commit: a session that connected during the upgrade
+    // would run old code on the new schema.
     const late = await foreignSessions(client);
     if (late.length > 0) {
       await client.query('ROLLBACK');
@@ -562,7 +553,7 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR 
       );
       return 1;
     }
-    // The COMMIT itself failed: it may have landed before the connection dropped.
+    // The COMMIT failed; it may still have applied before the connection dropped.
     const now = await levelAfterCommit(pool);
     if (now?.state === 'done')
       out('COMMIT reported an error, but the instance upgrade IS applied — continue with enrich');
@@ -575,13 +566,6 @@ async function run(pool: pg.Pool, args: string[]): Promise<number> { // NOSONAR 
   }
 }
 
-/**
- * Runs one command.
- *
- * @param argv - The command and its flags.
- * @returns The exit code (0 ok, 1 failed, 2 usage).
- * @throws {Refusal} When a guard refuses.
- */
 /** One step of `run-all`: a tool subcommand and its flags. */
 export interface RunAllStep {
   cmd: string;
@@ -589,11 +573,10 @@ export interface RunAllStep {
 }
 
 /**
- * The ordered steps of `run-all` for a database at `state`. The online steps
- * (`data` / `enrich` / `enable-owners`) require the schema already at head, so
- * they can only be dry-run AFTER the real `run` commits — hence they follow it.
- * A database already at head resumes with just the online block (completed
- * steps re-check and skip themselves).
+ * Returns the ordered `run-all` steps for a database at `state`. The online
+ * steps (`data`, `enrich`, `enable-owners`) need the schema at head, so they
+ * come after `run`. A database already at head gets only the online steps;
+ * completed steps check and skip themselves.
  *
  * @param state - The database's upgrade level.
  * @param snapshot - The `--snapshot-taken` id (required to start from 0022).
@@ -639,9 +622,8 @@ export function planRunAll(
 }
 
 /**
- * Runs each step in order, stopping at the first non-zero exit (e.g. `enrich`
- * on login conflicts). Re-running `run-all` resumes: completed steps re-check
- * and skip. Never throws.
+ * Runs each step in order and stops at the first non-zero exit. Re-running
+ * resumes, since completed steps check and skip. Never throws.
  *
  * @param steps - From {@link planRunAll}.
  * @param runStep - Executes one step, returning its exit code.
@@ -668,10 +650,17 @@ export async function executeRunAll(
   return 0;
 }
 
-async function main(argv: string[]): Promise<number> { // NOSONAR typescript:S3776 — inherently branchy dispatcher; splitting would obscure it
+/**
+ * Runs one command.
+ *
+ * @param argv - The command and its flags.
+ * @returns The exit code: 0 ok, 1 failed, 2 usage.
+ * @throws {Refusal} When a guard refuses.
+ */
+async function main(/* NOSONAR typescript:S3776 */ argv: string[]): Promise<number> {
   const [command, ...args] = argv;
   if (command === 'run-all') {
-    // Full env (it runs enrich / enable-owners against Keycloak).
+    // Needs the full env: enrich and enable-owners call Keycloak.
     const pool = openPool();
     let state: UpgradeState;
     try {
@@ -691,7 +680,7 @@ async function main(argv: string[]): Promise<number> { // NOSONAR typescript:S37
         try {
           return await main([step.cmd, ...step.args]);
         } catch (err) {
-          // A step that throws (not returns a code) still stops run-all cleanly.
+          // A step that throws also stops run-all.
           const e = err as { code?: string; name?: string };
           out(`  ${step.cmd} failed: ${e.code ?? e.name ?? 'error'}`);
           return 1;
@@ -727,7 +716,7 @@ async function main(argv: string[]): Promise<number> { // NOSONAR typescript:S37
           `data runs after the instance upgrade (the database is at ${level.appliedTag ?? 'nothing'})`,
         );
       }
-      // Config-free (DB only); loaded lazily to keep `check` / `run` lean.
+      // Database only; loaded lazily.
       const { DATA_STEPS, runDataSteps } = await import('./instance-upgrade-data.js');
       return await runDataSteps(pool, DATA_STEPS, { dryRun: args.includes('--dry-run') }, out);
     } finally {
@@ -748,12 +737,12 @@ async function main(argv: string[]): Promise<number> { // NOSONAR typescript:S37
   }
 }
 
-/** Whether this module is the process entry (also through a symlink). */
+/** Whether this module is the process entry, including through a symlink. */
 function isEntry(): boolean {
   try {
     return pathToFileURL(realpathSync(process.argv[1] ?? '')).href === import.meta.url;
   } catch {
-    // No such path (e.g. `node -e`): not the entry.
+    // No path (e.g. `node -e`): not the entry.
     return false;
   }
 }
@@ -773,8 +762,8 @@ if (isEntry()) {
 }
 
 /**
- * The CLI, for tests: runs one command and returns its exit code.
+ * Runs one command and returns its exit code. Exported for tests.
  *
- * @throws {Refusal} When a guard refuses (the entry prints `REFUSED: …`).
+ * @throws {Refusal} When a guard refuses.
  */
 export { main as _main };
