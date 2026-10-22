@@ -1,9 +1,9 @@
 /**
  * Filesystem implementation of ConfigServiceBase.
  *
- * Reads config/env/<env>.yaml override files and exposes typed get/require
- * accessors. Per-package schema discovery and defaults merging are added in
- * F-03.2 and F-03.3. Throws ConfigError on any load failure.
+ * Discovers per-package schemas, merges defaults and config/env/<env>.yaml
+ * overrides, and exposes typed get/require accessors. Throws ConfigError on any
+ * load failure.
  *
  * Import via the ./fs subpath — never import from src/fs directly.
  *
@@ -35,9 +35,7 @@ function loadYaml(filePath: string): Record<string, unknown> {
   if (!existsSync(filePath)) return {};
   try {
     const raw = readFileSync(filePath, 'utf8');
-    // An empty (or whitespace-only) file is an empty override. js-yaml 5 throws
-    // "expected a document, but the input is empty" on such input rather than
-    // returning undefined like v4 did, so short-circuit before parsing.
+    // An empty file is an empty override. js-yaml throws on empty input.
     if (raw.trim() === '') return {};
     const parsed = parseYaml(raw);
     if (parsed === null || parsed === undefined) return {};
@@ -92,9 +90,7 @@ export class FsConfigService extends ConfigServiceBase {
     const packagesDir = join(this.repoRoot, 'packages');
     this.registry = await discoverPackages(packagesDir);
 
-    // Seed store with per-package defaults (each nested under its configKey).
-    // TypeScript defaults provide typed baselines; config.defaults.yaml lets
-    // deployable package defaults change without editing source.
+    // Per-package defaults: TypeScript defaults, then config.defaults.yaml on top.
     const merged: Record<string, unknown> = {};
     for (const [key, pkg] of this.registry) {
       const defaults: Record<string, unknown> = {};
@@ -120,14 +116,13 @@ export class FsConfigService extends ConfigServiceBase {
       merged[key] = defaults;
     }
 
-    // Env YAML deep-merges on top, overriding any defaults.
+    // Env YAML overrides the defaults.
     const envFilePath = join(this.repoRoot, 'config', 'env', `${env}.yaml`);
     deepMerge(merged, loadYaml(envFilePath));
 
-    // Interpolate ${VAR} / ${VAR:-default} placeholders before Zod validation.
     const interpolated = interpolateConfig(merged);
 
-    // Validate against composite schema; store receives Zod-coerced output.
+    // The store holds the Zod-coerced output.
     this.store = validateConfig(interpolated, this.registry);
     this.currentEnv = env;
   }

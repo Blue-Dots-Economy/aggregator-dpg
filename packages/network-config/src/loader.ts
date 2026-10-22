@@ -1,11 +1,10 @@
 /**
- * File + HTTP config loader.
+ * File and HTTP network-config loader for the api and worker.
  *
  * Reads `aggregator.config.yaml` from disk, fetches the upstream
- * signalstack `network.json` over HTTPS, sniffs identity selectors,
- * and resolves a singleton {@link ResolvedNetworkConfig} the api +
- * worker consume. Last-known-good cache lets the aggregator survive
- * a transient signalstack/GitHub outage on restart.
+ * signalstack `network.json` over HTTPS, derives identity selectors, and
+ * builds one {@link ResolvedNetworkConfig}. A last-known-good cache lets
+ * the aggregator start when the upstream is briefly unavailable.
  *
  * @module @aggregator-dpg/network-config/loader
  */
@@ -40,10 +39,9 @@ import { sniffIdentitySelectors } from './sniffer.js';
 import { resolveConsentSourceOverride, resolveNetworkSourceOverride } from './paths.js';
 
 /**
- * Loader-internal shape of the sibling `brand.json` file. Not exported
- * from the package — external callers consume the merged
- * `BrandConfig` (with `palette`/`typography`/`logo`) on
- * `ResolvedNetworkConfig.aggregator.brand`.
+ * Shape of the sibling `brand.json` file.
+ *
+ * Internal. Callers read the merged result on `ResolvedNetworkConfig.aggregator.brand`.
  */
 const BrandJsonSchema = z.object({
   brand: z
@@ -65,28 +63,27 @@ export interface FileNetworkConfigLoaderOptions {
   /** Absolute path to the aggregator YAML config. */
   configPath: string;
   /**
-   * Directory for the last-known-good signalstack network.json. The
-   * fetcher writes a copy here on success and falls back to it on
-   * upstream failure. Skip the cache by leaving this unset.
+   * Directory for the last-known-good fetched files.
+   *
+   * Written on a successful fetch and read when the fetch fails. Unset disables the cache.
    */
   cacheDir?: string;
-  /** Override for the network.json fetcher. Tests inject a stub. */
+  /** Fetch implementation. Tests inject a stub. */
   fetchImpl?: typeof fetch;
-  /** Per-request timeout for the network.json GET. */
+  /** Per-request fetch timeout in milliseconds. */
   fetchTimeoutMs?: number;
   /**
-   * Deploy-time replacement for the YAML `aggregator.network.source` URL.
-   * Defaults to the `AGGREGATOR_NETWORK_SOURCE` env var (see
-   * {@link resolveNetworkSourceOverride}); pass explicitly in tests. Must be
-   * a valid URL — a malformed value fails `load()` with
-   * `CONFIG_PARSE_FAILED` instead of silently falling back to the YAML.
+   * Replaces the YAML `aggregator.network.source` URL.
+   *
+   * Defaults to `AGGREGATOR_NETWORK_SOURCE` (see {@link resolveNetworkSourceOverride}).
+   * A malformed URL fails `load()` with `CONFIG_PARSE_FAILED`.
    */
   networkSourceOverride?: string;
   /**
-   * Deploy-time replacement for the YAML `aggregator.network.consent_source`
-   * URL. Defaults to the `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE` env var (see
-   * {@link resolveConsentSourceOverride}); pass explicitly in tests. Must be a
-   * valid URL — a malformed value fails `load()` with `CONFIG_PARSE_FAILED`.
+   * Replaces the YAML `aggregator.network.consent_source` URL.
+   *
+   * Defaults to `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE` (see {@link resolveConsentSourceOverride}).
+   * A malformed URL fails `load()` with `CONFIG_PARSE_FAILED`.
    */
   consentSourceOverride?: string;
 }
@@ -121,11 +118,8 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
     const yaml = await this.readYaml();
     if (!yaml.success) return err(yaml.error);
 
-    // Deploy-time env override (#512): swap the signalstack network.json
-    // source without rebuilding the image or editing the mounted YAML. The
-    // override is applied onto the parsed YAML so the resolved config and the
-    // fetch use the same value. Fail loud on a malformed URL — silently
-    // falling back to the YAML would mask a broken deployment.
+    // The env override replaces the YAML source, so the resolved config and the
+    // fetch use the same URL. A malformed URL is an error, not a fallback.
     const override = this.opts.networkSourceOverride;
     if (override !== undefined) {
       const checked = z.string().url().safeParse(override);
@@ -138,8 +132,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
       yaml.value.aggregator.network.source = checked.data;
     }
 
-    // `source` is optional in the YAML (a deployment may rely solely on the
-    // env override) — but at least one of the two must resolve a URL.
+    // Either the YAML or the env override must provide a URL.
     const source = yaml.value.aggregator.network.source;
     if (!source) {
       return err({
@@ -156,11 +149,9 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
     const resolved = resolveDomains(yaml.value, network.value);
     if (!resolved.success) return err(resolved.error);
 
-    // Participant consent is fetched the same way as network.json (timeout +
-    // last-known-good cache) but is NON-fatal: unlike network.json it has an
-    // on-disk fallback in the web app, so a fetch/parse failure leaves
-    // `participantConsent` undefined rather than failing boot. Same
-    // env-override → YAML precedence, and the same fail-loud on a malformed URL.
+    // Participant consent is fetched like network.json, but a fetch failure is
+    // not fatal: `participantConsent` stays undefined and the web app uses its
+    // on-disk copy. A malformed override URL is still an error.
     const consentOverride = this.opts.consentSourceOverride;
     if (consentOverride !== undefined) {
       const checked = z.string().url().safeParse(consentOverride);
@@ -217,9 +208,12 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
   }
 
   /**
-   * Merge a sibling `brand.json` (design-system file) into the parsed
-   * YAML brand block. Absent or malformed file falls through — the
-   * aggregator must still boot on flat YAML fields alone.
+   * Merges a sibling `brand.json` into the parsed YAML brand block.
+   *
+   * A missing file is fine. An invalid file returns `CONFIG_PARSE_FAILED`.
+   *
+   * @param yaml - The validated aggregator config.
+   * @returns The config with brand tokens merged in, or a parse error.
    */
   private async mergeBrandJson(
     yaml: AggregatorYaml,
@@ -229,7 +223,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
     try {
       raw = await fs.readFile(brandPath, 'utf8');
     } catch {
-      // brand.json is optional — silent fall-through.
+      // brand.json is optional.
       return ok(yaml);
     }
     let parsed: unknown;
@@ -307,9 +301,11 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
   }
 
   /**
-   * Writes a fetched payload to its last-known-good cache file (best-effort).
-   * Shared by the network.json and consent.json fetch paths — the `kind`
-   * selects the cache filename suffix.
+   * Writes a fetched payload to its last-known-good cache file, best effort.
+   *
+   * @param url - Source URL; sets the file name.
+   * @param kind - Selects the file name suffix.
+   * @param payload - The data to write.
    */
   private async writeCacheFile(
     url: string,
@@ -322,15 +318,13 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
       await fs.mkdir(path.dirname(cachePath), { recursive: true });
       await fs.writeFile(cachePath, JSON.stringify(payload, null, 2), 'utf8');
     } catch {
-      // Best-effort cache write — fall through silently. The next boot
-      // will re-attempt the upstream fetch.
+      // Best effort. The next boot fetches again.
     }
   }
 
   private cachePath(url: string, kind: 'network' | 'consent' = 'network'): string | null {
     if (!this.opts.cacheDir) return null;
-    // Deterministic file name per source URL so different deployments
-    // sharing a host don't overwrite each other.
+    // One file per source URL, so deployments sharing a host do not collide.
     const safe = url.replace(/[^a-z0-9]/gi, '_').slice(0, 200);
     return path.join(this.opts.cacheDir, `${safe}.${kind}.json`);
   }
@@ -338,10 +332,12 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
   // ─── participant consent.json ───────────────────────────────────────────────
 
   /**
-   * Fetches + validates the participant `consent.json`, mirroring
-   * {@link fetchNetwork} (timeout + last-known-good cache). Returns null on any
-   * failure with no cached copy — consent is optional (the web app falls back to
-   * its on-disk copy), so a failure must never fail aggregator boot.
+   * Fetches and validates the participant `consent.json`, with timeout and cache.
+   *
+   * Never fails boot.
+   *
+   * @param url - The consent document URL.
+   * @returns The document, or null on failure with no cached copy.
    */
   private async fetchConsent(url: string): Promise<ParticipantConsentDoc | null> {
     const fetchImpl = this.opts.fetchImpl ?? fetch;
@@ -441,9 +437,7 @@ function resolveDomains(
       itemType,
       schema,
       identity,
-      // Registration-form gates — mirror signalstack network.json, defaulting
-      // to "off" so an older network.json without these keys collects neither
-      // consent nor birth year (#613).
+      // Missing keys default to off: no consent step and no birth year.
       guardianConsentRequired: d.guardian_consent_required === true,
       goLiveRequired: Array.isArray(d.go_live_required) ? d.go_live_required : [],
       ...(d.dashboard_tiles !== undefined ? { dashboardTiles: d.dashboard_tiles } : {}),
@@ -473,10 +467,10 @@ function pickIdentity(
 }
 
 /**
- * Overlay design-token fields (`palette`, `typography`, `logo`,
- * `strapline`) from a sibling `brand.json` onto the YAML brand
- * block. Flat YAML fields (`primary_color`, `short_name`, ...) always
- * win — they are deploy-state and operator-authoritative.
+ * Copies design tokens from `brand.json` onto the YAML brand block.
+ *
+ * Sets `palette`, `typography`, `logo`, `attribution` and `strapline`. Flat
+ * YAML fields such as `primary_color` are not changed.
  */
 function applyBrandJson(yaml: AggregatorYaml, brand: BrandJson): AggregatorYaml {
   return {

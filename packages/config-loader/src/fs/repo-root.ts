@@ -1,10 +1,8 @@
 /**
  * Shared filesystem probes for locating the monorepo `config/` tree.
  *
- * Extracted so the consent loader and the signals-roles loader resolve the
- * repo root the same way. Two copies of this rule would drift the moment an
- * app's working directory changed — the whole point of the upward search is
- * that it tolerates being called from `apps/web`, `apps/api` or the root.
+ * Used by the consent loader and the signals-roles loader. Works when called
+ * from `apps/web`, `apps/api` or the repo root.
  *
  * @module @aggregator-dpg/config-loader/fs
  */
@@ -38,8 +36,7 @@ export async function fileExists(filePath: string): Promise<boolean> {
  *   - `.`
  *
  * @param startDir - Directory to start searching from (usually `process.cwd()`).
- * @param errorCode - Typed-error code to use when nothing matches, so callers
- *   keep their own diagnostic vocabulary.
+ * @param errorCode - Error code to use when no root is found.
  * @returns Absolute path to the directory that owns `config/`.
  * @throws {ConfigError} If no suitable root is found.
  */

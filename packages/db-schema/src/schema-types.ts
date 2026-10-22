@@ -1,7 +1,5 @@
 /**
- * String-literal types mirroring the DB enums in `schema.ts`.
- * Re-exported for downstream services that don't want to pull in the full
- * Drizzle schema module.
+ * String-literal types matching DB enums, for callers that do not import the Drizzle schema.
  */
 
 export type AggregatorActorType = 'aggregator' | 'seeker' | 'provider';

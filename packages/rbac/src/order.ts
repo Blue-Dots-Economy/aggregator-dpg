@@ -6,10 +6,8 @@
  */
 
 /**
- * Orders two strings by UTF-16 code unit, the order `Array.prototype.sort()`
- * uses without a compare function. Kept explicit so sorted outputs (decision
- * reasons, held capabilities, role permissions) stay stable and
- * locale-independent.
+ * Orders two strings by UTF-16 code unit, the default `Array.prototype.sort()`
+ * order. Keeps sorted outputs stable and locale-independent.
  *
  * @param a - First string.
  * @param b - Second string.

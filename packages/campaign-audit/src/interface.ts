@@ -1,20 +1,18 @@
 /**
- * Campaign PII-action audit writer (#617).
+ * Campaign PII-action audit writer (`@aggregator-dpg/campaign-audit`).
  *
- * WRITE-ONLY BY DESIGN. There is no update, no delete, and no read on this
- * surface — that absence IS the append-only guarantee. A caller cannot rewrite
- * history because the vocabulary to do so does not exist. Do not add a read
- * method "for convenience": compliance queries the table directly.
+ * Write-only: there is no update, delete or read method, which keeps the audit
+ * append-only. Do not add a read method; compliance queries the table directly.
  *
- * NEVER pass a participant PII value into any of these inputs. Field NAMES and
- * counts only; `recipientRef` is an operator address, never a participant's.
+ * Never pass a participant PII value into these inputs. Use field names and
+ * counts only; `recipientRef` is an operator address.
  *
  * @module @aggregator-dpg/campaign-audit
  */
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 
-/** The audited action. Wider than the campaign channels — the dump is audited too. */
+/** The audited action: a campaign channel, or the dump. */
 export type AuditChannel = 'export' | 'email' | 'voice' | 'dump';
 
 /** Result of a completed action. Never set on a `requested` row. */
@@ -23,8 +21,8 @@ export type AuditOutcome = 'succeeded' | 'partial' | 'failed';
 /**
  * The `requested` row, written by the API when a campaign is accepted.
  *
- * Carries the fields only the HTTP request knows — `requestIp`, `actorAzp`,
- * `endpoint`, the Keycloak subject. The worker cannot recover these later.
+ * Carries the fields only the HTTP request knows: `requestIp`, `actorAzp`,
+ * `endpoint` and the Keycloak subject.
  */
 export interface RequestedAuditInput {
   /** = `campaign_job.id`. */
@@ -33,7 +31,7 @@ export interface RequestedAuditInput {
   actorUserId: string;
   actorSignalstackOrgId: string;
   actorAzp?: string;
-  /** PII field NAMES that this action will release. Never values. */
+  /** PII field names this action will release. Never values. */
   piiFields: string[];
   itemCount: number;
   requestedAt: Date;
@@ -48,12 +46,10 @@ export interface RequestedAuditInput {
 }
 
 /**
- * The `completed` row, written by the worker once the job reaches a TERMINAL
- * status. Never written for a mid-sequence attempt that will be retried.
+ * The `completed` row, written by the worker once the job reaches a terminal
+ * status. Never written for an attempt that will be retried.
  *
- * `actorSignalstackOrgId` is repeated here on purpose: the worker already loads the job,
- * so it is free, and it keeps "everything org X did" a single indexed scan
- * instead of a self-join.
+ * `actorSignalstackOrgId` is repeated so per-org queries need no self-join.
  */
 export interface CompletedAuditInput {
   correlationId: string;
@@ -68,19 +64,19 @@ export interface CompletedAuditInput {
   failedCount?: number;
   sentCount?: number;
   errorCode?: string;
-  /** Export-link recipient — an OPERATOR address. */
+  /** Export-link recipient. An operator address. */
   recipientRef?: string;
 }
 
 /**
  * The single row for a non-PII dump access.
  *
- * The dump is synchronous, has no org, no items and no purpose, so it produces
- * ONE row rather than the request/complete pair. `actorSignalstackOrgId` is absent by
- * design — that is the signature of a whole-network access.
+ * The dump is synchronous and has no org, items or purpose, so it writes one
+ * row instead of a requested/completed pair. It has no `actorSignalstackOrgId`
+ * because it is a whole-network access.
  */
 export interface DumpAuditInput {
-  /** Generated per request — there is no job to borrow an id from. */
+  /** Generated per request; there is no job id. */
   correlationId: string;
   actorUserId: string;
   actorAzp?: string;
@@ -99,39 +95,31 @@ export interface DumpAuditInput {
 }
 
 /**
- * Append-only audit writer. Implementations must never expose update, delete,
- * or read.
+ * Append-only audit writer. Implementations must not expose update, delete or read.
  */
 export abstract class CampaignAuditWriterBase {
   /**
-   * Appends the `requested` row for a campaign action, at the moment the API
-   * accepts it and before any work has started.
+   * Appends the `requested` row when the API accepts a campaign action.
    *
-   * @param input - Request-time fields the worker cannot recover later
-   *   (requester identity, endpoint, PII field names, item count).
-   * @returns ok(void) on successful insert; err(BaseError) on validation
-   *   failure or DB/upstream error.
+   * @param input - Requester identity, endpoint, PII field names and item count.
+   * @returns ok(void) on insert; err(BaseError) on validation or database failure.
    */
   abstract recordRequested(input: RequestedAuditInput): Promise<Result<void, BaseError>>;
 
   /**
-   * Appends the `completed` row once a campaign job reaches a TERMINAL
-   * status. Must not be called for a mid-sequence attempt that will retry.
+   * Appends the `completed` row once a campaign job reaches a terminal status.
+   * Do not call it for an attempt that will be retried.
    *
-   * @param input - Outcome + counts for the finished job, keyed by the same
-   *   `correlationId` as the matching `recordRequested` call.
-   * @returns ok(void) on successful insert; err(BaseError) on validation
-   *   failure or DB/upstream error.
+   * @param input - Outcome and counts, keyed by the `recordRequested` `correlationId`.
+   * @returns ok(void) on insert; err(BaseError) on validation or database failure.
    */
   abstract recordCompleted(input: CompletedAuditInput): Promise<Result<void, BaseError>>;
 
   /**
    * Appends the single row for a synchronous, non-PII dump access.
    *
-   * @param input - Requester identity + outcome for the whole-network dump;
-   *   has no `actorSignalstackOrgId` by design.
-   * @returns ok(void) on successful insert; err(BaseError) on validation
-   *   failure or DB/upstream error.
+   * @param input - Requester identity and outcome for the whole-network dump.
+   * @returns ok(void) on insert; err(BaseError) on validation or database failure.
    */
   abstract recordDumpAccess(input: DumpAuditInput): Promise<Result<void, BaseError>>;
 }

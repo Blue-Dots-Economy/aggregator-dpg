@@ -1,8 +1,7 @@
 /**
  * Drizzle-backed audit writer.
  *
- * Only ever INSERTs. There is no update or delete here, and none should be
- * added — see the interface module doc.
+ * Only inserts rows. Do not add update or delete.
  *
  * @module @aggregator-dpg/campaign-audit/postgres
  */
@@ -19,12 +18,8 @@ import {
 } from './interface.js';
 
 /**
- * The exact row shape Drizzle expects for a `campaign_pii_audit` INSERT,
- * derived from {@link campaignPiiAudit} itself so the seam cannot drift from
- * the real table: a typo'd or renamed key in one of this file's three
- * `insert()` call sites is now a compile error instead of a silently
- * inserted `NULL` (#617 review-round-2). Previously this seam used `unknown`,
- * which erased that checking entirely.
+ * The `campaign_pii_audit` insert row shape, derived from {@link campaignPiiAudit}
+ * so a wrong key is a compile error.
  */
 type AuditRow = typeof campaignPiiAudit.$inferInsert;
 
@@ -43,11 +38,8 @@ export interface AuditTx {
 }
 
 /**
- * Minimal shape this writer needs — avoids coupling to a concrete Drizzle
- * client type. `transaction` is optional: it is only invoked when the writer
- * is constructed with a `statementTimeoutMs` (see the constructor), so a
- * caller (e.g. an existing unit-test stub) that only ever exercises the
- * no-timeout path never needs to implement it.
+ * The database handle this writer needs. `transaction` is only used when the
+ * writer has a `statementTimeoutMs`.
  */
 export interface AuditDb {
   insert: AuditInsertable;
@@ -58,24 +50,16 @@ export interface AuditDb {
  * {@link CampaignAuditWriterBase} implementation backed by the
  * `campaign_pii_audit` Postgres table via Drizzle.
  *
- * Every method funnels through the private {@link insert} helper, which is
- * the only place this class touches the database — there is deliberately no
- * update, delete, or read path anywhere in this class.
+ * Every method goes through the private {@link insert} helper. There is no
+ * update, delete or read path.
  */
 export class PostgresCampaignAuditWriter extends CampaignAuditWriterBase {
   /**
-   * @param db - Minimal Drizzle-like handle used only to INSERT rows into
-   *   `campaign_pii_audit`.
-   * @param statementTimeoutMs - When set, every insert runs inside a
-   *   transaction with `SET LOCAL statement_timeout` pinned to this bound
-   *   (#617 SHOULD-FIX 1). A `Promise.race` alone can only make the *caller*
-   *   stop waiting — it does not cancel the in-flight query, so a stall (e.g.
-   *   something holding an exclusive lock on this table) leaves the
-   *   underlying pooled connection checked out indefinitely. A real
-   *   statement timeout makes Postgres itself cancel the query, which is
-   *   what actually frees the connection. Omit to insert directly with no
-   *   per-statement bound (existing behaviour, still used by callers that
-   *   don't need it, e.g. this package's own unit tests).
+   * Creates a writer.
+   *
+   * @param db - Drizzle-like handle used to insert rows into `campaign_pii_audit`.
+   * @param statementTimeoutMs - When set, each insert runs in a transaction with this
+   *   `statement_timeout`, so Postgres cancels a stalled query.
    */
   constructor(
     private readonly db: AuditDb,
@@ -85,12 +69,10 @@ export class PostgresCampaignAuditWriter extends CampaignAuditWriterBase {
   }
 
   /**
-   * Inserts the `requested` row for a campaign action, at the moment the API
-   * accepts it. `outcome` is deliberately never set here.
+   * Inserts the `requested` row when the API accepts a campaign action.
    *
-   * @param input - Request-time fields the worker cannot recover later.
-   * @returns `ok(void)` once the row is inserted; `err(BaseError)` if the
-   *   insert throws.
+   * @param input - Request-time fields.
+   * @returns `ok(void)` once inserted; `err(BaseError)` if the insert fails.
    */
   override async recordRequested(input: RequestedAuditInput): Promise<Result<void, BaseError>> {
     return this.insert({
@@ -110,18 +92,15 @@ export class PostgresCampaignAuditWriter extends CampaignAuditWriterBase {
       purpose: input.purpose ?? null,
       endpoint: input.endpoint,
       traceId: input.traceId ?? null,
-      // `outcome` is deliberately absent: nothing has happened yet.
+      // No `outcome` yet: nothing has happened.
     });
   }
 
   /**
-   * Inserts the `completed` row once a campaign job reaches a TERMINAL
-   * status.
+   * Inserts the `completed` row once a campaign job reaches a terminal status.
    *
-   * @param input - Outcome + counts for the finished job, keyed by the same
-   *   `correlationId` as the matching `recordRequested` call.
-   * @returns `ok(void)` once the row is inserted; `err(BaseError)` if the
-   *   insert throws.
+   * @param input - Outcome and counts, keyed by the `recordRequested` `correlationId`.
+   * @returns `ok(void)` once inserted; `err(BaseError)` if the insert fails.
    */
   override async recordCompleted(input: CompletedAuditInput): Promise<Result<void, BaseError>> {
     return this.insert({
@@ -144,13 +123,11 @@ export class PostgresCampaignAuditWriter extends CampaignAuditWriterBase {
   /**
    * Inserts the single row for a synchronous, non-PII dump access.
    *
-   * `actorSignalstackOrgId` is intentionally omitted (a dump is whole-network) and
-   * `piiFields` is set to an empty array rather than left null, asserting
-   * positively that no PII field was released.
+   * Has no `actorSignalstackOrgId` (a dump is whole-network). `piiFields` is an
+   * empty array to record that no PII field was released.
    *
-   * @param input - Requester identity + outcome for the whole-network dump.
-   * @returns `ok(void)` once the row is inserted; `err(BaseError)` if the
-   *   insert throws.
+   * @param input - Requester identity and outcome for the dump.
+   * @returns `ok(void)` once inserted; `err(BaseError)` if the insert fails.
    */
   override async recordDumpAccess(input: DumpAuditInput): Promise<Result<void, BaseError>> {
     return this.insert({
@@ -158,9 +135,9 @@ export class PostgresCampaignAuditWriter extends CampaignAuditWriterBase {
       event: 'completed' as const,
       channel: 'dump' as const,
       actorUserId: input.actorUserId,
-      // actorSignalstackOrgId intentionally omitted — a dump is whole-network, no org.
+      // No actorSignalstackOrgId: a dump is whole-network.
       actorAzp: input.actorAzp ?? null,
-      // Empty, not null: asserts positively that no PII field was released.
+      // Empty, not null: records that no PII field was released.
       piiFields: [],
       outcome: input.outcome,
       completedAt: input.completedAt,
@@ -176,25 +153,18 @@ export class PostgresCampaignAuditWriter extends CampaignAuditWriterBase {
   }
 
   /**
-   * Shared INSERT path for all three public methods. Never reads, updates,
-   * or deletes — that absence is the append-only guarantee.
+   * Inserts one row. Shared by all three public methods.
    *
-   * @param row - Fully-shaped `campaign_pii_audit` row to insert, typed
-   *   against the real table via {@link AuditRow}.
-   * @returns `ok(void)` on success; `err(UpstreamError)` wrapping the thrown
-   *   cause if the insert fails.
+   * @param row - The `campaign_pii_audit` row to insert.
+   * @returns `ok(void)` on success; `err(UpstreamError)` if the insert fails.
    */
   private async insert(row: AuditRow): Promise<Result<void, BaseError>> {
     try {
       if (this.statementTimeoutMs !== undefined && this.db.transaction) {
         const timeoutMs = this.statementTimeoutMs;
         await this.db.transaction(async (tx) => {
-          // `SET LOCAL` only takes effect for the current transaction and is
-          // reset automatically at COMMIT/ROLLBACK — safe on a pooled
-          // connection with no explicit reset needed. The value is our own
-          // internal, non-user-controlled constant, so a literal (rather than
-          // a bind parameter, which Postgres' SET command doesn't accept) is
-          // safe here.
+          // `SET LOCAL` resets at COMMIT/ROLLBACK, so it is safe on a pooled connection.
+          // SET takes no bind parameters; the value is an internal number, not user input.
           await tx.execute(sql.raw(`SET LOCAL statement_timeout = '${timeoutMs}ms'`));
           await tx.insert(campaignPiiAudit).values(row);
         });

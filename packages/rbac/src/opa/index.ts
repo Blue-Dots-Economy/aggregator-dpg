@@ -61,9 +61,7 @@ export class OpaAuthorizer extends AuthorizerBase {
    * Answers one access question through OPA.
    *
    * @param input - The access question.
-   * @returns Ok with the decision; Err `OPA_UNAVAILABLE` (network, timeout,
-   *   5xx after retries), `OPA_REJECTED` (other non-2xx) or `OPA_BAD_RESPONSE`
-   *   (no `result`, or a result of the wrong shape, e.g. policy not loaded).
+   * @returns Ok with the decision; Err `OPA_UNAVAILABLE`, `OPA_REJECTED` or `OPA_BAD_RESPONSE`.
    */
   async decide(input: DecisionInput): Promise<Result<Decision, BaseError>> {
     return this.query(DECISION_PATH, input, DecisionSchema);

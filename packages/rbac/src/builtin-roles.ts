@@ -1,12 +1,10 @@
 /**
  * The built-in roles of the catalogue (`@aggregator-dpg/rbac`).
  *
- * The single authored source of the six built-in roles. They are seeded into
- * the database by migration `0031_rbac_seed.sql` (generated from this const and
- * `permissionDefinitions(CAPABILITIES)`); an integration drift test asserts the
- * seed still matches this const. Changing a built-in role means editing this
- * const AND adding a new migration — a release-cadence change, not a per-start
- * config read. Custom roles live only in the database. Rules:
+ * The source of the six built-in roles. Migration `0031_rbac_seed.sql` seeds
+ * them into the database, and an integration test checks the seed matches this
+ * const. Changing a built-in role needs an edit here and a new migration.
+ * Custom roles live only in the database. Rules:
  * `docs/rbac/rbac-permissions-and-roles.md` §3–§4.
  *
  * @module @aggregator-dpg/rbac/builtin-roles
@@ -15,9 +13,9 @@
 import type { RoleDefinition } from './interface.js';
 
 /**
- * The six built-in roles, sorted by key. Every role is `isBuiltin: true`; the
- * three base roles (`baseFor` set) follow membership and the three additional
- * roles (`assignedBy` set) are granted by a permission holder.
+ * The six built-in roles, sorted by key. The three base roles (`baseFor` set)
+ * follow membership. The three additional roles (`assignedBy` set) are granted
+ * by a permission holder.
  */
 export const BUILTIN_ROLES: readonly RoleDefinition[] = [
   {
