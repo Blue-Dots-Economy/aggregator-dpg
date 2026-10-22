@@ -1,8 +1,6 @@
 /**
- * Server-only helpers shared by the public registration routes — the
- * coordinator page (`/register`) and the owner deep link (`/register/owner`,
- * #619). Extracted so both routes resolve the org schema and the versioned
- * consent content the same way.
+ * Server-only helpers shared by `/register` and `/register/owner` for loading
+ * the org schema and consent content.
  *
  * @module apps/web/src/app/(public)/register/register-server
  */
@@ -18,9 +16,7 @@ import type { ConsentDocContent } from '../../../components/consent/consent-type
 let legacyFlagWarned = false;
 
 /**
- * Logs once per process when the removed `ORG_HIERARCHY_ENABLED` variable is
- * still set: organisations are always on since migration 0028, so it has no
- * effect and should be removed from the environment.
+ * Logs once per process when `ORG_HIERARCHY_ENABLED` is set. The variable has no effect.
  */
 export function warnIfLegacyHierarchyFlag(): void {
   if (legacyFlagWarned || process.env.ORG_HIERARCHY_ENABLED === undefined) return;
@@ -32,12 +28,9 @@ export function warnIfLegacyHierarchyFlag(): void {
 }
 
 /**
- * Loads the versioned consent document content for both `aggregator` and `org`
- * audiences from the network/brand config tree.
+ * Loads the current consent documents for the `aggregator` and `org` audiences.
  *
- * @returns An object with `aggregator` and `org` {@link ConsentDocContent}, or
- *   `null` if the config file is absent or invalid (callers pass `null` to the
- *   forms — they degrade to plain text labels).
+ * @returns `aggregator` and `org` {@link ConsentDocContent}, or `null` if the config is missing or invalid.
  */
 export async function loadConsentContent(): Promise<{
   aggregator: ConsentDocContent;
@@ -100,7 +93,7 @@ export async function loadOrgSchema(): Promise<{
       uiSchema: JSON.parse(rawUi) as Record<string, unknown>,
     };
   } catch {
-    // Best-effort: absent org schema → owner route 404s / coordinator-only.
+    // Missing org schema: the owner route returns 404.
     return null;
   }
 }

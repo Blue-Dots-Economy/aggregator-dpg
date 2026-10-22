@@ -1,9 +1,8 @@
 /**
- * Bulk-action registry for the dashboard participant table. The selection
- * layer (checkboxes in `ParticipantTable`) knows nothing about what actions
- * exist; the bulk bar renders whatever {@link BulkAction} descriptors it is
- * given. Adding a future bulk action means appending one descriptor here
- * (plus, for server actions, extending the BFF allowlist).
+ * Bulk-action registry for the dashboard participant table (web app).
+ *
+ * The bulk bar renders whatever {@link BulkAction} entries it is given. To
+ * add an action, append one here; server actions also need a BFF allowlist entry.
  *
  * @module apps/web/services/bulk-actions
  */
@@ -16,16 +15,14 @@ import { buildParticipantCsv } from './participant-csv';
 
 /** Context the bulk bar passes to every action run. */
 export interface BulkActionContext {
-  /** Signalstack domain id the table is showing (e.g. `seeker`). */
+  /** Domain id the table is showing (e.g. `seeker`). */
   domain: string;
 }
 
 /**
  * One bulk action the operator can run on the current selection.
  *
- * `kind` is informational — `'client'` actions complete entirely in the
- * browser, `'server'` actions round-trip through the BFF. The bar treats
- * both identically (await `run`, then show success/error).
+ * `kind` is informational; the bar runs both kinds the same way.
  */
 export interface BulkAction {
   /** Stable key; for server actions this is also the BFF action name. */
@@ -41,17 +38,16 @@ export interface BulkAction {
    *
    * @param rows - Snapshot of the selected rows (may span pages).
    * @param ctx - Domain context for server calls / filenames.
-   * @throws When the action fails — the bar surfaces the message inline.
+   * @throws {Error} When the action fails; the bar shows the message.
    */
   run(rows: ParticipantBase[], ctx: BulkActionContext): Promise<void>;
 }
 
 /**
- * The default bulk actions shipped with the dashboard:
- * 1. `export_selected_csv` — client-side CSV of the selected rows only
- *    (decoupled from the signalstack-owned full export).
- * 2. `export_profile_data` — server-side CSV export of full profile data
- *    for the selected real items.
+ * Default dashboard bulk actions.
+ *
+ * `export_selected_csv` builds a CSV of the selected rows in the browser.
+ * `export_profile_data` exports full profile data for the selected items from the server.
  */
 export const DASHBOARD_BULK_ACTIONS: BulkAction[] = [
   {

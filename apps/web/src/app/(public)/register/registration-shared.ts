@@ -1,11 +1,8 @@
 /**
- * Shared helpers + types for the public registration surfaces.
+ * Shared helpers and types for the coordinator and org registration forms.
  *
- * Both the coordinator form (`RegisterView`) and the org form
- * (`OrgRegisterForm`) render RJSF, POST to a BFF proxy, and surface the same
- * canonical error envelope. This module holds the pure logic they share:
- * humanising Ajv validation errors against schema titles and parsing the API
- * error envelope. Kept framework-free so it is trivially unit-testable.
+ * Holds the framework-free logic both forms use: readable validation errors,
+ * API error parsing, submit, and payload shaping.
  *
  * @module apps/web/src/app/(public)/register/registration-shared
  */
@@ -17,10 +14,8 @@ export type SubmitState =
   | { status: 'idle' }
   | { status: 'submitting' }
   /**
-   * Submitted successfully. `outcome` distinguishes a NEW pending registration
-   * from an org that was already approved and had its coordinator-invite link
-   * re-sent — the API returns 200 for both, and rendering "our team will
-   * review your organisation" over the second is simply false.
+   * Submitted successfully. `outcome` separates a new pending registration
+   * from an already-approved org whose invite link was re-sent.
    */
   | {
       status: 'done';
@@ -95,9 +90,7 @@ export function lookupTitle(schema: RJSFSchema, dottedPath: string): string | un
 }
 
 /**
- * Converts Ajv-shaped validation errors into user-facing sentences keyed off
- * each field's schema `title` (falling back to a title-cased key, then the
- * raw message, then the schema path).
+ * Converts Ajv validation errors into readable lines using each field's schema `title`.
  *
  * @param errs - Raw Ajv errors from RJSF `onError`.
  * @param schema - The (pruned) schema the form validated against.
@@ -136,8 +129,7 @@ export function humaniseValidationErrors(errs: AjvLikeError[], schema: RJSFSchem
 }
 
 /**
- * Extracts a display-ready error from the canonical API envelope, applying
- * sensible fallbacks when the server response is missing fields.
+ * Extracts a display-ready error from the API error envelope, with fallbacks for missing fields.
  *
  * @param body - Parsed response body (may not be an envelope).
  * @param fallbackStatus - HTTP status, used to synthesise a detail line.
@@ -159,9 +151,9 @@ export function parseError(
 }
 
 /**
- * Returns a copy of an RJSF schema with `title`/`description` stripped — the
- * register page owns the heading and the schema description is an API-contract
- * note, not form UI copy. Shared by the coordinator + org forms.
+ * Returns a copy of an RJSF schema without `title` and `description`.
+ *
+ * The page renders its own heading, and the schema description is not form copy.
  *
  * @param schema - The loaded JSON Schema.
  * @returns A shallow clone without `title`/`description`.
@@ -180,9 +172,6 @@ export type SubmitResult =
 
 /**
  * POSTs a registration payload to a BFF endpoint and normalises the outcome.
- * Shared by the coordinator and org forms so the fetch → parse → error-envelope
- * handling lives in one place; the caller maps the success body to its own
- * reference id (aggregator_id vs slug).
  *
  * @param endpoint - BFF route, e.g. `/api/aggregator/register`.
  * @param payload - JSON body to send.
@@ -240,10 +229,9 @@ export function stampConsent(
 /**
  * Returns a copy of an RJSF schema with the `consent` block removed.
  *
- * Consent is collected by {@link ConsentGate} after the form is otherwise
- * valid, so the client-side schema must neither render the block nor gate
- * submit on it. The on-disk schema files are deliberately unchanged — the API
- * still requires `consent`, and the gate supplies it at submit time.
+ * Consent is collected by {@link ConsentGate} after the form is valid, so the
+ * form must not render or require it. The API still requires `consent`; the
+ * gate adds it at submit time.
  *
  * @param schema - The loaded JSON Schema.
  * @returns A copy without the consent property or its `required` entry.
@@ -259,25 +247,17 @@ export function stripConsentBlock(schema: RJSFSchema): RJSFSchema {
   return clone;
 }
 
-/** The half of a resolved place this module needs. Structural, so the widget's
- *  richer `ResolvedPlace` satisfies it without importing React code here. */
+/** Coordinate part of a resolved place. The widget's `ResolvedPlace` satisfies it. */
 export interface ResolvedCoordinate {
   lat: number;
   lng: number;
 }
 
 /**
- * Attaches the resolved coordinate to an **organisation** submit body.
+ * Attaches the resolved coordinate to an organisation submit body.
  *
- * Flat, unlike {@link withResolvedCoordinates}: the org body has no location
- * array, so the coordinate rides alongside the address and lands in
- * `aggregator_orgs.profile`.
- *
- * Extracted rather than built inline in the component for one reason — the
- * `[longitude, latitude]` order is the single most dangerous thing in this
- * feature and it cannot be type-checked, because both members are numbers.
- * A function is something a test can pin; an object literal inside a submit
- * handler is not.
+ * The org body has no location array, so `coordinates` sits at the top level.
+ * Kept as a function so tests can check the `[longitude, latitude]` order.
  *
  * @param payload - The submit body.
  * @param place - The coordinate the widget resolved, or null if none.
@@ -290,8 +270,7 @@ export function withOrgCoordinates(
   if (!place) return payload;
   return {
     ...payload,
-    // GeoJSON is [longitude, latitude] — the reverse of how the widget (and
-    // everyday speech) orders them. Swapped, Bengaluru lands in Somalia.
+    // GeoJSON order is [longitude, latitude].
     coordinates: [place.lng, place.lat],
   };
 }
@@ -299,14 +278,9 @@ export function withOrgCoordinates(
 /**
  * Stitches a resolved coordinate into the coordinator payload's first location.
  *
- * The address widget reports what it resolved on a side channel — RJSF exposes
- * `formContext` to widgets but never writes it back into `formData` — so the
- * coordinate has to be merged in at submit rather than read off the form.
- *
- * Returns the payload untouched when nothing was resolved, which is the case
- * whenever the user typed an address without picking a suggestion. The `[0,0]`
- * placeholder then stands, exactly as it did before this field existed:
- * `locations.items.required` includes `geo`, so the entry cannot simply omit it.
+ * The address widget reports its coordinate outside `formData`, so it is merged
+ * in at submit. When the user did not pick a suggestion, the payload is
+ * returned unchanged and keeps its `[0,0]` placeholder (`geo` is required).
  *
  * @param payload - The submit body, carrying the form's `locations` array.
  * @param place - The coordinate the widget resolved, or null if none.
@@ -325,8 +299,7 @@ export function withResolvedCoordinates(
     locations: [
       {
         ...first,
-        // GeoJSON is [longitude, latitude] — the reverse of how the widget (and
-        // everyday speech) orders them. Swapped, Bengaluru lands in Somalia.
+        // GeoJSON order is [longitude, latitude].
         geo: { type: 'Point', coordinates: [place.lng, place.lat] },
       },
       ...rest,

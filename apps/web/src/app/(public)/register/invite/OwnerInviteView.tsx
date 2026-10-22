@@ -7,11 +7,8 @@ export interface OwnerInviteViewProps {
   /** The owner grant token from the deep-link query string. */
   grant: string;
   /**
-   * Max invites per submission, mirroring the API's `INVITE_MINT_MAX_RECIPIENTS`.
-   *
-   * Passed in from the server page rather than read here: this is a client
-   * component, so a `process.env` read would be inlined at `next build` and the
-   * cap could not be retuned without rebuilding the image.
+   * Max invites per submission; should match the API's `INVITE_MINT_MAX_RECIPIENTS`.
+   * Resolved by the server page so it can change without a rebuild.
    */
   maxInvites?: number;
 }
@@ -28,7 +25,7 @@ type ViewState =
   | { status: 'idle' }
   | { status: 'submitting' }
   | { status: 'result'; summary: MintSummary }
-  | { status: 'recovery_sent' } // grant was expired → fresh link re-mailed
+  | { status: 'recovery_sent' } // expired grant; a fresh link was emailed
   | { status: 'invalid_grant' }
   | { status: 'error'; message: string };
 
@@ -39,7 +36,7 @@ interface InviteRow {
   email: string;
 }
 
-/** Fallback cap when the server passes none — mirrors the API's default. */
+/** Default cap when the server passes none; matches the API default. */
 export const DEFAULT_MAX_INVITES = 10;
 
 let rowSeq = 0;
@@ -50,10 +47,11 @@ function newRow(): InviteRow {
 }
 
 /**
- * Owner invite-management surface (#701). One Name + Email pair per coordinator,
- * with "add another" to invite several in one go. Mints N invites and reports a
- * per-recipient summary (sent / already-invited / invalid). An expired grant
- * lands on a recovery banner (a fresh link is re-mailed to the registered owner).
+ * Owner page for inviting coordinators.
+ *
+ * Takes one email and optional name per coordinator, sends the invites, and
+ * shows a summary (sent, re-sent, invalid). An expired grant shows a banner
+ * saying a fresh link was emailed to the owner.
  *
  * @param props - The grant token from the deep link, and the per-submission cap.
  * @returns The invite-management page body.
@@ -106,8 +104,7 @@ export function OwnerInviteView({
     }
     if (res.ok) {
       const summary = (await res.json()) as MintSummary;
-      // An expired grant re-mails a fresh link and mints nothing (recovery is
-      // folded into the mint endpoint — no separate call).
+      // An expired grant emails a fresh link and sends no invites.
       setState(summary.recovered ? { status: 'recovery_sent' } : { status: 'result', summary });
       if (!summary.recovered) setRows([newRow()]);
       return;
@@ -298,7 +295,7 @@ function Banner({
   );
 }
 
-/** Reads the canonical error envelope's code, tolerating a non-JSON body. */
+/** Reads the error code from the response body, or `null` for a non-JSON body. */
 async function readErrorCode(res: Response): Promise<string | null> {
   try {
     const body = (await res.json()) as { error?: { code?: string } };

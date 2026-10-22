@@ -1,9 +1,9 @@
 /**
- * Capability checks for the portal and the console (`apps/web`, RBAC R2).
+ * Capability checks for the portal and the console (`apps/web`).
  *
- * The capabilities come from `GET /v1/user/read/me`. `null` means access
- * control is off for the instance, so nothing is hidden. Hiding is a
- * convenience only: the API decides every request.
+ * Capabilities come from `GET /v1/user/read/me`. `null` means access control
+ * is off, so nothing is hidden. Hiding is for convenience only; the API
+ * authorises every request.
  *
  * @module apps/web/src/lib/capabilities
  */

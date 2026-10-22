@@ -10,22 +10,15 @@ export interface RegisterViewProps {
   schema: RJSFSchema;
   uiSchema: Record<string, unknown>;
   /**
-   * Versioned Terms/Privacy content for the coordinator (aggregator) form.
-   * Forwarded to {@link CoordinatorRegisterForm} as `consentContent`, which
-   * flattens it via `toConsentDocs` for the blocking `ConsentGate`.
-   * `null` when `loadConsentConfig` failed — the form then surfaces an error
-   * on submit instead of opening an empty gate.
+   * Terms/Privacy content for the coordinator form, passed to
+   * {@link CoordinatorRegisterForm}. `null` when loading failed; the form then
+   * shows an error on submit.
    */
   aggregatorConsentContent?: ConsentDocContent | null;
 }
 
 /**
- * Public coordinator registration page: the shared registration shell wrapping
- * the single coordinator form.
- *
- * Owner (organisation) registration used to be a second tab here; as of #619 it
- * is removed from the public page and served only via the `/register/owner`
- * deep link — there are no tabs.
+ * Public coordinator registration page: the shared shell around the coordinator form.
  *
  * @param props - Coordinator schema/UI schema and the aggregator consent content.
  * @returns The registration page body.

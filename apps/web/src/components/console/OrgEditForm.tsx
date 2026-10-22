@@ -1,10 +1,9 @@
 'use client';
 
 /**
- * Organisation details (user & org Phase 5): website, legal name and GST are
- * editable by the owner and the network admin; the name by the network admin
- * only; the Default org is read-only (P5-9, R8). Locations are shown, not
- * edited here (the address widget is the registration form's).
+ * Organisation details form. Website, legal name, and GST are editable by the
+ * owner and the network admin; the name by the network admin only. The
+ * Default org is read-only. Locations are shown but not edited here.
  */
 
 import { useState, type SubmitEvent } from 'react';
@@ -129,9 +128,7 @@ export function OrgEditForm({
             <Button type="submit" disabled={busy}>
               {t('org.save')}
             </Button>
-            {message ? (
-              <output className="text-[13px] text-ink-600">{message}</output>
-            ) : null}
+            {message ? <output className="text-[13px] text-ink-600">{message}</output> : null}
           </div>
         ) : null}
       </form>

@@ -1,10 +1,9 @@
 /**
- * Organisation console layout (user & org Phase 5).
+ * Organisation console layout.
  *
- * Server Component. Requires a session, then resolves the actor from the API
- * (`GET /v1/user/read/me`, cached in the session ~60 s): a coordinator is sent
- * to the coordinator portal; an admin the API does not know, or one without an
- * active org, is signed out with a reason the login page explains.
+ * Server Component. Requires a session and resolves the actor from
+ * `GET /v1/user/read/me`. Coordinators go to `/dashboard`; admins the API does
+ * not know, or without an active org, are signed out with a reason.
  */
 
 import { redirect } from 'next/navigation';
@@ -37,9 +36,7 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
   }
   if (actor.me.kind === 'coordinator') redirect('/dashboard');
 
-  // The Roles admin is also gated on the deploy-time custom-roles capability
-  // (api is the single source of truth). Both the capability check and the
-  // flag must pass, so the entry disappears when the feature is off.
+  // The Roles entry also needs the custom-roles feature to be on in the api.
   const customRoles = await customRolesEnabled();
 
   return (

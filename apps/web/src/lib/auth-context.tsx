@@ -3,12 +3,11 @@
 /**
  * Client-side auth context.
  *
- * Hydrated from a server-side `getSession()` snapshot via the `initialUser`
- * prop on the protected layout. The browser never sees access tokens — only
- * the public claims surfaced here.
+ * Filled from the server session through the `initialUser` prop on the
+ * protected layout. The browser gets public claims only, never tokens.
  *
- * `signOut()` redirects to the BFF logout endpoint, which destroys the Redis
- * session, clears the cookie, and bounces through Keycloak's end-session.
+ * `signOut()` goes to the BFF logout endpoint, which ends the session and
+ * signs out of Keycloak.
  */
 
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
@@ -33,24 +32,21 @@ export interface AuthProviderProps {
   children: ReactNode;
   initialUser?: User | null;
   /**
-   * Whether contact-support is available (`SUPPORT_EMAIL` configured
-   * upstream). Fetched server-side by the protected layout via
-   * `GET /v1/support/config`; defaults to `false` so the entry point stays
-   * hidden until proven enabled.
+   * Whether contact-support is available, from `GET /v1/support/config`.
+   * Defaults to `false`.
    */
   supportEnabled?: boolean;
   /**
-   * The caller's capabilities from `GET /v1/user/read/me` (RBAC). Null or
-   * absent: access control is off, so nothing is hidden.
+   * The caller's capabilities from `GET /v1/user/read/me`. Null or absent
+   * means access control is off.
    */
   capabilities?: readonly string[] | null;
 }
 
 /**
- * Provides the active user to client components. Consumes a session snapshot
- * passed from the server layout — does not fetch on its own.
+ * Provides the active user to client components. Does not fetch.
  *
- * @param props - `children` plus an optional `initialUser` and `supportEnabled` from the server.
+ * @param props - `children` plus optional `initialUser`, `supportEnabled` and `capabilities`.
  */
 export function AuthProvider({
   children,
@@ -93,9 +89,10 @@ export function useAuth(): AuthContextValue {
 }
 
 /**
- * Returns the capability check for client components. Outside an
- * `AuthProvider` (or with access control off) everything is allowed: hiding is
- * a convenience, the API decides.
+ * Returns the capability check for client components.
+ *
+ * Outside an `AuthProvider`, or with access control off, everything is
+ * allowed. The API still authorises every request.
  *
  * @returns `can(capability)`.
  */

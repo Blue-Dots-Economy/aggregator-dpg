@@ -12,8 +12,7 @@ interface TopbarProps {
 
 export function Topbar({ title, subtitle, right }: TopbarProps) {
   return (
-    // Below `sm` the title block and the actions stack, and the actions wrap,
-    // so a phone never overflows horizontally (#793).
+    // Below `sm` the title and actions stack and the actions wrap.
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6 mb-6">
       <div className="min-w-0">
         <h1 className="font-display font-bold text-[26px] text-ink-900 tracking-tight leading-tight">

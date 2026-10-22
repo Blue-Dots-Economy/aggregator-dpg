@@ -1,24 +1,25 @@
 /**
- * Ported verbatim from Signals-DPG `apps/ui/src/lib/geo/pii-mask.ts`.
+ * Detects masked PII values. Same as Signals-DPG `apps/ui/src/lib/geo/pii-mask.ts`.
  *
  * @module apps/web/lib/geo/pii-mask
  */
 /**
- * Guard against geocoding masked PII values surfaced by the API's read-time
- * masking. When the backend serves a private field to an unprivileged caller it
- * replaces its value with a mask (e.g. "M***", "+91-XX-XXXX-X123"). Passing
- * these strings to a geocoding service wastes quota and returns nonsense
- * results, so callers should check this before issuing a query.
+ * Returns true when a value looks like an API-masked PII value (e.g. "M***",
+ * "+91-XX-XXXX-X123").
+ *
+ * Check this before geocoding; masked values waste quota and give bad results.
+ *
+ * @param value - The field value to check.
+ * @returns True when the value looks masked.
  */
 export function looksLikePIIMask(value: string): boolean {
   if (!value) return false;
   const trimmed = value.trim();
   if (trimmed.length === 0) return false;
-  // Common mask: any string containing "***".
   if (/\*{3,}/.test(trimmed)) return true;
-  // Phone-style: contains "XX" runs (e.g. "+91-XX-XXXX-X123")
+  // Phone-style mask, e.g. "+91-XX-XXXX-X123".
   if (/X{3,}/.test(trimmed)) return true;
-  // Heuristic: anything where mask-chars are >= 40% of the string
+  // Treat as masked when mask characters are at least 40% of the string.
   const maskChars = trimmed.match(/[*X]/g)?.length ?? 0;
   return maskChars / trimmed.length >= 0.4;
 }

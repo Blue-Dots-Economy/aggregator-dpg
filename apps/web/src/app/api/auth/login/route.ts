@@ -16,18 +16,13 @@ import { OIDC_FLOW_COOKIE, oidcFlowCookieOptions, signFlowState } from '@/lib/co
 export const runtime = 'nodejs';
 
 /**
- * Base used only to resolve a relative `returnTo` into a parsable URL. The
- * `.invalid` TLD is reserved by RFC 2606 and never resolves, so no request
- * is ever made to it; the scheme is `https` purely so no cleartext URL
- * literal exists in the codebase.
+ * Base used only to parse a relative `returnTo`; the `.invalid` TLD never resolves.
  */
 const PARSE_BASE = 'https://placeholder.invalid';
 
 function isSafeReturnTo(value: string | null): string {
   if (!value) return '/';
-  // Reject anything that does not parse as a same-origin path. This guards
-  // against open-redirect tricks like `/%09/evil.com`, `/\\evil.com`,
-  // protocol-relative `//evil.com`, and full URLs.
+  // Only same-origin paths are allowed, to prevent open redirects.
   if (!value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) {
     return '/';
   }
@@ -52,18 +47,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const redirectUri = mustEnv('OIDC_REDIRECT_URI');
   const adapter = getOidcAdapter();
 
-  // `?switch=1` comes from the "sign in with a different account" action on a
-  // cross-app rejection (#753). It must END the realm session, not merely
-  // re-prompt: `prompt=login` re-authenticates the CURRENT user, and naming a
-  // different one makes Keycloak throw USER_CONFLICT
-  // (AuthenticationProcessor.setAutheticatedUser) which it reports as
-  // `invalid_user_credentials` — surfaced to the user as "Invalid username or
-  // password" on a flow that never asked for a password.
-  //
-  // The gate rejects before a session exists, so there is no id_token to hint
-  // with; Keycloak therefore shows its own logout confirmation. That is the
-  // honest prompt here — one realm serves both DPGs, so switching account also
-  // ends the Signals session.
+  // `?switch=1` ("sign in with a different account") ends the Keycloak
+  // session. `prompt=login` is not enough: Keycloak rejects a different user
+  // with a misleading credentials error. Ending the session also signs the
+  // user out of Signals, which shares the realm.
   if (req.nextUrl.searchParams.get('switch') === '1') {
     return redirectToAccountSwitch(req, adapter);
   }
@@ -105,10 +92,8 @@ async function redirectToAccountSwitch(
   req: NextRequest,
   adapter: ReturnType<typeof getOidcAdapter>,
 ): Promise<NextResponse> {
-  // Same origin rule as the logout route: inside docker `req.nextUrl.origin`
-  // is the container bind address, which Keycloak would echo back as a broken
-  // redirect. Query strings are stripped by the strict post-logout URI match,
-  // so the banner reason travels in a cookie.
+  // Use the public portal URL, as the logout route does. The reason travels in
+  // a cookie because the post-logout URI cannot carry a query string.
   const publicBase =
     process.env.PUBLIC_PORTAL_URL ??
     (process.env.OIDC_POST_LOGOUT_REDIRECT_URI

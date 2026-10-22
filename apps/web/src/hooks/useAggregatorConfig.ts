@@ -1,36 +1,26 @@
 'use client';
 
 /**
- * `useAggregatorConfig` — reads the active deployment's brand + domain
- * config from the BFF, caching for the page session. Sidebar, topbar,
- * dashboard tabs, and (post-refactor) URL routes all read from here so
- * the same web image runs blue_dot / purple_dot / yellow_dot without
- * source changes.
+ * Reads the deployment's brand and domain config from the BFF (web app).
  *
- * Falls back to a minimal Blue Dots default while the network call is
- * in flight so first paint is never blank. A *failed* call leaves callers on
- * that same default — intentionally, so the public form still works — but the
- * failure is logged to the console (see the effect in the hook body) rather
- * than swallowed, because degraded branding is otherwise indistinguishable
- * from a deployment that simply has no branding configured.
+ * The sidebar, topbar and dashboard tabs read from here, so one web image
+ * serves any network. Returns a Blue Dots default while loading, and also
+ * after a failed fetch, which is logged to the console.
  */
 
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { jsonFetch } from '../services/http';
 
-/**
- * One dashboard tile: which rollup key to read and what to call it. Mirrors
- * the network-config `DashboardTileDef`.
- */
+/** One dashboard tile: the rollup key to read and its label. Mirrors network-config `DashboardTileDef`. */
 export interface DashboardTileDef {
   field: string;
   label: string;
 }
 
 /**
- * Per-domain dashboard tiles, split into profile-level and user-level groups.
- * Both optional — UI falls back to default English tiles when absent.
+ * Per-domain dashboard tiles, split into profile and user groups.
+ * Both are optional; the UI uses default tiles when absent.
  */
 export interface DashboardTiles {
   profile?: DashboardTileDef[];
@@ -41,9 +31,8 @@ export interface DashboardTiles {
 }
 
 /**
- * Network-wide bucket-label overrides from network.json. Keys are the
- * canonical Signals vocab; values are network-specific copy. Action labels
- * are split by direction (initiated vs received).
+ * Network-wide bucket-label overrides from network.json.
+ * Keys are Signals bucket names; values are the network's labels.
  */
 export interface DashboardBuckets {
   by_status?: {
@@ -82,15 +71,13 @@ export interface AggregatorConfigDomain {
   plural_label: string;
   item_type: string;
   /**
-   * Mirrors network.json `guardian_consent_required`. Drives whether the
-   * registration form collects a birth year (#613). Optional for back-compat
-   * with an older config payload; treated as `false` when absent.
+   * Mirrors network.json `guardian_consent_required`. When true, the
+   * registration form collects a birth year. Treated as `false` when absent.
    */
   guardian_consent_required?: boolean;
   /**
    * Mirrors network.json `go_live_required`. The registration form shows the
-   * consent step iff this includes `consent_required` (#613). Optional for
-   * back-compat; treated as `[]` when absent.
+   * consent step only if this includes `consent_required`. Treated as `[]` when absent.
    */
   go_live_required?: string[];
   dashboardTiles?: DashboardTiles;
@@ -108,18 +95,16 @@ export interface RegistrationModeConfig {
   public_hint_i18n_key: string | null;
   /**
    * Whether links in this mode offer the Signals UI hand-off. Resolved
-   * server-side (the `submission_shape` default is already applied), so the
-   * client reads it directly. Optional for back-compat with an older api build.
+   * server-side, so the client reads it directly.
    */
   signals_cta?: boolean;
 }
 
 /**
- * Brand types mirror the Zod-inferred types exported from
- * `@aggregator-dpg/network-config/interface`. They are duplicated here
- * (as plain TS interfaces) instead of imported because the web app
- * deliberately avoids pulling the runtime Zod schemas into the client
- * bundle. Keep these in sync when `BrandConfigSchema` changes.
+ * Brand palette swatch. The brand types mirror `@aggregator-dpg/network-config/interface`.
+ *
+ * They are copied here to keep the Zod schemas out of the client bundle.
+ * Keep them in sync with `BrandConfigSchema`.
  */
 export interface BrandPaletteSwatch {
   name: string;
@@ -160,9 +145,8 @@ export interface BrandLogo {
 }
 
 /**
- * One "Owned by <party>" row on the login hero (signals-dpg#720). Mirrors
- * `BrandAttributionSchema`. A LIST of different organisations, unlike
- * {@link BrandLogo}, which is variants of one mark.
+ * One "Owned by <party>" row on the login hero. Mirrors `BrandAttributionSchema`.
+ * Each entry is a different organisation, unlike {@link BrandLogo}.
  */
 export interface BrandAttribution {
   label: string;
@@ -199,28 +183,18 @@ export interface AggregatorConfigPayload {
   };
   domains: AggregatorConfigDomain[];
   /**
-   * Deploy-time capability flags resolved by the api. Always present in the
-   * `/v1/aggregator-config` payload; mirrored here so config-gated surfaces
-   * read one source. `custom_roles` gates the console Roles admin UI and its
-   * BFF proxies — when false the whole custom-roles capability is turned off
-   * for the deployment.
+   * Deploy-time capability flags from the api. `custom_roles` gates the
+   * console Roles admin UI and its BFF proxies.
    */
   features: { custom_roles: boolean };
   dashboardBuckets?: DashboardBuckets;
   /** Per-link registration modes declared by the network (admin dropdown source). */
   registration_modes?: Record<string, RegistrationModeConfig>;
-  /**
-   * Per-domain Signals UI login URLs, keyed by domain id. Absent or missing a
-   * domain ⇒ no Signals hand-off for that domain.
-   */
+  /** Per-domain Signals UI login URLs. A domain without a URL has no Signals hand-off. */
   signals_ui_urls?: Record<string, string>;
 }
 
-/**
- * Conservative fallback used while the first network call is in flight.
- * Matches the pre-genericisation defaults so existing screens render
- * exactly the same on a cold mount.
- */
+/** Fallback config used while loading and after a failed fetch. */
 export const DEFAULT_AGGREGATOR_CONFIG: AggregatorConfigPayload = {
   aggregator: { name: 'Aggregator' },
   brand: {
@@ -235,8 +209,7 @@ export const DEFAULT_AGGREGATOR_CONFIG: AggregatorConfigPayload = {
     { id: 'seeker', label: 'Seekers', plural_label: 'Seekers', item_type: 'profile_1.0' },
     { id: 'provider', label: 'Providers', plural_label: 'Providers', item_type: 'job_posting_1.0' },
   ],
-  // Fail-safe: if the api field is somehow absent, the custom-roles capability
-  // is treated as off rather than silently exposing the admin UI.
+  // Custom roles stay off unless the api turns them on.
   features: { custom_roles: false },
 };
 
@@ -244,19 +217,12 @@ export function useAggregatorConfig() {
   const query = useQuery({
     queryKey: ['aggregator-config'],
     queryFn: () => jsonFetch<AggregatorConfigPayload>('/api/aggregator-config'),
-    // Brand + domains rarely change between deploys; stale data is fine.
+    // Config rarely changes between deploys.
     staleTime: 5 * 60 * 1000,
   });
   const { error } = query;
-  // Degrading to DEFAULT_AGGREGATOR_CONFIG on failure is deliberate — first
-  // paint is never blank and the public registration form still works. But
-  // degraded is not the same as fine: the deployment's real branding is gone
-  // and every config-gated surface (the #652 Signals hand-off chooser, the
-  // per-domain consent/birth-year gates) silently turns off. Without this the
-  // outage is invisible in the browser, which `.claude/rules/error-handling.md`
-  // forbids. Logged here rather than in each consumer so every caller of this
-  // hook is covered; react-query de-dupes the request, so a page with two
-  // consumers emits one line per mounted consumer, not one per retry.
+  // On failure callers fall back to the default config, which turns off
+  // config-gated surfaces. Log it so the failure is visible.
   useEffect(() => {
     if (!error) return;
     console.error(

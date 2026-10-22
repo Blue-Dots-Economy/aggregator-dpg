@@ -8,21 +8,12 @@ export const metadata: Metadata = {
 };
 
 /**
- * Per-submission invite cap, from `INVITE_MAX_RECIPIENTS`.
+ * Reads the per-submission invite cap from `INVITE_MAX_RECIPIENTS`.
  *
- * Resolved here rather than in `OwnerInviteView` because this is a server
- * component: `process.env` is read per request, so an operator can retune the
- * cap by restarting the container. The previous
- * `NEXT_PUBLIC_INVITE_MAX_RECIPIENTS` read lived in the client component, where
- * Next.js inlines the value at `next build` and changing it needed a rebuilt
- * image. Set it to the same value as the API's `INVITE_MINT_MAX_RECIPIENTS`.
- *
- * The legacy `NEXT_PUBLIC_` name is still honoured so existing deployments keep
- * working through the rename.
- *
- * `||`, NOT `??` — see the same note on `getEnabledLocales`: compose sets this
- * to an empty string when the operator's `.env` omits it, and `''` is not
- * nullish, so `??` would swallow the legacy name.
+ * Read on the server at request time, so a restart applies a new value. Set it
+ * to the same value as the API's `INVITE_MINT_MAX_RECIPIENTS`. The
+ * `NEXT_PUBLIC_INVITE_MAX_RECIPIENTS` name is also accepted. Uses `||` so an
+ * empty string falls through to the second name.
  *
  * @returns The configured cap, or `DEFAULT_MAX_INVITES` when unset or invalid.
  */
@@ -39,16 +30,11 @@ interface OwnerInvitePageProps {
 }
 
 /**
- * Org-owner invite-management deep link (#701): `/register/invite?grant=<jwt>`.
+ * Org-owner invite page: `/register/invite?grant=<jwt>`, linked from the owner's approval email.
  *
- * Reached from the owner's approval email — the owner cannot log in (their
- * Keycloak user is disabled by design), so this token-gated page is their only
- * surface. Gating mirrors the owner registration deep link:
- * 1. An active session → dashboard.
- * 2. No `grant` param → `notFound()` (not a real entry point).
- *
- * The grant is NOT verified here — the mint POST is the gate, so an expired
- * grant lands on the recovery action rather than a dead 404.
+ * An active session redirects to the dashboard. A missing `grant` returns
+ * `notFound()`. The grant is not verified here; the invite POST verifies it,
+ * so an expired grant shows the recovery action instead of a 404.
  */
 export default async function OwnerInvitePage({ searchParams }: Readonly<OwnerInvitePageProps>) {
   const session = await getSession();

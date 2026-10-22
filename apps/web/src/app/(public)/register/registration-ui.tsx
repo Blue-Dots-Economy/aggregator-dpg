@@ -1,12 +1,8 @@
 'use client';
 
 /**
- * Shared presentational pieces for the public registration forms.
- *
- * The coordinator (`RegisterView`) and org (`OrgRegisterForm`) forms render an
- * identical error banner and a structurally-identical success panel (only the
- * copy differs). These components hold that markup so the two forms cannot
- * drift. Belongs to `@aggregator-dpg/web`.
+ * Shared UI pieces and hooks for the coordinator and org registration forms.
+ * Belongs to `@aggregator-dpg/web`.
  *
  * @module apps/web/src/app/(public)/register/registration-ui
  */
@@ -32,17 +28,12 @@ export interface RegistrationFormState {
   setState: (s: SubmitState) => void;
   canSubmit: boolean;
   setCanSubmit: (v: boolean) => void;
-  /**
-   * React 19 folded `MutableRefObject` into `RefObject` and types
-   * `useRef<T>(null)` as `RefObject<T | null>` — `.current` genuinely is null
-   * until the error banner mounts, so the null belongs in the declared type.
-   */
+  /** Ref to the error banner; `null` until it mounts. */
   errorRef: RefObject<HTMLDivElement | null>;
 }
 
 /**
- * Holds the submit lifecycle both registration forms share: the `SubmitState`,
- * the validity gate, and an error ref that is scrolled + focused on failure.
+ * Holds the submit state, the validity flag, and an error ref that is scrolled into view and focused on failure.
  *
  * @returns The form state handles.
  */
@@ -59,7 +50,7 @@ export function useRegistrationFormState(): RegistrationFormState {
   return { state, setState, canSubmit, setCanSubmit, errorRef };
 }
 
-/** The park-then-gate submit cycle shared by the coordinator + org forms. */
+/** Submit flow that holds the form values until consent is accepted. */
 export interface ConsentGateSubmit {
   /** True while the blocking consent gate is open. */
   gateOpen: boolean;
@@ -72,14 +63,10 @@ export interface ConsentGateSubmit {
 }
 
 /**
- * Holds the park-then-gate submit cycle both registration forms share.
+ * Holds the form values on submit and opens the consent gate.
  *
- * Neither form POSTs straight from `onSubmit`: consent is collected in the
- * blocking `ConsentGate` first, so the values are parked in a ref for the
- * caller's own accept handler to replay. When the consent copy failed to load
- * (`consentDocs` is empty) the gate would render nothing at all and the form
- * would be stuck with no way to finish or explain why — that case surfaces an
- * error rather than opening a dead gate.
+ * The caller's accept handler posts the held values. When `consentDocs` is
+ * empty (loading failed), it sets an error instead of opening the gate.
  *
  * @param consentDocs - Ordered consent documents; empty when loading failed.
  * @param setState - Submit-lifecycle setter from {@link useRegistrationFormState}.
@@ -120,9 +107,7 @@ export interface SharedFormWiring {
   handleSubmit: (e: IChangeEvent<Record<string, unknown>>) => void;
   /** The schema the form validates against — used to name fields in errors. */
   formSchema: RJSFSchema;
-  // `| undefined` is load-bearing under `exactOptionalPropertyTypes`: both
-  // callers pass the prop through explicitly, which an optional-only type
-  // rejects.
+  // `| undefined` is required by `exactOptionalPropertyTypes`; callers pass it explicitly.
   consentContent?: ConsentDocContent | undefined;
   /** Where the address widget reports the coordinate it resolved. */
   onLocationResolved: (place: ResolvedPlace | null) => void;
@@ -133,14 +118,7 @@ export interface SharedFormWiring {
 /**
  * Builds the RJSF props the coordinator and org registration forms share.
  *
- * The two forms pass an identical block of wiring — form data, validity gate,
- * submit, and the client-side validation banner — differing only in the values
- * they close over. Keeping it here is the same reason the rest of this module
- * exists: the forms are structurally identical and silently drifting apart is
- * the failure that actually happens.
- *
- * Spread the result onto `<RjsfThemedForm>`; `schema` and `uiSchema` stay with
- * the caller, since those genuinely differ.
+ * Spread the result onto `<RjsfThemedForm>`. The caller passes `schema` and `uiSchema`.
  *
  * @param wiring - The calling form's state setters, schema and copy.
  * @returns Props to spread onto the themed RJSF form.
@@ -158,8 +136,7 @@ export function sharedRegistrationFormProps(wiring: SharedFormWiring): {
 } {
   return {
     formData: wiring.formData,
-    // RJSF v6 exposes this to widgets only as `registry.formContext`, never as
-    // a prop — see the note in LocationAutocompleteWidget.
+    // Widgets read this as `registry.formContext`, not as a prop.
     formContext: {
       consentContent: wiring.consentContent,
       onLocationResolved: wiring.onLocationResolved,
@@ -173,8 +150,7 @@ export function sharedRegistrationFormProps(wiring: SharedFormWiring): {
         title: wiring.validationErrorTitle,
         detail: humaniseValidationErrors(errs, wiring.formSchema).join('\n'),
         code: 'CLIENT_VALIDATION',
-        // The raw errors are the only actionable detail for a client-side
-        // failure, so they stand in for a server request id.
+        // Client-side failures have no request id; carry the raw errors instead.
         requestId: JSON.stringify(errs, null, 2),
       });
     },
@@ -196,8 +172,7 @@ export interface RegistrationSubmitButtonProps {
 }
 
 /**
- * The primary submit button shared by both registration forms — same size,
- * brand colours, and disabled styling.
+ * Primary submit button shared by both registration forms.
  *
  * @param props - Submitting/validity flags + labels.
  * @returns The submit button element.
@@ -214,15 +189,9 @@ export function RegistrationSubmitButton({
       <button
         type="submit"
         disabled={disabled}
-        // Same fix as ConsentGate's CTA: `text-white` here and
-        // `text-(--bd-primary-600)` in the disabled branch are both "text
-        // color" utilities, so which one actually renders depends on
-        // Tailwind's internal stylesheet order, not on their order in this
-        // string — here `text-white` was winning, leaving white-on-pale
-        // (effectively invisible) instead of the intended indigo label.
-        // Keeping one background + one text colour always, and only fading
-        // opacity when disabled, sidesteps that class-precedence trap
-        // entirely and matches the sibling Signals gate's CTA.
+        // One background and one text colour in both states; disabled only
+        // lowers opacity. Two conflicting text-colour classes would resolve by
+        // Tailwind stylesheet order, not class order.
         className={`w-full py-3 rounded-[12px] font-display font-bold text-[15px] text-white bg-(--bd-primary) transition-all
           ${
             disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-(--bd-primary-600) bd-shadow-lg'

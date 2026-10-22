@@ -1,12 +1,10 @@
 /**
- * CSRF guard for the console's mutating BFF routes (user & org Phase 5, C11).
+ * CSRF guard for the console's mutating BFF routes.
  *
- * Session cookies are `SameSite=Lax`, which still lets a top-level cross-site
- * form POST carry them. Console mutations therefore require a JSON body (a
- * cross-site form cannot send `application/json` without a CORS preflight the
- * BFF never answers) AND a same-origin `Origin` header — or, when a browser
- * omits `Origin`, `Sec-Fetch-Site: same-origin`. Nothing in the console
- * mutates on GET.
+ * Session cookies are `SameSite=Lax`, so a cross-site form POST still carries
+ * them. Console mutations therefore require a JSON body and a same-origin
+ * `Origin` header, or `Sec-Fetch-Site: same-origin` when `Origin` is absent.
+ * Nothing in the console mutates on GET.
  *
  * @module apps/web/src/lib/same-origin
  */
@@ -14,9 +12,10 @@
 import { type NextRequest, NextResponse } from 'next/server';
 
 /**
- * The origin the portal is served from: `PUBLIC_PORTAL_URL`'s origin when set
- * (inside docker `req.nextUrl.origin` is the container bind address), else the
- * request's own origin.
+ * Returns the origin the portal is served from.
+ *
+ * Uses `PUBLIC_PORTAL_URL` when set (in Docker the request origin is the
+ * container address), else the request's own origin.
  *
  * @param req - The incoming request.
  * @returns The expected origin, e.g. `https://portal.example.org`.

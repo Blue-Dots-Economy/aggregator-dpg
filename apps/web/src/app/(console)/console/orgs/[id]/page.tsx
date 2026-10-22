@@ -1,8 +1,8 @@
 /**
- * One organisation (user & org Phase 5): owner, counts and the details form.
- * The Default org and the root are read-only; the name is the network
- * admin's only (P5-9, R8). The network admin also sees the owner's roles
- * here (RBAC), to assign Org Onboarder or a custom admin role.
+ * Organisation detail page: owner, counts and the details form.
+ *
+ * The Default org and the root are read-only. Only the network admin can
+ * rename an org or assign roles to its owner.
  */
 
 import Link from 'next/link';
@@ -19,7 +19,9 @@ import { OrgEditForm } from '@/components/console/OrgEditForm';
 import { RolesPanel } from '@/components/console/RolesPanel';
 import { can } from '@/lib/capabilities';
 
-export default async function ConsoleOrgPage({ params }: Readonly<{ params: Promise<{ id: string }> }>) {
+export default async function ConsoleOrgPage({
+  params,
+}: Readonly<{ params: Promise<{ id: string }> }>) {
   const t = await getTranslations('console');
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
@@ -28,7 +30,7 @@ export default async function ConsoleOrgPage({ params }: Readonly<{ params: Prom
     actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer');
   const data = await consoleRead<OrgReadResponse>(`/v1/org/read/${encodeURIComponent(id)}`);
   const { org, owner } = data;
-  // Owner roles (RBAC): absent when access control is off.
+  // Owner roles; null when access control is off.
   const [ownerRoles, catalogue] =
     canAssignOwner && org.org_type === 'aggregator'
       ? await Promise.all([

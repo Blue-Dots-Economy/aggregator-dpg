@@ -12,19 +12,15 @@ export interface OwnerRegisterViewProps {
   schema: RJSFSchema;
   /** RJSF UI schema for the org form. */
   uiSchema: Record<string, unknown>;
-  /**
-   * Versioned Terms/Privacy content for the org audience. `null` when
-   * `loadConsentConfig` failed — the widget degrades to plain text.
-   */
+  /** Terms/Privacy content for the org audience. `null` when loading failed; the widget shows plain text. */
   orgConsentContent?: ConsentDocContent | null;
 }
 
 /**
- * Owner (organisation) registration page reached only via the `/register/owner`
- * deep link (#619) — not linked from the public `/register` page. Wraps
- * {@link OrgRegisterForm} in the shared {@link RegisterPageShell}. The route
- * that renders this view has already asserted the org-hierarchy flag and the
- * presence of the org schema, so this view assumes the owner flow is live.
+ * Owner (organisation) registration page body for `/register/owner`.
+ *
+ * Wraps {@link OrgRegisterForm} in {@link RegisterPageShell}. The route has
+ * already checked that the org schema exists.
  *
  * @param props - The org schema/UI schema and org consent content.
  * @returns The owner registration page body.

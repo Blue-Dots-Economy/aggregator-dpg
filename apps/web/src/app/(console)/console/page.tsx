@@ -1,7 +1,8 @@
 /**
- * Console home (user & org Phase 5, R14): an owner sees its organisations
- * with coordinator and pending counts; the network admin sees the network,
- * the organisations it owns (Default) and the organisations waiting for review.
+ * Console home page.
+ *
+ * An owner sees its organisations with coordinator and pending counts. The
+ * network admin also sees the network and the organisations awaiting review.
  */
 
 import Link from 'next/link';
@@ -19,13 +20,13 @@ type OrgRow = OrgSearchResponse['orgs'][number];
 export default async function ConsoleHomePage() {
   const t = await getTranslations('console');
   const actor = await getConsoleActor();
-  if (!actor.ok) return null; // the layout already navigated away
+  if (!actor.ok) return null; // the layout already redirected
   const me = actor.me;
 
   let owned: OrgRow[];
   let pending: OrgRow[] = [];
   if (me.is_network_admin) {
-    // The network admin's own aggregator orgs (the Default org), read one by one.
+    // The network admin's own aggregator orgs (the Default org).
     const ids = me.orgs.filter((o) => o.org_type === 'aggregator').map((o) => o.id);
     owned = await Promise.all(
       ids.map(async (id) => {

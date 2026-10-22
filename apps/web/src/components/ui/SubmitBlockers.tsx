@@ -4,13 +4,10 @@ import type { ReactNode, JSX } from 'react';
 import { I } from '../../icons';
 
 /**
- * Inline "why is submit disabled" hint. Pairs with a gated submit button so a
- * disabled button always explains itself — without this the button looks
- * clickable but silently swallows the click (e.g. an invalid mobile number the
- * user can't see is the blocker).
+ * Inline hint that explains why a submit button is disabled.
  *
- * Renders nothing when `reasons` is empty (form is submittable). Each reason is
- * a short, user-facing sentence describing one unmet requirement.
+ * Renders nothing when `reasons` is empty. Each reason is a short, user-facing
+ * sentence for one unmet requirement.
  */
 export function SubmitBlockers({
   reasons,

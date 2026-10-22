@@ -1,10 +1,9 @@
 /**
- * Resolves the console's signed-in actor (user & org Phase 5).
+ * Resolves the console's signed-in actor. Server-only.
  *
  * Reads `GET /v1/user/read/me` with the caller's own token and caches it in
- * the session for {@link ACTOR_CACHE_MS} (design C14): an owner who loses
- * their org is turned away within a minute, without a call on every render.
- * Server-only.
+ * the session for {@link ACTOR_CACHE_MS}, so lost access takes effect within
+ * a minute.
  *
  * @module apps/web/src/lib/console-actor
  */

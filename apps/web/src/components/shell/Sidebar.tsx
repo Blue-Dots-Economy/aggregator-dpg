@@ -11,8 +11,7 @@ import { useAuth, useCan } from '../../lib/auth-context';
 import { useThemeMode } from '../../lib/theme-mode';
 import { SupportDialog } from '../support/SupportDialog';
 import { Button } from '../ui/Button';
-// `mode` is also read here to swap to the light-on-dark logo variant
-// when the user is in dark theme — toggle UI itself lives in Topbar.
+// `mode` picks the dark-theme logo variant; the toggle lives in Topbar.
 import { useDashboard } from '../../hooks/useDashboard';
 import { useProfileRaw } from '../../hooks/useProfile';
 import {
@@ -30,8 +29,8 @@ interface NavItem {
 }
 
 /**
- * Viewport width from which the fixed sidebar replaces the mobile menu bar +
- * drawer. Mirrors Tailwind's `lg` breakpoint used in the classes below.
+ * Viewport width from which the fixed sidebar replaces the mobile menu bar
+ * and drawer. Matches Tailwind's `lg` breakpoint.
  */
 const DESKTOP_MEDIA_QUERY = '(min-width: 1024px)';
 
@@ -40,9 +39,8 @@ const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
- * Returns the stable route/icon structure for the side-nav.
- * Labels are resolved by the component using the `nav` translation namespace
- * so brand interpolation and locale switching work without re-running this function.
+ * Returns the route and icon structure for the side nav. The component
+ * resolves labels from the `nav` translation namespace.
  */
 function buildNavBase(): Omit<NavItem, 'label'>[] {
   return [
@@ -53,8 +51,8 @@ function buildNavBase(): Omit<NavItem, 'label'>[] {
 }
 
 /**
- * Brand logo, or the BlueDotsLogo + name fallback. `compact` is the smaller
- * variant used in the mobile menu bar (no "Aggregator Portal" sub-label).
+ * Brand logo, or the BlueDotsLogo and name fallback. `compact` is the smaller
+ * variant for the mobile menu bar, without the sub-label.
  */
 function BrandMark({
   cfg,
@@ -101,17 +99,16 @@ interface SidebarPanelProps {
   brand: ReactNode;
   nav: NavItem[];
   pathname: string | null;
-  /** Rendered beside the brand — the drawer's close button on mobile. */
+  /** Rendered beside the brand, such as the drawer's close button on mobile. */
   headerAction?: ReactNode;
-  /** Called after a nav link is followed, so the drawer can close itself. */
+  /** Called after a nav link is followed, so the drawer can close. */
   onNavigate?: () => void;
   onOpenSupport: () => void;
 }
 
 /**
- * Sidebar contents, shared unchanged by the desktop `<aside>` and the mobile
- * drawer: brand, nav links, the optional Contact-support entry and the
- * account card.
+ * Sidebar contents, used by both the desktop `<aside>` and the mobile drawer:
+ * brand, nav links, the optional Contact-support entry, and the account card.
  */
 function SidebarPanel({
   brand,
@@ -220,11 +217,10 @@ function SidebarPanel({
 /**
  * Portal navigation shell.
  *
- * From `lg` up this is the fixed left sidebar. Below `lg` the sidebar is
- * hidden and a slim bar (menu button + brand) opens the same sidebar contents
- * as a slide-in drawer (#793). The drawer closes on Escape, backdrop tap,
- * following a link, or the viewport growing to desktop width; while open it
- * locks page scroll and keeps keyboard focus inside itself.
+ * From `lg` up this is the fixed left sidebar. Below `lg` a slim bar (menu
+ * button and brand) opens the same contents as a slide-in drawer. The drawer
+ * closes on Escape, backdrop tap, link click, or resize to desktop width.
+ * While open it locks page scroll and keeps focus inside.
  */
 export function Sidebar() {
   const t = useTranslations('nav');
@@ -236,35 +232,28 @@ export function Sidebar() {
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const drawerId = useId();
-  // Brand + domain labels come from the aggregator config so the
-  // sidebar adapts to whichever signalstack network the deployment is
-  // bound to (blue / purple / yellow / ...) without code changes.
+  // Brand and domain labels come from the aggregator config.
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Dashboard rollup feeds the participant-count badge. Domain follows
-  // the aggregator's registered focus; falls back to the first domain
-  // declared by the network when the profile is still resolving.
+  // Dashboard rollup for the participant-count badge. Domain is the
+  // aggregator's focus, or the network's first domain while the profile loads.
   const profileType = useProfileRaw().data?.type;
-  // No 'seeker' fallback — until both profile + live network config have
-  // loaded, `activeDomain` is undefined and useDashboard skips the
-  // fetch (prevents a stale `?domain=seeker` request on cold mount).
+  // `activeDomain` stays undefined until config and profile load, and
+  // useDashboard skips the fetch until then.
   const activeDomain = profileType ?? cfg.domains[0]?.id;
   const { data: dashboard } = useDashboard(activeDomain ? { domain: activeDomain } : undefined);
-  // Plan-C / by_domain dashboard shape: every served domain ships under
-  // `by_domain[<id>]`; the badge mirrors the active aggregator's domain
-  // rollup so the sidebar count stays in sync with /dashboard.
+  // Badge shows the active domain's rollup from `by_domain`, matching /dashboard.
   const participantsBadge = activeDomain
     ? dashboard?.by_domain[activeDomain]?.rollup.total_items
     : undefined;
 
   const can = useCan();
-  // Resolve translated labels here so brand interpolation and locale switching
-  // work correctly; buildNavBase() supplies the stable route/icon skeleton.
+  // Resolve translated labels here; buildNavBase() supplies routes and icons.
   const navLabels: Record<string, string> = {
     '/dashboard': t('my', { brand: cfg.brand.short_name }),
     '/onboarding': t('onboarding'),
     '/profile': t('profile'),
   };
-  // RBAC: onboarding needs `profiles.onboard`; the API also checks it.
+  // Onboarding needs `profiles.onboard`; the API also checks it.
   const nav: NavItem[] = buildNavBase()
     .filter((n) => n.to !== '/onboarding' || can('profiles.onboard'))
     .map((n) => ({
@@ -275,11 +264,9 @@ export function Sidebar() {
         : {}),
     }));
 
-  // While the drawer is open: lock background scroll, move focus into the
-  // drawer, trap Tab inside it, close on Escape, and close if the viewport
-  // grows to desktop width (the drawer is `lg:hidden`, so it would otherwise
-  // stay "open" invisibly with scroll still locked). Focus returns to the menu
-  // button on close.
+  // While the drawer is open: lock page scroll, move focus in, trap Tab,
+  // close on Escape, and close if the viewport grows to desktop width. Focus
+  // returns to the menu button on close.
   useEffect(() => {
     if (!menuOpen) return;
     const menuButton = menuButtonRef.current;
@@ -332,8 +319,7 @@ export function Sidebar() {
 
   return (
     <>
-      {/* Mobile menu bar — the only way to reach navigation once the sidebar
-          is hidden below `lg`. */}
+      {/* Mobile menu bar, shown below `lg`. */}
       <header className="lg:hidden sticky top-0 z-40 flex items-center gap-2 h-14 px-3 bg-(--bd-card) border-b border-(--bd-border)">
         <button
           ref={menuButtonRef}

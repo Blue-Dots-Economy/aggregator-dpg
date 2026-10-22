@@ -1,12 +1,9 @@
 /**
  * Server-side read of the aggregator's deploy-time capability flags.
  *
- * The api is the single source of truth: `GET /v1/aggregator-config` always
- * returns `features: { custom_roles: boolean }`. Server components (the console
- * layout + roles page) and the role-mutation BFF proxies read the flag from
- * here so the custom-roles capability can be turned off at deploy time without
- * a web rebuild or any `NEXT_PUBLIC_*` var. Fails safe to `false` so a
- * transient api problem hides the admin surface rather than exposing it.
+ * Flags come from `GET /v1/aggregator-config` (`features.custom_roles`). The
+ * console layout, roles page and role-mutation BFF routes read them here.
+ * Fails safe to `false`, so an api problem hides the admin screens.
  *
  * @module apps/web/src/lib/features.server
  */
@@ -28,11 +25,8 @@ const DEFAULT_FEATURES: AggregatorFeatures = { custom_roles: false };
 /**
  * Logs a warning without ever throwing.
  *
- * The logger writes through a transport worker, and that worker can exit
- * under the dev server — a `logger.warn` inside the catch below then threw
- * `the worker has exited`, which escalated a recoverable fetch failure into an
- * uncaught exception and a spurious 404 on the role-mutation proxies. The
- * fail-safe return must survive a broken logger.
+ * The logger's transport worker can exit under the dev server and make
+ * `logger.warn` throw; the fail-safe return must still happen.
  *
  * @param payload - Structured log fields.
  */
@@ -47,14 +41,8 @@ function warnSafe(payload: Record<string, unknown>): void {
 /**
  * Reads the deploy-time capability flags from the aggregator api.
  *
- * Best-effort: on timeout, a non-2xx response, a malformed body, or an absent
- * `features` block, returns {@link DEFAULT_FEATURES} (everything off) so a
- * gated surface stays hidden. Never throws.
- *
- * Wrapped in React's `cache()` (as `server-session.ts` does) so the console
- * layout, the roles page and the role-mutation proxies share one upstream call
- * per server request instead of each paying the fetch — a slow api then adds
- * its latency once, not N times, to a render.
+ * On any failure returns {@link DEFAULT_FEATURES} (everything off). Never
+ * throws. Wrapped in React's `cache()`, so one request makes one upstream call.
  *
  * @returns The resolved feature flags, or the fail-safe default.
  */

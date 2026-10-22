@@ -1,7 +1,7 @@
 /**
- * Roles (RBAC R6, network admin): the built-in roles and the custom roles
- * composed from existing permissions. Other actors get "not found", as for
- * anything out of reach.
+ * Roles page for the network admin: built-in and custom roles.
+ *
+ * Other actors get "not found".
  */
 
 import { notFound } from 'next/navigation';
@@ -19,9 +19,7 @@ export default async function ConsoleRolesPage() {
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   if (!actor.me.is_network_admin || !can(actor.me.capabilities, 'network.administer')) notFound();
-  // Defense in depth alongside the capability gate: when the deploy-time
-  // custom-roles capability is off the api does not register the roles routes,
-  // so the page is out of reach — answer "not found" like anything else is.
+  // With custom roles off, the api has no roles routes, so answer "not found".
   if (!(await customRolesEnabled())) notFound();
   const data = await consoleReadOptional<RolesResponse>('/v1/roles');
   return (

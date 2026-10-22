@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * Console navigation (user & org Phase 5). The organisations list is the
- * network admin's only; coordinators and invites need `org.manage`, the roles
- * page `network.administer` (RBAC; the API also checks them).
+ * Console navigation. Organisations is for the network admin only;
+ * coordinators and invites need `org.manage`, roles needs
+ * `network.administer`. The API checks the same permissions.
  */
 
 import Link from 'next/link';

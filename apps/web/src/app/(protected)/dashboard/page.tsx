@@ -41,8 +41,7 @@ import type {
 } from '../../../types';
 
 /**
- * Indexes a domain's `status_rules` by status key so the dashboard can
- * pull per-status label/description copy onto the status cards.
+ * Indexes a domain's `status_rules` by status key for the status cards.
  *
  * @param rules - The active domain's `status_rules` from network config.
  * @returns Map of status key to its optional label/description copy.
@@ -179,8 +178,7 @@ function MiniStat({ label, value, icon, sub, delta, deltaTone = 'flat' }: MiniSt
         )}
         <div className="text-[13px] text-ink-500 font-semibold">{label}</div>
       </div>
-      {/* mt-auto pins the number block to the card bottom so values line up
-          across a row even when some labels wrap to a second line. */}
+      {/* mt-auto keeps values aligned across a row when labels wrap. */}
       <div className="mt-auto flex flex-col gap-1">
         <div className="flex items-baseline gap-2">
           <div className="font-display font-bold text-[26px] text-ink-900 leading-none tracking-tight">
@@ -194,8 +192,7 @@ function MiniStat({ label, value, icon, sub, delta, deltaTone = 'flat' }: MiniSt
             </span>
           )}
         </div>
-        {/* min-h reserves the subline slot so values still align when a
-            config-defined tile has no sub copy. */}
+        {/* min-h keeps values aligned when a tile has no sub-line. */}
         <div className="text-[12px] text-ink-400 font-medium min-h-[18px]">{sub}</div>
       </div>
     </div>
@@ -203,10 +200,9 @@ function MiniStat({ label, value, icon, sub, delta, deltaTone = 'flat' }: MiniSt
 }
 
 /**
- * Domain summary bar — single strip above the lifecycle funnel carrying the
- * domain label (from network-config `plural_label`), the live total, a
- * context hint, and the refresh action. Replaces the old standalone label
- * row + refresh button (design: Dashboard summary bar).
+ * Domain summary bar above the lifecycle funnel.
+ *
+ * Shows the domain's `plural_label`, the live total, a hint, and the refresh action.
  */
 function SummaryBar({
   icon,
@@ -277,14 +273,12 @@ function SummaryBar({
 }
 
 /**
- * Labelled metric group — eyebrow heading over a responsive card grid.
- * Groups the dashboard tiles into "Profiles" / "Users" sections
- * (design: grouped metric sections).
+ * Labelled metric group: a heading over a responsive card grid.
+ *
+ * Used for the "Profiles" and "Users" sections.
  */
 function MetricGroup({ title, children }: { title: string; children: ReactNode }) {
-  // h-full + flex-1 stretch the two side-by-side groups to equal height,
-  // so Profiles and Users cards stay the same size even when one group's
-  // labels wrap to more lines.
+  // h-full + flex-1 keep side-by-side groups the same height.
   return (
     <div className="flex h-full flex-col">
       <div className="text-[11.5px] font-bold uppercase tracking-[.09em] text-ink-400 mb-3">
@@ -295,10 +289,7 @@ function MetricGroup({ title, children }: { title: string; children: ReactNode }
   );
 }
 
-/**
- * Icon per known rollup tile field. Config-defined tiles with unknown
- * fields render without an icon rather than guessing one.
- */
+/** Icon per known rollup tile field. Unknown fields have no icon. */
 const TILE_ICONS: Record<string, IconName> = {
   total_items: 'copy',
   complete_profiles: 'check',
@@ -309,10 +300,10 @@ const TILE_ICONS: Record<string, IconName> = {
 };
 
 /**
- * Contextual sub-line for a known rollup tile field (design: metric card
- * sub-labels). Unknown fields — and the completion share while either
- * count is missing or total is 0 — return undefined so the card simply
- * omits the line.
+ * Returns the sub-line for a known rollup tile field.
+ *
+ * Returns undefined for unknown fields, and for the completion share when a
+ * count is missing or the total is 0.
  *
  * @param field - The tile's rollup field name.
  * @param t - Dashboard-scoped translator.
@@ -362,30 +353,16 @@ interface FunnelCellProps {
 /** Minimum distance (px) kept between a cell popover and the viewport edge. */
 const POPOVER_GUTTER = 8;
 
-/**
- * How far (px) a cell may move before a scroll event counts as a real scroll.
- * Layout-driven scroll events that leave the cell where it was must not close
- * the popover.
- */
+/** How far (px) a cell may move before a scroll event closes the popover. */
 const POPOVER_SCROLL_TOLERANCE = 2;
 
 /**
- * Open/position state for the small portal popovers on table cells
- * (FunnelCell, ProgressTiny).
+ * Open and position state for the portal popovers on table cells (FunnelCell, ProgressTiny).
  *
- * Mouse users get the popover on hover, as before. Touch has no hover, so a tap
- * toggles it and moving focus away (tapping elsewhere) closes it; keyboard users
- * get it on focus and can dismiss it with Escape (#793).
- *
- * Positioning is measured, not assumed: the popover first renders at the page's
- * left edge (so it takes its natural width, bounded by its viewport-relative
- * `max-width`), then a layout effect clamps it beside its cell with a
- * {@link POPOVER_GUTTER} margin — before paint, so the first frame is never
- * seen. That keeps it on screen whatever the (config-sourced) label length.
- *
- * A scroll closes it only when the cell actually moved, so the popover never
- * ends up detached from its cell, while layout-driven scroll events don't shut
- * it the moment it opens.
+ * Opens on hover for mouse, on tap for touch, and on focus for keyboard;
+ * Escape closes it. A layout effect places it beside its cell, at least
+ * {@link POPOVER_GUTTER} from the viewport edge, before paint. A scroll closes
+ * it only when the cell moved.
  *
  * @returns The trigger ref, the popover ref, open flag, page-relative position
  *   and the props to spread onto the trigger element.
@@ -421,9 +398,7 @@ function useCellPopover() {
     setPos((p) => ({ ...p, x: left + window.scrollX, placed: true }));
   }, [open, pos.placed]);
 
-  // The popover is pinned to page coordinates, so a real scroll — the page, or
-  // the table scrolling sideways on a phone — would leave it detached from its
-  // cell. Close it then (capture phase catches element scrolls too).
+  // Close on a scroll that moves the cell. Capture phase also catches element scrolls.
   useEffect(() => {
     if (!open) return;
     const onScroll = () => {
@@ -451,13 +426,13 @@ function useCellPopover() {
       if (e.pointerType === 'mouse') hide();
     },
     onClick: (e: ReactMouseEvent) => {
-      // Mouse already opened on hover; a click there must not toggle it shut.
+      // Mouse opened it on hover; a click must not close it.
       if ((e.nativeEvent as PointerEvent).pointerType === 'mouse') return;
       if (open) hide();
       else show();
     },
     onFocus: (e: ReactFocusEvent<HTMLDivElement>) => {
-      // Only keyboard focus opens it — a tap also focuses, and its click opens.
+      // Only keyboard focus opens it; a tap opens it through the click.
       if (e.currentTarget.matches(':focus-visible')) show();
     },
     onBlur: hide,
@@ -497,9 +472,7 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
             ref={popoverRef}
             data-cell-popover=""
             style={{ position: 'absolute', left: pos.x, top: pos.y, zIndex: 9999 }}
-            // max-w + wrap-anywhere bound the width to the viewport whatever the
-            // config-sourced bucket labels are, so the measured clamp can always
-            // keep the gutter (#793).
+            // max-w + wrap-anywhere keep the popover within the viewport.
             className="bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-2.5 min-w-[160px] max-w-[calc(100vw-1rem)] wrap-anywhere pointer-events-none animate-[fadeUp_.12s_ease-out]"
           >
             <div className="flex flex-col gap-1.5">
@@ -523,10 +496,9 @@ function FunnelCell({ total, parts }: FunnelCellProps) {
 }
 
 /**
- * Profile-completion progress bar (driven by the dashboard rollup's
- * `profile_completion_pct`). Hovering shows a popover (mirrors FunnelCell)
- * with the lifecycle label — `title` carries the Draft/Live text. Native
- * `title` renders inconsistently, so we use the portal popover instead.
+ * Profile-completion progress bar from `profile_completion_pct`.
+ *
+ * Hovering shows a popover with the lifecycle label passed in `title`.
  */
 function ProgressTiny({ pct, title }: { pct: number; title?: string }) {
   const color = pct >= 80 ? '#10B981' : pct >= 50 ? '#F59E0B' : '#EF4444';
@@ -576,22 +548,17 @@ type RowKind = 'seeker' | 'provider' | 'opp';
 type StatusFilter = string; // 'all' | any key signalstack returns in rollup.by_status
 
 /**
- * Lifecycle dropdown values. `'all'` is the no-filter sentinel; the other
- * four map 1:1 to {@link LifecycleFilter} on the items endpoint.
+ * Lifecycle dropdown values.
+ *
+ * `'all'` means no filter; the others map to {@link LifecycleFilter} on the items endpoint.
  */
 type LifecycleFilterValue = 'all' | LifecycleFilter;
 
-// Lifecycle states the aggregator surfaces today: `draft` (profile incomplete,
-// <100%) and `live` (100%). When signals introduces a new status, add it here,
-// add a matching <option> in the dropdown, and an i18n `filters.lifecycle_<x>`
-// key — the filter logic itself is status-agnostic (generic equality).
+// Lifecycle states shown: `draft` (<100% complete) and `live` (100%). A new
+// status needs an entry here, a dropdown <option>, and a `filters.lifecycle_<x>` key.
 const LIFECYCLE_FILTER_VALUES: LifecycleFilterValue[] = ['all', 'draft', 'live'];
 
-/**
- * Parse `?lifecycle=` from a search-params bag, validating against the
- * known enum. Unknown values resolve to `'all'` so a stale URL does not
- * blank the filter dropdown.
- */
+/** Parses `?lifecycle=` from search params. Unknown values resolve to `'all'`. */
 function parseLifecycleParam(raw: string | null): LifecycleFilterValue {
   if (!raw) return 'all';
   return (LIFECYCLE_FILTER_VALUES as readonly string[]).includes(raw)
@@ -605,11 +572,7 @@ interface StatusOption {
   count?: number;
 }
 
-/**
- * Render a snake_case / kebab-case signalstack status key as a Title-Case
- * label. Avoids hardcoding the status taxonomy — signalstack's by_status
- * is an open map, so new statuses surface automatically.
- */
+/** Converts a snake_case or kebab-case status key to a Title Case label. */
 function statusLabel(key: string): string {
   return key
     .replace(/[_-]+/g, ' ')
@@ -633,10 +596,9 @@ function buildStatusOptions(
 }
 
 /**
- * Looks up a bucket label from the config-sourced map, falling back to
- * an optional translated fallback supplier, then the raw key. Always returns a string.
+ * Looks up a bucket label from config, then the fallback, then the raw key.
  *
- * @param labels - Config-sourced bucket label map (e.g. `dashboardBuckets.by_initiated_action_status` / `by_received_action_status`).
+ * @param labels - Bucket label map from config.
  * @param key - Bucket key (e.g. `'create'`, `'accept'`).
  * @param getFallback - Optional function that returns the localised fallback label for the key.
  * @returns The resolved label string.
@@ -650,8 +612,7 @@ function getBucketLabel(
 }
 
 /**
- * Builds the four funnel parts (create/accept/reject/cancel) for one direction
- * of a row's action counts, labelling each from the direction's config map.
+ * Builds the create/accept/reject/cancel funnel parts for one direction of a row's action counts.
  *
  * @param stats - The directional counts for the row.
  * @param labels - Config-sourced bucket labels for this direction.
@@ -677,9 +638,7 @@ function buildActionParts(
 }
 
 /**
- * Localised default tile groups, used when network.json omits
- * `dashboard_tiles.profile` / `dashboard_tiles.user`. Built per-tab so
- * `{entityPlural}` reflects the active domain's plural label.
+ * Default tile groups, used when network config has no `dashboard_tiles.profile` or `dashboard_tiles.user`.
  */
 function useDefaultTiles(entityPlural: string): {
   profile: DashboardTileDef[];
@@ -704,9 +663,9 @@ function useDefaultTiles(entityPlural: string): {
 }
 
 /**
- * Action bar shown above the table while rows are selected. Renders one
- * button per {@link BulkAction} descriptor — the bar is action-agnostic, so
- * future bulk operations plug in by extending `DASHBOARD_BULK_ACTIONS`.
+ * Action bar shown above the table while rows are selected.
+ *
+ * Renders one button per {@link BulkAction} in `DASHBOARD_BULK_ACTIONS`.
  */
 function BulkActionBar({
   selectedRows,
@@ -794,59 +753,30 @@ function BulkActionBar({
 
 interface ParticipantTableProps<R extends ParticipantBase> {
   kind: RowKind;
-  /**
-   * Signalstack domain id this table shows, from the live network config
-   * (e.g. `seeker`, or orange_dot's `tourist`). Feeds the bulk-action
-   * context; when omitted, falls back to the legacy seeker/provider
-   * mapping derived from `kind`.
-   */
+  /** Domain id for this table, from network config. Defaults from `kind` when omitted. */
   domain?: string | undefined;
   rows: R[];
-  /**
-   * Total count from signalstack `total_matching` — required to compute
-   * the page list and decide whether to render the pagination footer.
-   * When equal to `rows.length` (single page), the page buttons are
-   * suppressed; the "Showing 1–N of N" line stays.
-   */
+  /** Total from signalstack `total_matching`, used for pagination. */
   total?: number | undefined;
   page?: number | undefined;
   pageSize?: number | undefined;
   onPageChange?: ((next: number) => void) | undefined;
-  /**
-   * Server-side status filter. `'all'` means no `?status=` is sent to
-   * signalstack. Other values map 1:1 to signalstack's status taxonomy.
-   */
+  /** Server-side status filter. `'all'` sends no `?status=`. */
   statusFilter?: StatusFilter | undefined;
   onStatusFilterChange?: ((next: StatusFilter) => void) | undefined;
-  /**
-   * Statuses available for this domain, derived from
-   * `rollup.by_status` so the popover always reflects what signalstack
-   * actually has for this aggregator.
-   */
+  /** Statuses for this domain, from `rollup.by_status`. */
   statusOptions?: StatusOption[] | undefined;
-  /**
-   * Action-status bucket labels for the INITIATED column, sourced from
-   * `dashboardBuckets.by_initiated_action_status`. Falls back to localised
-   * `t('buckets.*')` when absent.
-   */
+  /** Initiated-column bucket labels from config; falls back to `t('buckets.*')`. */
   initiatedLabels?: Record<string, string> | undefined;
-  /**
-   * Action-status bucket labels for the RECEIVED column, sourced from
-   * `dashboardBuckets.by_received_action_status`. Falls back to localised
-   * `t('buckets.*')` when absent.
-   */
+  /** Received-column bucket labels from config; falls back to `t('buckets.*')`. */
   receivedLabels?: Record<string, string> | undefined;
-  /**
-   * Active lifecycle dropdown value. `'all'` hides the URL param.
-   */
+  /** Active lifecycle dropdown value. `'all'` hides the URL param. */
   lifecycleFilter?: LifecycleFilterValue | undefined;
   onLifecycleFilterChange?: ((next: LifecycleFilterValue) => void) | undefined;
   /**
-   * Fetches every row matching the current server-side filter (all pages) so
-   * the operator can select the whole result set, not just the visible page.
-   * One batched call (`limit = total_matching`). Omit to disable the
-   * "Select all N matching" banner — the header checkbox then only selects
-   * the current page.
+   * Fetches every row matching the current filter in one call.
+   *
+   * Omit to hide the "Select all N matching" banner.
    */
   onSelectAllMatching?: (() => Promise<R[]>) | undefined;
 }
@@ -870,9 +800,7 @@ function ParticipantTable<R extends ParticipantBase>({
 }: ParticipantTableProps<R>) {
   const t = useTranslations('dashboard');
   const { data: tableCfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Heading entity label comes from the active dot's network config (singular
-  // `label`: "Seeker"/"Provider" on blue/purple, "Tourist"/… on other dots),
-  // so the "<Entity> Activity & Status" heading stays dot-based, not hardcoded.
+  // Heading entity label from the network config's singular `label`.
   const headingEntity =
     tableCfg.domains?.find((d) => d.id === domain)?.label ??
     (kind === 'provider' ? t('table.provider') : t('table.participant'));
@@ -894,8 +822,7 @@ function ParticipantTable<R extends ParticipantBase>({
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement | null>(null);
 
-  // Close the filter popover on outside click. Tracks `mousedown` so the
-  // close fires before any button inside the popover would re-toggle it.
+  // Close the filter popover on outside `mousedown`.
   useEffect(() => {
     if (!filterOpen) return;
     const handler = (e: MouseEvent) => {
@@ -907,9 +834,7 @@ function ParticipantTable<R extends ParticipantBase>({
     return () => document.removeEventListener('mousedown', handler);
   }, [filterOpen]);
 
-  // Client-side search across the fields the table renders. The dashboard
-  // endpoint has no free-text query param, so search filters the visible
-  // page only — clearing it restores the full server-paginated view.
+  // Client-side search; filters the current page only.
   const visibleRows = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return rows;
@@ -923,21 +848,13 @@ function ParticipantTable<R extends ParticipantBase>({
 
   const filterActive = statusFilter !== 'all';
 
-  // Domain id for the bulk-action context. Prefer the network-config id the
-  // tab resolved (orange_dot's `tourist`, etc.); the legacy seeker/provider
-  // mapping only backstops callers that pass no domain (the opp demo tab).
+  // Domain id for bulk actions. Falls back to `kind` when no domain is passed.
   const bulkDomain: string = domain ?? (kind === 'seeker' ? 'seeker' : 'provider');
 
-  // Bulk selection — Gmail-style: the checkbox column is always present, so
-  // operators select rows directly without a separate "Select" mode. Snapshots
-  // full row data (not just ids) so client-side actions like CSV export can
-  // include rows from pages no longer mounted. Persists across page changes;
-  // resets when a filter changes because the selection's meaning changed
-  // underneath it.
+  // Selected rows, stored as full row data so actions like CSV export work
+  // across pages. Kept across page changes; reset when a filter changes.
   const [selected, setSelected] = useState<Map<string, ParticipantBase>>(new Map());
-  // True once the operator has expanded the selection to every matching row
-  // across all pages (via the "Select all N matching" banner). Drives the
-  // banner copy and is cleared by any change that narrows the meaning.
+  // True after "Select all N matching" selected every matching row.
   const [selectedAllMatching, setSelectedAllMatching] = useState(false);
   // In-flight guard while the fetch-all-matching call runs.
   const [selectingAll, setSelectingAll] = useState(false);
@@ -946,16 +863,14 @@ function ParticipantTable<R extends ParticipantBase>({
     setSelectedAllMatching(false);
   }, [statusFilter, lifecycleFilter]);
 
-  // Rows without a real profile_item_id carry synthetic `row-<index>` keys
-  // that collide across pages — those rows are not selectable.
+  // Rows with synthetic `row-<index>` keys are not selectable.
   const isSelectable = (r: ParticipantBase): boolean => !r.id.startsWith('row-');
   const selectablePageRows = visibleRows.filter(isSelectable);
   const allPageSelected =
     selectablePageRows.length > 0 && selectablePageRows.every((r) => selected.has(r.id));
 
   const toggleRow = (r: ParticipantBase) => {
-    // Any individual edit drops the "all matching" mode — the selection is no
-    // longer the full result set.
+    // Any single change ends "all matching" mode.
     setSelectedAllMatching(false);
     setSelected((prev) => {
       const next = new Map(prev);
@@ -966,9 +881,9 @@ function ParticipantTable<R extends ParticipantBase>({
   };
 
   /**
-   * Header checkbox (Gmail-style master toggle):
-   *   - any rows selected (this page or another) → discard the whole selection;
-   *   - nothing selected → select all selectable rows on the current page.
+   * Header checkbox toggle.
+   *
+   * Clears the selection if any rows are selected; otherwise selects the current page.
    */
   const togglePage = () => {
     setSelectedAllMatching(false);
@@ -988,10 +903,7 @@ function ParticipantTable<R extends ParticipantBase>({
     setSelected(new Map());
   };
 
-  /**
-   * Expands the selection to every row matching the current filter by fetching
-   * all pages in one batched call, then selecting all selectable rows.
-   */
+  /** Fetches every matching row and selects all selectable ones. */
   const selectAllMatching = async () => {
     if (!onSelectAllMatching || selectingAll) return;
     setSelectingAll(true);
@@ -1008,9 +920,8 @@ function ParticipantTable<R extends ParticipantBase>({
     }
   };
 
-  // Show the "select all N matching" prompt when the whole current page is
-  // selected, more matching rows exist beyond this page, and the parent
-  // supports fetching them — mirrors Gmail's page-vs-all-conversations banner.
+  // Show "select all N matching" when the whole page is selected, more rows
+  // exist, and the parent can fetch them.
   const showSelectAllMatching =
     !!onSelectAllMatching &&
     allPageSelected &&
@@ -1030,12 +941,8 @@ function ParticipantTable<R extends ParticipantBase>({
           {t('table.count', { shown: visibleRows.length, total: total ?? rows.length })}
         </span>
 
-        {/* Below `sm` the controls take their own full-width row: search on
-            top, then the lifecycle select stretched beside the filter button,
-            which stays pinned right so its right-anchored menu stays on
-            screen (#793). From `sm` up nothing wraps — the layout is exactly the
-            original single row (`.bd-input`'s unlayered `width: 100%` would
-            otherwise push each control onto its own line). */}
+        {/* Below `sm` the controls wrap onto a full-width row with the filter
+            button on the right. From `sm` up they stay on one row. */}
         <div className="w-full sm:w-auto sm:ml-auto flex flex-wrap sm:flex-nowrap items-center gap-2">
           <div className="relative basis-full sm:basis-auto">
             <label htmlFor={searchId} className="sr-only">
@@ -1085,10 +992,7 @@ function ParticipantTable<R extends ParticipantBase>({
             {filterOpen && (
               <div
                 role="menu"
-                // Bounded + self-scrolling. The panel hangs below the trigger,
-                // which sits at the bottom of the toolbar; once a filter
-                // returns no rows the table collapses, the page stops
-                // scrolling, and any option past the fold became unreachable.
+                // Max height with its own scroll so every option stays reachable.
                 className="absolute right-0 top-full mt-1 z-20 min-w-[180px] max-w-[calc(100vw-2rem)] max-h-[min(320px,60vh)] overflow-y-auto bg-white border border-(--bd-border) rounded-[10px] bd-shadow-lg p-1"
               >
                 {options.map((opt) => {
@@ -1132,8 +1036,7 @@ function ParticipantTable<R extends ParticipantBase>({
         />
       )}
 
-      {/* Gmail-style: the header checkbox only selects the current page; this
-          banner lets the operator expand to every matching row across pages. */}
+      {/* Banner to extend the selection to every matching row. */}
       {(showSelectAllMatching || selectedAllMatching) && (
         <div className="px-5 py-2 flex items-center justify-center gap-2 border-b border-(--bd-border) bg-(--bd-primary-50) text-[12.5px] text-ink-600">
           {selectedAllMatching ? (
@@ -1190,10 +1093,7 @@ function ParticipantTable<R extends ParticipantBase>({
                   className="w-4 h-4 cursor-pointer align-middle"
                   style={{ accentColor: 'var(--bd-primary-600)' }}
                   ref={(el) => {
-                    // Minus (indeterminate) whenever a selection exists but the
-                    // current page isn't fully selected — covers selections held
-                    // on other pages too, so the box always signals "click to
-                    // discard".
+                    // Indeterminate when a selection exists but this page is not fully selected.
                     if (el) el.indeterminate = selected.size > 0 && !allPageSelected;
                   }}
                   checked={allPageSelected}
@@ -1332,20 +1232,15 @@ interface PaginationFooterProps {
   total: number;
   rowsOnPage: number;
   onPageChange?: ((next: number) => void) | undefined;
-  /**
-   * Search filtering happens client-side on the current page, so when a
-   * search is active the page count is meaningless — hide the buttons
-   * and reflect the filtered count in the "Showing" line instead.
-   */
+  /** True while a search is active; hides page buttons and shows the filtered count. */
   searchActive?: boolean | undefined;
   visibleCount?: number | undefined;
 }
 
 /**
- * Table footer. Always renders the "Showing X–Y of Z" line. Page buttons
- * are rendered only when more than one page exists — single-page tables
- * skip the numbered list entirely so a 5-row dashboard doesn't show
- * dead "2" / "3" controls.
+ * Table footer with the "Showing X–Y of Z" line.
+ *
+ * Page buttons appear only when there is more than one page.
  */
 function PaginationFooter({
   page,
@@ -1362,17 +1257,14 @@ function PaginationFooter({
   const end = (page - 1) * pageSize + rowsOnPage;
   const canPrev = page > 1;
   const canNext = page < totalPages;
-  // When a search query is active, the visible row count is filtered
-  // from the current page only — show that, not the unfiltered range,
-  // so the count line matches what the user sees in the table body.
+  // During a search, show the filtered count of the current page.
   const showSearchSummary = searchActive && visibleCount !== undefined;
   const change = (next: number) => {
     if (!onPageChange) return;
     if (next < 1 || next > totalPages || next === page) return;
     onPageChange(next);
   };
-  // Numbered list capped at 7 entries with leading/trailing ellipsis
-  // so dashboards with many pages stay readable.
+  // At most 7 page entries, with ellipsis.
   const pageList = buildPageList(page, totalPages);
   return (
     <div className="px-5 py-3 border-t border-(--bd-border) flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-[12.5px] text-ink-500">
@@ -1433,10 +1325,10 @@ function PaginationFooter({
 }
 
 /**
- * Returns the numbered button list with ellipsis markers. For ≤ 7 pages
- * we render every number. Beyond that, we surround the current page with
- * one neighbour on each side and pin the first / last pages, dropping
- * the gaps with `…`.
+ * Returns the page button list with `…` markers.
+ *
+ * Up to 7 pages shows every number. Otherwise shows the first, last, current,
+ * and the current page's neighbours.
  */
 function buildPageList(current: number, totalPages: number): Array<number | '…'> {
   if (totalPages <= 7) {
@@ -1471,13 +1363,11 @@ function ErrorCard() {
 const PAGE_SIZE = 25;
 
 /**
- * URL-backed lifecycle filter state. Reads `?lifecycle=` on every render
- * via `useSearchParams` and updates the URL through `router.replace` (so
- * the filter participates in browser history but doesn't push a new
- * navigation entry per click).
+ * Lifecycle filter state stored in `?lifecycle=`.
  *
- * Returns the parsed value + a setter that mirrors changes back to the
- * URL. `'all'` removes the param entirely so default views read clean.
+ * Updates the URL with `router.replace`. `'all'` removes the param.
+ *
+ * @returns The current value and a setter.
  */
 function useLifecycleUrlFilter(): [LifecycleFilterValue, (next: LifecycleFilterValue) => void] {
   const router = useRouter();
@@ -1495,49 +1385,31 @@ function useLifecycleUrlFilter(): [LifecycleFilterValue, (next: LifecycleFilterV
 }
 
 /**
- * Narrows the rendered table rows to the selected lifecycle. The table is fed
- * by the legacy dashboard rollup (not lifecycle-aware), so the dropdown filters
- * the already-merged rows here. `'all'` (and any non-draft/live value) is a
- * no-op; `'draft'` / `'live'` match `lifecycle_status` with the back-compat
- * default `'live'` for unmatched rows.
+ * Filters table rows to the selected lifecycle.
+ *
+ * `'all'` returns every row. Rows without `lifecycle_status` count as `'live'`.
  */
 function filterRowsByLifecycle<R extends { lifecycle_status?: LifecycleStatus }>(
   rows: R[],
   filter: LifecycleFilterValue,
 ): R[] {
   if (filter === 'all') return rows;
-  // Generic equality match so any lifecycle status — including ones added in
-  // future — filters correctly without touching this function. Unmatched rows
-  // default to `'live'` (back-compat with signals deployments that omit the
-  // field).
+  // Rows without a lifecycle status count as `'live'`.
   return rows.filter((r) => (r.lifecycle_status ?? 'live') === filter);
 }
 
 /** Props for the participant-profile tab (any `profile_*` domain). */
 interface DomainTabProps {
-  /**
-   * Domain to render — the signed-in coordinator's OWN domain, from its
-   * `aggregator_type`. Passed in rather than read from a fixed position in
-   * `cfg.domains`, which assumed every network has exactly two domains in
-   * seeker-then-provider order.
-   */
+  /** The signed-in coordinator's own domain, from its `aggregator_type`. */
   domainId: string | undefined;
 }
 
 function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
   const t = useTranslations('dashboard');
   const locale = useLocale();
-  // Signalstack's `/aggregator/dashboard` is the only endpoint that
-  // correctly scopes participant lookups by the caller's signalstack org
-  // (via the per-call `x-acting-org-id` header). The response now
-  // wraps every served domain under `by_domain[<id>]` so seeker +
-  // provider tabs share a single fetch.
-  //
-  // Domain id is the caller's own, passed in by the parent, so a network
-  // declaring non-default ids (orange_dot's `tourist`, up-gzb's
-  // `service_provider`) still resolves the right `by_domain[<id>]` slice.
-  // `undefined` until the parent's config loads, which lets useDashboard's
-  // `enabled` gate skip the call rather than firing a stale fetch.
+  // `/aggregator/dashboard` scopes results to the caller's org and returns
+  // each domain under `by_domain[<id>]`. The domain id is `undefined` until
+  // config loads, which skips the fetch.
   const seekerDomainId = domainId;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -1574,18 +1446,14 @@ function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
   const seekerCfg = cfg?.domains?.find((d) => d.id === seekerDomainId);
   const seekerPlural = seekerCfg?.plural_label ?? t('tabs.seekers');
   const defaultTiles = useDefaultTiles(seekerPlural);
-  // Directional bucket labels — wired to the funnel cells in the participant
-  // table's Initiated / Received action-count columns.
+  // Bucket labels for the Initiated and Received columns.
   const initiatedLabels = cfg?.dashboardBuckets?.by_initiated_action_status ?? {};
   const receivedLabels = cfg?.dashboardBuckets?.by_received_action_status ?? {};
   const statusLabels = cfg?.dashboardBuckets?.by_status ?? {};
   const statusRules = indexStatusRules(seekerCfg?.status_rules);
   const total = rollup?.total_items;
   const byStatus = rollup?.by_status ?? {};
-  // Cache the unfiltered status taxonomy the first time it loads, so the
-  // dropdown stays populated when the user picks a filter that narrows
-  // `by_status` down to a single key. Refreshed only on unfiltered
-  // responses — keeps a single fetch per tab.
+  // Keep the unfiltered status list so the dropdown stays full when a filter is set.
   const [cachedByStatus, setCachedByStatus] = useState<Record<string, number> | undefined>();
   useEffect(() => {
     if (!filterActive && rollup?.by_status) {
@@ -1596,8 +1464,7 @@ function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
     () => buildStatusOptions(cachedByStatus ?? byStatus, t('filters.all_statuses')),
     [cachedByStatus, byStatus, t],
   );
-  // Signalstack's status taxonomy is open — pick the keys the UI cares
-  // about; unknown ones still surface in the items list.
+  // Pick the status keys the UI shows; others still appear in the items list.
   const active = byStatus['active'] ?? byStatus['new'];
   const atRisk = byStatus['at_risk'];
   const inactive = byStatus['inactive'];
@@ -1610,8 +1477,7 @@ function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
     [rows, lifecycleFilter],
   );
 
-  // Fetch every matching seeker (all pages) in one batched call so the table's
-  // "Select all N matching" banner can select the whole result set.
+  // Fetch every matching seeker for "Select all N matching".
   const fetchAllSeekers = async () => {
     if (!seekerDomainId) return [];
     const res = await dashboardService.dashboard({
@@ -1619,10 +1485,7 @@ function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
       page: 1,
       limit: slice?.total_matching ?? total ?? PAGE_SIZE,
       ...(filterActive ? { status: statusFilter } : {}),
-      // Forward the lifecycle filter too: `total_matching` (the `limit` above)
-      // is the lifecycle-narrowed count, so the fetch must be narrowed the same
-      // way — else "Select all N matching" pulls N unfiltered rows and the
-      // client-side filter below finds almost none. Mirror the useDashboard call.
+      // Apply the lifecycle filter too, since `total_matching` is the filtered count.
       ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
         ? { lifecycle: lifecycleFilter }
         : {}),
@@ -1633,9 +1496,7 @@ function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
     return filterRowsByLifecycle(all, lifecycleFilter);
   };
 
-  // Refresh handler: hits the BFF with refresh=true to force signalstack to
-  // recompute the rollup synchronously, then invalidates the React Query
-  // cache so the next normal render picks up the freshly stored values.
+  // Refresh: asks signalstack to recompute the rollup, then invalidates the query cache.
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
@@ -1773,46 +1634,32 @@ function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
   );
 }
 
-/**
- * Render a numeric stat value, falling back to an em-dash when the
- * upstream rollup hasn't loaded yet or signalstack doesn't expose the
- * field.
- */
+/** Formats a numeric stat value, or an em dash when it is missing. */
 function fmtCount(n: number | null | undefined): string {
   if (n === undefined || n === null) return '—';
-  // Integers render clean; fractional values (e.g. avg_items_per_user) are
-  // capped at 2 decimals with trailing zeros dropped (1.1666… → "1.17").
-  // Locale left to the runtime so separators follow the user's language.
+  // At most 2 decimals (1.1666… → "1.17"), in the runtime locale.
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 /**
- * Maps a signalstack dashboard participant payload onto the `Seeker`
- * shape the participant table expects.
+ * Returns a row's lifecycle from signalstack's `lifecycle_status`.
  *
- * Signalstack's dashboard endpoint returns participant summaries only
- * — `name`, `city`, and the role/exp profile fields are NOT in this
- * response. They live in the per-user item detail endpoint, which the
- * table does not yet call. Missing fields render as em-dashes; the
- * `complete` profile bar uses `profile_completion_pct` from the rollup.
- */
-/**
- * Resolves a row's lifecycle from signalstack's authoritative `lifecycle_status`
- * (`draft`/`live`/`paused`, with the consent + schema go-live gates already
- * applied server-side), falling back to the completion heuristic only for an
- * older signalstack that omits the field. The heuristic mislabels a
- * schema-complete-but-unconsented profile (genuinely `draft`) as `live`, so it
- * is a last resort — see #558/#627.
+ * Falls back to the completion percentage when the field is missing; that
+ * fallback can label an unconsented profile as `live`.
  */
 function resolveLifecycleStatus(raw: unknown, completion: number): LifecycleStatus {
   if (raw === 'draft' || raw === 'live' || raw === 'paused') return raw;
   return completion >= 100 ? 'live' : 'draft';
 }
 
+/**
+ * Maps a signalstack dashboard participant onto the `Seeker` row shape.
+ *
+ * The dashboard response has no `name`, `city`, or role fields, so those show
+ * as em dashes.
+ */
 function toSeekerRow(participant: Record<string, unknown>, locale: string, index: number): Seeker {
-  // Row key: profile_item_id (one row per profile), else the array index.
-  // user_id is not unique per row (a user may own many profiles), so it is no
-  // longer used as the key — kept only as an optional passthrough upstream.
+  // Row key: profile_item_id, else the array index. user_id is not unique per row.
   const profileItemId =
     typeof participant.profile_item_id === 'string' ? participant.profile_item_id : '';
   const status = mapSeekerStatus(
@@ -1820,8 +1667,7 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string, index
   );
   const completion =
     typeof participant.profile_completion_pct === 'number' ? participant.profile_completion_pct : 0;
-  // Lifecycle from signalstack's authoritative row status, heuristic fallback
-  // only (see resolveLifecycleStatus).
+  // See resolveLifecycleStatus.
   const lifecycle_status = resolveLifecycleStatus(participant.lifecycle_status, completion);
   const lifecycleFields: Pick<Seeker, 'lifecycle_status'> = { lifecycle_status };
   const created =
@@ -1835,8 +1681,7 @@ function toSeekerRow(participant: Record<string, unknown>, locale: string, index
   const initiated = mapDirectional(participant.initiated);
   const received = mapDirectional(participant.received);
   return {
-    // `row-` prefix keeps synthetic keys from colliding with a genuine
-    // numeric profile_item_id on the same page.
+    // `row-` prefix avoids clashing with a numeric profile_item_id.
     id: profileItemId || `row-${index}`,
     name,
     city: '—',
@@ -1911,13 +1756,7 @@ function formatRelative(iso: string): string {
 function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
   const t = useTranslations('dashboard');
   const locale = useLocale();
-  // Mirror SeekersTab: live counts come from the signalstack dashboard
-  // rollup. Provider domain reuses the same canonical rollup shape
-  // (total_items, by_status, by_initiated_action_status,
-  //  by_received_action_status, complete_profiles, …)
-  // so the cards map field-for-field; only the labels differ.
-  //
-  // Domain id is the caller's own — see SeekersTab.
+  // Same rollup shape and fetch as SeekersTab; only the labels differ.
   const providerDomainId = domainId;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -1952,8 +1791,7 @@ function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
   const providerCfg = cfg?.domains?.find((d) => d.id === providerDomainId);
   const providerPlural = providerCfg?.plural_label ?? t('tabs.providers');
   const defaultTiles = useDefaultTiles(providerPlural);
-  // Directional bucket labels — wired to the funnel cells in the participant
-  // table's Initiated / Received action-count columns.
+  // Bucket labels for the Initiated and Received columns.
   const initiatedLabels = cfg?.dashboardBuckets?.by_initiated_action_status ?? {};
   const receivedLabels = cfg?.dashboardBuckets?.by_received_action_status ?? {};
   const statusLabels = cfg?.dashboardBuckets?.by_status ?? {};
@@ -1973,8 +1811,7 @@ function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
     () => filterRowsByLifecycle(rows, lifecycleFilter),
     [rows, lifecycleFilter],
   );
-  // Fetch every matching provider (all pages) for the "Select all N matching"
-  // banner — one batched call scoped to the active filter.
+  // Fetch every matching provider for "Select all N matching".
   const fetchAllProviders = async () => {
     if (!providerDomainId) return [];
     const res = await dashboardService.dashboard({
@@ -1982,10 +1819,7 @@ function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
       page: 1,
       limit: slice?.total_matching ?? total ?? PAGE_SIZE,
       ...(filterActive ? { status: statusFilter } : {}),
-      // Forward the lifecycle filter too: `total_matching` (the `limit` above)
-      // is the lifecycle-narrowed count, so the fetch must be narrowed the same
-      // way — else "Select all N matching" pulls N unfiltered rows and the
-      // client-side filter below finds almost none. Mirror the useDashboard call.
+      // Apply the lifecycle filter too, since `total_matching` is the filtered count.
       ...(lifecycleFilter === 'draft' || lifecycleFilter === 'live'
         ? { lifecycle: lifecycleFilter }
         : {}),
@@ -2006,9 +1840,7 @@ function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
     [cachedByStatus, byStatus, t],
   );
 
-  // Refresh handler: hits the BFF with refresh=true to force signalstack to
-  // recompute the rollup synchronously, then invalidates the React Query
-  // cache so the next normal render picks up the freshly stored values.
+  // Refresh: asks signalstack to recompute the rollup, then invalidates the query cache.
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
@@ -2155,10 +1987,7 @@ function toProviderRow(
 
 export default function DashboardPageRoot() {
   const rawProfile = useProfileRaw();
-  // Wait for the profile to resolve before mounting any tab — SeekersTab and
-  // ProvidersTab each fetch /api/dashboard?domain=... on mount (via
-  // useDashboard), so rendering a default before we know the aggregator's type
-  // fires a stale seeker request that a provider account should never make.
+  // Wait for the profile before mounting a tab, so no tab fetches the wrong domain.
   const profileType = rawProfile.data?.type;
   if (!profileType) {
     return <DashboardLoadingFrame />;
@@ -2184,21 +2013,11 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
   const router = useRouter();
   const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Resolve the aggregator's primary domain id strictly from the live
-  // network config (matches against `aggregatorType`). No fallback:
-  // when the config has not loaded yet, `primaryDomain` is undefined
-  // and `useDashboard` skips the request — preventing a stale
-  // `?domain=seeker` fetch on cold mount with DEFAULT_AGGREGATOR_CONFIG.
+  // Domain id from network config matching `aggregatorType`. Undefined until
+  // config loads, which skips the dashboard fetch.
   const primaryDomainCfg = cfg.domains?.find((d) => d.id === aggregatorType);
   const primaryDomain = primaryDomainCfg?.id;
-  // Provider-like = the domain publishes job postings rather than participant
-  // profiles, decided from the domain's own `item_type`.
-  //
-  // This was `primaryDomain === cfg.domains?.[1]?.id`, which assumed every
-  // network has exactly two domains in seeker-then-provider order. A third
-  // domain (blue_dot/up-gzb adds `service_provider`) matched neither branch, so
-  // it fell through to the seeker view AND that view fetched `domains[0]` —
-  // a service_provider coordinator saw a table headed "Seekers".
+  // Provider-like when the domain's `item_type` is job postings, not profiles.
   const isProviderLike = (primaryDomainCfg?.item_type ?? '').startsWith('job_posting');
   const canOnboard = useCan()('profiles.onboard');
 
@@ -2218,10 +2037,7 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
         }
       />
 
-      {/* Single-domain aggregators render no tab strip — the summary bar
-          inside each tab already carries the domain label + live total
-          (design: redundant pill removed). Which tab renders is fixed by
-          the aggregator's own type; nothing lets the user switch it. */}
+      {/* No tab strip: the tab is fixed by the aggregator's type. */}
       {isProviderLike ? (
         <ProvidersTab domainId={primaryDomain} />
       ) : (

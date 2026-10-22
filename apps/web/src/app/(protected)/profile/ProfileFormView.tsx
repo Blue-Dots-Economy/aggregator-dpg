@@ -11,17 +11,12 @@ import { I } from '../../../icons';
 import type { ProfileApiResponse } from '../../../services/profile.service';
 
 /**
- * Read-only aggregator profile view (issue #470).
+ * Read-only aggregator profile view.
  *
- * Renders the *same* form the public registration page renders — the schema is
- * loaded server-side and passed in — populated with the signed-in aggregator's
- * stored profile, with every field disabled. The registration-only consent
- * block is hidden (a signup-time legal artifact, not editable profile data) and
- * the form's submit button is suppressed, so the fields can never be edited in
- * place. Changes are instead raised via the "Request an update" panel, which
- * lists each schema-flagged (`x-updatable`) field as a Field / Current / New
- * row. The admin-approval email flow behind it is not wired up yet, so
- * submitting only shows a "coming soon" acknowledgement.
+ * Renders the registration form filled with the stored profile, with every
+ * field disabled, the consent block hidden, and no submit button. The
+ * "Request an update" panel lists each `x-updatable` field; submitting it
+ * only shows a "coming soon" message.
  */
 
 export interface ProfileFormViewProps {
@@ -32,10 +27,9 @@ export interface ProfileFormViewProps {
 }
 
 /**
- * Maps the merged profile API response into the registration schema's form
- * shape. Only the fields the registration schema declares are carried across;
- * post-login extras (personas, services) are intentionally omitted so the two
- * surfaces render identically.
+ * Maps the merged profile API response into the registration form shape.
+ *
+ * Only fields declared in the registration schema are kept.
  *
  * @param api - The merged `GET /v1/aggregators/profile/me` response.
  * @returns Form data keyed to the registration schema properties.
@@ -65,10 +59,7 @@ interface UpdatableField {
 }
 
 /**
- * Reads the registration schema for top-level properties flagged
- * `x-updatable: true` and returns them (with their human labels) in declared
- * order. The editable set is therefore config-driven — flip the flag in
- * `registration.v1.json` to add or remove a field, no code change here.
+ * Returns the top-level schema properties flagged `x-updatable: true`, with labels, in declared order.
  *
  * @param schema - The registration JSON Schema.
  * @returns The updatable fields, in property order.
@@ -81,9 +72,9 @@ function collectUpdatableFields(schema: RJSFSchema): UpdatableField[] {
 }
 
 /**
- * Renders the aggregator's current value for an updatable field as one display
- * line. `locations` flattens to a single-line postal address; other fields
- * stringify their scalar value.
+ * Formats the current value of an updatable field as one display line.
+ *
+ * `locations` becomes a single-line postal address.
  *
  * @param key - Schema property key.
  * @param api - The merged profile response (may be undefined while loading).
@@ -112,10 +103,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
   const t = useTranslations('profile.view');
   const { data, isLoading, isError } = useProfileRaw();
 
-  // Update-request panel (issue #470 part 3). The UI is present — one
-  // Field/Current/New row per schema-flagged field plus a submit CTA — but the
-  // admin-approval email flow is not wired up yet, so submitting only surfaces
-  // a "coming soon" acknowledgement. No API call.
+  // Update-request panel. Submitting shows a "coming soon" message; no API call.
   const [requesting, setRequesting] = useState(false);
   const [newValues, setNewValues] = useState<Record<string, string>>({});
   const [requestSent, setRequestSent] = useState(false);
@@ -129,8 +117,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
     setRequestSent(false);
   };
 
-  // Reuse the registration UI schema, but hide the consent block and suppress
-  // the submit button — the profile is display-only.
+  // Registration UI schema without the consent block or submit button.
   const readonlyUiSchema = useMemo<Record<string, unknown>>(
     () => ({
       ...uiSchema,
@@ -143,8 +130,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
     [uiSchema],
   );
 
-  // Strip the schema's title + API-contract description — the page owns its
-  // heading (Topbar + read-only note), matching how /register renders.
+  // Drop the schema title and description; the page renders its own heading.
   const displaySchema = useMemo<RJSFSchema>(() => {
     const clone = { ...schema } as RJSFSchema;
     delete (clone as { title?: string }).title;

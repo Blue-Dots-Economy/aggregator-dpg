@@ -1,11 +1,8 @@
 /**
  * Session store factory.
  *
- * Picks an implementation based on env:
- *   - `REDIS_URL` set → `RedisSessionStore` (production / docker-compose dev)
- *   - otherwise → `MemorySessionStore` (unit tests, offline dev)
- *
- * Returns a process-wide singleton so callers share one connection.
+ * Uses `RedisSessionStore` when `REDIS_URL` is set, otherwise
+ * `MemorySessionStore`. Returns a process-wide singleton.
  */
 
 import { MemorySessionStore } from './memory';

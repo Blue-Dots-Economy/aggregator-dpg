@@ -1,9 +1,9 @@
 /**
- * Console BFF (user & org Phase 5): Change a coordinator's domains.
+ * Console BFF: change a coordinator's domains.
  *   PATCH /api/console/user/metadata/:id → API PATCH /v1/user/metadata/update/:id
  *
- * Guarded by `consoleMutation` (JSON + same-origin, C11) and forwarded with
- * the caller's own token; the upstream envelope passes through unchanged.
+ * Guarded by `consoleMutation` (JSON body, same-origin) and sent with the
+ * caller's own token. The upstream response passes through unchanged.
  */
 
 import { type NextRequest, type NextResponse } from 'next/server';
