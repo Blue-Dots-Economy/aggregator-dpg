@@ -6,7 +6,9 @@ import { loadRegistrationSchema } from '../../../lib/aggregator-schema.server';
 import { loadConsentContent, warnIfLegacyHierarchyFlag } from './register-server';
 
 export const metadata: Metadata = {
-  title: 'Register as Aggregator',
+  // Matches the heading the page renders, which comes from the registration
+  // schema's own title (#873 renamed it to Coordinator Registration).
+  title: 'Coordinator Registration',
 };
 
 export const dynamic = 'force-dynamic';
