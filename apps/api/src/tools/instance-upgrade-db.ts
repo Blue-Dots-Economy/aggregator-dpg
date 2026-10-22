@@ -44,8 +44,9 @@ export async function readInstanceFacts(pool: Queryable): Promise<InstanceFacts>
 }
 
 /**
- * Whether the session's role can act as the owner of the coordinator table.
- * The migrations `SET LOCAL ROLE` to that owner.
+ * Whether the session's role can act as the owner of the coordinator table
+ * (`users`, or `aggregators` before 0027). The migrations `SET LOCAL ROLE` to
+ * that owner and refuse otherwise.
  *
  * @param pool - Postgres pool.
  * @returns `true` when the role is the owner or a member of it.
@@ -104,8 +105,8 @@ export function isFailing(row: CheckRow): boolean {
 /**
  * Splits a psql script into statements. Drops `\` meta lines and `--` comment
  * lines. A statement ends at `;` at a line end, outside quotes and dollar-quoted
- * bodies. Not supported: `/* … *\/` comments, `E'\''` escapes, and a quote
- * inside a trailing `--` comment.
+ * bodies. Not supported, and unused by the operator scripts: `/* … *\/`
+ * comments, `E'\''` escapes, and a quote inside a trailing `--` comment.
  *
  * @param script - The script text.
  * @returns The statements, in order.

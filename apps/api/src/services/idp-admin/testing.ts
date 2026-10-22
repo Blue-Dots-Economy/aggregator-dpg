@@ -190,7 +190,7 @@ export class IdpAdminFake extends IdpAdminAdapter {
       this.failNext = null;
       return { ok: false, error: e };
     }
-    // A duplicate top-level name fails with BAD_REQUEST, as Keycloak's 409 maps.
+    // A duplicate top-level name fails with BAD_REQUEST, like Keycloak's 409.
     if ([...this.groups.values()].some((g) => g.name === name)) {
       return { ok: false, error: { code: 'BAD_REQUEST', message: `group exists: ${name}` } };
     }
@@ -299,7 +299,7 @@ export class IdpAdminFake extends IdpAdminAdapter {
     return { ok: true, value: undefined };
   }
 
-  /** Returns how many times each user's sessions were ended. */
+  /** How many times each user's sessions were ended. */
   readonly logouts = new Map<string, number>();
 
   async logoutSessions(/* NOSONAR typescript:S7503 */ userId: string): Promise<IdpResult<void>> {

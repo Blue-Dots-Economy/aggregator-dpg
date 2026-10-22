@@ -12,9 +12,9 @@
  *
  * `check` is read-only, except for fixes. `run` migrates a database from 0022 to
  * the latest migration in one transaction, runs every verify gate, and commits
- * only when all pass. `check` and `run` need only `DATABASE_URL`,
- * `AGGREGATOR_NETWORK` and `AGGREGATOR_BRAND`. `enrich` and `enable-owners` need
- * the full API environment. Output is counts, check ids, error codes and
+ * only when all pass. `check` and `run` need only `DATABASE_URL` and
+ * `AGGREGATOR_NETWORK` (`AGGREGATOR_BRAND` is optional). `enrich` and
+ * `enable-owners` need the full API environment. Output is counts, check ids, error codes and
  * database ids, never row data. Exit codes: 0 ok, 1 refused or failed, 2 usage.
  */
 
@@ -69,7 +69,7 @@ const FIXES: Record<string, { file: string; param?: { flag: string; setting: str
 /** A refusal. Printed as `REFUSED: …` with exit code 1; nothing was changed. */
 class Refusal extends Error {}
 
-/** Operator SQL directory: `TRAIN_SQL_DIR`, else `<app>/sql`, else `scripts/sql`. */
+/** Operator SQL directory: `TRAIN_SQL_DIR`, else `<app>/sql` (image), else `scripts/sql`. */
 function sqlDir(): string {
   if (process.env.TRAIN_SQL_DIR) return process.env.TRAIN_SQL_DIR;
   const inImage = path.resolve(__dirname, '../../sql');
@@ -305,7 +305,7 @@ async function fix(/* NOSONAR typescript:S3776 */ pool: pg.Pool, args: string[])
   try {
     await client.query('BEGIN');
     await client.query(`SET LOCAL lock_timeout = '10s'`);
-    // Refuse while a `run` or boot migration holds the lock.
+    // Wait for any `run` or boot migration; fails after the lock timeout.
     await client.query(`SELECT pg_advisory_xact_lock(${MIGRATION_LOCK_SQL_KEY})`);
     if ((await levelOf(client)).state !== 'start') {
       throw new Refusal('the level moved: fixes apply to a database at 0022 only');
