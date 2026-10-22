@@ -456,7 +456,7 @@ export const ERR = {
     hint: 'Profile PATCH carried an org-detail field (migration 0028); the org owner edits them. `fields.fields` lists the offending keys.',
   },
 
-  // ── Coordinator invites (#700) ────────────────────────────────────────────
+  // ── Coordinator invites ──────────────────────────────────────────────────
   INVITE_INVALID: {
     code: 'INVITE_INVALID',
     status: 400,

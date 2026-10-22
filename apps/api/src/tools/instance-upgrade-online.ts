@@ -259,8 +259,7 @@ async function activeOrgs(): Promise<Organisation[]> {
   const all: Organisation[] = [];
   let cursor: { name: string; id: string } | undefined;
   for (;;) {
-    const page = await store.search({
-      // NOSONAR typescript:S9382
+    const page = /* NOSONAR typescript:S9382 */ await store.search({
       orgIds: null,
       status: 'active',
       limit: 100,
