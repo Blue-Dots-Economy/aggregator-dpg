@@ -3,7 +3,8 @@
  *
  * The built-in roles are the typed `BUILTIN_ROLES` const (seeded into the
  * database by migration `0031_rbac_seed.sql`); custom roles live only in the
- * database. Both pass the same checks here. Rules: `docs/rbac/rbac-permissions-and-roles.md` §3–§4.
+ * database. Both pass the same checks here, so a broken catalogue is never
+ * loaded. Rules: `docs/rbac/rbac-permissions-and-roles.md` §3–§4.
  *
  * @module @aggregator-dpg/rbac/roles
  */

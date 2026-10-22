@@ -108,7 +108,7 @@ export abstract class ConsentLedgerBase {
    * Returns a ledger that writes through the caller's transaction, so the
    * consent row commits or rolls back with its subject.
    *
-   * @param executor - The implementation's transaction handle (a Drizzle transaction for Postgres); a wrong handle fails at insert.
+   * @param executor - Transaction handle (Drizzle for Postgres). Not checked; a wrong one fails at insert.
    * @returns A ledger bound to `executor`.
    */
   abstract withExecutor(executor: unknown): ConsentLedgerBase;

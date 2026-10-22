@@ -25,8 +25,9 @@ assemblePrompt(request: PromptRequest): Promise<PromptResponse> {
 
 **Style (doc blocks and inline comments):**
 
-- State facts about the current code. Short, simple sentences.
-- No dramatic wording, metaphors, or emphasis words.
-- No history: no "used to", "was renamed", "since #123", PR, issue or review references. Git and PRs hold history.
+- State facts about the current code in short, simple sentences.
+- No dramatic wording, metaphors, or emphasis (ALL-CAPS words, "deliberately", "NOTE:").
+- No history: no "used to", "was renamed", "since #123", PR, issue, review or plan-phase references. Git and PRs hold history.
 - Keep each `@param` / `@returns` / `@throws` to one short line.
-- Do not add inline comments that restate the code. State real constraints plainly (e.g. "Never log this value.").
+- Do not add inline comments that restate the code.
+- Keep real constraints, stated plainly (e.g. "Never log this value.", "Must run in the caller's transaction.").

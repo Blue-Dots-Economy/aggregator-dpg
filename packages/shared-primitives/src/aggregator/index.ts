@@ -79,7 +79,7 @@ export const RegistrationPayloadSchema = z
     /**
      * Sub-org, division or institution name. Present only when the
      * deployment's registration schema asks for it. Stored in
-     * `aggregators.profile`.
+     * `users.profile`.
      */
     sub_org_name: z.string().max(200).optional(),
     contact: BecknContactSchema,

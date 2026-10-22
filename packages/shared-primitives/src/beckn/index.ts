@@ -9,8 +9,8 @@
  *   - GeoJSON   — https://schema.beckn.io/GeoJSONGeometry/v2.0/attributes.yaml
  *
  * Beckn leaves most fields optional. Here `phone` and `email` on Contact are
- * required, matching the DB check `aggregators_contact_shape_chk`. Each
- * location's GeoJSON `type` is validated here because Postgres cannot check it.
+ * required. Each location's GeoJSON `type` is validated here because Postgres
+ * cannot check it.
  *
  * @module @aggregator-dpg/shared-primitives/beckn
  */

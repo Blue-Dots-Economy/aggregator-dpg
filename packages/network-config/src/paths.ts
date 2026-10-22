@@ -44,7 +44,7 @@ export function resolveNetworkSourceOverride(env: ConfigPathEnv = process.env): 
 }
 
 /**
- * Reads the `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE` override for the participant `consent.json` URL.
+ * Reads the `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE` override for the consent URL.
  *
  * When set, it replaces `aggregator.network.consent_source` from the YAML.
  *
@@ -113,7 +113,7 @@ export function resolveSchemaRoot(env: ConfigPathEnv = process.env): string {
 }
 
 /**
- * Returns the candidate paths of an aggregator schema file under the config root, most specific first.
+ * Returns the candidate paths of an aggregator schema file, most specific first.
  *
  * Callers use the first path that exists. A network or brand overrides the
  * shared schema by placing a complete copy at

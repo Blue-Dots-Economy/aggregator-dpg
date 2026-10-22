@@ -308,6 +308,7 @@ export const users = pgTable(
   },
   (table) => [
     // Email and phone uniqueness is enforced on `contact`.
+    // Approval queue filter.
     index('users_status_idx').on(table.status),
     // One account per person per role.
     uniqueIndex('users_contact_type_unique').on(table.contactId, table.userType),
@@ -714,7 +715,7 @@ export const campaignJob = pgTable(
     /**
      * Set once the job's notification, such as the export download email, is sent.
      *
-     * A retry must not send it again.
+     * A retry must not send it again, or the recipient gets a second link to the same PII.
      */
     notifiedAt: timestamp('notified_at', { withTimezone: true }),
     // Voice only: raw provider responses from create and start.
@@ -765,8 +766,8 @@ export const campaignJobItem = pgTable(
     index('campaign_job_item_job_status_idx').on(table.jobId, table.status),
     // One row per item per job, so a retried insert is a no-op.
     uniqueIndex('campaign_job_item_job_item_unique').on(table.jobId, table.itemId),
-    // The same (item, action) cannot be pending or succeeded in two jobs at
-    // once. Rows with no action (exports) are not deduplicated.
+    // The same (item, action) cannot be `pending`, `resolved` or `submitted` in
+    // two jobs at once. Rows with no action (exports) are not deduplicated.
     uniqueIndex('campaign_job_item_active_dedup')
       .on(table.itemId, table.action)
       .where(sql`status IN ('pending','resolved','submitted') AND action IS NOT NULL`),

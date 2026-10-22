@@ -22,7 +22,7 @@ export type AuditOutcome = 'succeeded' | 'partial' | 'failed';
  * The `requested` row, written by the API when a campaign is accepted.
  *
  * Carries the fields only the HTTP request knows: `requestIp`, `actorAzp`,
- * `endpoint` and the Keycloak subject.
+ * `endpoint` and the Keycloak subject. The worker cannot recover them later.
  */
 export interface RequestedAuditInput {
   /** = `campaign_job.id`. */

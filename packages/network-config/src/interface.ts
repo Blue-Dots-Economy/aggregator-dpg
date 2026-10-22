@@ -440,7 +440,11 @@ export interface ResolvedDomain {
   dashboardTiles?: DashboardTiles;
   /** Status rules from the domain's `status_rules`. */
   statusRules?: StatusRule[];
-  /** From `guardian_consent_required`. When true the form collects a birth year. Defaults to `false`. */
+  /**
+   * From `guardian_consent_required`. Defaults to `false`.
+   *
+   * When true, the form collects a birth year.
+   */
   guardianConsentRequired: boolean;
   /**
    * From `go_live_required`. Defaults to `[]`.

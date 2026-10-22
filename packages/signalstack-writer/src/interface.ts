@@ -51,7 +51,7 @@ export interface ComplianceEntry {
  * Input for one participant onboard call to `POST /api/v1/admin/participant`.
  *
  * `actingOrgId` is sent as the `x-acting-org-id` header. It is the
- * aggregator's own signalstack org id (`aggregators.signalstack_org_id`),
+ * aggregator's own signalstack org id (`users.signalstack_org_id`),
  * not the platform-wide acting org id used by aggregator upsert.
  */
 export interface SignalStackOnboardParticipantInput {
@@ -149,7 +149,7 @@ export interface SignalStackOnboardParticipantResult {
 /**
  * Input for the admin aggregator upsert call.
  *
- * `external_id` is our `aggregators.id` and is the dedupe key. Repeating the
+ * `external_id` is the coordinator's `users.id` and is the dedupe key. Repeating the
  * call with the same `external_id` returns the existing row, so it is safe
  * to retry.
  */

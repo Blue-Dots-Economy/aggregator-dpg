@@ -33,9 +33,11 @@ interface SchemaShape {
  * Derives {@link IdentitySelectors} from a JSON Schema's properties.
  *
  * The first matching property wins:
- *   - phone: `format: tel`, a 10-digit or E.164 `pattern`, or a name containing "phone" or "mobile".
+ *   - phone: `format: tel`, a 10-digit or E.164 `pattern`, or a name
+ *     containing "phone" or "mobile".
  *   - email: `format: email`, or a name containing "email".
- *   - name: a string field named `name`, or with a `name` word in snake_case or camelCase, other than the phone and email fields.
+ *   - name: a string or untyped field named `name`, or with a `name` word in
+ *     snake_case or camelCase. The phone and email fields are excluded.
  *
  * @param schema - The profile JSON Schema.
  * @returns The selectors, or `null` when phone, email or name cannot be found.
