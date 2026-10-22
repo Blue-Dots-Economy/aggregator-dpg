@@ -6,8 +6,7 @@
  * ({@link DecisionInput}) and the {@link AuthorizerBase} every decision
  * engine implements. The question is "does the actor hold this permission in
  * this organisation"; which targets the actor reaches is answered outside the
- * policy (design decision D3). The OPA-backed engine and the in-memory fake
- * both extend it, so callers depend only on this file.
+ * policy. The OPA-backed engine and the in-memory fake both extend it.
  *
  * Design: `docs/rbac/rbac-design-aggregator.md`; catalogue:
  * `docs/rbac/rbac-permissions-and-roles.md`.
@@ -64,7 +63,7 @@ export type OrgRelation = z.infer<typeof OrgRelationSchema>;
 
 // ─── Roles ───────────────────────────────────────────────────────────────────
 
-/** Which membership a base role follows (design §1, decision D7). */
+/** Which membership a base role follows. */
 export const BaseForSchema = z.enum(['org_member', 'org_owner', 'root_owner']);
 
 /** `org_member` = a coordinator in `users.org_id`; `org_owner` = owner of an aggregator organisation; `root_owner` = owner of the root. */

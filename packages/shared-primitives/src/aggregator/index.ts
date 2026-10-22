@@ -24,16 +24,13 @@ export const ActorTypeSchema = z.enum(['aggregator', 'seeker', 'provider']);
 export type ActorType = z.infer<typeof ActorTypeSchema>;
 
 /**
- * Coordinator participant focus / domain id. Open string — the
- * signalstack network's `network.json` declares the valid values per
- * deployment (blue_dot: seeker/provider; yellow_dot: learner/tutor;
- * etc.). Callers validate against `getNetworkConfig().domainIds` at
- * the route boundary instead of pinning a closed enum here.
+ * Coordinator domain id. An open string: each network's `network.json` lists
+ * the valid values. Callers validate against `getNetworkConfig().domainIds`.
  */
 export const RoleTypeSchema = z.string().min(1);
 export type RoleType = z.infer<typeof RoleTypeSchema>;
 
-/** Alias kept for new code paths — same shape as {@link RoleTypeSchema}. */
+/** Alias of {@link RoleTypeSchema}. */
 export const DomainIdSchema = RoleTypeSchema;
 export type DomainId = RoleType;
 
@@ -46,9 +43,8 @@ export type DecisionMade = z.infer<typeof DecisionMadeSchema>;
 // ─── Consent ────────────────────────────────────────────────────────────────
 
 /**
- * Stored consent shape — used by DB types and reads. The DB CHECK only
- * enforces `value is boolean`. The registration route narrows further with
- * {@link RegistrationConsentSchema} to require an affirmative `true`.
+ * Stored consent shape. `value` may be any boolean. Registration uses
+ * {@link RegistrationConsentSchema}, which requires `true`.
  */
 export const ConsentRecordSchema = z
   .object({
@@ -61,10 +57,8 @@ export const ConsentRecordSchema = z
 export type ConsentRecord = z.infer<typeof ConsentRecordSchema>;
 
 /**
- * Registration-time consent shape — `value` must be literal `true`. The JSON
- * Schema in `registration.v1.json` uses `"type": "boolean"` (browser checkbox
- * constraint); this Zod schema adds the server-side affirmative guard so that
- * a direct API caller cannot submit `value: false`.
+ * Registration-time consent shape. `value` must be `true`, so an API caller
+ * cannot submit `value: false`.
  */
 export const RegistrationConsentSchema = ConsentRecordSchema.extend({
   value: z.literal(true),
@@ -76,17 +70,16 @@ export const RegistrationPayloadSchema = z
   .object({
     name: z.string().min(2).max(200),
     /**
-     * Coordinator's domain focus — `seeker` or `provider`. Mirrored to the
-     * Keycloak `aggregator_type` user attribute and published in the JWT
-     * claim of the same name. Routes that write participant data compare
-     * the request body to that claim.
+     * Coordinator's domain id. Copied to the Keycloak `aggregator_type`
+     * attribute and JWT claim. Routes that write participant data check
+     * the request against that claim.
      */
     type: RoleTypeSchema,
     url: z.string().url().max(2048).optional(),
     /**
-     * Sub-org / division / vertical / institution name. Declared only by
-     * deployments whose registration schema asks for it (UP-GZB today), so it
-     * is absent elsewhere. Has no column — persisted to `aggregators.profile`.
+     * Sub-org, division or institution name. Present only when the
+     * deployment's registration schema asks for it. Stored in
+     * `users.profile`.
      */
     sub_org_name: z.string().max(200).optional(),
     contact: BecknContactSchema,

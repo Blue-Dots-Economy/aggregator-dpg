@@ -1,13 +1,10 @@
 /**
- * The email channel's message contract (aggregator-dpg#578).
+ * The email channel's message contract.
  *
- * One schema, shared by both sides of the channel: the API validates the
- * inbound `content` block against it before a job row exists, and the worker
- * re-validates the persisted row against the SAME schema before rendering. It
- * lives here rather than in either app because `apps/*` cannot import from each
- * other, and two copies would drift — the worker's used to be looser (no
- * `.email()`, no length caps, not `.strict()`), which meant it did not actually
- * re-assert what the API had guaranteed.
+ * The API validates the inbound `content` block against this schema before a
+ * job row exists. The worker re-validates the stored row against the same
+ * schema before rendering. It lives in a package because apps cannot import
+ * from each other.
  *
  * Belongs to `@aggregator-dpg/campaign-template`.
  */
@@ -22,9 +19,8 @@ export const BODY_MAX = 20000;
 /**
  * The email channel's `content` block.
  *
- * `reply_to` is the only caller-settable header (the `From` address is always
- * the aggregator's configured sender). Strict: an unknown key is a client
- * error, not a silently ignored field.
+ * `reply_to` is the only header the caller can set. `From` is always the
+ * configured sender. Unknown keys are rejected.
  */
 export const emailContentSchema = z
   .object({

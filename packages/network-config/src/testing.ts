@@ -1,10 +1,9 @@
 /**
  * Testing fake for the network-config loader.
  *
- * Lets cross-package tests inject a pinned {@link ResolvedNetworkConfig}
- * without spinning up the file/HTTP loader. Use the `build*` helpers to
- * cover blue_dot / purple_dot in unit tests; pass a full resolved object
- * when a test needs to exercise an edge case the builders don't model.
+ * Lets tests inject a fixed {@link ResolvedNetworkConfig} without the file
+ * or HTTP loader. The `build*` helpers return blue_dot and purple_dot
+ * configs.
  *
  * @module @aggregator-dpg/network-config/testing
  */
@@ -42,10 +41,7 @@ interface NetworkFixture {
 }
 
 /**
- * Assembles a full resolved config from the handful of fields that actually
- * differ between networks. Everything else — onboarding limits, registration
- * modes, admin emails, the domain id ordering — is identical across fixtures
- * and lives here once.
+ * Builds a full resolved config from the fields that differ between networks.
  *
  * @param fixture - The per-network values to splice in.
  * @param overrides - Caller overrides applied last, as in the public builders.
@@ -94,10 +90,9 @@ function buildConfig(
 }
 
 /**
- * Deterministic blue_dot resolved config — mirrors what the production
- * loader would build from the live signalstack network.json + the
- * sample aggregator.config.yaml. Use as the default in consumer
- * tests that don't care about network specifics.
+ * Returns a fixed blue_dot resolved config.
+ *
+ * Use it as the default when a test does not depend on the network.
  *
  * @param overrides - Fields to replace on the returned config.
  * @returns The pinned blue_dot config.
@@ -143,10 +138,9 @@ export function buildBlueDotConfig(
 }
 
 /**
- * Deterministic purple_dot resolved config — captures the array-typed
- * fields + the `beneficiary_name / mobile_number` identity naming that
- * blue_dot doesn't have. Use to assert the aggregator stays generic
- * when called with non-blue networks.
+ * Returns a fixed purple_dot resolved config.
+ *
+ * Uses different identity field names from blue_dot, such as `beneficiary_name`.
  *
  * @param overrides - Fields to replace on the returned config.
  * @returns The pinned purple_dot config.

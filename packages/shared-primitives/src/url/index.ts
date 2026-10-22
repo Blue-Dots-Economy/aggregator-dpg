@@ -7,11 +7,8 @@
 /**
  * Removes every trailing `/` from a URL-ish string.
  *
- * Deliberately a loop rather than `replace(/\/+$/, '')`: the regex form has
- * super-linear (polynomial) backtracking because the engine retries the greedy
- * `\/+` from each start offset, which SonarCloud flags as a denial-of-service
- * risk on long inputs (typescript:S8786). This scan is linear and allocates at
- * most one slice.
+ * Uses a loop instead of the regex `/\/+$/`, which backtracks slowly on long
+ * input (SonarCloud typescript:S8786).
  *
  * @param value - The string to trim, e.g. a configured base or issuer URL.
  * @returns `value` with all trailing slashes removed; `''` if it was all slashes.

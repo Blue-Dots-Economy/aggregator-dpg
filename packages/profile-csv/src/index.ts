@@ -11,18 +11,14 @@
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
 
 /**
- * Ordered identity-column heuristics. Columns whose key matches an earlier
- * pattern lead; non-matching keys fall back to alphabetical order. Matching by
- * pattern (not a fixed key list) keeps this network-agnostic — it leads with
- * `name`/`phone` AND with network-specific names like `beneficiary_name` /
- * `mobile_number` without hardcoding per-network field names.
+ * Ordered identity-column patterns. Keys matching an earlier pattern sort first.
+ * Patterns keep this network-agnostic, e.g. `beneficiary_name` and
+ * `mobile_number` also match.
  */
 const PRIORITY_PATTERNS = [/name/i, /phone|mobile|contact/i] as const;
 
 /**
- * Priority rank of a column key — lower sorts first. Returns the index of the
- * first matching {@link PRIORITY_PATTERNS} entry, or a value past the end so
- * non-identity keys sort after all identity keys.
+ * Returns the sort rank of a column key from {@link PRIORITY_PATTERNS}. Lower sorts first.
  *
  * @param key - The item_state field name.
  * @returns The sort rank (0-based; `PRIORITY_PATTERNS.length` when no match).
@@ -33,10 +29,10 @@ function priorityRank(key: string): number {
 }
 
 /**
- * Neutralizes spreadsheet formula injection. Excel / Google Sheets interpret a
- * cell whose text begins with `=`, `+`, `-`, `@`, TAB, or CR as a formula, so
- * attacker-influenceable PII like `=HYPERLINK(...)` would execute on open.
- * Prefixing a single quote forces the cell to be treated as literal text.
+ * Neutralizes spreadsheet formula injection.
+ *
+ * Spreadsheets treat a cell starting with `=`, `+`, `-`, `@`, TAB or CR as a
+ * formula. A leading single quote makes the cell literal text.
  *
  * @param value - The raw cell string.
  * @returns The value, prefixed with `'` when it starts with a formula trigger.
@@ -68,7 +64,6 @@ function csvField(value: string): string {
 function renderCell(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (typeof value === 'object') return JSON.stringify(value);
-  // object is handled above, so this is a primitive — safe to String()
   return String(value as string | number | boolean | bigint | symbol);
 }
 
@@ -120,14 +115,13 @@ function contactSourceLabel(
 }
 
 /**
- * Builds the campaign PII export CSV (aggregator-dpg#579): one row per profile
- * carrying only the three canonical contact fields, each paired with its
- * provenance. Columns, in order:
- * `item_id,name,name_source,email,email_source,phone,phone_source`. Column set
- * is fixed regardless of network/domain/item type, so mixed types in one export
- * are fine. Every field is formula-neutralised and RFC-4180 escaped.
+ * Builds the campaign PII export CSV with one row per profile.
  *
- * @param rows - Decrypted profiles carrying a `contact` block (Signals #521).
+ * Columns: `item_id,name,name_source,email,email_source,phone,phone_source`.
+ * The column set is the same for every network and item type. Every field is
+ * formula-neutralised and RFC-4180 escaped.
+ *
+ * @param rows - Decrypted profiles carrying a `contact` block.
  * @returns The CSV text (CRLF line endings).
  */
 export function buildContactExportCsv(rows: SignalStackDecryptedProfileRow[]): string {

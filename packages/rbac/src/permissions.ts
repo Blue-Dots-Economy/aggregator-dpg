@@ -1,7 +1,7 @@
 /**
- * Effective permissions (`@aggregator-dpg/rbac`, design §1 and §3).
+ * Effective permissions (`@aggregator-dpg/rbac`).
  *
- * A user's base roles come from their memberships (decision D7); their
+ * A user's base roles come from their memberships; their
  * additional roles are assigned per organisation. What they may do in an
  * organisation is the union of the permissions of those roles held there or
  * in its ancestors. Pure functions: the API supplies the memberships, the

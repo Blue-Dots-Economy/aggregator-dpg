@@ -1,19 +1,15 @@
 /**
- * Fetch-backed SignalStackWriter — production impl.
+ * Fetch-based SignalStackWriter used in production, in the signalstack-writer package.
  *
- * Calls `POST {baseUrl}/api/v1/admin/onboard` with `x-api-key`. Any non-2xx
- * response, network failure, or shape mismatch is mapped to UpstreamError so
- * the caller never sees a thrown exception.
+ * Any non-2xx response, network failure, or unexpected payload becomes an
+ * UpstreamError. Methods never throw.
  *
  * Every request goes through {@link HttpSignalStackWriter.requestWithRetry},
- * which applies the configured per-attempt timeout and retries transient
- * failures (transport errors, request timeouts, `429`, and `5xx`) with
- * exponential backoff — per the repo `error-handling.md` rule. probe/aggregator
- * upsert/dashboard/get are idempotent (probe/upsert dedupe on identity/
- * `external_id`; dashboard/get are reads). NOTE: `onboard` is NOT idempotent
- * since signals #349 — a create always inserts a new profile, so a retry after
- * a request that actually succeeded can create a duplicate (bounded by the
- * per-user cap). A future idempotency key would restore retry-safety.
+ * which applies the per-attempt timeout and retries transport errors,
+ * timeouts, `429`, and `5xx` with exponential backoff. Probe, aggregator
+ * upsert, and the reads are idempotent. `onboard` is not: each call inserts a
+ * new profile, so a retry after a request that did succeed can create a
+ * duplicate (limited by the per-user cap).
  */
 
 import {
@@ -47,41 +43,33 @@ export interface HttpSignalStackWriterConfig {
   /** Base URL of the signalstack API, e.g. `http://localhost:2743`. No trailing slash. */
   baseUrl: string;
   /**
-   * Admin api-key issued by signalstack via better-auth. Sent as `x-api-key`.
-   * Mutually exclusive with {@link tokenProvider} — exactly one must be set.
-   * The default/legacy credential; {@link tokenProvider} is the Phase C
-   * client-credentials bearer alternative.
+   * Admin API key issued by signalstack. Sent as `x-api-key`.
+   * Set exactly one of this or {@link tokenProvider}.
    */
   apiKey?: string;
   /**
-   * Client-credentials token provider for signals' bearer service-auth path.
-   * When set, every request sends `Authorization: Bearer <token>` instead of
-   * `x-api-key`. Mutually exclusive with {@link apiKey} — exactly one must
-   * be set.
+   * Client-credentials token provider. When set, requests send
+   * `Authorization: Bearer <token>` instead of `x-api-key`.
+   * Set exactly one of this or {@link apiKey}.
    */
   tokenProvider?: SignalStackTokenProviderBase;
   /**
-   * Platform-wide signalstack organisation id under which admin upserts
-   * are performed. Sent as `x-acting-org-id` on the
-   * `POST /api/v1/admin/aggregator/upsert` call. Required for that call;
-   * other endpoints ignore it.
+   * Platform-wide signalstack organisation id, sent as `x-acting-org-id` on
+   * `POST /api/v1/admin/aggregator/upsert`. Required for that call only.
    */
   actingOrgId?: string;
-  /** Optional override; defaults to global `fetch`. Lets tests inject a stub. */
+  /** Optional fetch override; defaults to global `fetch`. */
   fetchImpl?: typeof fetch;
   /** Optional per-attempt request timeout in ms; off by default. */
   timeoutMs?: number;
   /**
-   * Max retry attempts for transient failures (transport error, timeout,
-   * `429`, `5xx`). `2` by default → up to 3 total attempts. `0` disables
-   * retries (one attempt). Non-transient responses (`4xx` other than `429`)
-   * are never retried.
+   * Max retries for transport errors, timeouts, `429`, and `5xx`. Default `2`
+   * (3 attempts in total). `0` disables retries. Other `4xx` are never retried.
    */
   maxRetries?: number;
   /**
-   * Base backoff in ms between retries; doubles each attempt
-   * (`base`, `base*2`, `base*4`, …). `200` by default. Set `0` in tests to
-   * remove the delay.
+   * Base backoff in ms between retries; doubles each attempt. Default `200`.
+   * `0` removes the delay.
    */
   retryBaseMs?: number;
 }
@@ -93,8 +81,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   private readonly tokenProvider: SignalStackTokenProviderBase | undefined;
   /**
    * Signalstack organisation id sent as `x-acting-org-id` on the aggregator
-   * upsert call. `undefined` when not configured — the upsert method then
-   * returns `SIGNALSTACK_CONFIG_MISSING` so the caller can soft-fail.
+   * upsert call. When unset, the upsert returns `SIGNALSTACK_CONFIG_MISSING`.
    */
   private readonly actingOrgId: string | undefined;
   private readonly fetchImpl: typeof fetch;
@@ -116,8 +103,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       );
     }
     this.baseUrl = stripTrailingSlashes(config.baseUrl);
-    // Plan-C tier-aware participant upsert. Replaced the old
-    // `/admin/onboard_participant` route which now returns 404.
     this.endpoint = `${this.baseUrl}/api/v1/admin/participant`;
     this.apiKey = config.apiKey;
     this.tokenProvider = config.tokenProvider;
@@ -129,24 +114,15 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   }
 
   /**
-   * Perform a fetch with a per-attempt timeout and bounded exponential-backoff
-   * retry of transient failures.
+   * Fetches with a per-attempt timeout and exponential-backoff retry.
    *
-   * Retries on: a thrown transport error, an aborted (timed-out) request, and
-   * a `429` or `5xx` response. A `4xx` (other than `429`) is returned to the
-   * caller immediately so it can map the response to the right typed error.
-   * When all attempts are exhausted the last thrown error is re-thrown (so the
-   * caller's `catch` maps it to a `SIGNALSTACK_TIMEOUT` / `_TRANSPORT_FAILED`),
-   * or the last failing `Response` is returned (so the caller maps the status).
+   * Retries transport errors, timeouts, `429`, and `5xx`. Other `4xx` are
+   * returned at once. When retries run out, the last error is re-thrown or the
+   * last `Response` is returned.
    *
-   * **Bearer 401 re-mint.** On the {@link SignalStackTokenProviderBase} path a
-   * `401` gets exactly one extra attempt with a freshly minted token, outside
-   * the retry budget and with no backoff. A cached token can still be inside
-   * its `expires_in` window yet be rejected upstream — realm signing-key
-   * rotation is the expected trigger — and without this every request fails
-   * until the cache expires on its own. Bounded to one re-mint so a genuinely
-   * unauthorised client (bad secret, client disabled) still fails fast instead
-   * of looping. The `x-api-key` path is untouched: there is nothing to refresh.
+   * With a token provider, a `401` gets one extra attempt with a new token.
+   * This attempt does not use the retry budget and has no backoff. The
+   * `x-api-key` path has no such retry.
    *
    * @param url - Absolute request URL.
    * @param init - Fetch init; the `signal` is supplied per attempt.
@@ -156,8 +132,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   private async requestWithRetry(url: string, init: RequestInit): Promise<Response> {
     let currentInit = init;
     let remintDone = false;
-    // `attempt` counts the retry budget only; a 401 re-mint deliberately does
-    // not consume it, so a key rotation cannot eat a transient-failure retry.
+    // Counts retries only; the 401 token refresh does not use the budget.
     let attempt = 0;
     for (;;) {
       const controller = this.timeoutMs ? new AbortController() : undefined;
@@ -172,8 +147,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           remintDone = true;
           this.tokenProvider.invalidate();
           const refreshed = await this.tokenProvider.getToken();
-          // A failed re-mint returns the original 401 so the caller still maps
-          // it to SIGNALSTACK_FORBIDDEN rather than a token-grant error.
+          // If the refresh fails, return the original 401 (SIGNALSTACK_FORBIDDEN).
           if (refreshed.success) {
             currentInit = {
               ...currentInit,
@@ -204,10 +178,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         if (timer) clearTimeout(timer);
       }
     }
-    // Unreachable — the loop always returns or throws.
+    // Unreachable: the loop always returns or throws.
   }
 
-  /** Sleep for `retryBaseMs * 2^attempt` ms before the next retry. */
+  /** Sleeps for `retryBaseMs * 2^attempt` ms before the next retry. */
   private backoff(attempt: number): Promise<void> {
     const ms = this.retryBaseMs * 2 ** attempt;
     if (ms <= 0) return Promise.resolve();
@@ -215,21 +189,14 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   }
 
   /**
-   * Builds the auth + content-type headers common to every request:
-   * `Authorization: Bearer <token>` when a {@link SignalStackTokenProviderBase}
-   * is configured (Phase C), else the legacy `x-api-key`.
+   * Builds the auth and content-type headers for a request.
    *
-   * Fetched fresh per call (not cached on the instance) so the token
-   * provider's own cache/refresh policy governs freshness — a call made
-   * right before expiry and one right after both get a valid token.
-   * `requestWithRetry` reuses whatever headers it's given across retry
-   * attempts, so a transient signals-side `503 IDENTITY_PROVIDER_UNAVAILABLE`
-   * (signals could not reach Keycloak to judge the token) is retried with
-   * the SAME token rather than fetching a new one — the token itself was
-   * never judged, so there is nothing to refresh.
+   * Uses `Authorization: Bearer <token>` when a
+   * {@link SignalStackTokenProviderBase} is set, else `x-api-key`. The token is
+   * requested on every call; the provider handles caching. Retries reuse the
+   * same headers.
    *
-   * @returns ok(headers) when a credential is available; err(BaseError) when
-   *   the token provider's grant fails (propagated as-is).
+   * @returns ok(headers), or the token provider's error.
    */
   private async buildHeaders(): Promise<Result<Record<string, string>, BaseError>> {
     if (this.tokenProvider) {
@@ -261,32 +228,19 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       domain: input.domain,
       item_type: input.item_type,
     };
-    // Consent is recorded via the `compliance` array (the live mechanism);
-    // the deprecated `terms_accepted`/`privacy_accepted` flags are never sent.
-    // `age` accompanies compliance on guardian-gated domains.
+    // Consent goes only in `compliance`; `terms_accepted`/`privacy_accepted` are never sent.
     if (input.compliance && input.compliance.length > 0) body.compliance = input.compliance;
     if (typeof input.age === 'number') body.age = input.age;
-    // Signalstack Plan-C renamed the body field from `profile` to
-    // `item_state` — the value is unchanged. When the caller opts out of
-    // item creation (`submit_mode === 'account_only'`), omit `item_state`
-    // entirely so signals creates only the user row. This is the
-    // upstream-friendly way to flag "account only": signals' own contract
-    // treats an absent item_state as "no item" rather than introducing a
-    // bespoke flag.
+    // `profile` is sent as `item_state`. For account_only it is omitted, so
+    // signals creates only the user row.
     if (submitMode !== 'account_only') {
       body.item_state = input.profile;
-      // Caller-resolved coordinates for the item, sent only alongside one.
-      // Omitted when empty so signalstack geocodes the address text out of
-      // item_state instead — and never sent on the account_only path, which
-      // creates no item for them to belong to.
+      // Omitted when empty so signalstack geocodes the address in item_state.
       if (input.item_locations && input.item_locations.length > 0) {
         body.item_locations = input.item_locations;
       }
     }
-    // Signalstack's user schema treats email / phoneNumber as `.optional()`
-    // (not `.nullable()`), so omit the keys entirely when we have no value
-    // rather than passing null — a literal null trips Zod's `expected:
-    // string` check and the whole push fails 400.
+    // Omit empty email/phone; signalstack rejects null for these fields with 400.
     if (input.phoneNumber) body.phone_number = input.phoneNumber;
     if (input.email) body.email = input.email;
 
@@ -309,25 +263,16 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         const bodyText = await safeReadText(res);
         const upstreamMsg = extractUpstreamMessage(bodyText);
         const upstreamCode = extractUpstreamCode(bodyText);
-        // Surface signalstack's own message (e.g. `INVALID_ITEM_STATE: must be
-        // equal to one of the allowed values`) when present so the caller can
-        // funnel it into the user-visible errors.csv. Falls back to the bare
-        // status code message if the body isn't JSON or carries no message.
+        // Include signalstack's message when present; callers show it in errors.csv.
         const message = upstreamMsg
           ? `signalstack onboard returned ${res.status}: ${upstreamMsg}`
           : `signalstack onboard returned ${res.status}`;
-        // Distinguish the per-user profile cap (signals #349) from other 409s,
-        // and a supplied coordinate outside the instance's country
-        // (signals-dpg#789) from other 400s, so callers can categorise them as
-        // user/data conditions rather than a generic conflict or system error.
+        // Give the per-user profile cap (409) and an out-of-country coordinate
+        // (400) their own codes so callers treat them as data errors.
         const code = this.onboardErrorCode(res.status, upstreamCode);
-        // `signalsMessage` is the bare, user-safe sentence (no infra prefixes) —
-        // callers surfacing errors to end users (public forms) should prefer it;
-        // errors.csv/operators keep the prefixed `message`.
+        // `signalsMessage` is safe to show end users; `message` is for operators.
         const signalsMessage = extractUpstreamMessageText(bodyText);
-        // Signals' own code and per-field map, so a caller can classify the
-        // rejection (bad row data vs a platform fault) and point at the
-        // offending input, without parsing `message`.
+        // Signals' per-field errors, so callers can point at the bad input.
         const signalsFields = extractUpstreamFields(bodyText);
         return err(
           new UpstreamError(message, {
@@ -343,13 +288,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      // Plan-C response shape:
-      //   { user_id, user_existed, onboarded_at, items: [{ item_id, lifecycle_status?, ... }] }
-      // The writer's public result still surfaces a flat
-      // `profile_item_id` so existing callers (worker, registration-link
-      // routes, audit logs) stay unchanged — pick the matching item for
-      // the requested network/domain/type, falling back to the first
-      // item when the request inserted a single row.
+      // Response: { user_id, user_existed, onboarded_at, items: [{ item_id, lifecycle_status?, ... }] }
+      // `profile_item_id` is the item matching network/domain/type, else the first item.
       const raw = (await res.json()) as {
         user_id?: unknown;
         user_existed?: unknown;
@@ -374,15 +314,9 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       const items = Array.isArray(raw.items) ? raw.items : [];
       const ownedElsewhereSignal = raw.owned_elsewhere === true;
 
-      // account_only path — signalstack created (or idempotently re-ensured)
-      // the user row but no item, so an empty `items` array is EXPECTED here,
-      // not a sign of foreign ownership. Re-submitting the same phone/email is
-      // an idempotent SUCCESS — signals returns the same user_id — so a
-      // returning own-aggregator user (`user_existed: true`) is NOT flagged
-      // `already_registered` (which would make the caller 409-skip it). Only a
-      // genuinely foreign user (explicit `owned_elsewhere`) skips. Checked
-      // BEFORE the with-item heuristic, which treats empty items as
-      // owned-elsewhere — invalid for account_only.
+      // account_only: empty `items` is expected. A returning own user is a
+      // success, not `already_registered`; only an explicit `owned_elsewhere`
+      // marks a foreign user. Must run before the with-item check below.
       if (submitMode === 'account_only') {
         return ok({
           user_id: raw.user_id,
@@ -392,12 +326,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           owned_elsewhere: ownedElsewhereSignal,
         });
       }
-      // with_item path — an existing user with an empty `items` array belongs
-      // to a different aggregator (that org's items are private to it).
-      // signalstack returns `user_existed: true` (and, in newer builds, an
-      // explicit `owned_elsewhere: true`). Not an error — surface it as an
-      // already-registered / owned_elsewhere result so the caller records a
-      // `skipped` outcome instead of a 502.
+      // with_item: an existing user with no items belongs to another
+      // aggregator. Return it as owned_elsewhere so the caller records `skipped`.
       if ((raw.user_existed === true || ownedElsewhereSignal) && items.length === 0) {
         return ok({
           user_id: raw.user_id,
@@ -454,18 +384,11 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   }
 
   /**
-   * Calls `POST {baseUrl}/api/v1/admin/aggregator/upsert` with the platform
-   * admin api-key and the configured `x-acting-org-id` header. The remote
-   * endpoint is idempotent on `external_id` (our Postgres aggregator UUID),
-   * so the same input may be re-fired safely from a login-time fallback.
+   * Calls `POST /api/v1/admin/aggregator/upsert` with the configured
+   * `x-acting-org-id`. Idempotent on `external_id`, so it is safe to retry.
    *
-   * Non-2xx responses, transport failures, and unexpected payload shapes
-   * are mapped to `UpstreamError` — no exception ever leaves the method.
-   *
-   * @param input - external_id (our aggregator UUID) + display name + slug
-   *   + optional metadata bag forwarded verbatim to signalstack.
-   * @returns ok(SignalStackAggregator) on 2xx with a non-empty `org_id`;
-   *   err(BaseError) with a `SIGNALSTACK_*` code on every failure path.
+   * @param input - external_id (our aggregator UUID), display name, slug, and optional metadata.
+   * @returns ok(SignalStackAggregator) on 2xx with a non-empty `org_id`; err(BaseError) otherwise.
    */
   override async upsertAggregator(
     input: SignalStackUpsertAggregatorInput,
@@ -558,13 +481,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   /**
    * Fetches the aggregator dashboard payload from signalstack.
    *
-   * Builds a query string from `page`, `limit`, and `status` only — the
-   * `domain` field is reserved for the eventual provider rollout and is
-   * intentionally NOT forwarded today because signalstack's dashboard
-   * endpoint is seeker-only at present. When upstream gains domain
-   * support, swap the predicate that gates the `domain` append below.
+   * Sends `page`, `limit`, `status`, `lifecycle`, and `refresh`. `domain` is
+   * not sent; signalstack does not accept it.
    *
-   * @param query - actingOrgId + optional pagination/status/domain.
+   * @param query - actingOrgId plus optional pagination/status/domain.
    * @returns ok(SignalStackDashboardPage) on 2xx; err(BaseError) otherwise.
    */
   override async fetchDashboard(
@@ -585,7 +505,6 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
     if (query.lifecycle && query.lifecycle.length > 0)
       params.set('lifecycle', query.lifecycle.join(','));
     if (query.refresh) params.set('refresh', 'true');
-    // domain intentionally NOT forwarded — see method docblock.
     const qs = params.toString();
     const url = `${this.baseUrl}/api/v1/aggregator/dashboard${qs ? `?${qs}` : ''}`;
 
@@ -716,20 +635,12 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   /**
    * Downloads the aggregator dashboard as a CSV file from signalstack.
    *
-   * Forwards `status` as the only query parameter today (signalstack's
-   * export endpoint accepts no others); `domain` is reserved for the
-   * provider rollout and intentionally NOT forwarded. The
-   * `accept: text/csv` header tells signalstack to return the CSV body
-   * directly — the writer hands the raw string back and the route
-   * streams it as `text/csv` with a `Content-Disposition` attachment
-   * header.
+   * Sends `status` and `refresh` only; `domain` is not sent. Requests
+   * `accept: text/csv` and returns the raw CSV body. The default filename has
+   * the status filter and the UTC date.
    *
-   * The default filename embeds the status filter and current date in
-   * UTC; the API route may override.
-   *
-   * @param query - actingOrgId + optional status/domain.
-   * @returns ok(SignalStackDashboardExport) on 2xx; err(BaseError) on
-   *   transport failure, validation rejection, or non-2xx.
+   * @param query - actingOrgId plus optional status/domain.
+   * @returns ok(SignalStackDashboardExport) on 2xx; err(BaseError) otherwise.
    */
   override async exportDashboardCsv(
     query: SignalStackDashboardExportQuery,
@@ -882,27 +793,16 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   }
 
   /**
-   * Read-only identity probe against signalstack's `GET /admin/participant`.
+   * Read-only identity probe via `GET /admin/participant`. Safe to retry.
    *
-   * Repointed from the old `POST /admin/participant` account-only probe, which
-   * created a phantom `name: 'lookup'` user row as a side effect (#648). This
-   * GET endpoint is side-effect-free: it returns `{ user_id, items }` where the
-   * `items` are already scoped to the acting aggregator's org. The response is
-   * reshaped into the slim {@link SignalStackProbeUserResult} tri-state so the
-   * caller never has to re-derive owned_elsewhere / lifecycle_summary:
+   * Signalstack returns `{ user_id, items }`, with `items` limited to the
+   * acting org. The result is mapped to {@link SignalStackProbeUserResult}:
    *   - `user_id` null             → new identity
    *   - `user_id` + owned items     → own user (+ lifecycle summary)
    *   - `user_id` + no owned items  → user exists under a different aggregator
    *
-   * Being a GET, it is safe to retry (the old POST was not — a retry could
-   * mint a second phantom user).
-   *
-   * @param input - actingOrgId + email and/or phoneNumber (both required, at
-   *   least one identifier) + network/domain (both required). Org scoping is via
-   *   the `x-acting-org-id` header; `network`/`domain` scope the returned
-   *   org items to the probed domain when selecting the primary item.
-   * @returns ok(SignalStackProbeUserResult) on 2xx; err(BaseError) on
-   *   validation failure, transport failure, or non-2xx.
+   * @param input - actingOrgId, email and/or phoneNumber, network, and domain.
+   * @returns ok(SignalStackProbeUserResult) on 2xx; err(BaseError) otherwise.
    */
   override async probeUser(
     input: SignalStackProbeUserInput,
@@ -929,18 +829,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       );
     }
 
-    // Read-only lookup — the identity travels as query params and there is no
-    // request body, so signals performs no write (#648: the old POST
-    // account-only probe created a phantom `name: 'lookup'` user). Org scoping
-    // is via the `x-acting-org-id` header; signals returns only items owned by
-    // this org.
-    //
-    // Privacy note: because this is a GET, the email/phone ride the query string
-    // rather than a POST body, so an intermediary (proxy / LB / ingress) that
-    // logs full request URIs could capture them. Acceptable — this is an
-    // internal server-to-server call and matches signals' existing read
-    // contract — but the signals ingress should keep `/admin/participant` query
-    // strings out of its access log.
+    // Email and phone are sent in the query string. The signals ingress must
+    // keep `/admin/participant` query strings out of its access log.
     const params = new URLSearchParams();
     if (input.email) params.set('email', input.email);
     if (input.phoneNumber) params.set('phone_number', input.phoneNumber);
@@ -990,9 +880,8 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      // GET /api/v1/admin/participant response: { user_id: string | null, items: [...] }.
-      // `items` are org-scoped by signals (only items this aggregator owns) and
-      // span every domain the user has here. Reshape into the tri-state.
+      // Response: { user_id: string | null, items: [...] }. `items` holds only
+      // this aggregator's items, across all domains.
       const raw = (await res.json()) as {
         user_id?: unknown;
         items?: unknown;
@@ -1008,7 +897,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
 
       const userId = typeof raw.user_id === 'string' && raw.user_id.length > 0 ? raw.user_id : null;
 
-      // No matching identity — a genuinely new user.
+      // No matching identity: a new user.
       if (!userId) {
         return ok({
           user_exists: false,
@@ -1017,9 +906,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         });
       }
 
-      // `items` is a required array on a well-formed response
-      // (GetParticipantResponse.items). A missing / non-array field is upstream
-      // drift — fail rather than silently coerce it to "owned elsewhere".
+      // `items` is required; fail instead of treating it as owned elsewhere.
       if (!Array.isArray(raw.items)) {
         return err(
           new UpstreamError('signalstack probe response missing items array', {
@@ -1035,8 +922,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         lifecycle_status?: unknown;
       }>;
 
-      // No items owned by this aggregator → owned elsewhere (or a foreign /
-      // account-only identity). No lifecycle leak from another org.
+      // No items owned by this aggregator: owned elsewhere.
       if (items.length === 0) {
         return ok({
           user_exists: true,
@@ -1045,18 +931,13 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         });
       }
 
-      // Scope the "primary" item to the probed network + domain — mirrors the
-      // onboard path, which matches by network/domain before touching an item.
-      // `items` span domains, so items[0] could belong to a DIFFERENT domain;
-      // reporting its lifecycle for THIS domain would be wrong (a paused
-      // domain-A profile must not read as a paused domain-B one).
+      // The primary item must match the probed network and domain, since
+      // `items` can include other domains.
       const domainItem = items.find(
         (it) => it.item_domain === input.domain && it.item_network === input.network,
       );
 
-      // Own user (this org owns items) but nothing in the requested domain yet —
-      // a fresh start in this domain, so no lifecycle summary. NOT owned
-      // elsewhere: the user belongs to this org.
+      // Own user with no item in this domain: no lifecycle summary.
       if (!domainItem) {
         return ok({
           user_exists: true,
@@ -1075,15 +956,11 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      // lifecycle_status → the result models only resumable states
-      // (draft | live | paused):
-      //   - absent/empty     → 'live' (back-compat: older builds omit it; same
-      //     default apps/api's read-side resolveLifecycle applies). Inlined
-      //     because apps/api sits above this package in the dep graph.
+      // lifecycle_status mapping:
+      //   - absent/empty      → 'live' (older signals builds omit it).
       //   - draft/live/paused → used as-is.
-      //   - retired          → a real but non-resumable signals state: no
-      //     summary; the user starts a fresh profile in this domain.
-      //   - anything else    → upstream drift; fail rather than mislabel as live.
+      //   - retired           → no summary; not resumable.
+      //   - anything else     → SIGNALSTACK_BAD_RESPONSE.
       const rawLifecycle = domainItem.lifecycle_status;
       if (rawLifecycle === 'retired') {
         return ok({
@@ -1135,9 +1012,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   }
 
   private guardInput(input: SignalStackOnboardParticipantInput): BaseError | null {
-    // Pre-send input validation → ValidationError (malformed input before the
-    // request leaves us), consistent with probeUser. The machine code
-    // stays SIGNALSTACK_INPUT_INVALID so existing callers/branches are intact.
+    // Input errors are ValidationError with code SIGNALSTACK_INPUT_INVALID.
     if (!input?.actingOrgId) {
       return new ValidationError('actingOrgId is required', {
         code: 'SIGNALSTACK_INPUT_INVALID',
@@ -1174,10 +1049,10 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
   }
 
   /**
-   * Picks the error code for a rejected onboard. The per-user profile cap
-   * (signals #349) and a coordinate outside the instance's country
-   * (signals-dpg#789) get their own codes so callers treat them as user/data
-   * conditions; everything else falls back to the status-based code.
+   * Picks the error code for a rejected onboard.
+   *
+   * The per-user profile cap and an out-of-country coordinate get their own
+   * codes; anything else uses the status-based code.
    */
   private onboardErrorCode(status: number, upstreamCode: string | null): string {
     if (status === 409 && upstreamCode === 'PROFILE_LIMIT_REACHED') {
@@ -1207,27 +1082,12 @@ async function safeReadText(res: Response): Promise<string> {
   }
 }
 
-/**
- * Extract the human-readable error string from a signalstack JSON error body.
- *
- * Signalstack returns shapes like:
- *   { "error": "INVALID_ITEM_STATE", "message": "Invalid item_state: must be …" }
- *   { "statusCode": 400, "error": "Bad Request", "message": "body/x Invalid …" }
- *   { "error": { "message": "…" } }
- *
- * Returns the most specific message available, or `null` if the body is not
- * JSON or carries no usable text. Combines `error` + `message` when both are
- * present so the caller sees both the machine code and the human text.
- */
-/** Extract signalstack's machine error code (the JSON `error` field), if any. */
+/** Extracts signalstack's machine error code from a JSON error body, if any. */
 function extractUpstreamCode(bodyText: string): string | null {
   if (!bodyText) return null;
   try {
     const obj = JSON.parse(bodyText) as Record<string, unknown>;
-    // Fastify's own request-validation body is
-    // `{ statusCode, code: 'FST_ERR_VALIDATION', error: 'Bad Request', message }`:
-    // there `error` is the generic HTTP reason and `code` is the machine code.
-    // Signals' own bodies carry the code in `error` and no `code` at all.
+    // Fastify validation errors put the code in `code`; signals puts it in `error`.
     const c = obj?.['code'];
     if (typeof c === 'string' && /^[A-Z][A-Z0-9_]+$/.test(c)) return c;
     const e = obj?.['error'];
@@ -1240,10 +1100,8 @@ function extractUpstreamCode(bodyText: string): string | null {
 }
 
 /**
- * Signals' per-field map from a JSON error body (`fields: { <field>: <message> }`,
- * signals-dpg#785 — present on INVALID_ITEM_STATE). Only string entries are
- * kept; anything else is not a field message and would mislead a caller that
- * renders it.
+ * Extracts the per-field error map (`fields: { <field>: <message> }`) from a
+ * JSON error body. Only string entries are kept.
  */
 function extractUpstreamFields(bodyText: string): Record<string, string> | null {
   if (!bodyText) return null;
@@ -1260,9 +1118,8 @@ function extractUpstreamFields(bodyText: string): Record<string, string> | null 
 }
 
 /**
- * The bare human `message` field from a signalstack JSON error body — WITHOUT
- * the `"<CODE>: "` prefix that {@link extractUpstreamMessage} adds. Suitable for
- * showing directly to an end user (e.g. a public registration form).
+ * Extracts the `message` from a JSON error body, without the `"<CODE>: "`
+ * prefix that {@link extractUpstreamMessage} adds. Safe to show end users.
  */
 function extractUpstreamMessageText(bodyText: string): string | null {
   if (!bodyText) return null;
@@ -1277,13 +1134,23 @@ function extractUpstreamMessageText(bodyText: string): string | null {
   return null;
 }
 
+/**
+ * Extracts a readable error string from a signalstack error body.
+ *
+ * Handles shapes like:
+ *   { "error": "INVALID_ITEM_STATE", "message": "Invalid item_state: must be …" }
+ *   { "statusCode": 400, "error": "Bad Request", "message": "body/x Invalid …" }
+ *   { "error": { "message": "…" } }
+ *
+ * Returns `"<code>: <message>"` when both exist. A non-JSON body is returned
+ * trimmed to 500 characters. Returns `null` when there is no usable text.
+ */
 function extractUpstreamMessage(bodyText: string): string | null {
   if (!bodyText) return null;
   let parsed: unknown;
   try {
     parsed = JSON.parse(bodyText);
   } catch {
-    // Non-JSON body — return the raw text trimmed to a sensible length.
     const trimmed = bodyText.trim();
     return trimmed.length > 0 ? trimmed.slice(0, 500) : null;
   }
@@ -1320,10 +1187,8 @@ function hasValidAggregatorOrgId(payload: unknown): payload is SignalStackAggreg
 /**
  * Default filename for the dashboard CSV export.
  *
- * Embeds the status filter (or `all` when omitted) plus the current
- * UTC date so concurrent exports don't collide in the browser's
- * downloads folder. Sanitises the status value so a hostile filter
- * string can't inject path separators or quote chars into the
+ * Includes the status filter (or `all`) and the UTC date. The status is
+ * sanitised so it cannot inject path separators or quotes into the
  * `Content-Disposition` header.
  */
 function buildDefaultExportFilename(status: string | undefined): string {
