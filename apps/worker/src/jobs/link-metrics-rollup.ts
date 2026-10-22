@@ -1,17 +1,14 @@
 /**
- * Link Metrics Coordinator — periodic rollup of `link_submissions` into
- * `onboarding`.
+ * Link metrics rollup for the worker app: adds `link_submissions` into `onboarding`.
  *
- * Per onboarding-implementation.md §4.3:
- *   1. SELECT * FROM link_submissions WHERE rolled_up_at IS NULL
- *      ORDER BY created_at LIMIT BATCH_SIZE.
- *   2. Aggregate by (aggregator_id, link_id, hour_bucket).
- *   3. UPSERT INTO onboarding (source='link', ...) ON CONFLICT
- *      (aggregator_id, link_id, period_start) WHERE source='link' DO UPDATE
- *      SET total/passed/failed/skipped += EXCLUDED.*.
- *   4. UPDATE link_submissions SET rolled_up_at = NOW() WHERE id IN (...).
+ * Steps:
+ *   1. Select up to BATCH_SIZE submissions with `rolled_up_at IS NULL`.
+ *   2. Group by aggregator, link and hour.
+ *   3. Upsert each group into `onboarding` (source='link'), adding to the totals.
+ *   4. Set `rolled_up_at` on the selected submissions.
  *
- * Idempotent. Restart-safe via `rolled_up_at IS NULL` filter.
+ * Steps 3 and 4 are not in one transaction. A crash between them counts those
+ * submissions again on the next run.
  */
 
 import { eq, inArray, isNull, sql } from 'drizzle-orm';
@@ -91,8 +88,7 @@ export async function rollupLinkMetrics(_job: LinkMetricsRollupJob): Promise<Rol
     entry.totals.submissionIds.push(row.id);
   }
 
-  // UPSERT each bucket — partial UNIQUE (aggregator_id, link_id, period_start)
-  // WHERE source='link' is the conflict target.
+  // Conflict target: the partial unique index on (user, link, period_start) where source='link'.
   for (const { key, totals } of buckets.values()) {
     const periodStart = new Date(key.hourBucketIso);
     const periodEnd = new Date(periodStart.getTime() + 60 * 60 * 1000);
@@ -123,7 +119,6 @@ export async function rollupLinkMetrics(_job: LinkMetricsRollupJob): Promise<Rol
       });
   }
 
-  // Mark all picked-up submissions as rolled up.
   const allIds = rows.map((r) => r.id);
   await getDb()
     .update(schema.linkSubmissions)
