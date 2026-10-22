@@ -1,11 +1,9 @@
 /**
  * Org-review notification for the org registration flow.
  *
- * Belongs to `@aggregator-dpg/api`. Delegates to the shared `sendReviewEmail`
- * (registration-notify) — the org flow differs only in the read-URL segment
- * (`orgs`), the recipient (always the network admin, never an org owner), and
- * the absence of an `org` token claim (the network admin is the approver, not
- * an org owner — spec §9). Shared by org submit and the §7 org-refresh path.
+ * Belongs to `@aggregator-dpg/api`. Uses the shared `sendReviewEmail`. For
+ * orgs, the URL segment is `orgs`, the recipient is always the network admin,
+ * and the token has no `org` claim. Used by org submit and org refresh.
  */
 
 import type { FastifyBaseLogger } from 'fastify';

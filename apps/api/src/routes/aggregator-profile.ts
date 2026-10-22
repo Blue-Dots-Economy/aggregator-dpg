@@ -1,37 +1,21 @@
 /**
- * Coordinator profile endpoints (post-login).
+ * Coordinator profile endpoints in `@aggregator-dpg/api`.
  *
  *   GET /v1/aggregators/profile/me
- *     Returns the `aggregators` row (registration-essential fields) plus an
- *     identity fragment derived from JWT / Keycloak.
+ *     Returns the coordinator row plus identity fields from the token or Keycloak.
  *
  *   PATCH /v1/aggregators/profile/me
- *     Splits writes by destination:
- *
- *       body.aggregator.contact    → Keycloak FIRST (mirror is authoritative
- *                                    for phone+email), then DB
- *       body.aggregator.*          → DB only (name)
+ *     Contact changes go to Keycloak first, then the database. `name` goes
+ *     to the database only.
  *
  *     Org details (`url`, `locations`, `contact.company`, `contact.gstNumber`)
- *     belong to the coordinator's org since migration 0028: they are rendered
- *     from it on GET, and a PATCH carrying any of them is refused with
- *     `409 ORG_DETAILS_READ_ONLY` before anything is written.
+ *     belong to the coordinator's org. A PATCH that changes any of them is
+ *     refused with `409 ORG_DETAILS_READ_ONLY` before any write.
  *
- *     `consent` is read-only: it is recorded once, at registration, in the
- *     append-only consent ledger, and a coordinator cannot rewrite it. A body
- *     that sends it is refused as `SCHEMA_VALIDATION` (the schema is strict).
+ *     `consent` is read-only after registration; a body that sends it is
+ *     refused as `SCHEMA_VALIDATION`. `org_slug` cannot be changed.
  *
- *     `org_slug` is rejected (immutable; DB trigger enforces too).
- *
- * The 1:1 `aggregator_profile` table this pair used to merge in was removed —
- * it was only ever written as an all-defaults stub, and its extensibility goal
- * is served by `aggregators.profile` + `aggregators.profile_ref` (migration
- * 0018). Its six response keys (`contact_name`, `personas`, `services`,
- * `verified_certificate`, `profile_completed_at`, `is_complete`) and the
- * `body.profile` request half went with it.
- *
- * Authorisation: Bearer access token from Keycloak with the custom
- * `aggregator_id` claim mapped from the user attribute.
+ * Requires a Keycloak Bearer token carrying the `aggregator_id` claim.
  */
 
 import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
@@ -58,8 +42,7 @@ const AggregatorPatchSchema = z
     contact: BecknContactSchema.optional(),
     locations: z.array(BecknLocationSchema).optional(),
   })
-  // Consent is read-only after registration (#836; since 0029 it lives only in
-  // the consent ledger): a body carrying it is refused, 400 SCHEMA_VALIDATION.
+  // Strict: a body carrying `consent` is refused with 400 SCHEMA_VALIDATION.
   .strict();
 
 const ProfileUpdateBodySchema = z
@@ -82,11 +65,7 @@ const ProfileIdentitySchema = z
   })
   .passthrough();
 
-// PII response sub-objects are declared with the canonical entity schemas
-// (the same ones the writes are validated against) rather than empty
-// `z.object({}).passthrough()`. This (a) field-whitelists the serialized
-// PII so undeclared keys can never leak, and (b) renders the real shapes in
-// the Scalar reference instead of empty objects.
+// PII sub-objects use the full entity schemas so undeclared keys are never serialized.
 const ProfileCommonResponseShape = {
   aggregator_id: z.string(),
   org_slug: z.string(),
@@ -95,8 +74,7 @@ const ProfileCommonResponseShape = {
   url: z.string().nullable(),
   contact: BecknContactSchema,
   locations: z.array(BecknLocationSchema),
-  // The newest registration consent from the ledger; null only when the
-  // ledger holds none (never after the 0029 verify).
+  // The newest registration consent from the ledger; null when there is none.
   consent: ConsentRecordSchema.nullable(),
   status: z.string(),
   updated_at: z.string(),
@@ -160,8 +138,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
       return reply.send({
         aggregator_id: auth.aggregatorId,
         org_slug: aggregator.value.orgSlug,
-        // aggregator.name is now authoritative for display. Fall back to slug
-        // only on the (impossible) empty-string edge case.
+        // Falls back to the slug only when the name is empty.
         org_name: aggregator.value.name || aggregator.value.orgSlug,
         actor_type: aggregator.value.actorType,
         type: aggregator.value.type,
@@ -170,7 +147,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         locations: aggregator.value.locations,
         consent: aggregator.value.consent,
         status: aggregator.value.status,
-        // Identity (from JWT claim / KC fallback)
+        // From the token, falling back to Keycloak.
         identity: {
           first_name: auth.firstName ?? kcUser?.firstName ?? null,
           last_name: auth.lastName ?? kcUser?.lastName ?? null,
@@ -212,16 +189,13 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
       const log = req.log.child({ operation: 'aggregator-profile.update', actor: auth.userId });
       const start = Date.now();
 
-      // `schema.body` already validated against `ProfileUpdateBodySchema`
-      // (the zod validator compiler replaces `req.body` with the parse
-      // output), so the typed body can be consumed directly here.
+      // Already validated and parsed by the route schema.
       const body = req.body as z.infer<typeof ProfileUpdateBodySchema>;
 
       const userStore = getUserStore();
 
-      // Org details are shared by every coordinator of the org: a CHANGE to any
-      // of them is refused before any write (Keycloak or DB). Sending back the
-      // values GET returned (a client echoing its own contact) is not a change.
+      // A change to org details is refused before any write. Sending back the
+      // current values is not a change.
       const sentOrgDetails =
         body.aggregator.url !== undefined ||
         body.aggregator.locations !== undefined ||
@@ -260,12 +234,10 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         }
       }
 
-      // ─── 1. Mirror phone/email to Keycloak FIRST (authoritative). ──────────
-      // If KC fails, abort before touching the DB so we never have the DB
-      // ahead of Keycloak.
+      // ─── 1. Write the phone to Keycloak first. ─────────────────────────────
+      // A Keycloak failure aborts before the database write.
       let normalisedContact: BecknContact | undefined;
-      // The coordinator's stored phone before this request (what Keycloak
-      // mirrors), written back to Keycloak if the DB write fails.
+      // The stored phone, restored in Keycloak if the database write fails.
       let previousPhone: string | undefined;
       if (body.aggregator.contact) {
         const raw = body.aggregator.contact;
@@ -273,17 +245,13 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         if (!phoneR.ok) {
           throw httpError('INVALID_PHONE', {
             detail: phoneR.error.message,
-            // Key it `phone` (not `input`) so the logger's `*.phone` redact
-            // path masks the raw number if this error is ever logged.
+            // Keyed `phone` so the logger redacts it.
             fields: { phone: raw.phone },
           });
         }
         normalisedContact = { ...raw, phone: phoneR.value };
 
-        // One phone and one email per person across coordinators and org
-        // owners (the phone is the OTP login key; `contact`, migration 0025).
-        // Checked before the Keycloak write so a clash never leaves Keycloak
-        // ahead of the DB.
+        // One phone and one email per person. Checked before the Keycloak write.
         previousPhone = await assertContactChangeAllowed(auth.aggregatorId, {
           email: raw.email,
           phone: phoneR.value,
@@ -316,8 +284,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
 
       const result = await userStore.update(auth.aggregatorId, patch);
       if (!result.ok && normalisedContact && previousPhone !== undefined) {
-        // Keycloak was written first; put it back so it never runs ahead of
-        // the database. Best-effort — logged if it fails.
+        // Restore the Keycloak phone. Best effort; logged on failure.
         const revert = await getIdpAdmin().setAttributes(auth.userId, {
           [KC_ATTR.PHONE_NUMBER]: previousPhone,
         });
@@ -347,7 +314,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
         'profile updated',
       );
 
-      // Echo the post-write row so the client doesn't need an extra GET.
+      // Return the updated row.
       const aggregator = await userStore.findById(auth.aggregatorId);
       if (!aggregator.ok || !aggregator.value) {
         throw httpError('INTERNAL', { detail: 'Post-write read failed.' });
@@ -432,8 +399,7 @@ function mapAggregatorUpdateError(
       return 'SCHEMA_VALIDATION';
     case 'DUPLICATE_SLUG':
       return 'DUPLICATE_SLUG';
-    // An unrecognised unique violation is a real conflict, but not one this
-    // layer can name — don't dress it up as a taken slug (#718 review).
+    // An unknown unique violation is a generic conflict.
     case 'DUPLICATE':
       return 'CONFLICT';
     default:
@@ -442,15 +408,11 @@ function mapAggregatorUpdateError(
 }
 
 /**
- * Checks a coordinator's requested contact change BEFORE anything is written
- * (Keycloak is written first, so a late refusal would leave it ahead of the
- * database):
- *   - the phone or email already belongs to another person (another
- *     coordinator, or an org owner whose contact is not this coordinator's own)
- *     → PHONE_EXISTS / USER_EXISTS;
- *   - this coordinator's contact is shared with an org-owner role (one person,
- *     two roles) and the email or phone would change → CONFLICT (not supported
- *     until accounts are modelled separately, in a later phase).
+ * Checks a coordinator's requested contact change before anything is written.
+ *
+ * - Phone or email held by another person: PHONE_EXISTS / USER_EXISTS.
+ * - Contact shared with an org-owner role and the email or phone changes: CONFLICT.
+ *
  * Identity is compared on stored contact ids, never on the submitted email.
  *
  * @param selfId - The caller's own `aggregators.id`.

@@ -1,22 +1,20 @@
 /**
- * Coordinator-org store contract — the org system of record (spec §5.1).
+ * Organisation store contract; the system of record for orgs.
  *
- * Belongs to `@aggregator-dpg/api`. The org is a row of `organisations`
- * (migration 0028); the Keycloak group is a future-authz mirror that this
- * store does not read for scoping. Status lives here so org approval uses an
- * atomic compare-and-set single-use guard (spec A3). Returns
- * `OrgStoreResult<T>` on every boundary — never throws.
+ * Belongs to `@aggregator-dpg/api`. An org is a row of `organisations`; the
+ * Keycloak group is a mirror this store does not read. Approval is an atomic
+ * compare-and-set on status. Every method returns `OrgStoreResult<T>` and
+ * never throws.
  *
- * **Scope:** every method except {@link OrganisationStoreBase.findRoot} sees
- * `aggregator` orgs only, so the network-facilitator root never reaches a
- * caller that lists, selects or owns orgs. The owner lookups also skip the
+ * Every method except {@link OrganisationStoreBase.findRoot} sees `aggregator`
+ * orgs only, never the network-facilitator root. Owner lookups also skip the
  * Default org, which the network admin owns.
  */
 
 import type { AggregatorStatus, BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import type { RecordConsentHook } from '../consent-ledger/hook.js';
 
-/** Slug of the fixed Default org that holds formerly-flat coordinators (0028). */
+/** Slug of the fixed Default org, which holds coordinators with no other org. */
 export const DEFAULT_ORG_SLUG = 'default';
 
 export interface Organisation {
@@ -24,47 +22,41 @@ export interface Organisation {
   slug: string;
   displayName: string;
   state: string | null;
-  /**
-   * FK → `contact.id` — the org owner's contact (migration 0025). PII-derived
-   * hash: never log it.
-   */
+  /** FK to `contact.id`, the owner's contact. PII-derived hash: never log it. */
   contactId: string;
-  /** The owner's admin account (`users.id`, migration 0027). */
+  /** The owner's admin account (`users.id`). */
   ownerUserId: string;
-  /** Owner email, lowercased — from the linked contact. */
+  /** Owner email, lowercased, from the linked contact. */
   ownerEmail: string;
-  /** Owner phone (canonical) — from the linked contact. */
+  /** Owner phone (canonical), from the linked contact. */
   ownerPhone: string | null;
   /**
-   * Owner name — from the linked contact. `null` for owners registered before
-   * migration 0025 until `scripts/backfill-owner-contact-names.ts` has run.
+   * Owner name, from the linked contact. `null` when the contact has no name
+   * until `scripts/backfill-owner-contact-names.ts` has run.
    */
   ownerName: string | null;
   ownerKcSub: string | null;
   kcGroupId: string | null;
   /**
-   * Schema-driven registration payload — only fields with no column of their
-   * own. The typed columns above stay authoritative for what they already hold.
+   * Registration fields that have no column of their own. The typed columns
+   * above take precedence.
    */
   profile: Record<string, unknown>;
-  /**
-   * Which schema variant produced `profile`, e.g. `blue_dot/org-registration.v1`.
-   * NULL on rows created before migration 0018.
-   */
+  /** Schema variant that produced `profile`, e.g. `blue_dot/org-registration.v1`; may be null. */
   profileRef: string | null;
   status: AggregatorStatus;
   createdAt: Date;
   updatedAt: Date;
   /**
-   * Audit actor of the last write: an admin user id (console), `'admin'` (an
-   * emailed link), `'self'`; `null` on rows never attributed.
+   * Who made the last write: an admin user id (console), `'admin'` (emailed
+   * link) or `'self'`; `null` when unknown.
    */
   updatedBy: string | null;
-  /** Write-once rejection timestamp (#726) — drives the cooling window. */
+  /** Write-once rejection time; drives the cooling window. */
   rejectedAt: Date | null;
   /** Whether this is the fixed Default org (slug {@link DEFAULT_ORG_SLUG}). */
   isDefault: boolean;
-  /** Org details (0028): rendered for every coordinator of the org. */
+  /** Org details, shown for every coordinator of the org. */
   url: string | null;
   locations: BecknLocation[];
   legalName: string | null;
@@ -83,12 +75,12 @@ export interface CreateOrgInput {
   kcGroupId?: string | null;
   profile?: Record<string, unknown>;
   profileRef?: string | null;
-  /** Org details (0028) from the registration form's website / address. */
+  /** Org details from the registration form's website and address. */
   url?: string | null;
   locations?: BecknLocation[];
   /**
-   * Writes the org's consent ledger row in the create transaction (0029).
-   * Required, so no caller can create an org without a consent record.
+   * Writes the org's consent ledger row inside the create transaction.
+   * Required, so no org is created without a consent record.
    */
   recordConsent: RecordConsentHook;
 }
@@ -99,14 +91,14 @@ export interface UpdateOrgPatch {
   ownerKcSub?: string | null;
   kcGroupId?: string | null;
   status?: AggregatorStatus;
-  /** Write-once reject timestamp (#726); set to `null` to revive after cooling. */
+  /** Write-once rejection time; set to `null` to revive after cooling. */
   rejectedAt?: Date | null;
-  /** Org details (0028), edited from the Phase 5 console. */
+  /** Org details, edited from the console. */
   url?: string | null;
   locations?: BecknLocation[];
   legalName?: string | null;
   gstNumber?: string | null;
-  /** Audit actor of this write (an admin user id; `'self'` / `'admin'` elsewhere). */
+  /** Who made this write: an admin user id, `'self'` or `'admin'`. */
   updatedBy?: string;
 }
 
@@ -117,8 +109,8 @@ export interface OrgCursor {
 }
 
 /**
- * A scoped org search (Phase 5 console). `orgIds = null` means every
- * aggregator org (the network admin); an empty array means none.
+ * A scoped org search. `orgIds = null` means every aggregator org (the
+ * network admin); an empty array means none.
  */
 export interface SearchOrgsFilter {
   orgIds: string[] | null;
@@ -143,11 +135,11 @@ export type OrgStoreError =
   | { code: 'NOT_FOUND'; message: string }
   | { code: 'DUPLICATE_SLUG'; message: string }
   | { code: 'DUPLICATE_NAME'; message: string }
-  /** The owner's email already belongs to another person (`contact`, 0025). */
+  /** The owner's email already belongs to another person. */
   | { code: 'DUPLICATE_EMAIL'; message: string }
-  /** The owner's phone already belongs to another person (`contact`, 0025). */
+  /** The owner's phone already belongs to another person. */
   | { code: 'DUPLICATE_PHONE'; message: string }
-  /** The `recordConsent` hook failed: nothing was created (0029). */
+  /** The `recordConsent` hook failed; nothing was created. */
   | { code: 'CONSENT_WRITE_FAILED'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
 
@@ -163,9 +155,10 @@ export abstract class OrganisationStoreBase {
   abstract findBySlug(slug: string): Promise<OrgStoreResult<Organisation | null>>;
   abstract findByOwnerEmail(email: string): Promise<OrgStoreResult<Organisation | null>>;
   /**
-   * Finds an org whose owner holds this phone. Backs the org-create pre-check
-   * that keeps one phone per person across coordinators and org owners (the
-   * phone is the OTP login key).
+   * Finds an org whose owner holds this phone.
+   *
+   * Used by the org-create check that keeps one phone per person; the phone
+   * is the OTP login key.
    *
    * @param phone - Canonical (`normalisePhone`) phone.
    * @returns The first matching org, or `null`.
@@ -179,22 +172,21 @@ export abstract class OrganisationStoreBase {
    */
   abstract listActive(): Promise<OrgStoreResult<Organisation[]>>;
   /**
-   * The fixed Default org (0028), or `null` when absent (a database not yet
-   * migrated, or a test that did not seed it).
+   * Finds the fixed Default org.
    *
-   * @returns The Default org.
+   * @returns The Default org, or `null` when it is not seeded.
    */
   abstract findDefault(): Promise<OrgStoreResult<Organisation | null>>;
   /**
-   * The network-facilitator root (0028) — the only method that returns it.
+   * Finds the network-facilitator root; the only method that returns it.
    *
    * @returns The root org, or `null` when absent.
    */
   abstract findRoot(): Promise<OrgStoreResult<Organisation | null>>;
   /**
    * Lists `pending` orgs, optionally only those last updated before `updatedBefore`.
-   * Drives the §7 stale-pending cleanup; the age filter keeps the row cap
-   * counting genuinely-stale rows rather than fresh ones masking them.
+   *
+   * Used by the stale-pending cleanup.
    *
    * @param updatedBefore - When set, only rows with `updated_at < updatedBefore`.
    * @returns Matching `pending` rows (may be empty).
@@ -202,27 +194,26 @@ export abstract class OrganisationStoreBase {
   abstract listPending(updatedBefore?: Date): Promise<OrgStoreResult<Organisation[]>>;
   abstract update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<Organisation>>;
   /**
-   * Hard-deletes an org row by id. Used by the §7 stale-pending cleanup after
-   * its mirrored KC group + owner user have been removed.
+   * Hard-deletes an org row by id.
+   *
+   * Used by the stale-pending cleanup after the Keycloak group and owner are removed.
    *
    * @param id - The org id to delete.
    * @returns `ok` with `void`; `NOT_FOUND` is treated as success (idempotent).
    */
   abstract deleteById(id: string): Promise<OrgStoreResult<void>>;
   /**
-   * Whether the org's owner is still needed elsewhere: their account owns
-   * another org, or the same person also has a coordinator account (one IdP
-   * user per person). Decides whether deleting this org may delete the
-   * owner's IdP user (prune): a shared owner keeps it.
+   * Whether the org's owner is still needed elsewhere.
+   *
+   * True when the owner owns another org or also has a coordinator account.
+   * A shared owner keeps their IdP user when this org is deleted.
    *
    * @param id - Org UUID.
-   * @returns `true` inside `ok` when the owner owns another org.
+   * @returns `true` inside `ok` when the owner is shared.
    */
   abstract ownerIsShared(id: string): Promise<OrgStoreResult<boolean>>;
   /**
-   * Atomic compare-and-set pending→active. Returns the updated row, or `null`
-   * inside `ok` when the row was not `pending` (the single-use guard lost the
-   * race / already decided). Never throws.
+   * Atomically moves the org from pending to active.
    *
    * @param id - The org id.
    * @param updatedBy - The decider, written in the same statement (`'admin'`
@@ -231,8 +222,7 @@ export abstract class OrganisationStoreBase {
    */
   abstract approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>>;
   /**
-   * Atomic compare-and-set pending→inactive (== rejected). Same null-on-race
-   * semantics as {@link approve}.
+   * Atomically moves the org from pending to inactive (rejected).
    *
    * @param id - The org id.
    * @param updatedBy - The decider (see {@link approve}).
@@ -240,23 +230,24 @@ export abstract class OrganisationStoreBase {
    */
   abstract reject(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>>;
   /**
-   * The aggregator orgs (Default included) an admin account owns.
+   * Lists the aggregator orgs (Default included) an admin account owns.
    *
    * @param ownerUserId - The admin `users.id`.
    * @returns The owned orgs, by name; empty when none.
    */
   abstract listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<Organisation[]>>;
   /**
-   * Scoped, keyset-paged org search by name (aggregator orgs only).
+   * Searches aggregator orgs by name, scoped and keyset-paged.
    *
    * @param filter - Scope (`orgIds`), filters and cursor.
    * @returns One page; an empty scope returns no rows.
    */
   abstract search(filter: SearchOrgsFilter): Promise<OrgStoreResult<SearchOrgsPage>>;
   /**
-   * Deletes an org only while it is still `pending` and older than `cutoff`,
-   * holding the row until `beforeCommit` (the Keycloak clean-up) has run; a
-   * concurrent approval waits, then finds the row gone.
+   * Deletes an org only while it is still `pending` and older than `cutoff`.
+   *
+   * The row stays locked until `beforeCommit` (the Keycloak clean-up) has run,
+   * so a concurrent approval waits and then finds the row gone.
    *
    * @param id - Org id.
    * @param cutoff - Only rows last updated before this instant.

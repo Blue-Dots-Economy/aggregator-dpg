@@ -1,10 +1,9 @@
 /**
  * In-memory campaign job store — the `./testing` fake for unit tests and dev.
  *
- * Backs the same {@link CampaignJobStoreBase} contract as the Postgres impl
- * (both are exercised by the shared conformance suite). Not durable; a single
- * process's Maps. Ids are random UUIDs; ordering is a monotonic sequence so
- * "newest first" list results are deterministic in tests.
+ * Implements the same {@link CampaignJobStoreBase} contract as the Postgres
+ * store. Not durable. Lists are ordered by a sequence number, so "newest
+ * first" is deterministic in tests.
  *
  * @module @aggregator-dpg/api
  */
@@ -45,7 +44,6 @@ interface JobRow {
   lastProgressAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
-  /** `unknown` already includes `null` — see the matching field on `JobView`. */
   providerResponse: unknown;
 }
 
@@ -70,8 +68,7 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
   async createJob(
     input: CreateJobInput,
   ): Promise<StoreResult<{ job: JobRecord; created: boolean }>> {
-    // Keyed by org + key: idempotency is per tenant (see the partial unique
-    // index), so one org's key must never resolve another org's job.
+    // Idempotency is per org: one org's key must never resolve another org's job.
     const idemKey = input.idempotencyKey
       ? `${input.signalstackOrgId}\u0000${input.idempotencyKey}`
       : null;
@@ -123,10 +120,9 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
   }
 
   /**
-   * Item ids (among the given batch) already active elsewhere — same
-   * `(itemId, action)` pair, any job, status in {@link ACTIVE_DEDUP_ITEM_STATUSES}.
-   * Mirrors the Postgres partial-unique-index predicate; null-action items are
-   * never included (export is never deduplicated).
+   * Returns item ids in the batch already active in any job for the same
+   * `(itemId, action)`. Matches the Postgres partial unique index; null-action
+   * items are never included.
    */
   private activeDedupIds(candidates: CreateJobInput['items']): Set<string> {
     const dup = new Set<string>();

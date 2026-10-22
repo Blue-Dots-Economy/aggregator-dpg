@@ -1,15 +1,12 @@
 /**
- * S3 key derivation for the Signals non-PII dump (#692).
+ * S3 key derivation for the Signals non-PII dump (`@aggregator-dpg/api`).
  *
- * The `signals-s3-export` cron writes ONE object per table at a FIXED key,
- * overwriting it in place every run:
+ * The `signals-s3-export` cron writes one object per table at a fixed key,
+ * overwriting it every run:
  *
  *     [<prefix>/]<network>/<instance_id>/<table>.ndjson.gz
  *
- * There is no manifest and no dated run folder (they were removed upstream in
- * adhoc-scripts commits e153c43/d5e4a2d), so "latest" is not resolved at all —
- * these keys ARE the contract. Derivation is kept here, separate from the S3
- * client, so it is unit-testable without a bucket.
+ * There is no manifest or dated folder; these keys are the contract.
  *
  * @module apps/api/services/object-storage/dump-keys
  */
@@ -33,20 +30,14 @@ export interface DumpLocation {
 /**
  * Builds the key prefix shared by this deployment's three dump objects.
  *
- * Leading, trailing and repeated slashes in the configured prefix are dropped;
- * `network` and `instanceId` are used verbatim, so a malformed one produces a
- * key that 404s rather than being silently corrected into a different dataset.
+ * Leading, trailing and repeated slashes in the prefix are dropped. `network`
+ * and `instanceId` are used as-is, so a malformed value gives a key that 404s.
  *
  * @param opts - The dump location.
  * @returns The key root, with no leading or trailing slash.
  */
 export function dumpKeyRoot(opts: DumpLocation): string {
-  // Split on `/` rather than regex-trimming the prefix. `/^\/+|\/+$/` is the
-  // obvious trim, but its `\/+$` alternative is the shape static analysis
-  // flags as super-linear under backtracking (sonar typescript:S8786) — V8
-  // happens to handle it fine, so this is a smell fix, not a hot path. The
-  // split also folds into the filter that already drops an empty prefix, and
-  // collapses an interior `//` that the regex would have left in the key.
+  // Split on `/` instead of a regex trim, which static analysis flags as super-linear.
   return [...opts.prefix.split('/'), opts.network, opts.instanceId]
     .filter((p) => p.length > 0)
     .join('/');

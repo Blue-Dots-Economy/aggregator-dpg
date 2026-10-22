@@ -1,11 +1,9 @@
 /**
- * Identity-provider admin contract.
+ * Identity-provider admin contract (`@aggregator-dpg/api`).
  *
- * The API only needs a small slice of admin operations to support the
- * aggregator approval flow: create a user, look one up by email, enable /
- * disable, delete (rollback). Everything else stays vendor-specific in the
- * concrete adapter. Swap implementations to support FusionAuth, Authentik,
- * Auth0, etc. without touching business logic.
+ * The small set of admin operations the API needs: users, attributes, groups,
+ * realm roles and sessions. Another IdP can be supported by writing a new
+ * adapter.
  */
 
 export interface CreateUserInput {
@@ -19,10 +17,8 @@ export interface CreateUserInput {
   /** Free-form attributes. Existing fields take precedence. */
   attributes?: Record<string, string | string[]>;
   /**
-   * Keycloak required actions to attach to the new user. Used to defer
-   * collection of fields not captured at registration time — e.g. the
-   * applicant fills first/last name via KC's Update Profile screen on
-   * their first sign-in.
+   * Keycloak required actions for the new user, e.g. Update Profile on first
+   * sign-in to collect fields not captured at registration.
    */
   requiredActions?: string[];
 }
@@ -54,20 +50,15 @@ export abstract class IdpAdminAdapter {
   abstract findByEmail(email: string): Promise<IdpResult<IdpUser | null>>;
   abstract findById(userId: string): Promise<IdpResult<IdpUser | null>>;
   /**
-   * Look up a user by a free-form attribute name/value pair.
-   *
-   * Used to map an aggregator UUID (stored as the `aggregator_id` user
-   * attribute on the Keycloak user) back to the identity record without
-   * keeping a redundant Keycloak user id in Postgres.
+   * Looks up a user by an attribute name/value pair, e.g. `aggregator_id`.
    */
   abstract findByAttribute(name: string, value: string): Promise<IdpResult<IdpUser | null>>;
   abstract enableUser(userId: string): Promise<IdpResult<void>>;
   abstract disableUser(userId: string): Promise<IdpResult<void>>;
   abstract deleteUser(userId: string): Promise<IdpResult<void>>;
   /**
-   * Merge attributes onto an existing user. Implementations preserve other
-   * attributes already on the user; only the keys provided here are written
-   * (or removed when the value is `null`).
+   * Merges attributes onto an existing user. Only the given keys are written;
+   * a `null` value removes the key.
    */
   abstract setAttributes(
     userId: string,
@@ -75,11 +66,8 @@ export abstract class IdpAdminAdapter {
   ): Promise<IdpResult<void>>;
 
   /**
-   * Write only the `decision_made` attribute on a user. Convenience wrapper
-   * around {@link setAttributes} so the approval flow does not need to know
-   * the attribute name. Use `enableUser` / `disableUser` separately when
-   * the decision affects login (typically `approved` → enable, `rejected` →
-   * disable).
+   * Writes the `decision_made` attribute on a user. Does not enable or
+   * disable the user; call `enableUser` / `disableUser` for that.
    *
    * @param userId  - Keycloak user id (from `findByAttribute(aggregator_id)`).
    * @param decision - One of `'pending'`, `'approved'`, `'rejected'`.
@@ -90,8 +78,8 @@ export abstract class IdpAdminAdapter {
   ): Promise<IdpResult<void>>;
 
   /**
-   * Creates a Keycloak group (the org's authz mirror — spec §9). In v1 the
-   * group holds only the org owner; coordinators are NOT members (spec A1).
+   * Creates a Keycloak group for an org. The group holds only the org owner;
+   * coordinators are not members.
    *
    * @param name - Group name (e.g. `org-<slug>`).
    * @param attributes - Optional group attributes (e.g. `{ org_id }`).
@@ -103,8 +91,7 @@ export abstract class IdpAdminAdapter {
   ): Promise<IdpResult<{ id: string }>>;
 
   /**
-   * Deletes a group by id. Used by the §7 stale-pending cleanup to remove the
-   * mirrored org group when pruning an abandoned org registration.
+   * Deletes a group by id. Used when pruning an abandoned org registration.
    *
    * @param groupId - Group id returned by {@link createGroup}.
    * @returns `ok` with `void`; a 404 is treated as success (idempotent).
@@ -112,8 +99,8 @@ export abstract class IdpAdminAdapter {
   abstract deleteGroup(groupId: string): Promise<IdpResult<void>>;
 
   /**
-   * Finds a top-level group by its exact name — used to adopt a group created
-   * by an earlier attempt whose id was never recorded (a 409 on create).
+   * Finds a top-level group by exact name, to adopt a group left by an earlier
+   * attempt (a 409 on create).
    *
    * @param name - Exact group name.
    * @returns The group's id and attributes, or `null` when absent.
@@ -123,8 +110,7 @@ export abstract class IdpAdminAdapter {
   ): Promise<IdpResult<{ id: string; attributes: Record<string, string[]> } | null>>;
 
   /**
-   * Removes a user from a group (an org owner replaced by another). A user or
-   * membership that is already gone is success (idempotent).
+   * Removes a user from a group. A missing user or membership counts as success.
    *
    * @param userId - Keycloak user id.
    * @param groupId - Group id.
@@ -148,8 +134,7 @@ export abstract class IdpAdminAdapter {
   abstract assignRealmRole(userId: string, role: string): Promise<IdpResult<void>>;
 
   /**
-   * Removes a realm role from a user. Removing a role the user does not hold
-   * succeeds (idempotent).
+   * Removes a realm role from a user. Succeeds if the user does not hold it.
    *
    * @param userId - Keycloak user id.
    * @param role - Realm role name.
@@ -165,8 +150,7 @@ export abstract class IdpAdminAdapter {
   abstract listRealmRoles(userId: string): Promise<IdpResult<string[]>>;
 
   /**
-   * Ends every session of a user now (their tokens stop refreshing), e.g.
-   * after losing the role a console needs.
+   * Ends every session of a user now, so their tokens stop refreshing.
    *
    * @param userId - Keycloak user id.
    */

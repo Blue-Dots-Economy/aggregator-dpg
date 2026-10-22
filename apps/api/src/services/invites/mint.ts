@@ -1,18 +1,14 @@
 /**
- * Coordinator-invite minting (`@aggregator-dpg/api`; #700, user & org Phase 5).
+ * Coordinator-invite minting (`@aggregator-dpg/api`).
  *
- * Shared by the owner grant route (`POST /admin/v1/invites`) and the console
- * (`POST /v1/user/create`). Per recipient: validate, de-duplicate, then either
- * mint / refresh a 14-day invite and mail it, or — when the address already
- * has an account (design C9) —
+ * Shared by `POST /admin/v1/invites` and `POST /v1/user/create`. Per
+ * recipient: validate, de-duplicate, then mint or refresh a 14-day invite and
+ * mail it. If the address already has an account:
  *
- *   - a coordinator of **this** org: nothing is mailed; the inviter is told
- *     (`existing`), since they can see their own org's members anyway;
- *   - any other account (another org's coordinator, an org owner, the network
- *     admin): a "you already have an account" mail instead of an invite link;
- *     an invite row is still kept, so the inviter sees the same `sent` /
- *     `resent` counts as for a fresh address and cannot probe other orgs'
- *     members.
+ *   - a coordinator of this org: nothing is mailed; reported as `existing`;
+ *   - any other account: a "you already have an account" mail is sent and an
+ *     invite row is still kept, so the counts look the same as for a fresh
+ *     address and cannot be used to probe other orgs' members.
  */
 
 import type { FastifyBaseLogger } from 'fastify';
@@ -55,10 +51,7 @@ export interface MintBatchDeps {
   log: FastifyBaseLogger;
 }
 
-// Conservative RFC-5322-lite check; the real gate is deliverability (a bad
-// address simply never registers). Prevents obvious garbage lines from the
-// bulk textarea becoming invite rows. Domain labels are `[^\s@.]+` separated by
-// dots so the pattern is unambiguous (linear — no catastrophic backtracking).
+// Simple email check to reject obvious garbage. Linear: no catastrophic backtracking.
 const EMAIL_RE = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
 
 /** Builds the coordinator registration URL carrying an invite token. */
@@ -82,9 +75,9 @@ interface ResolvedInvite {
 }
 
 /**
- * Resolves the invite row for one (org, email): refreshes an existing pending
- * invite, else creates a new one (falling back to refresh on a partial-unique
- * race). Returns the `jti` + whether it was a refresh, or `null` on a store error.
+ * Resolves the invite row for one (org, email): refreshes a pending invite or
+ * creates one (refreshing on a unique-key race). Returns the `jti` and whether
+ * it was a refresh, or `null` on a store error.
  */
 async function resolveInviteJti(
   invites: MintBatchDeps['invites'],
@@ -119,8 +112,7 @@ type AccountMatch =
   | { kind: 'error' };
 
 /**
- * Looks the address up among coordinators, org owners and the root / Default
- * owners (an email is one person across both roles; `contact_email_unique`).
+ * Looks the address up among coordinators, org owners and the root / Default owners.
  */
 async function accountFor(email: string, orgId: string): Promise<AccountMatch> {
   const coordinator = await getUserStore().findByContactEmail(email);
@@ -144,10 +136,9 @@ async function accountFor(email: string, orgId: string): Promise<AccountMatch> {
 }
 
 /**
- * Mints/refreshes and emails an invite per recipient, bucketing invalid and
- * duplicate-in-batch addresses, and handling addresses that already have an
- * account (see the module doc). A failed email is logged and still counted as
- * sent (the row exists; the owner can re-invite to retry delivery).
+ * Mints or refreshes and emails an invite per recipient. Invalid and duplicate
+ * addresses are bucketed; existing accounts are handled as in the module doc.
+ * A failed email is logged and still counted as sent.
  *
  * @param deps - Store, mailer, org, recipients, and token settings.
  * @returns Per-batch counts, the invalid list and own-org existing members.
@@ -157,7 +148,7 @@ export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary>
   const { invites, mailer, orgId, orgName, inviterEmail, recipients, ttlSec, createdBy, log } =
     deps;
   const summary: MintSummary = { sent: 0, resent: 0, invalid: [], existing: [] };
-  // De-dupe within the batch so one address can't consume two slots / two emails.
+  // De-duplicate within the batch.
   const seen = new Set<string>();
 
   for (const recipient of recipients) {
@@ -182,9 +173,7 @@ export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary>
       continue;
     }
     if (account.kind === 'other_account') {
-      // An invite row is kept for this address too, so a repeat counts as
-      // `resent` exactly like a fresh address (no account oracle); the row is
-      // harmless — registering with an address that has an account is refused.
+      // Keep an invite row so counts match a fresh address (no account oracle).
       const expiresAt = new Date(Date.now() + ttlSec * 1000);
       const kept = await resolveInviteJti(invites, orgId, email, expiresAt, createdBy); // NOSONAR typescript:S9382 — sequential by design
       if (!kept) {

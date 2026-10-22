@@ -1,12 +1,9 @@
 /**
- * Org-detail mapping for org registration (`@aggregator-dpg/api`, migration
- * 0028).
+ * Org-detail mapping for org registration (`@aggregator-dpg/api`).
  *
- * The org form's `website`, `address` (+ legacy `state`) and picked
- * `coordinates` become the org's `url` and one Beckn location — the same rule
- * migration 0028 (step O9) applied to existing orgs, so old and new orgs carry
- * the same shape. `addressDistrict` has no Beckn key; it stays in the org's
- * `profile` only.
+ * The org form's `website`, `address` (and legacy `state`) and picked
+ * `coordinates` become the org's `url` and one Beckn location, matching
+ * migration 0028. `addressDistrict` has no Beckn key; it stays in `profile`.
  */
 
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
@@ -38,9 +35,8 @@ export function orgUrlFrom(website: string | null | undefined): string | null {
 
 /**
  * The org's `locations` from its form's address, state and picked point. A
- * location is built only when there is a street or locality, or real
- * coordinates; a state alone gives `[]` (a stub would hide every member's
- * precise address behind it).
+ * location is built only from a street, locality or real coordinates; a state
+ * alone gives `[]`.
  *
  * @param address - The form's address block.
  * @param state - The legacy standalone state field.

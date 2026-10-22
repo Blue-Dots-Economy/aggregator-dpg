@@ -1,16 +1,14 @@
 /**
- * Organisation registration decision and owner access (`@aggregator-dpg/api`,
- * user & org Phase 5).
+ * Organisation registration decision and owner access (`@aggregator-dpg/api`).
  *
  * `decideOrg` is the one place a pending aggregator org is approved or
- * rejected, shared by the emailed review link (`routes/aggregator-org-approvals.ts`)
- * and the console (`POST /v1/org/decision/:id`). Both transitions are a
- * compare-and-set from `pending` first; only the winner provisions and mails.
+ * rejected, used by the emailed review link (`routes/aggregator-org-approvals.ts`)
+ * and the console (`POST /v1/org/decision/:id`). Both are a compare-and-set
+ * from `pending` first; only the winner provisions and mails.
  *
- * `grantOwnerAccess` is what lets an owner sign in: their Keycloak user
- * enabled, the `org_owner` realm role (the portal gate admits it) and the
- * org's group. It runs at approval, from the network admin's "repair access"
- * action, and in the release's one-off `enable-owners` step. Idempotent.
+ * `grantOwnerAccess` lets an owner sign in: enables their Keycloak user,
+ * grants the `org_owner` realm role and adds the org's group. It runs at
+ * approval, from "repair access", and in the `enable-owners` tool step. Idempotent.
  */
 
 import type { FastifyBaseLogger } from 'fastify';
@@ -187,7 +185,7 @@ export async function decideOrg(input: OrgDecisionInput): Promise<OrgDecisionOut
         sub_operation: 'mailer.send.orgRejected',
         code: sent.error.code,
       });
-    // The reason is free text: never logged (design C17).
+    // Never log the reason; it is free text.
     log.info({ status: 'success', decision: 'reject', decided_by: input.decidedBy });
     return {
       kind: 'decided',
@@ -197,8 +195,7 @@ export async function decideOrg(input: OrgDecisionInput): Promise<OrgDecisionOut
     };
   }
 
-  // Approved: the owner can now sign in (Phase 5). Soft-fail per step; the
-  // network admin's "repair access" re-runs it.
+  // Approved: give the owner sign-in access. Soft-fail per step; "repair access" re-runs it.
   const ownerAccess = await grantOwnerAccess(org, log);
   const mail = renderOrgOwnerApproved({
     orgName: org.displayName,

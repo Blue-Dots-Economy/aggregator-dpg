@@ -1,11 +1,9 @@
 /**
- * Schema loader singleton for the API process.
+ * Schema loader singleton for the API process (`@aggregator-dpg/api`).
  *
- * The hybrid resolution itself (participant ids from network-config, all other
- * ids from disk under `config/<network>/schemas/`) lives in
- * `@aggregator-dpg/schema-loader/network` and is shared with the worker. This
- * module only binds it to the API process's config and network-config
- * singleton, and owns the instance.
+ * Resolution lives in `@aggregator-dpg/schema-loader/network`, shared with the
+ * worker: participant ids come from network config, other ids from
+ * `config/<network>/schemas/`. This module binds it to the API's config.
  */
 
 import { NetworkSchemaLoader } from '@aggregator-dpg/schema-loader/network';
@@ -28,7 +26,7 @@ export function getSchemaLoader(): NetworkSchemaLoader {
   return instance;
 }
 
-/** Test helper — replace the singleton with a fake loader. */
+/** Test helper; replaces the singleton with a fake loader. */
 export function _setSchemaLoader(loader: NetworkSchemaLoader | null): void {
   instance = loader;
 }

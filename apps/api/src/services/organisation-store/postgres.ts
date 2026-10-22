@@ -1,20 +1,16 @@
 /**
- * Postgres adapter for the aggregator-org store.
+ * Postgres organisation store, in `@aggregator-dpg/api`.
  *
- * Wraps Drizzle queries against the `organisations` table (was
- * `aggregator_orgs`, migration 0028) — the org system of record (spec §5.1).
- * Every query is scoped to `org_type = 'aggregator'` ({@link scoped}) except
- * `findRoot`, so the network-facilitator root never reaches a caller. Driver-level errors are normalised to the abstract
- * `OrgStoreError` codes so callers never see raw pg error fields.
+ * Queries the `organisations` table. Every query is scoped to
+ * `org_type = 'aggregator'` ({@link scoped}) except `findRoot`. Driver errors
+ * are mapped to `OrgStoreError` codes.
  *
- * The owner is an `admin` account in `users` (`aggregator_orgs.owner_user_id`,
- * migration 0027); its email / phone / name live in `contact` and its IdP login
- * in `user_identities`. The owner's contact and account are written in the
- * same transaction as the org row (`db/contact-writes.ts`,
- * `db/account-writes.ts`), and every write re-reads the joined row inside that
- * transaction, because `RETURNING` cannot include the joined owner. Deleting an
- * org releases the owner's account in the database (`organisations_owner_ad`)
- * once it owns no other org.
+ * The owner is an `admin` account in `users`; its email, phone and name live
+ * in `contact` and its IdP login in `user_identities`. The owner's contact and
+ * account are written in the same transaction as the org row. Every write
+ * re-reads the joined row in that transaction, because `RETURNING` cannot
+ * include the joined owner. A database trigger releases the owner's account
+ * once it owns no org.
  */
 
 import { and, asc, desc, eq, gt, inArray, lt, ne, or, sql, type SQL } from 'drizzle-orm';
@@ -57,8 +53,6 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
     const start = Date.now();
     try {
       const created = await getDb().transaction(async (tx) => {
-        // The owner's contact, the owner's admin account and the org row are
-        // written atomically.
         const contactId = await linkContact(tx, {
           email: input.ownerEmail,
           phone: input.ownerPhone ?? null,
@@ -67,7 +61,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
         const ownerUserId = await linkAdminAccount(tx, contactId);
         if (input.ownerKcSub)
           await linkIdentity(tx, ownerUserId, IDP_PROVIDER, input.ownerKcSub, 'admin');
-        // Every aggregator org sits under the network-facilitator root (0028).
+        // Every aggregator org sits under the network-facilitator root.
         const [root] = await tx
           .select({ id: organisations.id })
           .from(organisations)
@@ -93,7 +87,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           })
           .returning({ id: organisations.id });
         if (!row) throw new Error('insert returned no row');
-        // The consent row commits with the org, or neither does (0029).
+        // The consent row commits with the org, or neither does.
         if (input.recordConsent) {
           try {
             await input.recordConsent(tx, row.id);
@@ -130,23 +124,19 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
 
   async findByOwnerEmail(email: string): Promise<OrgStoreResult<Organisation | null>> {
     const e = email.trim().toLowerCase();
-    // The owner's admin account by its contact's email (contact_email_unique),
-    // then its orgs. One owner may own several orgs (a rejected one and a new
-    // one), so the pick is deterministic: live first, then newest. The Default
-    // org is skipped: the network admin owns it, and must not read as an owner.
+    // An owner may own several orgs, so pick live first, then newest. The
+    // Default org is skipped: the network admin owns it.
     return this.findOne(eq(contact.email, e), true);
   }
 
   async findByOwnerPhone(phone: string): Promise<OrgStoreResult<Organisation | null>> {
-    // Same shape as findByOwnerEmail, keyed on contact_phone_unique.
+    // Same as findByOwnerEmail, keyed on phone.
     return this.findOne(eq(contact.phone, phone), true);
   }
 
   async ownerIsShared(id: string): Promise<OrgStoreResult<boolean>> {
     try {
-      // Shared when the owner's account owns another org, OR the same person
-      // also has a coordinator account (one IdP user per person: deleting it
-      // would lock the coordinator out).
+      // Shared when the owner owns another org or also has a coordinator account.
       const rows = await getDb().execute<{ shared: boolean }>(sql`
         WITH me AS (
           SELECT o.org_owner, u.contact_id
@@ -308,8 +298,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
     const ABORT = Symbol('abort');
     try {
       const outcome = await getDb().transaction(async (tx) => {
-        // The DELETE takes the row lock: a concurrent approval waits, then
-        // finds the row gone (or still pending if this aborts).
+        // The DELETE locks the row, so a concurrent approval waits for this transaction.
         const rows = await tx
           .delete(organisations)
           .where(
@@ -342,7 +331,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
     try {
       const [row] = await getDb()
         .update(organisations)
-        // Stamp rejected_at (write-once) on the reject transition only (#726).
+        // Stamp the write-once rejected_at on reject only.
         .set({
           status: next,
           updatedAt: new Date(),
@@ -359,9 +348,9 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
   }
 
   /**
-   * `organisations` JOIN the owner's admin account JOIN its `contact`, LEFT
-   * JOIN its IdP login — the one read shape every query uses. The inner joins
-   * hold: `org_owner` is NOT NULL and RESTRICT-protected (0027/0028).
+   * Builds the read used by every query: the org, its owner's account and
+   * contact, and the owner's IdP login. The inner joins are safe because
+   * `org_owner` is NOT NULL.
    *
    * @param db - Executor (the pool, or the caller's transaction).
    */
@@ -389,9 +378,8 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
    * Reads at most one org.
    *
    * @param predicate - The filter.
-   * @param byOwner - When true the filter matches an OWNER (who may own several
-   *   orgs): restrict to admin owners, skip the Default org, and order
-   *   live-first, then newest.
+   * @param byOwner - When true, match admin owners only, skip the Default org,
+   *   and pick live first, then newest.
    */
   private async findOne(
     predicate: SQL,
@@ -456,9 +444,9 @@ function toDomain(row: JoinedRow): Organisation {
 }
 
 /**
- * Restricts a predicate to `aggregator` orgs — every read and write of this
- * store goes through it, so the network-facilitator root is never returned or
- * modified here.
+ * Restricts a predicate to `aggregator` orgs.
+ *
+ * Every read and write in this store uses it, so the root is never returned or changed.
  *
  * @param predicate - The caller's filter.
  * @returns The scoped filter.
@@ -468,8 +456,9 @@ function scoped(predicate: SQL | undefined): SQL {
 }
 
 /**
- * Maps a database failure to an `OrgStoreError` and logs it (SQLSTATE and
- * constraint name only — never the driver message, which carries parameters).
+ * Maps a database failure to an `OrgStoreError` and logs it.
+ *
+ * Logs SQLSTATE and constraint name only, never the driver message (it holds parameters).
  *
  * @param op - Operation name for the log entry.
  * @param e - The thrown error.
@@ -499,9 +488,7 @@ function classifyWriteError(
   code: string | undefined,
   constraint: string,
 ): OrgStoreError {
-  // Only a genuine unique-violation (SQLSTATE 23505) maps to a 409 — gate on the
-  // code first so a connection failure on a query that happens to mention a
-  // constraint name isn't misreported as a duplicate.
+  // Only a unique violation (SQLSTATE 23505) maps to a duplicate error.
   if (code === PG_UNIQUE_VIOLATION) {
     if (constraint.includes('organisations_name_live_unique')) {
       return err('DUPLICATE_NAME', 'organisation name already in use');

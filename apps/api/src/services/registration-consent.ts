@@ -1,16 +1,11 @@
 /**
  * Server-side stamping of a registration's consent (`@aggregator-dpg/api`).
- * Shared by coordinator and org registration so both store the same
- * server-authoritative `given_at` and the same clamped `valid_till` in the
- * consent ledger (migration 0029, D4-4).
+ *
+ * Shared by coordinator and org registration, so both store a server-set
+ * `given_at` and a clamped `valid_till` in the consent ledger.
  */
 
-/**
- * Maximum consent validity window. Hard ceiling so a buggy or hostile
- * client cannot persist a consent record that is effectively permanent.
- * Five years lines up with typical regulatory retention envelopes; tune
- * via config if a deployment needs something different.
- */
+/** Maximum consent validity (five years), so a client cannot store a permanent consent. */
 export const MAX_CONSENT_VALIDITY_MS = 5 * 365 * 24 * 60 * 60 * 1000;
 
 /** The consent block a registration form submits. */
@@ -21,15 +16,14 @@ export interface SubmittedConsent {
 }
 
 /**
- * Server-stamps `given_at` to the current instant and clamps `valid_till` to
- * at most {@link MAX_CONSENT_VALIDITY_MS} after that instant. The client may
- * ask for a shorter window but never a longer one; an unparseable
- * `valid_till` gets the maximum.
+ * Sets `given_at` to now and clamps `valid_till` to at most
+ * {@link MAX_CONSENT_VALIDITY_MS} after now.
  *
- * @param incoming - Consent block as it arrived from the registration form.
+ * A shorter window is kept; an unparseable `valid_till` gets the maximum.
+ *
+ * @param incoming - Consent block from the registration form.
  * @param now - The current instant (injectable for tests).
- * @returns Consent record with server-authoritative timestamps, or `null`
- *   when `valid_till` is not after `now` (a consent born expired is refused).
+ * @returns The stamped consent, or `null` when `valid_till` is not after `now`.
  */
 export function stampConsent<T extends SubmittedConsent>(
   incoming: T,

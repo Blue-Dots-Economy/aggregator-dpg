@@ -1,6 +1,6 @@
 /**
- * Test helpers for the identity store (`./testing` convention): the in-memory
- * fake plus a builder.
+ * Test helpers for the identity store (`@aggregator-dpg/api`): the in-memory
+ * fake and a builder.
  */
 
 import { IDP_PROVIDER } from '../idp-admin/provider.js';

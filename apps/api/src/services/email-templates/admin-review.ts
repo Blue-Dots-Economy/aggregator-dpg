@@ -20,23 +20,26 @@ export interface AdminReviewVars {
   state?: string | undefined;
   about?: string | undefined;
   /**
-   * The email the coordinator was INVITED at (#701). When set and different
-   * from `applicantEmail`, the review highlights that they're registering with a
-   * different address than invited — so the approver can sanity-check it.
+   * The email the coordinator was invited at. When it differs from
+   * `applicantEmail`, the review highlights the difference.
    */
   invitedEmail?: string | undefined;
-  /** Pre-built review deep link — includes the signed token. Approve/reject is
-   * chosen on the page it opens (one link, both actions). */
+  /** Review link with the signed token; approve or reject is chosen on the page it opens. */
   reviewUrl: string;
   submittedAt: Date;
   /**
-   * Human-readable link lifetime (e.g. "7 days"), derived from the
-   * configured approval-token TTL via `formatApprovalTtl`. Must match the
-   * wording on the confirmation page.
+   * Human-readable link lifetime (e.g. "7 days"), from `formatApprovalTtl`.
+   * Must match the wording on the confirmation page.
    */
   expiresInText: string;
 }
 
+/**
+ * Renders the admin review email.
+ *
+ * @param v - Registration details and the review link.
+ * @returns The `subject`, `html`, and `text` parts ready for the mailer.
+ */
 export function renderAdminReview(v: AdminReviewVars): {
   subject: string;
   html: string;
@@ -44,8 +47,7 @@ export function renderAdminReview(v: AdminReviewVars): {
 } {
   const label = v.entityLabel ?? 'aggregator';
   const subject = `Action required: ${label} registration from ${v.association}`;
-  // Render the submission time in IST (the server clock is UTC) so the admin
-  // reads it in the network's local timezone, matching the approval pages.
+  // Show the submission time in IST, matching the approval pages.
   const submitted = `${v.submittedAt.toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
     day: '2-digit',
@@ -54,14 +56,10 @@ export function renderAdminReview(v: AdminReviewVars): {
     hour: '2-digit',
     minute: '2-digit',
   })} IST`;
-  // Highlight when the coordinator registered with a different email than the
-  // one they were invited at (#701) — the approver should sanity-check it.
+  // True when the coordinator registered with a different email than the invited one.
   const emailMismatch = Boolean(v.invitedEmail && v.invitedEmail !== v.applicantEmail);
 
-  // Rows are data, not markup: the bordered container needs to know which row
-  // is last (no divider under it), which is unmanageable when every row is a
-  // hand-written <tr>. One literal with conditional spreads, so optional rows
-  // drop out in place and the order stays readable top to bottom.
+  // Rows as data, so the last row can skip its divider and optional rows drop out.
   const rows: Array<{ label: string; value: string; style?: string }> = [
     { label: 'Association', value: escapeHtml(v.association) },
     { label: 'Type', value: escapeHtml(label), style: 'text-transform:capitalize;' },

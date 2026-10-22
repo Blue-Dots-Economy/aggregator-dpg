@@ -1,10 +1,9 @@
 /**
- * Postgres adapter for the registration-invites store (#700).
+ * Postgres registration-invites store (`@aggregator-dpg/api`).
  *
- * Wraps Drizzle queries against `registration_invites`. Driver-specific errors
- * are mapped to abstract `InviteStoreError` codes — callers reason in domain
- * terms. The partial-unique index on (org_id, email) WHERE
- * status='pending' surfaces as `DUPLICATE_PENDING`.
+ * Queries `registration_invites` and maps driver errors to `InviteStoreError`
+ * codes. The unique index on pending (org_id, email) surfaces as
+ * `DUPLICATE_PENDING`.
  */
 
 import { and, eq } from 'drizzle-orm';
@@ -137,8 +136,9 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
   }
 
   /**
-   * Shared CAS `pending → next` used by consume/revoke. Returns the row on a
-   * winning swap, `null` when the invite was not pending.
+   * Atomically moves a pending invite to `next`; used by consume and revoke.
+   *
+   * Returns `null` when the invite was not pending.
    */
   private async casTerminal(
     op: string,

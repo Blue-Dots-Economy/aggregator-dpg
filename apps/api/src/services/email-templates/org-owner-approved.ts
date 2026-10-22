@@ -1,14 +1,11 @@
 /**
- * Org-owner approved email (#699) — tells the org owner their organisation is
- * live and, since Phase 5, how to sign in to manage it: approval enables the
- * owner's Keycloak user and grants `org_owner`, so the CTA is the portal
- * sign-in link (no 90-day invite grant is minted any more).
+ * Org-owner approved email. Tells the org owner their organisation is live and
+ * links to the portal sign-in page.
  *
  * Belongs to `@aggregator-dpg/api`. Copy lives under `org_owner_approved.*`.
- * The tail is two sets of layout blocks gated on whether the link is given —
- * with it, a lead plus button plus standing note; without it, a heads-up that
- * a link follows. The token keeps its historical name `inviteUrl` so operator
- * copy overrides stay valid.
+ * With a link, the tail shows a lead, button and note; without one, a notice
+ * that a link follows. The token is named `inviteUrl` so operator copy
+ * overrides stay valid.
  */
 
 import { renderCase, type RenderedEmail } from './render-case.js';
@@ -21,7 +18,7 @@ export interface OrgOwnerApprovedVars {
   orgName: string;
   /** The owner email the organisation was registered with. */
   ownerEmail: string;
-  /** The portal sign-in link (historical token name; see the module doc). */
+  /** The portal sign-in link. */
   inviteUrl?: string;
 }
 

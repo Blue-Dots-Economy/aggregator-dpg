@@ -1,10 +1,9 @@
 /**
- * Owner notice of a network-admin action (`@aggregator-dpg/api`, user & org
- * Phase 5, design C13).
+ * Owner notice of a network-admin action (`@aggregator-dpg/api`).
  *
- * The network admin reaches every org; the org's owner is told when it edits
- * their org's details or decides one of their coordinators. The `action`
- * phrase names what changed (field names or the decision), never values.
+ * Tells the org owner when a network admin edits the org's details or decides
+ * one of its coordinators. The `action` phrase names what changed (field names
+ * or the decision), never values.
  * Copy lives under `org_admin_action.*`.
  */
 

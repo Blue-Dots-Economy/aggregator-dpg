@@ -2,21 +2,18 @@
  * Bulk uploads endpoints.
  *
  *   POST /v1/bulk-uploads
- *     Reserve a bulk_upload row (status='pending') and return a pre-signed
- *     S3 PUT URL with Content-Type + size constraints baked into the
- *     signature. The browser uploads CSV bytes directly to S3.
+ *     Reserves a `pending` upload row and returns a pre-signed S3 PUT URL.
+ *     The browser uploads the CSV directly to S3.
  *
  *   POST /v1/bulk-uploads/:id/start
- *     Browser calls this AFTER the S3 PUT completes. The API HEADs the
- *     object to confirm + capture the ETag, transitions status='uploaded',
- *     and (later slices) enqueues the File Processor job.
+ *     Called after the S3 PUT. Checks the object exists, marks the row
+ *     `uploaded` and enqueues the file-processing job.
  *
  *   GET /v1/bulk-uploads/:id
- *     DB-only status read for UI polling. Returns status, counters,
- *     errors_csv_s3_key (when ready). Never reads Redis.
+ *     Status read for UI polling: status, counters and the errors.csv key.
  *
- * All endpoints validate JWT `aggregator_id` matches the resource. Cross-
- * aggregator access returns 403 (not 404 — no enumeration leak).
+ * Every endpoint checks the token's `aggregator_id` owns the upload; another
+ * aggregator's upload answers 403. Belongs to `@aggregator-dpg/api`.
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -48,9 +45,7 @@ import { getRedis } from '../services/redis/index.js';
 import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
 
 /**
- * Loads the network config and returns the set of valid participant
- * types for the active network (e.g. ['seeker','provider'] for blue/purple,
- * ['tourist','practitioner'] for orange_dot).
+ * Returns the valid participant types for the active network.
  */
 async function getValidParticipantTypes(): Promise<Set<string>> {
   const cfg = await getNetworkConfig();
@@ -60,9 +55,7 @@ async function getValidParticipantTypes(): Promise<Set<string>> {
 /**
  * Loads the participant schema behind a template request.
  *
- * Extracted because both template formats need the same schema and the same
- * failure handling — a missing schema is an INTERNAL, not a 404, since the
- * participant type was already validated against the live network config.
+ * A missing schema is INTERNAL, not 404, because the type was already validated.
  *
  * @param participantType - Already-validated participant domain id.
  * @returns The participant JSON Schema.
@@ -83,9 +76,9 @@ async function loadParticipantSchema(participantType: string): Promise<JsonSchem
 }
 
 /**
- * Query shape for the template download. Valid `participant_type` values are
- * network-config driven (e.g. seeker/provider), so the schema stays an open
- * string and the handler validates against the live config.
+ * Query shape for the template download.
+ *
+ * `participant_type` is a string; the handler checks it against the network config.
  */
 const TemplateQuerySchema = z.object({
   participant_type: z
@@ -93,18 +86,17 @@ const TemplateQuerySchema = z.object({
     .optional()
     .describe('Participant domain id declared by the active network (e.g. seeker, provider).'),
   /**
-   * `csv` (default) returns the header + one example row — the shape an API
-   * caller generating its own file needs. `xlsx` returns the four-tab workbook
-   * for the same type, carrying the guidance a CSV cannot: dropdowns on
-   * closed-set columns, required/conditional marking, worked sample rows and
-   * the array delimiter (#564). The upload path still accepts `.csv` only.
+   * `csv` (default) returns the header and one example row. `xlsx` returns a
+   * four-tab workbook with dropdowns, required markers and sample rows.
+   * Uploads accept `.csv` only.
    */
   format: z.enum(['csv', 'xlsx']).optional().describe('Template format. Defaults to csv.'),
 });
 
 /**
- * Body for creating a bulk-upload job. `participant_type` is validated
- * against the active network config at request time.
+ * Body for creating a bulk-upload job.
+ *
+ * `participant_type` is checked against the active network config.
  */
 const CreateBulkUploadBodySchema = z
   .object({
@@ -121,9 +113,9 @@ const BulkUploadParamsSchema = z.object({
 });
 
 /**
- * Body for `/start`. The uploading aggregator must attest authority to submit
- * the file's participants (#522 Task 1) — `attestation` must be `true` or the
- * upload is rejected with 400 CONSENT_REQUIRED.
+ * Body for `/start`.
+ *
+ * `attestation` must be `true`, else the upload is rejected with 400 CONSENT_REQUIRED.
  */
 const StartBulkUploadBodySchema = z
   .object({
@@ -132,10 +124,10 @@ const StartBulkUploadBodySchema = z
   .passthrough();
 
 /**
- * Pagination query for the bulk-uploads list. Bounds are enforced here so the
- * handler consumes the already-validated values: `limit` must be 1-100
- * (default 20) and `offset` must be ≥ 0 (default 0); out-of-range values are
- * rejected with 400 SCHEMA_VALIDATION by the route schema.
+ * Pagination query for the bulk-uploads list.
+ *
+ * `limit` is 1-100 (default 20) and `offset` is ≥ 0 (default 0). Out-of-range
+ * values answer 400 SCHEMA_VALIDATION.
  */
 const ListBulkUploadsQuerySchema = z.object({
   limit: z.coerce
@@ -231,10 +223,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     async (req, reply) => {
       const auth = await requireAuth(req);
 
-      // Per-coordinator, so one caller cannot exhaust anyone else's quota. Each
-      // call renders a four-tab xlsx workbook, so this is a cost bound rather
-      // than an abuse one. The limiter fails open on a Redis error — an outage
-      // must not block a coordinator from starting work.
+      // Per-coordinator rate limit. Fails open on a Redis error.
       const templateRate = await checkBulkTemplateRate(auth.userId);
       if (!templateRate.allowed) {
         throw httpError('RATE_LIMITED', {
@@ -256,18 +245,8 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       }
       enforceAggregatorType(auth, participantType as string);
 
-      // Both formats are generated from the live schemas resolved out of
-      // `network.json`. Nothing is served from a committed artifact: the
-      // shipped `bulk-samples/*.csv` were deleted because they had rotted into
-      // templates the parser rejects (against live ka-dhwd: 24 columns vs the
-      // schema's 36, and 18 of 20 seeker rows failing on stale enum values). A
-      // schema edit now reaches the operator on the next boot with no code
-      // change and nothing to regenerate by hand.
-      //
-      // One workbook per participant type, not one covering every domain: a
-      // coordinator is scoped to a single type, so this is four tabs rather
-      // than every domain the network serves, and the type gate above applies
-      // to the workbook exactly as it does to the CSV.
+      // Both formats are generated from the live participant schema, one
+      // participant type per file.
       if (format === 'xlsx') {
         const cfgForXlsx = await getNetworkConfig();
         const workbook = await buildXlsxTemplate(
@@ -275,8 +254,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
           participantType as string,
           {
             arrayDelimiter: cfgForXlsx.aggregator.network.csv_array_delimiter,
-            // Names the phone/email columns so their sample cells are realistic
-            // rather than "Example Mobile Number" — see XlsxTemplateOptions.
+            // Names the phone and email columns so their samples are realistic.
             identity: cfgForXlsx.domains[participantType as string]?.identity,
           },
         );
@@ -293,9 +271,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       const cfg = await getNetworkConfig();
       const csv = buildCsvTemplate(csvSchema, {
         arrayDelimiter: cfg.aggregator.network.csv_array_delimiter,
-        // Same reason the workbook gets them, and this is the default format:
-        // without the selectors a phone column that declares no pattern samples
-        // as "Example Mobile Number", which `bulk-row-process` rejects.
+        // Without these, the phone sample would fail row validation.
         identity: cfg.domains[participantType as string]?.identity,
       });
       return reply
@@ -325,8 +301,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     async (req, reply) => {
       const auth = await requireAuth(req);
 
-      // Per-coordinator. This endpoint accepts a multi-MB file and persists it,
-      // the same shape support.ts guards, so it uses the same allowance.
+      // Per-coordinator rate limit.
       const uploadRate = await checkBulkUploadRate(auth.userId);
       if (!uploadRate.allowed) {
         throw httpError('RATE_LIMITED', {
@@ -338,8 +313,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       const log = req.log.child({ operation: 'bulkUploads.create', actor: auth.userId });
       const start = Date.now();
 
-      // Shape is already validated by the route schema; the value itself is
-      // network-config driven, so membership is checked against live config here.
+      // Check the type against the network config.
       const { participant_type: participantType } = req.body as z.infer<
         typeof CreateBulkUploadBodySchema
       >;
@@ -352,8 +326,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       }
       enforceAggregatorType(auth, participantType);
 
-      // Pin the active schema version at create time. v1 is the only published
-      // version today; this becomes a registry lookup once schema versioning ships.
+      // Record the schema version at create time. Only v1 exists.
       const schemaId = `participant-${participantType}`;
       const schemaVersion = 'v1';
 
@@ -361,8 +334,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       const created = await store.create({
         aggregatorId: auth.aggregatorId,
         participantType,
-        // Temporary placeholder; replaced after sign call below. We need the
-        // row id to compute the deterministic key, so create-then-update.
+        // Placeholder; the real key needs the row id and is set below.
         s3Key: 'pending',
         schemaId,
         schemaVersion,
@@ -383,9 +355,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         aggregatorId: auth.aggregatorId,
       });
 
-      // Persist the real key now that we know it. The store doesn't yet expose
-      // an updateKey method; reach in via Drizzle directly. (Slice 8 cleanup
-      // can move this into the store interface.)
+      // Store the real key. The store has no method for this, so use Drizzle directly.
       const { getDb } = await import('../db/client.js');
       const { bulkUploads } = await import('../db/schema.js');
       const { eq } = await import('drizzle-orm');
@@ -456,7 +426,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       }
 
       const upload = found.value;
-      // Idempotent re-call: already past 'uploaded' → just return current.
+      // Already past 'uploaded': return the current state.
       if (upload.status !== 'pending' && upload.status !== 'uploaded') {
         log.warn({
           status: 'skipped',
@@ -467,9 +437,8 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         return reply.send(toResponse(upload));
       }
 
-      // Operator attestation of authority (#522 Task 1): the aggregator must
-      // confirm they have permission to submit the file's participants. No
-      // attestation → reject before any S3 work or state transition.
+      // The aggregator must attest permission to submit these participants.
+      // Checked before any S3 call or state change.
       if (body.attestation !== true) {
         throw httpError('CONSENT_REQUIRED', {
           detail: 'You must confirm authority to upload before starting.',
@@ -493,9 +462,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         throw httpError('SCHEMA_VALIDATION', { detail: 'Uploaded CSV is empty.' });
       }
       if (head.contentLength > config.BULK_UPLOAD_MAX_BYTES) {
-        // Belt + braces alongside the signed PUT — S3 PUT signing alone does not
-        // bind a max size on the GetObject side, and the worker downloads the
-        // whole object into memory. Reject before enqueueing.
+        // The signed PUT does not cap size, so check it before enqueueing.
         log.warn({
           status: 'failure',
           reason: 'object_too_large',
@@ -508,12 +475,8 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         });
       }
 
-      // Record the operator attestation in the consent ledger BEFORE the row
-      // transitions / is enqueued — fail-closed, mirroring the registration
-      // consent contract (no upload is processed without a recorded
-      // attestation). No dedicated column: the source encodes the upload id +
-      // statement version (`bulk_upload:<uploadId>:v<n>`); terms/privacy
-      // versions in force are stored in their existing columns.
+      // Record the attestation before the state change. Fails closed: no upload
+      // is processed without one.
       const attestationRecorded = await recordBulkUploadAttestation({
         aggregatorId: auth.aggregatorId,
         uploadId,
@@ -525,10 +488,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         });
       }
 
-      // Aggregators are allowed to re-upload the same CSV bytes — the
-      // partial UNIQUE on (aggregator_id, s3_etag) was dropped in
-      // migration 0011. Any non-OK result here is a real DB / state
-      // error, not a duplicate.
+      // Re-uploading the same file is allowed, so a failure here is never a duplicate.
       const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.etag);
       if (!marked.ok) {
         throw httpError('DB_UNAVAILABLE', { cause: new Error(marked.error.message) });
@@ -544,8 +504,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
           schemaVersion: marked.value.schemaVersion,
         });
       } catch (err) {
-        // Enqueue failed but the row is already in 'uploaded' status. The
-        // stuck-job watchdog will surface this if no worker picks it up.
+        // The row stays 'uploaded'; the stuck-job watchdog picks it up.
         log.error({
           status: 'failure',
           sub_operation: 'enqueue.bulk-file-process',
@@ -584,7 +543,6 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      // Query is already validated + coerced by the route schema (bounds + defaults).
       const { limit, offset } = req.query as z.infer<typeof ListBulkUploadsQuerySchema>;
 
       const store = getBulkUploadsStore();
@@ -643,8 +601,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
   app.get(
     '/v1/bulk-uploads/:id/errors.csv',
     {
-      // The report carries the submitted participant contact data, so it
-      // needs the same permission as the other decrypted-profile exports.
+      // The report holds participant contact data, so it needs the export permission.
       config: { rbac: { capability: 'profiles.view_pii' } },
       schema: {
         tags: ['bulk-uploads'],
@@ -693,10 +650,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         });
       }
       if (!upload.errorsCsvS3Key) {
-        // The Finaliser only writes errors.csv when `failed > 0`. A null key
-        // on a completed run = clean upload (every row passed). Communicate
-        // that to the UI so it can hide the "Download errors" button instead
-        // of rendering it as a broken link.
+        // No key on a completed run means every row passed; there is no errors.csv.
         log.info({
           status: 'skipped',
           reason: 'no_errors_to_report',
@@ -705,9 +659,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
           detail: 'No errors to download — all rows in this upload passed.',
         });
       }
-      // Hardened: only sign keys that match the canonical errors.csv layout.
-      // Even though the worker writes a deterministic key, this guards against
-      // any future path (or DB tamper) signing a GET URL for an arbitrary object.
+      // Only sign keys that match the errors.csv layout, never an arbitrary object.
       const expectedKey = `bulk-uploads/${upload.id}/errors.csv`;
       if (upload.errorsCsvS3Key !== expectedKey) {
         log.error({
@@ -803,8 +755,9 @@ function toResponse(
 }
 
 /**
- * Loads live counters from Redis for an in-flight upload. Returns ZERO_COUNTS
- * when keys are missing (run not started, or already finalised + GC'd).
+ * Loads live counters from Redis for an in-flight upload.
+ *
+ * Returns ZERO_COUNTS when the keys are missing.
  */
 async function loadCountsFromRedis(uploadId: string): Promise<UploadCounts> {
   try {
@@ -825,9 +778,9 @@ async function loadCountsFromRedis(uploadId: string): Promise<UploadCounts> {
 }
 
 /**
- * Loads terminal counters from the `onboarding` row written by `bulk-finalise`.
- * Returns ZERO_COUNTS if the row is missing (would indicate a stale completed
- * upload that pre-dates the rollup migration).
+ * Loads final counters from the `onboarding` row written by `bulk-finalise`.
+ *
+ * Returns ZERO_COUNTS when the row is missing.
  */
 async function loadCountsFromOnboarding(uploadId: string): Promise<UploadCounts> {
   const rows = await getDb()
@@ -909,9 +862,7 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
 }
 
 /**
- * Reject when the requested participant type does not match the aggregator's
- * registered type (read from the JWT `aggregator_type` claim). An aggregator
- * may only upload or template the type it registered as.
+ * Rejects a participant type that differs from the token's `aggregator_type` claim.
  */
 function enforceAggregatorType(auth: AuthContext, participantType: string): void {
   if (!auth.aggregatorType) {
@@ -932,12 +883,9 @@ function enforceAggregatorType(auth: AuthContext, participantType: string): void
 /**
  * Records the operator's bulk-upload attestation in the consent ledger.
  *
- * Fail-closed (returns `false` on any failure) so the caller aborts the upload
- * rather than processing it without a recorded attestation. Uses no dedicated
- * columns: the `source` encodes the upload id and the attestation statement
- * version (`bulk_upload:<uploadId>:v<n>`), while the terms/privacy versions in
- * force at upload time are stored in their existing columns — satisfying the
- * "who / when / terms+privacy version" record without a migration (#522 Task 1).
+ * The `source` is `bulk_upload:<uploadId>:v<n>`; the terms and privacy
+ * versions go in their own columns. Returns `false` on any failure so the
+ * caller aborts the upload.
  *
  * @param aggregatorId - The uploading aggregator (ledger subject).
  * @param uploadId - The bulk_uploads row this attestation authorises.

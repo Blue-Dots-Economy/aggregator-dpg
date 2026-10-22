@@ -1,29 +1,25 @@
 /**
  * Boot-time reconcile of the network-facilitator root and the Default org
- * (`@aggregator-dpg/api`, migration 0028; design
- * `docs/plans/organisation-phase-3-implementation.md` §3.2).
+ * (`@aggregator-dpg/api`).
  *
- * Migration 0028 seeds the root and the Default org with PLACEHOLDER values
- * (slug `network`, name `Network`, an owner account on
- * `network-admin@nf.invalid`). On every boot this module puts the configured
- * values in place:
+ * Migration 0028 seeds both with placeholder values (slug `network`, name
+ * `Network`, owner `network-admin@nf.invalid`). On every boot this module
+ * applies the configured values:
  *
  * - root `slug` ← `brand.url_slug`; `name` ← `aggregator.legal_name` →
  *   `aggregator.name`; `legal_name` ← `aggregator.legal_name`;
  * - root owner ← the first `ADMIN_EMAILS` entry;
  * - Default owner ← `DEFAULT_ORG_OWNER_EMAIL`, else the root's owner.
  *
- * A configured owner whose address is a coordinator's (one login is one
- * account; P5-14), or a Default owner who already owns another org (C12), is
- * refused: logged, and the current owner kept.
+ * A configured owner who is a coordinator, or a Default owner who already
+ * owns another org, is refused: logged, and the current owner kept.
  *
- * Then, best-effort, it mirrors both orgs and their configured owners into the
- * IdP the way org registration does (a group per org; a user per owner unless
- * one already exists) and gives the owners sign-in access (Phase 5: enabled,
- * the `org_owner` role, the org's group). A replaced owner leaves the group;
- * once it owns nothing it also loses the role and its sessions, and is
- * disabled when this app created it (C4). Idempotent; counts-only logs; never
- * throws — a failure is logged and retried on the next boot.
+ * Then, best-effort, it mirrors both orgs and their owners into the IdP (a
+ * group per org, a user per owner) and gives owners sign-in access (enabled,
+ * `org_owner` role, the org's group). A replaced owner leaves the group; once
+ * it owns nothing it loses the role and sessions, and is disabled if this app
+ * created it. Idempotent; logs counts only; never throws. Failures retry on
+ * the next boot.
  */
 
 import { sql } from 'drizzle-orm';
@@ -69,9 +65,8 @@ export interface RootOrgState {
   /** The owner's recorded IdP subject, if any. */
   ownerSubject: string | null;
   /**
-   * Whether the owner's person also holds a coordinator account. Its IdP user
-   * (one per person) then belongs to that login, so the mirror never links or
-   * creates one for the admin account.
+   * Whether the owner also has a coordinator account. If so, the IdP user
+   * belongs to that login and is not linked to the admin account.
    */
   ownerIsCoordinator: boolean;
 }
@@ -156,10 +151,8 @@ async function releaseIfUnowned(tx: DbExecutor, userId: string): Promise<boolean
 /**
  * Why a configured owner address may not own the root / Default org, or null.
  *
- * - `owner_is_coordinator`: the address is a coordinator's — one login is one
- *   account, so it cannot also be an admin (P5-14).
- * - `owner_owns_other_org`: (Default only) the address already owns an
- *   aggregator org (C12).
+ * - `owner_is_coordinator`: the address belongs to a coordinator.
+ * - `owner_owns_other_org`: (Default only) the address already owns an org.
  */
 async function ownerConflict(
   tx: DbExecutor,
@@ -272,9 +265,8 @@ async function applyRootConfig(
  * Hands the root and the Default org to their configured owners, releasing
  * an owner account left with no org.
  *
- * @returns The replaced owners that had an IdP subject, captured before their
- *   accounts (and identities) are released, so the mirror can take them out
- *   of the org's group.
+ * @returns Replaced owners that had an IdP subject, read before their accounts
+ *   are released.
  */
 async function applyOwners( // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   tx: DbExecutor,
@@ -385,15 +377,11 @@ export interface RootIdpReport {
 }
 
 /**
- * Creates the org's group, or adopts it when an earlier attempt created it but
- * its id was never recorded (Keycloak answers 409): the existing group is
- * adopted only when its `org_id` attribute names this org.
+ * Creates the org's group, or adopts an existing one on a 409 when its
+ * `org_id` attribute names this org.
  *
- * The name is `org-<slug>-<first 8 of the org id>`: the root's and the Default
- * org's slugs are the same on every instance (`default`, the brand slug), so a
- * plain `org-<slug>` would collide on a realm shared by several instances or
- * with a group left by a recreated database. (Coordinator orgs' slugs already
- * carry a random suffix.)
+ * The name is `org-<slug>-<first 8 of the org id>`, because these slugs are
+ * the same on every instance sharing a realm.
  *
  * @returns The group id, or `null` (counted as a failure, retried next boot).
  */
@@ -422,8 +410,7 @@ async function ensureGroup(
     report.groupsAdopted += 1;
     return found.value.id;
   }
-  // The name belongs to another org (another instance on a shared realm, or a
-  // renamed old org): never take it over.
+  // The name belongs to another org: never take it over.
   fail('createGroup', 'group_name_taken');
   return null;
 }
@@ -456,8 +443,7 @@ async function mirrorOrg(
 
   const subject = await ownerSubject(ctx, org);
   if (!subject) return null;
-  // Sign-in access (Phase 5): the configured owner is the operator's choice,
-  // so the reconcile enables it; each step soft-fails and is retried next boot.
+  // Grant sign-in access; each step soft-fails and retries next boot.
   const [enabled, role, added] = await Promise.all([
     ctx.idp.enableUser(subject),
     ctx.idp.assignRealmRole(subject, OWNER_REALM_ROLE),
@@ -478,9 +464,8 @@ function isDefaultRealmRole(role: string): boolean {
 }
 
 /**
- * Ends a released owner's access (design C4): the owner role and every
- * session go; the user is disabled only when this app created it (a reused
- * login may be a person's Signals account).
+ * Ends a released owner's access: removes the owner role and every session.
+ * Disables the user only if this app created it.
  */
 async function revokeReleasedOwner(ctx: MirrorContext, subject: string): Promise<void> {
   const [role, logout, found] = await Promise.all([
@@ -496,8 +481,7 @@ async function revokeReleasedOwner(ctx: MirrorContext, subject: string): Promise
   }
   const ours = (found.value?.attributes?.[KC_ATTR.CREATED_BY] ?? []).includes(OWNER_CREATED_BY);
   if (ours) {
-    // Only a login that holds nothing else: another realm role means another
-    // app relies on this user.
+    // Skip users with other realm roles; another app relies on them.
     const roles = await ctx.idp.listRealmRoles(subject);
     if (!roles.ok) {
       ctx.fail('listRealmRoles', roles.error.code);
@@ -534,15 +518,14 @@ async function removeReplacedOwners(
 
 /**
  * The org owner's IdP subject: the recorded one, else the existing user for
- * the owner's email (reused untouched), else a new disabled user — linked to
- * the owner's admin account. `null` when nothing should be mirrored (the
- * placeholder owner; an owner who is also a coordinator) or a step failed.
+ * the owner's email, else a new disabled user, linked to the owner's admin
+ * account. `null` for the placeholder owner, an owner who is a coordinator,
+ * or on failure.
  */
 async function ownerSubject(ctx: MirrorContext, org: RootOrgState): Promise<string | null> {
   if (org.ownerEmail === PLACEHOLDER_OWNER_EMAIL) return null;
   if (org.ownerSubject) return org.ownerSubject;
-  // One IdP user per person: if the owner is also a coordinator, that user is
-  // the coordinator's login and must not be linked to the admin account.
+  // If the owner is also a coordinator, do not link that IdP user to the admin account.
   if (org.ownerIsCoordinator) {
     logger.warn(
       {
@@ -592,12 +575,10 @@ async function findOrCreateOwner(ctx: MirrorContext, email: string): Promise<str
 }
 
 /**
- * Mirrors the root and the Default org into the IdP, as org registration does:
- * a group per org (`org-<slug>`) and, for each configured owner, a user — the
- * existing user for that email, reused, else a new one marked as created here.
- * Each configured owner gets sign-in access (enabled, `org_owner`, the group);
- * replaced owners leave the group, and released ones lose the role and their
- * sessions (disabled only when created here). Never throws.
+ * Mirrors the root and the Default org into the IdP: a group per org and a
+ * user per configured owner (existing or new). Owners get sign-in access;
+ * replaced owners leave the group; released owners lose the role and
+ * sessions. Never throws.
  *
  * @param idp - The IdP admin adapter.
  * @param state - The reconciled orgs.
@@ -629,9 +610,7 @@ export async function provisionRootIdp(
 
   const ctx: MirrorContext = { idp, recorder, report, fail };
   const replaced = state.replacedOwners ?? [];
-  // The current owners' logins as actually resolved here (a newly configured
-  // owner has no recorded subject yet, and may resolve to the same IdP user as
-  // the owner it replaced): those are never revoked.
+  // Never revoke a login that a current owner resolved to.
   const current = new Set([
     state.root.ownerSubject,
     state.defaultOrg.ownerSubject,
@@ -699,7 +678,7 @@ export async function ensureRootOrganisation(cfg: RootConfig): Promise<RootState
     logger.error({
       operation: 'ensureRootOrganisation',
       status: 'failure',
-      // Never the driver message: Drizzle includes the query parameters (emails).
+      // Never log the driver message; it includes query parameters (emails).
       error: pgErrorCode(err) ? `database error ${pgErrorCode(err)}` : 'reconcile failed',
       error_type: (err as Error | undefined)?.constructor?.name ?? 'unknown',
       latency_ms: Date.now() - start,
@@ -709,9 +688,8 @@ export async function ensureRootOrganisation(cfg: RootConfig): Promise<RootState
 }
 
 /**
- * Mirrors the reconciled orgs into the IdP. Runs AFTER the server listens
- * (fire-and-forget at boot), so a slow or unreachable IdP never delays
- * readiness. Never throws.
+ * Mirrors the reconciled orgs into the IdP. Runs after the server listens,
+ * so a slow IdP does not delay readiness. Never throws.
  *
  * @param state - The state {@link ensureRootOrganisation} returned.
  * @param idp - The IdP admin adapter.

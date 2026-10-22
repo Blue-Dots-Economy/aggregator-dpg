@@ -1,20 +1,12 @@
 /**
- * Migration runner.
+ * Migration runner for the api app.
  *
- * Invoked via `pnpm --filter @aggregator-dpg/api db:migrate` to apply all
- * Drizzle migrations in `drizzle/migrations/` against the configured Postgres
- * instance. Safe to run repeatedly — Drizzle records applied migrations in
- * its own metadata table.
+ * `pnpm --filter @aggregator-dpg/api db:migrate` applies the Drizzle migrations
+ * in `drizzle/migrations/`. Safe to run repeatedly. Startup also calls
+ * `runMigrations()` before `app.listen()`.
  *
- * Production startup also calls `runMigrations()` programmatically before
- * `app.listen()` to keep the schema in lockstep with the deployed code.
- *
- * Concurrent runners (several API replicas booting at once, or a replica plus
- * a manual `db:migrate`) are serialised on a session-level advisory lock.
- * Drizzle reads the list of applied migrations BEFORE it opens its own
- * transaction, so without the lock a second runner can decide to re-apply a
- * migration the first one has just committed — e.g. re-run 0025 after 0026
- * dropped the columns it touches, or race on creating the metadata table.
+ * Concurrent runners are serialised on an advisory lock, so two replicas never
+ * apply the same migration.
  */
 
 import '../env.js';
@@ -54,9 +46,7 @@ export async function migrateWithLock<TSchema extends Record<string, unknown>>(
 export async function runMigrations(): Promise<void> {
   const migrationsFolder = path.resolve(__dirname, '../../drizzle/migrations');
   logger.info({ migrationsFolder }, 'running database migrations');
-  // Refuse foreign migrations, and the user & org instance upgrade on a
-  // database with data (that path is the migration tool's; see
-  // migration-guards.ts). Read once here, at startup.
+  // Refuse foreign migrations, and the instance upgrade on a database with data.
   await runMigrationGuards(getPool(), migrationsFolder, process.env.ALLOW_TRAIN_ON_BOOT === 'true');
   await migrateWithLock(getDb(), getPool(), migrationsFolder);
   logger.info('database migrations applied');

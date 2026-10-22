@@ -1,11 +1,10 @@
 /**
- * Custom roles (`@aggregator-dpg/api`, RBAC R6; catalogue §5).
+ * Custom roles (`@aggregator-dpg/api`).
  *
- * The network admin composes roles from existing permissions. Every change is
- * checked against the whole catalogue with the same role rules the boot uses
- * (`roleCatalogueIssues`), so a custom role can never break the catalogue.
- * Built-in roles are refused. After a write this replica reloads its role
- * snapshot at once; others follow within the refresh interval.
+ * The network admin builds roles from existing permissions. Every change is
+ * checked against the whole catalogue with `roleCatalogueIssues`. Built-in
+ * roles cannot be changed. After a write this replica reloads its role
+ * snapshot; other replicas follow within the refresh interval.
  */
 
 import {
@@ -24,7 +23,7 @@ import type { Actor } from '../auth/actor/index.js';
 import { getRbacCatalogue } from '../rbac-catalogue/index.js';
 import { getRbacRuntime, refreshRbacCatalogue } from './runtime.js';
 
-/** Most custom roles one instance may hold (design open question 5). */
+/** Most custom roles one instance may hold. */
 export const MAX_CUSTOM_ROLES = 50;
 
 /** Why a custom-role change did not happen. */

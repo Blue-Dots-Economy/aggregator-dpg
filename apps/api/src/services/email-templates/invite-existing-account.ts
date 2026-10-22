@@ -1,12 +1,10 @@
 /**
- * Invite-to-an-existing-account email (`@aggregator-dpg/api`, user & org
- * Phase 5, design C9).
+ * Invite-to-an-existing-account email (`@aggregator-dpg/api`).
  *
  * Sent instead of a coordinator invite when the address already belongs to an
- * account outside the inviting org. The inviter's response is the same as for
- * a fresh invite, so the console cannot probe other orgs' members; the
- * recipient learns they can simply sign in. Copy lives under
- * `invite_existing_account.*`.
+ * account outside the inviting org. The inviter sees the same response as for
+ * a fresh invite, so the console cannot probe other orgs' members. Copy lives
+ * under `invite_existing_account.*`.
  */
 
 import { renderCase, type RenderedEmail } from './render-case.js';

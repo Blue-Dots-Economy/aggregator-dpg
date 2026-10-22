@@ -1,10 +1,9 @@
 /**
- * Per-actor rate limit for console writes (`@aggregator-dpg/api`, user & org
- * Phase 5, design R11).
+ * Per-actor rate limit for console writes (`@aggregator-dpg/api`).
  *
  * Decisions and edits from `/v1/user/*` and `/v1/org/*` share one budget per
- * admin (`CONSOLE_WRITE_RATE_*`). Fail-open: a coarse guard against a runaway
- * client, not an anti-abuse control (the invite limit stays the fail-closed one).
+ * admin (`CONSOLE_WRITE_RATE_*`). Fails open; it guards against a runaway
+ * client. The invite limit is the fail-closed one.
  */
 
 import { config } from '../config.js';

@@ -1,24 +1,18 @@
 /**
- * Coordinator store contract.
+ * Coordinator store contract for the api app.
  *
- * Persistence port for coordinator rows of the `users` table — the
- * registration-essential row a coordinator has after signup.
+ * Persistence port for coordinator rows of the `users` table. Adapters:
+ * Postgres for production, in-memory for tests.
  *
- * Concrete adapters: Postgres for production, in-memory for tests. The
- * person's name / email / phone live in the `contact` table (migration 0025),
- * referenced by `contactId`; `contact`, `contactPhone` and `contactEmail` on
- * the record are composed from it so callers see the same Beckn shape as
- * before. Keycloak keeps its own copy of the login identifiers.
+ * Name, email and phone live in the `contact` table, referenced by
+ * `contactId`; `contact`, `contactPhone` and `contactEmail` are composed from it.
  *
- * Org details (migration 0028): `url`, `locations`, `contact.company` and
- * `contact.gstNumber` are RENDERED from the coordinator's org
- * (`organisations`), falling back per field to the coordinator's own values in
- * `legacy_org_details` when the org's is empty. They are never written through
- * this store's update; the org's owner edits them (Phase 5).
+ * `url`, `locations`, `contact.company` and `contact.gstNumber` are read from
+ * the coordinator's org, falling back per field to `legacy_org_details`. This
+ * store never writes them; the org's owner edits them.
  *
- * Consent (migration 0029) lives only in the `consent_record` ledger: `create`
- * writes the registration row through the caller's `recordConsent` inside its
- * transaction, and reads compose `consent` from the newest registration row.
+ * Consent lives only in the `consent_record` ledger. `create` writes it through
+ * `recordConsent` inside its transaction; reads take the newest registration row.
  */
 
 import type {
@@ -34,8 +28,8 @@ import type { RecordConsentHook } from '../consent-ledger/hook.js';
 export type { RecordConsentHook };
 
 /**
- * A coordinator's own org-detail values that its org did not adopt (0028):
- * a key is present only where the value differs from the org's.
+ * A coordinator's own org-detail values.
+ * A key is present only where the value differs from the org's.
  */
 export interface LegacyOrgDetails {
   url?: string | null;
@@ -47,29 +41,28 @@ export interface LegacyOrgDetails {
 export interface Coordinator {
   id: string;
   orgSlug: string;
-  /** Always `'aggregator'` since 0029 (the column is gone; the API still returns it). */
+  /** Always `'aggregator'`. */
   actorType: ActorType;
   name: string;
   /** The first domain of {@link serves}, or `null` when it serves every domain. */
   type: RoleType | null;
-  /** The network domain ids the coordinator serves (`users.serves`, 0029); `[]` = every domain. */
+  /** The network domain ids the coordinator serves; `[]` = every domain. */
   serves: RoleType[];
-  /** Rendered from the org, else the coordinator's own value (0028). */
+  /** From the org, else the coordinator's own value. */
   url: string | null;
-  /** FK → `contact.id` (migrations 0025/0026). PII-derived hash — never log it. */
+  /** FK to `contact.id`. A PII-derived hash; never log it. */
   contactId: string;
-  /** Beckn contact, composed from the linked `contact` row + `alternate_phone`. */
+  /** Beckn contact, composed from the linked `contact` row and `alternate_phone`. */
   contact: BecknContact;
-  /** The contact's phone (derived from `contact`; kept for existing callers). */
+  /** The contact's phone. */
   contactPhone: string;
-  /** The contact's email, lowercased (derived from `contact`). */
+  /** The contact's email, lowercased. */
   contactEmail: string;
-  /** Rendered from the org, else the coordinator's own value (0028). */
+  /** From the org, else the coordinator's own value. */
   locations: BecknLocation[];
   /**
-   * The newest registration consent from the ledger (`given_at` = its
-   * `accepted_at`). `null` only when the ledger holds no registration row for
-   * the coordinator (the 0029 verify gate V1 keeps that at zero).
+   * The newest registration consent from the ledger (`given_at` = its `accepted_at`).
+   * `null` only when the ledger has no registration row for the coordinator.
    */
   consent: ConsentRecord | null;
   /**
@@ -79,7 +72,7 @@ export interface Coordinator {
   profile: Record<string, unknown>;
   /**
    * Which schema variant produced `profile`, e.g. `blue_dot/up-gzb/registration.v1`.
-   * NULL on rows created before migration 0018.
+   * May be NULL on older rows.
    */
   profileRef: string | null;
   status: AggregatorStatus;
@@ -89,34 +82,28 @@ export interface Coordinator {
   updatedAt: Date;
   /**
    * Signalstack organisation id returned by `POST /admin/aggregator/upsert`.
-   * Mirror of the `signalstack_org_id` Keycloak user attribute. NULL until
-   * the admin-approval flow (or the login-time backfill in `requireApproved`)
-   * records it. Worker rows + anonymous link submissions read this column to
-   * source the per-call `x-acting-org-id` header.
+   * Mirrors the `signalstack_org_id` Keycloak attribute. NULL until approval
+   * (or the login-time backfill) records it. Used for the `x-acting-org-id` header.
    */
   signalstackOrgId: string | null;
   /**
-   * The coordinator's org (`users.org_id`, migration 0028; was
-   * `parent_org_id`). The single authority for the org→coordinator link
-   * (spec A1). Every coordinator has one — formerly-flat coordinators belong
-   * to the Default org — so it is `null` only for a store that predates 0028.
+   * The coordinator's org (`users.org_id`), the single authority for the
+   * org-coordinator link. Every coordinator has one.
    */
   parentOrgId: string | null;
   /** Whether {@link parentOrgId} is the fixed Default org. */
   isDefaultOrg: boolean;
   /**
-   * Email the coordinator was invited at (#701), when registered via an invite:
-   * the invite's address (`users.invite_id`, 0029), else a pre-0029 address
-   * kept in `profile.legacy_invite_email`. May differ from `contact.email`.
+   * Email the coordinator was invited at, from the invite or else
+   * `profile.legacy_invite_email`. May differ from `contact.email`.
    * `null` for non-invite registrations.
    */
   inviteEmail: string | null;
   /** The invite the coordinator registered with (`registration_invites.jti`), or `null`. */
   inviteId: string | null;
   /**
-   * Write-once rejection timestamp (#726). Set when a pending registration is
-   * rejected (status → inactive); drives the re-registration cooling window.
-   * `null` until/unless rejected.
+   * Write-once rejection timestamp, set when a pending registration is rejected.
+   * Drives the re-registration cooling window. `null` unless rejected.
    */
   rejectedAt: Date | null;
 }
@@ -129,31 +116,26 @@ export interface CreateCoordinatorInput {
   /** `contact.company` / `contact.gstNumber` are not stored (they belong to the org). */
   contact: BecknContact;
   /**
-   * The registration's consent as accepted — a snapshot only the in-memory
-   * store keeps (the Postgres store reads consent back from the ledger row
-   * that {@link recordConsent} writes).
+   * The accepted consent. Only the in-memory store keeps it; Postgres reads
+   * consent back from the ledger row {@link recordConsent} writes.
    */
   consent: ConsentRecord;
   /**
    * Writes the consent ledger row in the create transaction. Required, so no
-   * caller can create a coordinator without a consent record (fail-closed).
+   * coordinator is created without a consent record.
    */
   recordConsent: RecordConsentHook;
   createdBy: string;
   updatedBy: string;
-  /** The coordinator's org (`users.org_id`, required since 0028). */
+  /** The coordinator's org (`users.org_id`). */
   orgId: string;
-  /**
-   * The coordinator's own org-detail values. Set only for Default-org
-   * registrations, whose org has no shared value (0028).
-   */
+  /** The coordinator's own org-detail values. Set only for Default-org registrations. */
   legacyOrgDetails?: LegacyOrgDetails | null;
-  /** The invite consumed by this registration (#701; `registration_invites.jti`). */
+  /** The invite consumed by this registration (`registration_invites.jti`). */
   inviteId?: string | null;
   /**
-   * Schema-driven registration fields with no column of their own. Defaults to
-   * `{}` when omitted — the typed fields above stay authoritative for
-   * everything they already carry.
+   * Schema-driven registration fields with no column of their own. Defaults to `{}`.
+   * The typed fields above take precedence.
    */
   profile?: Record<string, unknown>;
   /**
@@ -164,24 +146,21 @@ export interface CreateCoordinatorInput {
 }
 
 /**
- * Patch shape for updates. `orgSlug` is intentionally absent — the DB trigger
- * `users_lock_signalstack_org_slug` rejects any attempt to mutate the slug.
- * Identity (`id`) and audit timestamps are server-managed too. Org details
- * (`url`, `locations`, company / GST) and the org link are not patchable here
- * (0028).
+ * Patch shape for updates.
+ *
+ * `orgSlug` is absent: the DB trigger `users_lock_signalstack_org_slug` rejects
+ * slug changes. `id`, audit timestamps, org details and the org link are not
+ * patchable here.
  */
 export interface UpdateCoordinatorPatch {
   name?: string;
   type?: RoleType | null;
-  /**
-   * The domains served (`[]` = every domain), set by the Phase 5 console;
-   * wins over {@link type} when both are given.
-   */
+  /** The domains served (`[]` = every domain); wins over {@link type} when both are given. */
   serves?: RoleType[];
-  /** `company` / `gstNumber` in it are ignored: they belong to the org. */
+  /** `company` / `gstNumber` are ignored; they belong to the org. */
   contact?: BecknContact;
   status?: AggregatorStatus;
-  /** Write-once rejection stamp (#726) — set only on the reject transition. */
+  /** Write-once rejection stamp; set only on the reject transition. */
   rejectedAt?: Date | null;
   updatedBy: string;
 }
@@ -191,9 +170,8 @@ export interface ListCoordinatorsFilter {
   offset?: number;
   status?: AggregatorStatus;
   /**
-   * Only rows last updated strictly before this instant. Lets the stale-pending
-   * cleanup filter by age in SQL, so the row cap counts stale rows (not fresh
-   * ones masking them).
+   * Only rows last updated strictly before this instant.
+   * Lets the stale-pending cleanup filter by age in SQL, before the row cap.
    */
   updatedBefore?: Date;
 }
@@ -205,8 +183,8 @@ export interface CoordinatorCursor {
 }
 
 /**
- * A scoped coordinator search (Phase 5 console). `orgIds = null` means every
- * org (the network admin); an empty array means none (returns no rows).
+ * A scoped coordinator search for the console.
+ * `orgIds = null` means every org; an empty array returns no rows.
  */
 export interface SearchCoordinatorsFilter {
   orgIds: string[] | null;
@@ -243,19 +221,18 @@ export type StoreError =
   | { code: 'DUPLICATE_SLUG'; message: string }
   | { code: 'DUPLICATE_PHONE'; message: string }
   | { code: 'DUPLICATE_EMAIL'; message: string }
-  /** Unique violation on a constraint this layer does not recognise (#718 review). */
+  /** Unique violation on a constraint this layer does not recognise. */
   | { code: 'DUPLICATE'; message: string }
   | { code: 'CHECK_VIOLATION'; message: string }
-  /** The `recordConsent` hook failed: nothing was created (0029). */
+  /** The `recordConsent` hook failed; nothing was created. */
   | { code: 'CONSENT_WRITE_FAILED'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
 
 export type StoreResult<T> = { ok: true; value: T } | { ok: false; error: StoreError };
 
 /**
- * Abstract aggregator persistence port. Concrete implementations must
- * implement every method (no partial stubs). Returns Result<T,StoreError> on
- * every boundary — never throws.
+ * Abstract coordinator persistence port.
+ * Every method returns `StoreResult<T>` and never throws.
  */
 export abstract class UserStoreBase {
   abstract create(input: CreateCoordinatorInput): Promise<StoreResult<Coordinator>>;
@@ -264,9 +241,7 @@ export abstract class UserStoreBase {
   abstract findByContactPhone(phone: string): Promise<StoreResult<Coordinator | null>>;
   abstract findByContactEmail(email: string): Promise<StoreResult<Coordinator | null>>;
   /**
-   * Returns every coordinator whose `org_id` matches the given org id — the
-   * spec §10 org-view query. `org_id` is the single authority for the
-   * org→coordinator link (spec A1).
+   * Returns every coordinator whose `org_id` matches the given org id.
    *
    * @param orgId - `organisations.id`.
    * @returns The org's coordinators (possibly empty); never throws.
@@ -280,11 +255,9 @@ export abstract class UserStoreBase {
     updatedBy: string,
   ): Promise<StoreResult<Coordinator>>;
   /**
-   * Atomic compare-and-set `pending`→`active`. Returns the updated row, or
-   * `null` inside `ok` when the row was not `pending` (a concurrent approval
-   * already committed). Lets the approval handler gate side effects (the
-   * applicant email) on the single winner and avoids the read-then-write
-   * TOCTOU of {@link updateStatus}.
+   * Atomic compare-and-set `pending` to `active`.
+   *
+   * Only the winner gets the row, so only it sends the applicant email.
    *
    * @param id - Coordinator UUID.
    * @param updatedBy - Audit actor.
@@ -295,12 +268,9 @@ export abstract class UserStoreBase {
     updatedBy: string,
   ): Promise<StoreResult<Coordinator | null>>;
   /**
-   * Stamps the signalstack organisation id on an aggregator row.
+   * Stamps the signalstack organisation id on a coordinator row.
    *
-   * Called by both the admin-approval flow (right after the signalstack
-   * aggregator upsert returns) and the login-time backfill helper in
-   * `requireApproved`. Idempotent: re-writing the same value is a no-op,
-   * so repeated approvals/backfills do not bump audit fields meaningfully.
+   * Called by approval and by the login-time backfill. Idempotent.
    *
    * @param id - Coordinator UUID.
    * @param signalstackOrgId - Org id returned by the upsert call.
@@ -313,10 +283,9 @@ export abstract class UserStoreBase {
   ): Promise<StoreResult<Coordinator>>;
   abstract deleteById(id: string): Promise<StoreResult<void>>;
   /**
-   * Atomic compare-and-set `pending`→`inactive` with a write-once
-   * `rejected_at`. Returns the updated row, or `null` inside `ok` when the row
-   * was not `pending` (a concurrent decision already committed), so only the
-   * winner sends the rejection email.
+   * Atomic compare-and-set `pending` to `inactive`, stamping a write-once `rejected_at`.
+   *
+   * Only the winner gets the row, so only it sends the rejection email.
    *
    * @param id - Coordinator id.
    * @param updatedBy - The deciding actor (an admin user id, or `'admin'` for a signed link).
@@ -327,10 +296,10 @@ export abstract class UserStoreBase {
     updatedBy: string,
   ): Promise<StoreResult<Coordinator | null>>;
   /**
-   * Deletes a coordinator only while it is still `pending` and older than
-   * `cutoff`, holding the row until `beforeCommit` (the Keycloak user delete)
-   * has run: a concurrent approval waits, then finds the row gone; a failed
-   * `beforeCommit` keeps the row for the next pass.
+   * Deletes a coordinator only while it is still `pending` and older than `cutoff`.
+   *
+   * The row stays locked while `beforeCommit` (the Keycloak delete) runs.
+   * A failed `beforeCommit` keeps the row for the next pass.
    *
    * @param id - Coordinator id.
    * @param cutoff - Only rows last updated before this instant.

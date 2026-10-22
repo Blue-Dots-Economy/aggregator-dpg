@@ -1,16 +1,12 @@
 /**
- * Server-rendered HTML pages for the admin approval flow.
+ * Server-rendered HTML pages for the admin approval flow in `@aggregator-dpg/api`.
  *
- * Plain inlined HTML — no template engine, no client-side framework. Styles
- * mirror the Blue Dots portal palette so the admin's confirmation flow feels
- * like part of the same product even though it is served by the Fastify API.
+ * Plain inlined HTML with no template engine or client framework. Styles follow
+ * the portal palette.
  */
 
 /**
- * Network-driven brand surface for the admin-approval pages. Sourced
- * from `getNetworkConfig().aggregator.brand` at render time so the
- * blue_dot / purple_dot / yellow_dot deployments each get their own
- * label + palette without code changes.
+ * Brand values for the approval pages, from `getNetworkConfig().aggregator.brand`.
  */
 export interface PageBrand {
   short_name: string;
@@ -26,13 +22,7 @@ const DEFAULT_BRAND: PageBrand = {
   portal_url: 'http://localhost:3000',
 };
 
-/**
- * Module-level brand seeded from the resolved network config at server
- * boot. Render functions read this when the caller doesn't pass an
- * explicit `brand` override — keeps the call sites churn-free while
- * driving the whole admin-decision flow from the active deployment's
- * aggregator.config.yaml.
- */
+/** Brand set at boot from network config; used when a caller passes no `brand`. */
 let runtimeBrand: PageBrand | null = null;
 
 /** Called once from the server boot path after network config resolves. */
@@ -76,11 +66,7 @@ const SUCCESS_BG = '#dcfce7';
 const INFO = '#1e40af';
 const INFO_BG = '#dbeafe';
 
-/**
- * Inline decision icons. Inlined rather than linked so the page stays a single
- * self-contained response — these views are opened from an email client, often
- * on a network where a second request for an asset is not a given.
- */
+/** Inline decision icons, so the page is one self-contained response. */
 const ICON_CHECK =
   '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
   'stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -346,15 +332,13 @@ export interface ConfirmPageVars {
   entityLabel?: string;
   postUrl: string;
   /**
-   * The email the coordinator was invited at (#701). When set and different
-   * from `applicantEmail`, the page flags that they registered with a different
-   * address than invited, so the approver can sanity-check it.
+   * The email the coordinator was invited at.
+   * When it differs from `applicantEmail`, the page flags it for the approver.
    */
   invitedEmail?: string | undefined;
   /**
-   * Human-readable link lifetime (e.g. "7 days"), derived from the
-   * configured approval-token TTL via `formatApprovalTtl`. Must match the
-   * wording in the admin review email.
+   * Human-readable link lifetime (e.g. "7 days") from `formatApprovalTtl`.
+   * Must match the wording in the admin review email.
    */
   expiresInText: string;
   brand?: PageBrand;
@@ -474,9 +458,8 @@ export interface ResultPageVars {
   title: string;
   message: string;
   /**
-   * Optional secondary action rendered as a POST form button (e.g. the
-   * "resend approval link" affordance on the expired-link page). Posts a
-   * single hidden `token` field to `url`.
+   * Optional secondary action rendered as a POST form button, e.g. "resend approval link".
+   * Posts a single hidden `token` field to `url`.
    */
   action?: { url: string; token: string; label: string };
   brand?: PageBrand;
@@ -495,8 +478,7 @@ export function renderResultPage(v: ResultPageVars): string {
   const iconSvg = resultIconSvg(v.status);
   const portalUrl = brand.portal_url;
   const decidedAt = new Date().toLocaleString('en-IN', {
-    // Render in IST regardless of the server's clock (the API container runs in
-    // UTC); without this the timestamp showed UTC despite the en-IN locale.
+    // Always render in IST; the server clock is UTC.
     timeZone: 'Asia/Kolkata',
     day: '2-digit',
     month: 'short',

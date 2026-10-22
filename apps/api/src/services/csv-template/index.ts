@@ -1,9 +1,7 @@
 /**
- * CSV template generator for bulk uploads. Produces a header row in
- * schema-property order (required first, then optional) plus one fully
- * populated example row derived from the JSON Schema, so non-technical
- * operators can see exactly how to format each cell — in particular how
- * array fields are joined with the network's CSV delimiter (#405).
+ * CSV template generator for bulk uploads. Produces a header row (required
+ * columns first, then optional) plus one example row derived from the JSON
+ * Schema, showing how to format each cell, including array delimiters.
  *
  * @module apps/api/services/csv-template
  */
@@ -16,8 +14,7 @@ import {
 
 /**
  * Example cell for a well-known column, or undefined when `name` is a normal
- * schema property. These carry no JSON Schema, so `exampleValue` — which is
- * schema-driven — has nothing to work from and would sample a bare string.
+ * schema property. Well-known columns have no JSON Schema to sample from.
  */
 export function wellKnownExample(name: string): string | undefined {
   return wellKnownColumnMeta(name)?.example;
@@ -30,18 +27,14 @@ export interface CsvTemplateOptions {
    * (`apps/worker/src/jobs/bulk-row-process.ts`).
    */
   arrayDelimiter?: string;
-  /** Set false to emit the legacy header-only template. */
+  /** Set false to emit a header-only template. */
   exampleRow?: boolean;
   /**
    * The domain's identity selectors (`ResolvedDomain.identity`), naming which
    * columns hold the name / phone / email.
    *
-   * The XLSX template takes the same option for the same reason: `exampleValue`
-   * is schema-driven by design, so a phone column that declares no `format` or
-   * `pattern` samples as "Example Mobile Number", which `normalisePhone`
-   * rejects before Ajv ever sees the row. Both formats of one template have to
-   * agree about the same column, so both take the selectors — and this is the
-   * only format an operator gets by default (`?format=csv`).
+   * Used to give those columns valid sample values. The XLSX template takes
+   * the same option so both formats agree.
    */
   identity?: IdentitySelectors | undefined;
 }
@@ -63,10 +56,8 @@ export interface IdentitySelectors {
  * schema's own `required` order), then every remaining property in declaration
  * order.
  *
- * Exported because the XLSX template (`services/xlsx-template`) must produce
- * the SAME columns in the SAME order as the CSV one — an operator who fills the
- * workbook and exports it to CSV has to land on a file this repo's parser
- * accepts. Two copies of this rule would drift the moment a schema changed.
+ * Also used by the XLSX template, so both formats have the same columns in the
+ * same order.
  *
  * @param schema - Participant JSON Schema.
  * @returns Property names in template column order.
@@ -83,10 +74,7 @@ export function orderedColumns(schema: JsonSchema): string[] {
   for (const name of Object.keys(properties)) {
     if (!requiredSet.has(name)) ordered.push(name);
   }
-  // Well-known columns last, and only when the schema does not already own the
-  // name — the schema wins, exactly as it does in the parser. Without this an
-  // operator downloading the template has no way to discover the feature, and
-  // an undiscoverable optional column may as well not exist.
+  // Well-known columns go last, unless the schema already has that name (the schema wins).
   for (const name of WELL_KNOWN_COLUMNS) {
     if (!properties[name]) ordered.push(name);
   }
@@ -125,11 +113,8 @@ export function buildCsvTemplate(schema: JsonSchema, options: CsvTemplateOptions
 /**
  * True when a candidate identity value satisfies the column's own declaration.
  *
- * The column's schema outranks any identity-shaped placeholder: a value that
- * fails the column's `format` or `pattern` is one the row parser rejects, and
- * `bulk-row-process` treats both as blocking. When this returns `false` the
- * caller falls through to `exampleValue`, which derives from the declaration
- * rather than around it.
+ * A value that fails the column's `format` or `pattern` would be rejected by
+ * the row parser. When this returns `false` the caller uses `exampleValue`.
  *
  * @param prop - The column's schema fragment.
  * @param candidate - The identity value being considered for the cell.
@@ -157,24 +142,14 @@ function fitsProperty(
 /**
  * Derives a realistic sample value for one configured identity column.
  *
- * `exampleValue` is schema-driven with no field-name heuristics, so a name /
- * phone / email column that declares nothing about its shape samples as
- * "Example <Title>" — the one class of cell `bulk-row-process` rejects
- * outright (`normalisePhone` strips it to zero digits) rather than merely
- * reporting. Config names those columns, so nothing is guessed here. Shared by
- * both template formats: an operator who fills the workbook and one who fills
- * the CSV must not be shown different values for the same column.
+ * Without it, an identity column with no `format` or `pattern` would sample as
+ * "Example <Title>", which the row parser rejects for a phone. Shared by both
+ * template formats.
  *
- * Two things this deliberately does NOT do:
- *
- * - **Override a column that declares its own `format` or `pattern`.** A phone
- *   declaring `^\+91[0-9]{10}$` would reject the hardcoded 10-digit run,
- *   putting a value the parser rejects in the field the network dedups on.
- *   `exampleValue` handles those; this fills only the gap where the schema says
- *   nothing about the shape.
- * - **Assume `identity.name` names a person.** blue_dot points it at
- *   `jobProviderName`, so the sample is built from the column's own label —
- *   "Sample Job Provider Name 1", not "Sample Person 1" in a company column.
+ * - A column that declares its own `format` or `pattern` is left to
+ *   `exampleValue` when the placeholder does not fit it.
+ * - The name sample uses the column's own label, since `identity.name` may
+ *   not name a person (for example `jobProviderName`).
  *
  * @param name - Column (property) name.
  * @param prop - The column's schema fragment.
@@ -271,17 +246,12 @@ function formatExample(format: string | undefined): string | undefined {
  * A value that satisfies a simple `pattern`, or undefined when none can be
  * synthesised.
  *
- * Digit-run patterns are the common case in participant schemas — phone,
- * pincode, Aadhaar — and this handles the fixed (`{10}`) and bounded
- * (`{6,10}`) forms with an optional literal prefix (`^\+91[0-9]{10}$`), plus a
- * leading character class so `^[6-9][0-9]{9}$` gets a valid first digit.
+ * Handles digit-run patterns (phone, pincode, Aadhaar): fixed (`{10}`) and
+ * bounded (`{6,10}`) runs, an optional literal prefix (`^\+91[0-9]{10}$`), and
+ * a leading class (`^[6-9][0-9]{9}$`).
  *
- * Whatever it builds is then TESTED against the pattern before being returned.
- * That is the point: an example that fails its own pattern is worse than no
- * example, because `bulk-row-process` treats a pattern miss as a blocking row
- * error — so an unrecognised shape, or a run longer than the digits available,
- * yields undefined and the caller leaves the cell blank rather than seeding a
- * value the parser will reject.
+ * The result is tested against the pattern before it is returned. Anything
+ * that does not match yields undefined, and the caller leaves the cell blank.
  *
  * @param pattern - The schema's `pattern`, when it declares one.
  * @returns A string matching the pattern, or undefined.
@@ -310,7 +280,7 @@ function patternExample(pattern: string | undefined): string | undefined {
     (firstDigit ?? '') + digits.repeat(Math.ceil(runLength / digits.length)).slice(0, min);
   const candidate = prefix + body;
 
-  // The whole reason this function is allowed to guess: verify before emitting.
+  // Verify before returning.
   try {
     return new RegExp(pattern).test(candidate) ? candidate : undefined;
   } catch {
@@ -321,8 +291,7 @@ function patternExample(pattern: string | undefined): string | undefined {
 /**
  * Derives a deterministic, schema-valid example value for one property.
  *
- * Purely schema-driven (enum/format/pattern/bounds) — no field-name
- * heuristics, so it stays correct for any network's schemas.
+ * Uses only the schema (enum, format, pattern, bounds), never the field name.
  *
  * @param name - Property name, used only as a label fallback.
  * @param prop - The property's schema fragment.
@@ -350,10 +319,7 @@ export function exampleValue(
   const pattern = str(prop, 'pattern');
   const fromPattern = patternExample(pattern);
   if (fromPattern !== undefined) return fromPattern;
-  // A pattern we could not satisfy: leave the cell blank. `Example <Title>`
-  // would fail the pattern, and `bulk-row-process` treats that as a blocking
-  // row error — the operator is better served by an empty cell and the note on
-  // the allowed-values tab than by a value that is guaranteed to be rejected.
+  // A pattern we could not satisfy: leave the cell blank rather than emit a value the parser rejects.
   if (pattern !== undefined) return '';
 
   const base = `Example ${str(prop, 'title') ?? name}`;

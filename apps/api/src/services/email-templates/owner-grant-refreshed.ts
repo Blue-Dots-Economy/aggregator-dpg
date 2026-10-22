@@ -1,12 +1,10 @@
 /**
- * Owner grant-refreshed email (#701) — sent when an org owner requests a fresh
- * invite-management link because their previous one expired.
+ * Owner grant-refreshed email. Sent when an org owner requests a fresh
+ * invite-management link because the previous one expired.
  *
- * Belongs to `@aggregator-dpg/api`. Distinct from `org-owner-approved` on
- * purpose: the owner did NOT just get approved (that may have been 90+ days
- * ago), they asked for a new link — so reusing the approval email would read
- * as a duplicate or a phishing attempt. No sign-in CTA (the owner has no
- * account). Copy lives under `owner_grant_refreshed.*`.
+ * Belongs to `@aggregator-dpg/api`. Separate from `org-owner-approved` so it
+ * does not read as a repeat approval. No sign-in button. Copy lives under
+ * `owner_grant_refreshed.*`.
  */
 
 import { renderCase, type RenderedEmail } from './render-case.js';

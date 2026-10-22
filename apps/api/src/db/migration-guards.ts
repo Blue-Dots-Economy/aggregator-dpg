@@ -1,28 +1,18 @@
 /**
  * Pre-migration guards for `runMigrations()` (`@aggregator-dpg/api`).
  *
- * 1. **Foreign migrations.** A row in `drizzle.__drizzle_migrations` whose
- *    `created_at` is not any journal `when` was applied from a file this
- *    release does not ship — e.g. the abandoned `app_user` 0027/0028 on a dev
- *    database. Drizzle skips by the `when` high-water mark, so continuing
- *    would silently mix two schemas: refuse (tolerated with a warning under
- *    the dev override `ALLOW_TRAIN_ON_BOOT=true`, since dev databases also
- *    carry rows from journal reshuffles). A hash mismatch on a KNOWN `when`
- *    only warns — several shipped migrations were edited after their first
- *    commit, so real instances hold older hashes.
+ * 1. **Foreign migrations.** An applied row whose `created_at` matches no
+ *    journal `when` came from a file this release does not ship. Drizzle skips
+ *    by the `when` high-water mark, so this is refused (only a warning under
+ *    `ALLOW_TRAIN_ON_BOOT=true`). A hash mismatch on a known `when` only warns.
  *
- * 2. **The user & org instance upgrade.** Migrations 0023 onwards (up to
- *    {@link UPGRADE_LAST_WHEN}) restructure existing data and are applied on an
- *    existing instance by the migration tool, with pods at zero, after its
- *    pre-flight and dry-run (docs/plans/existing-instance-migration.md). At
- *    boot (`RUN_MIGRATIONS_ON_BOOT`) or `pnpm db:migrate`, a pending train
- *    migration on a NON-EMPTY database is refused unless
- *    `ALLOW_TRAIN_ON_BOOT=true` (dev / e2e only). An empty database (fresh
- *    instance, CI) migrates as before, and once the train is applied the
- *    guard never fires again.
+ * 2. **The user & org instance upgrade.** Migrations 0023 to
+ *    {@link UPGRADE_LAST_WHEN} restructure data; existing instances apply them
+ *    with the instance-upgrade tool. At boot or `pnpm db:migrate`, a pending
+ *    one on a non-empty database is refused unless `ALLOW_TRAIN_ON_BOOT=true`
+ *    (dev / e2e only). An empty database migrates normally.
  *
- * The tool's `apply` calls `migrateWithLock` directly, so it is not subject to
- * guard 2. Decision logic is pure and unit-tested; the IO is a thin reader.
+ * The tool does not go through guard 2.
  */
 
 import type { Pool } from 'pg';
@@ -93,17 +83,13 @@ export async function runMigrationGuards(
       'applied migration differs from the shipped file (edited after release) — continuing',
     );
   }
-  // Drizzle skips by the `when` high-water mark, so a foreign row ABOVE a
-  // shipped migration that is not recorded makes drizzle skip that migration.
-  // Without the override such rows are refused below; with it, the skipped
-  // migrations are named in the warning so the skip is never silent.
+  // A foreign row above an unrecorded migration makes drizzle skip it.
+  // With the override, the warning names the skipped migrations.
   const appliedWhens = new Set(applied.map((a) => a.createdAt));
   const unrecorded = entries.filter((e) => !appliedWhens.has(e.when));
   const highestForeign = Math.max(...foreign.unknown.map((u) => u.createdAt), -Infinity);
   const masked = unrecorded.filter((e) => e.when < highestForeign).map((e) => e.tag);
   if (foreign.unknown.length > 0 && allowTrainOnBoot) {
-    // Dev / e2e databases accumulate rows from journal reshuffles during
-    // development; deployed instances never carry them.
     logger.warn(
       {
         operation: 'migrate.guard',
@@ -146,15 +132,13 @@ export async function runMigrationGuards(
 }
 
 /**
- * Whether the database holds any registration data: a coordinator (in
- * `users` or, before 0027, `aggregators`), an org (`aggregator_orgs` before
- * 0028; an aggregator org other than the Default org after it), or an invite.
+ * Whether the database holds any registration data: a coordinator, an
+ * aggregator org other than Default, or an invite. Probes old and new table names.
  *
- * Rows that migrations or boot seed themselves never count: 0027 creates
- * admin accounts only for existing orgs, and 0028 / `ensureRootOrganisation()`
- * seed the network root, the Default org and their owners' accounts and
- * contacts — so a fresh database still reads as empty after them. `contact` is
- * not probed: every contact is referenced by one of the rows above.
+ * Rows seeded by migrations or boot (root, Default org, their owners) do not count.
+ *
+ * @param pool - Postgres pool.
+ * @returns `true` when any such row exists.
  */
 export async function hasRegistrationData(pool: Pool): Promise<boolean> {
   for (const [table, probe] of DATA_PROBES) {

@@ -1,5 +1,5 @@
 /**
- * Console user routes `/v1/user/*` (`@aggregator-dpg/api`, user & org Phase 5).
+ * Console user routes `/v1/user/*` of the aggregator API (`@aggregator-dpg/api`).
  *
  *   GET   /v1/user/read/me               the signed-in actor (web routing)
  *   GET   /v1/user/read/:id              one coordinator within reach
@@ -11,7 +11,7 @@
  * Every handler calls `requireActor` first. Only `read/me` admits a
  * coordinator; the rest are for org owners (their orgs) and the network admin
  * (every org). A target out of reach answers 404 (`services/authz/scope.ts`).
- * Contact data is plain within reach (P5-8); single reads are audit-logged.
+ * Single reads are audit-logged.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -100,11 +100,6 @@ async function loadOrg(id: string): Promise<Organisation> {
 }
 
 /**
- * Builds the `read/me` answer for an actor.
- *
- * @throws {HttpError} DB_UNAVAILABLE.
- */
-/**
  * The aggregator organisation a request acts on, with the root as its
  * ancestor (RBAC: a role held in the root applies below it).
  *
@@ -120,10 +115,8 @@ async function aggregatorTarget(orgId: string | null): Promise<TargetOrg | undef
 }
 
 /**
- * Whether contact details are shown plain to this actor (RBAC
- * `contact.unmask`; handoff H-6), in the target user's organisation when one
- * is given. True when access control is off or only logging, so behaviour
- * changes only under `enforce`.
+ * Whether this actor sees contact details unmasked (`contact.unmask`), in the
+ * target user's organisation when given. Always true unless RBAC is `enforce`.
  */
 async function showsContact(
   req: FastifyRequest,
@@ -134,6 +127,11 @@ async function showsContact(
   return (await checkCapability(req, actor, 'contact.unmask', { target })).allowed;
 }
 
+/**
+ * Builds the `read/me` answer for an actor.
+ *
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
 async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> {
   // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
   const orgStore = getOrganisationStore();
@@ -154,9 +152,7 @@ async function meOf(req: FastifyRequest, actor: Actor): Promise<MeResponse> {
   const root = await orgStore.findRoot();
   if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
   const rootId = root.value?.id ?? null;
-  // Resolve every organisation and its target first, then ask the decision
-  // engine once per distinct question — this route is loaded on every portal
-  // render, so one OPA round-trip per organisation added up (#884 review).
+  // Ask the decision engine once per distinct question; this route runs on every page load.
   const resolved: Array<{ org: ActorOrg; found: Organisation; target: TargetOrg }> = [];
   for (const o of actor.orgs) {
     const found = o.orgType === 'network_facilitator' ? root : await orgStore.findById(o.id); // NOSONAR typescript:S9382 — sequential by design
@@ -239,7 +235,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const { id } = req.params as IdParams;
       const row = await coordinatorInReach(actor, id);
       const plain = await showsContact(req, actor, row.parentOrgId ?? null);
-      // Contact read audit (design C8): ids only.
+      // Audit the contact read: ids only.
       req.log.info({
         operation: 'console.user.read',
         status: 'success',
@@ -275,8 +271,8 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         ...(body.limit ? { limit: body.limit } : {}),
       });
       if (!page.ok) dbDown('userStore.search', page.error.message);
-      // Unmasking is decided per organisation, never once for the page: a
-      // caller may hold `contact.unmask` in one of its orgs and not another.
+      // Unmasking is decided per organisation; a caller may hold `contact.unmask`
+      // in one org and not another.
       const plainIn = new Map<string | null, boolean>();
       for (const row of page.value.rows) {
         const orgId = row.parentOrgId ?? null;
@@ -285,7 +281,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const isPlain = (row: Coordinator) => plainIn.get(row.parentOrgId ?? null) === true;
       const plainCount = page.value.rows.filter(isPlain).length;
       if (plainCount > 0) {
-        // Plain contact in a list: audited by count, never values (H-6).
+        // Unmasked contacts in a list are audited by count, never values.
         req.log.info({
           operation: 'console.user.search',
           status: 'success',
@@ -328,7 +324,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         });
       }
       const org = await loadOrg(body.org_id);
-      // The Default org takes no invites, for every principal (design R8).
+      // The Default org takes no invites.
       if (org.status !== 'active' || org.isDefault) throw httpError('TARGET_ORG_INACTIVE');
 
       const rl = await checkInviteMintRate(org.id, body.recipients.length);
@@ -360,7 +356,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         invalid: summary.invalid.length,
         existing: summary.existing.length,
       });
-      // The invite mail names the org's owner as the inviter (C13).
+      // The invite mail names the org's owner as the inviter.
       if (summary.sent + summary.resent > 0) {
         await notifyOwnerOfAdminAction(actor, org, 'invited coordinators', req.log);
       }
@@ -487,7 +483,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         updatedBy: actor.userId,
       });
       if (!updated.ok) dbDown('userStore.update', updated.error.message);
-      // Approved meanwhile (the approval pushed the old domains): push again.
+      // Approved meanwhile with the old domains: push again.
       if (row.status !== 'active' && updated.value.status === 'active' && !(await pushDomains())) {
         throw httpError('SIGNALSTACK_PUSH_FAILED', {
           detail: 'The domains were saved, but Signals was not updated. Save them again.',

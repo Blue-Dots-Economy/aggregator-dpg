@@ -1,9 +1,7 @@
 /**
- * Fixed-window rate limiter backed by Redis.
+ * Fixed-window rate limiter backed by Redis, in `@aggregator-dpg/api`.
  *
- * Used to bound the public link-submission endpoint per (slug, ip). The
- * window is intentionally small and configurable via env so dev runs aren't
- * accidentally rate-limited.
+ * Shared by the API's rate-limited routes. Windows and limits come from the caller.
  *
  * Key shape: `rl:{namespace}:{key}:{windowStart}` → INCR with EXPIRE.
  */
@@ -17,21 +15,15 @@ let instance: Redis | null = null;
 
 function getRedis(): Redis {
   if (instance) return instance;
-  // Dedicated fail-fast connection — NOT the BullMQ profile. The rate
-  // limiter fails open on Redis errors (see consume), so a downed Redis must
-  // surface an error promptly rather than buffering commands forever. A
-  // finite per-request retry + command timeout + disabled offline queue make
-  // the catch-and-allow path fire within ~1s instead of hanging the public
-  // submit endpoint.
+  // Dedicated fail-fast connection, not the BullMQ one: a downed Redis must
+  // error within about 1s instead of hanging the request.
   instance = createRedisConnection({
     url: config.REDIS_URL,
     maxRetriesPerRequest: 1,
     commandTimeout: 1000,
     enableOfflineQueue: false,
   });
-  // ioredis emits 'error' on every reconnect attempt; without a listener
-  // those bubble as unhandled. Swallow here — consume's try/catch owns the
-  // request-path behaviour (fail open).
+  // ioredis emits 'error' on every reconnect; consume() handles request-path failures.
   instance.on('error', () => undefined);
   return instance;
 }
@@ -39,23 +31,17 @@ function getRedis(): Redis {
 export interface RateLimitOptions {
   /** Logical bucket name (e.g. `link-submit`). */
   namespace: string;
-  /** Identifier inside the bucket — typically slug, ip, or `${slug}:${ip}`. */
+  /** Identifier inside the bucket, e.g. slug, ip, or `${slug}:${ip}`. */
   key: string;
   /** Window length in seconds. */
   windowSeconds: number;
   /** Maximum events allowed per window. */
   max: number;
-  /**
-   * Slots this call consumes. Default 1. A bulk operation (e.g. minting N
-   * invites in one request) passes N so the window bounds total events, not
-   * request count.
-   */
+  /** Slots this call consumes; default 1. A bulk operation passes its item count. */
   cost?: number;
   /**
-   * On a Redis error, deny instead of the default allow. Use for anti-abuse
-   * controls where a downed Redis must NOT silently remove the limit (e.g. the
-   * invite-mint bucket — a leaked grant would otherwise become unbounded). The
-   * public-submit limiter keeps the default fail-open posture.
+   * On a Redis error, deny instead of allow. Use for anti-abuse limits that
+   * must hold when Redis is down, such as invite minting.
    */
   failClosed?: boolean;
 }
@@ -70,17 +56,11 @@ export interface RateLimitResult {
 const READY_TIMEOUT_MS = 1000;
 
 /**
- * Waits (briefly) for the connection to be usable.
+ * Waits briefly for the connection to be usable.
  *
- * `enableOfflineQueue: false` makes ioredis throw `Stream isn't writeable`
- * rather than buffer a command issued before the socket is ready — which is
- * the right posture for a downed Redis, but it also caught the very first
- * call after boot while the connection was still being established. A
- * `failClosed` caller (invite minting) then saw a spurious deny against a
- * perfectly healthy Redis.
- *
- * Bounded by {@link READY_TIMEOUT_MS} so a genuinely unreachable Redis still
- * fails fast into the caller's chosen posture.
+ * With the offline queue disabled, a command sent before the socket is ready
+ * fails. Waiting avoids a false deny on the first call after boot. Bounded by
+ * {@link READY_TIMEOUT_MS}, so an unreachable Redis still fails fast.
  *
  * @param redis - The limiter's connection.
  */
@@ -98,8 +78,10 @@ async function awaitReady(redis: Redis): Promise<void> {
 }
 
 /**
- * Tries to consume one slot from the rate-limit bucket. Returns whether the
- * call is allowed plus the current window count.
+ * Consumes slots from a rate-limit bucket.
+ *
+ * @param options - Bucket, key, window, limit and failure behaviour.
+ * @returns Whether the call is allowed, the window count and the retry delay.
  */
 export async function consume(options: RateLimitOptions): Promise<RateLimitResult> {
   const redis = getRedis();
@@ -108,11 +90,7 @@ export async function consume(options: RateLimitOptions): Promise<RateLimitResul
   const fullKey = `rl:${options.namespace}:${options.key}:${windowStart}`;
   try {
     await awaitReady(redis);
-    // INCR + EXPIRE issued atomically. Pipelining via `multi()` avoids the
-    // INCR-without-EXPIRE window that exists if the process dies between
-    // calls — without TTL the bucket would never reset. Re-applying
-    // EXPIRE on every hit is a no-op cost-wise (single Redis op) and
-    // keeps the key alive while traffic is active in-window.
+    // INCR and EXPIRE run in one MULTI, so a key never exists without a TTL.
     const cost = Math.max(1, Math.floor(options.cost ?? 1));
     const pipelineRes = await redis
       .multi()
@@ -122,9 +100,7 @@ export async function consume(options: RateLimitOptions): Promise<RateLimitResul
     const incrEntry = pipelineRes?.[0];
     const count = Array.isArray(incrEntry) && typeof incrEntry[1] === 'number' ? incrEntry[1] : 0;
     if (count > options.max) {
-      // Refund the slots this denied call just consumed so a rejected request
-      // (e.g. an over-cap bulk mint) doesn't poison the window and lock out
-      // later smaller requests. Best-effort — a failed refund only over-counts.
+      // Refund a denied call's slots so smaller later requests still fit. Best effort.
       await redis.decrby(fullKey, cost).catch(() => undefined);
       const retryAfterSeconds = Math.max(
         1,
@@ -141,9 +117,7 @@ export async function consume(options: RateLimitOptions): Promise<RateLimitResul
       namespace: options.namespace,
       fail_closed: options.failClosed ?? false,
     });
-    // Default: fail open on Redis blips (public submit — better to accept
-    // traffic than 5xx). Anti-abuse callers set failClosed so a downed Redis
-    // can't silently remove the limit.
+    // Fail open by default; failClosed callers deny instead.
     if (options.failClosed) {
       return { allowed: false, count: 0, retryAfterSeconds: options.windowSeconds };
     }

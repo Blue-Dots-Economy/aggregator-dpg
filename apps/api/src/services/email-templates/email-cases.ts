@@ -1,27 +1,22 @@
 /**
  * Registry of externalised email cases.
  *
- * Belongs to `@aggregator-dpg/api`. Each entry fully describes one email: the
- * `{{token}}` types its copy may use, and the ordered layout of copy blocks
- * that makes up its body. `render-case.ts` is the only thing that reads this,
- * so adding an email means adding an entry here plus its keys in the
- * properties layers — no new module, no repeated assembly code.
+ * Belongs to `@aggregator-dpg/api`. Each entry describes one email: the
+ * `{{token}}` types its copy may use and the ordered layout of its body blocks.
+ * Only `render-case.ts` reads this. To add an email, add an entry here and its
+ * keys in the properties layers.
  *
- * The layout carries the three conditionals the migrated templates actually
- * have, declaratively rather than as code:
+ * Block conditions:
  *
  *   - `requires` — include only when every named token has a value
  *   - `absent`   — include only when every named token has none
  *   - `oneOf`    — first alternative whose conditions hold
  *
- * `requiredMessageKeys()` derives the full key list from these layouts, so a
- * key referenced by a layout but missing from the bundled defaults fails the
- * boot check rather than rendering as its own name.
+ * `requiredMessageKeys()` derives the full key list from these layouts. A key
+ * missing from the bundled defaults fails the boot check.
  *
  * Only participant-facing mail lives here. `admin-review` and
- * `support-request` stay hardcoded on purpose: they are internal operational
- * mail carrying action links and attachment metadata, with far more structure
- * than copy, and no operator has a reason to reword them.
+ * `support-request` are internal mail and stay hardcoded.
  *
  * @module @aggregator-dpg/api
  */
@@ -51,7 +46,7 @@ export interface BlockSpec {
   key: string;
   /** Include only when every named token has a value. */
   requires?: readonly string[];
-  /** Include only when every named token has NO value. */
+  /** Include only when every named token has no value. */
   absent?: readonly string[];
   /** Alternatives; the first whose conditions hold is used. */
   oneOf?: readonly BlockAlternative[] | undefined;
@@ -69,10 +64,7 @@ export interface EmailCaseDef {
   layout: readonly BlockSpec[];
   /** Copy key for the subject. Defaults to `subject`. */
   subjectKey?: string;
-  /**
-   * Tokens resolved from a copy-key alternation before the body renders, for
-   * a phrase embedded mid-sentence rather than standing as its own block.
-   */
+  /** Tokens resolved from a copy-key alternation before rendering, for mid-sentence phrases. */
   derivedTokens?: Readonly<Record<string, readonly BlockAlternative[]>>;
   /** Append "Sent by <brand>." to the text part. Defaults to true. */
   signOff?: boolean;
@@ -143,8 +135,7 @@ export const EMAIL_CASES: Readonly<Record<string, EmailCaseDef>> = {
       { block: 'para', key: 'intro' },
       // With the grant link: lead, button, then the standing note.
       { block: 'para', key: 'invite_lead', requires: ['inviteUrl'] },
-      // No `requires` needed: the cta branch already drops a block whose href
-      // token is unset. Stated here because the two neighbours below do need it.
+      // No `requires` needed: a cta block with an unset href is dropped.
       { block: 'cta', key: 'cta', href: 'inviteUrl' },
       { block: 'paraLast', key: 'invite_note', requires: ['inviteUrl'] },
       // Without it: a heads-up that the link follows.
@@ -205,8 +196,7 @@ export const EMAIL_CASE_IDS: readonly string[] = Object.keys(EMAIL_CASES);
  *
  * @param caseId - Case prefix, e.g. `applicant_approved`.
  * @returns The case definition.
- * @throws {Error} If the case is not registered — a programming error, raised
- *   at the call site rather than rendering an empty email.
+ * @throws {Error} If the case is not registered.
  */
 export function getEmailCase(caseId: string): EmailCaseDef {
   const def = EMAIL_CASES[caseId];

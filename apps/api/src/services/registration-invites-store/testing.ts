@@ -1,9 +1,8 @@
 /**
- * Test fake + builder for the registration-invites store (#700).
+ * Test fake and builder for the registration-invites store (`@aggregator-dpg/api`).
  *
- * `RegistrationInvitesStoreFake` extends the in-memory impl (per testing.md) so
- * fakes can never drift from the real contract. `seed()` sets exact row state;
- * `buildRegistrationInvite()` produces a valid default row for overrides.
+ * `seed()` sets exact row state; `buildRegistrationInvite()` returns a valid
+ * default row.
  */
 
 import { InMemoryRegistrationInvitesStore } from './memory.js';

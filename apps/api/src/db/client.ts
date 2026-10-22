@@ -1,12 +1,7 @@
 /**
- * Reusable Postgres connection pool + Drizzle ORM client.
+ * Shared Postgres pool and Drizzle client for the api app.
  *
- * One shared `pg.Pool` per process — pg already pools connections internally,
- * so a singleton instance gives the canonical connection pool. The Drizzle
- * client wraps the pool and is the entry point for all queries elsewhere in
- * the API.
- *
- * Lazy init on first use; `closeDb()` for graceful shutdown.
+ * One `pg.Pool` per process, created on first use. `closeDb()` closes it on shutdown.
  */
 
 import { createRequire } from 'node:module';
@@ -16,8 +11,7 @@ import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 import * as schema from './schema.js';
 
 const require = createRequire(import.meta.url);
-// pg ships CommonJS — load the constructible Pool via createRequire to avoid
-// the ESM/CJS default-import interop issues under NodeNext.
+// pg is CommonJS; load it with createRequire to avoid ESM interop issues.
 const { Pool } = require('pg') as typeof PgModule;
 
 type Pool = InstanceType<typeof Pool>;
@@ -40,8 +34,7 @@ interface PoolOptions {
 /**
  * Returns the shared `pg.Pool`. Creates it on first call.
  *
- * The connection string is never defaulted — credentials must come from the
- * deployment environment so no usable database URL is ever embedded in source.
+ * The connection string has no default, since it carries credentials.
  *
  * @param opts - Pool overrides; `url` takes precedence over `DATABASE_URL`.
  * @returns Shared connection pool.

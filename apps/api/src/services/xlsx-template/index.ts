@@ -1,14 +1,9 @@
 /**
- * XLSX bulk-upload template generator (#564).
+ * XLSX bulk-upload template generator for `@aggregator-dpg/api`.
  *
- * The CSV template is what the parser accepts, but CSV cannot tell an operator
- * anything: not which columns are required, not which values a closed set
- * accepts, not that an array cell is delimiter-joined. Each of those is a class
- * of upload failure we otherwise only report after the fact, per row, in
- * `errors.csv`.
- *
- * This builds the workbook an operator fills in and then exports with
- * File > Save As > CSV. The UPLOAD path is unchanged and still accepts `.csv`.
+ * Builds a workbook an operator fills in and exports with File > Save As > CSV.
+ * It shows which columns are required, which values a closed set accepts, and
+ * how array cells are joined. Uploads still accept `.csv` only.
  *
  * ## One workbook per participant type, four tabs
  *
@@ -19,29 +14,16 @@
  * 4. Enter your <type>s  the empty grid to fill, with the dropdowns
  * ```
  *
- * A coordinator is scoped to a single participant type, so a per-type file is
- * the smallest thing that can be handed to the person doing the typing: four
- * tabs instead of one workbook's worth of every domain the network serves.
+ * ## Grid headers are field names
  *
- * ## Why the grid keeps machine-name headers
+ * The parser (`bulk-file-stream`) matches the CSV header on field names, so the
+ * grid's header row is field names and is the only row above the data. Human
+ * labels appear on tabs 2 and 3 and in each header cell's note.
  *
- * `network.json` gives every field a human `title` ("Mobile Number" for
- * `phone`), and those read far better as headers — but the exported CSV's
- * header line is what `bulk-file-stream` matches against, and it matches field
- * names. Until the parser accepts titles too, the grid's header row has to be
- * the field names, and it has to be the ONLY row above the data: a label row or
- * a merged section banner would leave an extra line in the exported CSV and
- * fail the upload. So the labels live on tabs 2 and 3 and in each header cell's
- * note, and the grid conveys structure with colour instead.
+ * ## Generated from the schema
  *
- * ## Generated, never shipped as a binary
- *
- * This repo used to ship `config/<network>/bulk-samples/*.csv` and serve them
- * verbatim. They rotted: against the live ka-dhwd schemas those files carried
- * 24 columns to the schema's 36, and 18 of 20 seeker rows failed on outdated
- * enum values. They are deleted. Every column, dropdown and sample row here
- * comes from the schema resolved out of `network.json` at boot, so the template
- * cannot demonstrate something the parser rejects.
+ * Every column, dropdown and sample row comes from the schema resolved from
+ * `network.json` at boot, so the template matches what the parser accepts.
  *
  * @module apps/api/services/xlsx-template
  */
@@ -56,20 +38,15 @@ import {
 } from '../csv-template/index.js';
 import { wellKnownColumnMeta } from '@aggregator-dpg/shared-primitives/bulk-columns';
 
-/** Tab 1 — what to do. */
+/** Tab 1: what to do. */
 const INSTRUCTIONS_SHEET = '1. Instructions';
-/** Tab 2 — the closed sets, then every remaining column. */
+/** Tab 2: the closed sets, then every remaining column. */
 const VALUES_SHEET = '2. Allowed values';
-/** Tab 3 — worked examples. */
+/** Tab 3: worked examples. */
 const SAMPLE_SHEET = '3. Sample data';
-/**
- * Backing ranges for the dropdowns. Hidden rather than absent: Excel resolves
- * a list validation against a real range, so the values have to live in the
- * workbook somewhere, and an operator editing them would silently widen what
- * the schema accepts.
- */
+/** Hidden sheet holding the dropdown value ranges. Hidden so operators do not edit them. */
 const LISTS_SHEET = 'Lists';
-/** Rows the grid carries validation for — generous, so pasting keeps it. */
+/** Rows the grid carries validation for. */
 const VALIDATED_ROWS = 500;
 /** Upper bound on sample rows, applied after duplicates are dropped. */
 const MAX_SAMPLE_ROWS = 14;
@@ -82,7 +59,7 @@ const FILL_REQUIRED = 'FFFDE68A';
 const FILL_CONDITIONAL = 'FFE2E8F0';
 /** Header fill for an ordinary optional column. */
 const FILL_OPTIONAL = 'FFF8FAFC';
-/** Tab colours: the grid is the one an operator edits, so it reads "go". */
+/** Tab colours. */
 const TAB_COLOURS = {
   instructions: 'FF94A3B8',
   values: 'FF60A5FA',
@@ -100,20 +77,12 @@ function gridSheetName(participantType: string): string {
 export interface XlsxTemplateOptions {
   /**
    * Delimiter for array-typed cells, from the network's `csv_array_delimiter`.
-   * Shown on tab 2 and used in the sample rows, so the workbook documents the
-   * delimiter the parser will actually split on.
+   * Shown on tab 2 and used in the sample rows.
    */
   arrayDelimiter?: string;
   /**
-   * The domain's identity selectors (`ResolvedDomain.identity`), naming which
-   * columns hold the name / phone / email.
-   *
-   * Used only to make those sample cells realistic. `exampleValue` is purely
-   * schema-driven by design — no field-name heuristics — so where a schema
-   * declares no `format` or `pattern`, a phone column samples as "Example
-   * Mobile Number", which the row parser would reject. That is the worst cell
-   * in the workbook to get wrong: phone is what the network dedups and
-   * notifies on. Config says which column it is, so nothing is guessed here.
+   * The domain's identity selectors (`ResolvedDomain.identity`), naming the
+   * name, phone and email columns. Used only to make those sample cells valid.
    */
   identity?: { name: string; phone: string; email?: string | undefined } | undefined;
 }
@@ -121,11 +90,8 @@ export interface XlsxTemplateOptions {
 interface ColumnPlan {
   name: string;
   /**
-   * The property's own schema fragment, kept verbatim so `exampleValue` sees
-   * exactly what the CSV generator sees. Reconstructing one from the fields
-   * below would drop `format`, `pattern`, `minimum`/`maximum` and `minLength`,
-   * and the sample rows would then differ from the CSV template's for every
-   * numeric and formatted field.
+   * The property's own schema fragment, kept as-is so `exampleValue` sees what
+   * the CSV generator sees.
    */
   prop: Record<string, unknown>;
   /** Human label from the schema's `title`, falling back to the field name. */
@@ -135,19 +101,16 @@ interface ColumnPlan {
   allowed: string[];
   isArray: boolean;
   /**
-   * Parsed `x-show-if` clauses — one per controller field, ANDed together, in
-   * the rule's own key order. Empty when the column always applies.
+   * Parsed `x-show-if` clauses, one per controller field, ANDed together.
+   * Empty when the column always applies.
    */
   showIf: readonly ShowIfClause[];
-  /**
-   * True when the rule is present but cannot be satisfied by any form state,
-   * so the column is never shown. See {@link parseShowIf}.
-   */
+  /** True when the rule can never be satisfied, so the column is never shown. */
   showIfNeverApplies: boolean;
   description?: string;
 }
 
-/** One `(controller field → values that reveal this column)` clause. */
+/** One clause: a controller field and the values that reveal this column. */
 interface ShowIfClause {
   field: string;
   /** Controller values that make the column apply; empty means "any value". */
@@ -167,24 +130,11 @@ function isConditional(plan: ColumnPlan): boolean {
 /**
  * Parses the custom `x-show-if` keyword the same way the form renderer does.
  *
- * Deliberately mirrors `apps/web/src/lib/show-if.ts` (`isFieldVisible`), which
- * is the implementation that decides what an operator actually sees: **every**
- * `(controlField → allowed)` entry must hold (AND across keys), and a
- * non-array `allowed` makes the field permanently hidden rather than
- * unconstrained. Reading only the first key described a weaker condition than
- * the form enforces, and treating a scalar as "no constraint" said "always
- * fill this in" about a column the form never shows.
+ * Matches `isFieldVisible` in `apps/web/src/lib/show-if.ts`: every entry must
+ * hold (AND across keys), and a non-array `allowed` hides the field for good.
+ * Keep the two in sync.
  *
- * Every `x-show-if` in `config/` is single-key and array-valued today, so this
- * is parity insurance rather than a live divergence — but the workbook is the
- * document an operator trusts over the form, so the two must not be able to
- * disagree.
- *
- * Known limitation, shared with the form renderer: conditionality expressed
- * the plain JSON Schema way (`allOf` / `if` / `then`) is not read here, and a
- * network using it would get every column marked optional. `x-show-if` is the
- * only conditional keyword either side supports today; adding a fallback here
- * alone would make the workbook and the form disagree in the other direction.
+ * Like the form, this ignores `allOf` / `if` / `then`; only `x-show-if` is read.
  *
  * @param rule - The property's `x-show-if` value, whatever shape it has.
  * @returns The ANDed clauses, and whether the rule can ever be satisfied.
@@ -234,9 +184,7 @@ function planColumn(name: string, prop: Record<string, unknown>, required: boole
 /**
  * Renders the "only fill in when" sentence for a conditional column.
  *
- * Multi-clause rules are joined with "and", matching the AND the form renderer
- * applies — a sentence that named only the first controller would describe a
- * weaker condition than the one actually enforced.
+ * Multi-clause rules are joined with "and", as the form applies them.
  *
  * @param plan - The column.
  * @param byName - Every column by field name, for the controller's label.
@@ -255,8 +203,7 @@ function onlyWhen(plan: ColumnPlan, byName: ReadonlyMap<string, ColumnPlan>): st
 }
 
 /**
- * Lowercases only the first character, so a sentence can be spliced mid-line
- * without also lowercasing a field's human label ("Work Experience").
+ * Lowercases only the first character, so a sentence can be spliced mid-line.
  *
  * @param text - Sentence to splice.
  * @returns The sentence with a lowercase lead-in.
@@ -284,11 +231,7 @@ export async function buildXlsxTemplate(
   const required = new Set(
     Array.isArray(schema['required']) ? (schema['required'] as string[]) : [],
   );
-  // A well-known column has no schema fragment, so `planColumn` would label it
-  // with the raw field name and fall back to "Free text" on the allowed-values
-  // tab — leaving the one column with a non-obvious format as the only one
-  // with no explanation. Synthesise title + description from the shared
-  // metadata so both template formats describe it identically.
+  // Well-known columns have no schema fragment; take title and description from shared metadata.
   const plans = orderedColumns(schema).map((name) => {
     const meta = wellKnownColumnMeta(name);
     const prop =
@@ -312,11 +255,7 @@ export async function buildXlsxTemplate(
   writeSampleSheet(wb, plans, arrayDelimiter, identity);
   writeGridSheet(wb, gridName, plans, byName, ranges, arrayDelimiter);
 
-  // Open on the grid, not on tab 1. "File > Save As > CSV" exports the ACTIVE
-  // sheet, so a workbook that opens on Instructions hands an operator who saves
-  // straight away a CSV of the instructions — which then fails the upload on a
-  // header mismatch. Found by actually round-tripping the file through a
-  // spreadsheet app rather than assuming.
+  // Open on the grid: Save As CSV exports the active sheet.
   wb.views = [
     {
       activeTab: wb.worksheets.findIndex((sheet) => sheet.name === gridName),
@@ -329,8 +268,7 @@ export async function buildXlsxTemplate(
     },
   ];
 
-  // exceljs declares its own `Buffer` interface, structurally unrelated to
-  // Node's, so the cast goes through `unknown`. The value IS a Node Buffer.
+  // exceljs types its own `Buffer`; the value is a Node Buffer.
   return (await wb.xlsx.writeBuffer()) as unknown as Buffer;
 }
 
@@ -421,11 +359,7 @@ function writeInstructions(
 /**
  * Writes one hidden column of allowed values per closed-set field.
  *
- * Every dropdown is range-backed rather than inline, uniformly. Excel caps an
- * inline list at 255 characters and ka-dhwd alone has three fields far past it
- * (`itiTrade` is 170 values / 5,555 characters), so special-casing the long
- * ones would mean two code paths where one is exercised only by the schemas
- * nobody tests with.
+ * Every dropdown is range-backed, since Excel caps an inline list at 255 characters.
  *
  * @param sheet - The hidden lists sheet.
  * @param plans - Column plans.
@@ -453,11 +387,7 @@ function writeLists(
 /**
  * Writes tab 2: one row per column, closed sets first.
  *
- * Row-per-column rather than the reference workbook's column-per-field, so it
- * reads top-to-bottom like a list and stays legible at 40 columns. Closed sets
- * come first because "what am I allowed to type here" is the question this tab
- * exists to answer; the free-text columns follow so the tab is still a complete
- * index of the grid.
+ * Free-text columns follow, so the tab lists every grid column.
  *
  * @param wb - Target workbook.
  * @param plans - Column plans.
@@ -493,9 +423,7 @@ function writeValuesSheet(
 
   /** Adds one column's row, shaded to match the grid's header colour. */
   const addRow = (plan: ColumnPlan): void => {
-    // Comma-separated unless the column really does take several values: on a
-    // single-value column the delimiter reads as an instruction to join them,
-    // which is the one thing that column does not accept.
+    // Use the array delimiter only for multi-value columns; otherwise commas.
     const separator = plan.isArray ? `${arrayDelimiter} ` : ', ';
     const row = sheet.addRow({
       name: plan.name,
@@ -529,16 +457,9 @@ function writeValuesSheet(
 }
 
 /**
- * Blank for a conditional column this row's controller value does not unlock.
+ * Blank for a conditional column this row's controller values do not unlock.
  *
- * A filled-in conditional that does not apply is the wrong example — it teaches
- * an operator to populate a column the schema will reject. The reverse is just
- * as wrong, and is what reading `pins` alone produced: a row rendering
- * `educationCategory = "School"` left `schoolQualification` blank, contradicting
- * that column's own header note, because the row pinned a different controller.
- * A row pins one controller; every other controller still renders its first
- * allowed value, so the values consulted here are the ones the row ACTUALLY
- * shows.
+ * Checks the values each controller actually renders in this row, not just the pinned one.
  *
  * @param plan - The column.
  * @param selectedIn - The values a controller renders in this row: one entry
@@ -552,9 +473,7 @@ function conditionalCell(
 ): string | undefined {
   if (plan.showIfNeverApplies) return '';
   if (plan.showIf.length === 0) return undefined;
-  // AND across clauses, and an array-valued controller matches when ANY of its
-  // selected values is allowed — both exactly as `isFieldVisible` does
-  // (`apps/web/src/lib/show-if.ts`).
+  // AND across clauses; an array controller matches when any selected value is allowed (as `isFieldVisible`).
   const applies = plan.showIf.every(({ field, values }) => {
     const selected = selectedIn(field);
     if (selected.length === 0) return false;
@@ -564,24 +483,11 @@ function conditionalCell(
 }
 
 /**
- * Per-row name / phone / email, so the sample rows read as distinct entries
- * rather than a dozen copies of one.
+ * Per-row name, phone and email, so sample rows are distinct.
  *
- * Config names these columns (`ResolvedDomain.identity`); nothing is guessed
- * from field names.
- *
- * Two things this deliberately does NOT do:
- *
- * - **Override a column that declares its own `format` or `pattern`.** A phone
- *   declaring `^\+91[0-9]{10}$` or `^[0-9]{12}$` would reject the hardcoded
- *   10-digit run, putting a value the row parser rejects in the field the
- *   network dedups on — and making the workbook and the CSV template disagree
- *   about the same column. `exampleValue` handles those; this only fills the
- *   gap where the schema says nothing about the shape.
- * - **Assume `identity.name` names a person.** blue_dot points it at
- *   `jobProviderName` (`config/blue_dot/aggregator.config.yaml`), so the
- *   sample is built from the column's own label — "Sample Job Provider Name 1"
- *   rather than "Sample Person 1" in a company-name column.
+ * Config names these columns (`ResolvedDomain.identity`). Columns with their
+ * own `format` or `pattern` are left to `exampleValue`. The name sample uses
+ * the column's label, since `identity.name` may not be a person.
  *
  * @param plan - The column.
  * @param rowIndex - Zero-based sample row index.
@@ -594,25 +500,15 @@ function identityCell(
   identity?: XlsxTemplateOptions['identity'],
 ): string | undefined {
   if (identity === undefined) return undefined;
-  // Derivation and the fits-the-column check live in `csv-template` so the two
-  // formats cannot disagree about the same column.
+  // Shared with `csv-template` so both formats agree.
   return identityExample(plan.name, plan.prop, identity, rowIndex);
 }
 
 /**
- * Next value of a closed set, rotated by row, so each is demonstrated somewhere
- * rather than every row repeating the first option.
+ * Next value of a closed set, rotated by row, so each value appears somewhere.
  *
- * Two kinds of column are excluded:
- *
- * - **Controllers** — their value is pinned per row to drive the conditional
- *   branches, which is a stronger claim on the cell than rotation.
- * - **Array columns** — `planColumn` fills `allowed` from `items.enum` too, so
- *   a multi-value column would otherwise rotate to ONE value per cell and tab
- *   3 would never show the delimiter. Falling through to `exampleValue` is the
- *   only thing that produces a joined cell, and the join is the single
- *   formatting rule a CSV cannot express — precisely what the tab the operator
- *   copies from has to demonstrate.
+ * Skips controllers (pinned per row) and array columns (`exampleValue` shows a
+ * joined cell instead).
  *
  * @param plan - The column.
  * @param rowIndex - Zero-based sample row index.
@@ -631,14 +527,8 @@ function rotatedCell(
 /**
  * Generates sample rows that demonstrate every conditional branch.
  *
- * One row cannot show that `stipendMin` applies to an Internship while
- * `salaryMin` applies to a Full-time role, and on the live seeker schema 21 of
- * 36 columns are conditional — that asymmetry is most of what an operator gets
- * wrong. So a row is emitted per controller value: the controller is pinned,
- * the fields that value unlocks are filled, and the fields it does not unlock
- * are left blank, which is exactly the shape the schema expects. Values of the
- * remaining closed sets are then rotated across those rows so each appears at
- * least once wherever the row count allows.
+ * One row per controller value: the controller is pinned, the fields it unlocks
+ * are filled, and the rest are blank. Other closed sets rotate across rows.
  *
  * @param plans - Column plans.
  * @param arrayDelimiter - Delimiter for array cells.
@@ -654,10 +544,8 @@ function sampleRows(
   const byName = new Map(plans.map((plan) => [plan.name, plan] as const));
 
   /**
-   * Every cell of one row, each conditional column resolved against what its
-   * controller renders in THIS row. Chain-aware, like `resolveVisibleSchema`'s
-   * fixpoint: a controller that is itself conditional and blanked unlocks
-   * nothing downstream.
+   * Every cell of one row, each conditional resolved against its controller's cell in this row.
+   * A blanked controller unlocks nothing downstream.
    */
   const rowCells = (pins: ReadonlyMap<string, string>, rowIndex: number): Map<string, string> => {
     const resolved = new Map<string, string>();
@@ -675,15 +563,12 @@ function sampleRows(
     function resolve(plan: ColumnPlan): string {
       const done = resolved.get(plan.name);
       if (done !== undefined) return done;
-      // A cyclic `x-show-if` would otherwise recurse forever. Mid-resolution
-      // reads as blank, which is what the form shows for an unsatisfied rule.
+      // Guards against a cyclic `x-show-if`; mid-resolution reads as blank.
       if (resolving.has(plan.name)) return '';
       resolving.add(plan.name);
       const value =
         pins.get(plan.name) ??
-        // Well-known columns carry no JSON Schema, so `exampleValue` — which is
-        // purely schema-driven — has nothing to work from. Both formats of one
-        // template have to agree about the same column.
+        // Well-known columns have no JSON Schema for `exampleValue` to use.
         wellKnownExample(plan.name) ??
         conditionalCell(plan, selectedIn) ??
         identityCell(plan, rowIndex, identity) ??
@@ -698,9 +583,7 @@ function sampleRows(
     return resolved;
   };
 
-  // The signature ignores the identity columns: those vary by row index by
-  // construction, so including them would make every row look unique and the
-  // duplicate filter would never fire.
+  // Ignore identity columns in the signature; they always differ by row.
   const identityColumns = new Set(
     identity === undefined ? [] : [identity.name, identity.phone, identity.email],
   );
@@ -722,9 +605,7 @@ function sampleRows(
 /**
  * Maps each controller field to its allowed values.
  *
- * A controller is a column that other columns declare `x-show-if` against, and
- * only one with a closed set can drive sample rows — there is nothing to
- * enumerate otherwise.
+ * A controller is a closed-set column that other columns reference in `x-show-if`.
  *
  * @param plans - Column plans.
  * @returns Controller field name to its allowed values.
@@ -744,25 +625,11 @@ function collectControllers(plans: readonly ColumnPlan[]): ReadonlyMap<string, s
 }
 
 /**
- * One pin set per controller value — the shape of the sample sheet.
+ * One pin set per controller value; each fixes one controller to one value.
  *
- * Each pin set fixes a single controller to a single value, so the row it
- * renders demonstrates exactly one conditional branch.
- *
- * Ordered BREADTH-first: every controller's first value, then every
- * controller's second, and so on. Depth-first spent the whole budget on the
- * controllers that happened to be declared earliest — on a live seeker schema
- * `workExperience` (3 values) and `educationCategory` (10) filled it, and
- * `natureOfJobsInterestedIn` was never reached, so `stipendMin` / `salaryMin`
- * were blank in every row. That is precisely the case this module's header
- * names as the reason the sample sheet exists ("One row cannot show that
- * `stipendMin` applies to an Internship while `salaryMin` applies to a
- * Full-time role"). It was also order-fragile: ka-dhwd's 170-value `itiTrade`
- * declared first would have produced 14 near-identical rows and nothing else.
- *
- * Uncapped — {@link MAX_SAMPLE_ROWS} is applied by the caller after deduping,
- * so the budget is spent on rows that actually differ. The count here is the
- * SUM of the controllers' value counts, not their product.
+ * Ordered breadth-first (every controller's first value, then second, ...) so
+ * every controller is shown within the row cap. Uncapped here; the caller
+ * applies {@link MAX_SAMPLE_ROWS} after deduping.
  *
  * @param controllers - Controller fields and their allowed values.
  * @returns Pin sets, one controller value each, breadth-first across
@@ -787,9 +654,7 @@ function buildPinSets(
 /**
  * Drops entries whose key repeats one already seen, keeping the first.
  *
- * Pinning controller A leaves controller B at its first value, so the row
- * pinning B's first value renders identically to the row pinning A's — a wasted
- * line in a sheet whose whole job is showing DIFFERENT cases.
+ * Different pin sets can render the same row; this drops the repeats.
  *
  * @param items - Items in the order they should be kept.
  * @param key - Derives the comparison key for an item.
@@ -835,9 +700,8 @@ function writeSampleSheet(
 /**
  * Writes tab 4: the empty grid, with the dropdowns.
  *
- * Header row only above the data — no label row, no merged banner. The
- * exported CSV's first line has to be the header the parser matches on, so
- * anything else above the data would be uploaded as a row and fail.
+ * Only the header row sits above the data, since the exported CSV's first line
+ * must be the header the parser matches.
  *
  * @param wb - Target workbook.
  * @param name - Sheet name.
@@ -862,21 +726,10 @@ function writeGridSheet(
   plans.forEach((plan, i) => {
     const range = ranges.get(plan.name);
     if (range === undefined) return;
-    // An array column takes several values in one delimiter-joined cell, so a
-    // single-value dropdown would reject valid input. Its allowed values are on
-    // tab 2 and in the header note instead.
+    // No dropdown on array columns: a single-value list would reject joined values.
     if (plan.isArray) return;
 
-    // Added against the RANGE, not cell by cell. Assigning `dataValidation` on
-    // `getCell(row, col)` materialises that cell, and with 499 rows x every
-    // closed-set column that left the sheet declaring
-    // `<dimension ref="A1:AJ500">` with 499 empty `<row>` records. They export
-    // as nothing in LibreOffice, but "used range" is a per-application
-    // judgement and the failure mode if an application disagrees is ugly and
-    // silent: the operator types 2 rows, Save As writes 500 lines, and the
-    // upload reports 498 failures they cannot explain. The XLSX format stores
-    // list validations by `sqref` range anyway, so addressing the range is both
-    // the smaller file and the one with no phantom rows.
+    // Validate the range, not each cell; per-cell validation creates empty rows that may export.
     const letter = columnLetter(i + 1);
     rangeValidations(sheet).add(`${letter}2:${letter}${VALIDATED_ROWS}`, {
       type: 'list',
@@ -893,14 +746,8 @@ function writeGridSheet(
 /**
  * Range-addressable view of a sheet's data validations.
  *
- * exceljs keeps `worksheet.dataValidations` at runtime (`lib/doc/data-validations.js`)
- * but leaves it out of its published typings — `index.d.ts` exposes only the
- * per-cell `dataValidation` and has the worksheet-level model commented out. The
- * cast is deliberate rather than incidental, and the workbook test asserts both
- * halves of what it buys: that the emitted `sqref` ranges are present, and that
- * the sheet declares no phantom rows. An exceljs upgrade that moved this would
- * fail those assertions instead of silently shipping a workbook with no
- * dropdowns.
+ * exceljs has `worksheet.dataValidations` at runtime but not in its typings,
+ * hence the cast. The workbook test checks the emitted ranges.
  *
  * @param sheet - Sheet to add range validations to.
  * @returns The sheet's validation collection.
@@ -918,21 +765,9 @@ function rangeValidations(sheet: ExcelJS.Worksheet): {
 /**
  * Number format for a column, so Excel does not rewrite what the operator types.
  *
- * Left on the default General format, Excel reinterprets the cell and **Save As
- * CSV writes the DISPLAYED value, not the typed one** — which is the same
- * post-hoc `errors.csv` failure this generator exists to remove, reintroduced
- * by cell formatting:
- *
- * - a `format: date` column typed as `2024-01-01` exports per locale as
- *   `01/01/2024`, which `ajv-formats` (registered in
- *   `packages/schema-loader/src/ajv.ts`) rejects;
- * - a leading zero is dropped, so a pincode or an ID loses a digit;
- * - a long numeric id flips to scientific notation.
- *
- * Text (`@`) is therefore the default: it makes the exported CSV byte-identical
- * to what was typed for every column. Date columns get an explicit ISO mask
- * instead, so a value Excel has already parsed as a date still round-trips in
- * the shape `formatExample` demonstrates.
+ * Save As CSV writes the displayed value, so the General format can change dates,
+ * drop leading zeros, or use scientific notation. Text (`@`) is the default;
+ * date columns use an ISO `yyyy-mm-dd` mask.
  *
  * @param plan - The column.
  * @returns The Excel number-format code for the column's cells.
@@ -944,9 +779,7 @@ function numFmtFor(plan: ColumnPlan): string {
 /**
  * Lays out one column per planned field, in the CSV template's order.
  *
- * Width comes from the human label rather than the field name: the label is
- * what the header note and tab 2 show, and it is the better guide to how wide
- * the typed values will be.
+ * Width comes from the human label.
  *
  * @param sheet - Sheet to lay out.
  * @param plans - Column plans.
@@ -992,8 +825,7 @@ function styleHeader(
 }
 
 /**
- * Builds the note attached to a header cell — the label, whether it is
- * required, when it applies, and what it accepts, without leaving the cell.
+ * Builds the header cell note: label, whether required, when it applies, and what it accepts.
  *
  * @param plan - The column.
  * @param byName - Columns by field name, for the controller's label.
@@ -1010,13 +842,10 @@ function headerNote(
   const when = onlyWhen(plan, byName);
   if (when) lines.push(`${when}. Otherwise leave blank.`);
 
-  // One sentence about multiplicity, not two: an array column with a closed set
-  // used to get "join them with |" AND "Pick one of: …", which contradict each
-  // other about the same cell.
+  // One sentence about multiplicity.
   const pick = plan.isArray ? 'Pick one or more of' : 'Pick one of';
   const joinHint = plan.isArray ? ` — join them with "${arrayDelimiter}".` : '';
-  // `writeGridSheet` skips validation on an array column, so this must not send
-  // the operator to a dropdown that is deliberately not there.
+  // Array columns have no dropdown, so do not mention one.
   const manyValues = plan.isArray
     ? `${plan.allowed.length} values to choose from — see "${VALUES_SHEET}". More than one is allowed — join them with "${arrayDelimiter}".`
     : `${plan.allowed.length} values to choose from — use the dropdown, or see "${VALUES_SHEET}".`;

@@ -1,5 +1,6 @@
 /**
- * Process entrypoint. Builds the Fastify app and starts listening.
+ * Process entrypoint of the aggregator API (`@aggregator-dpg/api`). Builds the
+ * Fastify app and starts listening.
  */
 
 import './env.js';
@@ -40,10 +41,8 @@ async function main(): Promise<void> {
 
   const app = await buildApp();
 
-  // RBAC: load the catalogue snapshot once (built-in roles are seeded by
-  // migration 0031). A no-op with RBAC_MODE=off; with log/enforce an
-  // unreadable or invalid catalogue stops boot rather than failing requests
-  // later.
+  // Load the RBAC role snapshot once. No-op with RBAC_MODE=off; otherwise an
+  // invalid catalogue stops boot.
   try {
     await initRbac();
   } catch (err) {
@@ -51,10 +50,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Seed the admin-approval HTML pages with the active deployment's
-  // brand so the email-triggered approve/reject flow renders the same
-  // logo + palette as the portal. Network config is cached, so this is
-  // cheap and only runs once.
+  // Give the approval HTML pages the deployment's brand (logo, palette).
   try {
     const cfg = await getNetworkConfig();
     setApprovalBrand({
@@ -72,11 +68,9 @@ async function main(): Promise<void> {
     logger.warn({ err }, 'approval brand seed failed — falling back to default');
   }
 
-  // Put the configured network root / Default-org values in place of the
-  // placeholders 0028 seeds. Runs on every boot, whether or not this process
-  // ran the migrations (existing instances migrate with the operator tool).
-  // Never throws: a failure is logged and retried on the next boot. The IdP
-  // mirror runs after `listen` (below), so Keycloak never delays readiness.
+  // Replace the seeded placeholders for the network root and Default org with
+  // configured values. Runs on every boot and never throws; a failure is logged
+  // and retried next boot. The IdP mirror runs after `listen`.
   let rootState: RootState | null = null;
   {
     let network: { urlSlug?: string; name?: string; legalName?: string | null } | null = null;
@@ -95,11 +89,9 @@ async function main(): Promise<void> {
     );
   }
 
-  // Externalised email copy: merge the network/brand/instance override layers
-  // over the bundled defaults, then assert every key a case declares exists.
-  // Overrides are best-effort (a missing layer is normal, an unreadable one is
-  // logged and skipped) but a hole in the DEFAULTS is a build defect, so the
-  // completeness check is allowed to stop boot rather than send blank emails.
+  // Merge email copy overrides (network, brand, instance) over the bundled
+  // defaults. A missing or unreadable override is skipped; a key missing from
+  // the defaults stops boot.
   const overridden = await loadEmailMessageOverrides();
   assertMessagesComplete();
   logger.info({
@@ -111,9 +103,7 @@ async function main(): Promise<void> {
   const shutdown = (signal: string) => async () => {
     logger.info({ signal }, 'shutting down');
     try {
-      // Drain HTTP first, then close every backing connection. The rate-limiter
-      // Redis, the shared API Redis, and the BullMQ enqueue queue were all
-      // previously leaked on SIGTERM (only Fastify + the PG pool were closed).
+      // Drain HTTP first, then close every backing connection.
       await app.close();
       stopRbacRefresh();
       await closeDb();

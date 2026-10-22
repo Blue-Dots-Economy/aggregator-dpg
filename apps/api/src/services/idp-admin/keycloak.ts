@@ -1,14 +1,12 @@
 /**
  * Keycloak adapter for the IdP admin port.
  *
- * Talks to Keycloak's admin REST API (`/admin/realms/{realm}/...`) using a
- * confidential service-account client (`aggregator-api`) granted only the
- * `realm-management:manage-users` role. Tokens are fetched via the
- * client_credentials grant and cached until ~30s before expiry.
+ * Part of `@aggregator-dpg/api`. Calls Keycloak's admin REST API
+ * (`/admin/realms/{realm}/...`) with a confidential service-account client
+ * (`aggregator-api`) that has only `realm-management:manage-users`. Tokens come
+ * from the client_credentials grant and are cached until ~30s before expiry.
  *
- * Maintained as a thin layer — every method maps to one or two REST calls;
- * no SDK in the dependency graph (DPG-friendly: replace by writing a new
- * adapter, no SDK lock-in).
+ * Each method maps to one or two REST calls; no SDK is used.
  */
 
 import {
@@ -88,8 +86,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
       };
     }
 
-    // Keycloak returns the new user's URL in the Location header. Re-fetch
-    // to get the full representation.
+    // Keycloak returns the new user's URL in Location; re-fetch the full record.
     const location = res.value.headers.get('location');
     const userId = location?.split('/').pop();
     if (!userId) {
@@ -171,8 +168,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
       };
     }
     const list = (await res.value.json()) as KcUserPayload[];
-    // Defensive filter — Keycloak's q param matches partial values in some
-    // versions, so post-filter for an exact match on the attribute value.
+    // Some Keycloak versions match `q` partially; keep exact matches only.
     const exact = list.find((u) => {
       const vals = u.attributes?.[name];
       return Array.isArray(vals) && vals.includes(value);
@@ -223,9 +219,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
     const tokenResult = await this.getToken();
     if (!tokenResult.ok) return tokenResult;
 
-    // Read existing user representation so we can merge — Keycloak's
-    // `PUT /users/{id}` replaces the full `attributes` block, so partial
-    // writes need a read-modify-write cycle.
+    // `PUT /users/{id}` replaces all attributes, so read and merge first.
     const current = await this.readUser(userId, tokenResult.value);
     if (!current.ok) return current;
 
@@ -240,10 +234,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
       }
     }
 
-    // Some Keycloak versions interpret an admin PUT that omits top-level
-    // fields (email, username, firstName, lastName) as "clear those
-    // fields". To stay safe across versions, write back the full user
-    // representation we just read, with the merged attributes layered on.
+    // Write back the full user; some Keycloak versions clear omitted top-level fields.
     const u = current.value;
     const fullPayload: Record<string, unknown> = {
       id: u.id,
@@ -332,9 +323,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
       };
     }
 
-    // Keycloak's `POST /groups` ignores the `attributes` field on creation, so
-    // attributes must be persisted with a follow-up `PUT /groups/{id}`. Without
-    // this the group carries no `org_id` / `display_name`.
+    // `POST /groups` ignores `attributes`, so set them with `PUT /groups/{id}`.
     if (Object.keys(kcAttributes).length > 0) {
       const putUrl = `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/groups/${groupId}`;
       const putRes = await this.safeFetch(putUrl, {
@@ -371,7 +360,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
       headers: { Authorization: `Bearer ${tokenResult.value}` },
     });
     if (!res.ok) return res;
-    // 404 → already gone; treat as success (idempotent).
+    // 404 means already gone; treat as success.
     if (!res.value.ok && res.value.status !== 404) {
       return {
         ok: false,
@@ -454,8 +443,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
     const tokenResult = await this.getToken();
     if (!tokenResult.ok) return tokenResult;
 
-    // Resolve the realm-role representation first — the role-mappings endpoint
-    // requires the full {id,name} object, not just the role name.
+    // The role-mappings endpoint needs the full {id,name} role object.
     const roleRes = await this.safeFetch(
       `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/roles/${encodeURIComponent(role)}`,
       { headers: { Authorization: `Bearer ${tokenResult.value}` } },

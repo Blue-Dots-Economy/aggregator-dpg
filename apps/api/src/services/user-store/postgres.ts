@@ -1,23 +1,17 @@
 /**
- * Postgres adapter for the aggregator store.
+ * Postgres adapter for the api coordinator store.
  *
- * Wraps Drizzle queries against the `users` table. Driver-level errors
- * are normalised to the abstract `StoreError` codes so callers never see raw
- * pg error fields.
+ * Runs Drizzle queries against the `users` table and maps driver errors to
+ * `StoreError` codes.
  *
- * Person-contact data is read from the `contact` table through
- * `users.contact_id` (migrations 0025/0026) and composed back into the
- * Beckn `contact` shape, so callers and the API contract are unchanged. Writes
- * go to `contact` in the same transaction as the row (`db/contact-writes.ts`),
- * and every write re-reads the joined row, because `RETURNING` cannot include
- * the joined contact.
+ * Contact data is read from `contact` through `users.contact_id` and composed
+ * into the Beckn `contact` shape. Contact writes run in the same transaction as
+ * the row (`db/contact-writes.ts`). Every write re-reads the joined row, since
+ * `RETURNING` cannot include the join.
  *
- * Org details (`url`, `locations`, company / GST) are rendered from the joined
- * org with the `legacy_org_details` fallback (`org-details.ts`, migration 0028).
- *
- * Consent is read from the `consent_record` ledger (newest registration row)
- * and written by the caller's `recordConsent` hook inside the create
- * transaction (migration 0029).
+ * Org details come from the joined org with the `legacy_org_details` fallback.
+ * Consent is read from the newest registration row in `consent_record`, and
+ * written by the caller's `recordConsent` hook inside the create transaction.
  */
 
 import { and, desc, eq, inArray, lt, sql, type SQL } from 'drizzle-orm';
@@ -222,8 +216,7 @@ export class PostgresUserStore extends UserStoreBase {
     try {
       updated = await getDb().transaction(async (tx) => {
         if (patch.contact !== undefined) {
-          // Lock the row, then move its contact. A re-key is done in place and
-          // cascades to the FK, so no contact is left orphaned.
+          // Lock the row, then move its contact. A re-key cascades to the FK.
           const [current] = await tx
             .select({ contactId: users.contactId })
             .from(users)
@@ -284,7 +277,7 @@ export class PostgresUserStore extends UserStoreBase {
         .set({ status: 'active', updatedBy, updatedAt: new Date() })
         .where(coordinator(eq(users.id, id), eq(users.status, 'pending')))
         .returning({ id: users.id });
-      // No row → not pending (a concurrent approval already committed).
+      // No row: not pending, already decided.
       if (!rows[0]) return { ok: true, value: null };
       return this.reread('userStore.approveFromPending', id);
     } catch (err: unknown) {
@@ -347,7 +340,7 @@ export class PostgresUserStore extends UserStoreBase {
         .set({ status: 'inactive', rejectedAt: now, updatedBy, updatedAt: now })
         .where(coordinator(eq(users.id, id), eq(users.status, 'pending')))
         .returning({ id: users.id });
-      // No row → not pending (a concurrent decision already committed).
+      // No row: not pending, already decided.
       if (!rows[0]) return { ok: true, value: null };
       return this.reread('userStore.rejectFromPending', id);
     } catch (err: unknown) {
@@ -363,8 +356,7 @@ export class PostgresUserStore extends UserStoreBase {
     const ABORT = Symbol('abort');
     try {
       const outcome = await getDb().transaction(async (tx) => {
-        // The DELETE takes the row lock: a concurrent approval waits for this
-        // transaction, then finds the row gone (or still pending if aborted).
+        // The DELETE locks the row; a concurrent approval waits for this transaction.
         const rows = await tx
           .delete(users)
           .where(
@@ -395,9 +387,7 @@ export class PostgresUserStore extends UserStoreBase {
         // '{}' serves every domain.
         conds.push(sql`(${users.serves} = '{}' OR ${filter.serves} = ANY(${users.serves}))`);
       }
-      // Paged at millisecond precision on both sides: `created_at` holds
-      // microseconds, the cursor (a JS Date) only milliseconds, and rows
-      // inserted in one transaction share an instant.
+      // Compare at millisecond precision: the cursor is a JS Date, `created_at` has microseconds.
       const createdMs = sql`date_trunc('milliseconds', ${users.createdAt})`;
       if (filter.cursor) {
         const c = filter.cursor;
@@ -448,11 +438,10 @@ export class PostgresUserStore extends UserStoreBase {
   // ─── Reads ────────────────────────────────────────────────────────────────
 
   /**
-   * `users` JOIN `contact` LEFT JOIN its org — the one read shape every query
-   * uses. `contact_id` is NOT NULL and RESTRICT-protected; the org join is
-   * LEFT so a missing org can never hide a coordinator. Every caller filters
-   * through {@link coordinator}, so an admin account never reads as an
-   * aggregator (the token's `aggregator_id` is resolved here).
+   * Builds the shared read: `users` JOIN `contact` LEFT JOIN its org.
+   *
+   * The org join is LEFT so a missing org never hides a coordinator. Callers
+   * filter through {@link coordinator}.
    *
    * @param db - Executor (the pool, or the caller's transaction).
    */
@@ -478,8 +467,7 @@ export class PostgresUserStore extends UserStoreBase {
              AND ${consentRecord.source} IN ${REGISTRATION_CONSENT_SOURCES}
            ORDER BY ${consentRecord.acceptedAt} DESC, ${consentRecord.createdAt} DESC
            LIMIT 1)`,
-        // The invited address: the one 0029 kept on the row (no invite left, or
-        // spelled differently there), else the invite's.
+        // The invited address: `profile.legacy_invite_email`, else the invite's.
         inviteEmail: sql<string | null>`coalesce(
           ${users.profile} ->> 'legacy_invite_email',
           (SELECT ${registrationInvites.email} FROM ${registrationInvites}
@@ -509,9 +497,8 @@ export class PostgresUserStore extends UserStoreBase {
   }
 
   /**
-   * Re-reads a row just written by a single-statement update (the joined
-   * contact is not in `RETURNING`). A row that vanished in between is
-   * reported as `NOT_FOUND`.
+   * Re-reads a row just written by a single-statement update.
+   * A row that vanished in between is `NOT_FOUND`.
    */
   private async reread(op: string, id: string): Promise<StoreResult<Coordinator>> {
     const found = await this.findOne(op, eq(users.id, id));
@@ -528,18 +515,12 @@ export class PostgresUserStore extends UserStoreBase {
     contextId: string,
     start: number,
   ): StoreResult<never> {
-    // SQLSTATE `code` + `constraint` come from the shared pg-error helpers,
-    // which walk Drizzle's `.cause` chain. Gating on the code maps a
-    // unique/check violation to a clean 409 rather than a misleading 503.
-    // The driver message is never echoed: Drizzle puts the query parameters
-    // (emails, phones) in it.
+    // Never echo the driver message: it contains query parameters (emails, phones).
     const code = pgErrorCode(err);
     const constraint = pgConstraint(err) ?? '';
     const message = err instanceof Error ? err.message : '';
 
-    // contactId() rejects a non-canonical phone before any SQL runs — the
-    // same class of problem the database CHECK would have reported. Its
-    // message is a fixed string, safe to return.
+    // contactId() rejects a non-canonical phone before any SQL runs. Its message is fixed and safe to return.
     if (err instanceof TypeError && message.startsWith('contactId:')) {
       logger.warn({
         operation: op,
@@ -551,12 +532,9 @@ export class PostgresUserStore extends UserStoreBase {
     }
 
     if (code === PG_UNIQUE_VIOLATION) {
-      // Match each constraint explicitly. Defaulting the unknown case to
-      // DUPLICATE_SLUG told the user "that name is already taken" for whatever
-      // unique index a later migration happens to add (#718 review); the
-      // constraint name is logged below either way.
+      // Match each constraint explicitly; an unknown one is plain DUPLICATE.
       let storeCode: StoreError['code'] = 'DUPLICATE';
-      // The same person already has a coordinator account (one per person per role).
+      // The same person already has a coordinator account.
       if (constraint.includes('users_contact_type_unique')) storeCode = 'DUPLICATE_EMAIL';
       else if (constraint.includes('contact_phone')) storeCode = 'DUPLICATE_PHONE';
       else if (constraint.includes('contact_email')) storeCode = 'DUPLICATE_EMAIL';
@@ -587,8 +565,8 @@ export class PostgresUserStore extends UserStoreBase {
   }
 
   /**
-   * Maps any other database failure to `DB_UNAVAILABLE`, logging the SQLSTATE
-   * and error class only (never the driver message, which carries parameters).
+   * Maps any other database failure to `DB_UNAVAILABLE`.
+   * Logs only the SQLSTATE and error class, never the driver message.
    */
   private mapReadError(op: string, err: unknown, start?: number): StoreResult<never> {
     const code = pgErrorCode(err);
@@ -623,11 +601,10 @@ type JoinedRow = {
 };
 
 /**
- * Builds the Beckn `contact` the API has always returned, from the linked
- * `contact` row, the org's company / GST (rendered) and `alternate_phone`. Keys
- * are emitted in the order the legacy jsonb column produced them (Postgres
- * orders jsonb keys by length, then bytes), so a serialised response stays
- * byte-identical.
+ * Builds the Beckn `contact` from the `contact` row, the org's company and GST,
+ * and `alternate_phone`.
+ *
+ * Key order is fixed (jsonb order: by length, then bytes) so responses stay byte-stable.
  */
 function composeContact(
   row: JoinedRow,
@@ -646,9 +623,8 @@ function composeContact(
 }
 
 /**
- * Composes the API's consent object from the newest ledger row: `given_at` is
- * the row's `accepted_at` (G14). `null` when there is no registration row or
- * it has no `valid_till`.
+ * Composes the consent object from the newest ledger row (`given_at` = `accepted_at`).
+ * `null` when there is no registration row or it has no `valid_till`.
  */
 function composeConsent(c: JoinedRow['consent']): Coordinator['consent'] {
   if (c?.till == null) return null;
@@ -694,11 +670,10 @@ function toDomain(row: JoinedRow): Coordinator {
 }
 
 /**
- * Restricts a filter to coordinator accounts. Every read AND write of this
- * store goes through it: `users` also holds org owners' admin accounts
- * (migration 0027), and an admin id must never resolve as an aggregator — not
- * on a read (the token's `aggregator_id` is looked up here) and not on a write
- * (an admin id yields NOT_FOUND, never a CHECK violation or a deleted account).
+ * Restricts a filter to coordinator accounts.
+ *
+ * Every read and write of this store uses it. `users` also holds admin
+ * accounts, and an admin id must never resolve as a coordinator; it gets NOT_FOUND.
  *
  * @param conds - Further conditions (undefined entries are ignored).
  * @returns The combined condition.

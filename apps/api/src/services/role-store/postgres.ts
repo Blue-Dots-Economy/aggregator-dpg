@@ -1,10 +1,9 @@
 /**
- * Postgres role-assignment store (`@aggregator-dpg/api`, RBAC, migration 0030).
+ * Postgres role-assignment store (`@aggregator-dpg/api`).
  *
- * `user_role` and `iam_audit`; every write commits with its audit row. One
- * live row per (user, role, organisation) is held by a partial unique index.
- * Logs SQLSTATE only — never the driver message, which carries query
- * parameters.
+ * Writes `user_role` and `iam_audit`; every write commits with its audit row.
+ * A partial unique index allows one live row per user, role and org. Logs
+ * SQLSTATE only, never the driver message (it holds query parameters).
  */
 
 import { and, desc, eq, gt, isNull, or } from 'drizzle-orm';
@@ -52,7 +51,7 @@ function dbFailure(op: string, e: unknown): RoleStoreResult<never> {
   return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'database unavailable' } };
 }
 
-/** The live assignment of one role in one organisation. */
+/** Matches the live assignment of one role in one organisation. */
 const liveOf = (userId: string, roleKey: string, orgId: string) =>
   and(
     eq(userRole.userId, userId),
