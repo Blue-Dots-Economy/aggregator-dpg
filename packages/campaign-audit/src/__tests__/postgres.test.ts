@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { PostgresCampaignAuditWriter } from '../postgres.js';
-import { buildRequestedAudit, buildCompletedAudit, buildDumpAudit } from '../testing/index.js';
+import { buildRequestedAudit, buildCompletedAudit } from '../testing/index.js';
 
 function stubDb() {
   const values = vi.fn().mockResolvedValue(undefined);
@@ -24,15 +24,6 @@ describe('PostgresCampaignAuditWriter', () => {
     expect(row.event).toBe('completed');
     expect(row.actorSignalstackOrgId).toBe('org_test');
     expect(row.outcome).toBe('succeeded');
-  });
-
-  it('writes a dump row with no org and an empty pii_fields', async () => {
-    const { db, values } = stubDb();
-    await new PostgresCampaignAuditWriter(db).recordDumpAccess(buildDumpAudit());
-    const row = values.mock.calls[0]![0] as Record<string, unknown>;
-    expect(row.channel).toBe('dump');
-    expect(row.actorSignalstackOrgId).toBeUndefined();
-    expect(row.piiFields).toEqual([]);
   });
 
   it('returns an err Result instead of throwing when the insert fails', async () => {

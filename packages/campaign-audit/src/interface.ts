@@ -14,8 +14,8 @@
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 
-/** The audited action. Wider than the campaign channels — the dump is audited too. */
-export type AuditChannel = 'export' | 'email' | 'voice' | 'dump';
+/** The audited action. */
+export type AuditChannel = 'export' | 'email' | 'voice';
 
 /** Result of a completed action. Never set on a `requested` row. */
 export type AuditOutcome = 'succeeded' | 'partial' | 'failed';
@@ -29,7 +29,7 @@ export type AuditOutcome = 'succeeded' | 'partial' | 'failed';
 export interface RequestedAuditInput {
   /** = `campaign_job.id`. */
   correlationId: string;
-  channel: Exclude<AuditChannel, 'dump'>;
+  channel: AuditChannel;
   actorUserId: string;
   actorSignalstackOrgId: string;
   actorAzp?: string;
@@ -57,7 +57,7 @@ export interface RequestedAuditInput {
  */
 export interface CompletedAuditInput {
   correlationId: string;
-  channel: Exclude<AuditChannel, 'dump'>;
+  channel: AuditChannel;
   actorSignalstackOrgId: string;
   outcome: AuditOutcome;
   completedAt: Date;
@@ -70,32 +70,6 @@ export interface CompletedAuditInput {
   errorCode?: string;
   /** Export-link recipient — an OPERATOR address. */
   recipientRef?: string;
-}
-
-/**
- * The single row for a non-PII dump access.
- *
- * The dump is synchronous, has no org, no items and no purpose, so it produces
- * ONE row rather than the request/complete pair. `actorSignalstackOrgId` is absent by
- * design — that is the signature of a whole-network access.
- */
-export interface DumpAuditInput {
-  /** Generated per request — there is no job to borrow an id from. */
-  correlationId: string;
-  actorUserId: string;
-  actorAzp?: string;
-  outcome: AuditOutcome;
-  completedAt: Date;
-  /** The bucket/prefix that was pre-signed. */
-  destination?: string;
-  network?: string;
-  instance?: string;
-  requestIp?: string;
-  endpoint: string;
-  traceId?: string;
-  errorCode?: string;
-  /** Non-PII extras, e.g. `{ files: 3, bytes: 1234 }`. */
-  details?: Record<string, unknown>;
 }
 
 /**
@@ -124,14 +98,4 @@ export abstract class CampaignAuditWriterBase {
    *   failure or DB/upstream error.
    */
   abstract recordCompleted(input: CompletedAuditInput): Promise<Result<void, BaseError>>;
-
-  /**
-   * Appends the single row for a synchronous, non-PII dump access.
-   *
-   * @param input - Requester identity + outcome for the whole-network dump;
-   *   has no `actorSignalstackOrgId` by design.
-   * @returns ok(void) on successful insert; err(BaseError) on validation
-   *   failure or DB/upstream error.
-   */
-  abstract recordDumpAccess(input: DumpAuditInput): Promise<Result<void, BaseError>>;
 }

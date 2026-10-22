@@ -14,7 +14,6 @@ exports[`declared route table > declares every route of the app 1`] = `
   "GET /v1/bulk-uploads/:id": "profiles.view",
   "GET /v1/bulk-uploads/:id/errors.csv": "profiles.view_pii",
   "GET /v1/bulk-uploads/template": "profiles.onboard",
-  "GET /v1/campaign/dump": "service",
   "GET /v1/campaign/email": "profiles.view",
   "GET /v1/campaign/email/:job_id": "profiles.view",
   "GET /v1/campaign/export": "profiles.view",

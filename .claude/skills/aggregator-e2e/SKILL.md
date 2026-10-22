@@ -119,7 +119,7 @@ Remaining API groups, same shape — assert status **and** the persisted effect:
 - `/public/v1/aggregators/:orgSlug/registrations/:slug` (public submit);
   `/v1/bulk-uploads` (presign) → `/start` → poll `/v1/bulk-uploads/:id` →
   `/v1/bulk-uploads/:id/errors.csv`; `/v1/support/config` + `/v1/support`;
-  `/v1/campaign/{export,voice,email}` + job poll + `/v1/campaign/dump`;
+  `/v1/campaign/{export,voice,email}` + job poll;
   `/v1/dashboard/items` incl. `?lifecycle=` and `meta.tiles`;
   `/admin/v1/invites` (valid grant mints; **expired** grant mints nothing and
   re-mails a fresh grant to the DB-stored owner email only).

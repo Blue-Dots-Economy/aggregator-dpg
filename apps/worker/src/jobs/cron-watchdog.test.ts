@@ -495,7 +495,6 @@ describe('runWatchdog — stalled-campaign completed audit row (#617 follow-up)'
       recordRequested: async () => ({ success: true, value: undefined }) as never,
       recordCompleted: async () =>
         err(new UpstreamError('insert failed', { code: 'CAMPAIGN_AUDIT_INSERT_FAILED' })),
-      recordDumpAccess: async () => ({ success: true, value: undefined }) as never,
     } as never);
 
     const res = await runWatchdog();
