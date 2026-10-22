@@ -1,11 +1,8 @@
 /**
  * Shared HS256 signed-link token helpers (`@aggregator-dpg/api`).
  *
- * The invite (#700) and grant (#701) token services mint/verify the same shape
- * of short-lived HS256 JWT — same secret, same issuer, same JWT pre-check, same
- * jose-error → structured-failure mapping. Centralising that here keeps the two
- * modules from duplicating the boilerplate; each still owns its own audience and
- * claim shape.
+ * The invite and grant token services share the secret, issuer, JWT
+ * pre-check and error mapping defined here. Each owns its audience and claims.
  */
 
 import { jwtVerify, errors as joseErrors, type JWTPayload } from 'jose';
@@ -31,19 +28,20 @@ export function getTokenKey(): Uint8Array {
   return cachedKey;
 }
 
-/** Test helper — clears the cached key so env changes take effect. */
+/** Test helper; clears the cached key so env changes take effect. */
 export function _resetTokenKeyCache(): void {
   cachedKey = null;
 }
 
-/** Cheap structural pre-check so obvious non-JWTs fail as MALFORMED, not throw. */
+/** Quick shape check so obvious non-JWTs fail as MALFORMED instead of throwing. */
 export function isJwtLike(token: unknown): token is string {
   return typeof token === 'string' && token.length > 0 && token.includes('.');
 }
 
 /**
- * Verifies signature + issuer + audience + expiry and returns the payload.
- * Throws the underlying jose error on any failure (map it with {@link mapJoseError}).
+ * Verifies signature, issuer, audience and expiry, and returns the payload.
+ *
+ * Throws the jose error on failure; map it with {@link mapJoseError}.
  *
  * @param token - Raw JWT.
  * @param audience - Expected `aud` claim.
@@ -65,9 +63,9 @@ export interface TokenVerifyFailure {
 }
 
 /**
- * Maps a thrown jose verify error to a structured failure. Callers that support
- * an expired-but-signed recovery path handle `EXPIRED` themselves before/around
- * calling this.
+ * Maps a thrown jose verify error to a structured failure.
+ *
+ * Callers with an expired-link recovery path handle `EXPIRED` themselves.
  *
  * @param err - The thrown jose error.
  * @returns The mapped failure.

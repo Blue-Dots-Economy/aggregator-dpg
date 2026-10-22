@@ -1,12 +1,11 @@
 /**
- * In-memory aggregator store.
+ * In-memory coordinator store for api unit tests.
  *
- * Process-local Maps, suitable for unit tests. Mirrors the Postgres adapter's
- * external behaviour: unique slug / phone / email, `serves` from `type`, the
- * fail-closed consent hook, immutable slug on update, and org details rendered from the
- * coordinator's org with the `legacy_org_details` fallback (0028). Org details
- * are seeded per org id (`UserStoreFake.seedOrgDetails`); the Default org
- * is {@link MEMORY_DEFAULT_ORG_ID} unless a test changes it.
+ * Matches the Postgres adapter's behaviour: unique slug, phone and email,
+ * `serves` from `type`, the fail-closed consent hook, immutable slug, and org
+ * details from the org with the `legacy_org_details` fallback. Org details are
+ * seeded per org id (`UserStoreFake.seedOrgDetails`); the Default org is
+ * {@link MEMORY_DEFAULT_ORG_ID} unless a test changes it.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -34,8 +33,8 @@ export const MEMORY_DEFAULT_ORG_ID = '00000000-0000-0000-0000-0000000000d0';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 
 /**
- * The contact id for this email + phone, or `null` when the phone is not
- * canonical — the Postgres store rejects that write as `CHECK_VIOLATION`.
+ * The contact id for this email and phone, or `null` when the phone is not canonical.
+ * Postgres rejects that write as `CHECK_VIOLATION`.
  */
 function safeContactId(email: string, phone: string): string | null {
   try {
@@ -61,9 +60,8 @@ export class InMemoryUserStore extends UserStoreBase {
   protected readonly inviteEmails = new Map<string, string>();
 
   /**
-   * Renders org details and the composed contact as Postgres does: company /
-   * GST come from the org (or the coordinator's legacy values), never from
-   * the submitted contact.
+   * Renders org details and the composed contact as Postgres does.
+   * Company and GST come from the org or legacy values, never the submitted contact.
    */
   private render(
     orgId: string,
@@ -87,10 +85,8 @@ export class InMemoryUserStore extends UserStoreBase {
   }
 
   /**
-   * Re-renders a row's org details on read, as the Postgres join does, so org
-   * details seeded after a coordinator was created are reflected. Rows whose
-   * org has no seeded details and that hold no legacy values are returned as
-   * stored (rows seeded directly by tests keep their own url / locations).
+   * Re-renders a row's org details on read, as the Postgres join does.
+   * Rows with no seeded org details and no legacy values are returned as stored.
    */
   protected view(row: Coordinator): Coordinator {
     const orgId = row.parentOrgId;
@@ -122,8 +118,7 @@ export class InMemoryUserStore extends UserStoreBase {
     if (!cid) return errResult('CHECK_VIOLATION', 'contactId: phone must be canonical');
 
     const id = randomUUID();
-    // Fail-closed like the Postgres transaction: nothing is stored when the
-    // consent write fails.
+    // Nothing is stored when the consent write fails.
     if (input.recordConsent) {
       try {
         await input.recordConsent(undefined, id);
@@ -392,7 +387,7 @@ export class InMemoryUserStore extends UserStoreBase {
       this.byEmail.delete(prev.contactEmail);
       this.byEmail.set(next.contactEmail, next.id);
     }
-    // org_slug is immutable — no maintenance needed.
+    // org_slug is immutable.
   }
 }
 

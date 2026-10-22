@@ -1,29 +1,19 @@
 /**
- * Admin approval endpoints.
- *
- * URL shape mirrors the spec under `4.3.2 Endpoints by Actor & Action`:
+ * Coordinator approval routes reached from the emailed review link (api app).
  *
  *   GET  /admin/v1/aggregator-registrations/read/:id?token=...&intent=approve|reject
- *     Renders an HTML confirmation page that tells the admin which action
- *     they're about to take. If `aggregators.status` is already terminal
- *     (`active` after approve / `inactive` after reject) — i.e. a previous
- *     click ran to completion — it instead renders an "already decided"
- *     page so duplicate clicks never resend emails.
+ *     Renders the confirm page, or an "already decided" page when the
+ *     coordinator is no longer pending.
  *
  *   POST /admin/v1/aggregator-registrations/decision/:id
  *     Body: { token, decision: 'approve' | 'reject', reason? }
- *     Verifies the JWT, re-checks `aggregators.status` (single-use guard),
- *     applies the action:
- *       approve → store.updateStatus(id, 'active') + idp.enableUser
- *                 + idp.setUserDecision(kcId, 'approved')
- *       reject  → store.updateStatus(id, 'inactive')
- *                 + idp.setUserDecision(kcId, 'rejected')
- *     Sends the applicant a notification email and returns a result page.
+ *     Verifies the token and records the decision through `decideCoordinator`.
  *
- * Source of truth for the decision is the DB column `aggregators.status`.
- * Keycloak mirrors the decision via the `decision_made` user attribute so
- * the auth middleware can gate login at JWT-verify time without an extra
- * DB hit.
+ *   POST /admin/v1/aggregator-registrations/renew/:id
+ *     Mints a fresh token from an expired one and renders the confirm page.
+ *
+ * The coordinator's `status` column is the source of truth. Keycloak mirrors
+ * it in the `decision_made` attribute so login can be gated from the token.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -59,11 +49,9 @@ const ReadQuerySchema = z.object({
 });
 
 /**
- * Per-IP throttle shared by the three approval-token verify entrypoints
- * (read / decision / renew). Defence-in-depth against brute-forcing a forged
- * token — the renew path in particular accepts an expired-but-signature-valid
- * token, so it is the most replayable. Renders an HTML 429 page (these are all
- * browser flows) and returns true when the caller has been rate-limited.
+ * Per-IP throttle for the read, decision and renew routes, against token brute-forcing.
+ *
+ * Renders an HTML 429 page when the caller is limited.
  *
  * @param req - The inbound request (its `ip` is the bucket key).
  * @param reply - The reply to render the 429 page onto when limited.
@@ -99,16 +87,10 @@ async function approvalVerifyRateLimited(
 /**
  * Emits a structured audit log entry for an admin approval action.
  *
- * These routes are reached by an admin clicking a signed link in an email —
- * there is no Keycloak-authenticated admin identity to attribute the action
- * to (see `docs/security/admin-approval-auth-design.md` for why, and the
- * proposed fix). `identity_verified: false` makes that gap explicit in every
- * audit entry rather than silently implying stronger attribution than the
- * system actually has.
+ * The link carries no signed-in admin identity, so every entry logs `identity_verified: false`.
  *
  * @param req - The Fastify request handling the admin action.
- * @param fields - Action-specific context (aggregator id, action name, and
- *   optional decision outcome) to merge into the log entry.
+ * @param fields - Aggregator id, action and optional decision.
  */
 function logApprovalAudit(
   req: FastifyRequest,
@@ -161,9 +143,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
 
       if (!token) return sendPage(reply, missingTokenPage());
 
-      // Strict verify first (rejects expired). A merely-expired link offers an
-      // inline "Regenerate & review" step (no self-email to the reviewer);
-      // invalid/malformed still error.
+      // An expired but valid link offers "Regenerate & review"; an invalid one errors.
       const verified = await verifyTokenForId(token, aggregatorId, 'aggregator');
       if (!verified.ok) {
         const lenient = await verifyTokenForId(token, aggregatorId, 'aggregator', {
@@ -197,8 +177,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
 
-      // The link must be bound to the coordinator's org (every link carries the
-      // org claim since 0028).
+      // The link must be bound to the coordinator's org.
       if (lookup.aggregator.parentOrgId && verified.org !== lookup.aggregator.parentOrgId) {
         return sendHtml(reply, 400, renderResultPage(orgMismatchView()));
       }
@@ -215,8 +194,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
           applicantEmail: lookup.kcUser.email,
           ...(lookup.aggregator.inviteEmail ? { invitedEmail: lookup.aggregator.inviteEmail } : {}),
           association: lookup.aggregator.name,
-          // `type` is null when the coordinator serves every domain. Surface
-          // `actor_type` instead so the admin page always shows something.
+          // `type` is null when the coordinator serves every domain; show `actor_type` then.
           aggregatorType: lookup.aggregator.type ?? lookup.aggregator.actorType,
           postUrl: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
           expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
@@ -260,16 +238,13 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
       const lookup = await loadAggregatorAndUser(aggregatorId);
       if (!lookup.ok) return sendHtml(reply, lookup.status, lookup.html);
 
-      // Single-use guard: DB status is the source of truth. Anything other
-      // than `pending` means this aggregator has already been decided.
+      // Anything other than `pending` is already decided.
       const prior = decisionFromStatus(lookup.aggregator.status);
       if (prior) {
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
 
-      // Org-bound coordinator: the token must carry the matching `org` claim so
-      // an owner's link can only decide their own org's coordinators (spec §9 /
-      // A1). Every coordinator has an org since 0028 (the Default org included).
+      // The token's `org` claim must match, so an owner's link decides only its own org's coordinators.
       const parentOrgId = lookup.aggregator.parentOrgId;
       if (parentOrgId && verified.org !== parentOrgId) {
         return sendHtml(reply, 400, renderResultPage(orgMismatchView()));
@@ -387,9 +362,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         return sendHtml(reply, 200, renderResultPage(alreadyDecidedView(prior)));
       }
 
-      // The fresh token is bound to the coordinator's CURRENT org, so the
-      // decision handler's org check passes. Only a link already bound to that
-      // org may be renewed; a link bound to another org is never upgraded.
+      // Only a link bound to the coordinator's current org may be renewed.
       const currentOrg = lookup.aggregator.parentOrgId;
       if (currentOrg && verified.org !== currentOrg) {
         return sendHtml(reply, 400, renderResultPage(orgMismatchView()));
@@ -430,12 +403,9 @@ interface PriorDecision {
 }
 
 /**
- * Maps `aggregators.status` to a prior-decision marker. Returning `null`
- * means the row is still in `pending` and the admin click should proceed.
+ * Maps a coordinator's status to its prior decision, or `null` while pending.
  *
- * `retired` is treated as a prior approval (the aggregator was once active
- * and was later retired) so the approve button doesn't reactivate a retired
- * account behind the admin's back.
+ * `retired` counts as approved, so a retired account is never reactivated.
  */
 function decisionFromStatus(status: Coordinator['status']): PriorDecision | null {
   switch (status) {
@@ -523,8 +493,7 @@ async function loadAggregatorAndUser(aggregatorId: string): Promise<LookupOk | L
       }),
     };
   }
-  // The DB's own link to this coordinator's IdP login (0027). Best-effort:
-  // never blocks the review.
+  // Record the coordinator's IdP login. Best effort; never blocks the review.
   await recordLoginIdentity(aggregatorId, kc.value.id, 'aggregator-approvals.recordIdentity');
   return { ok: true, aggregator: stored.value, kcUser: kc.value };
 }

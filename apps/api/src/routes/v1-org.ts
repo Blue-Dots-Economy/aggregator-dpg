@@ -1,6 +1,5 @@
 /**
- * Console organisation routes `/v1/org/*` (`@aggregator-dpg/api`, user & org
- * Phase 5).
+ * Console organisation routes `/v1/org/*` of the aggregator API (`@aggregator-dpg/api`).
  *
  *   GET   /v1/org/read/:id              one org within reach, owner and counts
  *   POST  /v1/org/search                orgs within reach, by name, keyset paged
@@ -10,8 +9,8 @@
  *
  * Every handler calls `requireActor` first (admins only). A target out of
  * reach answers 404; a route the actor's kind cannot use answers 403. The
- * Default org's details are never editable (design R8). The root is read by
- * the network admin only and is not part of a search.
+ * Default org's details are never editable. Only the network admin can read
+ * the root, and search never returns it.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';

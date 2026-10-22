@@ -1,31 +1,18 @@
 /**
- * Campaign voice-call dispatch (aggregator-dpg#577, #602 async-job engine).
+ * Campaign voice-call dispatch.
  *
  *   POST /v1/campaign/voice → 202 { status, requested, job_id }
  *
- * Mirrors `campaign-export.ts`: validates the shared request envelope, applies
- * request idempotency (`Idempotency-Key`), an ingress rate-limit and a per-org
- * active-job cap, then in one transaction persists a `campaign_job` (+ one
- * `campaign_job_item` per id, each carrying `action:'voice_call'` so the store's
- * active-dedup guard arms and a collision with another live job surfaces as
- * `duplicate_active`) and enqueues a single `campaign-process` job carrying the
- * job id. The decrypt → Raya dispatch → persist work runs in `apps/worker` (the
- * `campaign` role) with BullMQ retry, writing item + job status back. The shared
- * submit flow (auth → validate → rate-limit → cap → createJob → enqueue with
- * enqueue-failure compensation → 202) lives in `../campaign/submit-job.ts`,
- * parameterized here for the voice channel.
+ * Uses the shared submit flow in `../campaign/submit-job.ts`: creates a
+ * `campaign_job` with one `voice_call` item per id and enqueues a
+ * `campaign-process` job. An id already in another live voice job is marked
+ * `duplicate_active`. The worker dispatches the calls to Raya.
  *
- * `content` is the caller's Raya dispatch request — validated here against
- * `voiceContentSchema` (agent id, optional batch/variables/start-options) so a
- * malformed request 400s before a job row is ever created. `action` is v1-only
- * `dispatch`; anything else fails schema validation.
+ * `content` is validated against `voiceContentSchema`. `action` must be `dispatch`.
  *
- * Auth is a Keycloak Bearer token scoped to the campaign-manager client; the
- * caller's Signals org id is the token's `signalstack_org_id` claim. The
- * aggregator (from `aggregator_id`) must be active. `requested_by` is resolved
- * from the verified token (its `email` claim, falling back to the aggregator's
- * `contact_email`) purely as an audit trail — the route never returns PII, only
- * `{ job_id }`. Belongs to `@aggregator-dpg/api`.
+ * Auth is a campaign-manager Bearer token; the aggregator must be active.
+ * `requested_by` (token `email`, else the aggregator's contact email) is kept
+ * for the audit trail. The route never returns PII. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
 import { campaignEnvelopeSchema } from '../campaign/envelope.js';
@@ -69,15 +56,8 @@ export async function registerCampaignVoiceRoutes(app: FastifyInstance): Promise
           }
           return contentParsed.data;
         },
-        // `variables` are additional participant fields the caller told Raya
-        // to substitute into the call script — released alongside the fixed
-        // name/phone the dispatch itself requires (#617). `variables` is
-        // caller-controlled free text (`voiceContentSchema` deliberately
-        // leaves it unvalidated — see `../campaign/audit-field-names.ts`),
-        // so it is NOT spread into the audit row verbatim: only the
-        // identifier-shaped entries are recorded by name, and anything else
-        // is folded into a redaction count instead of ever landing a
-        // participant value in `campaign_pii_audit` (#617 fix-round-1).
+        // `variables` is caller free text. Only identifier-shaped names are
+        // audited; anything else is recorded as a redaction count, never a value.
         piiFields: (content) => [
           'name',
           'phone',
@@ -86,7 +66,7 @@ export async function registerCampaignVoiceRoutes(app: FastifyInstance): Promise
         buildItem: (itemId) => ({ itemId, action: 'voice_call' }),
         maxItems: config.CAMPAIGN_VOICE_MAX_ITEMS,
         maxItemsErrorCode: 'CAMPAIGN_VOICE_TOO_MANY_ITEMS',
-        // Per-channel bucket: a voice burst must not throttle export/email.
+        // Rate-limit bucket per channel.
         rateLimitNamespace: 'campaign-submit-voice',
         submitWindowSeconds: config.CAMPAIGN_VOICE_SUBMIT_WINDOW_SECONDS,
         submitMax: config.CAMPAIGN_VOICE_SUBMIT_MAX,

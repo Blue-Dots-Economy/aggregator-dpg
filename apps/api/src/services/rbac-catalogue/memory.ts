@@ -1,9 +1,9 @@
 /**
  * In-memory RBAC catalogue (`@aggregator-dpg/api`) for unit tests.
  *
- * Mirrors the Postgres store over migration-seeded data: `setRoles` stands in
- * for the seed, the revision changes on every write, and `failWith` makes
- * later calls fail, to test boot and refresh paths.
+ * Behaves like the Postgres store. `setRoles` stands in for the migration
+ * seed, the revision changes on every write, and `failWith` makes later calls
+ * fail.
  */
 
 import type { RoleDefinition } from '@aggregator-dpg/rbac/interface';
@@ -26,8 +26,7 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
   }
 
   /**
-   * Replaces the stored roles, as the migration seed or an edit would (test
-   * setup only).
+   * Replaces the stored roles, as the migration seed would. Test setup only.
    *
    * @param roles - The new roles.
    */
@@ -36,7 +35,7 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
     this.rev += 1;
   }
 
-  /** The stored roles (a copy). */
+  /** Returns a copy of the stored roles. */
   storedRoles(): RoleDefinition[] {
     return structuredClone(this.roles);
   }

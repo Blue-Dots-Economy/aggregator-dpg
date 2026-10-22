@@ -1,10 +1,9 @@
 /**
  * Postgres adapter for the campaign job store.
  *
- * Wraps Drizzle queries against `campaign_job` / `campaign_job_item`. Job
- * creation is transactional (job + all item rows commit together); job status
- * roll-up counts are DERIVED with `COUNT(*) ... GROUP BY status` so they can't
- * drift. All errors map to the abstract `StoreError` codes.
+ * Wraps Drizzle queries against `campaign_job` / `campaign_job_item`. A job and
+ * its items are created in one transaction. Status counts come from
+ * `COUNT(*) ... GROUP BY status`. All errors map to the `StoreError` codes.
  *
  * @module @aggregator-dpg/api
  */
@@ -79,8 +78,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
         if (!row) {
           // Idempotency-key conflict — return the original job, add no items.
           created = false;
-          // Scope the replay lookup to the same tenant as the index, so a key
-          // reused by another org can never return that org's job.
+          // Scoped to the org, so another org's key never returns its job.
           const existing = await tx
             .select()
             .from(campaignJob)
@@ -117,19 +115,13 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
   }
 
   /**
-   * Inserts one item row per input, applying dedup-on-create: an item whose
-   * `action` is non-null and already active (`pending`/`resolved`/`submitted`)
-   * for the same `(itemId, action)` pair in ANY job is inserted as
-   * `duplicate_active` instead of `pending`. Runs inside the caller's
-   * transaction.
+   * Inserts one item row per input inside the caller's transaction.
    *
-   * Race-safe: the pre-check SELECT can go stale before the INSERT runs, if
-   * another transaction commits the same `(itemId, action)` concurrently. The
-   * insert uses `ON CONFLICT ... DO NOTHING` on the active-dedup partial index
-   * so a raced row is silently skipped rather than aborting the whole
-   * statement; any item missing from the returned rows is retried once as
-   * `duplicate_active`, a status the index never covers, so the retry can't
-   * conflict again.
+   * An item with a non-null `action` already active for the same
+   * `(itemId, action)` in any job is inserted as `duplicate_active`. A
+   * concurrent insert that wins the race is skipped by `ON CONFLICT DO NOTHING`;
+   * those items are then inserted as `duplicate_active`, which the index does
+   * not cover.
    */
   private async insertJobItems(
     tx: CampaignTx,
@@ -376,8 +368,6 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
             eq(campaignJobItem.jobId, jobId),
             eq(campaignJobItem.itemId, itemId),
             // Forward-only: skip rows already in a terminal status.
-            // Derived from TERMINAL_ITEM_STATUSES so this can't drift from the
-            // in-memory store (it did: the literal used to include 'resolved').
             sql.raw(`"campaign_job_item"."status" NOT IN (${terminalItemStatusSqlList()})`),
           ),
         );
@@ -399,10 +389,7 @@ export class PostgresCampaignJobStore extends CampaignJobStoreBase {
         .update(campaignJobItem)
         .set({
           status: 'submitted',
-          // `rayaBatchId` here is the Drizzle column-mapped field name (see
-          // `db-schema/schema.ts` — the `raya_batch_id` column keeps its
-          // original name as a storage detail); `args.providerBatchRef` is
-          // the provider-generic store-contract field.
+          // The `raya_batch_id` column stores `providerBatchRef`.
           rayaBatchId: args.providerBatchRef,
           ...(args.providerRef !== undefined ? { providerRef: args.providerRef } : {}),
           updatedAt: now,
@@ -552,8 +539,6 @@ function toItemView(row: typeof campaignJobItem.$inferSelect): JobItemView {
     action: row.action,
     status: row.status,
     providerRef: row.providerRef,
-    // Map the Drizzle column-mapped field (`raya_batch_id`, unchanged) onto
-    // the provider-generic store-contract field.
     providerBatchRef: row.rayaBatchId,
     skipReason: row.skipReason,
     errorReason: row.errorReason,

@@ -1,10 +1,10 @@
 /**
- * Role-assignment store contract (`@aggregator-dpg/api`, RBAC, migration 0030).
+ * Role-assignment store contract (`@aggregator-dpg/api`).
  *
- * `user_role` rows: the additional roles a user holds in an organisation, with
- * an optional expiry (base roles follow membership and are never stored), and
- * the append-only `iam_audit` trail. Every write and its audit row commit
- * together. Design: `docs/rbac/rbac-design-aggregator.md` §1 and §4.
+ * Covers `user_role` (additional roles a user holds in an org, with optional
+ * expiry; base roles follow membership and are not stored) and the
+ * append-only `iam_audit` trail. Every write commits with its audit row.
+ * See `docs/rbac/rbac-design-aggregator.md`.
  *
  * Every method returns a `Result`-style union and never throws across the
  * service boundary.
@@ -18,13 +18,13 @@ export interface UserRoleRecord {
   orgId: string;
   grantedBy: string | null;
   grantedAt: Date;
-  /** Null = no expiry. */
+  /** Null means no expiry. */
   expiresAt: Date | null;
   revokedAt: Date | null;
   revokedBy: string | null;
 }
 
-/** An `iam_audit` entry. Ids and names only — never contact data. */
+/** An `iam_audit` entry. Ids and names only, never contact data. */
 export interface AuditEntry {
   event: string;
   actorUserId: string | null;

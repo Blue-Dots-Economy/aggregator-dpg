@@ -1,12 +1,8 @@
 /**
- * Shared Postgres driver-error helpers (`@aggregator-dpg/api`).
+ * Postgres driver-error helpers (`@aggregator-dpg/api`).
  *
- * Drizzle wraps the pg driver error, so the SQLSTATE `code` and `constraint`
- * name live on `.cause` (sometimes nested) rather than the top-level error —
- * whose `.message` is just the query text. Centralised here so every store
- * classifies unique/check violations the same way and **by SQLSTATE**, never by
- * substring-matching the query text (which would misreport a connection failure
- * on a query mentioning a constraint name as a 409).
+ * Drizzle wraps the pg error, so the SQLSTATE `code` and `constraint` are on
+ * `.cause`. Stores classify violations by SQLSTATE, never by matching message text.
  */
 
 export const PG_UNIQUE_VIOLATION = '23505';

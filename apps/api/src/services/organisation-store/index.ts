@@ -1,5 +1,5 @@
 /**
- * Public surface + factory for the aggregator-org store.
+ * Public surface and factory for the aggregator-org store (`@aggregator-dpg/api`).
  *
  * Returns a process-wide singleton. Tests override via `_setOrganisationStore`.
  */

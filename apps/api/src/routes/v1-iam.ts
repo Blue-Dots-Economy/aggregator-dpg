@@ -1,5 +1,5 @@
 /**
- * RBAC roles API (`@aggregator-dpg/api`; design §4).
+ * RBAC roles API of the aggregator API (`@aggregator-dpg/api`).
  *
  *   GET  /v1/roles                     every role and its permissions
  *   GET  /v1/user/roles/:id            a user's base and additional roles, and what the caller may assign
@@ -9,11 +9,9 @@
  *   PATCH /v1/roles/update/:key        change a custom role (network admin)
  *   POST /v1/roles/delete/:key         delete an unused custom role (network admin)
  *
- * `requireActor()` admits admins only. The assign and revoke routes declare
- * `signed_in`: the permission they need is the role's own `assigned_by`,
- * checked in the target organisation by `services/authz/roles.ts` together
- * with the other rules. Every write is checked strictly — refused in `log`
- * mode too, since these routes have no pre-RBAC behaviour to preserve. Every
+ * `requireActor()` admits admins only. Assign and revoke declare `signed_in`;
+ * `services/authz/roles.ts` checks the role's `assigned_by` permission in the
+ * target organisation. Writes are always enforced, also in `log` mode. Every
  * change is written to `iam_audit`.
  */
 
@@ -69,8 +67,7 @@ function throwCustomFailure(f: CustomRoleFailure): never {
   switch (f.kind) {
     case 'rbac_off':
       throw httpError('RBAC_NOT_ENABLED');
-    // Defense in depth: the routes are not registered when the flag is off, so
-    // this maps to the same 404 a missing route returns if a call reaches it.
+    // The routes are not registered when the flag is off; answer the same 404.
     case 'custom_roles_disabled':
       throw httpError('NOT_FOUND');
     case 'not_found':
@@ -165,9 +162,8 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
       const rt = getRbacRuntime();
       if (!rt) throw httpError('RBAC_NOT_ENABLED');
       const roles = [...rt.roles.byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
-      // Derived from the registered routes, so a permission that nothing
-      // checks yet is reported as such instead of implying power it does
-      // not confer.
+      // Derived from the registered routes, so a permission no route checks is
+      // reported as unused.
       const enforced = enforcedCapabilities();
       return reply.status(200).send({
         roles: roles.map(toWireRole),
@@ -279,11 +275,9 @@ export function registerV1IamRoutes(app: FastifyInstance): void {
     },
   );
 
-  // CUSTOM-ROLES authoring (design §4). Registered only when the deploy-time
-  // `RBAC_CUSTOM_ROLES_ENABLED` flag is on; left off (the default) these routes
-  // do not exist — a request 404s and they are absent from the OpenAPI spec.
-  // The primary gate is not-registering here; `custom-roles.ts` carries a
-  // defense-in-depth guard that answers the same 404 if a call ever reaches it.
+  // Custom-role authoring routes, registered only when
+  // `RBAC_CUSTOM_ROLES_ENABLED` is on. Otherwise they 404 and are not in the
+  // OpenAPI spec. `custom-roles.ts` also answers 404 when the flag is off.
   if (!config.RBAC_CUSTOM_ROLES_ENABLED) return;
 
   app.post(

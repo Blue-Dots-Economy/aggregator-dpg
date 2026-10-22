@@ -1,23 +1,15 @@
 /**
- * Coordinator-invite mint endpoint (#700 mint, #701 recovery folded in).
- *
- * Always registered (the org hierarchy is always on since migration 0028).
+ * Coordinator-invite mint endpoint of the aggregator API (`@aggregator-dpg/api`).
  *
  *   POST /admin/v1/invites   body { grant, recipients[] }
- *     Authed by the owner GRANT token (the owner cannot log in). Three outcomes,
- *     all keyed off the grant:
- *       - valid grant  → mint one 14-day invite per recipient (refreshing an
- *         already-pending address), email each, return
- *         { recovered:false, sent, resent, invalid[] }. Per-org rate limited —
- *         the mandatory mitigation against a leaked grant (§7.2).
- *       - EXPIRED grant (signature valid) → mint NOTHING; re-mail a fresh grant
- *         to the org's REGISTERED owner address (never a request-supplied one),
- *         return { recovered:true, sent:0, resent:0, invalid:[] }. This folds
- *         the old /grant/renew recovery into the one endpoint.
- *       - invalid grant → GRANT_INVALID.
+ *     Authed by the owner grant token. Outcomes:
+ *       - valid grant: mint one 14-day invite per recipient (refreshing a
+ *         pending address) and email each. Rate limited per org.
+ *       - expired grant (valid signature): mint nothing; mail a sign-in link to
+ *         the org's registered owner address. Returns `recovered: true`.
+ *       - invalid grant: GRANT_INVALID.
  *
- * Mint logic lives in `services/invites/mint.ts`, shared with the console's
- * `POST /v1/user/create` (Phase 5). Belongs to `@aggregator-dpg/api`.
+ * Mint logic is in `services/invites/mint.ts`, shared with `POST /v1/user/create`.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -41,9 +33,8 @@ const RecipientSchema = z.object({
 
 const MintBodySchema = z.object({
   grant: z.string().min(1),
-  // Per-request recipient cap — configurable (INVITE_MINT_MAX_RECIPIENTS,
-  // default 10). Keep it ≤ the per-org window max so one full batch fits the
-  // rate window rather than tripping the limit.
+  // Per-request recipient cap (INVITE_MINT_MAX_RECIPIENTS). Keep it at or below
+  // the per-org rate limit so one full batch fits.
   recipients: z.array(RecipientSchema).min(1).max(config.INVITE_MINT_MAX_RECIPIENTS),
 });
 
@@ -80,9 +71,7 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
       const log = req.log.child({ operation: 'invites.mint' });
       const body = req.body as z.infer<typeof MintBodySchema>;
 
-      // M4: per-IP throttle before the (cheap) grant verify — matches every
-      // other public surface. Fail-open (a coarse DoS guard, not the anti-abuse
-      // control; the per-org limit below is the fail-closed one).
+      // Per-IP throttle, fail-open. The per-org limit below is fail-closed.
       const ipRl = await checkInviteIpRate(req.ip);
       if (!ipRl.allowed) {
         void reply.header('Retry-After', String(ipRl.retryAfterSeconds));
@@ -108,17 +97,15 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
           fields: { sub_operation: 'orgStore.findById' },
         });
       }
-      // Grant is implicitly revoked once the org leaves active (§5.2). Bind to a
-      // local so TS narrows it non-null for the rest of the handler.
+      // A grant is revoked once the org is no longer active.
       const orgRow = org.value;
-      // The Default org has no owner console to invite from (0028).
+      // The Default org takes no invites.
       if (orgRow?.status !== 'active' || orgRow.isDefault) {
         throw httpError('TARGET_ORG_INACTIVE');
       }
 
-      // H1: the per-org limit covers BOTH the recovery email and the mint batch,
-      // so a leaked/expired grant can't loop the recovery path to send unbounded
-      // mail. Recovery costs one slot (one email); a mint costs one per recipient.
+      // The per-org limit covers both recovery and minting: recovery costs one
+      // slot, a mint costs one per recipient.
       const cost = grant.expired ? 1 : body.recipients.length;
       const rl = await checkInviteMintRate(orgId, cost);
       if (!rl.allowed) {
@@ -129,9 +116,8 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
         });
       }
 
-      // Expired grant → recovery: mail the REGISTERED owner address (never a
-      // request input) a console sign-in link — no fresh grant (Phase 5: grants
-      // are no longer minted; still-valid ones work until they expire).
+      // Expired grant: mail a sign-in link to the registered owner address,
+      // never a request input. No new grant is minted.
       if (grant.expired) {
         const mail = renderOwnerGrantRefreshed({
           orgName: orgRow.displayName,

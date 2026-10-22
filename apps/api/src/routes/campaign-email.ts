@@ -1,30 +1,19 @@
 /**
- * Campaign participant email (aggregator-dpg#578, #602 async-job engine).
+ * Campaign participant email.
  *
  *   POST /v1/campaign/email → 202 { status, requested, job_id }
  *
- * Mirrors `campaign-export.ts` and `campaign-voice.ts`: validates the shared
- * request envelope, applies request idempotency (`Idempotency-Key`), an ingress
- * rate-limit and a per-org active-job cap, then in one transaction persists a
- * `campaign_job` (+ one `campaign_job_item` per recipient, each with
- * `action: null` so the store's active-dedup guard stays disarmed — dedup is
- * voice-only) and enqueues a single `campaign-process` job carrying the job id.
- * The decrypt → render → send work runs in `apps/worker` (the `campaign` role)
- * with BullMQ retry, writing per-recipient item status back so the caller can
- * poll `GET /v1/campaign/email/{job_id}` for outcomes. The shared submit flow
- * (auth → validate → rate-limit → cap → createJob → enqueue with
- * enqueue-failure compensation → 202) lives in `../campaign/submit-job.ts`,
- * parameterized here for the email channel.
+ * Uses the shared submit flow in `../campaign/submit-job.ts`: creates a
+ * `campaign_job` with one item per recipient and enqueues a `campaign-process`
+ * job. The worker decrypts, renders and sends, writing item status back for
+ * `GET /v1/campaign/email/{job_id}`. Email items have no active-job dedup.
  *
- * `content` is the message — validated here against `emailContentSchema`
- * (subject, Markdown body, optional `reply_to`), with the `{{placeholder}}`
- * allow-list enforced fail-closed so a typo 400s before a job row exists.
+ * `content` (subject, Markdown body, optional `reply_to`) is validated against
+ * `emailContentSchema`; an unknown `{{placeholder}}` answers 400.
  *
- * Auth is a Keycloak Bearer token scoped to the campaign-manager client; the
- * caller's Signals org id is the token's `signalstack_org_id` claim, which also
- * scopes the decrypt (an unowned id is skipped, never leaked). The route never
- * returns PII — recipient addresses are resolved server-side in the worker and
- * never leave the aggregator. Belongs to `@aggregator-dpg/api`.
+ * Auth is a campaign-manager Bearer token; its `signalstack_org_id` claim
+ * scopes the decrypt, and unowned ids are skipped. The route never returns
+ * PII. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
 import { requiredContactFields } from '@aggregator-dpg/campaign-template';
@@ -58,34 +47,24 @@ export async function registerCampaignEmailRoutes(app: FastifyInstance): Promise
       await submitCampaignJob(req, reply, {
         channel: 'email',
         parseContent: parseEmailContent,
-        // `email` is unconditional: every send releases the recipient address
-        // to the mail provider, even a plain announcement with no
-        // placeholders. `requiredContactFields()` only reports the OPTIONAL
-        // extras a template's `{{placeholder}}`s pull in (`name`, `phone`).
-        // Mirrors the worker's own contact projection in
-        // `apps/worker/src/services/campaign-process/email.ts`
-        // (`decryptEmailItems`) field for field, so the audit row states what
-        // was actually released (#617). Only `requiredContactFields()` is
-        // shared; this `['email', ...]` wrapper is duplicated there, so the
-        // two CAN drift — change both together, or extract a shared helper.
+        // Every send releases `email`; placeholders may add `name` and `phone`.
+        // Keep in sync with `decryptEmailItems` in the worker.
         piiFields: (content) => [
           ...new Set([
             'email',
             ...requiredContactFields(content.subject as string, content.body_markdown as string),
           ]),
         ],
-        // `action: null` keeps email out of the item-level active-dedup
-        // predicate — dedup is ON for voice only (batch spec §3.2).
+        // `action: null`: no active-job dedup for email.
         buildItem: (itemId) => ({ itemId, action: null }),
         maxItems: config.CAMPAIGN_EMAIL_MAX_ITEMS,
         maxItemsErrorCode: 'CAMPAIGN_TOO_MANY_ITEMS',
-        // Per-channel bucket: an email burst must not throttle export/voice.
+        // Rate-limit bucket per channel.
         rateLimitNamespace: 'campaign-submit-email',
         submitWindowSeconds: config.CAMPAIGN_EMAIL_SUBMIT_WINDOW_SECONDS,
         submitMax: config.CAMPAIGN_EMAIL_SUBMIT_MAX,
         maxActivePerOrg: config.CAMPAIGN_EMAIL_MAX_ACTIVE_PER_ORG,
-        // Retries stay ON (3, not 1): the worker's per-item terminal-status
-        // guard means a retried job re-emails nobody already marked `sent`.
+        // Safe to retry: the worker skips items already marked `sent`.
         attempts: config.CAMPAIGN_EMAIL_ATTEMPTS,
         enqueueFailedErrorCode: 'EMAIL_ENQUEUE_FAILED',
         enqueueFailedFallbackMessage: 'failed to enqueue email',

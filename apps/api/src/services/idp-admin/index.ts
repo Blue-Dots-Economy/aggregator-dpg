@@ -1,5 +1,5 @@
 /**
- * IdP admin adapter factory. Returns a process-wide singleton.
+ * IdP admin adapter factory (`@aggregator-dpg/api`). Returns a process-wide singleton.
  *
  * Required env (when not overridden by `_setIdpAdmin` in tests):
  *   - KEYCLOAK_URL                  base URL, e.g. http://keycloak:8080

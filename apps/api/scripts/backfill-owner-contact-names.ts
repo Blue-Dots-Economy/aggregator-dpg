@@ -1,8 +1,7 @@
 /**
- * Runner for the one-off org-owner name backfill (the `contact` table, migrations 0025/0026).
+ * Runs the org-owner name backfill for the `contact` table (api app script).
  *
- * Run ONCE per existing instance after the release that ships migration 0025,
- * from a checkout (the api image has no tsx):
+ * Run once per existing instance after migration 0025, from a checkout (the api image has no tsx):
  *
  *   DATABASE_URL=… KEYCLOAK_URL=… KEYCLOAK_REALM=… \
  *   KEYCLOAK_ADMIN_CLIENT_ID=… KEYCLOAK_ADMIN_CLIENT_SECRET=… \

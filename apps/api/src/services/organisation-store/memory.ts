@@ -1,12 +1,10 @@
 /**
- * In-memory aggregator-org store.
+ * In-memory organisation store for unit tests, in `@aggregator-dpg/api`.
  *
- * Process-local Map; mirrors the Postgres adapter's external behaviour
- * (partial-slug uniqueness over non-terminal rows, atomic approve/reject
- * guard, lowercased owner email, the Default org skipped by owner lookups,
- * name-sorted active list). It holds aggregator orgs only; the
- * network-facilitator root is a separate slot (see `OrganisationStoreFake`).
- * Unit-test use only.
+ * Matches the Postgres adapter's behaviour: slug uniqueness over live rows,
+ * atomic approve/reject, lowercased owner email, Default org skipped by owner
+ * lookups. It holds aggregator orgs only; the root is a separate slot (see
+ * `OrganisationStoreFake`).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -28,7 +26,7 @@ const NON_TERMINAL = new Set(['pending', 'active']);
 
 export class InMemoryOrganisationStore extends OrganisationStoreBase {
   protected readonly byId = new Map<string, Organisation>();
-  /** Owner admin-account id per owner contact (one account per person, 0027). */
+  /** Owner admin-account id per owner contact (one account per person). */
   protected readonly adminByContact = new Map<string, string>();
   /** Contacts that also hold a coordinator account (see {@link markCoordinator}). */
   protected readonly coordinatorContacts = new Set<string>();
@@ -54,8 +52,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       return err('DB_UNAVAILABLE', 'TypeError');
     }
     const orgId = randomUUID();
-    // Fail-closed like the Postgres transaction: nothing is stored when the
-    // consent write fails.
+    // Nothing is stored when the consent write fails.
     if (input.recordConsent) {
       try {
         await input.recordConsent(undefined, orgId);
@@ -168,8 +165,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     // As in Postgres: the Default org is never removable here.
     if (gone?.isDefault) return Promise.resolve({ ok: true, value: undefined });
     this.byId.delete(id);
-    // Mirror aggregator_orgs_owner_ad: release the owner's account once it
-    // owns no other org.
+    // Release the owner's account once it owns no other org, as the database trigger does.
     if (gone && ![...this.byId.values()].some((o) => o.ownerUserId === gone.ownerUserId)) {
       this.adminByContact.delete(gone.contactId);
     }
@@ -283,7 +279,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       status: next,
       updatedAt: new Date(),
       updatedBy,
-      // Stamp rejected_at (write-once) on reject only (#726).
+      // Stamp the write-once rejected_at on reject only.
       ...(next === 'inactive' ? { rejectedAt: new Date() } : {}),
     };
     this.byId.set(id, updated);
@@ -291,9 +287,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
   }
 }
 
-/**
- * The org an owner match resolves to, as in Postgres: live first, then newest.
- */
+/** Picks the org an owner match resolves to: live first, then newest. */
 function pickOwned(
   match: (o: Organisation) => boolean,
   byId: Map<string, Organisation>,

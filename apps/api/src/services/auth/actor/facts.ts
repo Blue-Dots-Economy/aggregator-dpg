@@ -1,5 +1,5 @@
 /**
- * Pure facts about a resolved actor (`@aggregator-dpg/api`, user & org Phase 5).
+ * Pure facts about a resolved actor, in the aggregator API (`@aggregator-dpg/api`).
  */
 
 import type { Actor } from './interface.js';

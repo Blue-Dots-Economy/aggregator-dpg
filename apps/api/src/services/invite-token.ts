@@ -1,15 +1,14 @@
 /**
- * Coordinator invite-token mint and verify (#700).
+ * Coordinator invite-token mint and verify (`@aggregator-dpg/api`).
  *
- * Mirrors `approval-token.ts`: HS256 via `jose`, issuer `aggregator-api`,
- * secret reused from `APPROVAL_TOKEN_SECRET`. The distinguishing claim is the
- * **audience `aggregator-invite`**, so an approval/admin token can never be
- * replayed as an invite (and vice versa) even though they share a secret.
+ * Same scheme as `approval-token.ts`: HS256 via `jose`, issuer
+ * `aggregator-api`, secret `APPROVAL_TOKEN_SECRET`. The audience
+ * `aggregator-invite` stops other tokens sharing the secret from being
+ * replayed as invites.
  *
- * The token carries the invite's identity (`sub` = the `registration_invites`
- * row `jti`), the org it admits to (`org`), and the bound recipient (`email`,
- * enforced on submit). Single-use is NOT a token property — it is the DB row's
- * `pending → consumed` CAS; the token only proves who/what/where.
+ * Claims: `sub` (the `registration_invites` row `jti`), `org`, and the bound
+ * `email` (checked on submit). Single use is enforced by the DB row's
+ * `pending → consumed` update, not the token.
  */
 
 import { SignJWT } from 'jose';
@@ -28,7 +27,7 @@ const INVITE_ROLE = 'coordinator';
 /** 14 days — overridable per-call via `ttlSec` (`INVITE_TOKEN_TTL_SECONDS`). */
 const DEFAULT_TTL_SEC = 14 * 24 * 60 * 60;
 
-/** The single invite role in this phase. */
+/** The only invite role. */
 export type InviteRole = typeof INVITE_ROLE;
 
 export interface MintInviteInput {
@@ -89,9 +88,7 @@ export type VerifyInviteResult = VerifyInviteOk | VerifyInviteErr;
 
 /**
  * Verifies an invite token's signature, audience, issuer, expiry, and required
- * claims. Unlike the approval token there is no `allowExpired` mode: an expired
- * invite has no in-app recovery — the owner re-mints (§6), so the caller only
- * ever needs a strict verify.
+ * claims. There is no `allowExpired` mode; the owner re-sends expired invites.
  *
  * @param token - Raw JWT string from the coordinator invite link.
  * @returns Parsed `jti` / `org` / `email` / `role` on success; structured error otherwise.

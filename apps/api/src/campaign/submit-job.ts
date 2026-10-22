@@ -1,18 +1,10 @@
 /**
- * Shared async-job submission flow for the campaign channels (aggregator-dpg#577,
- * #579).
+ * Async-job submission flow shared by the api app's campaign channels.
  *
- * `campaign-export.ts` and `campaign-voice.ts` are near-identical: auth →
- * active-aggregator check → requester/recipient resolution → content parsing →
- * item-id dedup/cap → ingress rate-limit → per-org active-job cap → createJob
- * → enqueue (re-enqueuing a `queued` idempotency replay) → enqueue-failure
- * compensation (mark the job `failed` so it doesn't strand the org's active
- * slot) → best-effort `requested` audit write (#617, never blocks or fails the
- * request — see `../services/campaign-audit/index.ts`) → `202`. This module
- * owns that shared flow; each route supplies its channel-specific knobs
- * (config keys, error codes, content shape, item action, PII field names,
- * log/message text) via {@link SubmitCampaignJobOptions} and stays
- * responsible only for its own Fastify route schema/response shape.
+ * Steps: auth, active-aggregator check, content parsing, item dedup and cap,
+ * rate limit, per-org active-job cap, create job, enqueue (marking the job
+ * `failed` if that fails), best-effort `requested` audit row, `202`.
+ * Each route passes its channel settings via {@link SubmitCampaignJobOptions}.
  *
  * @module @aggregator-dpg/api
  */
@@ -38,12 +30,7 @@ import { getCampaignAuditWriter, safeAudit } from '../services/campaign-audit/in
 export interface SubmitCampaignJobOptions {
   /** The campaign channel this submission belongs to. */
   channel: CampaignChannel;
-  /**
-   * Parses/validates the envelope's raw `content` into the job's persisted
-   * `content`. Export passes it through untouched; voice validates it against
-   * `voiceContentSchema`. Throw (via `httpError(...)`) to fail the request
-   * before any row is created.
-   */
+  /** Validates the raw `content` for the job; throw an `httpError` to fail before any row is created. */
   parseContent: (rawContent: unknown) => Record<string, unknown>;
   /** Builds one job item's `action` column from a deduped item id. */
   buildItem: (itemId: string) => CreateJobItemInput;
@@ -51,7 +38,7 @@ export interface SubmitCampaignJobOptions {
   maxItems: number;
   /** Error code thrown when `maxItems` is exceeded. */
   maxItemsErrorCode: ErrorCode;
-  /** Rate-limiter bucket namespace — per-channel so one channel's burst can't throttle another. */
+  /** Rate-limiter bucket namespace, one per channel. */
   rateLimitNamespace: string;
   /** Rate-limiter window, in seconds. */
   submitWindowSeconds: number;
@@ -65,27 +52,19 @@ export interface SubmitCampaignJobOptions {
   enqueueFailedErrorCode: ErrorCode;
   /** Fallback detail text when the enqueue rejection isn't an `Error`. */
   enqueueFailedFallbackMessage: string;
-  /** `operation` field for the structured log emitted when marking a stranded job failed also fails. */
+  /** `operation` log field used when marking an un-enqueued job failed also fails. */
   logOperation: string;
   /** `message` field of the `202` response body. */
   successMessage: string;
-  /**
-   * PII field NAMES this channel will release, derived from the parsed
-   * `content`. Names only — never values (#617). Recorded on the audit
-   * `requested` row so compliance knows what a job was authorized to release
-   * without the audit log itself ever holding a participant value.
-   */
+  /** PII field names this channel releases, for the audit `requested` row. Names only, never values. */
   piiFields: (content: Record<string, unknown>) => string[];
 }
 
 /**
- * Runs the shared campaign-job submission flow for one channel and sends the
- * `202` response itself. See the module doc for what's shared vs.
- * channel-specific.
+ * Runs the campaign-job submission flow for one channel and sends the `202`.
  *
- * @param req - The Fastify request. `req.body` must already have been
- *   validated against `campaignEnvelopeSchema` by the route's Fastify schema.
- * @param reply - The Fastify reply — this function sends the final response.
+ * @param req - The Fastify request; `req.body` is already validated against `campaignEnvelopeSchema`.
+ * @param reply - The Fastify reply; this function sends the response.
  * @param opts - Channel-specific config, see {@link SubmitCampaignJobOptions}.
  */
 export async function submitCampaignJob(
@@ -107,7 +86,7 @@ export async function submitCampaignJob(
     });
   }
 
-  // Ingress rate-limit, per org. Fails open on a Redis blip (see consume).
+  // Per-org rate limit. Fails open on a Redis error.
   const rl = await consume({
     namespace: opts.rateLimitNamespace,
     key: orgId,
@@ -121,7 +100,6 @@ export async function submitCampaignJob(
 
   const store = getCampaignJobStore();
 
-  // Per-org active-job cap.
   const active = await store.countActiveJobs(orgId, opts.channel);
   if (!active.ok) throw httpError('INTERNAL', { detail: 'could not read active job count' });
   if (active.value >= opts.maxActivePerOrg) {
@@ -144,22 +122,11 @@ export async function submitCampaignJob(
 
   await enqueueWithCompensation(created.value.job, created.value.created, opts, req, store);
 
-  // Audit the request (#617). Best effort — the job is already committed and
-  // enqueued above, so nothing here can prevent the campaign from running.
-  // `exactOptionalPropertyTypes` means an optional field must be OMITTED
-  // rather than set to `undefined`, so each one is conditionally spread.
-  //
-  // Only on first creation, never on an idempotency replay (#617 SHOULD-FIX
-  // 3): `created.value.created === false` means `createJob` found an existing
-  // row for this Idempotency-Key and returned it unchanged (its
-  // `onConflictDoNothing`) — no new release happened, so a second `requested`
-  // row here would double-count "how many people did org X touch" queries,
-  // and if the retry body differs from the original, it would describe a
-  // release that never actually occurred.
+  // Best-effort audit; the job is already committed and enqueued.
+  // Written only on first creation, not on an idempotency replay, so nothing is counted twice.
   if (created.value.created) {
     const purpose = metadataValue(envelope.metadata, 'purpose');
-    // Caller-supplied header — cap it so an oversized value can't bloat the
-    // audit row (#617 cheap item).
+    // Caller-supplied header; capped to keep the audit row small.
     const traceId = (req.headers['x-request-id'] as string | undefined)?.slice(0, 200);
     await safeAudit(
       () =>
@@ -194,24 +161,17 @@ export async function submitCampaignJob(
 }
 
 /**
- * Verifies the requesting aggregator is active and resolves the
- * `requested_by` audit-trail email — the token's own verified email claim,
- * falling back to the aggregator's stored `contact_email`. Split out of
- * {@link submitCampaignJob} to keep that function's cognitive complexity in
- * check; behaviour (including both `FORBIDDEN` failure modes) is unchanged.
+ * Checks the aggregator is active and resolves the `requested_by` email (token email, else `contact_email`).
  *
  * @param aggregatorId - The requesting aggregator's id (from the auth token).
  * @param tokenEmail - The token's own `email` claim, if present.
  * @returns The resolved requester email.
- * @throws The `FORBIDDEN` http error if the aggregator isn't active, or if no
- *   requester identity resolves (no token email claim and no `contact_email`).
+ * @throws `FORBIDDEN` if the aggregator is not active or no email resolves.
  */
 async function resolveRequestedBy(
   aggregatorId: string,
   tokenEmail: string | undefined,
 ): Promise<string> {
-  // The requesting aggregator must be active (fail fast, and it supplies the
-  // fallback requester/recipient email below).
   const found = await getUserStore().findById(aggregatorId);
   if (!found.ok || found.value?.status !== 'active') {
     throw httpError('FORBIDDEN', {
@@ -220,9 +180,7 @@ async function resolveRequestedBy(
     });
   }
 
-  // requested_by: the requesting user's own verified token email, falling
-  // back to the aggregator's stored contact_email — audit trail only, but the
-  // column is NOT NULL so it must resolve.
+  // The `requested_by` column is NOT NULL, so one of these must resolve.
   const requestedBy = tokenEmail ?? found.value.contactEmail;
   if (!requestedBy) {
     throw httpError('FORBIDDEN', {
@@ -235,21 +193,14 @@ async function resolveRequestedBy(
 }
 
 /**
- * Enqueues the just-created (or idempotency-replayed) campaign job, and
- * compensates if the enqueue call itself fails. Split out of
- * {@link submitCampaignJob} to keep that function's cognitive complexity in
- * check; behaviour is unchanged — see the module doc for the enqueue/replay/
- * compensation contract this implements.
+ * Enqueues the created or replayed campaign job, marking it `failed` if the enqueue fails.
  *
- * @param job - The created/replayed job row (id + current status).
- * @param wasCreated - Whether this call created the row (vs. an idempotency
- *   replay of an existing one).
- * @param opts - Channel-specific enqueue/error-code/log knobs.
- * @param req - The Fastify request — used for structured logging only.
- * @param store - The campaign job store, for the failure-compensation write.
- * @throws The channel's `enqueueFailedErrorCode` http error if enqueueing
- *   fails; the underlying job row is marked `failed` first so the org's
- *   active-job slot isn't permanently stranded.
+ * @param job - The created or replayed job row.
+ * @param wasCreated - Whether this call created the row (false for an idempotency replay).
+ * @param opts - Channel-specific settings.
+ * @param req - The Fastify request, used for logging.
+ * @param store - The campaign job store.
+ * @throws The channel's `enqueueFailedErrorCode` if the enqueue fails.
  */
 async function enqueueWithCompensation(
   job: JobRecord,
@@ -258,21 +209,16 @@ async function enqueueWithCompensation(
   req: FastifyRequest,
   store: ReturnType<typeof getCampaignJobStore>,
 ): Promise<void> {
-  // Enqueue on first creation, and ALSO on a replay whose job is still
-  // `queued` — that means a previous enqueue never landed, and returning 202
-  // again without re-queuing would promise a dispatch that never runs.
-  // BullMQ de-duplicates on jobId, so a redundant add is a no-op.
+  // Also re-enqueue a replay that is still `queued`: its first enqueue may have failed.
+  // BullMQ de-duplicates on jobId, so an extra add does nothing.
   const needsEnqueue = wasCreated || job.status === 'queued';
   if (!needsEnqueue) return;
 
   try {
     await enqueueCampaignProcess({ jobId: job.id }, { attempts: opts.attempts });
   } catch (cause) {
-    // The row is already committed. Leaving it `queued` strands it: the
-    // watchdog only reaps `processing`, and `queued` counts against the
-    // per-org active cap, so repeated Redis blips would permanently wedge
-    // the org's cap. Mark it failed so the state is truthful and the slot
-    // is released.
+    // A `queued` job counts against the org's active cap and the watchdog never
+    // reaps it, so mark it failed to free the slot.
     const reason = cause instanceof Error ? cause.message : opts.enqueueFailedFallbackMessage;
     const marked = await store.setJobStatus(job.id, 'failed', 'enqueue_failed');
     if (!marked.ok) {

@@ -1,10 +1,10 @@
 /**
- * RBAC catalogue store contract (`@aggregator-dpg/api`, migrations 0030/0031).
+ * RBAC catalogue store contract (`@aggregator-dpg/api`).
  *
- * The `permission`, `role` and `role_permission` tables. The built-in roles
- * and the permission catalogue are seeded by migration `0031_rbac_seed.sql`;
- * this store loads every role into a snapshot, re-reads a checksum on a timer
- * to reload when a role changed, and writes custom roles (design §5).
+ * Covers the `permission`, `role` and `role_permission` tables. Built-in roles
+ * and permissions are seeded by migration `0031_rbac_seed.sql`. The store
+ * loads every role into a snapshot, exposes a revision so callers can reload
+ * on change, and writes custom roles.
  *
  * Every method returns a `Result`-style union and never throws across the
  * service boundary.
@@ -55,8 +55,9 @@ export abstract class RbacCatalogueBase {
   ): Promise<CatalogueStoreResult<{ created: boolean }>>;
 
   /**
-   * Replaces a custom role's fields and permissions and audits it. Built-in
-   * roles are never changed.
+   * Replaces a custom role's fields and permissions and audits it.
+   *
+   * Built-in roles are never changed.
    *
    * @param role - The role's new definition (same key).
    * @param actorUserId - Who changed it.
@@ -69,8 +70,9 @@ export abstract class RbacCatalogueBase {
 
   /**
    * Deletes a custom role unless a live assignment uses it, and audits it.
-   * Its past assignments are removed with it (their history is in
-   * `iam_audit`). Built-in roles are never deleted.
+   *
+   * Its past assignments are removed too; their history stays in `iam_audit`.
+   * Built-in roles are never deleted.
    *
    * @param key - The role.
    * @param actorUserId - Who deleted it.

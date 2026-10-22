@@ -1,10 +1,9 @@
 /**
- * Route access declarations and their enforcement (`@aggregator-dpg/api`, RBAC R1).
+ * Route access declarations and their enforcement (`@aggregator-dpg/api`, RBAC).
  *
- * Every route declares who may call it in `config.rbac`, so an unguarded route
- * is visible in review (#805) and the app refuses to boot without one
- * ({@link assertRouteDeclared}). Each route file's auth wrapper then calls
- * {@link enforceRouteAccess} after the token is verified.
+ * Every route declares who may call it in `config.rbac`; the app refuses to
+ * boot without one ({@link assertRouteDeclared}). Each route file's auth
+ * wrapper then calls {@link enforceRouteAccess} after the token is verified.
  */
 
 import type { FastifyRequest, RouteOptions } from 'fastify';
@@ -20,8 +19,7 @@ import { recordLoginIdentity } from '../identity-store/record.js';
  * Who may call a route.
  *
  * - `capability`: an end user holding it (organisation set ∩ role, reach).
- *   With `strict`, a deny is refused in `log` mode too: for routes that did
- *   not exist before RBAC, which have no legacy behaviour to preserve.
+ *   With `strict`, a deny is refused in `log` mode too.
  * - `self`: an active account acting on its own record.
  * - `signed_in`: any known account.
  * - `service`: a Keycloak service-account token (no end user).
@@ -111,20 +109,17 @@ export function _resetDeclaredRoutes(): void {
 /**
  * Capabilities a handler checks itself rather than declaring on its route.
  *
- * `contact.unmask` does not gate a route — it decides whether a response shows
- * contact details plain or masked (`showsContact` in `v1-user.ts`), so it never
- * appears in a `config.rbac` declaration yet is very much enforced.
+ * `contact.unmask` decides whether a response shows contact details plain or
+ * masked (`showsContact` in `v1-user.ts`); it gates no route.
  */
 const HANDLER_CHECKED: readonly Capability[] = ['contact.unmask'];
 
 /**
  * The capabilities this build actually enforces somewhere.
  *
- * The catalogue deliberately runs ahead of the routes — a permission can exist,
- * be granted by a role, and have nothing that checks it yet. Granting such a
- * role conveys no power, which is misleading unless the console says so. This
- * derives the answer from the registered routes rather than a hand-kept list,
- * so adding the missing route flips it with no further edit.
+ * A permission can exist in the catalogue with nothing that checks it yet.
+ * The console uses this to show which permissions have effect. It is derived
+ * from the registered routes.
  *
  * @returns Every capability named by a route declaration or checked in a handler.
  */
@@ -196,11 +191,9 @@ export async function enforceRouteAccess(req: FastifyRequest, caller: RouteCalle
   const decl = req.routeOptions.config.rbac;
   if (!decl) return;
 
-  // The actor resolver accepts a coordinator only through its recorded login
-  // (handoff H-11). Logins are recorded lazily on the first approved request;
-  // record it here too, so a coordinator whose first call is a `self` or
-  // `signed_in` route is not mistaken for an unknown caller. Best effort,
-  // once per process, never overwrites a different link.
+  // The actor resolver accepts a coordinator only through its recorded login.
+  // Record it here so a first call to a `self` or `signed_in` route resolves.
+  // Best effort; never overwrites a different link.
   if (caller.aggregatorId && !('access' in decl && decl.access === 'service')) {
     await recordLoginIdentity(caller.aggregatorId, caller.subject, 'rbac.recordIdentity');
   }

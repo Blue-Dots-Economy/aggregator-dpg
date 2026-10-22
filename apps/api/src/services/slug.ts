@@ -1,13 +1,10 @@
 /**
- * Slug generation utilities.
+ * Slug generation utilities (`@aggregator-dpg/api`).
  *
- * `slugify` produces a URL-safe, lower-case, hyphen-separated rendering of
- * arbitrary input. `randomSuffix` appends a short hex suffix so multiple
- * registrations from the same display `name` don't collide on the unique
- * `org_slug` column. The slug is generated **once** at INSERT time from
- * `aggregator.name` and is then immutable — the DB trigger
- * `aggregators_lock_slug` rejects any UPDATE that mutates the column,
- * even if `name` is later edited.
+ * `slugify` makes a URL-safe, lower-case, hyphenated string. `randomSuffix`
+ * adds a short hex suffix so equal names do not collide on the unique
+ * `signalstack_org_slug` column. The slug is set once at insert; a DB trigger
+ * rejects any later change.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -17,8 +14,7 @@ const MAX_SLUG_LEN = 60;
 /**
  * Converts a free-form string into a URL-safe slug.
  *
- * Falls back to "org" when input contains no slug-friendly characters
- * (e.g. only emoji or punctuation) so callers always get a non-empty stem.
+ * Returns "org" when the input has no slug-friendly characters.
  *
  * @param input - Raw input (aggregator display name).
  * @returns Lower-case slug, max 60 chars.
@@ -45,9 +41,9 @@ export function randomSuffix(bytes = 2): string {
 }
 
 /**
- * Composes a slug from the aggregator's display name + a random suffix:
- * `slugify(name)-<hex>`. Call this once at INSERT — the slug is immutable
- * afterwards (DB trigger `aggregators_lock_slug` enforces it).
+ * Builds `slugify(name)-<hex>` from the display name.
+ *
+ * Call once at insert; the slug cannot change afterwards.
  *
  * @param name - Coordinator display name from the registration payload.
  * @param bytes - Random suffix length in bytes (default 2 → 4 hex chars).
@@ -57,8 +53,7 @@ export function slugFromName(name: string, bytes = 2): string {
 }
 
 /**
- * Legacy alias for {@link slugFromName}. Kept so callers that still pass an
- * association string don't break until Phase 6 swaps them to `name`.
+ * Alias for {@link slugFromName}, for callers that pass an association string.
  *
  * @deprecated Use {@link slugFromName} once the registration route is on the new payload.
  */

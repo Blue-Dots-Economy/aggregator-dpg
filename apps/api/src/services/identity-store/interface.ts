@@ -1,5 +1,5 @@
 /**
- * Identity-store contract (`@aggregator-dpg/api`, migration 0027).
+ * Identity-store contract (`@aggregator-dpg/api`).
  *
  * Links an account (`users.id`) to its login at an identity provider, in the
  * provider-neutral `user_identities` table. One login per provider per

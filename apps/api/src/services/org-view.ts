@@ -1,10 +1,8 @@
 /**
- * Org-level view query (spec §10).
+ * Org-level view query.
  *
- * Belongs to `@aggregator-dpg/api`. Resolves an org's coordinators purely from
- * the `aggregators.parent_org_id` FK — the single authority for the
- * org→coordinator link (spec A1). No Keycloak calls, no group membership; the
- * future org console builds on this without a data migration.
+ * Belongs to `@aggregator-dpg/api`. Resolves an org's coordinators from the
+ * `users.org_id` foreign key only; no Keycloak calls.
  */
 
 import { getUserStore } from './user-store/index.js';

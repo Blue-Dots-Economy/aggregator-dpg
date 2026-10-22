@@ -1,7 +1,7 @@
 /**
- * Public surface + factory for the registration-invites store (#700).
+ * Public surface and factory for the registration-invites store (`@aggregator-dpg/api`).
  *
- * Returns a process-wide singleton. Tests override via
+ * Returns a process-wide singleton. Tests override it with
  * `_setRegistrationInvitesStore`.
  */
 
@@ -10,14 +10,14 @@ import { PostgresRegistrationInvitesStore } from './postgres.js';
 
 let instance: RegistrationInvitesStoreBase | null = null;
 
-/** Returns the shared invites store. Lazy-initialised on first call. */
+/** Returns the shared invites store, created on first call. */
 export function getRegistrationInvitesStore(): RegistrationInvitesStoreBase {
   if (instance) return instance;
   instance = new PostgresRegistrationInvitesStore();
   return instance;
 }
 
-/** Test helper — replace the singleton. */
+/** Test helper; replaces the singleton. */
 export function _setRegistrationInvitesStore(s: RegistrationInvitesStoreBase | null): void {
   instance = s;
 }

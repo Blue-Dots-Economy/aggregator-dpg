@@ -1,9 +1,9 @@
 /**
- * Console route guard (`@aggregator-dpg/api`, user & org Phase 5).
+ * Console route guard, in the aggregator API (`@aggregator-dpg/api`).
  *
- * `requireActor` is the first statement of every `/v1/user/*` and `/v1/org/*`
- * handler (the repo's per-file wrapper pattern). It verifies the token,
- * refuses service accounts, and resolves the caller from the database.
+ * `requireActor` is the first call in every `/v1/user/*` and `/v1/org/*`
+ * handler. It verifies the token, refuses service accounts, and resolves the
+ * caller from the database.
  */
 
 import type { FastifyRequest } from 'fastify';
@@ -23,7 +23,7 @@ export interface ResolvedCaller {
 export interface RequireActorOptions {
   /**
    * Admit an approved coordinator. Off by default: every console route except
-   * `user/read/me` is for admins only (design C7).
+   * `user/read/me` is for admins only.
    */
   allowCoordinator?: boolean;
 }
@@ -51,8 +51,8 @@ export async function requireActor(
     if (auth.error.code === 'AZP_NOT_ALLOWED') throw httpError('FORBIDDEN');
     throw httpError('UNAUTHORIZED', { detail: auth.error.message });
   }
-  // A service account is told apart from a user on the same client by
-  // `preferred_username`, never by `sub` (a UUID for both; apps/api/CLAUDE.md).
+  // Tell a service account from a user by `preferred_username`, never by `sub`
+  // (a UUID for both).
   if (auth.context.preferredUsername?.startsWith('service-account-')) {
     throw httpError('FORBIDDEN', { detail: 'console routes require a signed-in user' });
   }
@@ -75,8 +75,8 @@ export async function requireActor(
   } else if (!actor.active) {
     throw httpError('NOT_ORG_ADMIN');
   }
-  // RBAC: the route's declared capability (`config.rbac`), on the actor just
-  // resolved. A no-op with RBAC_MODE=off; logs in `log`; 403 in `enforce`.
+  // Check the route's capability (`config.rbac`). No-op with RBAC_MODE=off,
+  // logs in `log`, 403 in `enforce`.
   await enforceActorRouteAccess(req, actor);
   return { actor, auth: auth.context };
 }

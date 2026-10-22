@@ -1,23 +1,17 @@
 /**
- * Org approval endpoints (spec §6.1 / §8 org column).
- *
- * Always registered: the org hierarchy is always on since migration 0028.
+ * Org approval endpoints reached from the network admin's review email.
  *
  *   GET  /admin/v1/orgs/read/:id?token=...&intent=approve|reject
- *     HTML confirmation page reached from the network-admin review email.
+ *     HTML confirmation page.
  *
  *   POST /admin/v1/orgs/decision/:id   body { token, decision }
- *     approve → enable owner KC user + assign `org_owner` role + add owner to
- *       the mirrored group, then atomic CAS `aggregator_orgs` pending→active
- *       (the single-use commit). reject → atomic CAS pending→inactive.
+ *     Approves or rejects a pending org (see `decideOrg`).
  *
- *   POST /admin/v1/orgs/resend/:id   body { token }
- *     Re-mints + re-emails the review link for a still-pending org (§7).
+ *   POST /admin/v1/orgs/renew/:id   body { token }
+ *     Mints a fresh review token for an expired link and shows the confirm page.
  *
- * The org token carries no `org` claim — the **network admin** is the approver
- * (spec §9). Provisioning is an ordered, idempotent sequence: the owner-enable
- * hard-gate runs before the status CAS so a failure leaves the org pending and
- * the link re-clickable. Belongs to `@aggregator-dpg/api`.
+ * The org token carries no `org` claim; the network admin is the approver.
+ * Belongs to `@aggregator-dpg/api`.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -90,14 +84,10 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
 
       if (!token) return sendPage(reply, missingTokenPage());
 
-      // Strict verify first (rejects expired). A valid link → straight to the
-      // confirm page.
       const verified = await verifyTokenForId(token, orgId, ORG_NOUN);
       if (!verified.ok) {
-        // If it's merely expired (signature valid, id matches), offer inline
-        // regeneration — the admin clicks once to mint a fresh link and land on
-        // the confirm page, no self-email round-trip (§7). Otherwise (invalid /
-        // malformed / wrong id) show the original error page.
+        // An expired but otherwise valid link offers a one-click regenerate.
+        // Any other failure shows the error page.
         const lenient = await verifyTokenForId(token, orgId, ORG_NOUN, { allowExpired: true });
         if (lenient.ok) {
           return sendHtml(
@@ -253,8 +243,6 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
       const prior = orgDecidedView(lookup.value.status);
       if (prior) return sendHtml(reply, 200, renderResultPage(prior));
 
-      // Mint a fresh review token, then land the admin on the review page
-      // directly (approve/reject chosen there).
       const freshToken = await mintReviewToken(orgId);
       return sendHtml(
         reply,

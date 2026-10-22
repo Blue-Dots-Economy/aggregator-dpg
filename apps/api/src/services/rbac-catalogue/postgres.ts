@@ -1,12 +1,11 @@
 /**
- * Postgres RBAC catalogue (`@aggregator-dpg/api`, migrations 0030/0031).
+ * Postgres RBAC catalogue (`@aggregator-dpg/api`).
  *
- * The built-in roles and the permission catalogue are seeded by migration
- * `0031_rbac_seed.sql`. `load` reads every role, its permissions and the
- * revision in one read-only REPEATABLE READ transaction, so the snapshot and
- * its revision always match. The revision is an md5 over `role` and
- * `role_permission`, so any insert, update or delete changes it. Logs SQLSTATE
- * only — never the driver message.
+ * Built-in roles and permissions are seeded by migration `0031_rbac_seed.sql`.
+ * `load` reads roles, permissions and the revision in one read-only
+ * REPEATABLE READ transaction, so they always match. The revision is an md5
+ * over `role` and `role_permission`, so any row change moves it. Logs SQLSTATE
+ * only, never the driver message.
  */
 
 import { and, eq, gt, isNull, or, sql } from 'drizzle-orm';
@@ -44,12 +43,12 @@ function dbFailure(op: string, e: unknown): CatalogueStoreResult<never> {
   return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'database unavailable' } };
 }
 
-/** The `revision` column of a `REVISION` result. */
+/** Reads the `revision` column of a `REVISION` result. */
 function revisionOf(result: { rows: Array<Record<string, unknown>> }): string {
   return String(result.rows[0]?.['revision'] ?? '');
 }
 
-/** A role's stored columns. */
+/** Maps a role to its stored columns. */
 function roleValues(r: RoleDefinition) {
   return {
     key: r.key,

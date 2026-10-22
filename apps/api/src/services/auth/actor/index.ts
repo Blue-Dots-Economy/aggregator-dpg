@@ -1,6 +1,6 @@
 /**
- * Public surface + factory for the actor resolver (`@aggregator-dpg/api`,
- * user & org Phase 5). Returns a process-wide singleton; tests override it
+ * Public surface and factory for the actor resolver, in the aggregator API
+ * (`@aggregator-dpg/api`). Returns a process-wide singleton; tests override it
  * with `_setActorResolver`.
  */
 

@@ -1,9 +1,8 @@
 /**
- * Store-backed actor resolver (`@aggregator-dpg/api`, user & org Phase 5).
+ * Store-backed actor resolver (`@aggregator-dpg/api`).
  *
- * Composes the coordinator store, the org store and the identity store, so it
- * runs unchanged against Postgres in production and the in-memory stores in
- * tests.
+ * Reads the coordinator, org and identity stores, so it works with Postgres
+ * and with the in-memory stores used in tests.
  */
 
 import { getUserStore, type Coordinator } from '../../user-store/index.js';
@@ -52,8 +51,7 @@ function ownedOrg(org: Organisation): ActorOrg {
 
 /**
  * Adds the user's live additional roles (`user_role`) to a resolved actor.
- * Skipped with RBAC off: nothing reads them, and an instance that never turns
- * RBAC on should not pay a query per request or fail on the role table.
+ * Skipped when RBAC is off, so no role query runs per request.
  *
  * @returns The actor (with `roles` when RBAC is on), or `UNAVAILABLE` when the store failed.
  */
@@ -84,8 +82,7 @@ export class StoreActorResolver extends ActorResolverBase {
     if (!linked.value) return { ok: true, value: null };
     const userId = linked.value;
 
-    // A recorded coordinator login without the claim (a realm missing the
-    // mapper): still a coordinator, never an admin.
+    // A coordinator login without the claim is still a coordinator, never an admin.
     const asCoordinator = await getUserStore().findById(userId);
     if (!asCoordinator.ok) return unavailable(asCoordinator.error.message);
     if (asCoordinator.value) return this.coordinator(userId);
@@ -109,10 +106,10 @@ export class StoreActorResolver extends ActorResolverBase {
   }
 
   /**
-   * A coordinator named by the token's `aggregator_id` claim, accepted only
-   * when the recorded login of that coordinator is this token's subject: the
-   * database, not a token claim, is the authority for who a coordinator is.
-   * An unlinked coordinator (login not recorded yet) resolves to nothing here.
+   * Resolves the coordinator named by the `aggregator_id` claim.
+   *
+   * Accepted only when that coordinator's recorded login is this token's
+   * subject. A coordinator with no recorded login resolves to nothing.
    */
   private async claimedCoordinator(id: string, subject: string): Promise<ActorResult> {
     const linked = await getIdentityStore().subjectOf(id, IDP_PROVIDER);

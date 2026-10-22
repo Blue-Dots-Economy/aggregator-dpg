@@ -1,17 +1,15 @@
 /**
  * RBAC runtime state for `@aggregator-dpg/api`: the mode, the role snapshot
- * and the decision engine (design §5).
+ * and the decision engine.
  *
- * The built-in roles and the permission catalogue are seeded into the database
- * by migration `0031_rbac_seed.sql`; with RBAC on the API just loads every
- * role (built-in and custom) into a snapshot. A timer re-reads the catalogue
- * revision and reloads when it changed, so a custom-role write on another
- * instance propagates here. An invalid catalogue stops the boot; on a later
- * refresh the last good snapshot stays in place, so an edit can never widen or
- * drop access by accident.
+ * Built-in roles and permissions are seeded by migration `0031_rbac_seed.sql`.
+ * With RBAC on, the API loads every role into a snapshot. A timer re-reads the
+ * catalogue revision and reloads when it changed, so custom-role writes on
+ * other instances reach this one. An invalid catalogue stops the boot; on a
+ * later refresh the last good snapshot is kept, so a bad edit cannot change access.
  *
- * With `RBAC_MODE=off` nothing is loaded and no access check runs, so an
- * instance without an OPA sidecar boots as before.
+ * With `RBAC_MODE=off` nothing is loaded, no access check runs, and no OPA
+ * sidecar is needed.
  */
 
 import {
@@ -55,11 +53,10 @@ function unavailable(op: string, message: string): ConfigError {
 }
 
 /**
- * Loads every role and checks the role rules. When
- * `RBAC_CUSTOM_ROLES_ENABLED` is false, non-built-in roles are dropped before
- * indexing, so the in-process snapshot is built-in-only everywhere — the single
- * gating point that makes existing custom-role assignments inert
- * (`effectivePermissions` skips any held role absent from the snapshot).
+ * Loads every role and checks the role rules.
+ *
+ * When `RBAC_CUSTOM_ROLES_ENABLED` is false, custom roles are dropped here, so
+ * existing custom-role assignments grant nothing.
  *
  * @param store - The catalogue store.
  * @returns The indexed roles and their revision.
@@ -79,9 +76,7 @@ async function loadSnapshot(
 
 /**
  * Loads the role snapshot and builds the OPA engine, unless `RBAC_MODE` is
- * `off`; then starts the refresh timer. Called once at boot. The built-in
- * roles and the permission catalogue are already in the database (migration
- * `0031_rbac_seed.sql`), so there is no file load and no sync here.
+ * `off`; then starts the refresh timer. Called once at boot.
  *
  * @param mode - Defaults to `RBAC_MODE`.
  * @param refreshMs - Refresh interval; defaults to `RBAC_CATALOGUE_REFRESH_MS`,
@@ -95,10 +90,7 @@ export async function initRbac(
   stopRbacRefresh();
   if (mode === 'off') {
     runtime = null;
-    // A moot combination worth surfacing once at boot: CUSTOM-ROLES is
-    // subordinate to RBAC_MODE, so with RBAC off the capability does nothing
-    // despite being enabled. Warn so an operator is not left expecting role
-    // authoring to work.
+    // Custom roles do nothing while RBAC is off; tell the operator.
     if (config.RBAC_CUSTOM_ROLES_ENABLED) {
       logger.warn({
         operation: 'rbac.init',
@@ -180,12 +172,8 @@ async function refreshOnce(): Promise<RefreshOutcome> {
  * Reloads the snapshot when the catalogue revision changed. Runs on the timer
  * and right after a role write on this replica.
  *
- * A caller that arrives while a refresh is in flight is **queued behind** it
- * rather than joined to it. Joining looked cheaper, but a refresh reads the
- * revision when it starts: a writer that joined a run begun before its own
- * commit would be told "unchanged" and keep the pre-write snapshot until the
- * next timer tick. Queueing guarantees every caller observes a read taken
- * after it asked.
+ * A caller that arrives while a refresh is running is queued behind it, so
+ * every caller sees a revision read taken after it asked.
  *
  * @returns What the refresh did for this caller.
  */
@@ -194,8 +182,7 @@ export function refreshRbacCatalogue(): Promise<RefreshOutcome> {
   const next: Promise<RefreshOutcome> = refreshing ? refreshing.then(run, run) : run();
   refreshing = next;
   void next.finally(() => {
-    // Only the last queued run clears the chain, so a caller that arrives
-    // mid-flight still lands behind it.
+    // Only the last queued run clears the chain.
     if (refreshing === next) refreshing = null;
   });
   return next;

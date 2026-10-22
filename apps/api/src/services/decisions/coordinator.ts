@@ -1,16 +1,14 @@
 /**
- * Coordinator registration decision (`@aggregator-dpg/api`, user & org Phase 5).
+ * Coordinator registration decision (`@aggregator-dpg/api`).
  *
- * The one place a pending coordinator is approved or rejected, shared by the
+ * The one place a pending coordinator is approved or rejected, used by the
  * emailed review link (`routes/aggregator-approvals.ts`) and the console
- * (`POST /v1/user/decision/:id`). Callers check who may decide (the link's
- * signed org claim, the console's reach) before calling it.
+ * (`POST /v1/user/decision/:id`). Callers check who may decide first.
  *
- * Race-safety (design R3): **reject** is a compare-and-set from `pending`
- * first, then side effects. **Approve** must provision Signals and Keycloak
- * before its compare-and-set (the commit point), so when that compare-and-set
- * loses to a concurrent reject it compensates: the Keycloak user is disabled
- * again and stamped `rejected`. Only the winner mails the applicant.
+ * Reject is a compare-and-set from `pending`, then side effects. Approve
+ * provisions Signals and Keycloak before its compare-and-set; if that loses
+ * to a concurrent reject, the Keycloak user is disabled and stamped `rejected`
+ * again. Only the winner mails the applicant.
  */
 
 import type { FastifyBaseLogger } from 'fastify';
@@ -75,9 +73,10 @@ export function priorDecision(status: AggregatorStatus): 'approved' | 'rejected'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * How a row was decided, read from its `updated_by`: {@link LINK_DECIDER} is an
- * emailed link, an admin's user id is the console. Anything else (`'self'`,
- * `'system'`, a later write) no longer says, so `null`.
+ * Returns how a row was decided, read from its `updated_by`.
+ *
+ * {@link LINK_DECIDER} is an emailed link and an admin's user id is the
+ * console. Anything else (such as a later write) gives `null`.
  *
  * @param updatedBy - The row's `updated_by`.
  * @returns `link`, `console`, or `null` when unknown.
@@ -159,23 +158,21 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
   const store = getUserStore();
   const idp = getIdpAdmin();
 
-  // The target org must still be active (a row can sit pending while its org
-  // is rejected or retired).
+  // The coordinator's org must still be active.
   if (aggregator.parentOrgId) {
     const org = await getOrganisationStore().findById(aggregator.parentOrgId);
     if (!org.ok) return { kind: 'unavailable', dependency: 'db' };
     if (org.value?.status !== 'active') return { kind: 'org_inactive' };
   }
 
-  // 1. Signals first: until the upsert succeeds the row stays pending and the
-  //    Keycloak user disabled; a retry is safe (idempotent on external_id).
+  // 1. Signals first. Until it succeeds the row stays pending; a retry is safe
+  //    (idempotent on external_id).
   const signalstack = getSignalStackWriter();
   let signalstackOrgId: string | null = null;
   if (signalstack) {
     const started = Date.now();
     const networkCfg = await getNetworkConfig();
-    // Every domain the coordinator serves (the console can set several); none
-    // known to this network, or `[]`, means all of them.
+    // The coordinator's known domains; none (or `[]`) means all of them.
     const served = aggregator.serves.filter((d) => networkCfg.domainIds.includes(d));
     const domains = served.length > 0 ? served : networkCfg.domainIds;
     const upsert = await signalstack.upsertAggregator({
@@ -203,15 +200,14 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
     log.error({ status: 'failure', sub_operation: 'idp.enableUser', code: enable.error.code });
     return { kind: 'unavailable', dependency: 'idp' };
   }
-  // 3. The gate attribute; soft-fail (the enabled flag already admits them,
-  //    and the login-time check repairs it).
+  // 3. The gate attribute. Soft-fail: the login-time check repairs it.
   const stamp = await idp.setUserDecision(kcUser.id, 'approved');
   if (!stamp.ok) {
     log.warn({ status: 'failure', sub_operation: 'idp.setUserDecision', code: stamp.error.code });
   }
-  // 4. Signals org id on Keycloak; soft-fail (login backfill repairs). The
-  //    row's copy is written after the commit point, so a losing approval
-  //    never touches the row (nor its `updated_by`).
+  // 4. Signals org id on Keycloak. Soft-fail: login backfill repairs it.
+  //    The row's copy is written after the commit point, so a losing approval
+  //    never touches the row.
   if (signalstackOrgId) {
     const attr = await idp.setAttributes(kcUser.id, {
       [KC_ATTR.SIGNALSTACK_ORG_ID]: signalstackOrgId,
@@ -223,15 +219,13 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
   // 5. The commit point: compare-and-set pending → active.
   const cas = await store.approveFromPending(aggregator.id, input.decidedBy);
   if (!cas.ok || cas.value === null) {
-    // A database failure, or lost to a concurrent decision. Unless the row is
-    // now approved, undo what this approval did in Keycloak, so a user is
-    // never enabled while its row is pending, rejected or gone.
+    // Failed or lost. Unless the row is now approved, undo the Keycloak
+    // changes, so a user is never enabled while its row is not active.
     const now = await store.findById(aggregator.id);
     const current = now.ok ? now.value : null;
     if (current?.status !== 'active') await compensate(kcUser.id, log);
     if (signalstackOrgId) {
-      // The Signals org stays (upsert is idempotent on external_id: a later
-      // approval of the same row reuses it). Ids only.
+      // The Signals org stays; a later approval reuses it.
       log.warn({ status: 'skipped', sub_operation: 'signalstack.orgLeftByLostApproval' });
     }
     if (!cas.ok) {
@@ -297,7 +291,7 @@ async function reject(
   log: FastifyBaseLogger,
 ): Promise<DecisionOutcome> {
   const store = getUserStore();
-  // Compare-and-set first (write-once rejected_at): only the winner continues.
+  // Compare-and-set first; only the winner continues.
   const cas = await store.rejectFromPending(aggregator.id, input.decidedBy);
   if (!cas.ok) {
     log.error({
@@ -313,7 +307,7 @@ async function reject(
     if (!now.value) return { kind: 'not_found' };
     return alreadyDecided(now.value);
   }
-  // RBAC: a rejected coordinator's additional roles in the org end with it.
+  // A rejected coordinator loses its additional roles in the org.
   if (aggregator.parentOrgId) {
     await revokeRolesOnLeave(aggregator.id, aggregator.parentOrgId, 'coordinator_rejected');
   }
@@ -334,7 +328,7 @@ async function reject(
   });
   if (!sent.ok)
     log.error({ status: 'failure', sub_operation: 'mailer.send.rejected', code: sent.error.code });
-  // The reason is free text: never logged (design C17).
+  // Never log the reason; it is free text.
   log.info({ status: 'success', decision: 'reject', decided_by: input.decidedBy });
   return { kind: 'decided', decision: 'reject', notified: sent.ok };
 }

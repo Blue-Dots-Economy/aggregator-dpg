@@ -1,8 +1,7 @@
 /**
- * Postgres adapter for the registration links store.
+ * Postgres registration-links store (`@aggregator-dpg/api`).
  *
- * Wraps Drizzle queries against `registration_links`. Driver-specific errors
- * are mapped to abstract `StoreError` codes — callers reason in domain terms.
+ * Queries `registration_links` and maps driver errors to `StoreError` codes.
  */
 
 import { and, desc, eq, sql } from 'drizzle-orm';
@@ -23,10 +22,9 @@ import {
 const PG_UNIQUE_VIOLATION = '23505';
 
 /**
- * Extracts the Postgres SQLSTATE from a thrown error. Drizzle wraps driver
- * errors in a `DrizzleQueryError`, so the `code` lives on `.cause` (or deeper),
- * not the top-level error — walk the cause chain so a unique-violation is
- * recognised as SLUG_COLLISION instead of masquerading as DB_UNAVAILABLE.
+ * Extracts the Postgres SQLSTATE from a thrown error.
+ *
+ * Drizzle wraps driver errors, so this walks the `.cause` chain to find `code`.
  */
 function pgErrorCode(err: unknown): string | undefined {
   let cur: unknown = err;
@@ -204,9 +202,7 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
           and(
             eq(registrationLinks.id, id),
             eq(registrationLinks.userId, aggregatorId),
-            // Only drafts are mutable — live rows have already published the
-            // QR + public URL; mutating them in-place would invalidate the
-            // posters in the field. Live → retire → recreate is the right flow.
+            // Only drafts are editable; live rows have published their QR and public URL.
             eq(registrationLinks.status, 'draft'),
           ),
         )

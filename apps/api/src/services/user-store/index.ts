@@ -1,7 +1,7 @@
 /**
- * Public surface and factory for the aggregator store.
+ * Public surface and factory for the user store (`@aggregator-dpg/api`).
  *
- * Returns a process-wide singleton. Tests override via `_setUserStore`.
+ * Returns a process-wide singleton. Tests override it with `_setUserStore`.
  */
 
 import type { UserStoreBase } from './interface.js';
@@ -10,7 +10,7 @@ import { PostgresUserStore } from './postgres.js';
 let instance: UserStoreBase | null = null;
 
 /**
- * Returns the shared aggregator store. Lazy-initialised on first call.
+ * Returns the shared user store, created on first call.
  */
 export function getUserStore(): UserStoreBase {
   if (instance) return instance;
@@ -18,7 +18,7 @@ export function getUserStore(): UserStoreBase {
   return instance;
 }
 
-/** Test helper — replace the singleton. */
+/** Test helper; replaces the singleton. */
 export function _setUserStore(s: UserStoreBase | null): void {
   instance = s;
 }

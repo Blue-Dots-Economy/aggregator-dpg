@@ -1,56 +1,43 @@
 /**
  * Standalone data migrations for the instance-upgrade tool (`@aggregator-dpg/api`).
  *
- * The three layers of the upgrade, kept separate on purpose:
+ * The upgrade has three layers:
  *
- *   1. **Schema** (DDL, and the DML that is *coupled* to it — a constraint
- *      backfill, a column retype that reads the column being dropped, a
- *      seed→re-point→constrain sequence) lives in the drizzle migrations and
- *      is applied by `run` in one transaction.
- *   2. **Standalone data migration** — a data move with **no** ordering
- *      dependency on a DDL step, i.e. it only touches columns that still exist
- *      once the schema is at head — lives here and is applied by
- *      `instance-upgrade data`, after `run`.
- *   3. **External dependencies** (Keycloak) live in the online step
- *      (`enrich` / `enable-owners`).
+ *   1. Schema: DDL and the DML coupled to it. Lives in the drizzle migrations;
+ *      `run` applies it in one transaction.
+ *   2. Standalone data: data moves with no ordering dependency on a DDL step.
+ *      Lives here; `instance-upgrade data` applies it after `run`.
+ *   3. External dependencies (Keycloak): the online step (`enrich` / `enable-owners`).
  *
- * A step is **idempotent** (safe to re-run) and **config-free** (only the
- * database — no app config, no external services). Register new ones in
- * {@link DATA_STEPS}. There are none in this release: every data move in
- * 0027–0029 is schema-coupled and therefore stays in the migration.
+ * A step must be idempotent and config-free (database only). Register new
+ * steps in {@link DATA_STEPS}.
  */
 
 import type pg from 'pg';
 
 /** One standalone, idempotent, DB-only data migration. */
 export interface DataStep {
-  /** Stable id for the log + the runbook. */
+  /** Stable id for the log and the runbook. */
   name: string;
-  /**
-   * Applies the data change on the given client (inside the shared
-   * transaction). Must be idempotent.
-   */
+  /** Applies the data change inside the shared transaction. Must be idempotent. */
   apply(client: pg.PoolClient): Promise<void>;
   /**
-   * Optional post-apply check: returns the count of rows still wrong. A
-   * non-zero result rolls the whole `data` run back.
+   * Optional post-apply check that returns the count of rows still wrong.
+   * Non-zero rolls the whole `data` run back.
    */
   verify?(client: pg.PoolClient): Promise<number>;
 }
 
-/**
- * The standalone data migrations for this release. Empty: 0027–0029's data
- * moves are all schema-coupled (see the module doc) and live in the migrations.
- */
+/** The standalone data migrations for this release. Currently empty. */
 export const DATA_STEPS: DataStep[] = [];
 
 /** Line printer (matches the tool's `out`). */
 type Out = (line: string) => void;
 
 /**
- * Applies every standalone data step in one transaction, verifying each, and
- * commits only when all pass. `--dry-run` always rolls back. An empty registry
- * is a success no-op. Never throws.
+ * Applies every standalone data step in one transaction and commits only when all verify.
+ *
+ * `--dry-run` always rolls back. An empty list is a no-op. Never throws.
  *
  * @param pool - A database pool (config-free; only `DATABASE_URL`).
  * @param steps - The steps to run (defaults to {@link DATA_STEPS}).

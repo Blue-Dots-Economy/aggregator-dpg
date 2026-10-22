@@ -1,7 +1,7 @@
 /**
  * Public surface of RBAC in `@aggregator-dpg/api`: boot-time init, the
- * capability checks and the route declarations. The actor comes from Phase 5's
- * resolver (`services/auth/actor`); reach from `scope.ts`.
+ * capability checks and the route declarations. The actor comes from
+ * `services/auth/actor`; reach from `scope.ts`.
  */
 
 export {

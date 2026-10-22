@@ -1,13 +1,12 @@
 /**
- * Config-free migration core (`@aggregator-dpg/api`): the advisory-locked
- * migration runner and the journal / applied-row readers, shared by the API's
- * boot path (`migrate.ts`, `migration-guards.ts`) and the instance-upgrade
- * operator entry (`tools/instance-upgrade.ts`), which applies pending migrations inside
- * its own transaction with {@link applyPending}.
+ * Config-free migration core (`@aggregator-dpg/api`): the locked migration
+ * runner and the journal and applied-row readers.
  *
- * Deliberately imports neither `config.ts` nor `env.ts` nor the app logger:
- * the operator tool runs with only `DATABASE_URL` (and must never silently
- * load a developer `.env`), so the caller injects its logger.
+ * Used by the boot path and by the instance-upgrade tool, which applies pending
+ * migrations in its own transaction with {@link applyPending}.
+ *
+ * Imports no config, `.env` or app logger, because the tool runs with only
+ * `DATABASE_URL`. The caller passes a logger.
  */
 
 import { createHash } from 'node:crypto';
@@ -23,7 +22,7 @@ export type Queryable = Pick<Pool | PoolClient, 'query'>;
 
 /** Journal `when` of the first train migration (0023). */
 export const UPGRADE_FIRST_WHEN = 1790600000000;
-/** Journal `when` of the last train migration (0029, the end of the train). */
+/** Journal `when` of the last train migration (0029). */
 export const UPGRADE_LAST_WHEN = 1791400000000;
 /** Journal `when` of 0022, the level every existing instance is at. */
 export const PRE_TRAIN_WHEN = 1788400000000;
@@ -139,12 +138,11 @@ export async function readApplied(pool: Queryable): Promise<AppliedMigration[] |
 }
 
 /**
- * Applies all pending migrations in `migrationsFolder` while holding the
- * session-level migration advisory lock on a dedicated connection from
- * `pool`. The lock is released (and the connection returned) whether or not
- * the migrations succeed. Drizzle reads the applied list BEFORE it opens its
- * own transaction, so the lock is what makes concurrent runners safe; all
- * pending migrations then run in ONE transaction.
+ * Applies all pending migrations while holding the migration advisory lock.
+ *
+ * The lock is always released. Drizzle reads the applied list before its own
+ * transaction, so the lock keeps concurrent runners safe. All pending
+ * migrations run in one transaction.
  *
  * @param db - Drizzle client the migrations run through.
  * @param pool - Pool the lock connection is taken from (normally the one `db` wraps).
@@ -174,8 +172,7 @@ export async function migrateWithLock<TSchema extends Record<string, unknown>>(
       try {
         await lockClient.query(`SELECT pg_advisory_unlock(${MIGRATION_LOCK_SQL_KEY})`);
       } catch (err) {
-        // The server drops a session lock with its connection; destroy this
-        // one rather than return a connection in an unknown state.
+        // Discard the connection; the server drops its lock with it.
         broken = err as Error;
         log.warn(
           { error_type: (err as Error).name },
@@ -189,13 +186,11 @@ export async function migrateWithLock<TSchema extends Record<string, unknown>>(
 }
 
 /**
- * Applies every shipped migration above the applied high-water mark on the
- * given connection, inside the CALLER's transaction, and records each in
- * `drizzle.__drizzle_migrations` exactly as drizzle's own migrator does
- * (drizzle's file reader: statements split on `--> statement-breakpoint`,
- * `hash` = sha256 of the file, `created_at` = the journal `when`). A later
- * boot-time `migrate()` therefore finds nothing pending. The caller holds the
- * migration advisory lock and decides COMMIT / ROLLBACK.
+ * Applies every migration above the applied high-water mark inside the caller's transaction.
+ *
+ * Records each in `drizzle.__drizzle_migrations` the same way drizzle does, so
+ * a later `migrate()` finds nothing pending. The caller holds the lock and
+ * decides commit or rollback.
  *
  * @param client - A connection with an open transaction.
  * @param migrationsFolder - Folder holding the `.sql` files and `meta/_journal.json`.

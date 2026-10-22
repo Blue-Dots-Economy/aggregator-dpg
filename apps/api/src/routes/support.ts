@@ -1,14 +1,12 @@
 /**
- * Contact-support endpoints (post-login).
+ * Contact-support endpoints of the aggregator API (`@aggregator-dpg/api`).
  *
- *   GET  /v1/support/config → whether SUPPORT_EMAIL is set, plus the attachment
- *                             limits and accepted content types (#551).
- *   POST /v1/support        → emails the submission to SUPPORT_EMAIL, with any
- *                             attached image/video/audio files.
+ *   GET  /v1/support/config → whether SUPPORT_EMAIL is set, plus attachment
+ *                             limits and accepted content types.
+ *   POST /v1/support        → emails the submission and any image/video/audio
+ *                             attachments to SUPPORT_EMAIL.
  *
- * Any authenticated coordinator may submit — approval status is
- * intentionally not required (an aggregator awaiting approval may still
- * need to contact support). Belongs to `@aggregator-dpg/api`.
+ * Any authenticated coordinator may submit, approved or not.
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -40,9 +38,8 @@ const SupportRequestSchema = z
     type: z.enum(['complaint', 'support_request']),
     details: z.string().trim().min(1).max(5000),
     consent: z.literal(true),
-    // Count/size/type limits are applied in the handler by
-    // validateSupportAttachments so each rejection carries its own error code
-    // and a detail naming the offending file (#551).
+    // Count, size and type limits are checked in the handler by
+    // validateSupportAttachments, so each rejection names the file.
     attachments: z
       .array(
         z.object({
@@ -55,9 +52,8 @@ const SupportRequestSchema = z
       .optional(),
   })
   .strict()
-  // At least one contact channel is required so support can reply. A failed
-  // refine surfaces as a 400 SCHEMA_VALIDATION envelope via the global error
-  // handler (see app.ts), consistent with every other zod body rejection.
+  // At least one contact channel is required so support can reply. A failure
+  // is a 400 SCHEMA_VALIDATION.
   .refine((body) => Boolean(body.email) || Boolean(body.phone), {
     message: 'Provide at least one of email or phone so support can reach you.',
     path: ['email'],
@@ -94,8 +90,7 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
     },
     async (req, reply) => {
       await requireAuth(req);
-      // Limits are served rather than duplicated in the web bundle, so the
-      // form's validation cannot disagree with this API's.
+      // Served to the web form so its checks match this API's.
       const limits = supportAttachmentLimits();
       return reply.send({
         enabled: Boolean(supportEmail()),
@@ -123,9 +118,8 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
           ...errorResponses(400, 401, 429, 502, 503),
         },
       },
-      // Fastify's 1MB default would reject any attachment submission (base64
-      // inflates a 5MB file to ~6.7MB). Derived from the configured budget so
-      // raising the cap cannot turn into a silent 413; other routes keep 1MB.
+      // Body limit derived from the attachment budget (base64 adds about a third).
+      // Other routes keep Fastify's 1MB default.
       bodyLimit: supportBodyLimitBytes(supportAttachmentLimits().maxTotalBytes),
     },
     async (req, reply) => {
@@ -138,25 +132,15 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
         throw httpError('SUPPORT_NOT_CONFIGURED');
       }
 
-      // Validated by the route's `body` zod schema. Use the SUBMITTED
-      // name/email/phone — the web form prefills them from the session but
-      // lets the coordinator correct them before sending.
+      // Validated by the route's `body` schema. Use the submitted name, email and
+      // phone; the coordinator may have edited the prefilled values.
       const { name, email, phone, type, details, attachments } = req.body as z.infer<
         typeof SupportRequestSchema
       >;
 
-      // Per-coordinator cap, counted BEFORE the body is validated, deliberately.
-      // Fastify (and the BFF proxy ahead of it) has already buffered and parsed
-      // the payload by the time this runs, so a rejected submission has cost the
-      // same as an accepted one — if only accepted ones counted, a caller could
-      // post oversized rubbish (a fourth file, a disallowed content type) without
-      // limit and never spend a slot. The web form validates the same rules before
-      // submitting, so a legitimate coordinator does not reach here with an
-      // invalid body.
-      //
-      // Still after the 503: an instance with no support address should not burn
-      // anyone's quota. The limiter fails open on a Redis error — an outage must
-      // not silence a complaint.
+      // Count against the per-coordinator cap before validating the body, so
+      // rejected submissions also use a slot. Runs after the 503 check. Fails open
+      // on a Redis error.
       const rate = await checkSupportRate(auth.userId);
       if (!rate.allowed) {
         throw httpError('RATE_LIMITED', {
@@ -179,8 +163,7 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
         details,
         reference,
         link: supportPortalLink(),
-        // Brand short-name seeded from config-loader at server boot
-        // (setEmailBrand); falls back to the generic default under test.
+        // Brand short-name set at boot (setEmailBrand).
         teamName: getEmailBrand().short_name,
         submittedAt: new Date(),
         attachments: checked.attachments.map(({ filename, bytes }) => ({ filename, bytes })),
@@ -229,7 +212,7 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
   );
 }
 
-/** Unwrap the auth context or throw the catalogue error. Mirrors the local helper in other route modules (e.g. `dashboard.ts`, `aggregator-profile.ts`). */
+/** Returns the auth context or throws the catalogue error. */
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await authenticate(req);
   if (result.ok) {

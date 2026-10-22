@@ -1,19 +1,15 @@
 /**
- * Application-side writes to the `contact` table (`@aggregator-dpg/api`).
+ * Writes to the `contact` table (`@aggregator-dpg/api`).
  *
- * The aggregator and org Postgres stores call these INSIDE their own
- * transaction, so a contact and the row that references it are written
- * atomically. They are plain functions over a Drizzle executor rather than a
- * store behind an abstract contract, because the transaction handle must not
- * leak through a service interface (interfaces.md §5) and no caller outside
- * those two stores writes contacts.
+ * The user and org Postgres stores call these inside their own transaction, so
+ * a contact and the row that references it are written together. They are
+ * plain functions, not a store, so the transaction handle stays out of service interfaces.
  *
- * Unlike the best-effort sync triggers migration 0025 installed for the
- * previous release's writes (0026 drops them), these are strict: a clash with another person's email or phone raises the
- * database unique violation (`contact_email_unique` / `contact_phone_unique`),
- * which the calling store maps to `DUPLICATE_EMAIL` / `DUPLICATE_PHONE`.
+ * A clash with another person's email or phone raises the unique violation
+ * (`contact_email_unique` / `contact_phone_unique`); the store maps it to
+ * `DUPLICATE_EMAIL` / `DUPLICATE_PHONE`.
  *
- * Contact ids are PII-derived — never log them.
+ * Contact ids are derived from PII. Never log them.
  */
 
 import { and, eq, isNull, sql } from 'drizzle-orm';
@@ -29,10 +25,8 @@ export type DbExecutor = Pick<
 >;
 
 /**
- * Thrown by {@link changeContact} when the contact is shared by another row
- * (one person holding two roles). Changing it would silently change the other
- * role's email/phone while Keycloak does not follow, so it is refused until
- * accounts are modelled separately.
+ * Thrown by {@link changeContact} when another row shares the contact (one
+ * person in two roles). Changing it would also change the other role, and Keycloak would not follow.
  */
 export class SharedContactError extends Error {
   constructor() {
@@ -42,9 +36,8 @@ export class SharedContactError extends Error {
 }
 
 /**
- * Thrown by {@link changeContact} when the requested email + phone already
- * form ANOTHER person's contact (a row referenced by someone else). Moving onto
- * it would merge two people and let one overwrite the other's details.
+ * Thrown by {@link changeContact} when the new email and phone already form
+ * another person's contact. Contacts are never merged.
  */
 export class ContactTakenError extends Error {
   constructor() {
@@ -83,8 +76,7 @@ export interface ContactInput {
 }
 
 /**
- * Keeps a name verbatim (the API has always echoed names as submitted),
- * collapsing a blank one to `null` (the table rejects blank names).
+ * Keeps a name as submitted, turning a blank one into `null` (the table rejects blank names).
  */
 function cleanName(name: string | null | undefined): string | null {
   return name?.trim() ? name : null;
@@ -105,9 +97,7 @@ export async function linkContact(db: DbExecutor, input: ContactInput): Promise<
   const email = input.email.trim().toLowerCase();
   const id = contactId(email, input.phone);
   const name = cleanName(input.name);
-  // Conflict target is the primary key ONLY: the same person resolves to the
-  // same row, while a clash on email/phone alone (a different person) still
-  // raises, so the caller can report it.
+  // Conflict on the primary key only, so a clash on email or phone alone still raises.
   await db
     .insert(contact)
     .values({ id, email, phone: input.phone, name })
@@ -118,9 +108,8 @@ export async function linkContact(db: DbExecutor, input: ContactInput): Promise<
       .set({ name })
       .where(and(eq(contact.id, id), isNull(contact.name)));
   }
-  // Hold the row (FOR KEY SHARE) until the caller's transaction ends, so a
-  // concurrent contact_gc() cannot delete it before the referencing insert's
-  // FK check. If it vanished in between, create it again.
+  // Hold the row until the transaction ends so contact_gc() cannot delete it
+  // before the FK check. Recreate it if it vanished.
   const held = await db.execute(sql`SELECT 1 FROM contact WHERE id = ${id} FOR KEY SHARE`);
   if (held.rows.length === 0) {
     await db
@@ -163,20 +152,15 @@ export async function changeContact(
     if (name) await db.update(contact).set({ name }).where(eq(contact.id, newId));
     return newId;
   }
-  // Lock the current contact first, so the shared-or-not answer below cannot
-  // change under us (a concurrent insert referencing it would otherwise be
-  // re-keyed along with this row).
+  // Lock the current contact so the shared check below stays true.
   await db.execute(sql`SELECT 1 FROM contact WHERE id = ${oldId} FOR UPDATE`);
 
   const [target] = await db.select({ id: contact.id }).from(contact).where(eq(contact.id, newId));
   if (target) {
-    // Another person already has exactly this email + phone. Never merge onto
-    // it (and never overwrite their name) — that is someone else's contact.
     throw new ContactTakenError();
   }
 
-  // Every reference to a contact is a `users` row since 0027 (coordinators and
-  // org owners' admin accounts alike); two rows = one person in two roles.
+  // Every contact reference is a `users` row; two rows mean one person in two roles.
   const refs = await db.execute<{ n: number }>(sql`
     SELECT count(*) AS n FROM users WHERE contact_id = ${oldId}`);
   const shared = Number(refs.rows[0]?.n ?? 0) > 1;

@@ -1,11 +1,10 @@
 /**
- * Shared helpers of the console routes `/v1/user/*` and `/v1/org/*`
- * (`@aggregator-dpg/api`, user & org Phase 5): wire mappers, keyset cursors,
- * the per-actor write limit, decision-outcome mapping and the owner notice.
+ * Shared helpers of the console routes `/v1/user/*` and `/v1/org/*` in
+ * `@aggregator-dpg/api`: wire mappers, keyset cursors, the per-actor write
+ * limit, decision-outcome mapping and the owner notice.
  *
- * Logging rule for every console action (design R12 / C8): actor id, target
- * id and field names only — never values, never contact data, never a
- * decision reason.
+ * Console logs carry actor id, target id and field names only. Never log
+ * values, contact data or a decision reason.
  */
 
 import type { FastifyBaseLogger, FastifyReply } from 'fastify';
@@ -28,9 +27,7 @@ export function consoleUrl(): string {
 }
 
 /**
- * Masks an email address: the first character of the local part, then `***`,
- * then the domain (`a***@example.org`). Shows that an address exists without
- * revealing it.
+ * Masks an email address as `a***@example.org`.
  *
  * @param email - The address.
  * @returns The masked address; `***` when it has no `@`.
@@ -54,11 +51,10 @@ export function maskPhone(phone: string | null): string | null {
 }
 
 /**
- * A coordinator on the wire.
+ * Maps a coordinator to its wire shape.
  *
  * @param a - The coordinator.
- * @param opts - `masked`: hide the email and phone (RBAC: the caller lacks
- *   `contact.unmask`). The name is always shown.
+ * @param opts - `masked` hides the email and phone; set when the caller lacks `contact.unmask`.
  * @returns The `UserSchema` shape.
  */
 export function toWireUser(a: Coordinator, opts: { masked?: boolean } = {}): User {
@@ -83,7 +79,7 @@ export function toWireUser(a: Coordinator, opts: { masked?: boolean } = {}): Use
 }
 
 /**
- * An organisation on the wire.
+ * Maps an organisation to its wire shape.
  *
  * @param o - The org.
  * @param orgType - `network_facilitator` for the root, else `aggregator`.
@@ -213,9 +209,9 @@ export function throwDecisionFailure(
 }
 
 /**
- * Tells an org's owner that the network admin acted in their org (design
- * C13). Skipped when the actor owns the org itself. Best effort: a failed
- * send is logged and never fails the action.
+ * Emails an org's owner that the network admin acted in their org.
+ *
+ * Skipped when the actor owns the org. A failed send is logged and never fails the action.
  *
  * @param actor - The acting admin.
  * @param org - The org acted on.
