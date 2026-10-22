@@ -62,17 +62,22 @@ export async function manageableOrgIds(
     .map((o) => o.id);
   const narrowed = reach === null ? owned : reach.filter((id) => owned.includes(id));
   if (reach !== null && narrowed.length === reach.length) return reach;
-  if (rt.mode === 'enforce') return narrowed;
+  // Log before returning, in both modes. `enforce` is the mode that actually
+  // withholds organisations, and the caller turns that into a 404 that looks
+  // exactly like a missing record — so without this line the one outcome worth
+  // auditing is the one that leaves no trace. The route guard's `rbac.decide`
+  // entries do not cover it either: this scope is computed outside that path.
+  const enforcing = rt.mode === 'enforce';
   req.log.warn({
     operation: 'rbac.manage_scope',
     purpose,
-    status: 'skipped',
+    status: enforcing ? 'failure' : 'skipped',
     user_id: actor.userId,
     mode: rt.mode,
     reasons: ['org_manage_not_held'],
     org_count: narrowed.length,
   });
-  return reach;
+  return enforcing ? narrowed : reach;
 }
 
 /**
