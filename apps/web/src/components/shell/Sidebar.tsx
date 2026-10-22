@@ -11,7 +11,6 @@ import { useAuth, useCan } from '../../lib/auth-context';
 import { useThemeMode } from '../../lib/theme-mode';
 import { SupportDialog } from '../support/SupportDialog';
 import { Button } from '../ui/Button';
-// `mode` picks the dark-theme logo variant; the toggle lives in Topbar.
 import { useDashboard } from '../../hooks/useDashboard';
 import { useProfileRaw } from '../../hooks/useProfile';
 import {
@@ -225,6 +224,7 @@ function SidebarPanel({
 export function Sidebar() {
   const t = useTranslations('nav');
   const pathname = usePathname();
+  // `mode` picks the dark-theme logo variant; the toggle lives in Topbar.
   const { mode } = useThemeMode();
   const [supportOpen, setSupportOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -235,10 +235,10 @@ export function Sidebar() {
   // Brand and domain labels come from the aggregator config.
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   // Dashboard rollup for the participant-count badge. Domain is the
-  // aggregator's focus, or the network's first domain while the profile loads.
+  // aggregator's focus, else the first domain in `cfg` (the default config
+  // while the real one loads).
   const profileType = useProfileRaw().data?.type;
-  // `activeDomain` stays undefined until config and profile load, and
-  // useDashboard skips the fetch until then.
+  // useDashboard skips the fetch when there is no domain.
   const activeDomain = profileType ?? cfg.domains[0]?.id;
   const { data: dashboard } = useDashboard(activeDomain ? { domain: activeDomain } : undefined);
   // Badge shows the active domain's rollup from `by_domain`, matching /dashboard.

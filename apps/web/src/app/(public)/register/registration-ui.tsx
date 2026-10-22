@@ -33,7 +33,9 @@ export interface RegistrationFormState {
 }
 
 /**
- * Holds the submit state, the validity flag, and an error ref that is scrolled into view and focused on failure.
+ * Holds the submit state, the validity flag, and the error banner ref.
+ *
+ * On failure the error banner is scrolled into view and focused.
  *
  * @returns The form state handles.
  */

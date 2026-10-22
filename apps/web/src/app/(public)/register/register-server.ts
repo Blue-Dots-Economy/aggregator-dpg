@@ -30,7 +30,8 @@ export function warnIfLegacyHierarchyFlag(): void {
 /**
  * Loads the current consent documents for the `aggregator` and `org` audiences.
  *
- * @returns `aggregator` and `org` {@link ConsentDocContent}, or `null` if the config is missing or invalid.
+ * @returns `aggregator` and `org` {@link ConsentDocContent}, or `null` if the
+ *   config is missing or invalid.
  */
 export async function loadConsentContent(): Promise<{
   aggregator: ConsentDocContent;

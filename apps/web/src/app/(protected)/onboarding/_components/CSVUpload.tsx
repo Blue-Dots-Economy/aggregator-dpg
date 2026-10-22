@@ -75,7 +75,8 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
 
   const acceptFile = (f: File) => {
     if (!/\.csv$/i.test(f.name)) {
-      // Tell the user how to fix it, since uploading the .xlsx template directly is a common mistake.
+      // Tell the user how to fix it; uploading the .xlsx template directly is a
+      // common mistake.
       setUploadError(
         /\.xlsx?$/i.test(f.name)
           ? 'This is an Excel file. Open it and use File → Save As (or Export) → CSV, then upload the .csv.'
@@ -172,7 +173,8 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
           id="csv-file-input"
         />
         {pickedFile ? (
-          // Selected-file chip. Dismissing it also resets the input so the same file can be picked again.
+          // Selected-file chip. Dismissing it also resets the input so the same
+          // file can be picked again.
           <div className="flex items-center justify-center gap-2">
             <div className="inline-flex items-center gap-2 max-w-full px-3 py-2 rounded-[10px] bg-(--bd-primary-50) border border-(--bd-primary-100)">
               <I.upload size={14} className="text-primary-600 shrink-0" />

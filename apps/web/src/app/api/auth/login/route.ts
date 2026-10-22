@@ -22,7 +22,8 @@ const PARSE_BASE = 'https://placeholder.invalid';
 
 function isSafeReturnTo(value: string | null): string {
   if (!value) return '/';
-  // Only same-origin paths are allowed, to prevent open redirects.
+  // Only same-origin paths are allowed, to prevent open redirects. Rejects
+  // `//host`, `/\\host`, encoded tricks such as `/%09/host`, and full URLs.
   if (!value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) {
     return '/';
   }

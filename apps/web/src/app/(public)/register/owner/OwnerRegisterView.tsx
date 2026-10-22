@@ -12,7 +12,10 @@ export interface OwnerRegisterViewProps {
   schema: RJSFSchema;
   /** RJSF UI schema for the org form. */
   uiSchema: Record<string, unknown>;
-  /** Terms/Privacy content for the org audience. `null` when loading failed; the widget shows plain text. */
+  /**
+   * Terms/Privacy content for the org audience. `null` when loading failed;
+   * the widget then shows plain text.
+   */
   orgConsentContent?: ConsentDocContent | null;
 }
 

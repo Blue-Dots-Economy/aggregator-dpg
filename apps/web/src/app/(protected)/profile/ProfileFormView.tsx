@@ -59,7 +59,9 @@ interface UpdatableField {
 }
 
 /**
- * Returns the top-level schema properties flagged `x-updatable: true`, with labels, in declared order.
+ * Returns the top-level schema properties flagged `x-updatable: true`.
+ *
+ * Each comes with its label, in declared order.
  *
  * @param schema - The registration JSON Schema.
  * @returns The updatable fields, in property order.

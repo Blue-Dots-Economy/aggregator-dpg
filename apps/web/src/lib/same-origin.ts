@@ -4,7 +4,8 @@
  * Session cookies are `SameSite=Lax`, so a cross-site form POST still carries
  * them. Console mutations therefore require a JSON body and a same-origin
  * `Origin` header, or `Sec-Fetch-Site: same-origin` when `Origin` is absent.
- * Nothing in the console mutates on GET.
+ * A cross-site form cannot send JSON without a CORS preflight, which the BFF
+ * never answers. Nothing in the console mutates on GET.
  *
  * @module apps/web/src/lib/same-origin
  */

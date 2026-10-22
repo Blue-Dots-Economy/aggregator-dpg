@@ -330,7 +330,11 @@ function parseFilenameFromContentDisposition(header: string): string | null {
   return plain && plain[1] ? plain[1].trim() : null;
 }
 
-/** Default export filename when the BFF sends no `Content-Disposition`. Matches the API's format. */
+/**
+ * Default export filename when the BFF sends no `Content-Disposition`.
+ *
+ * Matches the API's format.
+ */
 function defaultExportFilename(query?: DashboardExportQuery): string {
   const status = (query?.status ?? 'all').replace(/[^a-z0-9_]/gi, '_').slice(0, 32);
   const date = new Date().toISOString().slice(0, 10);

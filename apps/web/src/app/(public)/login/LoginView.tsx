@@ -124,7 +124,8 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
               <Welcome onSignIn={goSignIn} brand={brand} t={t} />
             </div>
 
-            {/* Registration is invite-only, so point users without an invite to their organisation. */}
+            {/* Registration is invite-only, so point users without an invite to
+                their organisation. */}
             <p className="mt-6 text-[12.5px] text-ink-400">
               Need access? Contact your organisation administrator for an invitation.
             </p>

@@ -73,6 +73,7 @@ interface ConsentGateDialogProps {
  * `useReadProgress` attaches its listeners once, on mount, and does nothing if
  * the scroll ref is `null`. Mounting on open makes sure the ref points at the
  * real reader element when that effect runs.
+ *
  * @param props - Documents, agreement copy, and callbacks.
  * @returns The dialog element.
  */

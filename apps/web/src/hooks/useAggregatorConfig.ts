@@ -12,7 +12,11 @@ import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { jsonFetch } from '../services/http';
 
-/** One dashboard tile: the rollup key to read and its label. Mirrors network-config `DashboardTileDef`. */
+/**
+ * One dashboard tile: the rollup key to read and its label.
+ *
+ * Mirrors network-config `DashboardTileDef`.
+ */
 export interface DashboardTileDef {
   field: string;
   label: string;

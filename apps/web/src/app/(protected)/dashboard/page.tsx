@@ -638,7 +638,8 @@ function buildActionParts(
 }
 
 /**
- * Default tile groups, used when network config has no `dashboard_tiles.profile` or `dashboard_tiles.user`.
+ * Default tile groups, used when network config has no `dashboard_tiles.profile`
+ * or `dashboard_tiles.user`.
  */
 function useDefaultTiles(entityPlural: string): {
   profile: DashboardTileDef[];
@@ -1408,8 +1409,8 @@ function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
   const t = useTranslations('dashboard');
   const locale = useLocale();
   // `/aggregator/dashboard` scopes results to the caller's org and returns
-  // each domain under `by_domain[<id>]`. The domain id is `undefined` until
-  // config loads, which skips the fetch.
+  // each domain under `by_domain[<id>]`. An `undefined` domain id skips the
+  // fetch.
   const seekerDomainId = domainId;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -2013,8 +2014,8 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
   const router = useRouter();
   const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Domain id from network config matching `aggregatorType`. Undefined until
-  // config loads, which skips the dashboard fetch.
+  // Domain id from the config entry matching `aggregatorType`. Undefined when
+  // no entry matches, which skips the dashboard fetch.
   const primaryDomainCfg = cfg.domains?.find((d) => d.id === aggregatorType);
   const primaryDomain = primaryDomainCfg?.id;
   // Provider-like when the domain's `item_type` is job postings, not profiles.
