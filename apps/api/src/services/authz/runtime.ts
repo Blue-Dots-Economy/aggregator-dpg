@@ -6,7 +6,7 @@
  * With RBAC on, the API loads every role into a snapshot. A timer re-reads the
  * catalogue revision and reloads when it changed, so custom-role writes on
  * other instances reach this one. An invalid catalogue stops the boot; on a
- * later refresh the last good snapshot is kept.
+ * later refresh the last good snapshot is kept, so a bad edit cannot change access.
  *
  * With `RBAC_MODE=off` nothing is loaded, no access check runs, and no OPA
  * sidecar is needed.

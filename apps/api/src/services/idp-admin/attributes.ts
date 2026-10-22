@@ -34,8 +34,8 @@ export const KC_ATTR = {
   SIGNALSTACK_ORG_ID: 'signalstack_org_id',
   /**
    * `aggregator-owner` on Keycloak users this app created for an org owner.
-   * Only these users are disabled when an owner is replaced, because the realm
-   * is shared with Signals.
+   * Only these users are disabled when an owner is replaced: the realm is
+   * shared with Signals, so a reused user may be someone else's login.
    */
   CREATED_BY: 'created_by',
 

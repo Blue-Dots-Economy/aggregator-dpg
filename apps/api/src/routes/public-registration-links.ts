@@ -463,8 +463,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         }
       }
 
-      // 2. Normalise. Any client-supplied `participant_id` is ignored. The dedup
-      // key comes from the normalised phone, or a fresh UUID when there is no phone.
+      // 2. Normalise the phone and email. Any client-supplied `participant_id` is
+      // dropped, so an anonymous caller cannot choose it.
       delete (body as Record<string, unknown>)['participant_id'];
       const emailSourceKey = linkDomainCfg.identity.email;
       const phoneRaw =
@@ -477,7 +477,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         }
         phoneNormalised = phone.value;
       }
-      // Email is optional; without it dedup uses phone only.
+      // Email is optional.
       const emailRaw =
         emailSourceKey && typeof body[emailSourceKey] === 'string'
           ? (body[emailSourceKey] as string)

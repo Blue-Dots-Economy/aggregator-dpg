@@ -3,8 +3,8 @@
  *
  * `slugify` makes a URL-safe, lower-case, hyphenated string. `randomSuffix`
  * adds a short hex suffix so equal names do not collide on the unique
- * `org_slug` column. The slug is set once at insert; a DB trigger rejects
- * any later change.
+ * `signalstack_org_slug` column. The slug is set once at insert; a DB trigger
+ * rejects any later change.
  */
 
 import { randomBytes } from 'node:crypto';

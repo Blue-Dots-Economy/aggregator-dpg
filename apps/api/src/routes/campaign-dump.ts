@@ -199,7 +199,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
         }));
 
         // `last_modified` is how the caller detects files from different runs,
-        // so a missing value is an error, not a null.
+        // so a missing value is logged as a warning rather than passed on silently.
         const undated = files.filter((f) => f.last_modified === null).map((f) => f.table);
         if (undated.length > 0) {
           logger.warn(

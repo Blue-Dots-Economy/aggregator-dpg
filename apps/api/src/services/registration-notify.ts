@@ -105,7 +105,7 @@ export interface ReviewEmailInput {
  *
  * @param input - Review-email fields and resolved recipients.
  * @param log - Request-scoped logger for delivery diagnostics.
- * @throws {HttpError} `TOKEN_MINT_FAILED` if either JWT cannot be minted.
+ * @throws {HttpError} `TOKEN_MINT_FAILED` if the token cannot be minted.
  */
 export async function sendReviewEmail(
   input: ReviewEmailInput,
@@ -153,7 +153,7 @@ export async function sendReviewEmail(
  *
  * @param input - Registration id + applicant identity for the email body.
  * @param log - Request-scoped logger for delivery diagnostics.
- * @throws {HttpError} `TOKEN_MINT_FAILED` if either JWT cannot be minted.
+ * @throws {HttpError} `TOKEN_MINT_FAILED` if the token cannot be minted.
  */
 export async function sendAdminReviewEmail(
   input: AdminReviewNotifyInput,

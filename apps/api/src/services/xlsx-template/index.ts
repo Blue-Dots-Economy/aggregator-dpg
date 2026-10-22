@@ -473,7 +473,8 @@ function conditionalCell(
 ): string | undefined {
   if (plan.showIfNeverApplies) return '';
   if (plan.showIf.length === 0) return undefined;
-  // AND across clauses; an array controller matches when any selected value is allowed (as `isFieldVisible`).
+  // AND across clauses; an array controller matches when any selected value is
+  // allowed. Same as `isFieldVisible`.
   const applies = plan.showIf.every(({ field, values }) => {
     const selected = selectedIn(field);
     if (selected.length === 0) return false;
@@ -544,8 +545,8 @@ function sampleRows(
   const byName = new Map(plans.map((plan) => [plan.name, plan] as const));
 
   /**
-   * Every cell of one row, each conditional resolved against its controller's cell in this row.
-   * A blanked controller unlocks nothing downstream.
+   * Every cell of one row, each conditional resolved against its controller's
+   * cell in this row. A blanked controller unlocks nothing downstream.
    */
   const rowCells = (pins: ReadonlyMap<string, string>, rowIndex: number): Map<string, string> => {
     const resolved = new Map<string, string>();
@@ -729,7 +730,8 @@ function writeGridSheet(
     // No dropdown on array columns: a single-value list would reject joined values.
     if (plan.isArray) return;
 
-    // Validate the range, not each cell; per-cell validation creates empty rows that may export.
+    // Validate the range, not each cell: per-cell validation creates empty rows
+    // that some apps export as blank lines.
     const letter = columnLetter(i + 1);
     rangeValidations(sheet).add(`${letter}2:${letter}${VALIDATED_ROWS}`, {
       type: 'list',

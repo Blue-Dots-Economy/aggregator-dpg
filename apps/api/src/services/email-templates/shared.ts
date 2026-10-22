@@ -123,6 +123,14 @@ function safeHref(href: string): string {
   return escapeHtml(href);
 }
 
+/**
+ * Renders an inline CTA button.
+ *
+ * @param label - Button text.
+ * @param href - Target URL; must be http(s).
+ * @param color - `primary` uses the brand colour, `danger` red.
+ * @returns HTML for the button.
+ */
 export function ctaButton(
   label: string,
   href: string,

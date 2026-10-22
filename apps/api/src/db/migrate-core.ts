@@ -141,7 +141,8 @@ export async function readApplied(pool: Queryable): Promise<AppliedMigration[] |
  * Applies all pending migrations while holding the migration advisory lock.
  *
  * The lock is always released. Drizzle reads the applied list before its own
- * transaction, so the lock keeps concurrent runners safe.
+ * transaction, so the lock keeps concurrent runners safe. All pending
+ * migrations run in one transaction.
  *
  * @param db - Drizzle client the migrations run through.
  * @param pool - Pool the lock connection is taken from (normally the one `db` wraps).

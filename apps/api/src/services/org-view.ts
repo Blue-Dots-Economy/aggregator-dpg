@@ -2,7 +2,7 @@
  * Org-level view query.
  *
  * Belongs to `@aggregator-dpg/api`. Resolves an org's coordinators from the
- * `aggregators.parent_org_id` foreign key only; no Keycloak calls.
+ * `users.org_id` foreign key only; no Keycloak calls.
  */
 
 import { getUserStore } from './user-store/index.js';

@@ -100,7 +100,7 @@ export abstract class RegistrationLinksStoreBase {
   abstract findBySlug(slug: string): Promise<StoreResult<RegistrationLink | null>>;
 
   /**
-   * Finds a link by the aggregator's `org_slug` and the link slug, for the public URL.
+   * Finds a link by the coordinator's `signalstack_org_slug` and the link slug.
    */
   abstract findByOrgAndSlug(
     orgSlug: string,

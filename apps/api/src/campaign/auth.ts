@@ -88,7 +88,8 @@ export type CampaignSystemAuthResult =
  * relying on a missing claim.
  *
  * @param req - The inbound request carrying the Bearer token.
- * @returns The verified context, or the error to throw (401 bad token, 403 wrong client or account) and the subject when known.
+ * @returns The verified context, or the error to throw and the subject when known.
+ *   The error is 401 for a missing or invalid token, 403 for the wrong client or account.
  */
 export async function requireCampaignSystemAuth(
   req: FastifyRequest,

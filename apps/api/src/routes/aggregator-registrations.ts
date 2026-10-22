@@ -12,7 +12,7 @@
  *   6. Create a disabled Keycloak user with `aggregator_id`,
  *      `aggregator_type`, `phoneNumber` and `decision_made: 'pending'`.
  *      Approval enables it.
- *   7. Email the review link to the org owner.
+ *   7. Email the review link to the org owner (see `resolveOwnerRouting`).
  *
  * A consent-ledger failure rolls the insert back. A Keycloak failure after the
  * commit deletes the coordinator row; its consent row stays, unlinked.

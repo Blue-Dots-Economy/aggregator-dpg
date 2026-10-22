@@ -31,8 +31,8 @@ export interface Organisation {
   /** Owner phone (canonical), from the linked contact. */
   ownerPhone: string | null;
   /**
-   * Owner name, from the linked contact. `null` when the contact has no name
-   * until `scripts/backfill-owner-contact-names.ts` has run.
+   * Owner name, from the linked contact. `null` for older owners until
+   * `scripts/backfill-owner-contact-names.ts` has run.
    */
   ownerName: string | null;
   ownerKcSub: string | null;
@@ -186,7 +186,8 @@ export abstract class OrganisationStoreBase {
   /**
    * Lists `pending` orgs, optionally only those last updated before `updatedBefore`.
    *
-   * Used by the stale-pending cleanup.
+   * Used by the stale-pending cleanup. The age filter keeps fresh rows from
+   * filling the cleanup's row cap.
    *
    * @param updatedBefore - When set, only rows with `updated_at < updatedBefore`.
    * @returns Matching `pending` rows (may be empty).
@@ -213,16 +214,16 @@ export abstract class OrganisationStoreBase {
    */
   abstract ownerIsShared(id: string): Promise<OrgStoreResult<boolean>>;
   /**
-   * Atomically moves the org from pending to active.
+   * Moves the org from pending to active with an atomic compare-and-set.
    *
    * @param id - The org id.
    * @param updatedBy - The decider, written in the same statement (`'admin'`
    *   for an emailed link, else the admin's user id).
-   * @returns The updated row, or `null` when the row was not pending.
+   * @returns The updated row, or `null` when the row was not pending (another decision won).
    */
   abstract approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>>;
   /**
-   * Atomically moves the org from pending to inactive (rejected).
+   * Moves the org from pending to inactive (rejected) with an atomic compare-and-set.
    *
    * @param id - The org id.
    * @param updatedBy - The decider (see {@link approve}).

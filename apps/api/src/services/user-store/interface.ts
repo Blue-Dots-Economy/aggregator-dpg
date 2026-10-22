@@ -88,7 +88,8 @@ export interface Coordinator {
   signalstackOrgId: string | null;
   /**
    * The coordinator's org (`users.org_id`), the single authority for the
-   * org-coordinator link. Every coordinator has one.
+   * org-coordinator link. Every coordinator has one; the type allows `null`
+   * only for a store without org data.
    */
   parentOrgId: string | null;
   /** Whether {@link parentOrgId} is the fixed Default org. */
@@ -298,8 +299,8 @@ export abstract class UserStoreBase {
   /**
    * Deletes a coordinator only while it is still `pending` and older than `cutoff`.
    *
-   * The row stays locked while `beforeCommit` (the Keycloak delete) runs.
-   * A failed `beforeCommit` keeps the row for the next pass.
+   * The row stays locked while `beforeCommit` (the Keycloak delete) runs, so a
+   * concurrent approval waits and then finds the row gone. A failed `beforeCommit` keeps the row for the next pass.
    *
    * @param id - Coordinator id.
    * @param cutoff - Only rows last updated before this instant.

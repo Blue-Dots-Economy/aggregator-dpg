@@ -718,13 +718,16 @@ async function buildResponse(
 }
 
 /**
- * Generates a random URL-safe slug (16 hex chars). The route still retries on
- * a unique-violation.
+ * Generates the short hex suffix added to a slug on a collision.
  */
 function randomSuffix(bytes = 2): string {
   return randomBytes(bytes).toString('hex');
 }
 
+/**
+ * Generates a random URL-safe slug (16 hex chars). The route still retries on
+ * a unique-violation.
+ */
 function generateSlug(): string {
   return randomBytes(8).toString('hex');
 }

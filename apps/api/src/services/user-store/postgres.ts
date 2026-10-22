@@ -387,7 +387,8 @@ export class PostgresUserStore extends UserStoreBase {
         // '{}' serves every domain.
         conds.push(sql`(${users.serves} = '{}' OR ${filter.serves} = ANY(${users.serves}))`);
       }
-      // Compare at millisecond precision: the cursor is a JS Date, `created_at` has microseconds.
+      // Compare at millisecond precision: the cursor is a JS Date, `created_at`
+      // has microseconds, and rows inserted in one transaction share an instant.
       const createdMs = sql`date_trunc('milliseconds', ${users.createdAt})`;
       if (filter.cursor) {
         const c = filter.cursor;
@@ -520,7 +521,8 @@ export class PostgresUserStore extends UserStoreBase {
     const constraint = pgConstraint(err) ?? '';
     const message = err instanceof Error ? err.message : '';
 
-    // contactId() rejects a non-canonical phone before any SQL runs. Its message is fixed and safe to return.
+    // contactId() rejects a non-canonical phone before any SQL runs. Its
+    // message is fixed and safe to return.
     if (err instanceof TypeError && message.startsWith('contactId:')) {
       logger.warn({
         operation: op,

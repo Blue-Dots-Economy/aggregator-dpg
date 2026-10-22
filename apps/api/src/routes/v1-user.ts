@@ -356,7 +356,8 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         invalid: summary.invalid.length,
         existing: summary.existing.length,
       });
-      // The invite mail names the org's owner as the inviter.
+      // The invite mail names the org's owner as the inviter, so tell the owner
+      // when the network admin sent it.
       if (summary.sent + summary.resent > 0) {
         await notifyOwnerOfAdminAction(actor, org, 'invited coordinators', req.log);
       }

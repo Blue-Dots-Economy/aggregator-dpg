@@ -328,6 +328,7 @@ export function supportEmail(): string | undefined {
  * `azp` client ids allowed on the campaign routes.
  *
  * Replaces `KEYCLOAK_ALLOWED_AZP` on those routes, so they accept only these clients.
+ * The global list leaves them out, so their tokens are refused on every other route.
  *
  * @returns The allowed `azp` values; default `['campaign-manager']`.
  */
@@ -344,11 +345,12 @@ export function campaignManagerAllowedAzp(): string[] {
 /**
  * Keycloak `preferred_username` of the campaign-manager system caller on the non-PII dump route.
  *
+ * The dump is whole-network with no org scope, so this identity is its only control.
  * Coordinators and the system caller share one `azp`, so the username tells
  * them apart. Keycloak names the service account `service-account-<client-id>`,
  * which no human can hold. Read from the environment at call time.
  *
- * @returns The expected username; the default when the env var is blank.
+ * @returns The expected username; the default when the env var is unset or blank.
  */
 export function campaignDumpServiceAccount(): string {
   // An empty value would match a token with no username, so fall back to the default.
@@ -360,7 +362,7 @@ export function campaignDumpServiceAccount(): string {
  *
  * Read from the environment at call time.
  *
- * @returns The instance id, or `undefined` when blank (the route then returns 503).
+ * @returns The instance id, or `undefined` when unset or blank (the route then returns 503).
  */
 export function campaignDumpInstanceId(): string | undefined {
   const raw = process.env.CAMPAIGN_DUMP_INSTANCE_ID?.trim();

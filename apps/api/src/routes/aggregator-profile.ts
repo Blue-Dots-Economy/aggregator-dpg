@@ -5,8 +5,8 @@
  *     Returns the coordinator row plus identity fields from the token or Keycloak.
  *
  *   PATCH /v1/aggregators/profile/me
- *     Contact changes go to Keycloak first, then the database. `name` goes
- *     to the database only.
+ *     A contact change writes the phone to Keycloak first, then the contact
+ *     to the database. `name` goes to the database only.
  *
  *     Org details (`url`, `locations`, `contact.company`, `contact.gstNumber`)
  *     belong to the coordinator's org. A PATCH that changes any of them is

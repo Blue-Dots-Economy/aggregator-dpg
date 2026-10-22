@@ -1,15 +1,16 @@
 /**
- * Injectable rate-limit check for re-sending an approved org's
- * coordinator-invite link.
+ * Injectable rate-limit check for re-sending an approved org's owner its
+ * sign-in link.
  *
  * Belongs to `@aggregator-dpg/api`. Guards the `active` branch of
  * `POST /v1/orgs/create`, where an owner re-submits the form and is mailed a
- * fresh grant. Runs in addition to `checkSubmitRate`, with two differences:
+ * sign-in link. Runs in addition to `checkSubmitRate`, with two differences:
  *
  * - Keyed on the stored owner email only, not `ip|email`, so rotating IPs
  *   does not get a fresh bucket.
- * - Fails closed, because each call mints a 90-day grant. The narrow key
- *   means an outage blocks re-sends for one address only.
+ * - Fails closed, so a Redis outage cannot remove the limit on mail sent from
+ *   an anonymous form. The narrow key means an outage blocks re-sends for one
+ *   address only.
  *
  * Tests override via `_setOrgInviteResendRateChecker`.
  *

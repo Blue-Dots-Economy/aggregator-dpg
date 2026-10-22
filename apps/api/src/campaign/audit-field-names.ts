@@ -10,6 +10,8 @@
  * and count limit, and counts what it drops by reason. It never rejects a
  * request. Only the audit copy is filtered; `content.variables` itself is unchanged.
  *
+ * A single-word value (e.g. a first name) looks like a field name and still passes.
+ *
  * @module @aggregator-dpg/api
  */
 

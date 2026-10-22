@@ -488,7 +488,8 @@ function classifyWriteError(
   code: string | undefined,
   constraint: string,
 ): OrgStoreError {
-  // Only a unique violation (SQLSTATE 23505) maps to a duplicate error.
+  // Only a unique violation (SQLSTATE 23505) maps to a duplicate error, so a
+  // connection failure that mentions a constraint name is not misreported.
   if (code === PG_UNIQUE_VIOLATION) {
     if (constraint.includes('organisations_name_live_unique')) {
       return err('DUPLICATE_NAME', 'organisation name already in use');

@@ -411,7 +411,8 @@ export class AzpNotAllowedError extends Error {
  *
  * - `aud`: when `KEYCLOAK_EXPECTED_AUDIENCE` is set, must contain it. Needs
  *   the realm audience mapper.
- * - `azp`: when `KEYCLOAK_ALLOWED_AZP` is set, must be in that list.
+ * - `azp`: when `KEYCLOAK_ALLOWED_AZP` is set, must be in that list. Keycloak
+ *   always emits `azp`, so this is the main client gate.
  *
  * Each check is skipped when its env var is unset.
  *

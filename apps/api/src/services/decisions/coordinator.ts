@@ -206,7 +206,8 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
     log.warn({ status: 'failure', sub_operation: 'idp.setUserDecision', code: stamp.error.code });
   }
   // 4. Signals org id on Keycloak. Soft-fail: login backfill repairs it.
-  //    The row's copy is written after the commit point.
+  //    The row's copy is written after the commit point, so a losing approval
+  //    never touches the row.
   if (signalstackOrgId) {
     const attr = await idp.setAttributes(kcUser.id, {
       [KC_ATTR.SIGNALSTACK_ORG_ID]: signalstackOrgId,

@@ -281,7 +281,8 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         });
       }
 
-      // A resubmit by an owner who already has an org reuses that org.
+      // A resubmit by an owner who already has an org is answered from that
+      // org's status; no new org is created.
       const existing = await orgStore.findByOwnerEmail(ownerEmail);
       if (!existing.ok) {
         throw httpError('DB_UNAVAILABLE', {
