@@ -149,7 +149,8 @@ services:
 
   # S3-compatible object storage for aggregator bulk uploads + QR PNGs.
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    # minio/minio is no longer public on Docker Hub or quay.io; DHI publishes it.
+    image: dhi.io/minio:latest
     container_name: sd-minio
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
@@ -163,7 +164,8 @@ services:
     volumes:
       - sd-minio-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      # No curl or grep in the DHI image: ask /minio/health/live over bash's /dev/tcp.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /minio/health/live HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && read -r l <&3 && [[ $$l == *' 200'* ]]"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -171,7 +173,8 @@ services:
 
   # Creates the aggregator upload bucket once MinIO is healthy. Idempotent.
   minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    # minio/mc is no longer public; Chainguard's -dev variant has mc and a shell.
+    image: cgr.dev/chainguard/minio-client:latest-dev
     container_name: sd-minio-init
     depends_on:
       minio:
@@ -180,6 +183,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
       S3_BUCKET: ${S3_BUCKET:-aggregator-bulk-uploads}
+      MC_CONFIG_DIR: /tmp/.mc
     entrypoint:
       - sh
       - -c
@@ -557,6 +561,11 @@ services:
       SIGNALSTACK_AUTH_MODE: ${SIGNALSTACK_AUTH_MODE:-apikey}
       SIGNALSTACK_CLIENT_ID: ${SIGNALSTACK_CLIENT_ID:-aggregator-dpg}
       SIGNALSTACK_CLIENT_SECRET: ${SIGNALSTACK_CLIENT_SECRET:-aggregator-dpg-signals-local-dev-secret}
+      # RBAC (docs/rbac/rbac-design-aggregator.md): `log` decides every request
+      # and logs would-denies without blocking; `enforce` returns 403; `off`
+      # skips it. Decisions come from the `opa` service below.
+      RBAC_MODE: ${RBAC_MODE:-log}
+      OPA_URL: http://opa:8181
     volumes:
       - ../config:/app/config:ro
     healthcheck:
@@ -581,6 +590,27 @@ services:
       # API can create users — otherwise aggregator_id attributes are dropped.
       keycloak-init:
         condition: service_completed_successfully
+      # So the first requests are not denied because OPA is still starting.
+      opa:
+        condition: service_healthy
+
+  # OPA (RBAC decisions) for aggregator-api, from ../policy/rbac. Deployments
+  # run it as a sidecar in the api pod (bluedots-automation).
+  opa:
+    image: openpolicyagent/opa:1.21.1@sha256:d3a9a6bd4fbcb0f4403294b0d0b239b07be163ac118a46df7d50045b52e52053
+    container_name: sd-aggregator-opa
+    restart: unless-stopped
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=error", "--ignore=*_test.rego", "--ignore=vectors.json", "/policy"]
+    ports:
+      - "127.0.0.1:8181:8181"
+    volumes:
+      - ../policy/rbac:/policy:ro
+    healthcheck:
+      test: ["CMD", "/opa", "eval", "--fail", "--data", "/policy", "--ignore", "*_test.rego", "--ignore", "vectors.json", "data.rbac.not_through_root"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   aggregator-web:
     build:

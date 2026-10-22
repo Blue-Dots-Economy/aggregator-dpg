@@ -24,6 +24,7 @@ import { getSignalStackWriter } from '../signalstack.js';
 import { getNetworkConfig } from '../network-config.js';
 import { renderApplicantApproved, renderApplicantRejected } from '../email-templates/index.js';
 import { recordLoginIdentity } from '../identity-store/record.js';
+import { revokeRolesOnLeave } from '../authz/roles.js';
 
 /** What the decider asks for. */
 export type Decision = 'approve' | 'reject';
@@ -311,6 +312,10 @@ async function reject(
     if (!now.ok) return { kind: 'unavailable', dependency: 'db' };
     if (!now.value) return { kind: 'not_found' };
     return alreadyDecided(now.value);
+  }
+  // RBAC: a rejected coordinator's additional roles in the org end with it.
+  if (aggregator.parentOrgId) {
+    await revokeRolesOnLeave(aggregator.id, aggregator.parentOrgId, 'coordinator_rejected');
   }
   const stamp = await getIdpAdmin().setUserDecision(kcUser.id, 'rejected');
   if (!stamp.ok) {

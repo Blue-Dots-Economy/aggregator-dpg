@@ -38,6 +38,7 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
   app.post(
     '/v1/campaign/export',
     {
+      config: { rbac: { capability: 'profiles.view_pii' } },
       schema: {
         tags: ['campaign'],
         summary: 'Request an async participant PII export',

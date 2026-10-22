@@ -106,11 +106,19 @@ def set_req(flow, ex, requirement):
 
 
 def add_exec(flow, provider, requirement, config=None, config_alias=None):
+    # Identify the execution we just created by diffing ids, not by looking up
+    # the provider. A gate can hold two conditions with the SAME provider (the
+    # approved gate uses conditional-user-attribute twice), and a provider
+    # lookup returns the first one every time — so the second add_exec would
+    # re-mark the first condition and leave the new one at Keycloak's default
+    # of DISABLED, which verify() then rejects.
+    before = {e["id"] for e in executions(flow)}
     st, b = req("POST", f"{A}/flows/{urllib.parse.quote(flow)}/executions/execution",
                 {"provider": provider}, tok=TOK)
     assert st in (200, 201), (provider, st, b)
-    ex = find_exec(flow, provider=provider)
-    assert ex, f"execution {provider} not found in {flow}"
+    added = [e for e in executions(flow) if e["id"] not in before]
+    assert len(added) == 1, (provider, "expected exactly one new execution", added)
+    ex = added[0]
     set_req(flow, ex, requirement)
     if config:
         st, b = req("POST", f"{A}/executions/{ex['id']}/config",
@@ -120,11 +128,13 @@ def add_exec(flow, provider, requirement, config=None, config_alias=None):
 
 
 def add_subflow(parent, alias, description, requirement):
+    before = {e["id"] for e in executions(parent)}
     st, b = req("POST", f"{A}/flows/{urllib.parse.quote(parent)}/executions/flow",
                 {"alias": alias, "type": "basic-flow", "description": description}, tok=TOK)
     assert st in (200, 201), (alias, st, b)
-    ex = find_exec(parent, display=alias)
-    assert ex, f"subflow {alias} not found in {parent}"
+    added = [e for e in executions(parent) if e["id"] not in before]
+    assert len(added) == 1, (alias, "expected exactly one new subflow", added)
+    ex = added[0]
     set_req(parent, ex, requirement)
     return ex
 

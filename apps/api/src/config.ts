@@ -363,6 +363,39 @@ const ConfigSchema = z.object({
    * each newly-approved aggregator as a signalstack org.
    */
   SIGNALSTACK_ACTING_ORG_ID: z.string().optional(),
+  // ─── RBAC (docs/rbac/rbac-design-aggregator.md) ─────────────────────────
+  /**
+   * `off`: no access checks run (nothing is loaded at boot). `log`: every
+   * check runs and a would-deny is logged, but the request continues.
+   * `enforce`: a deny returns 403. Flip per instance after a clean log window.
+   */
+  RBAC_MODE: z.enum(['off', 'log', 'enforce']).default('off'),
+  /**
+   * Deploy-time switch for the CUSTOM-ROLES capability (network-admin role
+   * authoring). `false` (default, opt-in) builds the role snapshot from the
+   * built-in roles alone, so any existing custom-role assignment is inert, the
+   * role-authoring routes are not registered (404), and `GET
+   * /v1/aggregator-config` reports `features.custom_roles: false`. Independent
+   * of — and subordinate to — `RBAC_MODE`: with `RBAC_MODE=off` nothing is
+   * loaded and this flag has no effect.
+   */
+  RBAC_CUSTOM_ROLES_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /** Base URL of the OPA sidecar. Validated as a URL so a typo fails at boot, not per request. */
+  OPA_URL: z.string().url().default('http://localhost:8181'),
+  /** Per-attempt timeout for an OPA decision. */
+  OPA_TIMEOUT_MS: z.coerce.number().int().positive().default(500),
+  /** Retries after the first OPA attempt, for transient failures. */
+  OPA_RETRIES: z.coerce.number().int().min(0).max(3).default(1),
+  /** Base backoff between OPA retries; doubles per retry. */
+  OPA_BACKOFF_MS: z.coerce.number().int().positive().default(50),
+  /**
+   * How often each replica re-reads the RBAC catalogue version and reloads
+   * roles and PermissionSets when it moved. `0` disables the timer.
+   */
+  RBAC_CATALOGUE_REFRESH_MS: z.coerce.number().int().min(0).default(30000),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

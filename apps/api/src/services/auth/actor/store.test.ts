@@ -20,6 +20,10 @@ import {
 import { IdentityStoreFake } from '../../identity-store/testing.js';
 import { _setIdentityStore } from '../../identity-store/index.js';
 import { IDP_PROVIDER } from '../../idp-admin/provider.js';
+import { InMemoryRoleStore, _setRoleStore } from '../../role-store/index.js';
+import { _setRbacRuntime } from '../../authz/runtime.js';
+import { shippedRoleIndex } from '../../authz/testing.js';
+import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
 import { StoreActorResolver } from './store.js';
 
 const COORD_ID = '11111111-1111-4111-8111-111111111111';
@@ -30,13 +34,16 @@ describe('StoreActorResolver', () => {
   let coordStore: UserStoreFake;
   let orgStore: OrganisationStoreFake;
   let identity: IdentityStoreFake;
+  let roleStore: InMemoryRoleStore;
   const resolver = new StoreActorResolver();
 
   beforeEach(() => {
     coordStore = new UserStoreFake();
     orgStore = new OrganisationStoreFake();
     identity = new IdentityStoreFake();
+    roleStore = new InMemoryRoleStore();
     _setUserStore(coordStore);
+    _setRoleStore(roleStore);
     _setOrganisationStore(orgStore);
     _setIdentityStore(identity);
   });
@@ -45,6 +52,8 @@ describe('StoreActorResolver', () => {
     _setUserStore(null);
     _setOrganisationStore(null);
     _setIdentityStore(null);
+    _setRoleStore(null);
+    _setRbacRuntime(null);
   });
 
   describe('claimed coordinator (aggregator_id present)', () => {
@@ -194,6 +203,44 @@ describe('StoreActorResolver', () => {
       const r = await resolver.resolve({ subject: SUBJECT });
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error.code).toBe('UNAVAILABLE');
+    });
+  });
+
+  describe('additional roles', () => {
+    const asCoordinator = async () => {
+      coordStore.seed([buildCoordinator({ id: COORD_ID, status: 'active' })]);
+      identity.seed([{ userId: COORD_ID, provider: IDP_PROVIDER, subject: SUBJECT }]);
+      return resolver.resolve({ aggregatorId: COORD_ID, subject: SUBJECT });
+    };
+    const rbacOn = async () =>
+      _setRbacRuntime({
+        mode: 'log',
+        roles: await shippedRoleIndex(),
+        authorizer: new AuthorizerFake(),
+      });
+
+    it('attaches the live roles when RBAC is on', async () => {
+      await rbacOn();
+      roleStore.seed([{ userId: COORD_ID, roleKey: 'data_export', orgId: 'org-a' }]);
+      const r = await asCoordinator();
+      expect(r.ok && r.value?.roles).toEqual([
+        { roleKey: 'data_export', orgId: 'org-a', expiresAt: null },
+      ]);
+    });
+
+    it('reports UNAVAILABLE when the role store fails with RBAC on', async () => {
+      await rbacOn();
+      roleStore.failWith({ code: 'DB_UNAVAILABLE', message: 'down' });
+      const r = await asCoordinator();
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.code).toBe('UNAVAILABLE');
+    });
+
+    it('skips the role store when RBAC is off', async () => {
+      roleStore.failWith({ code: 'DB_UNAVAILABLE', message: 'down' });
+      const r = await asCoordinator();
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value).not.toHaveProperty('roles');
     });
   });
 });

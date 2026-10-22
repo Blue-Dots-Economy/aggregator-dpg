@@ -7,6 +7,11 @@ import { writeFile } from 'node:fs/promises';
 
 process.env.API_REFERENCE_ENABLED = 'true';
 process.env.API_REFERENCE_FORCE = 'true';
+// Document the full API surface, including the CUSTOM-ROLES authoring routes
+// (`/v1/roles/{create,update,delete}`) that a deployment omits when
+// RBAC_CUSTOM_ROLES_ENABLED is off. The committed spec is the complete catalogue
+// of what the API can expose; the toggle is a per-deploy registration detail.
+process.env.RBAC_CUSTOM_ROLES_ENABLED = 'true';
 // `DATABASE_URL` has no source default — it carries credentials, so the config
 // schema requires it rather than falling back to a literal (secrets:S6698).
 // This script only builds the Fastify app to serialise its route metadata and

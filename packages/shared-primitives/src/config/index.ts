@@ -53,6 +53,19 @@ export const signalStackConfigFields = {
    * unset. Must match across processes.
    */
   SIGNALSTACK_ORG_SLUG: z.string().optional(),
+  /**
+   * Realm holding the signals service client, when it differs from the realm
+   * this app authenticates its own users against (`KEYCLOAK_REALM`).
+   *
+   * Signals is a shared service and trusts one issuer; the aggregator portal may
+   * live in its own realm. Without this, a single `KEYCLOAK_REALM` would have to
+   * satisfy both, and one of them breaks — portal logins fail JWKS validation, or
+   * signals rejects the service token as an untrusted issuer.
+   *
+   * Optional. Falls back to `KEYCLOAK_REALM`, so deployments where both live in
+   * the same realm are unaffected.
+   */
+  SIGNALSTACK_KEYCLOAK_REALM: z.string().optional(),
 } as const;
 
 /**

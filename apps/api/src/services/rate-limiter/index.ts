@@ -66,6 +66,37 @@ export interface RateLimitResult {
   retryAfterSeconds: number;
 }
 
+/** How long a command waits for the connection to come up before giving up. */
+const READY_TIMEOUT_MS = 1000;
+
+/**
+ * Waits (briefly) for the connection to be usable.
+ *
+ * `enableOfflineQueue: false` makes ioredis throw `Stream isn't writeable`
+ * rather than buffer a command issued before the socket is ready — which is
+ * the right posture for a downed Redis, but it also caught the very first
+ * call after boot while the connection was still being established. A
+ * `failClosed` caller (invite minting) then saw a spurious deny against a
+ * perfectly healthy Redis.
+ *
+ * Bounded by {@link READY_TIMEOUT_MS} so a genuinely unreachable Redis still
+ * fails fast into the caller's chosen posture.
+ *
+ * @param redis - The limiter's connection.
+ */
+async function awaitReady(redis: Redis): Promise<void> {
+  if (redis.status === 'ready') return;
+  await new Promise<void>((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      redis.off('ready', done);
+      resolve();
+    };
+    const timer = setTimeout(done, READY_TIMEOUT_MS);
+    redis.once('ready', done);
+  });
+}
+
 /**
  * Tries to consume one slot from the rate-limit bucket. Returns whether the
  * call is allowed plus the current window count.
@@ -76,6 +107,7 @@ export async function consume(options: RateLimitOptions): Promise<RateLimitResul
   const windowStart = Math.floor(now / 1000 / options.windowSeconds) * options.windowSeconds;
   const fullKey = `rl:${options.namespace}:${options.key}:${windowStart}`;
   try {
+    await awaitReady(redis);
     // INCR + EXPIRE issued atomically. Pipelining via `multi()` avoids the
     // INCR-without-EXPIRE window that exists if the process dies between
     // calls — without TTL the bucket would never reset. Re-applying

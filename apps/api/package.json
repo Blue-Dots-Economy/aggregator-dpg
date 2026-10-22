@@ -29,6 +29,7 @@
     "@aggregator-dpg/network-config": "workspace:*",
     "@aggregator-dpg/profile-csv": "workspace:*",
     "@aggregator-dpg/queue": "workspace:*",
+    "@aggregator-dpg/rbac": "workspace:*",
     "@aggregator-dpg/schema-loader": "workspace:*",
     "@aggregator-dpg/shared-primitives": "workspace:*",
     "@aggregator-dpg/signalstack-writer": "workspace:*",

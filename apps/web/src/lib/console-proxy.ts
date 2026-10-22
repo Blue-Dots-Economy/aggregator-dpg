@@ -27,6 +27,18 @@ export function isUuid(id: string): boolean {
   return UUID_RE.test(id);
 }
 
+const ROLE_KEY_RE = /^[a-z][a-z0-9_]{0,39}$/;
+
+/**
+ * Whether a path segment is a role key (lower-case letters, digits, underscores).
+ *
+ * @param key - The raw segment.
+ * @returns True for a role key.
+ */
+export function isRoleKey(key: string): boolean {
+  return ROLE_KEY_RE.test(key);
+}
+
 /** Options of {@link consoleMutation}. */
 export interface ConsoleMutationOptions {
   method: 'POST' | 'PATCH';
