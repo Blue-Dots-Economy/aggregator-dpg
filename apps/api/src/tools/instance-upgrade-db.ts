@@ -1,14 +1,13 @@
 /**
- * Database IO of the instance-upgrade operator tool (`@aggregator-dpg/api`,
- * `tools/instance-upgrade.ts`): instance facts, the role and session checks, and the
- * runner for the operator SQL (`check_id | category | n` rows). Config-free:
- * only the pool / connection it is given.
+ * Database access for the instance-upgrade tool (`@aggregator-dpg/api`): instance
+ * facts, role and session checks, and the runner for the operator SQL
+ * (`check_id | category | n` rows). Uses only the pool or connection it is given.
  */
 
 import { readFile } from 'node:fs/promises';
 import type { Queryable } from '../db/migrate-core.js';
 
-/** What the operator sees before anything is written (review R3). */
+/** Instance facts shown to the operator before anything is written. */
 export interface InstanceFacts {
   systemIdentifier: string;
   database: string;
@@ -45,9 +44,8 @@ export async function readInstanceFacts(pool: Queryable): Promise<InstanceFacts>
 }
 
 /**
- * Whether the session's role can act as the owner of the coordinator table
- * (`users`, or `aggregators` before 0027) — the migrations `SET LOCAL ROLE`
- * to it and refuse otherwise.
+ * Whether the session's role can act as the owner of the coordinator table.
+ * The migrations `SET LOCAL ROLE` to that owner.
  *
  * @param pool - Postgres pool.
  * @returns `true` when the role is the owner or a member of it.
@@ -65,15 +63,14 @@ export async function canActAsOwner(pool: Queryable): Promise<boolean> {
 export interface OtherSession {
   applicationName: string;
   count: number;
-  /** A session of this tool (`train…`): another operator, or an orphan of a killed run. */
+  /** A session of this tool (`train…`), from another operator or a killed run. */
   tool: boolean;
 }
 
 /**
- * Lists the other sessions on the current database (pods must be at zero).
- * Without `pg_read_all_stats` another role's session shows NULL for
- * `backend_type` / `application_name`; such rows are counted, not skipped.
- * Background processes (no user) are not sessions.
+ * Lists the other sessions on the current database. Pods must be scaled to zero.
+ * Sessions of other roles may show NULL names without `pg_read_all_stats`; they
+ * are still counted. Background processes are not counted.
  *
  * @param pool - Postgres pool or connection.
  * @returns One entry per application name; empty when alone.
@@ -105,16 +102,15 @@ export function isFailing(row: CheckRow): boolean {
 }
 
 /**
- * Splits a psql script into plain statements: `\` meta lines and `--` comment
- * lines are dropped, and statements end with `;` at a line end — outside
- * quoted strings and dollar-quoted bodies (`DO $$ … $$`). Not handled (the
- * operator scripts use none): `/* … *\/` comments, `E'\''` escapes, and a
- * quote inside a trailing `--` comment.
+ * Splits a psql script into statements. Drops `\` meta lines and `--` comment
+ * lines. A statement ends at `;` at a line end, outside quotes and dollar-quoted
+ * bodies. Not supported: `/* … *\/` comments, `E'\''` escapes, and a quote
+ * inside a trailing `--` comment.
  *
  * @param script - The script text.
  * @returns The statements, in order.
  */
-export function sqlStatements(script: string): string[] { // NOSONAR typescript:S3776 — inherently branchy migration step; splitting would obscure it
+export function sqlStatements(/* NOSONAR typescript:S3776 */ script: string): string[] {
   const body = script
     .split('\n')
     .filter((l) => !l.trimStart().startsWith('\\') && !l.trimStart().startsWith('--'))
@@ -159,18 +155,17 @@ export function sqlStatements(script: string): string[] { // NOSONAR typescript:
 }
 
 /**
- * Runs an operator check script (`instance-upgrade-check.sql`, the verify files) and
- * returns its `check_id | category | n` rows; statements without a
- * `check_id` (setup such as TEMP views) are run and skipped.
+ * Runs an operator check script and returns its `check_id | category | n` rows.
+ * Statements without a `check_id` (setup such as TEMP views) run but add no row.
  *
- * @param client - The connection (the instance upgrade's transaction, or a read session).
+ * @param client - The upgrade transaction or a read session.
  * @param file - Path to the script.
  * @returns The rows, in script order.
  */
 export async function runChecks(client: Queryable, file: string): Promise<CheckRow[]> {
   const rows: CheckRow[] = [];
   for (const stmt of sqlStatements(await readFile(file, 'utf8'))) {
-    const r = await client.query<{ check_id?: string; category?: string; n?: string }>(stmt); // NOSONAR typescript:S9382 — sequential by design
+    const r = await client.query<{ check_id?: string; category?: string; n?: string }>(stmt); // NOSONAR typescript:S9382 — statements run in order
     for (const row of r.rows ?? []) {
       if (row.check_id === undefined) continue;
       const category =

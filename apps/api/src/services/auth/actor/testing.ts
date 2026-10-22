@@ -1,9 +1,8 @@
 /**
- * Test fake for the actor resolver (`@aggregator-dpg/api`, user & org Phase 5).
+ * Test fake for the actor resolver (`@aggregator-dpg/api`).
  *
- * Route tests usually keep the real {@link StoreActorResolver} over the
- * in-memory stores; this fake is for tests that want to pin an actor without
- * seeding stores.
+ * Use it to pin an actor without seeding stores. Most route tests use the real
+ * {@link StoreActorResolver} over the in-memory stores.
  */
 
 import {
@@ -29,7 +28,8 @@ export class ActorResolverFake extends ActorResolverBase {
     this.byKey.set(key, actor);
   }
 
-  async resolve(input: ResolveActorInput): Promise<ActorResult> { // NOSONAR typescript:S7503 — fake implements the async contract
+  /** {@inheritDoc ActorResolverBase.resolve} */
+  async resolve(/* NOSONAR typescript:S7503 */ input: ResolveActorInput): Promise<ActorResult> {
     if (this.failWith) return { ok: false, error: { code: 'UNAVAILABLE', message: this.failWith } };
     const actor = this.byKey.get(input.aggregatorId ?? input.subject) ?? null;
     return { ok: true, value: actor };
