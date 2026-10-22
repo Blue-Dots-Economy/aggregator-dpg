@@ -71,8 +71,9 @@ export function useOnboardingSummary() {
 }
 
 /**
- * Coordinator-wide onboarding counters grouped by entry source
- * (`bulk` / `link`). Drives the dashboard's "joins by entry mode" card.
+ * Fetches onboarding counters grouped by entry source (`bulk` / `link`).
+ *
+ * @returns The React Query result for the by-source counters.
  */
 export function useOnboardingBySource() {
   return useQuery<OnboardingBySource>({

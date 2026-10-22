@@ -30,8 +30,7 @@ export function Button({
       type={type}
       className={cn(
         'inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-[13.5px] font-medium transition-all',
-        // Disabled state needs a visible cue — without it the button looks
-        // clickable but the native `disabled` silently swallows the click.
+        // Visible cue for the disabled state.
         'disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none',
         kindStyles[kind],
         className,

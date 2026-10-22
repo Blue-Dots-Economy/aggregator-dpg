@@ -1,11 +1,10 @@
 /**
- * Shared plumbing for the console's mutating BFF routes (user & org Phase 5).
+ * Shared helpers for the console's mutating BFF routes.
  *
- * Every console mutation is a `POST` / `PATCH` that: refuses cross-site or
- * non-JSON requests ({@link rejectCrossSite}), validates the path id, reads the
- * JSON body, and forwards it with the caller's own token through `callApi`
- * (never the service token — see `apps/web/CLAUDE.md`). The upstream envelope
- * is passed through unchanged, so a `409 ALREADY_DECIDED` reaches the view.
+ * Each mutation refuses cross-site or non-JSON requests ({@link rejectCrossSite}),
+ * validates the path id, and forwards the JSON body with the caller's own token
+ * via `callApi`. Never use the service token here. The upstream response is
+ * passed through unchanged.
  *
  * @module apps/web/src/lib/console-proxy
  */
@@ -71,7 +70,11 @@ export async function consoleMutation(
   }
 }
 
-/** The 404 a malformed id answers (same as an id out of reach upstream). */
+/**
+ * Builds the 404 response for a malformed id, matching an out-of-reach id upstream.
+ *
+ * @returns A 404 JSON response.
+ */
 export function invalidIdResponse(): NextResponse {
   return NextResponse.json({ error: { code: 'NOT_FOUND', title: 'Not found' } }, { status: 404 });
 }

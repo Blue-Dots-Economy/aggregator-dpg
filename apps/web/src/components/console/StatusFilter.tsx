@@ -1,8 +1,8 @@
 'use client';
 
 /**
- * A plain GET form filtering a console list by status (no JavaScript needed;
- * the page re-reads server-side).
+ * A plain GET form that filters a console list by status. Works without
+ * JavaScript; the page re-reads on the server.
  */
 
 import { useTranslations } from 'next-intl';

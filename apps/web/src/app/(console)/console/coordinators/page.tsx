@@ -1,6 +1,7 @@
 /**
- * Coordinators within reach (user & org Phase 5): filtered by org and status,
- * newest first, paged by the API's cursor.
+ * Lists the coordinators the actor can reach, filtered by org and status.
+ *
+ * Newest first, paged by the API's cursor.
  */
 
 import Link from 'next/link';

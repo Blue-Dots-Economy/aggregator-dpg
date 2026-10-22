@@ -1,6 +1,5 @@
 /**
- * My account (user & org Phase 5): the signed-in admin's contact, read-only
- * (contact change with OTP is deferred, P5-7).
+ * Shows the signed-in admin's contact details, read-only.
  */
 
 import { getTranslations } from 'next-intl/server';

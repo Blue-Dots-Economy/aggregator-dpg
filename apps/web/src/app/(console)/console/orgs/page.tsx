@@ -1,7 +1,7 @@
 /**
- * Organisations (network admin, user & org Phase 5): every aggregator org,
- * filtered by status, with approve / reject for pending ones and "repair
- * access" for active ones.
+ * Organisations page for the network admin, filtered by status.
+ *
+ * Pending orgs can be approved or rejected; active orgs can have access repaired.
  */
 
 import { redirect } from 'next/navigation';

@@ -1,9 +1,8 @@
 /**
- * Browser-side caller of the console's BFF mutations (user & org Phase 5).
+ * Browser-side caller of the console's BFF mutations.
  *
- * Sends JSON with the same-origin defaults the BFF guard expects, and returns
- * the status and body instead of throwing, so a view can update in place on
- * `409 ALREADY_DECIDED` (C10).
+ * Sends same-origin JSON and returns the status and body instead of throwing,
+ * so a view can update in place on `409 ALREADY_DECIDED`.
  *
  * @module apps/web/src/lib/console-client
  */
@@ -48,7 +47,7 @@ export async function sendConsole<T>(
 }
 
 /**
- * The console message key for a failed call.
+ * Returns the console message key for a failed call.
  *
  * @param r - A failed result.
  * @returns A key under `console.errors`.

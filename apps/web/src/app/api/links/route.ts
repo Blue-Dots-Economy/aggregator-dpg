@@ -4,8 +4,7 @@
  *   GET  /api/links?status=&limit=&offset=
  *   POST /api/links
  *
- * Forwards to the upstream API verbatim with the active session's bearer
- * token. Body and response shapes are not re-mapped here.
+ * Forwards to the upstream API as-is with the session's bearer token.
  */
 
 import { type NextRequest, NextResponse } from 'next/server';

@@ -12,13 +12,11 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 /**
- * Public aggregator (coordinator) registration page. Loads the coordinator JSON
- * Schema + UI schema from `config/schemas/aggregator/` on the server and renders
- * the single coordinator flow.
+ * Public coordinator registration page.
  *
- * Owner (organisation) registration is no longer a tab here — as of #619 it is
- * served only via the `/register/owner` deep link. The coordinator form always
- * shows its org selector (the hierarchy is always on since migration 0028).
+ * Loads the coordinator schema and UI schema on the server. Owner registration
+ * is served only at `/register/owner`. The coordinator form always shows its
+ * organisation selector.
  */
 export default async function RegisterPage() {
   const session = await getSession();

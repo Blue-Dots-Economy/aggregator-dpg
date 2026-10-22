@@ -3,14 +3,10 @@
 /**
  * The Privacy / Terms links shown at the foot of the public surfaces.
  *
- * One component for all three (login, org registration, the public QR form)
- * because the styling is the whole point: these had been muted `text-ink-500`
- * with `hover:underline`, so they read as ordinary prose until you happened to
- * hover them. A link that only announces itself on hover is not discoverable by
- * touch at all. They now carry the brand colour and a permanent underline, the
- * same treatment as the sibling Signals portal's own footer.
+ * Used on the login page, org registration, and the public QR form. Links use
+ * the brand colour and a permanent underline so they are visible on touch.
  *
- * Both documents live on one page, so each link is a fragment of `/legal`.
+ * Each link points to a section of `/legal`.
  *
  * @module components/legal/LegalLinksFooter
  */
@@ -18,17 +14,14 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import type { JSX, ReactNode } from 'react';
 
-/** Shared link chrome — the reason this component exists. */
+/** Shared link styling. */
 const LINK_CLASS =
   'font-medium text-(--bd-primary-600) underline underline-offset-2 transition-opacity hover:opacity-80';
 
 /**
- * Tag renderers for the `agree_sentence` message, so the translated copy can
- * place each link where its own grammar needs it.
+ * Tag renderers for the `agree_sentence` message.
  *
- * Declared at module scope rather than inside the component: they close over
- * nothing from a render, and defined inline they read as a fresh component
- * definition on every render (Sonar S6478).
+ * Module scope so they are not recreated on each render (Sonar S6478).
  */
 const SENTENCE_LINKS = {
   privacy: (chunks: ReactNode) => (
@@ -45,11 +38,11 @@ const SENTENCE_LINKS = {
 
 interface LegalLinksFooterProps {
   /**
-   * `sentence` — "By continuing you agree to the Privacy Policy and Terms.",
-   * for a surface where continuing IS the act of agreeing (the login page).
+   * Display style.
    *
-   * `separated` — "Privacy Policy · Terms of Service", for a surface that
-   * already captures consent explicitly and just needs the documents reachable.
+   * `sentence` shows "By continuing you agree to ..." (login page).
+   * `separated` shows "Privacy Policy · Terms of Service" for pages that
+   * collect consent separately.
    */
   variant: 'sentence' | 'separated';
   className?: string;
@@ -87,10 +80,7 @@ export function LegalLinksFooter({
 
   return (
     <p className={`text-[12px] text-ink-500 ${className ?? ''}`}>
-      {/* `t.rich`, not string concatenation: where the links sit inside the
-          sentence differs by language, and only the translator can decide that.
-          Hindi and Kannada both put the verb last, so a hardcoded
-          "prefix + link + and + link" would read wrong in each. */}
+      {/* `t.rich` lets each language place the links in its own word order. */}
       {t.rich('agree_sentence', SENTENCE_LINKS)}
     </p>
   );

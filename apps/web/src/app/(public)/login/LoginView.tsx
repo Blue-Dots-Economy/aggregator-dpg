@@ -17,22 +17,15 @@ export interface LoginViewProps {
 }
 
 /**
- * Public login page — sign-in only.
+ * Public login page with a single sign-in card that starts the BFF login flow.
  *
- * One card:
- *   - "Existing user — Sign in"  → BFF login → Keycloak
- *
- * No credentials are collected here, and registration is intentionally NOT
- * linked from this page (#619): coordinator/owner registration is served via
- * deep links (`/register`, `/register/owner`), not advertised on the homepage.
+ * No credentials are collected here, and registration is not linked from this page.
  */
 export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
   const t = useTranslations('auth');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const brand = cfg.brand.short_name;
-  // The default lockup is the navy-on-white variant, which all but disappears
-  // on the dark pane. `logo.light` is the light-ink variant shipped for exactly
-  // this; fall back to the default when a brand ships only one.
+  // Use the light logo in dark mode, falling back to the default logo.
   const { mode } = useThemeMode();
   const headerLogo =
     mode === 'dark' ? (cfg.brand.logo?.light ?? cfg.brand.logo?.default) : cfg.brand.logo?.default;
@@ -44,11 +37,7 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
     <div className="h-screen w-full flex overflow-hidden">
       <BrandPanel />
 
-      {/* The pane background is the `--bd-bg` token, not a literal. It used to
-          be `background: '#FBFCFE'`, and an inline style outranks every CSS
-          rule — including the `.dark` overrides — so when the login page
-          stopped pinning light theme the text flipped to its dark palette
-          while this stayed white, leaving "Welcome back." unreadable. */}
+      {/* Uses the `--bd-bg` token so the background follows dark mode. */}
       <div
         className="flex-1 min-w-0 h-screen flex flex-col px-6 py-8 relative overflow-y-auto"
         style={{ background: 'var(--bd-bg)' }}
@@ -65,9 +54,7 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
           }}
         />
 
-        {/* `flex-1` + centring here, rather than on the pane, so the card is
-            still optically centred while the footer below it is pinned to the
-            foot of the pane. */}
+        {/* Centres the card while the footer stays at the bottom of the pane. */}
         <div className="flex-1 flex items-center justify-center relative z-10">
           <div className="w-full max-w-[440px]">
             <div className="flex items-center gap-3 mb-7">
@@ -111,12 +98,9 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
                   className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800"
                 >
                   {t(error)}
-                  {/* Every refused account may be the wrong one, so offer a
-                      switch; a plain link back to /login would silently reuse
-                      the same realm SSO session and return them here, which is
-                      why this ends the realm session first. `account_switch` is
-                      the landing state AFTER that logout, so it must not offer
-                      the link again. */}
+                  {/* Offer an account switch, which ends the realm SSO session
+                      first. Not shown on `account_switch`, which is the state
+                      after that logout. */}
                   {error !== 'account_switch' ? (
                     <a
                       href="/api/auth/login?switch=1"
@@ -140,9 +124,8 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
               <Welcome onSignIn={goSignIn} brand={brand} t={t} />
             </div>
 
-            {/* Invite-only recovery line (#701): registration is not linked from
-                here, so a mis-shared/expired invite would otherwise leave a
-                legitimate coordinator with no route. Point them at their org. */}
+            {/* Registration is invite-only, so point users without an invite to
+                their organisation. */}
             <p className="mt-6 text-[12.5px] text-ink-400">
               Need access? Contact your organisation administrator for an invitation.
             </p>
@@ -151,10 +134,7 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
           </div>
         </div>
 
-        {/* At the foot of the pane, not trailing the card's own content — the
-            same place the sibling Signals portal keeps it. Signing in from here
-            is the act of agreeing, so the line belongs on the page; it just
-            isn't part of the sign-in card. */}
+        {/* Legal links at the bottom of the pane, outside the sign-in card. */}
         <LegalLinksFooter
           variant="sentence"
           className="relative z-10 mx-auto w-full max-w-[440px] pt-8"
@@ -167,10 +147,8 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
 type TFunction = ReturnType<typeof useTranslations<'auth'>>;
 
 function humanizeError(code: string, t: TFunction): string {
-  // Map known codes to fixed copy. Anything unrecognised becomes a generic
-  // message — never reflect the raw code into the DOM, since a malicious or
-  // misconfigured IdP could deliver attacker-controlled text via this query
-  // param.
+  // Map known codes to fixed copy. Never render the raw code: it comes from
+  // the query string and may be attacker-controlled.
   const knownKeys = [
     'invalid_flow_cookie',
     'missing_code_or_state',
@@ -200,10 +178,7 @@ interface WelcomeProps {
 }
 
 /**
- * Sign-in welcome surface — a single "Existing user — Sign in" card.
- *
- * Registration is not offered here (#619): coordinator/owner sign-up is served
- * via deep links, not from the login homepage.
+ * Sign-in welcome card with a single "Sign in" button.
  *
  * @param props - Sign-in callback, brand name, and translation function.
  */

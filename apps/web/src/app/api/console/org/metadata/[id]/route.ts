@@ -1,9 +1,9 @@
 /**
- * Console BFF (user & org Phase 5): Update an organisation's details.
+ * Console BFF: update an organisation's details.
  *   PATCH /api/console/org/metadata/:id → API PATCH /v1/org/metadata/update/:id
  *
- * Guarded by `consoleMutation` (JSON + same-origin, C11) and forwarded with
- * the caller's own token; the upstream envelope passes through unchanged.
+ * Guarded by `consoleMutation` (JSON body, same-origin) and sent with the
+ * caller's own token. The upstream response passes through unchanged.
  */
 
 import { type NextRequest, type NextResponse } from 'next/server';

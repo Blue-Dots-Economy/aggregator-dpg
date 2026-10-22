@@ -1,7 +1,7 @@
 /**
- * One coordinator (user & org Phase 5): contact (plain within reach, P5-8),
- * approve / reject a pending one, and change the domains served. With RBAC
- * on, its roles: the base Coordinator role and additional roles to assign.
+ * Coordinator detail page: contact, approve or reject, and domains served.
+ *
+ * With access control on, also shows the coordinator's roles.
  */
 
 import Link from 'next/link';
@@ -47,7 +47,7 @@ export default async function ConsoleCoordinatorPage({
   const [user, domainList, userRoles, catalogue] = await Promise.all([
     consoleRead<User>(`/v1/user/read/${encodeURIComponent(id)}`),
     domains(),
-    // RBAC roles: absent when access control is off or not allowed.
+    // Roles; null when access control is off or not allowed.
     canManage
       ? consoleReadOptional<UserRolesResponse>(`/v1/user/roles/${encodeURIComponent(id)}`)
       : Promise.resolve(null),

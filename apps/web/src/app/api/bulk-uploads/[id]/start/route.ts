@@ -15,10 +15,8 @@ export async function POST(
 ): Promise<NextResponse> {
   const { id } = await params;
   try {
-    // Forward the JSON body (carries the operator `attestation` flag) to the
-    // API, which validates + records it before enqueueing (#522 Task 1).
-    // Pass a parsed object — callApi JSON.stringifies it (passing a string
-    // would double-encode and the API would see a string, not an object).
+    // The body carries the operator `attestation` flag. Pass the parsed object;
+    // `callApi` stringifies it, so a string would be double-encoded.
     const body = (await req.json().catch(() => ({}))) as unknown;
     const upstream = await callApi(`/v1/bulk-uploads/${encodeURIComponent(id)}/start`, {
       method: 'POST',

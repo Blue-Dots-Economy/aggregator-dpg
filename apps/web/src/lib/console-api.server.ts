@@ -1,10 +1,9 @@
 /**
- * Server-side reads for the console pages (user & org Phase 5).
+ * Server-side reads for the console pages.
  *
- * Console pages are Server Components that read with the user's own token
- * (`callApi`); only mutations go through the guarded BFF routes. A search is
- * a `POST` upstream but a read here. Failures map onto navigation: no session
- * → login, a lost entitlement → sign-out with a reason, out of reach → 404.
+ * Reads use the user's own token (`callApi`). A search is a `POST` upstream
+ * but counts as a read here. Failures navigate: no session goes to login, a
+ * lost entitlement signs out with a reason, out of reach is a 404.
  *
  * @module apps/web/src/lib/console-api.server
  */
@@ -35,7 +34,7 @@ export async function consoleRead<T>(path: string, body?: unknown): Promise<T> {
     if (code === 'USER_NOT_PROVISIONED')
       redirect('/api/auth/logout?reason=console_not_provisioned');
     if (code === 'NOT_ORG_ADMIN') redirect('/api/auth/logout?reason=console_no_org');
-    // A route this kind of actor cannot use: back to the console home.
+    // Route not available to this actor: back to the console home.
     redirect('/console');
   }
   if (!res.ok) throw new Error(`console read failed (${res.status})`);
@@ -43,9 +42,10 @@ export async function consoleRead<T>(path: string, body?: unknown): Promise<T> {
 }
 
 /**
- * Reads an optional console resource: the parsed body, or null on any failure.
- * For panels that are simply left out when unavailable, e.g. RBAC grants when
- * access control is off (503) or the caller lacks the capability (403).
+ * Reads an optional console resource, returning null on any failure.
+ *
+ * For panels that are hidden when unavailable, e.g. RBAC grants when access
+ * control is off (503) or the caller lacks the capability (403).
  *
  * @param path - Upstream path.
  * @returns The parsed JSON body, or null.

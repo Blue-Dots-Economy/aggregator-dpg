@@ -30,20 +30,17 @@ export interface OrgRegisterFormProps {
   /** RJSF UI schema for the org form. */
   uiSchema: Record<string, unknown>;
   /**
-   * Versioned Terms/Privacy content for the org audience. Flattened via
-   * {@link toConsentDocs} into the ordered document list the blocking
-   * {@link ConsentGate} reads at submit time. Omit (or pass `undefined`)
-   * when `loadConsentConfig` failed — the gate then has nothing to show, so
-   * submit surfaces an error instead of opening it.
+   * Terms/Privacy content for the org audience, shown by {@link ConsentGate}
+   * at submit. Omit when loading failed; submit then shows an error.
    */
   consentContent?: ConsentDocContent;
 }
 
 /**
- * Renders the parent-org registration form (spec §6.1). Submits to the BFF
- * proxy which forwards to `/v1/orgs/create`; on success the org sits `pending`
- * until a network admin approves it. Shown only when the org hierarchy flag is
- * on — the caller gates rendering.
+ * Renders the organisation registration form.
+ *
+ * Submits through the BFF to `/v1/orgs/create`. A new org stays `pending`
+ * until a network admin approves it.
  *
  * @param props - The org JSON Schema + UI schema.
  * @returns The org registration content block (form, success, or error state).
@@ -56,8 +53,7 @@ export function OrgRegisterForm({
   const t = useTranslations('register');
   const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>({});
-  // Coordinate the address widget resolved, held outside `formData` because
-  // RJSF hands `formContext` to widgets one-way and never writes it back.
+  // Coordinate from the address widget; RJSF does not write it into `formData`.
   const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
   const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
   const { gateOpen, setGateOpen, pendingRef, handleSubmit } = useConsentGateSubmit(
@@ -74,8 +70,6 @@ export function OrgRegisterForm({
     setGateOpen(false);
     setState({ status: 'submitting' });
     const body: Record<string, unknown> = {
-      // No `?? {}`: spreading null contributes nothing, so the fallback
-      // object was dead weight rather than a guard.
       ...pendingRef.current,
       consent: stampConsent({ value: true }),
     };
@@ -85,8 +79,8 @@ export function OrgRegisterForm({
       setState({ status: 'error', ...result.error });
       return;
     }
-    // A 201 is a new pending registration; a 200 with status 'active' means the
-    // org already existed and its owner was mailed the invite link instead.
+    // 201: new pending registration. 200 with status 'active': the org already
+    // exists and its owner was mailed the invite link.
     const alreadyRegistered = result.body['status'] === 'active';
     setState({
       status: 'done',

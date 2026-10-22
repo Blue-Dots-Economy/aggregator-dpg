@@ -11,15 +11,10 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 /**
- * Owner (organisation) registration deep link (#619). Not linked from the
- * public `/register` page — reachable only by direct URL / QR.
+ * Owner (organisation) registration page, reachable only by direct URL or QR.
  *
- * Gating (in order):
- * 1. An active session redirects to the dashboard, like `/register`.
- * 2. Org schema absent ⇒ `notFound()`. Without the schema the owner form
- *    cannot be rendered.
- *
- * Otherwise it renders the owner form inside the brand shell.
+ * An active session redirects to the dashboard. A missing org schema returns
+ * `notFound()`. Otherwise it renders the owner form.
  */
 export default async function OwnerRegisterPage() {
   const session = await getSession();

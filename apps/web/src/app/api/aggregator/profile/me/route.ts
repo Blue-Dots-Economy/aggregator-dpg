@@ -4,9 +4,8 @@
  *   GET   /api/aggregator/profile/me
  *   PATCH /api/aggregator/profile/me  — partial update of the aggregator row
  *
- * Requires an active session — `callApi` attaches the access token and
- * refreshes it transparently. The body and response are forwarded verbatim;
- * the BFF never re-shapes the upstream contract.
+ * Requires a session; `callApi` attaches and refreshes the access token.
+ * The body and response are forwarded as-is.
  */
 
 import { type NextRequest, NextResponse } from 'next/server';

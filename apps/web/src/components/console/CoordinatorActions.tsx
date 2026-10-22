@@ -1,10 +1,9 @@
 'use client';
 
 /**
- * Coordinator actions (user & org Phase 5): approve / reject a pending one
- * (optional reason, mailed to the applicant) and change the domains served.
- * A decision made elsewhere (409 ALREADY_DECIDED) updates the status in place
- * (C10).
+ * Coordinator actions: approve or reject a pending coordinator (optional
+ * reason, emailed to the applicant) and change the domains served. A 409
+ * ALREADY_DECIDED response updates the status in place.
  */
 
 import { useState } from 'react';
@@ -89,9 +88,7 @@ export function CoordinatorActions({
             </div>
           </>
         ) : null}
-        {decisionNote ? (
-          <output className="text-ink-600">{decisionNote}</output>
-        ) : null}
+        {decisionNote ? <output className="text-ink-600">{decisionNote}</output> : null}
       </Card>
 
       {domains.length > 0 ? (
@@ -112,9 +109,7 @@ export function CoordinatorActions({
             <Button kind="ghost" disabled={busy} onClick={() => void saveServes()}>
               {t('coordinator.save_domains')}
             </Button>
-            {servesNote ? (
-              <output className="text-ink-600">{servesNote}</output>
-            ) : null}
+            {servesNote ? <output className="text-ink-600">{servesNote}</output> : null}
           </div>
         </Card>
       ) : null}

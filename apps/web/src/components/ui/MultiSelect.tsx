@@ -1,11 +1,9 @@
 'use client';
 
 /**
- * Multi-select popover for array-of-enum form fields. shadcn ships a
- * single-select Select; this component pairs a Radix Popover trigger
- * (styled like our `bd-input`) with a scrollable checkbox list inside
- * a portal-rendered popup. Selected values render as chips on the
- * trigger; click a chip's × to remove without opening the popover.
+ * Multi-select popover for array-of-enum form fields. A Radix Popover trigger
+ * styled like `bd-input` opens a checkbox list. Selected values show as chips
+ * on the trigger; a chip's × removes it.
  */
 
 import * as React from 'react';
@@ -30,9 +28,8 @@ export interface MultiSelectProps {
 }
 
 /**
- * Toggles `option` membership inside `selected`. Order is preserved
- * for additions (appended at end) so the chip order reflects user
- * intent rather than the original option ordering.
+ * Toggles `option` in `selected`. New values are appended, so chip order
+ * follows the order the user picked them.
  */
 function toggle(selected: string[], option: string): string[] {
   return selected.includes(option) ? selected.filter((v) => v !== option) : [...selected, option];

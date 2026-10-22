@@ -96,20 +96,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const { tokens, claims } = exchanged.value;
 
-  // Who may sign in: a coordinator (the token carries `aggregator_id`, mapped
-  // from the KC user attribute) lands in the portal; an org owner or the
-  // network admin (realm role `org_owner`, user & org Phase 5) lands in the
-  // console, which asks the API who they are. Anyone else is refused here.
+  // A coordinator (token has `aggregator_id`) lands in the portal. An org owner
+  // or the network admin (realm role `org_owner`) lands in the console.
+  // Anyone else is refused.
   const isCoordinator = Boolean(tokenAggregatorId(tokens.accessToken));
   const population = isCoordinator
     ? null
     : classifyNonCoordinator(tokens.accessToken, await resolveSignalsRealmRoles());
   if (population !== null && population !== 'org_owner') {
-    // One Keycloak realm serves both this portal and the Signals app, so a
-    // token can be entirely valid and still belong to the other application —
-    // Keycloak reuses an existing SSO session silently, and the user never
-    // gets to pick an account. Classify WHICH population this is so the login
-    // screen can say what happened (#753).
+    // One Keycloak realm serves this portal and the Signals app, so a valid
+    // token may belong to the other app. The reason tells the login page which.
     const reason = PORTAL_GATE_REASON[population];
     log.warn(
       {
@@ -149,9 +145,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 }
 
 /**
- * Where a fresh session lands: the requested path, except that each actor's
- * home replaces the other's (a coordinator never lands on `/console`, an
- * admin never on the coordinator portal). The layouts enforce the same rule.
+ * Picks where a new session lands.
+ *
+ * Returns the requested path, except a coordinator never lands on `/console`
+ * and an admin never lands on the coordinator portal.
  */
 function landingPath(returnTo: string, isCoordinator: boolean): string {
   const inConsole = returnTo === '/console' || returnTo.startsWith('/console/');

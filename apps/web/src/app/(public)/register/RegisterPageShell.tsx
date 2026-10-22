@@ -13,22 +13,17 @@ import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/u
 export interface RegisterPageShellProps {
   /** Page heading rendered above the form (the coordinator/owner title). */
   heading: string;
-  /**
-   * Sub-heading under the title. Omit to use the default registration tagline;
-   * pass `null` to render no tagline (e.g. the invite surfaces, which carry
-   * their own intro copy).
-   */
+  /** Sub-heading under the title. Omit for the default tagline; pass `null` for none. */
   tagline?: string | null;
   /** The registration form (coordinator or org). */
   children: ReactNode;
 }
 
 /**
- * Shared chrome for the public registration surfaces — the coordinator page
- * (`RegisterView`) and the owner deep link (`OwnerRegisterView`, #619). Renders
- * the brand panel, header/logo, "back to sign in" link, heading + tagline, the
- * form (`children`), and the Terms/Privacy footer links. Extracted so the two
- * views don't duplicate ~60 lines of identical layout.
+ * Shared layout for the public registration pages.
+ *
+ * Renders the brand panel, logo, "back to sign in" link, heading and tagline,
+ * the form (`children`), and the Terms/Privacy footer links.
  *
  * @param props - The page heading and the form to render.
  * @returns The registration page body.
@@ -104,8 +99,7 @@ export function RegisterPageShell({
 
           {children}
 
-          {/* Once the blocking ConsentGate closes, nothing else on this page
-              links to the read-only legal page. */}
+          {/* The only link to the legal page after the consent gate closes. */}
           <LegalLinksFooter variant="separated" className="mt-8" />
         </div>
       </div>
