@@ -186,7 +186,7 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
   await redis.hset(`${ns}:meta`, 'total_rows', String(rows.length), 'reader_done', '1');
 
   // `:lines` holds PII. The finaliser deletes it on success; the TTL covers
-  // failed or abandoned uploads.
+  // failed or abandoned uploads. The row commit script refreshes the TTL on its keys.
   const ttl = config.BULK_UPLOAD_REDIS_TTL_SECONDS;
   await redis.expire(`${ns}:meta`, ttl);
   await redis.expire(`${ns}:lines`, ttl);

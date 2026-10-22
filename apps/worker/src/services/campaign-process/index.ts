@@ -8,7 +8,8 @@
  * The export channel lives here (decrypt, CSV, private S3, email a signed
  * link). Voice and email live in `./voice.ts` and `./email.ts`.
  *
- * Transient failures re-throw so BullMQ retries; the job stays `processing`.
+ * Transient failures re-throw so BullMQ retries; the job stays `processing`
+ * until the last attempt, which marks it `failed`.
  * An item that is not found or not owned is an item outcome, not a job
  * failure. Never logs PII.
  */

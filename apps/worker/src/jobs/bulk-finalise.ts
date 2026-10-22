@@ -7,7 +7,7 @@
  *   2. Mark the upload completed and insert the onboarding rollup row.
  *   3. Delete the `bu:{id}:*` Redis keys after the DB writes succeed.
  *
- * Idempotent: the jobId `${uploadId}:finalise` dedups triggers, the S3 key is
+ * Idempotent: the jobId `${uploadId}__finalise` dedups triggers, the S3 key is
  * fixed, and the onboarding insert is skipped if the row already exists.
  */
 
@@ -138,7 +138,8 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
       .where(eq(schema.bulkUploads.id, job.uploadId));
 
     // Check first: the partial unique index on batch_id cannot be a Drizzle
-    // ON CONFLICT target.
+    // ON CONFLICT target. The check runs inside the transaction so a parallel
+    // finaliser cannot insert between the check and the insert.
     const existing = await tx
       .select({ id: schema.onboarding.id })
       .from(schema.onboarding)
