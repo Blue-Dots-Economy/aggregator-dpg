@@ -358,6 +358,11 @@ export async function checkAnyCapability(
  * The permissions a resolved actor holds in each organisation it belongs to
  * or owns, for the portal. Never throws.
  *
+ * Asks once per *distinct* question rather than once per organisation: the
+ * manage-scope checks (#873) call this on every coordinator read, search and
+ * decision, and an owner holding the same role in each of its organisations
+ * would otherwise pay one sequential engine round-trip per organisation.
+ *
  * @param req - The request (for its logger).
  * @param actor - The resolved actor.
  * @param rootId - The root organisation's id (every aggregator organisation's ancestor), when known.
@@ -368,14 +373,11 @@ export async function permissionsByOrg(
   actor: Actor,
   rootId: string | null,
 ): Promise<Record<string, Capability[]> | null> {
-  if (!getRbacRuntime()) return null;
-  const out: Record<string, Capability[]> = {};
-  for (const o of actor.orgs) {
-    const ancestorIds = o.orgType === 'aggregator' && rootId ? [rootId] : [];
-    out[o.id] =
-      (await listActorCapabilities(req, actor, {
-        target: { id: o.id, orgType: o.orgType, ancestorIds },
-      })) ?? [];
-  }
-  return out;
+  const targets: TargetOrg[] = actor.orgs.map((o) => ({
+    id: o.id,
+    orgType: o.orgType,
+    ancestorIds: o.orgType === 'aggregator' && rootId ? [rootId] : [],
+  }));
+  const byOrg = await listCapabilitiesForTargets(req, actor, targets);
+  return byOrg === null ? null : Object.fromEntries(byOrg);
 }
