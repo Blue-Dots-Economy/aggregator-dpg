@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * A user's roles in one organisation (RBAC; design §4): the base role that
- * membership gives, and the additional roles the caller may assign or revoke
- * (PII Access and Data Export for a coordinator, Org Onboarder for an owner,
- * custom roles). The API applies every rule and audits every change.
+ * A user's roles in one organisation: the base role from membership, and the
+ * additional roles the caller may assign or revoke (PII Access and Data
+ * Export for a coordinator, Org Onboarder for an owner, custom roles). The
+ * API applies every rule and audits every change.
  */
 
 import { useState } from 'react';

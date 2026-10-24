@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * The network admin's organisation list (user & org Phase 5): approve /
- * reject a pending org, repair an active org's owner access. A decision made
- * elsewhere (409 ALREADY_DECIDED) updates the row in place (C10).
+ * The network admin's organisation list: approve or reject a pending org, and
+ * repair an active org's owner access. A 409 ALREADY_DECIDED response updates
+ * the row in place.
  */
 
 import { useState } from 'react';

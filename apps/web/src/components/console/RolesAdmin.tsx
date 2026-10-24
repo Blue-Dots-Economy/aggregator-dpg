@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * Roles page body (RBAC R6, network admin): the built-in roles, read-only,
- * and the custom roles, which the network admin composes from existing
- * permissions, edits and deletes. The API checks every role rule.
+ * Roles page body for the network admin: built-in roles (read-only) and
+ * custom roles, which can be created from existing permissions, edited, and
+ * deleted. The API checks every role rule.
  */
 
 import { useState } from 'react';

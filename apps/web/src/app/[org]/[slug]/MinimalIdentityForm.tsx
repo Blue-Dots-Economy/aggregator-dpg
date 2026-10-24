@@ -1,15 +1,9 @@
 /**
- * Identity-only registration form rendered when a public link has
- * the resolved `submission_shape === 'account_only'`. Collects name + phone or email +
- * consent and nothing else. The parent view (`PublicRegistrationView`)
- * passes the network's identity field names (e.g. `phone` vs
- * `mobile_number`) so the body posted to the API uses the right keys
- * for the link's domain. No RJSF, no profile schema, no `partial`
- * checkbox — the link itself locks the capture scope.
+ * Identity-only registration form for links with `submission_shape === 'account_only'`.
  *
- * Styled to match the rest of the public registration card chrome
- * (bd-card / bd-input / brand primary colour) so the user can't tell
- * this is a separate flow.
+ * Collects name, phone or email, and optional consent and birth year. The
+ * parent passes the network's identity field names so the payload uses the
+ * right keys for the domain.
  */
 'use client';
 
@@ -24,75 +18,47 @@ export interface MinimalIdentityPayload {
 
 export interface MinimalIdentityFormProps {
   /**
-   * Identity field selectors from the network config — the wire keys the
-   * submitted body must use. `phone` / `email` may be undefined when the
-   * domain doesn't declare them; the corresponding input is hidden.
+   * Identity field names from the network config, used as payload keys.
+   * An undefined `phone` or `email` hides that input.
    */
   identity: {
     name?: string;
     phone?: string;
     email?: string;
   };
-  /** Submit handler — receives the identity-only payload. */
+  /** Submit handler; receives the identity-only payload. */
   onSubmit: (payload: MinimalIdentityPayload) => void | Promise<void>;
   /**
-   * Disables the submit button while the parent is in flight — this is the
-   * ONLY submit-in-flight guard the form has. There is deliberately no local
-   * `submitting` state: the parent's own `state.status === 'submitting'`
-   * already covers the whole probe -> gate -> POST round trip (the same
-   * signal the full-profile surface's submit button uses), and this
-   * component now stays mounted across that whole round trip (a widened
-   * render guard fixed a Critical where it used to unmount/remount instead).
-   * A second, local flag would be a second source of truth for the same
-   * fact — which is exactly what caused that Critical's own regression: the
-   * old local `submitting` was never reset once the component stopped being
-   * torn down and rebuilt on every transition, so the button stayed
-   * permanently disabled after the very first submit (e.g. after cancelling
-   * the consent gate).
+   * Disables the submit button while the parent's submit is in flight. This
+   * is the form's only in-flight guard; it has no local `submitting` state.
    */
   busy?: boolean;
-  /**
-   * Saturated brand colour for the header band + submit button. Caller
-   * threads `cfg.brand.primary_color` through so the minimal form looks
-   * native to the network (purple for purple_dot, sienna for orange_dot,
-   * etc.). Falls back to `var(--bd-primary-600)`.
-   */
+  /** Brand colour for the header band and submit button. Defaults to `var(--bd-primary-600)`. */
   brandColor?: string;
-  /**
-   * Optional i18n key (resolved against the root message namespace) for a
-   * hint rendered beneath the form — e.g. the voice-call notice declared on
-   * the link's registration mode. `null` / undefined renders nothing.
-   */
+  /** Optional i18n key (root namespace) for a hint below the form. */
   hintI18nKey?: string | null;
   /**
-   * Voice-mode capture: a phone number is mandatory and the email input is
-   * hidden (the link's purpose is a call-back, so email is not collected).
-   * When false (default), the classic "name + (phone OR email)" rule applies.
+   * Voice mode: phone is required and email is optional. When false
+   * (default), name plus phone or email is required.
    */
   requirePhone?: boolean;
   /**
-   * #613: show the profile-creation consent step. Driven by the domain's
-   * `go_live_required` including `consent_required`. When false, no consent
-   * checkbox is shown or required and no consent flags are submitted.
+   * Show the consent checkbox. Set when the domain's `go_live_required`
+   * includes `consent_required`.
    */
   showConsent: boolean;
   /**
-   * #613: collect a birth year. Driven by the domain's
-   * `guardian_consent_required`. When false, no birth-year field is shown or
-   * required and no `year_of_birth` is submitted.
+   * Collect a birth year. Set when the domain has `guardian_consent_required`.
    */
   showBirthYear: boolean;
 }
 
 /**
- * Client-side "does this look like an email" check used to gate the submit
- * button. Accepts exactly what `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` accepted — one
- * `@`, non-empty whitespace-free parts either side, and at least one interior
- * dot in the domain — but as index scans rather than a regex, whose adjacent
- * greedy classes backtrack super-linearly (SonarCloud typescript:S8786).
+ * Checks whether a value looks like an email, for the inline blocker list.
  *
- * Authoritative validation still happens server-side; this only drives the
- * inline blocker list.
+ * Requires one `@`, no whitespace, and a dot inside the domain. Uses index
+ * scans instead of a regex to avoid slow backtracking. The server does the
+ * real validation.
  *
  * @param value - Trimmed contents of the email field.
  * @returns True when the value is plausibly an email address.
@@ -123,9 +89,8 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   // mandatory and email is optional; otherwise phone OR email is required.
   const showEmail = !!emailKey;
 
-  // Identity invariant: name AND (voice → valid phone; otherwise valid phone
-  // OR valid email). Format is checked here so a half-typed value (e.g. a
-  // 4-digit mobile) blocks submit — and the blocker list says why.
+  // Requires a name and, in voice mode, a valid phone; otherwise a valid phone
+  // or email. Partial values block submit and appear in the blocker list.
   const hasName = name.trim().length > 0;
   const hasPhone = !!phoneKey && phone.trim().length > 0;
   const hasEmail = showEmail && email.trim().length > 0;
@@ -136,18 +101,15 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   // An entered email must be valid even when it's optional (voice mode).
   const emailOk = !hasEmail || emailFormatOk;
   const contactValid = requirePhone ? phoneValid : phoneValid || emailValid;
-  // Year of birth → derived age (§4.4 snapshot: no birthdate stored). Age is
-  // required with consent on guardian-gated domains; Signals rejects the push
-  // (`AGE_REQUIRED`) otherwise.
+  // Age is derived from the birth year; no birthdate is stored. Guardian-gated
+  // domains need it, or Signals rejects the submit with `AGE_REQUIRED`.
   const currentYear = new Date().getFullYear();
   const yobNum = Number(yearOfBirth.trim());
   const yobValid =
     /^\d{4}$/.test(yearOfBirth.trim()) && yobNum >= currentYear - 120 && yobNum <= currentYear;
   const derivedAge = yobValid ? currentYear - yobNum : Number.NaN;
-  // U18 (§4.4): a minor cannot establish consent here — they accept terms in
-  // the Signalstack app after signing in. The submit still goes through (the
-  // API omits age + consent for a minor so Signals creates the account); we
-  // just don't collect/require consent. Fail-closed at the boundary: age <= 18.
+  // Minors (age <= 18) do not give consent here; they accept terms in the
+  // Signalstack app after signing in. The submit still goes through.
   const isMinor = yobValid && derivedAge <= 18;
   const valid =
     hasName &&
@@ -156,8 +118,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
     (!props.showBirthYear || yobValid) &&
     (!props.showConsent || isMinor || consentCall);
 
-  // Option B: the submit stays disabled until valid, but we surface exactly
-  // what is blocking so the user is never left guessing.
+  // Submit stays disabled until valid; list what is blocking it.
   const blockers: string[] = [];
   if (!hasName) blockers.push(t('blockers.name'));
   if (requirePhone) {
@@ -191,15 +152,10 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
           if (!valid || !nameKey || props.busy) return;
           const payload: MinimalIdentityPayload = {
             [nameKey]: name.trim(),
-            // #613: only send the birth year when the domain actually
-            // collects it (config-driven). Absent gate ⇒ the server omits
-            // age. `consent_terms` / `consent_privacy` are NOT set here: the
-            // parent view (`PublicRegistrationView`) owns those — it runs
-            // this submit through its blocking consent gate and stamps the
-            // real accepted value onto the payload afterwards. `consentCall`
-            // is a *different* consent (permission to place a call on the
-            // registrant's behalf) and must never be conflated with terms/
-            // privacy acceptance.
+            // Send the birth year only when the domain collects it. The parent
+            // view adds `consent_terms` / `consent_privacy` after its consent
+            // gate. `consentCall` is permission to call the registrant, not
+            // terms/privacy acceptance.
             ...(props.showBirthYear ? { year_of_birth: yearOfBirth.trim() } : {}),
           };
           if (phoneKey && hasPhone) payload[phoneKey] = phone.trim();
@@ -292,8 +248,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
 
         {props.showConsent &&
           (isMinor ? (
-            // Minor: no consent here — Signals creates the account without it and
-            // the participant accepts terms in the Signalstack app after signing in.
+            // Minor: no consent here; they accept terms in the Signalstack app later.
             <div className="rounded-[10px] border border-(--bd-border) bg-(--bd-primary-50) px-4 py-3.5 text-[13.5px] text-ink-900">
               {t('u18_notice')}
             </div>

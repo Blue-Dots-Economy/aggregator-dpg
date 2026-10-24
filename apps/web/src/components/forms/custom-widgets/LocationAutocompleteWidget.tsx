@@ -3,21 +3,11 @@
 /**
  * Address autocomplete for a single `location`-marked schema field.
  *
- * Ported from Signals-DPG
- * `apps/ui/src/components/forms/custom-widgets/location-autocomplete-widget.tsx`
- * so the same network.json schema behaves the same way in the public
- * registration form as it does in the Signals profile form. Two deliberate
- * differences from that original:
+ * Matches the Signals-DPG location widget, with two differences:
  *
- *  1. The form context is read off `registry.formContext`, NOT the
- *     `formContext` prop. RJSF v6 stopped spreading it onto widget props — it
- *     only lives on the registry — so the prop is always `undefined` and every
- *     location callback silently no-ops. That is signals-dpg#506, which this
- *     file must not reproduce: `WidgetProps` extends an index-signature type, so
- *     reading the dead prop type-checks cleanly and fails only at runtime.
- *  2. Errors are left to `FieldTemplate`, which already renders the message and
- *     reddens any `.bd-input` beneath it. The Signals copy draws its own,
- *     because its host template does not.
+ *  1. The form context is read from `registry.formContext`. The `formContext`
+ *     prop type-checks but is always `undefined` in RJSF v6.
+ *  2. Errors are rendered by `FieldTemplate`, not by this widget.
  *
  * @module apps/web/components/forms/custom-widgets/LocationAutocompleteWidget
  */
@@ -36,10 +26,8 @@ import type { GeoComponents, GeoSuggestion } from '../../../lib/geo/types';
 /**
  * A selected place reported to the page.
  *
- * `components` is carried so this stays shape-compatible with the Signals
- * widget, but nothing reads it on either side today: the exact point is what
- * gets submitted, and Signals jitters a `private` field's coordinate at its own
- * storage choke point, so no client-side coarsening is needed or performed.
+ * `components` keeps the shape compatible with Signals but is not read. The
+ * exact point is submitted; Signals handles any coarsening.
  */
 export interface ResolvedPlace {
   lat: number;
@@ -77,8 +65,7 @@ export function LocationAutocompleteWidget({
   const [text, setText] = React.useState<string>((value as string) ?? '');
   const [suggestions, setSuggestions] = React.useState<GeoSuggestion[]>([]);
   const [open, setOpen] = React.useState(false);
-  // Open the list upward when the input sits near the bottom of the viewport,
-  // so the suggestions aren't hidden below the fold.
+  // Open the list upward when the input is near the viewport bottom.
   const [dropUp, setDropUp] = React.useState(false);
 
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -97,10 +84,8 @@ export function LocationAutocompleteWidget({
     [config.googleMapsApiKey, config.photonUrl, config.geoCountry],
   );
 
-  // Keep the input in sync when RJSF pushes a new value (e.g. a prefill). This
-  // intentionally does NOT search — searching is driven only by typing (see
-  // runSearch), so choosing a suggestion (which calls onChange, updating
-  // `value`) never re-opens the dropdown.
+  // Sync the text with new values from RJSF. Does not search; only typing
+  // searches, so choosing a suggestion never re-opens the list.
   React.useEffect(() => {
     setText((value as string) ?? '');
   }, [value]);
@@ -141,13 +126,9 @@ export function LocationAutocompleteWidget({
 
   function handleInput(next: string) {
     setText(next);
-    // Emit `undefined` (not "") when cleared, so a required location field goes
-    // back to invalid — an empty string counts as "present" for JSON-Schema
-    // `required`, which would let an emptied location slip past validation.
+    // `undefined`, not '', so a cleared required field fails validation.
     onChange(next === '' ? undefined : next);
-    // Freshly typed text is no longer a resolved place, so drop any prior
-    // coordinate: the submit path then re-geocodes rather than attaching a
-    // coordinate to an address the user has since edited.
+    // Typed text is not a resolved place, so drop any earlier coordinate.
     if (isPrimary) ctx.onLocationResolved?.(null);
     runSearch(next);
   }
@@ -160,8 +141,7 @@ export function LocationAutocompleteWidget({
     onChange(suggestion.label);
     setSuggestions([]);
     setOpen(false);
-    // Only the primary field's coordinate is persisted; secondary fields are
-    // autocomplete-only, matching Signals.
+    // Only the primary field's coordinate is saved, as in Signals.
     if (isPrimary) {
       ctx.onLocationResolved?.({
         lat: suggestion.lat,
@@ -186,14 +166,7 @@ export function LocationAutocompleteWidget({
 
   return (
     <div className="relative">
-      {/*
-        A search affordance inside the field. Without it this looks like an
-        ordinary text box, so people type a full address by hand and never
-        discover the list — which also means no coordinate is ever resolved.
-        `pointer-events-none` so the icon never steals the click that focuses
-        the input; `aria-hidden` because the combobox role already announces
-        the behaviour to assistive tech.
-      */}
+      {/* Search icon so the field reads as a search box. Decorative only. */}
       <Search
         aria-hidden="true"
         className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-(--bd-muted)"
@@ -229,9 +202,7 @@ export function LocationAutocompleteWidget({
           )}
         >
           {suggestions.map((s, i) => (
-            // `role="option"` on the item itself, not a nested <button>: an
-            // option is what `aria-activedescendant` can point at, and a
-            // listbox may only contain options.
+            // `role="option"` so `aria-activedescendant` can point at it.
             <li
               key={`${s.lat},${s.lng},${i}`}
               id={optionId(i)}
@@ -243,14 +214,12 @@ export function LocationAutocompleteWidget({
                   ? 'bg-(--bd-primary-50) text-(--bd-primary-600)'
                   : 'hover:bg-(--bd-primary-50)',
               )}
-              // onMouseDown (not onClick) so selection runs before the input's
-              // blur fires; preventDefault keeps focus from flicking away.
+              // onMouseDown runs before the input's blur; preventDefault keeps focus.
               onMouseDown={(e) => {
                 e.preventDefault();
                 choose(s);
               }}
-              // Hovering moves the keyboard highlight too, so the two never
-              // disagree about which option Enter would take.
+              // Hover moves the keyboard highlight too.
               onMouseEnter={() => setActiveIndex(i)}
             >
               {s.label}

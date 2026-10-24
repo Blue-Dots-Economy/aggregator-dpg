@@ -1,16 +1,16 @@
 /**
  * Session storage contract for the aggregator portal BFF.
  *
- * Concrete implementations (Redis, in-memory) extend this base. The portal
- * depends only on this abstract surface so the storage backend stays swappable.
+ * Redis and in-memory implementations extend this base. Portal code depends
+ * only on this abstract class.
  */
 
 import type { MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
 
 /**
- * The signed-in actor (`GET /v1/user/read/me`) cached in the session for a
- * short time (user & org Phase 5, C14): the database stays the authority, so
- * the cache only spares a call per page.
+ * The signed-in actor (`GET /v1/user/read/me`), cached briefly in the session.
+ *
+ * The database stays the authority; the cache saves one call per page.
  */
 export interface CachedActor {
   me: MeResponse;
@@ -42,7 +42,7 @@ export type SessionError =
   | { code: 'CORRUPT'; message: string };
 
 /**
- * Abstract base for any session store. All BFF code talks to this surface only.
+ * Abstract base for any session store. BFF code uses only this class.
  */
 export abstract class SessionStoreBase {
   abstract create(data: SessionData): Promise<string>;

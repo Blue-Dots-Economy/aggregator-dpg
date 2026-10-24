@@ -31,9 +31,9 @@ interface OrgOption {
 }
 
 /**
- * Decodes a JWT payload (middle segment) without verifying it. Display-only:
- * the server re-verifies on submit, so a tampered token still fails there —
- * this only drives what the page shows. Returns `null` on any malformed input.
+ * Decodes a JWT payload without verifying it, for display only.
+ *
+ * The server verifies the token on submit.
  *
  * @param token - The raw JWT.
  * @returns The invite claims, or `null` if the token can't be decoded.
@@ -53,11 +53,12 @@ function decodeInviteClaims(token: string): InviteClaims | null {
 }
 
 /**
- * Coordinator invite landing view (#701). Decodes the invite for display, looks
- * up the inviting org's name from the active-org list (`/api/orgs`, reused — no
- * new endpoint), and renders the coordinator form with the org locked and the
- * bound email prefilled. Malformed/expired/unknown-org tokens fall back to a
- * message pointing at sign-in; the submit endpoint is the real gate.
+ * Coordinator invite landing view.
+ *
+ * Decodes the invite, looks up the org name from `/api/orgs`, and renders the
+ * coordinator form with the org fixed and the email prefilled. Invalid, expired,
+ * or unknown-org tokens show a message pointing to sign-in. The submit endpoint
+ * does the real check.
  *
  * @param props - Coordinator schema/UI schema, the invite token, consent content.
  * @returns The coordinator invite page body.
@@ -116,8 +117,7 @@ export function CoordinatorInviteView({
   }
 
   if (!org) {
-    // Org not in the active list → inactive / off-network / unknown. Same safe
-    // fallback as an invalid token; the server would reject a submit anyway.
+    // Org is not in the active list; the server would reject a submit.
     return (
       <RegisterPageShell heading="Invitation unavailable">
         <Notice>

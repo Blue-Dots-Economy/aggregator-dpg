@@ -1,6 +1,7 @@
 /**
- * Invite coordinators (user & org Phase 5): into an active organisation the
- * actor owns (any active org for the network admin); never the Default org.
+ * Invites coordinators into an active organisation the actor can manage.
+ *
+ * The Default org is never offered.
  */
 
 import { getTranslations } from 'next-intl/server';
@@ -13,7 +14,7 @@ import { redirect } from 'next/navigation';
 
 export default async function ConsoleInvitePage() {
   const t = await getTranslations('console');
-  // RBAC: inviting needs `org.manage` (the API also checks it).
+  // Inviting needs `org.manage`; the API also checks it.
   const actor = await getConsoleActor();
   if (actor.ok && !can(actor.me.capabilities, 'org.manage')) redirect('/console');
   const page = await consoleRead<OrgSearchResponse>('/v1/org/search', {

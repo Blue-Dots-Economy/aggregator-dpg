@@ -1,8 +1,7 @@
 /**
  * Builds the ordered document list the consent gate reads.
  *
- * Order is fixed privacy → terms → profile so the tracker reads the same on
- * every surface and matches Signals' `initialTab="privacy"`.
+ * Order is fixed: privacy, terms, profile.
  *
  * @module apps/web/src/components/consent/consent-docs
  */

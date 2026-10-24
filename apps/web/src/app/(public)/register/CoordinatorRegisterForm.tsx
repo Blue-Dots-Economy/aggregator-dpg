@@ -40,24 +40,19 @@ export interface CoordinatorRegisterFormProps {
   /** Coordinator registration UI schema. */
   uiSchema: Record<string, unknown>;
   /**
-   * Versioned Terms/Privacy content for the aggregator (coordinator) audience.
-   * Flattened via {@link toConsentDocs} into the ordered document list the
-   * blocking {@link ConsentGate} reads at submit time. Omit (or pass
-   * `undefined`) when `loadConsentConfig` failed — the gate then has nothing
-   * to show, so submit surfaces an error instead of opening it.
+   * Terms/Privacy content for the coordinator audience, shown by
+   * {@link ConsentGate} at submit. Omit when loading failed; submit then shows an error.
    */
   consentContent?: ConsentDocContent;
   /**
-   * Invite mode (#701). When set, this is an invite-bound registration: the org
-   * selector is replaced by the fixed inviting org, the bound email is
-   * prefilled + locked, and the submission carries `invite` (not `org_id`) so
-   * the API validates + consumes the invite. The server re-validates
-   * everything — these props are UX only.
+   * Invite token. When set, the org is fixed to the inviting org, the email is
+   * prefilled, and the submission sends `invite` instead of `org_id`. The
+   * server validates everything; these props only shape the UI.
    */
   inviteToken?: string;
-  /** The inviting org's display name (invite mode) — fills the hidden `name`. */
+  /** The inviting org's display name (invite mode); fills the hidden `name`. */
   lockedOrgName?: string;
-  /** The invite's bound email (invite mode) — prefilled + read-only. */
+  /** The invite's email (invite mode); prefilled. */
   lockedEmail?: string;
 }
 
@@ -68,13 +63,13 @@ interface OrgOption {
   display_name: string;
 }
 
-/** Slug of the fixed Default org (migration 0028). */
+/** Slug of the fixed Default org. */
 const DEFAULT_ORG_SLUG = 'default';
 
 /**
- * Removes the schema properties marked `"x-org-detail": true` (url, locations):
- * they belong to the coordinator's org, so a coordinator of a real org neither
- * sees nor submits them (migration 0028).
+ * Removes schema properties marked `"x-org-detail": true` (url, locations).
+ *
+ * These belong to the org, so a coordinator of a real org does not see or submit them.
  *
  * @param schema - The coordinator form schema.
  * @returns The schema without org-detail properties.
@@ -95,12 +90,12 @@ function withoutOrgDetails(schema: RJSFSchema): RJSFSchema {
 }
 
 /**
- * Renders the coordinator registration form with a required organisation
- * selector (spec §6.2; always on since migration 0028) populated from the
- * active-org list. Picking a real org inherits its name and hides the
- * org-detail fields (they are the org's); picking the Default org keeps the
- * flat form — the coordinator names its own organisation and enters its own
- * url / locations. The Default org is preselected when it is the only one.
+ * Renders the coordinator registration form with a required organisation selector.
+ *
+ * Picking a real org uses its name and hides the org-detail fields. Picking the
+ * Default org shows the full form, where the coordinator enters their own
+ * organisation name, url, and locations. The Default org is preselected when it
+ * is the only one.
  *
  * @param props - Schema/UI schema, consent content and the invite context.
  * @returns The coordinator registration content block.
@@ -121,17 +116,15 @@ export function CoordinatorRegisterForm({
 
   const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
-    // `[0,0]` stands for "not resolved yet": `locations.items.required`
-    // includes `geo`, so the entry cannot omit it. The real coordinate is
-    // stitched in at submit from whatever the address widget resolved.
+    // `[0,0]` means "not resolved yet" (`geo` is required). The real coordinate
+    // is added at submit.
     locations: [{ geo: { type: 'Point', coordinates: [0, 0] }, address: {} }],
-    // Prefill the invite-bound email so it can't be mistyped (also locked below).
+    // Prefill the invite email.
     ...(lockedEmail ? { contact: { email: lockedEmail } } : {}),
   }));
-  // Selected parent org (spec §6.2). Empty until picked.
+  // Selected org. Empty until picked.
   const [orgId, setOrgId] = useState<string>('');
-  // Coordinate the address widget resolved, held outside `formData` because
-  // RJSF hands `formContext` to widgets one-way and never writes it back.
+  // Coordinate from the address widget; RJSF does not write it into `formData`.
   const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
   const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
   const { gateOpen, setGateOpen, pendingRef, handleSubmit } = useConsentGateSubmit(
@@ -148,22 +141,19 @@ export function CoordinatorRegisterForm({
   });
   const orgs = useMemo(() => orgsQuery.data?.orgs ?? [], [orgsQuery.data]);
   const selectedOrg = orgs.find((o) => o.id === orgId);
-  // A real org lends the coordinator its name and its details; the Default org
-  // has neither, so its coordinators fill them in themselves (as flat mode did).
+  // A real org supplies the name and details; Default org coordinators enter their own.
   const inheritsFromOrg =
     inviteMode || (selectedOrg !== undefined && selectedOrg.slug !== DEFAULT_ORG_SLUG);
   const selectedOrgName = inviteMode ? (lockedOrgName ?? '') : (selectedOrg?.display_name ?? '');
 
-  // The API lists the Default org only while it is the only active org:
-  // preselect it then, so a formerly-flat instance's form works as before.
+  // The API lists the Default org only when it is the only active org; preselect it then.
   useEffect(() => {
     if (inviteMode || orgId) return;
     const only = orgs.length === 1 ? orgs[0] : undefined;
     if (only?.slug === DEFAULT_ORG_SLUG) setOrgId(only.id);
   }, [inviteMode, orgId, orgs]);
 
-  // Keep the hidden required `name` in sync with an inherited org name; drop
-  // an inherited name again when the coordinator switches to the Default org.
+  // Sync the hidden `name` with the org name; clear it on switching to the Default org.
   useEffect(() => {
     if (inheritsFromOrg) {
       const next = selectedOrgName || undefined;
@@ -182,13 +172,10 @@ export function CoordinatorRegisterForm({
 
   const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
 
-  // A real org: hide the free-text "Organisation Name" (`name`) — inherited
-  // from the selected org. The Default org keeps the flat form.
+  // For a real org, hide the `name` field; the name comes from the org.
   const formUiSchema = useMemo<Record<string, unknown>>(() => {
     if (!inheritsFromOrg) return uiSchema;
-    // Hide the org-name field (inherited from the org); the invited email is
-    // prefilled but stays editable (#701) — a coordinator may register with a
-    // different address, and the owner sees the mismatch at approval.
+    // The invite email stays editable; the owner sees any mismatch at approval.
     return {
       ...uiSchema,
       name: { ...((uiSchema['name'] as Record<string, unknown>) ?? {}), 'ui:widget': 'hidden' },
@@ -201,17 +188,13 @@ export function CoordinatorRegisterForm({
     setState({ status: 'submitting' });
     const payload: Record<string, unknown> = withResolvedCoordinates(
       {
-        // No `?? {}`: spreading null contributes nothing, so the fallback
-        // object was dead weight rather than a guard.
         ...pendingRef.current,
         consent: stampConsent({ value: true }),
       },
       resolvedPlace,
     );
-    // The API strips `org_id`/`invite` before RJSF validation and stores the
-    // resolved org on `users.org_id`. In invite mode the org comes from the
-    // token claim (never `org_id`); otherwise from the dropdown. A real org's
-    // name and details are its own, so none are submitted for it.
+    // Invite mode sends `invite` (the org comes from the token); otherwise
+    // `org_id` from the dropdown. For a real org, url and locations are not sent.
     if (inviteMode) {
       payload['invite'] = inviteToken;
     } else if (orgId) {

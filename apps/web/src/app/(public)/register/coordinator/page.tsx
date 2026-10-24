@@ -16,16 +16,11 @@ interface CoordinatorInvitePageProps {
 }
 
 /**
- * Coordinator invite landing (#701): `/register/coordinator?invite=<jwt>`.
+ * Coordinator invite landing page: `/register/coordinator?invite=<jwt>`.
  *
- * Reached from a coordinator-invite email. Gating:
- * 1. An active session → dashboard.
- * 2. No `invite` token → `/login` (invite-only;
- *    a bare visit has no self-serve register path by design).
- *
- * The token is decoded client-side for display only (org name + bound email);
- * the submit endpoint is the security gate — it verifies the signature,
- * enforces the email binding, and consumes the invite.
+ * An active session redirects to the dashboard. A missing `invite` token
+ * redirects to `/login`. The token is decoded in the browser for display only;
+ * the submit endpoint verifies it, checks the email, and consumes the invite.
  */
 export default async function CoordinatorInvitePage({
   searchParams,

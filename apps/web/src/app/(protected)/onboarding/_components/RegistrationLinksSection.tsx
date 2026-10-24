@@ -20,16 +20,11 @@ import { useAggregatorConfig } from '../../../../hooks/useAggregatorConfig';
 import type { ApiRegistrationLink } from '../../../../services/onboarding.service';
 
 interface CreateLinkFormState {
-  /**
-   * Domain id from the live network config (e.g. 'seeker' on blue/purple,
-   * 'tourist' on orange_dot). Pinned to the aggregator's registered
-   * `type` at mount time — the read-only Domain field shows the matching
-   * `label`/`plural_label` from cfg.domains.
-   */
+  /** Domain id from the network config (e.g. `seeker`), set to the aggregator's registered type. */
   domain: string;
   /** Instance (state of operation). Drives slug + display title. */
   state: string;
-  /** District — required, drives slug + display title. */
+  /** District. Required. Drives slug + display title. */
   district: string;
   /** Free-form lever / event label (e.g. "Field Drive", "Campaign"). */
   lever_event: string;
@@ -38,9 +33,9 @@ interface CreateLinkFormState {
   /** Optional event venue / city. */
   event_location: string;
   /**
-   * Per-link registration mode key — chosen at create time, immutable
-   * afterwards. Sourced from the live network config's `registration_modes`.
-   * Empty until the config loads (an effect pins the default).
+   * Registration mode key from the network config's `registration_modes`.
+   *
+   * Set at create time and cannot change. Empty until the config loads.
    */
   registration_mode: string;
   /** Optional, comma-separated free-form tags. Stored on `context.tags`. */
@@ -48,8 +43,7 @@ interface CreateLinkFormState {
 }
 
 const EMPTY_FORM: CreateLinkFormState = {
-  // Empty until rawProfile loads — the effect below pins it to the
-  // aggregator's registered domain id once the profile resolves.
+  // Empty until the profile loads; an effect then sets the aggregator's domain.
   domain: '',
   state: '',
   district: '',
@@ -106,9 +100,9 @@ function buildLinkTitle(f: CreateLinkFormState): string {
 }
 
 /**
- * Splits a public URL into `{ host, path }` for the emphasised-slug display.
- * Empty for a null URL (draft/retired rows); a malformed URL keeps the raw
- * string as the host.
+ * Splits a public URL into `{ host, path }` for display.
+ *
+ * Returns empty parts for a null URL. A malformed URL is returned as the host.
  */
 function splitPublicUrl(publicUrl: string | null): { host: string; path: string } {
   if (!publicUrl) return { host: '', path: '' };
@@ -121,9 +115,9 @@ function splitPublicUrl(publicUrl: string | null): { host: string; path: string 
 }
 
 /**
- * Top-right green toast for success notifications. Portals to <body> so a
- * transformed ancestor (e.g. `fade-up`) can't pin it inside the section. Auto-
- * dismisses after 2400ms, matching the profile-save toast.
+ * Top-right success toast, rendered in a portal on <body>.
+ *
+ * Closes itself after 2400ms.
  */
 function SuccessToast({ message, onDone }: { message: string; onDone: () => void }) {
   const [mounted, setMounted] = useState(false);
@@ -145,10 +139,10 @@ function SuccessToast({ message, onDone }: { message: string; onDone: () => void
 }
 
 /**
- * QR preview modal (#650). The QR is derived data — the caller generates the
- * PNG data-URI in the browser from the link's public URL and passes it here;
- * nothing is persisted. Portals to <body>. Shows the code with a Download
- * action. `dataUrl === null` while generating; `error` when generation failed.
+ * QR preview modal with a Download action, rendered in a portal on <body>.
+ *
+ * The caller generates the PNG data URI in the browser. `dataUrl` is `null`
+ * while generating; `error` is set when generation failed.
  */
 function QrPreviewModal({
   title,
@@ -165,15 +159,13 @@ function QrPreviewModal({
 }>) {
   const t = useTranslations('onboarding');
   const dialogRef = useRef<HTMLDialogElement>(null);
-  // Native <dialog> + showModal(): top-layer stacking (no z-index), a built-in
-  // focus trap, focus restore to the trigger, and Esc-to-close for free.
+  // Native <dialog> gives focus trapping, focus restore, and Esc-to-close.
   useEffect(() => {
     const el = dialogRef.current;
     el?.showModal?.();
     return () => el?.close?.();
   }, []);
 
-  // Extracted from a nested ternary so each state reads as one branch.
   let body: React.ReactNode;
   if (error) {
     body = <p className="text-[13px] text-rose-600">{error}</p>;
@@ -240,9 +232,7 @@ function Field({
 
 export function CreateLinkSection() {
   const t = useTranslations('onboarding');
-  // Root-scoped translator for runtime-config i18n keys (registration mode
-  // labels/hints are top-level keys declared in network config, not under
-  // the `onboarding` namespace).
+  // Root translator for registration mode keys from network config.
   const tRoot = useTranslations();
   const router = useRouter();
   const [form, setForm] = useState<CreateLinkFormState>(EMPTY_FORM);
@@ -255,17 +245,14 @@ export function CreateLinkSection() {
   const aggregatorType = rawProfile.data?.type ?? '';
   const { data: cfg } = useAggregatorConfig();
   const domainCfg = cfg?.domains?.find((d) => d.id === aggregatorType);
-  // Label rendered in the read-only Domain field. Pulls from the live
-  // network config so orange's `tourist` shows "Tourists" not "Provider".
+  // Label for the read-only Domain field, from network config.
   const domainLabel = domainCfg?.plural_label ?? domainCfg?.label ?? aggregatorType;
-  // Field caption lists every configured domain, e.g. "Seekers / Providers".
-  // The value below is the one this aggregator is scoped to.
+  // Caption listing every configured domain, e.g. "Seekers / Providers".
   const domainsCaption =
     (cfg?.domains ?? []).map((d) => d.plural_label ?? d.label ?? d.id).join(' / ') ||
     t('create_link.field_domain');
 
-  // Unmet required fields, surfaced under the (disabled) create button so the
-  // user is never left guessing why submit won't fire.
+  // Missing required fields, listed under the disabled create button.
   const createBlockers: string[] = [];
   if (!form.state) createBlockers.push(t('create_link.blockers.state'));
   if (!form.district) createBlockers.push(t('create_link.blockers.district'));
@@ -273,9 +260,7 @@ export function CreateLinkSection() {
   if (!form.domain) createBlockers.push(t('create_link.blockers.domain'));
   if (!form.registration_mode) createBlockers.push(t('create_link.blockers.registration_mode'));
 
-  // Pin the link domain to the aggregator's registered type — the API
-  // rejects mismatches with AGGREGATOR_TYPE_MISMATCH, so the UI never lets
-  // the user pick the wrong one.
+  // Use the aggregator's registered type. The API rejects other types.
   useEffect(() => {
     if (rawProfile.data?.type) {
       setForm((f) =>
@@ -284,10 +269,8 @@ export function CreateLinkSection() {
     }
   }, [rawProfile.data?.type]);
 
-  // Pin the registration mode to the network's default once the config
-  // loads. Prefer the `form` key (full-profile, legacy default) when the
-  // network declares it, else the first declared mode. Only fills while
-  // empty so a user selection stays sticky.
+  // Default the mode once config loads: `form` if declared, else the first
+  // mode. Only fills while empty, so a user choice is kept.
   useEffect(() => {
     const modes = cfg?.registration_modes ?? {};
     const keys = Object.keys(modes);
@@ -296,16 +279,10 @@ export function CreateLinkSection() {
     setForm((f) => (f.registration_mode ? f : { ...f, registration_mode: fallback }));
   }, [cfg?.registration_modes]);
 
-  // Prefill state / district / event location from the aggregator's first
-  // postal address. User can still override. Only fills on first load —
-  // subsequent edits stay sticky.
-  //
-  // Since #810 the address is one free-text line, so `addressRegion` and
-  // `addressLocality` exist only on rows registered before that. State and
-  // district are left blank rather than guessed — a state cannot be parsed out
-  // of free text reliably, and a wrong prefill the user does not notice is
-  // worse than an empty one they fill in. `event_location` is itself a
-  // free-text label, so the address is a valid value for it.
+  // Prefill state, district, and event location from the first postal address
+  // on first load. The address is one free-text line; `addressRegion` and
+  // `addressLocality` exist only on older rows. State and district are not
+  // parsed from free text.
   useEffect(() => {
     const firstLoc = rawProfile.data?.locations?.[0]?.address;
     if (!firstLoc) return;
@@ -329,9 +306,7 @@ export function CreateLinkSection() {
   };
 
   const onCreate = async () => {
-    // The Create button is disabled while `createBlockers` is non-empty
-    // (state/district/lever_event required) — this handler can't fire
-    // with any of those missing, so no separate guard is needed here.
+    // The Create button is disabled while `createBlockers` is non-empty.
     setCreateError(null);
     try {
       const title = buildLinkTitle(form);
@@ -353,11 +328,7 @@ export function CreateLinkSection() {
           ...(parseTags(form.tags).length > 0 ? { tags: parseTags(form.tags) } : {}),
         },
       });
-      // Refresh the form so the user can compose the next link from scratch.
-      // The newly-created draft appears in "Your Registration Links" on the
-      // onboarding page; pass its id as `?new=` so that list scrolls to and
-      // highlights the fresh draft (and its "Make Live" CTA) — otherwise the
-      // navigation makes the just-created link feel like it vanished.
+      // Reset the form. `?new=` tells the links list to scroll to and highlight the new draft.
       resetSection();
       setToast(t('create_link.link_created'));
       router.push(`/onboarding?new=${encodeURIComponent(created.link_id)}`);
@@ -434,20 +405,13 @@ export function CreateLinkSection() {
             />
           </Field>
           <Field label={domainsCaption} required>
-            {/*
-             * Pinned to the aggregator's registered type — single-type
-             * enforcement is what the API expects. Rendered read-only so
-             * the user sees the value but can't switch domains.
-             */}
+            {/* Read-only: set to the aggregator's registered type. */}
             <input className="bd-input" value={domainLabel} readOnly aria-readonly="true" />
           </Field>
           {/*
-           * Per-link registration mode — chosen here at create time, immutable
-           * afterwards. Options are sourced from the live network config's
-           * `registration_modes` so adding a channel (sms, kiosk, …) needs no
-           * web change. The mode's `public_hint_i18n_key` is intentionally NOT
-           * shown here — it is end-user copy for the public submission form,
-           * not for the aggregator creating the link.
+           * Registration mode, set at create time and fixed afterwards. Options
+           * come from the network config's `registration_modes`. The mode's
+           * `public_hint_i18n_key` is for the public form, so it is not shown here.
            */}
           <Field label={t('create_link.field_registration_mode')} required>
             <select
@@ -471,8 +435,7 @@ export function CreateLinkSection() {
               placeholder={t('create_link.placeholder_tags')}
             />
           </Field>
-          {/* Option B: keep the create button gated, but list what's still
-              missing so a disabled button always explains itself. */}
+          {/* List what is missing while the create button is disabled. */}
           {createBlockers.length > 0 && (
             <div className="md:col-span-2">
               <SubmitBlockers
@@ -510,10 +473,9 @@ export function CreateLinkSection() {
 }
 
 /**
- * When `highlight` is set (a just-created draft, `?new=`), bring the card into
- * view and pulse a ring for ~2s so the user sees where it landed and its
- * "Make Live" CTA — otherwise the create → onboarding nav can feel like the
- * link vanished. Returns the card ref + whether the ring is currently shown.
+ * Scrolls a just-created card into view and shows a ring for about 2s.
+ *
+ * @returns The card ref and whether the ring is shown.
  */
 function useHighlightOnMount(highlight: boolean) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -527,11 +489,7 @@ function useHighlightOnMount(highlight: boolean) {
   return { cardRef, ringed };
 }
 
-/**
- * Pill + dot colours per link status. A lookup rather than nested ternaries in
- * the JSX: the two were duplicating the same status test, and the nesting is
- * what pushed LinkCard over the cognitive-complexity limit.
- */
+/** Pill and dot colours per link status. */
 const STATUS_STYLE: Record<string, { pill: string; dot: string }> = {
   live: { pill: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
   retired: { pill: 'bg-rose-50 text-rose-700', dot: 'bg-rose-500' },
@@ -543,7 +501,7 @@ function LinkCard({
   highlight = false,
 }: Readonly<{
   link: ApiRegistrationLink;
-  /** Freshly created via the create flow (`?new=`) — scroll to + ring it. */
+  /** True for a just-created link (`?new=`); scrolls to and highlights it. */
   highlight?: boolean;
 }>) {
   const t = useTranslations('onboarding');
@@ -568,8 +526,7 @@ function LinkCard({
     [ctx['org_name'], ctx['event_location']].filter(Boolean).join(' · ') ||
     `${t('link_card.created_prefix')} ${format.dateTime(new Date(link.created_at), { day: '2-digit', month: 'short', year: 'numeric' })}`;
 
-  // `<host>/<orgSlug>/<slug>` with the slug emphasised. Empty for drafts/
-  // retired rows (null public_url); a malformed URL falls back to raw host.
+  // `<host>/<orgSlug>/<slug>`. Empty when `public_url` is null.
   const { host: urlHost, path: urlPath } = splitPublicUrl(link.public_url);
   const onCopy = async () => {
     if (!link.public_url || !navigator.clipboard) return;
@@ -577,9 +534,7 @@ function LinkCard({
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
-  // #650: the QR is derived data — generated in the browser from the public
-  // URL on demand (no S3 round-trip, never expires). Opening the preview
-  // renders the PNG data-URI; Download reuses the same in-memory value.
+  // The QR is generated in the browser from the public URL when the preview opens.
   const [qrOpen, setQrOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
@@ -609,9 +564,7 @@ function LinkCard({
     a.remove();
   };
 
-  // Inline edit form state — drafts only. Pre-populated from the link's
-  // current context. Slug is regenerated server-side from district+lever+date
-  // on save (matches the create flow).
+  // Inline edit form state (drafts only). The server regenerates the slug on save.
   const [editForm, setEditForm] = useState<CreateLinkFormState>(() => ({
     domain: link.domain,
     state: ctxString('state'),
@@ -619,17 +572,13 @@ function LinkCard({
     lever_event: ctxString('lever_event'),
     event_date: ctxString('event_date'),
     event_location: ctxString('event_location'),
-    // Carry the existing link's mode so the edit form can render a
-    // read-only badge. registration_mode is immutable post-create so the
-    // edit path must not POST a new value.
+    // Shown read-only. The edit request must not send a new registration_mode.
     registration_mode: link.registration_mode ?? 'form',
     tags: Array.isArray(ctx['tags']) ? (ctx['tags'] as string[]).join(', ') : '',
   }));
   const [editError, setEditError] = useState<string | null>(null);
   const onSaveEdit = async () => {
-    // The Save button is disabled while state/district/lever_event are
-    // missing — this handler can't fire with any of those unset, so no
-    // separate guard is needed here.
+    // The Save button is disabled while required fields are missing.
     setEditError(null);
     try {
       const slug = buildLinkSlug(editForm);
@@ -663,8 +612,7 @@ function LinkCard({
         ringed ? 'ring-2 ring-primary-400 ring-offset-2' : ''
       }`}
     >
-      {/* Phones stack the actions under the card body instead of squeezing
-          them beside it (#793). */}
+      {/* Actions stack under the card body below `sm`. */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
@@ -681,28 +629,16 @@ function LinkCard({
 
           <p className="text-[12.5px] text-ink-400 mt-1.5">{subtitle}</p>
 
-          {/*
-           * Public URL + QR are only meaningful once the link is live. Drafts
-           * carry a null public_url from the API; rendering it here would
-           * show "host/null" and copy the literal string — both wrong.
-           */}
+          {/* Public URL and QR only for live links; drafts have a null public_url. */}
           {isLive && link.public_url && (
             <div className="flex items-center gap-2 mt-3 flex-wrap">
               <div className="inline-flex flex-wrap sm:flex-nowrap items-center gap-1 min-w-0 max-w-full bg-ink-50 border border-(--bd-border) rounded-[10px] px-3 py-1.5 text-[12.5px] font-mono">
                 <span className="text-ink-500">{urlHost}/</span>
-                {/* Below `sm` the pill wraps, so a long slug drops onto its own
-                    line under the host; min-w-0 + wrap-anywhere then let it break
-                    inside the pill instead of pushing the card off-screen. From
-                    `sm` up the layout is the original single row. */}
+                {/* Below `sm` a long slug wraps inside the pill. */}
                 <span className="min-w-0 wrap-anywhere text-amber-700 font-semibold">
                   {urlPath}
                 </span>
-                {/*
-                 * The only copy affordance on the card. A second, labelled
-                 * "Copy link" button used to sit at the end of this row firing
-                 * the same handler; it was removed, so the copied confirmation
-                 * it carried moves here.
-                 */}
+                {/* Copy button for the public URL; shows the copied confirmation. */}
                 <button
                   type="button"
                   onClick={onCopy}
@@ -873,29 +809,24 @@ function LinkCard({
 }
 
 /**
- * Body-only "Your Registration Links" list. Designed to be rendered INSIDE
- * another card shell (the merged Registration via Link section on the
- * onboarding landing). No outer card padding/border — parent owns chrome.
+ * "Your Registration Links" list body, without an outer card.
+ *
+ * Render it inside a parent card.
  */
 export function YourLinksBody() {
   const t = useTranslations('onboarding');
-  // `?new=<link_id>` is set by the create flow after it navigates here, so the
-  // fresh draft can be scrolled to and highlighted (its card carries the
-  // "Make Live" CTA). Absent on a normal visit.
+  // `?new=<link_id>` is set by the create flow to highlight the new draft.
   const newLinkId = useSearchParams().get('new');
-  // The create toast can't survive the navigation from the create page, so it
-  // is surfaced here on arrival: confirm the draft + point at "Make Live".
+  // Show the create confirmation here, after navigation from the create page.
   const [toast, setToast] = useState<string | null>(null);
   useEffect(() => {
     if (newLinkId) setToast(t('your_links.draft_created'));
   }, [newLinkId, t]);
   const rawProfile = useProfileRaw();
   const { data: cfg } = useAggregatorConfig();
-  // Domain id the aggregator is scoped to; falls back to the network's first
-  // declared domain (networks.json order) until the profile loads.
+  // Aggregator's domain; the network's first domain until the profile loads.
   const aggregatorType: string = rawProfile.data?.type ?? cfg?.domains[0]?.id ?? '';
-  // The aggregator only ever has links of its registered type — no tab
-  // switcher needed. Filter is pinned via `aggregatorType`.
+  // Links are filtered to the aggregator's registered type.
   const { data, isLoading, error } = useRegistrationLinks(aggregatorType);
   const links: ApiRegistrationLink[] = data ?? [];
   const activeCount = links.filter((l) => l.status === 'live').length;

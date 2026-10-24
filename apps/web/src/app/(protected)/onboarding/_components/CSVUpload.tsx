@@ -18,9 +18,7 @@ import { onboardingService } from '../../../../services/onboarding.service';
 import type { BulkAttestationContent } from '../../../../lib/bulk-attestation.server';
 import { useCan } from '../../../../lib/auth-context';
 
-// Module-level so its identity is stable across CSVUpload re-renders. Defining
-// it inline re-created the component every render, remounting the toast and
-// restarting its timer — which read as the message flickering/switching fast.
+// Defined at module level so re-renders of CSVUpload do not remount the toast.
 function UploadToast({ message, onDone }: { message: string; onDone: () => void }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -43,10 +41,10 @@ function UploadToast({ message, onDone }: { message: string; onDone: () => void 
 /** Props for {@link CSVUpload}. */
 export interface CSVUploadProps {
   /**
-   * Operator attestation copy (#522 Task 1), loaded server-side. `null` ⇒ the
-   * checkbox shows a generic label. When present, the statement is shown and
-   * the aggregator must tick it before Upload is enabled; `attestation: true`
-   * is sent to `/start`, which validates + records it.
+   * Operator attestation text, loaded on the server.
+   *
+   * `null` shows a generic checkbox label. The checkbox must be ticked before
+   * Upload is enabled; `attestation: true` is sent to `/start`.
    */
   attestation?: BulkAttestationContent | null;
 }
@@ -56,10 +54,8 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
   const [attested, setAttested] = useState(false);
   const rawProfile = useProfileRaw();
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Coordinator registered participant focus, mirrored from the
-  // `aggregator_type` KC claim. Falls back to the network's first declared
-  // domain (networks.json order) while the profile loads — the upload submit
-  // path is gated by the API anyway, so a transient mismatch is harmless.
+  // Participant type from the `aggregator_type` claim. Uses the network's first
+  // domain while the profile loads; the API checks the type on upload.
   const aggregatorType: string = rawProfile.data?.type ?? cfg.domains[0]?.id ?? '';
   // Plural label for the scoped domain, sourced from network config.
   const aggregatorTypeLabel =
@@ -79,9 +75,8 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
 
   const acceptFile = (f: File) => {
     if (!/\.csv$/i.test(f.name)) {
-      // Naming the fix matters now that we hand out an .xlsx template (#564):
-      // filling the workbook and uploading it directly is the obvious mistake,
-      // and "Only .csv files are accepted" does not say what to do about it.
+      // Tell the user how to fix it; uploading the .xlsx template directly is a
+      // common mistake.
       setUploadError(
         /\.xlsx?$/i.test(f.name)
           ? 'This is an Excel file. Open it and use File → Save As (or Export) → CSV, then upload the .csv.'
@@ -123,15 +118,10 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
         recent.refetch();
         return;
       }
-      // Stay on the page so the success note is readable and the just-uploaded
-      // run appears in the recent-uploads list below. Processing continues in
-      // the worker. (Previously navigated to /onboarding immediately, which
-      // unmounted the toast before it could be read.)
+      // Show the success note and refresh the list. Processing continues in the worker.
       setToast(t('csv.success_note'));
       recent.refetch();
-      // Let the success toast be read, then return to the onboarding overview.
-      // A short delay (not an immediate push) avoids unmounting the toast the
-      // instant it appears — the bug the previous "navigate immediately" had.
+      // Return to the onboarding overview after the toast has been shown.
       setTimeout(() => router.push('/onboarding'), 2500);
     } catch (err) {
       setUploadError((err as Error).message);
@@ -139,11 +129,8 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
   };
 
   const downloadTemplate = () => {
-    // Workbook only. It carries the dropdowns, the required-column marking and
-    // the delimiter note, so it is the format that prevents the errors #564 is
-    // about — offering a bare CSV alongside it just invites the version with no
-    // guidance. `GET /v1/bulk-uploads/template` still defaults to CSV for API
-    // callers that generate their own file.
+    // Offer only the workbook: it has dropdowns and required-column marks.
+    // The API template endpoint still defaults to CSV.
     window.location.href = `/api/bulk-uploads/template?participant_type=${participantType}&format=xlsx`;
   };
 
@@ -155,17 +142,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
           <div className="text-[12.5px] text-ink-400 mt-0.5">{t('csv.subtitle')}</div>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {/*
-           * Aggregators are scoped to a single participant type (seeker OR
-           * provider). The opposite button is omitted, not just disabled, so
-           * the UI matches what the API enforces: one tile per aggregator.
-           */}
-          {/*
-           * Render as a passive label, not a button — aggregators are
-           * scoped to one participant type so the chip is informational
-           * only. Plain <div> avoids hover/cursor cues that suggest
-           * the value is changeable.
-           */}
+          {/* Aggregators have one participant type, so this is a read-only label. */}
           <div
             className="flex items-center bg-ink-50 border border-(--bd-border) rounded-[10px] p-0.5"
             aria-label={`Participant type: ${aggregatorTypeLabel}`}
@@ -196,8 +173,8 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
           id="csv-file-input"
         />
         {pickedFile ? (
-          // Selected-file chip with explicit × dismissal. Cleared state +
-          // resets the file input so the same filename can be re-picked.
+          // Selected-file chip. Dismissing it also resets the input so the same
+          // file can be picked again.
           <div className="flex items-center justify-center gap-2">
             <div className="inline-flex items-center gap-2 max-w-full px-3 py-2 rounded-[10px] bg-(--bd-primary-50) border border-(--bd-primary-100)">
               <I.upload size={14} className="text-primary-600 shrink-0" />
@@ -274,9 +251,9 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
 }
 
 /**
- * Body-only "Recent uploads" table. Designed to be rendered INSIDE another
- * card shell (the merged Bulk Upload section on the onboarding landing).
- * No outer card padding/border — the parent owns the chrome.
+ * "Recent uploads" table body, without an outer card.
+ *
+ * Render it inside a parent card.
  */
 export function RecentUploadsBody() {
   const t = useTranslations('onboarding');

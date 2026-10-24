@@ -8,12 +8,9 @@ export interface ProfileService {
 }
 
 /**
- * Wire shape of `contact` on `GET /v1/aggregators/profile/me` — mirrors
- * `BecknContactSchema` in `@aggregator-dpg/shared-primitives/beckn`. Since
- * migration 0025 the API composes it from the `contact` table (name / email /
- * phone) plus `users.alternate_phone` and the org's company / GST (the optional
- * keys below, migrations 0028 / 0029); the shape
- * the web receives is unchanged.
+ * Shape of `contact` on `GET /v1/aggregators/profile/me`.
+ *
+ * Mirrors `BecknContactSchema` in `@aggregator-dpg/shared-primitives/beckn`.
  */
 interface BecknContact {
   name: string;
@@ -29,23 +26,18 @@ interface BecknLocation {
   address?: Record<string, string | undefined>;
 }
 
-/**
- * `GET /v1/aggregators/profile/me` response shape — the `aggregators` row
- * flattened to the top level, plus the Keycloak-derived `identity` fragment.
- */
+/** Response of `GET /v1/aggregators/profile/me`, plus the Keycloak `identity` fragment. */
 export interface ProfileApiResponse {
   aggregator_id: string;
   org_slug: string;
   org_name: string;
   actor_type: 'aggregator' | 'seeker' | 'provider';
-  // Domain id the aggregator is scoped to. Comes from the network config
-  // (networks.json domains), so not limited to seeker/provider — e.g.
-  // orange_dot exposes tourist / practitioner.
+  // Domain id from the network config; any network domain is possible.
   type: string | null;
   url: string | null;
   contact: BecknContact;
   locations: BecknLocation[];
-  // From the consent ledger (0029); null only when the ledger holds no registration row.
+  // From the consent ledger; null when it has no registration row.
   consent: { value: boolean; given_at: string; valid_till: string } | null;
   status: 'pending' | 'active' | 'inactive' | 'retired';
   identity?: {
@@ -73,15 +65,13 @@ class ApiProfileService implements ProfileService {
 }
 
 function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
-  // Display the Beckn contact.name as the coordinator, falling back to the KC
-  // identity (firstName + lastName) when the contact has not been set.
+  // Use contact.name, else the Keycloak first and last name.
   const identityFull = [api.identity?.first_name, api.identity?.last_name]
     .filter((p): p is string => Boolean(p && p.length > 0))
     .join(' ');
   const coordinator = api.contact?.name || identityFull;
 
-  // Render the first location's postal address as a single line for the
-  // dashboard card.
+  // First location's address as one line.
   const firstLoc = api.locations?.[0]?.address;
   const address = firstLoc
     ? [
@@ -94,10 +84,7 @@ function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
         .join(', ')
     : '';
 
-  // `addressRegion` only exists on rows registered before the address became a
-  // single autocomplete field (#810), so fall back to the free-text address —
-  // the only location text a current row carries. Without the fallback this
-  // renders blank for every new registration.
+  // Older rows have `addressRegion`; newer rows only have `streetAddress`.
   const geographies = (api.locations ?? [])
     .map((loc) => loc.address?.addressRegion || loc.address?.streetAddress)
     .filter((r): r is string => Boolean(r && r.length > 0))
@@ -120,9 +107,7 @@ function mapToAggregatorProfile(api: ProfileApiResponse): AggregatorProfile {
       mobile: api.contact?.phone ?? api.identity?.phone ?? '',
       email: api.contact?.email ?? api.identity?.email ?? '',
     },
-    // `beneficiaries` / `sectors` were fed by the removed `aggregator_profile`
-    // personas + services. No component renders them; kept on the display type
-    // so the dashboard shape is unchanged.
+    // Not rendered anywhere; kept to satisfy the display type.
     beneficiaries: '',
     address,
     geographies,

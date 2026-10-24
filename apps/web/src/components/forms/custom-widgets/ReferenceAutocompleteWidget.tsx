@@ -1,24 +1,17 @@
 'use client';
 
 /**
- * Autocomplete backed by an EXTERNAL reference dataset rather than an inline
- * JSON-Schema `enum`.
+ * Autocomplete backed by an external reference dataset instead of a schema `enum`.
  *
- * A field opts in with the custom `x-reference-source` marker in network.json
- * (e.g. `"colleges"`), which the uiSchema builder maps to this widget with
- * `ui:options.source`. The widget fetches `<base>/<dataset>.json` — so a list
- * far too large for network.json (the college/institute lists run to hundreds of
- * thousands of entries) lives outside the schema and can be updated without a
- * schema change.
+ * A field opts in with the `x-reference-source` marker (e.g. `"colleges"`),
+ * passed here as `ui:options.source`. The widget fetches
+ * `<base>/<dataset>.json`, so large lists live outside the schema.
  *
- * The stored value is the plain option NAME, so the field stays a simple
- * `type: "string"` and any existing free-text value keeps working. A failed
- * dataset load degrades to a plain text input rather than blocking the field.
+ * The stored value is the option name, a plain string. If the dataset fails
+ * to load, the field works as a plain text input.
  *
- * Ported from Signals-DPG
- * `apps/ui/src/components/forms/custom-widgets/reference-autocomplete-widget.tsx`.
- * The dataset id and base URL come from the form runtime config instead of
- * `import.meta.env`, and errors are left to `FieldTemplate`.
+ * Matches the Signals-DPG widget, except the dataset id and base URL come from
+ * the form runtime config and errors are rendered by `FieldTemplate`.
  *
  * @module apps/web/components/forms/custom-widgets/ReferenceAutocompleteWidget
  */
@@ -51,9 +44,9 @@ type HierarchicalDataset = {
   }>;
 };
 
-/** Cap on rendered matches — a two-character query can match tens of thousands. */
+/** Maximum number of matches shown. */
 const MAX_SUGGESTIONS = 50;
-/** Below this, a query matches too much of the dataset to be worth listing. */
+/** Shortest query that shows matches. */
 const MIN_QUERY_LENGTH = 2;
 const BLUR_CLOSE_MS = 150;
 
@@ -61,8 +54,7 @@ const BLUR_CLOSE_MS = 150;
 const DEFAULT_REFERENCE_BASE = '/reference/';
 
 /**
- * Module-level so switching fields or re-mounting the form doesn't refetch the
- * (large) dataset. Holds the in-flight promise, keyed by resolved dataset id.
+ * Dataset fetch promises by dataset id, shared across mounts so each loads once.
  */
 const datasetCache = new Map<string, Promise<ReferenceOption[]>>();
 
@@ -73,8 +65,7 @@ function stringField(source: Record<string, unknown>, field: string): string | u
 }
 
 /**
- * Builds one option, omitting `district`/`state` rather than setting them
- * undefined — the rendered subtitle filters on presence.
+ * Builds one option, leaving out empty `district`/`state` keys.
  */
 function toOption(
   name: string,
@@ -88,7 +79,7 @@ function toOption(
   };
 }
 
-/** Flattens the already-flat shape: `[{ name, district?, state? }, ...]`. */
+/** Reads the flat shape: `[{ name, district?, state? }, ...]`. */
 function flattenFlat(raw: unknown[]): ReferenceOption[] {
   const out: ReferenceOption[] = [];
   for (const entry of raw) {
@@ -104,8 +95,7 @@ function flattenFlat(raw: unknown[]): ReferenceOption[] {
  * Flattens the hierarchical shape (the KA/UP institute lists):
  * `{ states: [{ name, districts: [{ name, organizations: [...] }] }] }`.
  *
- * An organization's own `district`/`state` wins over the node it hangs under,
- * since a few entries are filed under one district but record another.
+ * An organization's own `district`/`state` takes precedence over its parent nodes.
  */
 function flattenHierarchical(raw: HierarchicalDataset | null): ReferenceOption[] {
   const out: ReferenceOption[] = [];
@@ -130,11 +120,6 @@ function flattenHierarchical(raw: HierarchicalDataset | null): ReferenceOption[]
 /**
  * Normalises either supported dataset shape into a flat option list.
  *
- * Split across the two helpers above rather than one branching function: the
- * hierarchical walk is three nested loops, which on its own carried more
- * cognitive complexity than Sonar's threshold allows (S3776) and made the
- * district/state precedence rules hard to pick out.
- *
  * @param raw - Parsed dataset JSON, shape unverified.
  * @returns Flat options; entries without a string `name` are dropped.
  */
@@ -147,9 +132,8 @@ export function flattenReferenceDataset(raw: unknown): ReferenceOption[] {
 /**
  * Resolves an `x-reference-source` value to a concrete dataset file id.
  *
- * `colleges` is region-scoped: the state is chosen per deployment via
- * `COLLEGE_DATASET` (`ka` | `up`), so one build serves any state with no schema
- * change. Any other source id is used verbatim.
+ * `colleges` maps to `colleges-<COLLEGE_DATASET>` (e.g. `ka`, `up`). Any other
+ * source id is used as-is.
  *
  * @param source - The marker's source id.
  * @param collegeDataset - Region code from the form runtime config.
@@ -162,21 +146,17 @@ export function resolveDatasetId(source: string, collegeDataset: string): string
 /**
  * Builds the URL a dataset is fetched from.
  *
- * Defaults to the app's own `/reference/`, which is where a deployment mounts
- * its ConfigMap. The datasets are deliberately NOT committed to this repo, so
- * that path serves nothing without one — locally, point `referenceBaseUrl` at
- * canonical instead (see `infra/env.template`). An absolute value is used
- * as-is; a relative one resolves against the app origin. A remote host must
- * send permissive CORS headers, since the browser fetches it directly.
+ * Defaults to `/reference/`, where a deployment mounts its ConfigMap. The
+ * datasets are not in this repo; for local dev set `referenceBaseUrl` (see
+ * `infra/env.template`). A relative value resolves against the app origin.
+ * A remote host must allow CORS, since the browser fetches it directly.
  *
  * @param id - Resolved dataset file id.
  * @param referenceBaseUrl - Optional base URL override.
  * @returns An absolute URL to the dataset JSON.
  */
 function referenceUrl(id: string, referenceBaseUrl: string = DEFAULT_REFERENCE_BASE): string {
-  // A default parameter only covers `undefined`, and Helm renders an unset
-  // chart value as `""` — `getFormRuntimeConfig` already maps blank to absent,
-  // so this second guard is belt-and-braces for a hand-built config.
+  // Treat a blank value as unset too.
   const raw = referenceBaseUrl.trim() || DEFAULT_REFERENCE_BASE;
   const base = raw.endsWith('/') ? raw : `${raw}/`;
   return new URL(`${id}.json`, new URL(base, window.location.origin)).toString();
@@ -192,8 +172,7 @@ function loadDataset(id: string, referenceBaseUrl: string | undefined): Promise<
     })
     .then(flattenReferenceDataset)
     .catch((err: unknown) => {
-      // Drop the failed promise so a later mount can retry rather than being
-      // stuck with the failure for the session.
+      // Drop the failed promise so a later mount can retry.
       datasetCache.delete(id);
       throw err;
     });
@@ -212,8 +191,7 @@ export function ReferenceAutocompleteWidget({
 }: Readonly<WidgetProps>) {
   const opts = options as { source?: string; subtitleFields?: string[] } | undefined;
   const source = opts?.source;
-  // Unknown field names are dropped; an explicit (possibly empty) list wins over
-  // the default, so `[]` means name-only.
+  // Unknown names are dropped. An explicit list, even `[]`, replaces the default.
   const subtitleFields: SubtitleField[] = Array.isArray(opts?.subtitleFields)
     ? opts.subtitleFields.filter((f): f is SubtitleField =>
         (SUBTITLE_FIELDS as readonly string[]).includes(f),
@@ -240,8 +218,7 @@ export function ReferenceAutocompleteWidget({
         if (live) setDataset(loaded);
       })
       .catch(() => {
-        // A load failure leaves the field as a plain text input — no
-        // suggestions, but the typed value is still captured.
+        // On failure the field works as plain text input.
         if (live) setDataset([]);
       });
     return () => {
@@ -271,10 +248,7 @@ export function ReferenceAutocompleteWidget({
   }
 
   /**
-   * The secondary line under an option's name. Ordered per the marker's
-   * `subtitle` config (default: district only) — when the dataset is
-   * state-scoped by deployment, `state` is the same for every option, so
-   * district is usually the only one that distinguishes anything.
+   * Builds the line under an option's name from `subtitleFields` (default: district).
    */
   function subtitle(option: ReferenceOption): string | null {
     const parts = subtitleFields

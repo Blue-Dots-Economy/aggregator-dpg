@@ -1,14 +1,9 @@
 /**
- * Locale constants and pure resolution helpers for the web portal's i18n.
+ * Locale constants and pure helpers for the web app's i18n.
  *
- * Kept free of `next/*` imports so it is unit-testable and importable from
- * both server and client code. The active set of switchable languages is
- * driven by `ENABLED_LANGUAGES`.
- *
- * `getEnabledLocales()` reads `process.env`, so it must only be called where
- * that is a RUNTIME read — server components, server actions and route
- * handlers. Client components take the resolved list from
- * `EnabledLocalesProvider` instead; see the note on that function.
+ * Has no `next/*` imports, so server and client code can import it.
+ * `getEnabledLocales()` is server-only; client components use
+ * `EnabledLocalesProvider` instead.
  */
 
 export const SUPPORTED_LOCALES = ['en', 'kn', 'hi'] as const;
@@ -32,13 +27,10 @@ export function isSupportedLocale(v: string | undefined | null): v is Locale {
 }
 
 /**
- * Parses a comma-separated, ordered locale list into the set shown in the
- * switcher. `en` is always force-included as the fallback, unsupported codes
- * are dropped, and duplicates collapse. Empty/absent input → all supported
- * locales.
+ * Parses a comma-separated locale list into the set shown in the switcher.
  *
- * Pure, so the same rules apply whether the raw value came from the
- * environment (server) or was handed to a client component as a prop.
+ * `en` is always included, unsupported codes and duplicates are dropped, and
+ * empty input means all supported locales.
  *
  * @param raw - Comma-separated locale codes, or undefined when unconfigured.
  * @returns The enabled locales, in display order.
@@ -56,26 +48,13 @@ export function parseEnabledLocales(raw: string | undefined | null): Locale[] {
 }
 
 /**
- * Locales shown in the switcher, from the `ENABLED_LANGUAGES` environment
- * variable.
+ * Locales shown in the switcher, from the `ENABLED_LANGUAGES` environment variable.
  *
- * SERVER-ONLY in effect. Next.js inlines `process.env.NEXT_PUBLIC_*` into the
- * client bundle at `next build`, so the previous `NEXT_PUBLIC_`-prefixed name
- * read from a client component froze the language list into the image — the
- * var looked configurable but needed a rebuild to change, which is no use to
- * an operator. The unprefixed name is read per request on the server instead,
- * and the resolved list reaches client components through
- * `EnabledLocalesProvider`.
+ * Server-only: never call from a client component. Client components get the
+ * list from `EnabledLocalesProvider`.
  *
- * `NEXT_PUBLIC_ENABLED_LANGUAGES` is still honoured as a fallback so existing
- * deployments keep working through the rename; remove it once they have moved.
- *
- * `||`, NOT `??`: the var is routinely present-but-empty rather than absent.
- * Compose passes `ENABLED_LANGUAGES: ${ENABLED_LANGUAGES:-}`, which sets it to
- * an empty string when the operator's `.env` omits it — and `''` is not
- * nullish, so `??` would accept it and the legacy name would never be read.
- * That made the fallback dead code on every container path, which is the one
- * path deployments actually use.
+ * Falls back to `NEXT_PUBLIC_ENABLED_LANGUAGES`. Uses `||` because Compose
+ * sets an unset variable to an empty string.
  *
  * @returns The enabled locales, in display order.
  */
@@ -91,10 +70,10 @@ export function isEnabledLocale(v: string | undefined | null): v is Locale {
 }
 
 /**
- * Resolves the active locale from a cookie value and an Accept-Language
- * header. Cookie wins when it names an enabled locale; otherwise the first
- * Accept-Language tag whose base matches an enabled locale; otherwise the
- * default. Pure — no `next/*` access — so it is unit-testable.
+ * Resolves the active locale from the locale cookie and Accept-Language header.
+ *
+ * Order: an enabled cookie locale, then the first enabled Accept-Language
+ * tag, then the default.
  *
  * @param cookieValue - The locale cookie value, if present.
  * @param acceptLanguage - The Accept-Language header string, or null.

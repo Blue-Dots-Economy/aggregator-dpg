@@ -2,11 +2,7 @@
  * BFF proxy: bulk-upload template download (CSV or XLSX).
  *   GET /api/bulk-uploads/template?participant_type=seeker[&sample=10][&format=xlsx]
  *
- * The body is forwarded as BYTES, not text. `format=xlsx` returns a workbook
- * (#564), and reading that through `.text()` would decode it as UTF-8 and
- * corrupt every byte outside the ASCII range — a silently broken download
- * rather than a failure. `arrayBuffer` is byte-exact for CSV too, so one path
- * serves both.
+ * The body is forwarded as bytes, not text, so XLSX workbooks are not corrupted.
  */
 
 import { type NextRequest, NextResponse } from 'next/server';

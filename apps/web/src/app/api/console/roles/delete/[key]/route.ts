@@ -1,9 +1,9 @@
 /**
- * Console BFF (RBAC R6): Delete an unused custom role (network admin).
+ * Console BFF: delete an unused custom role (network admin).
  *   POST /api/console/roles/delete/:key → API POST /v1/roles/delete/:key
  *
- * Guarded by `consoleMutation` (JSON + same-origin, C11) and forwarded with
- * the caller's own token; the upstream envelope passes through unchanged.
+ * Guarded by `consoleMutation` (JSON body, same-origin) and sent with the
+ * caller's own token. The upstream response passes through unchanged.
  */
 
 import { type NextRequest, type NextResponse } from 'next/server';
@@ -16,8 +16,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ key: string }> },
 ): Promise<NextResponse> {
-  // Defense in depth: when the custom-roles capability is off the api does not
-  // register this route (404). Short-circuit here to avoid a wasted upstream call.
+  // With custom roles off the api has no such route, so answer 404 here.
   if (!(await customRolesEnabled())) return invalidIdResponse();
   const { key } = await params;
   if (!isRoleKey(key)) return invalidIdResponse();

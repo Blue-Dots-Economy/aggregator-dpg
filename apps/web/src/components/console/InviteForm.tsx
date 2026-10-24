@@ -1,9 +1,8 @@
 'use client';
 
 /**
- * Invite coordinators (user & org Phase 5): one address per line into a
- * chosen organisation; shows what was sent, what was refused and who is
- * already in the organisation.
+ * Invites coordinators to an organisation, one address per line. Shows what
+ * was sent, what was refused, and who is already a member.
  */
 
 import { useState, type SubmitEvent } from 'react';

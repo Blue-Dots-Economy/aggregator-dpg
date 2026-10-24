@@ -1,9 +1,9 @@
 /**
- * Console BFF (user & org Phase 5): Re-apply an organisation owner's sign-in access (network admin).
+ * Console BFF: re-apply an organisation owner's sign-in access (network admin).
  *   POST /api/console/org/repair/:id → API POST /v1/org/access/repair/:id
  *
- * Guarded by `consoleMutation` (JSON + same-origin, C11) and forwarded with
- * the caller's own token; the upstream envelope passes through unchanged.
+ * Guarded by `consoleMutation` (JSON body, same-origin) and sent with the
+ * caller's own token. The upstream response passes through unchanged.
  */
 
 import { type NextRequest, type NextResponse } from 'next/server';

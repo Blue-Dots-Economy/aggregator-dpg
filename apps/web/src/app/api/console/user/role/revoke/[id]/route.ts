@@ -1,9 +1,9 @@
 /**
- * Console BFF (RBAC): Revoke a user's additional role in an organisation.
+ * Console BFF: revoke a user's additional role in an organisation.
  *   POST /api/console/user/role/revoke/:id → API POST /v1/user/role/revoke/:id
  *
- * Guarded by `consoleMutation` (JSON + same-origin, C11) and forwarded with
- * the caller's own token; the upstream envelope passes through unchanged.
+ * Guarded by `consoleMutation` (JSON body, same-origin) and sent with the
+ * caller's own token. The upstream response passes through unchanged.
  */
 
 import { type NextRequest, type NextResponse } from 'next/server';
