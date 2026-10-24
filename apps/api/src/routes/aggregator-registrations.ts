@@ -128,7 +128,8 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       let inviteCommitted = false;
       try {
         // Re-sends the review link for an existing pending or revived record
-        // using stored values. The anonymous submit never changes the record.
+        // using stored values. The anonymous submit never changes the record: it
+        // carries no proof of identity, so a stranger must not overwrite it.
         const reclaimReview = async (row: Coordinator): Promise<FastifyReply> => {
           await sendAdminReviewEmail(
             {

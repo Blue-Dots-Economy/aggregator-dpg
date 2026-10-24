@@ -19,8 +19,9 @@ const ConfigSchema = z.object({
   INSTANCE_ENV: z.enum(['development', 'staging', 'production']).optional(),
   /**
    * Read only so the startup guard can reject `0` in production. Node reads it
-   * from process.env itself. A free string, because only the exact value `'0'`
-   * disables verification.
+   * from process.env itself; do not re-derive TLS posture from this field
+   * elsewhere. A free string, because only the exact value `'0'` disables
+   * verification.
    */
   NODE_TLS_REJECT_UNAUTHORIZED: z.string().optional(),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -87,7 +88,9 @@ const ConfigSchema = z.object({
    *
    * An env var, not YAML, so it can differ per instance.
    *
-   * Gates link creation only; existing links keep working in their own mode.
+   * Gates link creation only; existing links keep working in their own mode,
+   * which is why `routes/public-registration-links.ts` reads the unfiltered
+   * network config.
    */
   AGGREGATOR_ONBOARDING_ENABLED: z.string().optional(),
   /**
@@ -224,7 +227,9 @@ const ConfigSchema = z.object({
 
   /**
    * Window and cap for re-sending an approved org's link when its owner
-   * re-submits the form. Keyed on the stored owner email and fails closed.
+   * re-submits the form. Keyed on the stored owner email (not the client IP)
+   * and fails closed even when Redis is down, because every admitted call mints
+   * another 90-day link.
    */
   ORG_INVITE_RESEND_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
   ORG_INVITE_RESEND_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(3),

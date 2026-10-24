@@ -76,8 +76,9 @@ export interface SignedUploadUrl {
  *
  * The signature constrains:
  *   - Content-Type: text/csv (signed; mismatch → S3 rejects with 403)
- *   - Maximum size: BULK_UPLOAD_MAX_BYTES (signed via x-amz-content-length-range
- *     where supported; otherwise enforced post-upload by HEAD inspection)
+ *
+ * The size is not signed; `/complete` checks it against BULK_UPLOAD_MAX_BYTES
+ * with a HEAD request.
  *
  * @param uploadId - DB row id; used as the deterministic S3 key.
  * @param aggregatorId - Owner aggregator; used as a key prefix for grouping.

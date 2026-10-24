@@ -200,7 +200,8 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
     log.error({ status: 'failure', sub_operation: 'idp.enableUser', code: enable.error.code });
     return { kind: 'unavailable', dependency: 'idp' };
   }
-  // 3. The gate attribute. Soft-fail: the login-time check repairs it.
+  // 3. The gate attribute. Soft-fail: the enabled flag already admits them, and
+  //    the login-time check repairs it.
   const stamp = await idp.setUserDecision(kcUser.id, 'approved');
   if (!stamp.ok) {
     log.warn({ status: 'failure', sub_operation: 'idp.setUserDecision', code: stamp.error.code });

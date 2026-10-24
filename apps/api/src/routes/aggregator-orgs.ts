@@ -208,7 +208,8 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
       // Mails the owner of an approved org a sign-in link. A failed send is
       // logged, not raised. The row is not changed.
       const resendOwnerInvite = async (row: Organisation): Promise<FastifyReply> => {
-        // Rate-limited per owner address and fails closed.
+        // Rate-limited per owner address and fails closed. Not the route's shared
+        // submit limiter: that one is keyed on IP and fails open.
         const resendRate = await checkOrgInviteResendRate(row.ownerEmail);
         if (!resendRate.allowed) {
           void reply.header('Retry-After', String(resendRate.retryAfterSeconds));

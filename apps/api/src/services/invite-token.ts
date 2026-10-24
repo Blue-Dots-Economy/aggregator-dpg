@@ -6,8 +6,8 @@
  * `aggregator-invite` stops other tokens sharing the secret from being
  * replayed as invites.
  *
- * Claims: `sub` (the `registration_invites` row `jti`), `org`, and the bound
- * `email` (checked on submit). Single use is enforced by the DB row's
+ * Claims: `sub` (the `registration_invites` row `jti`), `org`, and `email`,
+ * the invited address (recorded on submit, not enforced). Single use is enforced by the DB row's
  * `pending → consumed` update, not the token.
  */
 

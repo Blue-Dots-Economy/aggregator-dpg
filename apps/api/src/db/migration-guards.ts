@@ -4,11 +4,14 @@
  * 1. **Foreign migrations.** An applied row whose `created_at` matches no
  *    journal `when` came from a file this release does not ship. Drizzle skips
  *    by the `when` high-water mark, so this is refused (only a warning under
- *    `ALLOW_TRAIN_ON_BOOT=true`). A hash mismatch on a known `when` only warns.
+ *    `ALLOW_TRAIN_ON_BOOT=true`). A hash mismatch on a known `when` only warns:
+ *    some shipped migrations were edited after their first commit, so real
+ *    instances hold older hashes.
  *
  * 2. **The user & org instance upgrade.** Migrations 0023 to
  *    {@link UPGRADE_LAST_WHEN} restructure data; existing instances apply them
- *    with the instance-upgrade tool. At boot or `pnpm db:migrate`, a pending
+ *    with the instance-upgrade tool, with pods at zero, after its pre-flight
+ *    and dry-run. At boot or `pnpm db:migrate`, a pending
  *    one on a non-empty database is refused unless `ALLOW_TRAIN_ON_BOOT=true`
  *    (dev / e2e only). An empty database migrates normally.
  *

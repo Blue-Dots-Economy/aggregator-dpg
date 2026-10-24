@@ -249,8 +249,9 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
     return;
   }
 
-  // Domains come from the network config: the aggregator's registered type when
-  // set, else every domain of the network.
+  // Domains come from the live network config, so the backfill never writes a
+  // stale domain set into org.metadata.domains: the aggregator's registered
+  // type when set, else every domain of the network.
   const networkCfg = await getNetworkConfig();
   const aggregatorType = found.value.type;
   const upsertDomains: string[] =

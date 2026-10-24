@@ -133,7 +133,7 @@ async function readOverrideLayer(
     return await readFile(file, 'utf8');
   } catch (cause) {
     const code = (cause as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return null; // absent layer
+    if (code === 'ENOENT') return null; // absent layer — the common case
     if (isInstanceOverride) {
       throw new Error(`EMAIL_MESSAGES_PATH is set but unreadable: ${file} (${code})`, { cause });
     }

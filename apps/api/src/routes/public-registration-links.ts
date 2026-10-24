@@ -443,7 +443,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 
         const validate = validatorResult.value;
         if (!validate(body)) {
-          // Partial profiles are accepted: drop only top-level `required` errors, since
+          // Partial profiles are accepted: drop `required` errors outside a `then` branch, since
           // signals marks such an item `draft`. Constraints on present fields still 400.
           //
           // For a conditional requirement (`allOf`/`if`/`then`), a `required` error
