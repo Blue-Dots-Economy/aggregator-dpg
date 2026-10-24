@@ -11,8 +11,9 @@
  *     only in `consent_record`.
  *   - `organisations`: the network-facilitator root, the Default org and every
  *     aggregator org.
- *   - `bulk_uploads`: one row per CSV upload, with its status and counters.
- *     Per-row state is in Redis during the run and in `errors.csv` on S3 after.
+ *   - `bulk_uploads`: one row per CSV upload, with its status. Counters and
+ *     per-row state are in Redis during the run; afterwards counters are in
+ *     `onboarding` and row errors in `errors.csv` on S3.
  *
  * Keycloak keeps its own copy of a user's email, phone and name, plus
  * `decision_made`. The `contact` table is the application's copy. The two

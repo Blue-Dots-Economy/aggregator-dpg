@@ -387,7 +387,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
    * Calls `POST /api/v1/admin/aggregator/upsert` with the configured
    * `x-acting-org-id`. Idempotent on `external_id`, so it is safe to retry.
    *
-   * @param input - external_id (our aggregator UUID), display name, slug, and optional metadata.
+   * @param input - external_id (coordinator `users.id`), display name, slug, optional metadata.
    * @returns ok(SignalStackAggregator) on 2xx with a non-empty `org_id`; err(BaseError) otherwise.
    */
   override async upsertAggregator(
