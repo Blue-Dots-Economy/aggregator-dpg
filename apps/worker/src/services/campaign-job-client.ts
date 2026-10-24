@@ -1,13 +1,9 @@
 /**
- * Worker-side persistence for the campaign job model (#579).
+ * Worker-side DB access for campaign jobs.
  *
- * The API owns job creation; the worker only reads a job for processing and
- * writes item + job status back. This is a thin Drizzle client against the same
- * `campaign_job` / `campaign_job_item` tables (shared via `@aggregator-dpg/db-schema`)
- * — the cross-app twin of the API's `campaign-job-store`. Kept separate rather
- * than imported to respect the app boundary (the dependency-cruiser forbids
- * apps importing each other); the small `deriveJobStatus` roll-up rule is
- * duplicated for the same reason and must stay in step with the API's copy.
+ * The API creates jobs; the worker reads them and writes item and job status.
+ * Apps cannot import each other, so this mirrors the API's `campaign-job-store`.
+ * `deriveJobStatus` must stay in step with the API's copy.
  *
  * @module @aggregator-dpg/worker
  */
@@ -38,10 +34,9 @@ export const SKIPPED_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
 ];
 
 /**
- * Statuses a channel handler must never act on again when a job retries.
- * `resolved` is deliberately absent — it means "data fetched", an intermediate
- * step for email (resolve → send) and voice (resolve → submit). Twin of the
- * API-side constant; keep the two in step.
+ * Item statuses a handler does not act on again when a job retries.
+ *
+ * `resolved` is not terminal; it means the data was fetched. Must match the API's copy.
  */
 export const TERMINAL_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
   'submitted',
@@ -52,7 +47,7 @@ export const TERMINAL_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
   'failed',
 ];
 
-/** The guard rendered for a SQL `NOT IN (...)`, derived so it can't drift. */
+/** {@link TERMINAL_ITEM_STATUSES} as a SQL `NOT IN (...)` list. */
 const TERMINAL_SQL_LIST = TERMINAL_ITEM_STATUSES.map((s) => `'${s}'`).join(',');
 
 /** Job statuses a job can no longer move out of. */
@@ -68,12 +63,9 @@ export interface ProcessingJobItem {
   action: string | null;
   status: CampaignJobItemStatus;
   /**
-   * Provider-generic field name (voice: the Raya batch id) this item was
-   * submitted under, if any. Written atomically with `status: 'submitted'`
-   * by {@link markSubmitted} — its presence is the retry-safety signal the
-   * voice handler checks before dispatching, so a resumed job never creates
-   * a second batch at the provider. Persisted in the `raya_batch_id` column
-   * (a storage detail; the column keeps its original name).
+   * Provider batch id this item was submitted under (voice: the Raya batch id).
+   * Set with `submitted` by {@link markSubmitted}. The voice handler checks it
+   * to avoid a second dispatch. Stored in the `raya_batch_id` column.
    */
   providerBatchRef: string | null;
 }
@@ -113,8 +105,9 @@ export interface JobStatusCounts {
 }
 
 /**
- * Derives the roll-up job status from item counts. Duplicate of the API's
- * `deriveJobStatus` (see module note) — keep the two in step.
+ * Derives the job status from item counts.
+ *
+ * Must match the API's `deriveJobStatus`.
  *
  * @param c - The job's item-status tally.
  * @returns The derived job status.
@@ -123,13 +116,13 @@ export function deriveJobStatus(c: JobStatusCounts): CampaignJobStatus {
   if (c.pending > 0) return 'processing';
   if (c.total === 0) return 'completed';
   const succeeded = c.resolved + c.submitted + c.sent;
-  // Skips are deliberate no-ops, never failures — see the API-side twin.
+  // Skips are not failures.
   if (c.failed === 0) return 'completed';
   if (succeeded === 0) return 'failed';
   return 'partial';
 }
 
-/** Loads a job + its items for processing (unscoped — the jobId is trusted). */
+/** Loads a job and its items. Not org-scoped; the jobId comes from the queue. */
 export async function getJobForProcessing(jobId: string): Promise<ProcessingJob | null> {
   const rows = await getDb().select().from(campaignJob).where(eq(campaignJob.id, jobId)).limit(1);
   const row = rows[0];
@@ -153,25 +146,16 @@ export async function getJobForProcessing(jobId: string): Promise<ProcessingJob 
       itemId: i.itemId,
       action: i.action,
       status: i.status,
-      // Map the Drizzle column-mapped field (`raya_batch_id`, unchanged)
-      // onto the provider-generic client field.
+      // Column `raya_batch_id`.
       providerBatchRef: i.rayaBatchId,
     })),
   };
 }
 
 /**
- * Item-status tally for a job (derived, never a stored counter).
+ * Counts a job's items by status.
  *
- * Both callers that feed this into the `completed` audit row's counts
- * (#617) call `failPendingItems` first, so by the time this runs, no item is
- * left `pending` — every requested item is accounted for in a real bucket
- * rather than silently missing from every count: `campaign-process/index.ts`
- * does it on the final-attempt-failure path (`rollUpStatus` is not reached
- * there), and `jobs/cron-watchdog.ts`'s stalled-job sweep does it before
- * auditing a force-failed job, since `stalled` means the worker died
- * mid-run — leftover `pending` items are the NORMAL case there, not an edge
- * case.
+ * Failure paths call `failPendingItems` first so no item is left `pending`.
  */
 export async function countItems(jobId: string): Promise<JobStatusCounts> {
   const rows = await getDb()
@@ -198,7 +182,7 @@ export async function countItems(jobId: string): Promise<JobStatusCounts> {
   return counts;
 }
 
-/** Forward-only item status write — a terminal item is not overwritten. */
+/** Sets an item's status. A terminal item is not overwritten. */
 export async function markItem(
   jobId: string,
   itemId: string,
@@ -210,7 +194,7 @@ export async function markItem(
     .update(campaignJobItem)
     .set({
       status,
-      // A skip is not an error: its reason belongs in `skip_reason`.
+      // Skip reasons go in `skip_reason`, not `error_reason`.
       skipReason: SKIPPED_ITEM_STATUSES.includes(status) ? (reason ?? null) : null,
       errorReason: SKIPPED_ITEM_STATUSES.includes(status) ? null : (reason ?? null),
       ...(providerRef !== undefined ? { providerRef } : {}),
@@ -227,11 +211,9 @@ export async function markItem(
 }
 
 /**
- * Records that an item was submitted to the voice provider. Sets `status` to
- * `submitted`, stamps `providerBatchRef` (persisted in the `raya_batch_id`
- * column), and optionally `provider_ref`. Forward-only: a no-op when the
- * item is already in a terminal status (the same retry guard as
- * {@link markItem}).
+ * Marks an item `submitted` to the voice provider and stores its batch id.
+ *
+ * No-op when the item is already terminal, like {@link markItem}.
  *
  * @param jobId - The job the item belongs to.
  * @param itemId - The item that was submitted.
@@ -248,14 +230,10 @@ export async function markSubmitted(
     .update(campaignJobItem)
     .set({
       status: 'submitted',
-      // `rayaBatchId` here is the Drizzle column-mapped field name (see
-      // `db-schema/schema.ts` — the `raya_batch_id` column keeps its
-      // original name); `args.providerBatchRef` is the provider-generic
-      // client-contract field.
       rayaBatchId: args.providerBatchRef,
       ...(args.providerRef !== undefined ? { providerRef: args.providerRef } : {}),
       updatedAt: now,
-      completedAt: now, // 'submitted' is always a terminal status
+      completedAt: now, // 'submitted' is terminal
     })
     .where(
       and(
@@ -267,8 +245,7 @@ export async function markSubmitted(
 }
 
 /**
- * Writes the raw provider response captured for a job (voice: the Raya
- * create+start payload), so the campaign manager can render it verbatim.
+ * Stores the raw provider response for a job (voice: the Raya create + start payload).
  *
  * @param jobId - The job to stamp.
  * @param response - Arbitrary provider payload, stored as-is.
@@ -280,7 +257,7 @@ export async function setProviderResponse(jobId: string, response: unknown): Pro
     .where(eq(campaignJob.id, jobId));
 }
 
-/** Stamps `last_progress_at = now()` (watchdog heartbeat). */
+/** Sets `last_progress_at` to now for the watchdog. */
 export async function heartbeat(jobId: string): Promise<void> {
   await getDb()
     .update(campaignJob)
@@ -288,7 +265,7 @@ export async function heartbeat(jobId: string): Promise<void> {
     .where(eq(campaignJob.id, jobId));
 }
 
-/** Sets the job's roll-up status (+ optional error reason). */
+/** Sets the job status and an optional error reason. */
 export async function setJobStatus(
   jobId: string,
   status: CampaignJobStatus,
@@ -305,18 +282,16 @@ export async function setJobStatus(
     .where(eq(campaignJob.id, jobId));
 }
 
-/** `rollUpStatus`'s return shape: the derived status plus the tally it was derived from (#617). */
+/** The derived job status and the counts it came from. */
 export interface RollUpResult {
   status: CampaignJobStatus;
   counts: JobStatusCounts;
 }
 
 /**
- * Derives + persists the job's roll-up status from its item counts.
+ * Derives and saves the job status from its item counts.
  *
- * Returns the counts alongside the status (rather than the status alone) so
- * a caller that needs both — the `completed` audit write (#617) is the
- * motivating case — does not have to issue a second `countItems` query.
+ * Also returns the counts, which the audit write needs.
  */
 export async function rollUpStatus(jobId: string): Promise<RollUpResult> {
   const counts = await countItems(jobId);
@@ -325,7 +300,7 @@ export async function rollUpStatus(jobId: string): Promise<RollUpResult> {
   return { status, counts };
 }
 
-/** The `completed` audit row's outcome-count columns (#617 §3). */
+/** The `completed` audit row's count columns. */
 export interface AuditCounts {
   resolvedCount: number;
   skippedCount: number;
@@ -334,29 +309,14 @@ export interface AuditCounts {
 }
 
 /**
- * Maps a job's item-status tally onto the `completed` audit row's outcome
- * counts (#617).
+ * Maps item counts to the `completed` audit row's count columns.
  *
- * `resolvedCount` aggregates `resolved` (export: decrypted, ready to ship)
- * AND `submitted` (voice: handed to Raya). Voice items terminate at
- * `submitted`, never `resolved` or `sent` — handing a contact to the
- * provider IS the release, so it must be counted, or a fully successful
- * voice campaign would audit as `outcome: 'succeeded'` with every count at
- * zero, which reads as "measured and nothing happened" rather than "not
- * measured". `sentCount` stays strictly confirmed-delivered (the export and
- * email channels' own success write). This mirrors `deriveJobStatus`'s own
- * `succeeded = resolved + submitted + sent` grouping, so the counts and the
- * derived status agree about what counts as a release.
- *
- * `skippedCount` aggregates every status that is a deliberate no-op rather
- * than a release: `skipped_not_owned` (the org doesn't own the item),
- * `skipped_no_contact` (owned, but no usable contact field), and
- * `duplicate_active` (de-duplicated against an already-active send). None of
- * those three ever reached a participant, so they are counted together as
- * "skipped" rather than split across the fixed audit-row columns.
+ * `resolvedCount` = `resolved` + `submitted` (voice items end at `submitted`).
+ * `skippedCount` = `skipped_not_owned` + `skipped_no_contact` + `duplicate_active`.
+ * `sentCount` = `sent`.
  *
  * @param counts - The job's item-status tally (`countItems`/`rollUpStatus`).
- * @returns The four outcome-count fields the audit row's `CompletedAuditInput` accepts.
+ * @returns The four count fields for `CompletedAuditInput`.
  */
 export function toAuditCounts(counts: JobStatusCounts): AuditCounts {
   return {
@@ -368,8 +328,7 @@ export function toAuditCounts(counts: JobStatusCounts): AuditCounts {
 }
 
 /**
- * Stamps the job's notification as sent, so a retry cannot deliver a second
- * working pre-signed link to the same participant PII.
+ * Marks the job's notification as sent, so a retry does not send it again.
  *
  * @param jobId - The job whose notification was delivered.
  */
@@ -381,9 +340,9 @@ export async function setNotifiedAt(jobId: string): Promise<void> {
 }
 
 /**
- * Fails every item still `pending` on a job that has exhausted its retries, so
- * the derived counts account for all requested items instead of leaving rows
- * in a non-terminal status no later run will touch.
+ * Marks every item still `pending` on a job as `failed`.
+ *
+ * Used when a job has no retries left, so the counts cover all items.
  *
  * @param jobId - The job that ran out of attempts.
  * @param errorReason - Reason recorded on each item.

@@ -1,6 +1,7 @@
 /**
- * Runtime configuration for the worker process. Mirrors the shape of the
- * API config but only loads the variables the worker actually consumes.
+ * Runtime configuration for the worker app, parsed from env at startup.
+ *
+ * Holds only the variables the worker uses.
  */
 
 import { z } from 'zod';
@@ -16,20 +17,15 @@ const ConfigSchema = z.object({
   /** Deployment environment; falls back to NODE_ENV when unset. */
   INSTANCE_ENV: z.enum(['development', 'staging', 'production']).optional(),
   /**
-   * Observed ONLY so the startup guard can reject the insecure `0` value in
-   * production. Node reads this directly from process.env for its TLS
-   * behaviour — do not re-derive TLS posture from this field elsewhere. Kept
-   * a free string (not an enum) because Node treats only the exact value `'0'`
-   * as "disable"; any other value (empty, `'true'`, unset) leaves verification
-   * on, and an enum would crash-parse those benign values.
+   * Read only so the startup guard can reject `0` in production. Node reads it
+   * from process.env itself; do not derive TLS posture from this field elsewhere.
+   * A plain string, since Node disables TLS checks only for the exact value `'0'`.
    */
   NODE_TLS_REJECT_UNAUTHORIZED: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   /**
-   * Postgres connection string. Deliberately has **no default** — the URL
-   * carries credentials, so embedding one in source would ship a usable
-   * secret and mask a misconfigured deploy behind a silent fallback to
-   * localhost. Startup fails when it is unset.
+   * Postgres connection string. No default, since it holds credentials.
+   * Startup fails when unset.
    */
   DATABASE_URL: z.string().min(1, 'DATABASE_URL must be set'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
@@ -39,11 +35,8 @@ const ConfigSchema = z.object({
   // ─── Object storage ─────────────────────────────────────────────────────
   S3_ENDPOINT: z.string().optional(),
   /**
-   * Browser-reachable S3 host used ONLY to mint pre-signed URLs (the export
-   * download link is clicked in a browser/email client, which cannot resolve
-   * the internal `S3_ENDPOINT` inside docker). Pre-signed URLs encode the
-   * endpoint, so they must be signed against the public host. Falls back to
-   * `S3_ENDPOINT` when unset (single-host dev). Mirrors the API's field.
+   * Browser-reachable S3 host, used only to sign download URLs.
+   * Falls back to `S3_ENDPOINT` when unset.
    */
   S3_PUBLIC_ENDPOINT: z.string().optional(),
   S3_REGION: z.string().default('us-east-1'),
@@ -68,40 +61,28 @@ const ConfigSchema = z.object({
     .default(64 * 1024),
 
   /**
-   * TTL (seconds) applied to every per-upload Redis key (`bu:{id}:*`, which
-   * includes each participant row's cells in `:lines` and error rows in `:errors`).
-   * A safety net so participant PII cannot persist indefinitely when an upload
-   * fails or is abandoned before `bulk-finalise` deletes the keys. Must comfortably
-   * exceed the longest expected processing time (the stuck-job watchdog kills
-   * in-flight uploads after 30 min). Default 24h.
+   * TTL (seconds) for the per-upload Redis keys (`bu:{id}:*`), which hold PII.
+   * Covers uploads that fail before the finaliser deletes the keys. Must exceed
+   * the watchdog's 30 min stuck threshold. Default 24h.
    */
   BULK_UPLOAD_REDIS_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
 
   // ─── Worker role selection ──────────────────────────────────────────────
   /**
-   * Comma-separated subset of consumer roles this process runs:
-   * `file`, `row`, `finalise`, `cron`, `campaign`. Unset / empty / `all` runs
-   * everything
-   * (single-process default). Run `file` in its own deployment to isolate the
-   * CPU-sensitive parser from the other consumers.
+   * Comma-separated roles this process runs: `file`, `row`, `finalise`, `cron`,
+   * `campaign`. Unset, empty or `all` runs every role.
    */
   WORKER_ROLES: z.string().optional(),
 
   // ─── Worker concurrency ─────────────────────────────────────────────────
   BULK_FILE_PROCESS_CONCURRENCY: z.coerce.number().int().positive().default(2),
   BULK_ROW_PROCESS_CONCURRENCY: z.coerce.number().int().positive().default(10),
-  // Concurrency caps how many DIFFERENT uploads can finalise in parallel
-  // across the worker process. BullMQ jobId dedupe (`${uploadId}:finalise`)
-  // already guarantees one finaliser per upload.
+  // How many different uploads can finalise in parallel. jobId dedup allows
+  // one finaliser per upload.
   BULK_FINALISE_CONCURRENCY: z.coerce.number().int().positive().default(2),
 
   // ─── Link metrics aggregator ────────────────────────────────────────────
-  /**
-   * Cron interval (ms) for the link-metrics rollup tick. Default 1 min so
-   * public-form submissions surface on the aggregator dashboard quickly.
-   * Override via env for higher-throughput deployments where 1 min creates
-   * too much DB churn.
-   */
+  /** Cron interval (ms) for the link-metrics rollup tick. Default 1 min. */
   LINK_METRICS_ROLLUP_INTERVAL_MS: z.coerce
     .number()
     .int()
@@ -117,48 +98,30 @@ const ConfigSchema = z.object({
     .default(60 * 60 * 1000),
 
   // ─── SignalStack outward push ───────────────────────────────────────────
-  // Base + Keycloak-bearer credential fields are shared with the api via
-  // @aggregator-dpg/shared-primitives/config.
+  // Shared with the api via @aggregator-dpg/shared-primitives/config.
   ...signalStackConfigFields,
-  /**
-   * Keycloak base URL for the bearer token grant. The worker has no OIDC
-   * login of its own (no acting-org header, no user session) — these two
-   * vars exist solely to mint the service token.
-   */
+  /** Keycloak base URL, used only to get the Signals service token in bearer mode. */
   KEYCLOAK_URL: z.string().optional(),
   KEYCLOAK_REALM: z.string().optional(),
 
-  // ─── Campaign PII export (aggregator-dpg#579) ───────────────────────────
-  // Recipient is the requesting aggregator's email, resolved by the API and
-  // carried on the job — not a worker env.
+  // ─── Campaign PII export ────────────────────────────────────────────────
   /**
-   * Pre-signed GET TTL (seconds) for the export CSV link. Default 1 day (86400).
-   * Keep in step with the S3 lifecycle rule that deletes the file at expiry
-   * (bluedots-automation `global.campaignExportExpiryDays` = this ÷ 86400), so
-   * the link and the file expire together.
+   * TTL (seconds) of the export download link. Default 1 day.
+   * Keep in step with the S3 lifecycle rule that deletes the file
+   * (bluedots-automation `global.campaignExportExpiryDays`).
    */
   EXPORT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(86400),
-  /**
-   * How many campaign-process jobs this process runs in parallel, across every
-   * channel — one queue and one worker role serve export, email and voice.
-   * Default 2.
-   */
+  /** Campaign jobs run in parallel by this process, across all channels. Default 2. */
   CAMPAIGN_CONCURRENCY: z.coerce.number().int().positive().default(2),
   /** How many recipients a single email-channel campaign job sends in parallel. Default 5. */
   EMAIL_SEND_CONCURRENCY: z.coerce.number().int().positive().default(5),
-  /** Items per Signals decrypt chunk (bounds request size + gives heartbeat cadence). */
+  /** Items per Signals decrypt request. The heartbeat is bumped per chunk. */
   CAMPAIGN_DECRYPT_CHUNK: z.coerce.number().int().positive().default(500),
-  // Shared with the api (@aggregator-dpg/shared-primitives/config) so the two
-  // processes can never disagree on what an export releases — the worker
-  // reads this to actually perform the export; the api reads the same key to
-  // record `piiFields` on the campaign_pii_audit `requested` row (#617).
+  // Shared with the api, which records the same field set in the audit row.
   ...campaignExportConfigFields,
   /**
-   * Who receives the export link. `requester` (default) sends it to the user
-   * who made the request (the job's `requested_by`, resolved from the verified
-   * token by the API). `network_admin` sends it to
-   * `EXPORT_NETWORK_ADMIN_EMAIL` instead — a deployment-level override, never
-   * caller-controlled.
+   * Who receives the export link: `requester` (default, the job's `requested_by`)
+   * or `network_admin` (`EXPORT_NETWORK_ADMIN_EMAIL`).
    */
   CAMPAIGN_EXPORT_RECIPIENT: z.enum(['requester', 'network_admin']).default('requester'),
   /** Recipient used when CAMPAIGN_EXPORT_RECIPIENT=network_admin. */
@@ -169,12 +132,12 @@ const ConfigSchema = z.object({
    */
   CAMPAIGN_STALL_SECONDS: z.coerce.number().int().positive().default(900),
 
-  // ─── Campaign voice channel (#577) ──────────────────────────────────────
+  // ─── Campaign voice channel ────────────────────────────────────────────
   /** Voice campaign provider (currently only `raya` is supported). */
   CAMPAIGN_VOICE_PROVIDER: z.enum(['raya']).default('raya'),
   /** Raya API base URL. */
   RAYA_BASE_URL: z.string().url().default('https://v1.getraya.app/api'),
-  /** Raya API key (asserted lazily when the voice provider runs). */
+  /** Raya API key. Checked when the voice provider is first used. */
   RAYA_API_KEY: z.string().min(1).optional(),
   /** HTTP timeout for Raya API calls (milliseconds). */
   RAYA_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),

@@ -1,14 +1,11 @@
 /**
- * Worker entrypoint.
+ * Worker app entrypoint.
  *
- * Wires BullMQ workers for the onboarding pipeline. At slice 9 this
- * exposes only the File Processor (`bulk-file-process` queue). Subsequent
- * slices add the Row Processor, Finaliser, and Metrics Coordinator workers
- * alongside.
+ * Starts the health server and the BullMQ consumers for the roles in
+ * `WORKER_ROLES`, and registers the cron schedulers when `cron` runs here.
  */
 
-// Load apps/worker/.env into process.env before config.js parses it (dev only;
-// no-op when the file is absent, e.g. Docker/prod inject env directly).
+// Load apps/worker/.env before config.js parses env. No-op when the file is absent.
 import './env.js';
 
 import { Queue, Worker } from 'bullmq';
@@ -39,8 +36,7 @@ import { startHealthServer } from './health.js';
 async function main(): Promise<void> {
   const connection = getRedis();
   const healthServer = startHealthServer(config.HEALTH_PORT, connection);
-  // Which consumers this process runs. Default (unset) = all, preserving the
-  // single-process deployment; `WORKER_ROLES=file` isolates the parser.
+  // Consumers this process runs. Unset means all.
   const roles = parseWorkerRoles(config.WORKER_ROLES);
 
   const workers: Array<readonly [string, Worker]> = [];
@@ -110,8 +106,7 @@ async function main(): Promise<void> {
       }),
     ]);
 
-    // Repeatable cron ticks. Threshold-triggered fan-in for metrics rollup
-    // can be added later — cron-only is sufficient for MVP.
+    // Repeatable cron ticks.
     const linkMetricsQueue = new Queue<LinkMetricsRollupJob>(QueueName.LinkMetricsRollup, {
       connection,
       defaultJobOptions: DEFAULT_JOB_OPTS,
@@ -134,9 +129,7 @@ async function main(): Promise<void> {
     );
     queues.push(watchdogQueue);
 
-    // One-shot cleanup: removed cron-driven keycloak-sync. If a previous worker
-    // run registered the scheduler, drop it from Redis so it does not keep
-    // firing without a consumer.
+    // Remove any `keycloak-sync` scheduler left in Redis; it has no consumer.
     const legacyKeycloakSyncQueue = new Queue('keycloak-sync', { connection });
     try {
       const schedulers = await legacyKeycloakSyncQueue.getJobSchedulers();
@@ -157,10 +150,8 @@ async function main(): Promise<void> {
     });
   }
 
-  // Fleet-completeness sanity check: a process running a strict subset of roles
-  // is valid only if the complement runs in another deployment. Warn so a
-  // single-pod misconfiguration doesn't silently strand uploads (no consumer
-  // for finalise, or no cron watchdog to fail stuck uploads out).
+  // Warn when this process runs only some roles. The rest must run elsewhere,
+  // or uploads and campaigns stall.
   const uncovered = missingRoles(roles);
   if (uncovered.length > 0) {
     logger.warn({

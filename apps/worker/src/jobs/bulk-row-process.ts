@@ -1,23 +1,18 @@
 /**
- * Bulk Row Processor — per-row processing inside the bulk-upload pipeline.
+ * Bulk row processor: handles one row of a bulk upload in the worker app.
  *
- * Per onboarding-implementation.md §3.3:
- *   1. Pull job { uploadId, aggregatorId, rowIndex, rawRow, payload }.
- *   2. Validate against the schema pinned on bulk_uploads.
- *   3. Normalise phone (E.164) and email (lowercase).
- *   4. Push to signalstack (the store of record — there is no local row).
- *   5. Run Lua script (§7) for atomic SADD + counter INCR + error HSET.
- *   6. If processed_count == total && reader_done → enqueue Finaliser.
+ * Steps:
+ *   1. Validate the row against the schema pinned on the upload.
+ *   2. Normalise phone (E.164) and email (lowercase).
+ *   3. Push the row to Signals, which is the store of record.
+ *   4. Commit the outcome to Redis with the atomic Lua script.
+ *   5. Enqueue the finaliser when the last row is in and the reader is done.
  *
- * Outcome categories:
- *   passed   = signalstack accepted the push
- *   failed   = validation | normalisation | limit_reached | owned_elsewhere |
- *              system_error
- *   skipped  = no producer on this path since migration 0024 dropped the local
- *              `participants` table. It deduped its own row but pushed to
- *              signals regardless, so `skipped`/`duplicate` was reported while a
- *              second profile was created upstream. Signals does not dedup;
- *              de-duplication, if wanted, belongs there.
+ * Outcomes:
+ *   passed  = Signals accepted the push
+ *   failed  = validation | normalisation | duplicate | limit_reached |
+ *             owned_elsewhere | system_error
+ *   skipped = not produced on this path
  */
 
 import { randomUUID } from 'node:crypto';
@@ -45,10 +40,9 @@ import {
 import { buildSignalStackItemState } from '@aggregator-dpg/signalstack-writer/item-state';
 
 /**
- * Returns the set of participant types declared by the active network
- * (e.g. `seeker`/`provider` for blue/purple, `tourist`/`practitioner`
- * for orange_dot). Read once at network-config load — the network
- * loader caches the result for the lifetime of the worker.
+ * Returns the participant types declared by the active network.
+ *
+ * The network loader caches the config for the life of the worker.
  */
 async function loadValidParticipantTypes(): Promise<Set<string>> {
   const cfg = await getNetworkConfig();
@@ -58,16 +52,14 @@ async function loadValidParticipantTypes(): Promise<Set<string>> {
 type ErrorCategory =
   | 'validation'
   | 'normalisation'
-  // No producer since 0024 (see the module header). Retained because the redis
-  // / finalise / errors.csv plumbing still carries the field, and signals-side
-  // dedup would repopulate it.
+  // Set when Signals reports the person already exists.
   | 'duplicate'
   | 'limit_reached'
   | 'owned_elsewhere'
   | 'system_error';
 
 interface RowOutcome {
-  /** `skipped` has no producer on this path since 0024 — see the module header. */
+  /** `skipped` is not produced on this path. */
   outcome: 'passed' | 'skipped' | 'failed';
   category: ErrorCategory | null;
   reasons: string[];
@@ -82,10 +74,8 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     row_index: job.rowIndex,
   });
 
-  // Job payload carries the schema ref + participant type pinned by the File
-  // Processor — no per-row SELECT on bulk_uploads needed. Status guards live
-  // in the Finaliser and the File Processor entry guard; stale row jobs are a
-  // non-issue here because the Lua commit script + jobId dedup absorb replays.
+  // The job carries the schema ref and participant type set by the file
+  // processor. Replays are absorbed by the Lua commit script and jobId dedup.
   const validTypes = await loadValidParticipantTypes();
   if (!validTypes.has(job.participantType)) {
     return await commit(
@@ -99,10 +89,8 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     );
   }
 
-  // 1. Schema validation. Load schema + validator together (both cached
-  // by the loader) so we can pre-split comma-joined array cells before Ajv
-  // runs. Ajv's `coerceTypes: 'array'` wraps a single string into a
-  // one-element array but does NOT split on `,` — that's our job.
+  // 1. Schema validation. Load the schema too, so array cells can be split
+  // before Ajv runs; Ajv does not split delimited strings.
   const ref = { id: job.schemaId, version: job.schemaVersion };
   const loader = getSchemaLoader();
   const [validatorResult, schemaResult] = await Promise.all([
@@ -120,15 +108,9 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
       log,
     );
   }
-  // 1b. Well-known columns (#807). Pulled out of the payload BEFORE Ajv runs:
-  // they are not schema properties, so a schema with
-  // `additionalProperties: false` would reject every row carrying them, and
-  // any that survived would reach Signals as junk `item_state` fields.
-  // Removing them here also keeps them out of `item_state` without a second
-  // strip step, since the payload is passed through verbatim further down.
-  // The schema wins if it declares the name itself: extracting then would
-  // delete a real property before Ajv sees it, failing every row on a column
-  // the operator can see in their own file.
+  // 1b. Remove the well-known geo column before Ajv runs. It is not a schema
+  // property, so it would fail `additionalProperties: false` and would leak
+  // into `item_state`. If the schema declares the column itself, leave it.
   const schemaOwnsGeo = schemaOwnsColumn(
     schemaResult.success ? (schemaResult.value as Record<string, unknown>) : null,
     GEO_LOCATION_COLUMN,
@@ -137,11 +119,9 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   if (!schemaOwnsGeo) delete job.payload[GEO_LOCATION_COLUMN];
   const geo = parseGeoLocation(geoRaw);
   if (geo.status === 'invalid') {
-    // Not a row failure. Coordinates only let Signals skip geocoding, so a bad
-    // cell costs a geocoder call rather than correctness — and failing here
-    // would push the operator into a re-upload, which duplicates every
-    // already-successful row because `onboard` always inserts.
-    // Logged without the raw cell: coordinates are PII.
+    // Not a row failure: Signals geocodes the address instead. Failing would
+    // force a re-upload, which duplicates rows because `onboard` always inserts.
+    // The raw cell is not logged because coordinates are PII.
     log.warn({
       status: 'skipped',
       sub: 'geo_location.ignored',
@@ -156,22 +136,14 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
       schemaResult.value,
       cfg.aggregator.network.csv_array_delimiter,
     );
-    // Strip every empty cell, required or not. Empty cells reaching Ajv
-    // trip `type`/`enum`/`minItems`/`minLength` even when the field
-    // wasn't filled in by the operator. Signals accepts missing keys
-    // (item_state is treated as partial) and classifies the resulting
-    // item as `draft`. Required-field gaps surface as Ajv `required`
-    // errors below — those are dropped so the row passes through.
+    // Drop empty cells so Ajv does not fail type/enum/length checks on
+    // fields the operator left blank. Signals accepts partial item_state.
     stripAllEmptyCells(job.payload);
   }
 
-  // Schema validation is advisory at this layer. Required-field gaps
-  // are NOT a failure: signals' /admin/participant accepts partial
-  // item_state and classifies the resulting item as `draft`. We still
-  // surface TYPE / FORMAT / PATTERN / ENUM mismatches as row failures
-  // because signals would 400 on them anyway and the local check gives
-  // a faster error path. Missing-required-only failures pass through —
-  // signals handles them.
+  // Missing required fields do not fail the row; Signals stores it as a
+  // draft. Type, format, pattern and enum errors do fail the row, since
+  // Signals would reject them too.
   const validate = validatorResult.value;
   if (!validate(job.payload)) {
     const reasons = blockingValidationReasons(validate.errors ?? []);
@@ -188,16 +160,12 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     }
   }
 
-  // 2. Normalisation. Auto-allocate a UUID when the row carries no explicit
-  // `participant_id`. Since 0024 this no longer backs a local unique index; it
-  // is the external id forwarded to signals and the name fallback below.
+  // 2. Normalisation. Use a new UUID when the row has no `participant_id`.
+  // It is the name fallback sent to Signals.
   const rawParticipantId = String(job.payload['participant_id'] ?? '').trim();
   const participantId = rawParticipantId.length > 0 ? rawParticipantId : randomUUID();
 
-  // Identity selectors come from the resolved network config — sniffer
-  // picks them up from the schema, or aggregator.config.yaml overrides
-  // them. Different signalstack networks (blue / purple / yellow) use
-  // different field names; the worker stays generic.
+  // Identity field names come from the network config.
   const networkCfg = await getNetworkConfig();
   const domainCfg = networkCfg.domains[job.participantType];
   if (!domainCfg) {
@@ -231,23 +199,15 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
     }
     phoneNormalised = phone.value;
   }
-  // Email is optional in IdentitySelectors — domains like orange_dot's
-  // `tourist` have no email field. Skip the lookup when undefined;
-  // dedup degrades to phone-only.
+  // Some domains have no email field.
   const emailNormalised = normaliseEmail(
     emailSourceKey && typeof job.payload[emailSourceKey] === 'string'
       ? (job.payload[emailSourceKey] as string)
       : null,
   );
 
-  // 3. Push to signalstack. Signals is the identity store of record — there is
-  // no local participant row any more, so its verdict is the row's outcome.
-  //
-  // Note there is no duplicate detection here, and there was none before: the
-  // old local `participants` table deduped its own row but pushed to signals
-  // regardless, so a repeat CSV row reported `skipped`/`duplicate` while a
-  // second signals profile was created. Reporting `passed` is the honest
-  // answer. Real deduplication belongs upstream in signals.
+  // 3. Push to Signals. Its response decides the row outcome. There is no
+  // local duplicate check.
   let outcome: RowOutcome;
   const push = await pushToSignalStack(
     job,
@@ -260,9 +220,7 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   if (push.success) {
     outcome = { outcome: 'passed', category: null, reasons: [] };
   } else {
-    // Classified by Signals' own error code: a row Signals rejected for its
-    // data is the operator's to fix and reads like a local schema failure;
-    // only a genuine platform fault is `system_error`.
+    // Data rejections are row errors; platform faults are `system_error`.
     const category = categoriseSignalsRejection(push);
     outcome = { outcome: 'failed', category, reasons: signalsRejectionReasons(push, category) };
   }
@@ -271,19 +229,15 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
 }
 
 /**
- * Atomically commit the row outcome to Redis (Lua) + flush DB counters
- * periodically + check completion.
+ * Commits the row outcome to Redis, bumps the heartbeat, and enqueues the finaliser when done.
  */
 async function commit(
   job: BulkRowProcessJob,
   outcome: RowOutcome,
   log: typeof logger,
 ): Promise<RowOutcome> {
-  // Only `failed` outcomes get a payload — `skipped` is a deliberate no-op,
-  // not an error, and must not appear in errors.csv. (No bulk producer emits
-  // `skipped` since 0024; the branch is kept for the shared outcome shape.)
-  // raw_row is reconstructed by the Finaliser from `bu:{id}:lines` keyed on
-  // row_index, so it does NOT travel in the per-row job payload anymore.
+  // Only `failed` outcomes get an error payload. The finaliser rebuilds the raw
+  // row from `bu:{id}:lines` by row_index.
   const errorPayload =
     outcome.outcome === 'failed'
       ? JSON.stringify({
@@ -303,21 +257,19 @@ async function commit(
   );
 
   if (result.wasNew === 0) {
-    // Replay: row already committed earlier. Skip side-effect bookkeeping.
+    // Replay: the row was already committed.
     log.info({ status: 'replay', outcome: outcome.outcome });
     return outcome;
   }
 
-  // Heartbeat: bump last_progress_at every PROGRESS_FLUSH_EVERY rows so the
-  // watchdog can detect stalled jobs. Counters live in Redis only — the
-  // bulk_uploads counter columns were dropped in migration 0009.
+  // Bump last_progress_at every PROGRESS_FLUSH_EVERY rows so the watchdog can
+  // detect stalled jobs. Counters live in Redis only.
   if (result.processed % PROGRESS_FLUSH_EVERY === 0 || result.processed === result.total) {
     await bumpHeartbeat(job.uploadId).catch((err) => {
       log.warn({ status: 'warn', sub: 'heartbeat', error: (err as Error).message });
     });
   }
 
-  // Trigger Finaliser when last row is in.
   if (result.total > 0 && result.processed === result.total && result.readerDone === 1) {
     await enqueueFinalise({ uploadId: job.uploadId } satisfies BulkFinaliseJob);
   }
@@ -334,12 +286,7 @@ async function commit(
 }
 
 /**
- * Best-effort outward push of the freshly-inserted participant to signalstack.
- *
- * Sync-awaited (one HTTP call per row) so we can log a deterministic outcome
- * per row, but failures NEVER alter the local participant write result —
- * signalstack is treated as a downstream sink, not a transactional partner.
- * Returns void; status is observable via structured logs.
+ * Result of pushing one row to Signals.
  */
 type SignalStackPushResult =
   | { success: true }
@@ -348,9 +295,8 @@ type SignalStackPushResult =
       code: string;
       message: string;
       /**
-       * Signals' own bare sentence (e.g. `Location 23.81, 90.41 is outside the
-       * allowed region (IN).`), without the transport/status prefixes `message`
-       * carries. Present only when Signals returned a JSON error body.
+       * Signals' own error sentence, without the prefixes in `message`.
+       * Present only when Signals returned a JSON error body.
        */
       signalsMessage?: string;
       /** Signals' own error code (e.g. `INVALID_ITEM_STATE`), when it sent one. */
@@ -361,10 +307,9 @@ type SignalStackPushResult =
     };
 
 /**
- * Signals rejections caused by the ROW — the operator fixes the CSV and
- * re-uploads. Anything not listed here (auth, an unserved domain, a 5xx, a
- * timeout) is the platform's problem and stays `system_error`. Keyed on Signals'
- * own error code, so a new data error Signals adds is one line here.
+ * Maps Signals error codes caused by row data to a row error category.
+ *
+ * Codes not listed here are treated as `system_error`.
  */
 const SIGNALS_REJECTION_CATEGORY: Readonly<Record<string, ErrorCategory>> = {
   INVALID_ITEM_STATE: 'validation',
@@ -373,14 +318,11 @@ const SIGNALS_REJECTION_CATEGORY: Readonly<Record<string, ErrorCategory>> = {
   AGE_REQUIRED: 'validation',
   USER_LEVEL_INCOMPLETE: 'validation',
   CONSENT_DECLINED: 'validation',
-  // A returning participant Signals already holds a sub-18 age for: Signals
-  // falls back to the stored age, so omitting it from the row does not help.
-  // The operator removes the row (minors onboard through the portal) — a row
-  // problem, not a platform fault. Same checkAgeGates as the two above.
+  // Signals already holds an under-18 age for this person. Minors onboard
+  // through the portal, so the operator removes the row.
   U18_NOT_ALLOWED: 'validation',
   LOCATION_OUTSIDE_COUNTRY: 'validation',
-  // The person already exists in a way this row cannot override: registered in
-  // the other domain (single-domain lock) or an identity clash.
+  // The person already exists in another domain or with a clashing identity.
   DOMAIN_LOCKED: 'duplicate',
   USER_ALREADY_EXISTS: 'duplicate',
   IDENTITY_CONFLICT: 'duplicate',
@@ -388,9 +330,9 @@ const SIGNALS_REJECTION_CATEGORY: Readonly<Record<string, ErrorCategory>> = {
 };
 
 /**
- * Category for a failed push. `owned_elsewhere` comes from a 2xx and is flagged
- * on the result; everything else is looked up by Signals' code, falling back to
- * the writer's own codes for callers (and older Signals) that send none.
+ * Returns the error category for a failed push.
+ *
+ * Uses Signals' error code when present, else the writer's own code.
  */
 function categoriseSignalsRejection(
   push: Extract<SignalStackPushResult, { success: false }>,
@@ -404,11 +346,10 @@ function categoriseSignalsRejection(
 }
 
 /**
- * errors.csv reasons for a failed push. A row-caused rejection reads like a
- * local schema failure — one `field: message` line per field when Signals sent
- * them, else Signals' bare sentence — because that is what the operator fixes
- * the CSV from. A system error keeps the code + full upstream text, which is
- * what someone debugging the platform needs.
+ * Builds the errors.csv reasons for a failed push.
+ *
+ * Row errors give one `field: message` line per field, or Signals' message.
+ * System errors keep the code and the full upstream text.
  */
 function signalsRejectionReasons(
   push: Extract<SignalStackPushResult, { success: false }>,
@@ -425,12 +366,9 @@ function signalsRejectionReasons(
 /**
  * Derives the participant's age and consent record from a bulk row.
  *
- * `year_of_birth` / `age` are the well-known participant keys the interactive
- * link flow reads. A minor (age ≤ 18) sends neither age nor consent — as with
- * the link flow's minor path, so the row lands and the minor accepts terms in
- * the Signals app. When the network presumes consent for adults, forward the
- * same accept record the link flow sends; otherwise omit `compliance` entirely
- * (an explicit decline would reject every row).
+ * Reads `year_of_birth` or `age`. A minor (age 18 or under) gets neither age
+ * nor consent, and accepts terms in the Signals app. An adult gets the accept
+ * record only when the network presumes consent; otherwise `compliance` is omitted.
  */
 function deriveAgeAndConsent(
   payload: Record<string, unknown>,
@@ -467,9 +405,7 @@ function deriveAgeAndConsent(
 /**
  * Maps a failed signalstack onboard into the row's push result.
  *
- * Carries Signals' own user-safe message, rejection code and per-field map
- * through when the writer captured them, so errors.csv can classify the row
- * and point at the offending column.
+ * Keeps Signals' message, error code and per-field messages when present.
  *
  * @param error - The writer's failure, with optional Signals details.
  * @returns A failed {@link SignalStackPushResult}.
@@ -503,21 +439,16 @@ export async function pushToSignalStack(
   email: string | null,
   log: typeof logger,
   /**
-   * Point parsed from the row's `geo_location` cell, or null when the column
-   * was absent, blank or unusable. Non-null makes Signals store it verbatim
-   * and skip geocoding the address text; null leaves today's behaviour intact.
+   * Point from the row's `geo_location` cell, or null when absent or invalid.
+   * When set, Signals stores it and skips geocoding.
    */
   geoLocation: ParsedGeoLocation | null = null,
 ): Promise<SignalStackPushResult> {
   const ss = getSignalStackWriter();
-  // Signalstack disabled in this env — treat as success so the row is not
-  // marked failed when the operator deliberately turned the push off.
+  // Signals push is disabled in this env; count the row as passed.
   if (!ss) return { success: true };
 
-  // Resolve the aggregator's signalstack org id from the DB mirror written
-  // by the approval flow + login-time backfill. The worker carries no JWT,
-  // so the `signalstack_org_id` claim is unreachable here — `aggregators`
-  // is the only authoritative source available offline.
+  // The worker has no JWT, so read the aggregator's Signals org id from the DB.
   const orgIdRow = await getDb()
     .select({ signalstackOrgId: schema.users.signalstackOrgId })
     .from(schema.users)
@@ -539,8 +470,7 @@ export async function pushToSignalStack(
     };
   }
 
-  // Identity selectors + item_type come from the resolved network
-  // config so the worker stays generic across signalstack networks.
+  // Identity fields and item_type come from the network config.
   const networkCfg = await getNetworkConfig();
   const domainCfg = networkCfg.domains[job.participantType];
   if (!domainCfg) {
@@ -568,33 +498,14 @@ export async function pushToSignalStack(
       ? (job.payload[phoneSourceKey] as string)
       : phone;
   const pushPhone = phone ?? phoneFromBody;
-  // Coordinator-level consent captured at registration is the legal basis for
-  // the bulk-row push — there is no per-row consent column in the bulk CSV
-  // contract. `terms_accepted`/`privacy_accepted` booleans are the OLD
-  // signals contract; signals now records consent only via `compliance`
-  // (accept-only: any `value: false` hard-rejects with CONSENT_DECLINED).
-  // So when the network presumes consent, forward the same accept record the
-  // interactive link flow sends for an adult; when it doesn't, omit
-  // `compliance` entirely (same as the link flow's minor path) rather than
-  // sending an explicit decline that would reject every row. Surface as CSV
-  // columns if signalstack ever demands real per-row participant consent.
+  // The bulk CSV has no per-row consent column. Consent is sent only via
+  // `compliance`, which Signals treats as accept-only: a `false` value is
+  // rejected with CONSENT_DECLINED.
   const presumeConsent = networkCfg.aggregator.onboarding.presume_consent;
 
-  // Age (#331) — mirrors the interactive link flow
-  // (`apps/api/src/routes/public-registration-links.ts`) so bulk and link
-  // onboarding behave identically. Two upstream gates depend on it:
-  //
-  //   - `AGE_REQUIRED` (400): signals refuses to record `user_terms` +
-  //     `user_privacy` on a guardian-gated domain (blue_dot `seeker`) without a
-  //     known age. Sending consent but never an age — as this job used to —
-  //     therefore failed EVERY row on such a domain.
-  //   - `U18_NOT_ALLOWED` (400): a minor is never onboarded server-to-server.
-  //     As with the link flow's minor path we send neither age nor consent, so
-  //     the row still lands and the minor accepts terms in the Signals app.
-  //
-  // `year_of_birth` / `age` are the same well-known participant keys the link
-  // flow reads; the participant schema declares `age` as a column, so the
-  // generated CSV/XLSX templates carry it.
+  // Age and consent match the public link flow. Signals rejects consent
+  // without an age on guardian-gated domains (AGE_REQUIRED) and rejects
+  // minors server-to-server (U18_NOT_ALLOWED).
   const { ageNum, compliance } = deriveAgeAndConsent(job.payload, presumeConsent);
   const result = await ss.onboard({
     actingOrgId: signalstackOrgId,
@@ -608,14 +519,9 @@ export async function pushToSignalStack(
     network: config.SIGNALSTACK_ITEM_NETWORK,
     domain: job.participantType,
     item_type: domainCfg.itemType,
-    // Omitted entirely rather than sent as `[]` — Signals treats a present,
-    // non-empty array as "use these coordinates, do not geocode", and an empty
-    // one would be an ambiguous way to say "I have none".
+    // Omitted rather than sent as `[]` when there is no point.
     ...(geoLocation ? { item_locations: [geoLocation] } : {}),
-    // Always pass the row's profile cells through verbatim. Signals
-    // accepts partial item_state and classifies the resulting item as
-    // `draft` when required fields are missing — that's signals' job,
-    // not ours. Coordinator stays a thin pass-through.
+    // Profile cells pass through as-is. Signals stores partial items as drafts.
     profile: buildSignalStackItemState(job.payload, pushPhone, domainCfg.identity.phone),
   });
   if (!result.success) {
@@ -627,10 +533,8 @@ export async function pushToSignalStack(
     });
     return onboardFailure(result.error);
   }
-  // A 2xx with `owned_elsewhere` means signals recognised the person under a
-  // DIFFERENT aggregator and created no item here — it is NOT a successful
-  // onboard. The link path already surfaces this; the bulk path must too, or
-  // the row would be miscounted as `passed`. Fail the row with a clear reason.
+  // A 2xx with `owned_elsewhere` means the person belongs to another
+  // aggregator and no item was created. Fail the row.
   if (result.value.owned_elsewhere) {
     log.warn({
       status: 'failure',
@@ -656,11 +560,9 @@ export async function pushToSignalStack(
 }
 
 /**
- * Mutates `payload` in place: for every schema property declared with
- * `type: 'array'`, if the cell arrived as a string (CSV form), split it on
- * commas into a trimmed array. Empty cells become empty arrays. Non-string
- * values are left untouched. Worker complement to Ajv `coerceTypes: 'array'`
- * which wraps a string into a one-element array but never splits on commas.
+ * Splits string cells of array-typed schema properties into trimmed arrays.
+ *
+ * Mutates `payload` in place. Empty parts are dropped; non-string values are left as-is.
  */
 function preprocessArrayCells(
   payload: Record<string, unknown>,
@@ -695,19 +597,12 @@ function isConditionalRequired(e: SchemaValidationError): boolean {
 }
 
 /**
- * Reduce Ajv errors to the human-readable reasons that should FAIL a bulk row.
+ * Returns the Ajv errors that should fail a bulk row, as readable reasons.
  *
- * Required-field gaps are NOT failures at this layer — signals accepts partial
- * `item_state` and classifies the item as `draft`. A conditional requirement is
- * the exception: `if` category is `licensed` `then` two more fields are required, and
- * Signals rejects that row outright rather than drafting it, so letting it
- * through would only come back as an opaque upstream 400 categorised as a
- * system error. Ajv reports it as one `required` error per missing field (its
- * `schemaPath` runs through `/then/`) plus one `if` error ("must match \"then\"
- * schema") that only summarises them: the former fail the row by field name,
- * the latter is dropped. Every other error
- * (type/format/pattern/enum/additionalProperties/minLength/minItems/…) is
- * surfaced so the row fails fast before reaching signals.
+ * Top-level `required` errors are dropped, since Signals stores partial items
+ * as drafts. `required` errors inside an `if`/`then` branch are kept, because
+ * Signals rejects those rows. The summary `if` error is dropped. All other
+ * errors are kept.
  *
  * @param errors - Ajv `validate.errors` (or `[]`).
  * @returns One reason string per blocking error; empty when the only failures
@@ -724,16 +619,9 @@ export function blockingValidationReasons(errors: readonly SchemaValidationError
 }
 
 /**
- * Strips ALL empty cells from the payload — empty strings, empty
- * arrays, null, undefined. Used by the bulk row processor so partial
- * profiles can pass through to signals without tripping Ajv's
- * content-shape checks (type/enum/minItems/minLength) on cells the
- * operator never filled in. Signals' classifier handles partial
- * item_state directly and classifies the resulting item as `draft`.
+ * Removes empty cells (blank strings, empty arrays, null, undefined) from a row.
  *
- * Note: the public link path (apps/api/.../public-registration-links.ts)
- * keeps its own required-only strip helper — that path validates with a
- * different (interactive) contract, so the divergence is intentional.
+ * Lets partial rows pass Ajv without failing checks on blank cells.
  *
  * @param payload - The row payload; mutated in place.
  */
@@ -755,9 +643,7 @@ export function stripAllEmptyCells(payload: Record<string, unknown>): void {
 }
 
 /**
- * Heartbeat-only DB write — bumps `last_progress_at` so the watchdog can
- * detect stalled jobs. Counters live exclusively in Redis (live) and the
- * `onboarding` row (after `bulk-finalise`).
+ * Updates `last_progress_at` so the watchdog can detect stalled uploads.
  */
 async function bumpHeartbeat(uploadId: string): Promise<void> {
   await getDb()
