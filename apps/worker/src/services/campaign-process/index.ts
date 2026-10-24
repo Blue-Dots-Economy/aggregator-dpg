@@ -463,7 +463,8 @@ async function runExportForJob(job: ProcessingJob, deps: CampaignJobDeps): Promi
     text: email.text,
   });
   if (!sent.ok) {
-    // Throw so BullMQ retries the send.
+    // Throw so BullMQ retries the job; decrypt and upload run again against the
+    // same S3 key.
     throw new Error(`campaign export email failed: ${sent.error.code}: ${sent.error.message}`);
   }
 

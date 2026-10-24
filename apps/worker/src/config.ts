@@ -17,7 +17,8 @@ const ConfigSchema = z.object({
   /** Deployment environment; falls back to NODE_ENV when unset. */
   INSTANCE_ENV: z.enum(['development', 'staging', 'production']).optional(),
   /**
-   * Read only so the startup guard can reject `0` in production.
+   * Read only so the startup guard can reject `0` in production. Node reads it
+   * from process.env itself; do not derive TLS posture from this field elsewhere.
    * A plain string, since Node disables TLS checks only for the exact value `'0'`.
    */
   NODE_TLS_REJECT_UNAUTHORIZED: z.string().optional(),
@@ -62,7 +63,7 @@ const ConfigSchema = z.object({
   /**
    * TTL (seconds) for the per-upload Redis keys (`bu:{id}:*`), which hold PII.
    * Covers uploads that fail before the finaliser deletes the keys. Must exceed
-   * the longest processing time. Default 24h.
+   * the watchdog's 30 min stuck threshold. Default 24h.
    */
   BULK_UPLOAD_REDIS_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
 

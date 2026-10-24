@@ -8,6 +8,8 @@
  * Delivery is at-least-once per recipient. A retry skips items already `sent`,
  * but a crash between the send and the `sent` write means that recipient is
  * emailed again. SMTP and SES have no idempotency key to prevent this.
+ * Unlike export, there is no job-level `notified_at` guard: a partly sent job
+ * resumes per recipient.
  *
  * Decrypted items are not marked `resolved`; `sent` is the only success status.
  * Never logs PII.
