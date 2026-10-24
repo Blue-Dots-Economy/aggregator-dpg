@@ -1,17 +1,14 @@
 /**
- * Org-owner grant-token mint and verify (#701).
+ * Org-owner grant-token mint and verify (`@aggregator-dpg/api`).
  *
- * The grant is the org owner's key to the invite-mint page — the only surface
- * available to them, since their Keycloak user is deliberately disabled (#699).
- * Mirrors `approval-token.ts` / `invite-token.ts`: HS256 via `jose`, issuer
- * `aggregator-api`, secret reused from `APPROVAL_TOKEN_SECRET`, distinguishing
- * **audience `aggregator-grant`**.
+ * The grant gives the org owner access to the invite-mint page. Same scheme as
+ * `approval-token.ts` / `invite-token.ts`: HS256 via `jose`, issuer
+ * `aggregator-api`, secret `APPROVAL_TOKEN_SECRET`, audience `aggregator-grant`.
  *
- * Grant and invite lifetimes differ deliberately: invites are 14 days, the
- * grant is 90 days (`GRANT_TOKEN_TTL_SECONDS`). A 14-day grant would strand an
- * owner who cannot log in. An expired-but-signature-valid grant is recoverable
- * (`allowExpired`) — the owner requests a fresh link, emailed to the org's
- * registered owner address (never a request-supplied one).
+ * The grant lasts 90 days (`GRANT_TOKEN_TTL_SECONDS`); invites last 14. An
+ * expired grant with a valid signature can be recovered (`allowExpired`): a
+ * fresh link is emailed to the org's registered owner address, never a
+ * request-supplied one.
  */
 
 import { SignJWT, decodeJwt, errors as joseErrors } from 'jose';
@@ -80,10 +77,9 @@ export type VerifyGrantResult = VerifyGrantOk | VerifyGrantErr;
 /**
  * Verifies a grant token's signature, audience, issuer, expiry, and `sub`.
  *
- * With `opts.allowExpired`, an expired-but-signature-valid grant is accepted
- * and flagged `expired: true` — used only by the recovery path to recover the
- * org id from a stale link before emailing a fresh grant to the registered
- * owner. Signature/issuer/audience failures still error regardless.
+ * With `opts.allowExpired`, an expired grant with a valid signature is
+ * accepted and flagged `expired: true`. Only the recovery path uses this.
+ * Signature, issuer and audience failures always error.
  *
  * @param token - Raw grant JWT from the owner link.
  * @param opts - Set `allowExpired: true` for the recovery path.
@@ -109,8 +105,7 @@ export async function verifyGrantToken(
 
 /**
  * Maps a jose verify error to a {@link VerifyGrantResult}, applying the
- * expired-grant recovery path when allowed. Split out of {@link verifyGrantToken}
- * to keep that function's control flow flat.
+ * expired-grant recovery path when allowed.
  *
  * @param err - The thrown jose error.
  * @param token - The original token (for the safe expired-payload decode).
@@ -119,8 +114,7 @@ export async function verifyGrantToken(
  */
 function mapVerifyError(err: unknown, token: string, allowExpired: boolean): VerifyGrantResult {
   if (err instanceof joseErrors.JWTExpired && allowExpired) {
-    // jose verifies the signature before `exp`, so a JWTExpired throw proves the
-    // signature was genuine — decoding the payload here is safe.
+    // jose checks the signature before `exp`, so decoding an expired token here is safe.
     const payload = decodeJwt(token);
     if (!payload.sub) {
       return { ok: false, error: { code: 'INVALID', message: 'missing sub in expired grant' } };

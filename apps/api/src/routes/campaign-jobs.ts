@@ -1,18 +1,12 @@
 /**
- * Campaign job status endpoints (aggregator-dpg#579).
+ * Campaign job status endpoints.
  *
  *   GET /v1/campaign/{channel}/{job_id} → one job's detail + per-item status
  *   GET /v1/campaign/{channel}          → the org's jobs, newest first
  *
- * Per the contract spec §5 the poll pair is **per channel**, so this module
- * exports a factory: `registerCampaignJobRoutes(app, 'export')` mounts
- * `/v1/campaign/export*`, and #578/#577 mount `/email*` and `/voice*` the same
- * way. The routes are scoped BOTH ways — a job belonging to another org *or*
- * to another channel is a 403, never returned and never confirmed to exist.
- *
- * Counts are derived from the item rows (never a stored counter). Auth is the
- * shared campaign-manager Bearer gate. These back the caller's poll-for-status
- * flow after a `202` from the submit route. Belongs to `@aggregator-dpg/api`.
+ * Registered once per channel. A job of another org or another channel
+ * answers 403. Counts are derived from the item rows. Auth is the
+ * campaign-manager Bearer token. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -83,18 +77,14 @@ export async function registerCampaignJobRoutes(
         response: {
           200: jobSummarySchema.extend({
             metadata: metadataSchema,
-            // Raw provider payload captured for the campaign manager (voice:
-            // the Raya create+start response). Curated to a PII-safe field
-            // whitelist by the writer — safe to return as-is.
+            // Provider response, already reduced to PII-safe fields by the writer.
             provider_response: z.unknown().nullable(),
             items: z.array(
               z.object({
                 item_id: z.string(),
                 status: itemStatusSchema,
                 provider_ref: z.string().nullable(),
-                // Provider-generic field (voice: the Raya batch id this item
-                // was submitted under). Persisted in the `raya_batch_id`
-                // column — a storage detail, not part of this public contract.
+                // Provider batch id (voice: the Raya batch id).
                 provider_batch_ref: z.string().nullable(),
                 skip_reason: z.string().nullable(),
                 error_reason: z.string().nullable(),
@@ -113,9 +103,7 @@ export async function registerCampaignJobRoutes(
       const store = getCampaignJobStore();
       const job = await store.getJob(jobId, orgId);
       if (!job.ok) throw httpError('INTERNAL', { detail: 'could not read campaign job' });
-      // Spec §5: another org's job is a 403, not a 404. A job on a different
-      // channel is the same answer — this path only serves `channel`, and
-      // saying "wrong channel" would confirm the id exists.
+      // Another org's or another channel's job answers 403, not 404.
       if (job.value?.channel !== channel) throw httpError('CAMPAIGN_JOB_FORBIDDEN');
 
       const items = await store.getJobItems(jobId, orgId);

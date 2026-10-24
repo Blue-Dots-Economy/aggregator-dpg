@@ -1,14 +1,10 @@
 /**
  * The one renderer for externalised email cases.
  *
- * Belongs to `@aggregator-dpg/api`. Every case's HTML body, plain-text body
- * and subject come out of this function, driven by the declarative layout on
- * its registry entry. Before this existed each template module repeated the
- * same four steps — look up copy, substitute tokens, assemble blocks, derive
- * the text part — which is four chances per template for the two parts to
- * drift, and six copies to edit when the shell changes.
+ * Belongs to `@aggregator-dpg/api`. Builds every case's subject, HTML body and
+ * plain-text body from the layout on its registry entry.
  *
- * A template module now supplies only its typed inputs; the layout lives in
+ * A template module supplies only its typed inputs; the layout lives in
  * `email-cases.ts` and the copy lives in the properties layers.
  *
  * @module @aggregator-dpg/api
@@ -44,10 +40,7 @@ export interface RenderedEmail {
  * Decides whether a conditional block belongs in this render.
  *
  * `requires` keeps a block out unless every named token has a value;
- * `absent` keeps it out unless every named token has none. Together they
- * express the three conditionals the migrated templates actually have — an
- * optional rejection reason, a named-vs-anonymous greeting, and the
- * invite-link-vs-coming-soon tail — without any of them being code.
+ * `absent` keeps it out unless every named token has none.
  */
 function blockApplies(spec: BlockSpec, values: CaseValues): boolean {
   for (const token of spec.requires ?? []) {

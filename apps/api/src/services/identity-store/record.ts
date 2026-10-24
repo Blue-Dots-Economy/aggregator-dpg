@@ -1,11 +1,9 @@
 /**
- * Best-effort recording of a coordinator's IdP login (`@aggregator-dpg/api`,
- * migration 0027).
+ * Best-effort recording of a coordinator's IdP login (`@aggregator-dpg/api`).
  *
- * The database learns a coordinator's IdP subject lazily: when an approver
- * opens the review link (the subject is resolved there anyway) and on the
- * coordinator's first approved request per process. A failure is logged and
- * never blocks the caller; a conflicting link is never overwritten.
+ * The IdP subject is recorded when an approver opens the review link and on
+ * the coordinator's first approved request per process. A failure is logged
+ * and never blocks the caller; a conflicting link is never overwritten.
  */
 
 import { logger } from '../../logger.js';
@@ -14,8 +12,7 @@ import { getIdentityStore } from './index.js';
 import type { IdentityStoreBase } from './interface.js';
 
 /**
- * Users already recorded by this process, per store instance — avoids a write
- * per request (and starts empty whenever a different store is in use).
+ * Users already recorded by this process, per store instance, to avoid a write per request.
  */
 let recorded = new WeakMap<IdentityStoreBase, Set<string>>();
 
@@ -38,8 +35,7 @@ export async function recordLoginIdentity(
     recorded.set(store, seen);
   }
   if (seen.has(userId)) return;
-  // Only a coordinator account may be linked through this path (the subject
-  // comes from a coordinator's token or review link).
+  // Only coordinator accounts are linked through this path.
   const r = await store.link(userId, IDP_PROVIDER, subject, 'coordinator');
   if (r.ok) {
     seen.add(userId);
@@ -48,7 +44,7 @@ export async function recordLoginIdentity(
     }
     return;
   }
-  if (r.error.code !== 'DB_UNAVAILABLE') seen.add(userId); // a conflict will not heal by retrying
+  if (r.error.code !== 'DB_UNAVAILABLE') seen.add(userId); // retrying will not fix a conflict
   logger.warn({ operation, status: 'failure', error: r.error.code, aggregator_id: userId });
 }
 

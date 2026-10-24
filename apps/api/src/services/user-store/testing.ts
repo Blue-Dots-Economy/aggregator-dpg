@@ -1,8 +1,7 @@
 /**
- * Public testing surface for the aggregator store.
+ * Public testing surface for the api coordinator store.
  *
- * Cross-package consumers must import the fake from this subpath rather than
- * reaching into the in-memory implementation directly.
+ * Other modules import the fake from here, not from the in-memory implementation.
  */
 
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
@@ -16,17 +15,15 @@ import type { BecknContact, ConsentRecord } from '@aggregator-dpg/shared-primiti
 
 export class UserStoreFake extends InMemoryUserStore {
   /**
-   * Pre-seed the store with rows. Bypasses the invariant + uniqueness checks
-   * applied by `create()` — callers are responsible for keeping seeded data
-   * internally consistent.
+   * Pre-seeds the store with rows.
+   * Skips the checks `create()` applies; callers keep seeded data consistent.
    */
   seed(rows: Coordinator[]): void {
     for (const r of rows) this.indexInsert(r);
   }
 
   /**
-   * Seeds an org's detail columns, rendered for its coordinators created
-   * afterwards (as the Postgres join does).
+   * Seeds an org's detail columns, rendered for its coordinators.
    *
    * @param orgId - The org id.
    * @param details - The org's `url` / `locations` / `legalName` / `gstNumber`.
@@ -42,9 +39,7 @@ export class UserStoreFake extends InMemoryUserStore {
   }
 
   /**
-   * Seeds an invite's address, read back as `inviteEmail` by coordinators
-   * created with that `inviteId` (the Postgres store joins
-   * `registration_invites`).
+   * Seeds an invite's address, read back as `inviteEmail` for that `inviteId`.
    *
    * @param jti - The invite id.
    * @param email - The invited address.
@@ -87,10 +82,7 @@ export class UserStoreFake extends InMemoryUserStore {
   }
 
   /**
-   * Test-only helper: overwrite the `updatedAt` timestamp on an existing row.
-   *
-   * Use this to back-date a row for stale-pending cleanup tests without going
-   * through the public `update()` API (which stamps `updatedAt` to `now`).
+   * Overwrites `updatedAt` on an existing row, to back-date it in tests.
    *
    * @param id - Coordinator UUID to back-date.
    * @param date - The timestamp to set on `updatedAt`.

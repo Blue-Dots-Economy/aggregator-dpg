@@ -1,19 +1,16 @@
 /**
- * Public registration link endpoints.
+ * Public registration link endpoints of the aggregator API (`@aggregator-dpg/api`).
  *
  *   GET  /public/v1/aggregators/:orgSlug/links/:slug
- *     Anonymous resolve. Returns the public-safe shape of a live link so a
- *     BFF can render the registration form. 404 for missing or draft slugs;
- *     410 for retired or expired ones.
+ *     Anonymous resolve of a live link, for rendering the registration form.
+ *     404 for missing or draft slugs; 410 for retired or expired ones.
  *
  *   POST /public/v1/aggregators/:orgSlug/registrations/:slug
- *     Anonymous synchronous submit. Validates the body against the active
- *     participant schema for the link's domain, normalises phone+email,
- *     creates the user + profile in signalstack, records a link_submission
- *     row, and returns the submission id.
+ *     Anonymous submit. Validates the body against the domain's participant
+ *     schema, normalises phone and email, creates the user and profile in
+ *     signalstack, records a link_submission row, and returns its id.
  *
- * Security model: (org_slug, slug) pair is the access token. No JWT
- * required. Coordinator scoping is implicit via the link row.
+ * The (org_slug, slug) pair is the access credential; no JWT is needed.
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -76,12 +73,9 @@ const ResolveLinkResponseSchema = z
   .passthrough();
 
 /**
- * Submission body. The profile portion is dynamic — it is validated at
- * runtime (Ajv) against the active participant JSON Schema for the link's
- * domain, so no static shape can be pinned here. Identity field names
- * (name / phone / email) also vary per network and come from the network
- * config; `consent_terms` / `consent_privacy` booleans are accepted on
- * account_only links.
+ * Submission body. The profile part is validated at runtime (Ajv) against the
+ * domain's participant schema. Identity field names come from the network config.
+ * `consent_terms` / `consent_privacy` are accepted on account_only links.
  */
 const PublicRegistrationSubmitBodySchema = z
   .object({})
@@ -91,25 +85,17 @@ const PublicRegistrationSubmitBodySchema = z
   );
 
 /**
- * Upper bound on submitted coordinates. The array exists for multi-location
- * fields (e.g. a service provider's service areas) and no schema caps it, so the
- * limit is set here — this is unauthenticated input, and each entry costs a
- * geocode-free but still non-zero write downstream.
+ * Max submitted coordinates. No schema caps the array and the input is
+ * unauthenticated, so the limit is set here.
  */
 const MAX_ITEM_LOCATIONS = 25;
 
 /**
- * Coordinates the registrant PICKED from the address autocomplete, forwarded to
+ * Coordinates the registrant picked from the address autocomplete, sent to
  * signalstack as `item_locations`.
  *
- * Optional throughout: absent (or empty) means no suggestion was chosen — or no
- * Maps key is configured — and signalstack then geocodes the address text from
- * `item_state`, which is the behaviour that predates this field. A non-empty
- * array is stored as-is and the address text is not geocoded over.
- *
- * `lat`/`lng` are strict numbers rather than coerced strings, matching what
- * signalstack's admin-participant API accepts; a string there is a 400 on its
- * side, so rejecting it here turns a confusing upstream error into a local one.
+ * Absent or empty: signalstack geocodes the address text instead. Non-empty:
+ * stored as-is. `lat`/`lng` must be numbers, as signalstack requires.
  */
 const ItemLocationsSchema = z
   .array(
@@ -133,7 +119,7 @@ const SubmitAcceptedResponseSchema = z
   })
   .passthrough();
 
-/** 409 payload — dedup hit: the phone/email is already registered. */
+/** 409 payload: the phone or email is already registered. */
 const SubmitSkippedResponseSchema = SubmitAcceptedResponseSchema.extend({
   outcome: z.string().describe("'skipped'"),
   message: z.string(),
@@ -166,11 +152,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 
       const link = await loadLiveLinkByOrgAndSlug(orgSlug, slug, log);
 
-      // Pull the link domain's JSON Schema from the live network config so
-      // the public registration page can render the form without a
-      // separate fetch (and without hardcoding any seeker/provider
-      // assumption). Networks that omit the domain return 404 — the link
-      // points at a no-longer-declared domain.
+      // Include the domain's JSON Schema from the network config so the page needs
+      // no second fetch. A domain no longer in the config returns 404.
       const networkCfg = await getNetworkConfig();
       const linkDomainCfg = networkCfg.domains[link.domain];
       if (!linkDomainCfg) {
@@ -186,20 +169,16 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         domain: link.domain,
       });
 
-      // Per-link registration_mode resolves (via network config) to a form
-      // shape that locks the rendered form:
+      // The link's registration_mode sets the form shape:
       //   - 'account_and_profile': identity + full profile schema.
-      //   - 'account_only': identity only — `schema` is nulled so the client
-      //     never accidentally renders a profile form for this link.
+      //   - 'account_only': identity only; `schema` is null.
       const submissionShape = resolveSubmissionShape(link.registrationMode, networkCfg);
       const hintKey = publicHintI18nKey(link.registrationMode, networkCfg);
       const accountOnly = submissionShape === 'account_only';
 
       return reply.send({
         slug: link.slug,
-        // Active network id (e.g. 'blue_dot' / 'orange_dot'). The BFF needs
-        // it alongside the domain to call /lookup, which scopes the probe
-        // to the right signalstack network.
+        // Active network id; the BFF passes it to /lookup.
         network: networkCfg.network.id,
         domain: link.domain,
         context: link.context,
@@ -209,11 +188,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         schema_id: accountOnly ? null : `participant-${link.domain}`,
         schema_version: accountOnly ? null : 'v1',
         schema: accountOnly ? null : linkDomainCfg.schema,
-        // Identity field selectors (name / phone / email) for this domain.
-        // The public form needs them to relax required-field validation when
-        // the user opts into "submit identity now, complete later": account-only
-        // submits create no item, so only the identity fields signalstack needs
-        // (a name + at least one contact) stay mandatory.
+        // Identity field selectors for this domain. On an account-only submit only
+        // these stay required (a name + at least one contact).
         identity: linkDomainCfg.identity,
         expires_at: link.expiresAt ? link.expiresAt.toISOString() : null,
       });
@@ -250,9 +226,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       });
       const start = Date.now();
 
-      // Rate limit by (orgSlug, slug, ip). CAPTCHA enforcement is handled at
-      // the BFF layer (Cloudflare Turnstile) — the API layer keeps a coarse
-      // fallback so a misconfigured BFF can't expose unbounded write traffic.
+      // Rate limit by (orgSlug, slug, ip). CAPTCHA is checked in the BFF; this is
+      // a fallback.
       const ip = (req.ip ?? '0.0.0.0').toString();
       const rate = await consume({
         namespace: 'link-submit',
@@ -272,9 +247,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 
       const rawBody = (req.body ?? {}) as Record<string, unknown>;
 
-      // Identity selectors live in the network config; load them up front so
-      // both the account_only allowed-key guard and the downstream normaliser
-      // share one source of truth.
+      // Identity selectors from the network config, shared by the account_only
+      // key guard and the normaliser.
       const networkCfgEarly = await getNetworkConfig();
       const linkDomainCfgEarly = networkCfgEarly.domains[link.domain];
       if (!linkDomainCfgEarly) {
@@ -282,32 +256,21 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           detail: `link domain '${link.domain}' not declared in network ${networkCfgEarly.network.id}`,
         });
       }
-      // #613: consent is only demanded when this domain gates go-live on
-      // `consent_required`. A domain without that gate (e.g. a provider
-      // configured `["schema_required"]` / none) collects no consent, so the
-      // form omits the step and the submit must not 400 CONSENT_REQUIRED.
+      // Consent is required only when the domain has `consent_required`.
       const consentRequiredForDomain = domainRequiresConsent(linkDomainCfgEarly.goLiveRequired);
 
-      // Resolve the link's registration_mode to a form shape via the live
-      // network config. Unknown keys fall back to `account_and_profile` (see
-      // resolveSubmissionShape) so config drift never hard-fails a live link.
+      // Unknown registration_mode values fall back to `account_and_profile`
+      // (see resolveSubmissionShape).
       const submissionShape = resolveSubmissionShape(link.registrationMode, networkCfgEarly);
 
-      // `account_only` shape locks the form: identity fields only, no profile
-      // payload, no schema render. Reject any item_state or stray top-level key
-      // BEFORE we touch the Ajv path. Allowed identity field names come from the
-      // network config so the rule stays generic across signalstack networks
-      // (blue_dot uses `phone`, purple_dot uses `mobile_number`, etc.). Server
-      // enforcement only — the web form already renders just identity fields for
-      // an account_only link, but trusting the client would let a tampered
-      // submit bypass the capture-scope intent.
+      // `account_only`: accept identity fields only. Reject item_state or any other
+      // top-level key before Ajv runs. Enforced here because the client can be tampered with.
       if (submissionShape === 'account_only') {
         const allowed = new Set<string>([
           'consent_terms',
           'consent_privacy',
-          // Age/year-of-birth required with consent on guardian-gated domains
-          // (§4.4); the account_only form collects year_of_birth (age kept for
-          // backward compatibility with older clients).
+          // Year of birth (or `age` from older clients) is allowed with consent on
+          // guardian-gated domains.
           'age',
           'year_of_birth',
           ...[
@@ -324,9 +287,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             });
           }
         }
-        // Identity-presence guard: name AND (phone OR email) must be present.
-        // Without this we'd defer to signalstack-writer.onboard's guardInput
-        // which 502s — wrong status code for a client-side missing-field.
+        // Require name and (phone or email); otherwise the writer would answer 502.
         const nameKey = linkDomainCfgEarly.identity.name;
         const phoneKey = linkDomainCfgEarly.identity.phone;
         const emailKey = linkDomainCfgEarly.identity.email;
@@ -355,23 +316,14 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         }
       }
 
-      // The submit shape is driven entirely by the link's resolved
-      // registration_mode — there is no client-supplied `partial` flag anymore.
-      // `account_only` flips signals' lifecycle path to user-row-only (no item,
-      // no lifecycle fields). `account_and_profile` always submits with_item;
-      // missing required profile fields are accepted silently (see the Ajv
-      // block below) and signals' classifier marks the item `draft`. The stray
-      // `partial` key is stripped defensively in case an old client still sends
-      // it.
+      // The link's registration_mode sets the submit shape. `account_only` creates
+      // the user only (no item). `account_and_profile` always submits an item;
+      // missing profile fields make it `draft`. A stray `partial` key is stripped.
       const body: Record<string, unknown> = { ...rawBody };
       delete body['partial'];
 
-      // Picked-coordinate passthrough. Read then stripped like the consent and
-      // birth-year keys above, so it never reaches Ajv or the signalstack
-      // item_state — it is transport metadata about the profile, not a field of
-      // it. A malformed value is rejected here rather than forwarded, since
-      // signalstack would answer with its own 400 that this route cannot
-      // attribute back to the offending key.
+      // Read and strip `item_locations` so it never reaches Ajv or item_state.
+      // Reject a malformed value here; signalstack's own 400 could not be traced to it.
       const rawItemLocations = body['item_locations'];
       delete body['item_locations'];
       let itemLocations: z.infer<typeof ItemLocationsSchema> = [];
@@ -388,11 +340,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       const submitMode: 'with_item' | 'account_only' =
         submissionShape === 'account_only' ? 'account_only' : 'with_item';
 
-      // Consent booleans are captured outside the participant profile schema,
-      // then stripped from `body` so they never reach Ajv (a+p) or the
-      // signalstack item_state. `consent_profile` (profile_creation) is a
-      // distinct point on the with_item shape. See the minor branch below —
-      // consent is required for adults only.
+      // Consent booleans are read, then stripped so they never reach Ajv or
+      // item_state. Consent is required for adults only (see below).
       const termsOk = body['consent_terms'] === true;
       const privacyOk = body['consent_privacy'] === true;
       const profileConsentOk = body['consent_profile'] === true;
@@ -400,11 +349,9 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       delete body['consent_privacy'];
       delete body['consent_profile'];
 
-      // Year of birth (snapshot model, no birthdate stored) → derived age.
-      // Stripped from `body` so it never reaches Ajv / item_state; the a+p
-      // profile keeps its own `age` schema field (which does NOT trigger the
-      // U18 gate — only the top-level `age` does). Falls back to body `age`
-      // for older clients.
+      // Year of birth gives the age; it is stripped from `body`. Only this
+      // top-level age triggers the U18 rule, not a profile `age` field. Falls back
+      // to body `age` for older clients.
       const yobRaw = body['year_of_birth'];
       delete body['year_of_birth'];
       const coerceNum = (v: unknown): number | undefined =>
@@ -417,13 +364,10 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       const derivedAge =
         yob !== undefined ? new Date().getUTCFullYear() - yob : coerceNum(body['age']);
 
-      // U18 (§4.4): a minor cannot establish consent here — they accept terms
-      // in the Signals app after signing in. Signals rejects any onboard that
-      // carries a top-level `age < 18` (`U18_NOT_ALLOWED`) but creates the user
-      // when NEITHER age NOR compliance is sent. So for a minor we submit
-      // WITHOUT age and WITHOUT compliance (no consent required); for an adult
-      // we require consent and forward both. Age is unknown ⇒ treat as adult
-      // (form always collects year of birth).
+      // A minor cannot give consent here; they accept terms in the Signals app.
+      // Signals rejects an onboard with top-level `age < 18`, so for a minor send
+      // neither age nor compliance. For an adult, require consent and send both.
+      // Unknown age is treated as adult.
       const isMinor = derivedAge !== undefined && derivedAge <= 18;
       if (consentRequiredForDomain && !isMinor) {
         const missingConsent: string[] = [];
@@ -436,8 +380,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         }
       }
       const ageNum = isMinor ? undefined : derivedAge;
-      // Only forward compliance when the domain requires consent AND the
-      // registrant is an adult — otherwise no consent was collected (#613).
+      // Send compliance only when the domain requires consent and the registrant is an adult.
       const compliance =
         !consentRequiredForDomain || isMinor
           ? undefined
@@ -447,11 +390,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
               ...(submitMode === 'account_only' ? [] : [{ key: 'profile_creation', value: true }]),
             ];
 
-      // Identity selectors come from the resolved network config so the
-      // route stays generic across signalstack networks. The sniffer
-      // picks them up from the schema; aggregator.config.yaml overrides
-      // when needed. Loaded up front so `account_only` validation can keep
-      // just the identity fields required (see below).
+      // Identity selectors come from the network config (schema sniffer, with
+      // aggregator.config.yaml overrides).
       const networkCfg = await getNetworkConfig();
       const linkDomainCfg = networkCfg.domains[link.domain];
       if (!linkDomainCfg) {
@@ -461,18 +401,11 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       }
       const phoneSourceKey = linkDomainCfg.identity.phone;
 
-      // 1. Schema validation against the link's domain schema. Skipped for
-      // `account_only` shape — the upstream identity-presence guard already
-      // enforced shape (name + phone OR email + consent), no profile fields
-      // are written, and running Ajv would mis-flag the consent toggles as
-      // `additionalProperties` violations against the profile schema.
+      // 1. Validate against the domain schema. Skipped for `account_only`: identity
+      // was checked above and Ajv would flag the consent keys as extra properties.
       if (submissionShape !== 'account_only') {
-        // Strip every empty cell (required or not) BEFORE Ajv runs. An empty
-        // cell means "not provided" — leaving it trips `format`/`type`/
-        // `minItems`/`minLength` even on fields the participant never filled.
-        // Removing it makes the field absent, which is exactly what signals'
-        // shape-only validation relaxes (missing-required ⇒ `draft`). Mirrors
-        // the worker's bulk-row strip so both ingest paths behave identically.
+        // Remove empty cells before Ajv, so an unfilled field is absent rather than
+        // failing `format`/`type`/`minLength`. Same as the worker's bulk-row strip.
         const schemaRef = { id: `participant-${link.domain}`, version: 'v1' };
         const loader = getSchemaLoader();
         const validatorResult = await loader.getValidator(schemaRef);
@@ -485,13 +418,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         }
         stripEmptyCells(body);
 
-        // Identity-presence guard — mandatory even on a partial profile submit.
-        // The relaxed Ajv pass below drops `required` so profile fields may be
-        // blank (signals classifies the item `draft`), but identity itself —
-        // name AND at least one contact — must always be present. Without this,
-        // a blank name would silently fall back to the participant UUID and a
-        // contactless row would 502 at signals' onboard guard. Mirrors the
-        // account_only guard above so both shapes enforce the same invariant.
+        // Name and at least one contact are required even on a partial profile;
+        // Ajv below ignores `required`. Same rule as the account_only guard.
         {
           const present = (k?: string): boolean =>
             !!k && typeof body[k] === 'string' && (body[k] as string).length > 0;
@@ -515,22 +443,12 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 
         const validate = validatorResult.value;
         if (!validate(body)) {
-          // Silent partial-accept: `account_and_profile` links always submit
-          // with_item, but a participant may save an incomplete profile. Drop
-          // ONLY `required` errors (a missing field) — signals relaxes exactly
-          // and only missing-required, classifying the item `draft`. Every
-          // value constraint on a PRESENT field — `minItems`/`minLength`/
-          // `minimum`/`type`/`format`/`pattern`/`enum`/`additionalProperties` —
-          // still 400s here, matching signals' shape-only validation. Relaxing
-          // value constraints would green-light data signals later rejects.
+          // Partial profiles are accepted: drop `required` errors outside a `then` branch, since
+          // signals marks such an item `draft`. Constraints on present fields still 400.
           //
-          // Two refinements for a conditional requirement (`allOf: [{ if:
-          // category is 'licensed', then: { required: [licence_number, licence_type] } }]`):
-          // Signals relaxes only TOP-LEVEL required fields, so a `required`
-          // error from inside a `then` branch is enforced here too — it names
-          // the missing field. Ajv's accompanying `if` error ("must match
-          // \"then\" schema") only summarises those and names nothing, so it is
-          // dropped.
+          // For a conditional requirement (`allOf`/`if`/`then`), a `required` error
+          // inside `then` is kept because signals enforces it. Ajv's `if` summary error
+          // names no field, so it is dropped.
           const isConditionalRequired = (e: { keyword?: string; schemaPath?: string }) =>
             e.keyword === 'required' && (e.schemaPath ?? '').includes('/then/');
           const issues = (validate.errors ?? []).filter(
@@ -545,12 +463,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         }
       }
 
-      // 2. Normalisation. The server discards any client-supplied
-      // `participant_id` (anonymous caller probing prevention) and derives the
-      // dedup key from the normalised phone — same person re-submitting the
-      // form hits the wrapper's ON CONFLICT path and returns outcome='skipped'.
-      // Falls back to a fresh UUID when phone is absent so dedup degrades
-      // gracefully for phone-optional schemas (no dedup, but still works).
+      // 2. Normalise the phone and email. Any client-supplied `participant_id` is
+      // dropped, so an anonymous caller cannot choose it.
       delete (body as Record<string, unknown>)['participant_id'];
       const emailSourceKey = linkDomainCfg.identity.email;
       const phoneRaw =
@@ -563,21 +477,16 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         }
         phoneNormalised = phone.value;
       }
-      // Email is optional in IdentitySelectors
-      // override is undefined; dedup falls back to phone-only.
+      // Email is optional.
       const emailRaw =
         emailSourceKey && typeof body[emailSourceKey] === 'string'
           ? (body[emailSourceKey] as string)
           : '';
       const emailNormalised = emailRaw ? emailRaw.trim().toLowerCase() : null;
 
-      // 2a. Resolve the aggregator's signalstack org id BEFORE opening the
-      // transaction. Anonymous submitters carry no token, so the value must
-      // come from `users.signalstack_org_id` (written at approval time
-      // or by the login-time backfill in `requireApproved`). A NULL here means
-      // the aggregator never completed the signalstack handshake — fail fast
-      // with 503 so the participant retries rather than landing a half-pushed
-      // row.
+      // 2a. Read the signalstack org id from `users.signalstack_org_id` before the
+      // transaction. NULL means the org was never registered with signalstack: answer
+      // 503 so the participant retries.
       const ss = getSignalStackWriter();
       let signalstackOrgId: string | null = null;
       if (ss) {
@@ -598,23 +507,13 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
         }
       }
 
-      // 3 + 4. The link_submission INSERT and the signalstack push must commit
-      // atomically. A signalstack failure rolls the submission row back so the
-      // caller sees a single, honest outcome: a 2xx means signals really has
-      // the profile. Tightens
-      // the DB connection hold time — acceptable for a public-link form submit
-      // (low volume). If push volume ever requires async fan-out, switch to an
-      // outbox table inside the tx + worker consumer.
-      // Lifecycle fields hoisted out of the tx scope so the response path can
-      // surface them without re-reading the signals response. `null` is the
-      // honest default: signals is disabled (no push) OR the submit was
-      // account_only — neither produces a lifecycle classification.
+      // 3 + 4. The link_submission INSERT and the signalstack push commit together:
+      // a push failure rolls the row back, so a 2xx means signals has the profile.
+      // Lifecycle fields are null when signals is disabled or the submit is account_only.
       let lifecycleStatusOut: LifecycleStatus | null = null;
       let ownedElsewhere = false;
       const txResult = await getDb().transaction(async (tx) => {
-        // Seeded outcome. Signals is the identity authority and overwrites this
-        // below whenever it is configured; the seed only survives when signals
-        // is disabled, where a successful local capture is a `passed`.
+        // Default outcome; signals overwrites it when configured.
         const insertedOutcome: 'passed' | 'skipped' = 'passed';
         let outcome: 'passed' | 'skipped' = insertedOutcome;
 
@@ -629,16 +528,10 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           })
           .returning({ id: linkSubmissions.id });
 
-        // Outward signalstack push, inside the same tx so a downstream failure
-        // rolls the `link_submissions` row back. Signalstack is the identity
-        // store of record; the submission row is only the local audit trail of
-        // what this link captured.
+        // Push inside the transaction so a failure rolls back the submission row.
         if (ss && signalstackOrgId) {
           const nameSourceKey = linkDomainCfg.identity.name;
-          // Unreachable in practice — the identity-presence guard above rejects
-          // a blank name on both submit shapes. Kept as a defensive fallback;
-          // the link id is an opaque UUID, so nothing identifying leaks if it
-          // ever did fire.
+          // Fallback only; the guard above rejects a blank name. The link id is an opaque UUID.
           const name =
             typeof body[nameSourceKey] === 'string' ? (body[nameSourceKey] as string) : link.id;
           const phoneFromBody =
@@ -652,10 +545,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             name,
             ...(pushPhone ? { phoneNumber: pushPhone } : {}),
             ...(emailNormalised ? { email: emailNormalised } : {}),
-            // Adult: record consent via the `compliance` array (the live Signals
-            // mechanism, never the deprecated flags) + forward age. Minor: both
-            // omitted so Signals creates the user without consent (§4.4) — they
-            // accept terms in the Signals app after signing in.
+            // Adult: send consent via `compliance`, plus age. Minor: send neither.
             ...(compliance ? { compliance } : {}),
             ...(ageNum !== undefined ? { age: ageNum } : {}),
             channel: 'link',
@@ -664,9 +554,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             domain: link.domain,
             item_type: linkDomainCfg.itemType,
             profile: buildSignalStackItemState(body, pushPhone, linkDomainCfg.identity.phone),
-            // Omitted when empty so signalstack geocodes the address text
-            // instead — it treats an empty array as "none supplied", but not
-            // sending the key at all keeps that explicit on the wire.
+            // Omitted when empty so signalstack geocodes the address text.
             ...(itemLocations.length > 0 ? { item_locations: itemLocations } : {}),
             submit_mode: submitMode,
           });
@@ -679,17 +567,12 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
               code: result.error.code,
               link_id: link.id,
             });
-            // Profile cap (signals #349): show the bare user-facing sentence
-            // (no `signalstack onboard returned 409: PROFILE_LIMIT_REACHED:`
-            // infra prefixes) directly on the public form. Falls back to the
-            // generic string for any other push failure.
+            // Show signals' profile-limit message as is; other failures get a generic message.
             const signalsMessage = (
               result.error.details as { signalsMessage?: unknown } | undefined
             )?.signalsMessage;
-            // Belt-and-braces (§4.4): the form gates minors client-side, but a
-            // bypassed client that pushes an under-18 gets Signals'
-            // `U18_NOT_ALLOWED`. Map it to the finish-in-the-app response
-            // instead of a generic push failure.
+            // A client that skips the minor check gets `U18_NOT_ALLOWED` from Signals;
+            // map it to the finish-in-the-app response.
             if (result.error.message.includes('U18_NOT_ALLOWED')) {
               throw httpError('U18_REGISTRATION_REDIRECT', {
                 fields: { code: result.error.code, message: result.error.message },
@@ -708,10 +591,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             });
           }
 
-          // Resolve lifecycle through the back-compat helper so the absent →
-          // 'live' rule stays centralised. `account_only` submits produce no
-          // item, so we suppress lifecycle fields entirely (null) — the
-          // resolver would otherwise return 'live' for an absent column.
+          // `account_only` creates no item, so lifecycle fields are null.
           const lifecycleStatus =
             submitMode === 'account_only' || !result.value.profile_item_id
               ? null
@@ -723,16 +603,9 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           ownedElsewhere = Boolean(result.value.owned_elsewhere);
           lifecycleStatusOut = lifecycleStatus;
 
-          // Signalstack is the identity authority and the sole source of this
-          // outcome. A repeat submission is a legitimate NEW profile: signals
-          // inserts one on every onboard call without an `item_id`, so there is
-          // no de-duplication within an aggregator. A local mirror used to
-          // report `skipped` here while the profile was created upstream anyway
-          // — the worst of both answers — which is why it was removed (#780,
-          // then migration 0024).
-          //
-          // Skip only when the identity is genuinely owned by ANOTHER aggregator.
-          // That is tenant isolation, not deduplication, and is unaffected.
+          // Signals decides the outcome. Each submission creates a new profile; there
+          // is no dedup within an aggregator. Skip only when another aggregator owns
+          // the identity (tenant isolation).
           outcome = ownedElsewhere ? 'skipped' : 'passed';
 
           log.info({
@@ -749,13 +622,8 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
           });
         }
 
-        // The submission row was inserted BEFORE the push, carrying the seeded
-        // `passed`, and the push may since have corrected it to `skipped`.
-        // Persist the correction inside the same transaction so the stored
-        // record matches both the response and what actually happened — a row
-        // reading `skipped` for a submission that created a profile would
-        // under-count real registrations for anyone who later reports on this
-        // table. Pre-existing for `account_only`; #780 makes it routine.
+        // The row was inserted with `passed`; store any correction to `skipped` in
+        // the same transaction so the row matches the response.
         const submissionId = submission[0]?.id;
         if (submissionId && outcome !== insertedOutcome) {
           await tx
@@ -785,9 +653,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       });
 
       if (outcome === 'skipped') {
-        // Cross-aggregator ownership surfaces as 409 (design). No participant
-        // identifier is returned on the public path — an anonymous caller must
-        // not learn anything about a record held by another aggregator.
+        // Owned by another aggregator: 409 with no participant identifier.
         return reply.code(409).send({
           outcome,
           submission_id: submissionId,
@@ -812,16 +678,11 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
 }
 
 /**
- * Mutates `payload`: deletes any top-level field whose value is empty —
- * `null`, `undefined`, an empty/whitespace string, or an empty array —
- * regardless of whether the field is required.
+ * Deletes every top-level field whose value is empty (`null`, `undefined`,
+ * blank string, or empty array), required or not.
  *
- * Partial submits seed unfilled fields with empty values (RJSF sends `[]`
- * for unselected multi-selects and `''` for blank inputs). Removing them
- * makes the field absent, which is exactly what signals' shape-only
- * validation relaxes: a missing required field classifies the item `draft`,
- * while value constraints on present fields stay enforced on both sides.
- * Mirrors the worker's `stripAllEmptyCells` so the two ingest paths agree.
+ * An absent required field makes signals mark the item `draft`. Matches the
+ * worker's `stripAllEmptyCells`.
  *
  * @param payload - The submission body; mutated in place.
  */
@@ -839,9 +700,8 @@ function stripEmptyCells(payload: Record<string, unknown>): void {
 }
 
 /**
- * Loads a registration link by (org_slug, slug) and asserts it is currently
- * `live`. Translates store/null/expiry into the canonical 404 / 410 status
- * codes.
+ * Loads a registration link by (org_slug, slug) and checks it is `live`.
+ * Missing answers 404; retired or expired answers 410.
  */
 async function loadLiveLinkByOrgAndSlug(
   orgSlug: string,

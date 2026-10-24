@@ -1,9 +1,8 @@
 /**
  * Postgres adapter for the identity store (`user_identities`, migration 0027).
  *
- * Thin wrapper over `db/account-writes.ts`, which the org store also uses
- * inside its own transactions. Logs SQLSTATE only — never the driver message
- * (Drizzle includes query parameters in it).
+ * Thin wrapper over `db/account-writes.ts`. Logs SQLSTATE only, never the
+ * driver message (it includes query parameters).
  */
 
 import { and, eq } from 'drizzle-orm';

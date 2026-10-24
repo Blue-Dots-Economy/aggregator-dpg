@@ -1,30 +1,18 @@
 /**
- * Injectable rate-limit check for re-sending an approved org's
- * coordinator-invite link.
+ * Injectable rate-limit check for re-sending an approved org's owner its
+ * sign-in link.
  *
  * Belongs to `@aggregator-dpg/api`. Guards the `active` branch of
- * `POST /v1/orgs/create`, where an owner who lost their invite email
- * re-submits the registration form and is mailed a fresh grant. That branch
- * turned a no-op 409 into a credential-minting path, so it needs its own
- * bound rather than relying on the route's inherited submit limiter.
+ * `POST /v1/orgs/create`, where an owner re-submits the form and is mailed a
+ * sign-in link. Runs in addition to `checkSubmitRate`, with two differences:
  *
- * Two deliberate differences from `checkSubmitRate`, which this sits
- * alongside rather than replaces:
+ * - Keyed on the stored owner email only, not `ip|email`, so rotating IPs
+ *   does not get a fresh bucket.
+ * - Fails closed, so a Redis outage cannot remove the limit on mail sent from
+ *   an anonymous form. The narrow key means an outage blocks re-sends for one
+ *   address only.
  *
- * - **Keyed on the stored owner email alone**, not `ip|email`. The submit
- *   limiter's IP component means rotating IPs buys a fresh bucket for the
- *   same owner, so per-owner flooding is unbounded even with Redis healthy.
- * - **Fail-closed.** Each admitted call mints an independent 90-day grant
- *   that can mint coordinator invites, with no revocation and no cap on live
- *   grants. A downed Redis must not silently remove that bound — the same
- *   reasoning as the invite-mint bucket (#700 §7.2) and the approval-verify
- *   throttle (A2).
- *
- * Fail-closed is safe here precisely because the key is narrow: an outage
- * blocks re-sends for one email address, not everyone behind one NAT.
- *
- * Route handlers stay testable without Redis; tests override via
- * `_setOrgInviteResendRateChecker`.
+ * Tests override via `_setOrgInviteResendRateChecker`.
  *
  * @module @aggregator-dpg/api
  */
@@ -50,9 +38,7 @@ export function _setOrgInviteResendRateChecker(c: Checker | null): void {
 /**
  * Consumes one slot from the invite-resend bucket for an owner address.
  *
- * @param ownerEmail - The org's STORED owner email. Never the address the
- *   caller submitted: the org form is anonymous, so keying on submitted input
- *   would let an attacker pick an unused bucket for every request.
+ * @param ownerEmail - The org's stored owner email, never the submitted address.
  * @returns Whether the resend is allowed + retry-after seconds.
  */
 export async function checkOrgInviteResendRate(

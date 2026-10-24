@@ -1,6 +1,5 @@
 /**
- * Public API surface re-exports for downstream packages that need typed
- * access to API contracts. The HTTP entrypoint lives in `server.ts`.
+ * Public exports of the api app for packages that need its types. The HTTP entry point is `server.ts`.
  */
 
 export type { Config } from './config.js';

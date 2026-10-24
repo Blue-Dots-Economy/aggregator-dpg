@@ -2,7 +2,7 @@
  * Postgres adapter for the bulk uploads store.
  *
  * Wraps Drizzle queries against `bulk_uploads`. All errors map to the
- * abstract `StoreError` codes — no driver-specific errors leak.
+ * `StoreError` codes.
  */
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
@@ -160,9 +160,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
     s3Etag: string,
   ): Promise<StoreResult<BulkUpload>> {
     const start = Date.now();
-    // Two-step: read current state, decide transition, write atomically with
-    // a status guard. Using UPDATE...WHERE status='pending' OR status='uploaded'
-    // makes replay safe.
+    // Read the current state, then write with a status guard.
     const existing = await this.findById(id, aggregatorId);
     if (!existing.ok) return existing;
     if (!existing.value) {
@@ -178,14 +176,11 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
         },
       };
     }
-    // Idempotent: if already uploaded with the same etag, just return.
     if (current.status === 'uploaded' && current.s3Etag === s3Etag) {
       return { ok: true, value: current };
     }
     try {
-      // SQL guard the transition — without `status IN ('pending','uploaded')`
-      // a concurrent caller racing past row_processing/completed could
-      // clobber the row back to `uploaded`.
+      // The status guard stops a concurrent caller moving a later row back to `uploaded`.
       const rows = await getDb()
         .update(bulkUploads)
         .set({ status: 'uploaded', s3Etag, updatedAt: new Date() })
@@ -199,9 +194,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
         .returning();
       const row = rows[0];
       if (!row) {
-        // Row exists (we read it above) but status moved past pending/uploaded
-        // between the read and the write. Treat as a stale-replay invalid
-        // transition rather than DB unavailability.
+        // The status moved on between the read and the write.
         return {
           ok: false,
           error: {

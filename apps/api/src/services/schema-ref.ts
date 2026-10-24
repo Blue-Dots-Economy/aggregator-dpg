@@ -1,16 +1,12 @@
 /**
  * Resolves an aggregator schema file and the `profile_ref` that names it.
  *
- * `profile_ref` records WHICH schema variant produced a stored `profile`
- * payload. The registration schemas vary per deployment, so a row that does not
- * name its own contract cannot be interpreted later.
+ * `profile_ref` records which schema variant produced a stored `profile`.
+ * Registration schemas vary per deployment, so each row names its own schema.
  *
- * The ref is derived from the file that actually resolved, never from
- * `AGGREGATOR_NETWORK`/`AGGREGATOR_BRAND`. That distinction is the whole point:
- * schema lookup falls back to the shared default when an override is missing, so
- * an env-derived ref would claim `blue_dot/up-gzb/...` while the payload came
- * from the generic schema — silently mislabelling exactly the drift this column
- * exists to detect.
+ * The ref comes from the file that resolved, not from
+ * `AGGREGATOR_NETWORK`/`AGGREGATOR_BRAND`. Lookup falls back to the shared
+ * default when an override is missing, so an env-based ref could be wrong.
  *
  * Belongs to `@aggregator-dpg/api`.
  *
@@ -43,9 +39,8 @@ export interface ResolvedSchema {
   /** Absolute path to the resolved file. */
   path: string;
   /**
-   * Variant identifier, e.g. `blue_dot/up-gzb/registration.v1` for a brand
-   * override, `blue_dot/registration.v1` for a network-level one, or bare
-   * `registration.v1` when the shared default answered.
+   * Variant id: `blue_dot/up-gzb/registration.v1` (brand),
+   * `blue_dot/registration.v1` (network) or `registration.v1` (shared default).
    */
   ref: string;
 }
@@ -67,14 +62,11 @@ function refFromRelPath(rel: string): string {
 /**
  * Finds the most specific existing copy of an aggregator schema file.
  *
- * Specificity first, then root: a brand override in any resolvable root beats
- * the shared default in another, so a dev checkout and a container mount resolve
- * identically.
+ * Specificity first, then root: a brand override in any root beats the shared
+ * default in another.
  *
  * @param file - Bare schema file name, e.g. `registration.v1.json`.
- * @param env - Env-var bag; defaults to `process.env`. Pass an explicit object
- *   in tests rather than mutating `process.env`, which would leak into other
- *   test files sharing the worker.
+ * @param env - Env-var bag; defaults to `process.env`. Tests pass their own object.
  * @returns The resolved file and its ref, or `null` when no candidate exists.
  */
 export function resolveSchema(
@@ -90,10 +82,7 @@ export function resolveSchema(
 /**
  * Every absolute path {@link resolveSchema} will try, in order.
  *
- * Exported so a caller that must fail loudly can name what it looked for
- * without re-deriving the root list — two copies of that algorithm would let
- * the validator and the recorded `profile_ref` disagree about which file
- * answered.
+ * Exported so a caller can report which paths it tried.
  *
  * @param file - Bare schema file name, e.g. `registration.v1.json`.
  * @param env - Env-var bag; defaults to `process.env`.
@@ -104,9 +93,7 @@ export function schemaCandidates(
   env: ConfigPathEnv = process.env,
 ): { path: string; rel: string }[] {
   const roots = configRoots();
-  // Specificity first, then root: a brand override in ANY resolvable root must
-  // beat the shared default, or a layout where two roots both resolve would
-  // silently fall back to the generic schema.
+  // Specificity first, then root, so a brand override in any root beats the shared default.
   return aggregatorSchemaRelPaths(file, env).flatMap((rel) =>
     roots.map((root) => ({ path: path.join(root, rel), rel })),
   );
@@ -116,10 +103,7 @@ export function schemaCandidates(
  * Returns the `profile_ref` for a schema file, or `null` when it cannot be
  * determined.
  *
- * `null` is deliberate rather than a guess: storing a ref that names a variant
- * the payload did not come from is worse than recording that the variant is
- * unknown. Callers should log when this happens — it means the deployment's
- * schema file is missing.
+ * `null` means the deployment's schema file is missing; callers should log it.
  *
  * @param file - Bare schema file name, e.g. `org-registration.v1.json`.
  * @param env - Env-var bag; defaults to `process.env`.

@@ -1,6 +1,7 @@
 /**
- * In-memory role-assignment store (`@aggregator-dpg/api`, RBAC). For unit
- * tests; mirrors the Postgres store's rules.
+ * In-memory role-assignment store for unit tests (`@aggregator-dpg/api`).
+ *
+ * Follows the same rules as the Postgres store.
  */
 
 import { randomUUID } from 'node:crypto';

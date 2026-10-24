@@ -1,5 +1,5 @@
 /**
- * Onboarding metrics endpoints.
+ * Onboarding metrics endpoints of the aggregator API (`@aggregator-dpg/api`).
  *
  *   GET /v1/onboarding/summary       totals across both sources
  *   GET /v1/onboarding/by-source     bulk vs link breakdown
@@ -139,10 +139,7 @@ export async function registerOnboardingRoutes(app: FastifyInstance): Promise<vo
 }
 
 /**
- * Converts the route-validated `?from=&to=` query into Date bounds.
- *
- * The route's `querystring: RangeQuerySchema` already validated and replaced
- * `req.query`, so this only coerces the ISO strings to Dates.
+ * Converts the validated `?from=&to=` query into Date bounds.
  *
  * @param query - The zod-validated range query from `req.query`.
  * @returns Optional from/to Date bounds.

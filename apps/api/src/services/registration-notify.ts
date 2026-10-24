@@ -1,10 +1,9 @@
 /**
  * Admin-review notification for the aggregator registration flow.
  *
- * Belongs to `@aggregator-dpg/api`. Mints the approve/reject JWT pair and
- * sends the reviewer email. Shared by the initial submit, the resubmit
- * (reclaim) path, and the explicit "resend approval link" endpoint so the
- * three surfaces stay byte-for-byte identical.
+ * Belongs to `@aggregator-dpg/api`. Mints the review token and sends the
+ * reviewer email. Used by submit, resubmit and the "resend approval link"
+ * endpoint, so all three send the same email.
  */
 
 import type { FastifyBaseLogger } from 'fastify';
@@ -20,25 +19,24 @@ export interface AdminReviewNotifyInput {
   applicantName: string;
   applicantEmail: string;
   applicantPhone: string;
-  /** Invited email (#701) — highlighted to the approver when it differs. */
+  /** Invited email; highlighted to the approver when it differs. */
   invitedEmail?: string | undefined;
   /**
-   * Parent org id (spec §9). When set, it is minted into the approve/reject
-   * tokens as the `org` claim so the decision handler can bind the decision to
-   * the coordinator's `parent_org_id`.
+   * Parent org id. Minted into the token as the `org` claim, so the decision
+   * is bound to the coordinator's org.
    */
   org?: string;
   /**
-   * Recipient override. When set (the org owner's email for a coordinator under
-   * an org), the review email routes here instead of the network-admin list.
+   * Recipient override, such as the org owner's email. When set, it replaces
+   * the network-admin list.
    */
   recipientEmail?: string;
 }
 
 /**
- * Parse the comma-separated `ADMIN_EMAILS` env value into a clean array.
- * Tolerates wrapping quotes and stray whitespace; falls back to a safe
- * default when unset.
+ * Parses the comma-separated `ADMIN_EMAILS` env value.
+ *
+ * Strips quotes and whitespace; falls back to a default when unset.
  *
  * @returns The reviewer recipient list (never empty).
  */
@@ -58,9 +56,9 @@ export function parseAdminEmails(): string[] {
 }
 
 /**
- * Mint a single review token for the approve/reject page. One link now drives
- * both decisions — the action is chosen on the page and read from the form, so
- * the token carries no intent (the `intent` claim is set but ignored downstream).
+ * Mints the review token for the approve/reject page.
+ *
+ * The action is chosen on the page; the token's `intent` claim is ignored.
  *
  * @param subjectId - The record id bound as the token subject (aggregator or org id).
  * @param org - Optional parent-org id minted as the `org` claim (coordinator flow).
@@ -79,34 +77,35 @@ export async function mintReviewToken(subjectId: string, org?: string): Promise<
   }
 }
 
-/** Shared inputs for rendering + delivering an admin/owner review email. */
+/** Inputs for rendering and sending a review email. */
 export interface ReviewEmailInput {
-  /** Record id — token subject, read-URL segment, and email `registrationId`. */
+  /** Record id: token subject, read-URL segment and email `registrationId`. */
   subjectId: string;
   /** Path segment under `/admin/v1/` for the read URL, e.g. `aggregator-registrations` or `orgs`. */
   readPath: string;
   applicantName: string;
   applicantEmail: string;
   applicantPhone: string;
-  /** Invited email (#701) — highlighted when it differs from applicantEmail. */
+  /** Invited email; highlighted when it differs from applicantEmail. */
   invitedEmail?: string | undefined;
   /** Resolved recipient list (network admins, or an org owner). */
   recipients: string[];
-  /** Optional `org` token claim (coordinator-under-org flow). */
+  /** Optional `org` token claim, for a coordinator. */
   org?: string;
-  /** What was registered — drives the email subject/heading (default `aggregator`). */
+  /** What was registered; sets the email subject and heading (default `aggregator`). */
   entityLabel?: string;
-  /** Structured-log operation label for the delivery-failure warning. */
+  /** Log operation name for the delivery-failure warning. */
   logOperation: string;
 }
 
 /**
- * Mint the token pair, render the shared admin-review email, and deliver it.
- * The single delivery path behind both the coordinator and org review emails.
+ * Mints the review token, renders the review email and sends it.
  *
- * @param input - Review-email fields + resolved recipients.
+ * Used for both coordinator and org review emails.
+ *
+ * @param input - Review-email fields and resolved recipients.
  * @param log - Request-scoped logger for delivery diagnostics.
- * @throws {HttpError} `TOKEN_MINT_FAILED` if either JWT cannot be minted.
+ * @throws {HttpError} `TOKEN_MINT_FAILED` if the token cannot be minted.
  */
 export async function sendReviewEmail(
   input: ReviewEmailInput,
@@ -148,12 +147,13 @@ export async function sendReviewEmail(
 }
 
 /**
- * Mint a fresh approve/reject token pair for a coordinator registration and
- * email the reviewers (or the org owner, when routed under an org) a review link.
+ * Sends a fresh review link for a coordinator registration.
+ *
+ * Goes to the reviewers, or to the org owner when the coordinator has an org.
  *
  * @param input - Registration id + applicant identity for the email body.
  * @param log - Request-scoped logger for delivery diagnostics.
- * @throws {HttpError} `TOKEN_MINT_FAILED` if either JWT cannot be minted.
+ * @throws {HttpError} `TOKEN_MINT_FAILED` if the token cannot be minted.
  */
 export async function sendAdminReviewEmail(
   input: AdminReviewNotifyInput,
@@ -169,10 +169,7 @@ export async function sendAdminReviewEmail(
       ...(input.invitedEmail ? { invitedEmail: input.invitedEmail } : {}),
       recipients: input.recipientEmail ? [input.recipientEmail] : parseAdminEmails(),
       ...(input.org ? { org: input.org } : {}),
-      // Stated explicitly rather than left to the `aggregator` default: this
-      // email announces a COORDINATOR, and a reviewer who also handles org
-      // registrations cannot tell the two apart from "New aggregator
-      // registration" alone.
+      // Set explicitly so reviewers can tell coordinator emails from org emails.
       entityLabel: 'aggregator coordinator',
       logOperation: 'registration-notify.sendAdminReviewEmail',
     },

@@ -1,13 +1,11 @@
 /**
- * Permission checks for the API (`@aggregator-dpg/api`, RBAC; design §3).
+ * Permission checks for the API (`@aggregator-dpg/api`, RBAC).
  *
- * Expands a resolved actor's base roles (from its memberships) and live
- * additional roles into permissions, for the organisation acted on and its
- * ancestors (or every organisation the actor belongs to or owns, for a route
- * with no single target), asks the decision engine, and logs the outcome. In
- * `log` mode a deny is only logged; in `enforce` mode the caller turns
- * `allowed: false` into a 403. Reach (which targets) is not decided here:
- * `scope.ts` answers it with 404 (design decision D3).
+ * Expands an actor's base and additional roles into permissions for the target
+ * organisation and its ancestors (or every organisation the actor relates to,
+ * when there is no single target), asks the decision engine, and logs the
+ * outcome. In `log` mode a deny is only logged; in `enforce` mode the caller
+ * turns `allowed: false` into a 403. Reach is decided in `scope.ts` (404).
  */
 
 import type { FastifyBaseLogger } from 'fastify';
@@ -55,9 +53,8 @@ export interface CheckOptions {
   /** Clock, for role expiry. Injectable for tests. */
   now?: number | undefined;
   /**
-   * Deny in `log` mode too. For checks on surfaces that did not exist before
-   * RBAC (the role and custom-role writes): there is no legacy behaviour for
-   * `log` to preserve, so an IAM write is never open while RBAC is on.
+   * Deny in `log` mode too. Used for role and custom-role writes, so they are
+   * never open while RBAC is on.
    */
   strict?: boolean | undefined;
 }
@@ -71,7 +68,7 @@ export interface TokenIdentity {
 }
 
 /**
- * Resolves the caller through Phase 5's actor resolver.
+ * Resolves the caller through the actor resolver.
  *
  * @param identity - Claims from the verified token.
  * @returns The actor, or a deny reason (`actor_unavailable`, `unknown_actor`).
@@ -89,9 +86,9 @@ export async function resolveCaller(
 }
 
 /**
- * The permissions an actor holds where a request applies: its base roles
- * (from its memberships) and live additional roles, expanded through the
- * role snapshot.
+ * Returns the permissions an actor holds where a request applies.
+ *
+ * Expands its base roles and live additional roles through the role snapshot.
  *
  * @param roles - The role snapshot.
  * @param actor - The resolved actor.
@@ -289,13 +286,10 @@ export async function listActorCapabilities(
 
 /**
  * Lists the permissions a resolved actor holds in each of several
- * organisations, asking the engine once per *distinct* question.
+ * organisations, asking the engine once per distinct question.
  *
- * `listCapabilities` is decided purely from the actor's expanded permissions
- * and the organisation's type, so two targets that produce the same pair ask
- * the same question. An owner of many organisations normally holds the same
- * role in each, which collapses to a single call instead of one per
- * organisation on a route the portal loads on every render.
+ * The answer depends only on the expanded permissions and the organisation
+ * type, so targets with the same pair share one engine call.
  *
  * @param req - The request (for its logger).
  * @param actor - The resolved actor.
@@ -311,8 +305,7 @@ export async function listCapabilitiesForTargets(
 ): Promise<Map<string, Capability[]> | null> {
   if (!getRbacRuntime()) return null;
   const out = new Map<string, Capability[]>();
-  // Key the memo on what the engine actually sees, not on the organisation:
-  // same permissions + same org type ⇒ same answer.
+  // Keyed on permissions + org type, which is all the engine sees.
   const answers = new Map<string, Promise<Capability[] | null>>();
   for (const target of targets) {
     const rt = getRbacRuntime();

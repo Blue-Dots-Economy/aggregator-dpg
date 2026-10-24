@@ -1,13 +1,12 @@
 /**
- * Role assignment rules (`@aggregator-dpg/api`, RBAC; design §4, catalogue §4).
+ * Role assignment rules (`@aggregator-dpg/api`, RBAC).
  *
- * The roles API calls these after `requireActor()`. Checks run in the order
- * the design lists: the target is in reach (else not found), the role exists,
- * it is not a base role, the target belongs to or owns the organisation, the
- * caller holds the role's `assigned_by` permission there, the target is not
- * the caller, the account type matches, the organisation type is assignable,
- * and the expiry is within `max_days`. Every change is audited. Base roles
- * follow membership and are never assigned.
+ * The roles API calls these after `requireActor()`. Checks, in order: the
+ * target is in reach (else not found), the role exists and is not a base role,
+ * the target belongs to or owns the organisation, the caller holds the role's
+ * `assigned_by` permission there, the target is not the caller, the account
+ * and organisation types match, and the expiry is within `max_days`. Every
+ * change is audited. Base roles follow membership and are never assigned.
  */
 
 import type { FastifyRequest } from 'fastify';
@@ -63,9 +62,10 @@ async function rootId(): Promise<RoleOutcome<string | null>> {
 }
 
 /**
- * The user `id` and the organisations it belongs to or owns, when at least
- * one of them is within the actor's reach (else not found, so ids cannot be
- * probed).
+ * Returns the user and the organisations it belongs to or owns.
+ *
+ * Answers not found unless at least one organisation is within the actor's
+ * reach, so ids cannot be probed.
  *
  * @param actor - The acting admin.
  * @param id - The target user.
@@ -146,10 +146,8 @@ export async function listUserRoles(
   if (!root.ok) return root;
   const all = await getRoleStore().listForUser(userId);
   if (!all.ok) return fail({ kind: 'unavailable', message: all.error.message });
-  // With CUSTOM-ROLES off the snapshot is built-in-only, so a held custom role
-  // grants nothing (`effectivePermissions` skips it). Drop those inert
-  // assignments from the read too, so what the console shows matches reality;
-  // the rows stay in the store and revive if the flag is turned on.
+  // With custom roles off, held custom roles grant nothing; hide them here too.
+  // The rows stay and apply again if the flag is turned on.
   const additional = config.RBAC_CUSTOM_ROLES_ENABLED
     ? all.value
     : all.value.filter((a) => rt.value.roles.byKey.has(a.roleKey));
@@ -286,9 +284,8 @@ export async function revokeRole(
 
 /**
  * Revokes every additional role a user holds in an organisation they no
- * longer belong to or own. Best effort: a failure is logged, and a leftover
- * row grants nothing because roles count only where the user is a member or
- * owner (`effectivePermissions`).
+ * longer belong to or own. Best effort: a failure is logged. A leftover row
+ * grants nothing, since roles count only where the user is a member or owner.
  *
  * @param userId - The user who left.
  * @param orgId - The organisation.

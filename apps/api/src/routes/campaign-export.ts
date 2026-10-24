@@ -1,27 +1,16 @@
 /**
- * Campaign participant PII export (aggregator-dpg#579, #576).
+ * Campaign participant PII export.
  *
  *   POST /v1/campaign/export → 202 { job_id }
  *
- * Routes the export through the durable campaign async-job engine: it validates
- * the shared request envelope, applies request idempotency (`Idempotency-Key`),
- * an ingress rate-limit and a per-org active-job cap, then in one transaction
- * persists a `campaign_job` (+ one `campaign_job_item` per id) and enqueues a
- * single `campaign-process` job carrying the job id. The decrypt → CSV → S3 →
- * email-link work runs in `apps/worker` (the `campaign` role) with BullMQ
- * retry, writing item + job status back. The shared submit flow (auth →
- * validate → rate-limit → cap → createJob → enqueue with enqueue-failure
- * compensation → 202) lives in `../campaign/submit-job.ts`, parameterized here
- * for the export channel.
+ * Uses the shared submit flow in `../campaign/submit-job.ts`: creates a
+ * `campaign_job` with one item per id and enqueues a `campaign-process` job.
+ * The worker builds the CSV, uploads it to S3 and emails the link.
  *
- * Auth is a Keycloak Bearer token scoped to the campaign-manager client; the
- * caller's Signals org id is the token's `signalstack_org_id` claim. The
- * aggregator (from `aggregator_id`) must be active. The delivery recipient is
- * resolved here from the verified token (its `email` claim, falling back to the
- * aggregator's `contact_email`) and stored as the job's `requested_by` — a
- * server-set value the worker trusts, so the caller can never redirect the
- * export via the request body. The route never returns PII — only `{ job_id }`.
- * Belongs to `@aggregator-dpg/api`.
+ * Auth is a campaign-manager Bearer token; the aggregator must be active. The
+ * recipient is the token's `email` claim, else the aggregator's contact email,
+ * stored as `requested_by`; the request body cannot change it. The route
+ * returns only `{ job_id }`. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
 import { campaignEnvelopeSchema } from '../campaign/envelope.js';
@@ -53,14 +42,13 @@ export async function registerCampaignExportRoutes(app: FastifyInstance): Promis
       await submitCampaignJob(req, reply, {
         channel: 'export',
         parseContent: (rawContent) => rawContent as Record<string, unknown>,
-        // Deployment config, not caller input: the export worker's own field
-        // set (CAMPAIGN_EXPORT_FIELDS) decides what a row actually releases.
+        // From deployment config (CAMPAIGN_EXPORT_FIELDS), not caller input.
         piiFields: () =>
           config.CAMPAIGN_EXPORT_FIELDS === 'full' ? ['full'] : ['name', 'email', 'phone'],
         buildItem: (itemId) => ({ itemId, action: null }),
         maxItems: config.CAMPAIGN_EXPORT_MAX_ITEMS,
         maxItemsErrorCode: 'CAMPAIGN_TOO_MANY_ITEMS',
-        // Per-channel bucket: an export burst must not throttle email/voice.
+        // Rate-limit bucket per channel.
         rateLimitNamespace: 'campaign-submit-export',
         submitWindowSeconds: config.CAMPAIGN_EXPORT_SUBMIT_WINDOW_SECONDS,
         submitMax: config.CAMPAIGN_EXPORT_SUBMIT_MAX,

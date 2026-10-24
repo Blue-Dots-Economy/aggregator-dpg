@@ -1,15 +1,13 @@
 /**
- * The domains a coordinator serves (`users.serves`, migration 0029;
- * `@aggregator-dpg/api` aggregator store). Shared by the Postgres and
- * in-memory stores so both store a registration's domain the same way.
+ * The domains a coordinator serves (`users.serves`) in the `@aggregator-dpg/api`
+ * user store. Shared by the Postgres and in-memory stores.
  */
 
 /**
- * The `serves` value for a registration's domain: `null` means every domain,
- * stored as `[]` (D4-9); a domain id is stored as a one-element array. The
- * caller validates the id against the network's domains first, so `serves`
- * only ever holds real domain ids (never a sentinel such as the removed
- * `'both'`).
+ * The `serves` value for a registration's domain.
+ *
+ * `null` means every domain and is stored as `[]`; a domain id is stored as a
+ * one-element array. The caller validates the id first.
  *
  * @param type - The domain id from the request (already validated), or null.
  * @returns The domain ids to store.

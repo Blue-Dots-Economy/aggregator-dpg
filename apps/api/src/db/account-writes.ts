@@ -1,11 +1,9 @@
 /**
- * Application-side writes to `users` admin accounts and `user_identities`
- * (`@aggregator-dpg/api`, migration 0027).
+ * Writes to `users` admin accounts and `user_identities` (`@aggregator-dpg/api`).
  *
  * An org owner is an `admin` row of `users`: identity only, every
  * coordinator-only column NULL (`users_role_shape_chk`). These helpers run
- * INSIDE the caller's transaction (the `contact-writes.ts` pattern), so an org
- * and its owner's account are written atomically.
+ * inside the caller's transaction, so an org and its owner's account are written together.
  *
  * Login identities are provider-neutral (`provider`, `subject`) and belong to
  * the account, never to `contact`.
@@ -16,11 +14,10 @@ import { userIdentities } from './schema.js';
 import type { DbExecutor } from './contact-writes.js';
 
 /**
- * Returns the admin account of the person behind `contactId`, creating it when
- * absent, and holds it (`FOR KEY SHARE`) until the caller's transaction ends —
- * so a concurrent org delete cannot release the account before the org row
- * that will reference it is inserted. If it vanished in between, it is created
- * and held again (the `linkContact` hold-and-retry pattern).
+ * Returns the admin account for `contactId`, creating it when absent.
+ *
+ * Holds the row (`FOR KEY SHARE`) until the transaction ends, so a concurrent
+ * org delete cannot release it first. Retries once if it vanished.
  *
  * @param db - The caller's transaction.
  * @param contactId - The owner's contact id.
@@ -29,9 +26,7 @@ import type { DbExecutor } from './contact-writes.js';
  */
 export async function linkAdminAccount(db: DbExecutor, contactId: string): Promise<string> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    // Explicit NULLs: `status` and `profile` keep their defaults for
-    // coordinator inserts, and the role CHECK requires NULL on admin rows
-    // (`serves` defaults to '{}', which the CHECK requires too; 0029).
+    // Explicit NULLs: the role CHECK requires them on admin rows, and the column defaults are for coordinators.
     await db.execute(sql`
       INSERT INTO users (user_type, contact_id, status, profile, created_by, updated_by)
       VALUES ('admin', ${contactId}, NULL, NULL, 'self', 'self')
@@ -58,9 +53,8 @@ export class IdentityTakenError extends Error {
 }
 
 /**
- * The account already has a DIFFERENT login for this provider (e.g. the IdP
- * user was recreated). Never overwritten silently: the caller logs it and an
- * operator decides.
+ * The account already has a different login for this provider. It is never
+ * overwritten; the caller logs it for an operator.
  */
 export class IdentityMismatchError extends Error {
   constructor() {
@@ -78,10 +72,9 @@ export class IdentityNotLinkableError extends Error {
 }
 
 /**
- * Links a provider login to an account, once. The insert only happens when the
- * account exists (and, when `userType` is given, is of that type), so a link
- * can never be recorded against a missing account or the wrong kind of
- * account (e.g. an org owner's admin account through a coordinator path).
+ * Links a provider login to an account, once.
+ *
+ * Inserts only when the account exists and, if `userType` is given, has that type.
  *
  * @param db - Executor (the pool or the caller's transaction).
  * @param userId - The account (`users.id`).

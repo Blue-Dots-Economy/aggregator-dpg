@@ -1,10 +1,9 @@
 /**
- * Access-token verification.
+ * Access-token verification, in the aggregator API (`@aggregator-dpg/api`).
  *
- * Validates the `Authorization: Bearer ...` header against the Keycloak
- * realm's JWKS, then projects a small claims subset into a strongly-typed
- * `AuthContext`. The route handlers use that context for authorisation —
- * never the raw token.
+ * Verifies the `Authorization: Bearer` token against the Keycloak realm's
+ * JWKS and maps selected claims into an `AuthContext`. Handlers authorise
+ * from that context, never the raw token.
  */
 
 import { jwtVerify, createRemoteJWKSet, type JWTPayload } from 'jose';
@@ -30,23 +29,19 @@ export interface AuthContext {
   /** Custom claim mapped from the `aggregator_id` user attribute. */
   aggregatorId: string;
   /**
-   * Custom claim mapped from the `aggregator_type` user attribute. Drives the
-   * single-type enforcement on bulk uploads and public registration links —
-   * the aggregator may only operate on the type it registered as.
+   * Claim from the `aggregator_type` user attribute. Bulk uploads and public
+   * registration links accept only this type.
    */
   aggregatorType?: AggregatorType;
   /**
-   * Approval state read from the `decision_made` user-attribute claim.
-   * `'pending'` when the admin has not yet decided. Auth-gated routes call
-   * {@link requireApproved} to reject anything other than `'approved'`.
+   * Approval state from the `decision_made` claim; `'pending'` until decided.
+   * {@link requireApproved} rejects anything other than `'approved'`.
    */
   decisionMade?: 'pending' | 'approved' | 'rejected';
   /**
-   * Signalstack organisation id read from the `signalstack_org_id`
-   * user-attribute claim. Written at admin approval; backfilled by the
-   * login-time fallback when missing. May be absent on the very first
-   * authenticated request after an approval failure — handlers that need
-   * it should call the fallback helper before proceeding.
+   * Signalstack organisation id from the `signalstack_org_id` claim. Written at
+   * approval and backfilled at login when missing, so it may be absent; handlers
+   * that need it should use the fallback helper.
    */
   signalstackOrgId?: string;
   email?: string;
@@ -57,9 +52,8 @@ export interface AuthContext {
   phoneNumber?: string;
   phoneNumberVerified?: boolean;
   /**
-   * `azp` claim — the client that requested the token. Validated by the azp
-   * gate (see {@link assertAllowedAzp}), but not previously projected onto
-   * this context; recorded as the audit log's actor client (#617).
+   * `azp` claim: the client that requested the token. Recorded as the audit
+   * log's actor client.
    */
   azp?: string;
 }
@@ -81,10 +75,9 @@ export interface AnyAuthContext {
   clientId?: string;
   /**
    * `preferred_username` claim. Keycloak sets it to `service-account-<client>`
-   * for a client's service account and to the user's username for an end user,
-   * so it distinguishes a client_credentials token from a password-grant token
-   * on the SAME client — which `azp` cannot, and which the `sub` claim cannot
-   * either (it is a UUID in both cases).
+   * for a service account and to the username for a user, so it tells a
+   * client_credentials token from a password-grant token on the same client.
+   * `azp` and `sub` cannot.
    */
   preferredUsername?: string;
   /** Whether this token is bound to an end user (has `aggregator_id`). */
@@ -101,14 +94,11 @@ export type AnyAuthResult =
     };
 
 /**
- * Verifies the Bearer token on a Fastify request and returns an
- * `AuthContext`.
+ * Verifies the Bearer token on a request and returns an `AuthContext`.
  *
  * @param req - The Fastify request.
- * @param opts.allowedAzp - Per-call `azp` allow-list that OVERRIDES the global
- *   `KEYCLOAK_ALLOWED_AZP`. Use to scope a single endpoint to a specific client
- *   (e.g. `/v1/campaign/export` accepts only `campaign-manager`, while the
- *   global list excludes it so no other route accepts campaign-manager tokens).
+ * @param opts.allowedAzp - `azp` allow-list that replaces `KEYCLOAK_ALLOWED_AZP`
+ *   for this call, to limit one endpoint to a specific client.
  */
 export async function authenticate(
   req: FastifyRequest,
@@ -153,13 +143,12 @@ export async function authenticate(
 }
 
 /**
- * Builds an {@link AuthContext} from a verified token's optional claims. Split
- * out of {@link authenticate} so the guard logic there stays flat.
+ * Builds an {@link AuthContext} from a verified token's optional claims.
  *
  * @param userId - The token `sub`.
  * @param aggregatorId - The resolved `aggregator_id`.
  * @param payload - The verified JWT payload.
- * @returns The populated auth context (optional fields set only when present).
+ * @returns The auth context; optional fields set only when present.
  */
 function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayload): AuthContext {
   const claims = payload as Record<string, unknown>;
@@ -181,8 +170,7 @@ function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayloa
   if (decision === 'pending' || decision === 'approved' || decision === 'rejected') {
     ctx.decisionMade = decision;
   }
-  // Accept any non-empty domain id — the network config (loaded at the
-  // route layer) decides which values are valid for this deployment.
+  // Accept any non-empty domain id; the network config decides which are valid.
   const aggregatorType = readStringOrFirst(claims.aggregator_type);
   if (aggregatorType) ctx.aggregatorType = aggregatorType;
   const signalstackOrgId = readStringOrFirst(claims.signalstack_org_id);
@@ -191,23 +179,14 @@ function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayloa
 }
 
 /**
- * Wrap {@link authenticate} with the approval gate. Rejects with
- * `NOT_APPROVED` when `decision_made` is missing or != `'approved'`. Use on
- * protected business endpoints (everything except `/auth/*` and the
- * profile-self-read which legitimately needs to surface "pending" status to
- * the applicant's own dashboard).
+ * {@link authenticate} plus the approval gate. Rejects with `NOT_APPROVED`
+ * unless `decision_made` is `'approved'`. Use on business endpoints; not on
+ * `/auth/*` or the profile self-read, which must show "pending".
  *
- * When the token is missing the `signalstack_org_id` claim — typically
- * because the signalstack upsert failed during approval — the helper
- * synchronously backfills it before returning: looks up the aggregator's
- * name + slug, calls the (idempotent) admin upsert, writes the result on
- * the KC user as `signalstack_org_id`, and patches the in-flight
- * `AuthContext` so the current handler sees the value. The user's token
- * still lacks the claim until they refresh; subsequent requests carry it.
- *
- * Backfill failures are logged but do not block the request — the
- * authoritative gate is `decision_made`, and downstream handlers that
- * genuinely require an org id can re-check `context.signalstackOrgId`.
+ * When the token lacks `signalstack_org_id`, backfills it first (signalstack
+ * upsert, Keycloak attribute, DB row) and sets it on the context. The user's
+ * token carries the claim after the next refresh. Backfill failures are
+ * logged and do not block the request.
  */
 export async function requireApproved(req: FastifyRequest): Promise<AuthResult> {
   const result = await authenticate(req);
@@ -224,8 +203,7 @@ export async function requireApproved(req: FastifyRequest): Promise<AuthResult> 
   if (!result.context.signalstackOrgId) {
     await backfillSignalstackOrgId(result.context);
   }
-  // Record the coordinator's IdP login on its account (0027): once per process
-  // per user, best-effort, never blocks the request.
+  // Record the coordinator's IdP login once per process per user; best-effort.
   await recordLoginIdentity(
     result.context.aggregatorId,
     result.context.userId,
@@ -235,12 +213,10 @@ export async function requireApproved(req: FastifyRequest): Promise<AuthResult> 
 }
 
 /**
- * Best-effort backfill of `signalstack_org_id` on the authenticated user.
+ * Best-effort backfill of `signalstack_org_id` for the authenticated user.
  *
- * Idempotent — safe to call repeatedly because the signalstack upsert
- * dedupes on `external_id`. Mutates the supplied context in place when a
- * value is resolved; logs and returns silently on every failure path so
- * the caller can continue.
+ * Idempotent: the signalstack upsert dedupes on `external_id`. Sets the value
+ * on the context when resolved; logs and returns on every failure.
  */
 async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
   const start = Date.now();
@@ -273,11 +249,9 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
     return;
   }
 
-  // Resolve domains from the live network config (signalstack network.json)
-  // so the backfill never overwrites org.metadata.domains with a stale
-  // seeker/provider set on networks like orange_dot (tourist, practitioner).
-  // Prefer the aggregator's registered type when set; otherwise send the
-  // full domain list for the active network.
+  // Domains come from the live network config, so the backfill never writes a
+  // stale domain set into org.metadata.domains: the aggregator's registered
+  // type when set, else every domain of the network.
   const networkCfg = await getNetworkConfig();
   const aggregatorType = found.value.type;
   const upsertDomains: string[] =
@@ -306,11 +280,9 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
 
   const idp = getIdpAdmin();
   const orgId = upsert.value.org_id;
-  // Dual-write to KC attr + DB column. The DB mirror is what the worker
-  // and anonymous public-link submission path read; the KC attribute is
-  // what the next token refresh surfaces back as a claim. The current
-  // request's context is patched in memory either way so the in-flight
-  // handler sees the value without waiting for the refresh.
+  // Write both the Keycloak attribute (the claim after refresh) and the DB
+  // column (read by the worker and public-link submit). The context is updated
+  // in memory for the current request.
   const [attr, dbWrite] = await Promise.all([
     idp.setAttributes(ctx.userId, { [KC_ATTR.SIGNALSTACK_ORG_ID]: orgId }),
     store.updateSignalstackOrgId(ctx.aggregatorId, orgId, ctx.userId),
@@ -352,21 +324,17 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
 }
 
 /**
- * Verifies the Bearer token signature against the Keycloak JWKS without
- * requiring an `aggregator_id` claim. Use this on routes that may be
- * reached anonymously through the BFF (which then attaches a Keycloak
- * service-account token via the client_credentials grant).
+ * Verifies the Bearer token without requiring an `aggregator_id` claim.
  *
- * The middleware succeeds for both end-user tokens and service tokens.
- * Handlers can branch on `context.isUser` if they need to behave differently.
+ * Use on routes reached through the BFF, which attaches a service-account
+ * token for anonymous callers. Accepts user and service tokens; handlers can
+ * check `context.isUser`.
  *
  * @param req - The Fastify request.
- * @param opts.allowedAzp - Per-call `azp` allow-list that OVERRIDES the global
- *   `KEYCLOAK_ALLOWED_AZP`. Needed by the campaign dump route, whose client is
- *   deliberately excluded from the global list. Omitted ⇒ prior behaviour.
- * @returns `ok: true` with the projected {@link AnyAuthContext} when the token
- *   verifies; otherwise `ok: false` with a `MISSING_TOKEN`, `INVALID_TOKEN`, or
- *   `AZP_NOT_ALLOWED` error code and message.
+ * @param opts.allowedAzp - `azp` allow-list that replaces `KEYCLOAK_ALLOWED_AZP`
+ *   for this call. Used by the campaign dump route.
+ * @returns `ok: true` with the {@link AnyAuthContext}; otherwise `ok: false`
+ *   with `MISSING_TOKEN`, `INVALID_TOKEN`, or `AZP_NOT_ALLOWED`.
  */
 export async function authenticateAny(
   req: FastifyRequest,
@@ -419,8 +387,7 @@ function readStringOrFirst(v: unknown): string | undefined {
 }
 
 function readAggregatorId(payload: JWTPayload): string | undefined {
-  // Keycloak protocol mappers can publish a user attribute as either a
-  // single string or a one-element array claim — accept both shapes.
+  // A mapper may publish the attribute as a string or a one-element array.
   const direct = (payload as Record<string, unknown>).aggregator_id;
   if (typeof direct === 'string' && direct.length > 0) return direct;
   if (Array.isArray(direct) && typeof direct[0] === 'string') return direct[0];
@@ -428,11 +395,8 @@ function readAggregatorId(payload: JWTPayload): string | undefined {
 }
 
 /**
- * Thrown when a token's `azp` is not in the effective allow-list.
- *
- * A distinct type rather than a bare `Error` so callers can map a wrong-client
- * token to 403 while a bad signature stays 401 — the two are otherwise
- * indistinguishable once `verifyToken` has thrown.
+ * Thrown when a token's `azp` is not in the allow-list, so callers can answer
+ * 403 for a wrong client and 401 for a bad signature.
  */
 export class AzpNotAllowedError extends Error {
   constructor(message: string) {
@@ -442,23 +406,16 @@ export class AzpNotAllowedError extends Error {
 }
 
 /**
- * Verifies a raw Bearer token against the Keycloak realm and returns its
- * claims.
+ * Verifies a raw Bearer token against the Keycloak realm and returns its claims.
  *
- * Beyond the signature + `iss` + `exp` checks jose performs, this adds two
- * client-scoping controls that stop a token minted for a *different* client
- * (or a different resource server) from being replayed against this API:
+ * Besides the signature, `iss` and `exp`, it checks:
  *
- * - **`aud` (audience)** — when `KEYCLOAK_EXPECTED_AUDIENCE` is set, jose
- *   requires the token's `aud` to contain it. Off by default because it needs
- *   the realm's audience mapper (see `realm.json`) to be present;
- *   enable it once tokens actually carry the API audience.
- * - **`azp` (authorized party)** — when `KEYCLOAK_ALLOWED_AZP` is set, the
- *   token's `azp` (the client that requested it) must be in that allow-list.
- *   Unlike `aud`, `azp` is always emitted by Keycloak, so this is the primary,
- *   deploy-safe gate.
+ * - `aud`: when `KEYCLOAK_EXPECTED_AUDIENCE` is set, must contain it. Needs
+ *   the realm audience mapper.
+ * - `azp`: when `KEYCLOAK_ALLOWED_AZP` is set, must be in that list. Keycloak
+ *   always emits `azp`, so this is the main client gate.
  *
- * Both are no-ops when their env var is unset, preserving prior behaviour.
+ * Each check is skipped when its env var is unset.
  *
  * @param token - The raw JWT from the `Authorization: Bearer` header.
  * @returns The verified JWT claim set.
@@ -485,9 +442,8 @@ async function verifyToken(token: string, azpAllow?: readonly string[]): Promise
  * Rejects a token whose `azp` is not in the allow-list.
  *
  * @param payload - The verified JWT claim set.
- * @param override - Per-call allow-list; when provided it REPLACES the global
- *   `KEYCLOAK_ALLOWED_AZP` (used to scope one endpoint to a specific client).
- * @throws {Error} If an allow-list is in effect and `azp` is absent or not in it.
+ * @param override - Allow-list that replaces `KEYCLOAK_ALLOWED_AZP` when given.
+ * @throws {Error} If an allow-list applies and `azp` is absent or not in it.
  */
 function assertAllowedAzp(payload: JWTPayload, override?: readonly string[]): void {
   const allow = override ?? allowedAzp();

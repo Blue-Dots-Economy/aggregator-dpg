@@ -1,6 +1,6 @@
 /**
- * Public surface + factory for the identity store. Returns a process-wide
- * singleton; tests override it with `_setIdentityStore`.
+ * Public surface and factory for the identity store (`@aggregator-dpg/api`).
+ * Returns a process-wide singleton; tests override it with `_setIdentityStore`.
  */
 
 import type { IdentityStoreBase } from './interface.js';

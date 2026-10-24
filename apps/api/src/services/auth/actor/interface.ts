@@ -1,15 +1,12 @@
 /**
- * Actor-resolver contract (`@aggregator-dpg/api`, user & org Phase 5).
+ * Actor-resolver contract, in the aggregator API (`@aggregator-dpg/api`).
  *
- * Answers "who is calling, and which organisations do they relate to" for a
- * verified token. The database, not the token, is the authority: ownership
- * changes without a re-login, so the resolver reads it on every request.
+ * Answers who is calling and which organisations they relate to, for a
+ * verified token. The database is the authority, read on every request, so
+ * ownership changes apply without a re-login.
  *
- * The shape mirrors the RBAC work's `ActorResolverBase`
- * (`resolve({ aggregatorId?, subject })` → `{ userId, userType, active, orgs }`)
- * so RBAC can adopt this resolver or replace it behind the same contract
- * (`docs/rbac/phase-5-rbac-handoff.md`, H-3). RBAC adds the user's additional
- * roles (`user_role`); base roles follow `orgs` (design decision D7).
+ * Shape: `resolve({ aggregatorId?, subject })` → `{ userId, userType, active, orgs, roles? }`.
+ * Base roles follow `orgs`; additional roles come from `user_role`.
  *
  * Never throws across the service boundary.
  */

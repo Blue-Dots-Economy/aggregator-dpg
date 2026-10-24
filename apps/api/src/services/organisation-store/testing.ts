@@ -1,8 +1,7 @@
 /**
- * Public testing surface for the aggregator-org store.
+ * Test fake and builders for the organisation store, in `@aggregator-dpg/api`.
  *
- * Cross-module consumers import the fake from here, never the in-memory impl
- * directly (testing rule).
+ * Other modules import the fake from here, not the in-memory store.
  */
 
 import { InMemoryOrganisationStore } from './memory.js';
@@ -53,8 +52,7 @@ export function buildOrganisation(overrides: Partial<Organisation> = {}): Organi
     displayName: 'Test Org',
     state: null,
     contactId: contactId(ownerEmail, ownerPhone),
-    // One admin account per owner person (0027): derived from the owner's
-    // contact, so two orgs share an owner exactly when they share the person.
+    // Derived from the owner's contact, so two orgs share an owner exactly when they share the person.
     ownerUserId: `owner-${contactId(ownerEmail, ownerPhone).slice(0, 16)}`,
     ownerEmail,
     ownerPhone,
@@ -78,7 +76,7 @@ export function buildOrganisation(overrides: Partial<Organisation> = {}): Organi
 }
 
 /**
- * Builds the fixed Default org (0028): active, owned by the network admin.
+ * Builds the fixed Default org: active, owned by the network admin.
  *
  * @param overrides - Field overrides.
  * @returns The Default org row.

@@ -1,11 +1,8 @@
 /**
- * Email campaign content validation at the API boundary.
+ * Validates email campaign content in the api app.
  *
- * The schema itself is shared with the worker
- * (`@aggregator-dpg/campaign-template/content`) so both sides of the channel
- * assert the same thing; this module adds the submit-time placeholder check,
- * which only the API can do usefully — it must fail the request before a job
- * row exists.
+ * The schema is shared with the worker. This module adds the placeholder
+ * check, which fails the request before a job row exists.
  *
  * @module @aggregator-dpg/api
  */
@@ -20,10 +17,8 @@ export { emailContentSchema, type EmailContent };
  *
  * @param rawContent - The envelope's `content` value, unvalidated.
  * @returns The parsed content, ready to persist on the job row.
- * @throws `SCHEMA_VALIDATION` when the block is malformed, or
- *   `UNKNOWN_PLACEHOLDER` when the subject or body references a `{{token}}`
- *   outside the supported set — fail-closed at submit, so a typo never reaches
- *   a real inbox.
+ * @throws `SCHEMA_VALIDATION` when the block is malformed.
+ * @throws `UNKNOWN_PLACEHOLDER` when the subject or body uses an unsupported `{{token}}`.
  */
 export function parseEmailContent(rawContent: unknown): EmailContent {
   const parsed = emailContentSchema.safeParse(rawContent);

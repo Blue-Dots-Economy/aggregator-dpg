@@ -1,12 +1,9 @@
 /**
- * Org-detail rendering for a coordinator (`@aggregator-dpg/api`, migration
- * 0028; target model §4.3).
+ * Org-detail rendering for a coordinator (`@aggregator-dpg/api`).
  *
  * `url`, `locations`, company and GST number belong to the coordinator's org.
- * Each field is rendered from the org when the org has a value, else from the
- * coordinator's own value kept in `users.legacy_org_details`, else empty — so a
- * formerly-flat coordinator in the Default org still sees what it registered.
- * Shared by the Postgres and in-memory stores so the rule cannot drift.
+ * Each field comes from the org when set, else from `users.legacy_org_details`,
+ * else empty. Shared by the Postgres and in-memory stores.
  */
 
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';

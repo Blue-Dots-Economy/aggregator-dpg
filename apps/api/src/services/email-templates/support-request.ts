@@ -1,9 +1,8 @@
 /**
- * Support / contact-form email — sent to SUPPORT_EMAIL when a coordinator
- * submits the in-app "Contact support" form. Carries the raised complaint /
- * support request, the (prefilled + editable) submitter contact details, a
- * human-readable reference, and the portal link so support can triage and
- * follow up (Reply-To is the submitter's email when present).
+ * Support / contact-form email, sent to SUPPORT_EMAIL when a coordinator
+ * submits the in-app "Contact support" form. Carries the request, the
+ * submitter's contact details, a reference and the portal link. Reply-To is
+ * the submitter's email when present.
  *
  * Belongs to `@aggregator-dpg/api`.
  */
@@ -35,11 +34,7 @@ export interface SupportRequestVars {
   teamName: string;
   /** When the form was submitted. */
   submittedAt: Date;
-  /**
-   * Accepted attachments, listed in the body as well as carried as MIME parts
-   * (#551) — so a client that hides attachments still tells the agent what was
-   * sent, and one lost in transit shows up as a discrepancy rather than silence.
-   */
+  /** Accepted attachments, listed in the body as well as sent as MIME parts. */
   attachments?: Array<{ filename: string; bytes: number }>;
 }
 
@@ -56,10 +51,9 @@ function typeLabel(type: SupportRequestType): string {
 }
 
 /**
- * Generates a support tracking reference of the form `SUP-YYYYMMDD-XXXXXX`,
- * where the date is UTC and the suffix is 6 uppercase alphanumeric characters
- * drawn from a cryptographic source. Pure and side-effect-free given its
- * clock argument, so the format is trivially asserted in tests.
+ * Generates a support reference of the form `SUP-YYYYMMDD-XXXXXX`. The date is
+ * UTC; the suffix is 6 uppercase alphanumeric characters from a cryptographic
+ * source.
  *
  * @param now - Timestamp to derive the UTC date from. Defaults to `new Date()`.
  * @returns A new support reference string.
@@ -68,12 +62,7 @@ export function generateSupportReference(now: Date = new Date()): string {
   const y = now.getUTCFullYear();
   const m = String(now.getUTCMonth() + 1).padStart(2, '0');
   const d = String(now.getUTCDate()).padStart(2, '0');
-  // Rejection sampling rather than `% REF_ALPHABET.length`. The alphabet is 36
-  // symbols and 256 % 36 = 4, so a plain modulo draws the first four symbols
-  // from 8 byte values each and the rest from 7 — a ~14% skew toward A-D
-  // (CodeQL js/biased-cryptographic-random). Discarding the final partial block
-  // makes every symbol equally likely. The loop is bounded in practice: each
-  // byte has a 252/256 chance of being usable.
+  // Rejection sampling avoids modulo bias (256 % 36 != 0), so every symbol is equally likely.
   const limit = Math.floor(256 / REF_ALPHABET.length) * REF_ALPHABET.length;
   let suffix = '';
   while (suffix.length < 6) {

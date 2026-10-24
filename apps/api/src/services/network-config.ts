@@ -1,9 +1,7 @@
 /**
- * Process-local singleton for the resolved aggregator + signalstack
- * network config. Loaded once on first access from
- * `AGGREGATOR_CONFIG_PATH` (default `/app/config/aggregator.config.yaml`)
- * and re-used by every route + service that needs to look up a domain's
- * identity selectors, item_type, brand label, etc.
+ * Process-wide singleton for the resolved aggregator and signalstack network
+ * config (`@aggregator-dpg/api`). Loaded once on first access from
+ * `AGGREGATOR_CONFIG_PATH` (default `/app/config/aggregator.config.yaml`).
  *
  * Tests inject a pinned config via `_setNetworkConfig`.
  *
@@ -28,11 +26,9 @@ let cached: ResolvedNetworkConfig | null = null;
 let inflight: Promise<ResolvedNetworkConfig> | null = null;
 
 /**
- * Returns the resolved aggregator config. First call triggers the file
- * read + signalstack network.json fetch; subsequent calls return the
- * cached singleton. Throws on any unrecoverable failure so the api
- * fails loud at the route-binding stage instead of swallowing
- * configuration errors at request time.
+ * Returns the resolved aggregator config. The first call reads the file and
+ * fetches the signalstack network.json; later calls return the cached value.
+ * Throws on any unrecoverable failure, so config errors surface at startup.
  */
 export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
   if (cached) return cached;
@@ -57,12 +53,8 @@ export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
       throw new Error(`network-config load failed: ${message}`);
     }
     cached = result.value;
-    // First and only point in the process where both halves are known: the
-    // `SIGNALS_UI_URLS` keys (parsed at module load, before any config exists)
-    // and the network's declared domains. A key that matches no domain —
-    // `seekr=…` for `seeker` — is well-formed, so the parser passes it, and
-    // then the hand-off for the real domain never appears with nothing said.
-    // Warn only: see `unknownSignalsUiUrlDomains` for why this must not filter.
+    // Warn about `SIGNALS_UI_URLS` keys that match no declared domain (e.g. a typo).
+    // Warn only; do not filter.
     for (const domain of unknownSignalsUiUrlDomains(signalsUiUrls, cached.domainIds)) {
       logger.warn(
         {
@@ -95,28 +87,13 @@ export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
 }
 
 /**
- * Cross-checks the `AGGREGATOR_ONBOARDING_ENABLED` allow-list (#637) against
- * the registration modes this network actually declares, and emits the
- * diagnostics that env var otherwise has no way of producing.
+ * Checks the `AGGREGATOR_ONBOARDING_ENABLED` allow-list against the
+ * registration modes this network declares, and logs problems:
  *
- * Three distinct failures, all invisible without this:
- *
- * 1. A value naming no declared mode (`frm` for `form`) parses perfectly clean
- *    at module load, then withholds a mode nobody asked to withhold. Warn —
- *    never filter, and never fail the load: this is an optional narrowing knob,
- *    and a mode added to the YAML ahead of the ConfigMap rollout must not break
- *    boot.
- * 2. A reserved value (`bulk`, until bulk gating exists) is documented as
- *    accepted, so it gets its own message rather than being reported as a typo.
- *    It still counts for nothing in the intersection below — listing only
- *    reserved keys is a total lockout, and case 3 says so.
- * 3. An allow-list that survives the intersection with the declared modes
- *    *empty* leaves the operator with an empty mode dropdown and no way to
- *    create any link at all. Logged at **error**, because it is a
- *    deployment-breaking typo. Note what is deliberately NOT done: falling back
- *    to "all enabled". That would mask the typo and re-enable the very modes
- *    the operator set out to withhold — explicit config wins, it just has to be
- *    loud.
+ * 1. A value naming no declared mode (e.g. `frm`): warn. Never filter or fail.
+ * 2. A reserved value (`bulk`): its own message. It enables nothing.
+ * 3. No declared mode left enabled: logged at error, because no link can be
+ *    created. There is no fallback to "all enabled".
  *
  * @param cfg - The freshly resolved network config.
  */
@@ -128,9 +105,7 @@ function warnOnOnboardingAllowList(cfg: ResolvedNetworkConfig): void {
     logger.warn(
       {
         operation: 'config.onboardingEnabled.modeCheck',
-        // `status` is the documented success/failure/skipped enum
-        // (.claude/rules/logging-observability.md); the specific finding rides
-        // in `finding` so a query filtering on the enum still sees this line.
+        // `status` is the standard success/failure/skipped enum; the detail goes in `finding`.
         status: 'skipped',
         finding: 'unknown_capability',
         capability,
@@ -157,9 +132,7 @@ function warnOnOnboardingAllowList(cfg: ResolvedNetworkConfig): void {
       {
         operation: 'config.onboardingEnabled.modeCheck',
         status: 'failure',
-        // The value as configured, NOT the enabled set — that is empty by
-        // construction in this branch. `fields.enabled` on the create-link 400
-        // means the enabled subset, so this key must not reuse the name.
+        // The configured value, not the enabled set (which is empty here).
         configured: capabilities,
         declared_modes: declaredModes,
       },

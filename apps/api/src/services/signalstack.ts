@@ -1,11 +1,9 @@
 /**
- * Lazy SignalStack writer factory for the api process.
+ * Lazy SignalStack writer factory for the API process (`@aggregator-dpg/api`).
  *
- * Returns a singleton HttpSignalStackWriter when SIGNALSTACK_BASE_URL is set
- * and the configured credential (apikey or bearer — SIGNALSTACK_AUTH_MODE)
- * is fully configured, or `null` when signalstack push is disabled. Callers
- * should treat a null return as "skip the push, log nothing" — the env vars
- * are the operator's opt-in switch.
+ * Returns a singleton HttpSignalStackWriter when SIGNALSTACK_BASE_URL and the
+ * credential for SIGNALSTACK_AUTH_MODE are set, else `null`. On `null`,
+ * callers skip the push without logging.
  *
  * Tests inject a fake via `_setSignalStackWriter`.
  */
@@ -27,9 +25,8 @@ export function getSignalStackWriter(): SignalStackWriterBase | null {
   }
   const actingOrgId = config.SIGNALSTACK_ACTING_ORG_ID;
   if (!actingOrgId) {
-    // Onboard + list still work without an acting org; aggregator upsert
-    // will fail loudly with SIGNALSTACK_CONFIG_MISSING. Warn so the
-    // operator notices before the first approval click.
+    // Onboard and list work without an acting org; aggregator upsert fails
+    // with SIGNALSTACK_CONFIG_MISSING. Warn the operator early.
     logger.warn({
       status: 'warn',
       sub: 'signalstack.init',
@@ -42,9 +39,7 @@ export function getSignalStackWriter(): SignalStackWriterBase | null {
     const clientId = config.SIGNALSTACK_CLIENT_ID;
     const clientSecret = config.SIGNALSTACK_CLIENT_SECRET;
     const keycloakUrl = process.env.KEYCLOAK_URL;
-    // Signals is a shared service and trusts one issuer, which is not
-    // necessarily the realm this app authenticates its own users against.
-    // Falls back to KEYCLOAK_REALM when both live in the same realm.
+    // Signals may trust a different realm from this app's users; defaults to KEYCLOAK_REALM.
     const keycloakRealm = process.env.SIGNALSTACK_KEYCLOAK_REALM || process.env.KEYCLOAK_REALM;
     if (!clientId || !clientSecret || !keycloakUrl || !keycloakRealm) {
       logger.warn({
@@ -90,7 +85,7 @@ export function getSignalStackWriter(): SignalStackWriterBase | null {
   return writer;
 }
 
-/** Test helper — inject a fake or null to disable. */
+/** Test helper; injects a fake, or null to disable. */
 export function _setSignalStackWriter(w: SignalStackWriterBase | null): void {
   writer = w;
 }

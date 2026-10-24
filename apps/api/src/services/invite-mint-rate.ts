@@ -1,11 +1,9 @@
 /**
- * Injectable per-org rate-limit check for the invite-mint endpoint (#700 §7.2).
+ * Injectable per-org rate-limit check for the invite-mint endpoint.
  *
- * Belongs to `@aggregator-dpg/api`. Bounds how many invites one org can mint
- * per window — the mandatory mitigation that stops a leaked owner grant from
- * becoming a platform-branded spam amplifier. Wraps the Redis fixed-window
- * limiter so route handlers stay testable without Redis; tests override via
- * `_setInviteMintRateChecker`.
+ * Belongs to `@aggregator-dpg/api`. Limits how many invites one org can mint
+ * per window, so a leaked owner grant cannot be used to send spam. Wraps the
+ * Redis fixed-window limiter; tests override via `_setInviteMintRateChecker`.
  */
 
 import { config } from '../config.js';
@@ -33,9 +31,8 @@ export function _setInviteIpRateChecker(c: IpChecker | null): void {
 }
 
 /**
- * Coarse per-IP throttle for the mint endpoint, run before the (cheap) grant
- * verify — matches every other public surface. Fail-open (a DoS guard, not the
- * anti-abuse control; the per-org limit is the fail-closed one). Reuses the
+ * Coarse per-IP throttle for the mint endpoint, run before the grant check.
+ * Fails open; the per-org limit is the one that fails closed. Uses the
  * public-submit window/max config.
  *
  * @param ip - The caller IP.
@@ -54,8 +51,7 @@ export async function checkInviteIpRate(ip: string): Promise<InviteMintRateResul
 
 /**
  * Consumes `count` slots for one org from the invite-mint bucket. A bulk mint
- * of N addresses consumes N slots so the window bounds total invites, not
- * request count.
+ * of N addresses uses N slots.
  *
  * @param orgId - The minting org (`parent_org_id`).
  * @param count - Number of invites this request would mint.
@@ -72,8 +68,7 @@ export async function checkInviteMintRate(
     windowSeconds: config.INVITE_MINT_RATE_WINDOW_SECONDS,
     max: config.INVITE_MINT_RATE_MAX_PER_WINDOW,
     cost: count,
-    // Anti-abuse control for a leaked grant — a downed Redis must not silently
-    // remove it (§7.2). Fail closed.
+    // Fail closed: a Redis outage must not remove this limit.
     failClosed: true,
   });
   return { allowed: r.allowed, retryAfterSeconds: r.retryAfterSeconds };

@@ -1,13 +1,8 @@
 /**
- * Object-storage service for bulk uploads.
+ * Object-storage service (`@aggregator-dpg/api`).
  *
- * Wraps the AWS S3 SDK with the small surface the bulk upload pipeline
- * needs:
- *   - signUploadUrl: pre-signed PUT URL with Content-Type + size cap baked in.
- *   - headObject: confirm upload completed and capture ETag.
- *
- * Works against real S3 and against MinIO (local dev) interchangeably; the
- * latter requires `S3_ENDPOINT` + path-style addressing.
+ * Wraps the AWS S3 SDK: pre-signed upload and download URLs, HEAD and PUT.
+ * Works with S3 and MinIO; MinIO needs `S3_ENDPOINT` and path-style addressing.
  */
 
 import {
@@ -19,15 +14,10 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../../config.js';
 
-// Two S3 clients are kept on this module:
-//   - `getInternalClient()` uses S3_ENDPOINT (e.g. http://minio:9000 inside
-//     docker, or the AWS regional endpoint in prod). All server-side calls
-//     (HEAD, PUT for errors.csv, GET for the worker's CSV download)
-//     route through here.
-//   - `getPresignerClient()` uses S3_PUBLIC_ENDPOINT — the host the BROWSER
-//     can reach. Pre-signed URLs encode the endpoint, so they MUST be minted
-//     against the public hostname or browsers see DNS errors. Defaults to
-//     S3_ENDPOINT when S3_PUBLIC_ENDPOINT is unset (single-host dev).
+// Two S3 clients:
+//   - `getInternalClient()` uses S3_ENDPOINT for all server-side calls.
+//   - `getPresignerClient()` uses S3_PUBLIC_ENDPOINT, the host browsers can
+//     reach; pre-signed URLs must use it. Defaults to S3_ENDPOINT.
 let cachedInternalClient: S3Client | null = null;
 let cachedPresignerClient: S3Client | null = null;
 
@@ -41,10 +31,8 @@ function buildClient(endpoint: string | undefined): S3Client {
     region: config.S3_REGION,
     ...(endpoint ? { endpoint } : {}),
     forcePathStyle: config.S3_FORCE_PATH_STYLE,
-    // Explicit retry + connect timeout per error-handling.md. Only the connect
-    // phase is bounded — not a request/body timeout — so a large streaming
-    // GetObject download is never aborted mid-stream. Mirrors
-    // apps/worker/src/object-storage.ts so the two agree.
+    // Only the connect phase has a timeout, so large streaming downloads are not cut off.
+    // Matches apps/worker/src/object-storage.ts.
     maxAttempts: S3_MAX_ATTEMPTS,
     requestHandler: { connectionTimeout: S3_CONNECTION_TIMEOUT_MS },
     ...(config.S3_ACCESS_KEY_ID && config.S3_SECRET_ACCESS_KEY
@@ -88,8 +76,9 @@ export interface SignedUploadUrl {
  *
  * The signature constrains:
  *   - Content-Type: text/csv (signed; mismatch → S3 rejects with 403)
- *   - Maximum size: BULK_UPLOAD_MAX_BYTES (signed via x-amz-content-length-range
- *     where supported; otherwise enforced post-upload by HEAD inspection)
+ *
+ * The size is not signed; `/complete` checks it against BULK_UPLOAD_MAX_BYTES
+ * with a HEAD request.
  *
  * @param uploadId - DB row id; used as the deterministic S3 key.
  * @param aggregatorId - Owner aggregator; used as a key prefix for grouping.
@@ -121,10 +110,8 @@ export interface ObjectHead {
   etag: string;
   contentLength: number;
   /**
-   * S3 `LastModified`. Absent only if S3 omits it. The non-PII dump route
-   * reports this per object: the exporter overwrites the three keys in place
-   * with no cross-object atomicity, so these timestamps are how a consumer
-   * detects that it has caught a run mid-flight.
+   * S3 `LastModified`, if S3 returns it. The dump route reports it per object
+   * so consumers can detect a run caught mid-write.
    */
   lastModified?: Date;
 }
@@ -155,10 +142,7 @@ export async function headObject(key: string): Promise<ObjectHead | null> {
 }
 
 /**
- * Uploads an artefact to S3. General-purpose API-side object write.
- * NOTE: currently has no callers — the QR PNG write was removed in #650.
- * Kept as the write primitive (bulk-upload uses presigned client-side PUTs);
- * remove if no server-side write reappears.
+ * Uploads an object to S3. Currently has no callers.
  */
 export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
   await getInternalClient().send(
@@ -181,8 +165,7 @@ export interface SignedDownloadUrl {
 /**
  * Issues a pre-signed GET URL for a bulk-upload errors.csv artefact.
  *
- * Reuses BULK_UPLOAD_URL_TTL_SECONDS for download TTL — short enough that a
- * leaked URL has limited utility, long enough for a normal browser download.
+ * Uses BULK_UPLOAD_URL_TTL_SECONDS as the URL lifetime.
  */
 export async function signErrorsCsvDownloadUrl(key: string): Promise<SignedDownloadUrl> {
   const command = new GetObjectCommand({
@@ -201,11 +184,9 @@ export async function signErrorsCsvDownloadUrl(key: string): Promise<SignedDownl
 /**
  * Issues a pre-signed GET URL for an arbitrary object key.
  *
- * The generic counterpart to the artefact-specific presigners above: the
- * non-PII dump route (#692) signs keys it derives from config rather than from
- * a stored row, so it needs an explicit TTL and no baked-in content headers.
- * Signed against the PUBLIC endpoint client — the campaign manager is outside
- * the cluster, and a pre-signed URL encodes the host it was signed for.
+ * Used by the non-PII dump route. Takes an explicit TTL and optional response
+ * headers. Signed against the public endpoint, since callers are outside the
+ * cluster.
  *
  * @param key - The S3 object key to grant GET access to.
  * @param opts.ttlSeconds - URL lifetime in seconds.

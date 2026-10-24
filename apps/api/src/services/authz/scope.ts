@@ -1,13 +1,10 @@
 /**
- * Reach checks for the console routes (`@aggregator-dpg/api`, user & org
- * Phase 5).
+ * Reach checks for the console routes (`@aggregator-dpg/api`).
  *
- * Reach answers "is this target within the actor's organisations": the
- * network admin reaches everything; an org owner reaches the orgs it owns and
- * their coordinators; nobody else reaches anything. A target out of reach is
- * answered **404**, never 403, so ids cannot be probed (design C7). Whether
- * the actor may use a route at all (403) is decided before this, by the
- * route guard (and later by RBAC's capability check; handoff H-9).
+ * The network admin reaches everything; an org owner reaches the orgs it owns
+ * and their coordinators; nobody else reaches anything. Out of reach answers
+ * 404, not 403, so ids cannot be probed. Whether the actor may use a route at
+ * all (403) is decided earlier by the route guard.
  *
  * Pure functions over a resolved {@link Actor}; no I/O.
  */
@@ -39,9 +36,9 @@ export function reachesOrg(actor: Actor, orgId: string | null): boolean {
 }
 
 /**
- * Narrows a requested org filter to the actor's reach: an out-of-reach
- * `org_id` yields "no orgs" (an empty page), indistinguishable from an org
- * with no matches.
+ * Narrows a requested org filter to the actor's reach.
+ *
+ * An out-of-reach `org_id` yields an empty page, same as an org with no matches.
  *
  * @param actor - A resolved admin actor.
  * @param requested - The `org_id` filter, if any.

@@ -1,14 +1,14 @@
 /**
- * Registration links endpoints.
+ * Registration links endpoints of the aggregator API (`@aggregator-dpg/api`).
  *
- *   POST /v1/links/create              create a link (QR is client-side, #650)
+ *   POST /v1/links/create              create a link (QR is made client-side)
  *   GET  /v1/links                     list links scoped to aggregator
  *   GET  /v1/links/:id                 read a single link
  *   POST /v1/links/:id/activate        flip a draft link to live (idempotent)
  *   POST /v1/links/:id/deactivate      retire a link (idempotent)
  *
- * All endpoints require an authenticated aggregator JWT and scope writes by
- * `aggregator_id` claim — cross-aggregator access is impossible by construction.
+ * All endpoints need an authenticated aggregator JWT and are scoped by the
+ * `aggregator_id` claim.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -38,9 +38,8 @@ interface LinkMetrics {
 const ZERO_METRICS: LinkMetrics = { total: 0, passed: 0, failed: 0, skipped: 0 };
 
 /**
- * Sums the rolled-up `onboarding` rows (source='link') for one or more link
- * IDs scoped to a single aggregator. Returns a Map keyed by link_id; missing
- * keys mean the link has no rolled-up submissions yet.
+ * Sums the `onboarding` rows (source='link') for the given link ids of one
+ * aggregator. Returns a Map keyed by link_id; a missing key means no submissions yet.
  */
 async function fetchLinkMetrics(
   aggregatorId: string,
@@ -80,10 +79,8 @@ async function fetchLinkMetrics(
 const CreateLinkBodySchema = z.object({
   domain: z.string().min(1),
   /**
-   * Optional client-supplied slug. URL-safe lowercase, hyphen-separated,
-   * 3-60 chars. The route appends a short random suffix on collision so the
-   * caller doesn't have to retry — the returned `public_url` carries the
-   * final allocated slug.
+   * Optional slug: lowercase, hyphen-separated, 3-60 chars. On collision a short
+   * random suffix is added; `public_url` carries the final slug.
    */
   slug: z
     .string()
@@ -94,11 +91,8 @@ const CreateLinkBodySchema = z.object({
   context: z.record(z.unknown()).default({}),
   status: z.enum(['draft', 'live']).default('draft'),
   /**
-   * Per-link admin-facing registration mode key (e.g. `voice`, `form`). The
-   * mode → form-shape mapping lives in network config under
-   * `registration_modes`; the key is validated against the live config in the
-   * handler. Omitted defaults to the network's `form` mode. Open snake_case
-   * identifier. Immutable after creation (PATCH route .strict()-rejects it).
+   * Registration mode key (e.g. `voice`, `form`), checked against the network
+   * config's `registration_modes`. Defaults to `form`. Cannot be changed after creation.
    */
   registration_mode: z
     .string()
@@ -112,9 +106,8 @@ const CreateLinkBodySchema = z.object({
 });
 
 /**
- * Patch shape for `PATCH /v1/links/:id`. Only fields editable on a draft are
- * accepted; `domain` + `status` mutations go through dedicated endpoints
- * (signup-time pin and activate/deactivate respectively).
+ * Patch shape for `PATCH /v1/links/:id`. Only draft-editable fields; `domain`
+ * and `status` are not editable here.
  */
 const UpdateLinkBodySchema = z
   .object({
@@ -209,8 +202,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       });
       const start = Date.now();
 
-      // Body is already validated + transformed by the route schema —
-      // `expires_at` arrives as a Date|null and defaults are applied.
+      // Validated by the route schema; `expires_at` is a Date or null.
       const body = req.body as z.infer<typeof CreateLinkBodySchema>;
       const networkCfg = await getNetworkConfig();
       if (!networkCfg.domainIds.includes(body.domain)) {
@@ -222,24 +214,11 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       enforceAggregatorType(auth, body.domain);
 
       const declaredModes = Object.keys(networkCfg.aggregator.registration_modes ?? {});
-      // Second enforcement point for `AGGREGATOR_ONBOARDING_ENABLED` (#637).
-      // `GET /v1/aggregator-config` already hides a withheld mode from the
-      // admin dropdown, but that is a UI affordance — this is the gate, so the
-      // allow-list cannot be bypassed by calling the API directly. Unset ⇒
-      // `enabledModes` equals `declaredModes` and nothing below changes.
+      // Enforce AGGREGATOR_ONBOARDING_ENABLED here; hiding a mode in the UI is not
+      // enough. When unset, every declared mode is enabled.
       const enabledModes = enabledRegistrationModes(declaredModes);
-      // Omitted mode preserves the legacy full-profile default: prefer the
-      // `form` key (DB column default) when it is available, else the first
-      // one. Chosen from the *enabled* list, never the declared list — an
-      // omitted mode must not fall back to a mode this deployment withholds.
-      // Note the fallback is *within* the enabled set, so on a deployment that
-      // withholds `form` (or a network that never declared it) an omitted mode
-      // resolves to `voice`, i.e. an account-only channel. Deliberate and
-      // pinned by test: creating a link is better than 400ing, and the caller
-      // gets the mode back in the response. The portal is unaffected — it
-      // always sends an explicit mode and blocks create while it is empty
-      // (`RegistrationLinksSection.tsx`) — so this is an API-contract nuance
-      // for non-web clients only.
+      // No mode given: use `form` if enabled, else the first enabled mode. That can
+      // be `voice` (account-only) when `form` is withheld. The response returns the mode used.
       const modeKey =
         body.registration_mode ??
         (enabledModes.includes('form') ? 'form' : enabledModes[0]) ??
@@ -254,10 +233,8 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       }
       const store = getRegistrationLinksStore();
 
-      // Slug allocation. If the caller supplied a slug, try it first; collisions
-      // are resolved by appending a short random suffix (`-XXXX`) so the user
-      // keeps the readable part of their slug. Without a caller-supplied slug,
-      // a pure-random base62 stem is used.
+      // Try the caller's slug first and add a short random suffix on collision.
+      // Without one, use a random stem.
       let created;
       let slug = '';
       for (let attempt = 0; attempt < SLUG_RETRIES; attempt++) {
@@ -302,9 +279,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         });
       }
 
-      // Coordinator org_slug for the URL namespace. Cached per-create only —
-      // worst-case one extra row read per link, which is negligible vs the
-      // alternative of denormalising org_slug onto every registration_links row.
+      // Coordinator org_slug for the URL path.
       const userStore = getUserStore();
       const aggLookup = await userStore.findById(auth.aggregatorId);
       if (!aggLookup.ok || !aggLookup.value) {
@@ -316,11 +291,8 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       }
       const callerOrgSlug = aggLookup.value.orgSlug;
 
-      // The public URL is only minted when the link is published (status=live).
-      // Drafts are pure metadata — the slug may still change via PATCH. The QR
-      // is no longer persisted (#650): it is a deterministic function of the
-      // public URL, generated client-side on demand, so activation does no S3
-      // work and never fails on an unreachable bucket.
+      // The public URL exists only once the link is live; a draft slug can still
+      // change. The QR is generated client-side from the URL.
       if (created.status === 'draft') {
         log.info({
           status: 'success',
@@ -333,7 +305,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         return reply.code(201).send(await buildResponse(created, callerOrgSlug));
       }
 
-      // status === 'live' — eager activate-at-create path.
+      // status === 'live': activate at create.
       const publicUrl = buildPublicUrl(callerOrgSlug, slug);
 
       log.info({
@@ -373,7 +345,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
       });
       const start = Date.now();
 
-      // Query is already validated + coerced by the route schema (defaults applied).
+      // Validated and defaulted by the route schema.
       const { status, limit, offset } = req.query as z.infer<typeof ListQuerySchema>;
 
       const orgSlug = await resolveOrgSlug(auth.aggregatorId);
@@ -386,8 +358,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
       }
 
-      // Single grouped SQL for all link metrics; per-row fallback in
-      // buildResponse would N+1 the list endpoint.
+      // One grouped query for all link metrics, avoiding N+1.
       const metricsById = await fetchLinkMetrics(
         auth.aggregatorId,
         result.value.rows.map((r) => r.id),
@@ -434,9 +405,8 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      // Params + body are already validated by the route schemas — the
-      // `.strict()` Update schema rejects unknown keys (incl. registration_mode)
-      // before the handler runs, and `expires_at` arrives as Date|null|undefined.
+      // Validated by the route schemas; the `.strict()` schema rejects unknown keys
+      // such as registration_mode.
       const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
       const log = req.log.child({
         operation: 'registrationLinks.update',
@@ -462,10 +432,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         });
       }
 
-      // Slug-collision retry — mirror create flow. If the caller asks to set a
-      // slug that's already taken by a sibling link, append a short random
-      // suffix and try again. Without a caller-supplied slug, leave the
-      // existing slug in place (omit `slug` from the patch).
+      // Same slug retry as create. Without a requested slug, keep the current one.
       let updated;
       let slug = found.value.slug;
       if (body.slug !== undefined) {
@@ -551,7 +518,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      // Params are already validated by the route schema (id: non-empty string).
+      // Validated by the route schema.
       const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
 
       const result = await getRegistrationLinksStore().findById(linkId, auth.aggregatorId);
@@ -559,7 +526,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         throw httpError('DB_UNAVAILABLE', { cause: new Error(result.error.message) });
       }
       if (!result.value) {
-        // 403 to prevent cross-aggregator enumeration.
+        // 403 so other aggregators' links cannot be enumerated.
         throw httpError('FORBIDDEN', { detail: 'Link not accessible.' });
       }
       const orgSlug = await resolveOrgSlug(auth.aggregatorId);
@@ -586,7 +553,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      // Params are already validated by the route schema (id: non-empty string).
+      // Validated by the route schema.
       const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
       const log = req.log.child({
         operation: 'registrationLinks.activate',
@@ -613,9 +580,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
         throw httpError('CONFLICT', { detail: 'Retired links cannot be reactivated.' });
       }
 
-      // The draft slug is now frozen, so the public URL it encodes is final.
-      // No QR is minted or persisted (#650) — it is generated client-side from
-      // the public URL on demand, so activation no longer touches S3.
+      // The slug is now fixed, so the public URL is final. The QR is generated client-side.
       const publicUrl = buildPublicUrl(orgSlug, found.value.slug);
 
       const updated = await store.updateStatus(linkId, auth.aggregatorId, 'live');
@@ -652,7 +617,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      // Params are already validated by the route schema (id: non-empty string).
+      // Validated by the route schema.
       const { id: linkId } = req.params as z.infer<typeof LinkParamsSchema>;
       const log = req.log.child({
         operation: 'registrationLinks.deactivate',
@@ -693,9 +658,7 @@ export async function registerRegistrationLinksRoutes(app: FastifyInstance): Pro
 }
 
 /**
- * Resolves the caller's aggregator org_slug. Used by the public-URL builder
- * which needs the slug as a path segment. Wrapped in a helper so handlers
- * don't repeat the lookup-or-throw boilerplate.
+ * Resolves the caller's org_slug, used as a path segment in the public URL.
  */
 async function resolveOrgSlug(aggregatorId: string): Promise<string> {
   const result = await getUserStore().findById(aggregatorId);
@@ -713,35 +676,26 @@ interface ResponseOverrides {
 }
 
 /**
- * Renders a registration link as the canonical API response shape. The public
- * URL is re-minted per request from `org_slug` (never a persisted snapshot).
+ * Renders a registration link as the API response shape. The public URL is
+ * built per request from `org_slug`.
  *
- * `qr_url` / `qr_expires_at` are retained in the shape but always `null`
- * (#650): the QR is now generated client-side on demand from `public_url`.
- * The fields stay for one release so existing clients don't hard-break on a
- * missing key; they will be dropped in a follow-up.
+ * `qr_url` / `qr_expires_at` are always `null`; the QR is generated
+ * client-side from `public_url`. They will be removed later.
  *
- * @param orgSlug - The owning aggregator's `org_slug`. The public URL is
- *   namespaced under it (`<base>/<org_slug>/<link_slug>`), so we need it to
- *   re-mint the URL each request rather than persisting a stale snapshot.
+ * @param orgSlug - The owning aggregator's `org_slug`, used in the public URL.
  */
 async function buildResponse(
   row: RegistrationLink,
   orgSlug: string,
   overrides: ResponseOverrides = {},
 ): Promise<Record<string, unknown>> {
-  // Drafts are metadata-only — the public URL is minted at activation and
-  // never published while the row is still in draft. Retired links lose
-  // visibility for the same reason: the underlying poster is no longer
-  // authoritative.
+  // Drafts and retired links have no public URL.
   const isPublished = row.status === 'live';
   const publicUrl = isPublished ? (overrides.publicUrl ?? buildPublicUrl(orgSlug, row.slug)) : null;
-  // #650: QR is derived client-side from public_url — no server-side URL.
+  // No server-side QR URL.
   const qrUrl: string | null = null;
   const qrExpiresAt: string | null = null;
-  // `metrics` may be supplied by the caller when responding to a list (one
-  // grouped SQL aggregation per request); otherwise fall back to a per-link
-  // lookup so single-link reads still surface counters.
+  // List calls pass `metrics` from one grouped query; single reads look them up.
   const metrics =
     overrides.metrics ??
     (await fetchLinkMetrics(row.aggregatorId, [row.id])).get(row.id) ??
@@ -764,22 +718,22 @@ async function buildResponse(
 }
 
 /**
- * Generates a URL-safe random slug. 8 random bytes → 16 hex chars; collisions
- * across a single aggregator are vanishingly unlikely but the route still
- * retries on the unique-violation error from the store as defence in depth.
+ * Generates the short hex suffix added to a slug on a collision.
  */
 function randomSuffix(bytes = 2): string {
   return randomBytes(bytes).toString('hex');
 }
 
+/**
+ * Generates a random URL-safe slug (16 hex chars). The route still retries on
+ * a unique-violation.
+ */
 function generateSlug(): string {
   return randomBytes(8).toString('hex');
 }
 
 /**
- * Build the public URL for a registration link. The URL is namespaced under
- * the aggregator's `org_slug` so two users can use the same per-link
- * slug without collision: `${base}/<org_slug>/<slug>`.
+ * Builds the public URL for a link: `${base}/<org_slug>/<slug>`.
  */
 function buildPublicUrl(orgSlug: string, slug: string): string {
   const base = stripTrailingSlashes(config.PUBLIC_LINK_BASE_URL);
@@ -802,9 +756,8 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
 }
 
 /**
- * Reject when the requested link domain (seeker | provider) does not match
- * the aggregator's registered type (JWT `aggregator_type` claim). An
- * aggregator may only create registration links for the type it registered as.
+ * Rejects a link domain (seeker | provider) that does not match the
+ * aggregator's registered type (`aggregator_type` claim).
  */
 function enforceAggregatorType(auth: AuthContext, domain: string): void {
   if (!auth.aggregatorType) {

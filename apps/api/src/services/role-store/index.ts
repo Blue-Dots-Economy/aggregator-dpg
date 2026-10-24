@@ -1,7 +1,7 @@
 /**
- * Public surface + factory for the role-assignment store (`@aggregator-dpg/api`,
- * RBAC). Returns a process-wide singleton; tests override it with
- * `_setRoleStore`.
+ * Public surface and factory for the role-assignment store (`@aggregator-dpg/api`).
+ *
+ * Returns a process-wide singleton; tests override it with `_setRoleStore`.
  */
 
 import type { RoleStoreBase } from './interface.js';
@@ -11,8 +11,9 @@ import { TEST_ROLE_STORE_KEY } from './test-hook.js';
 let instance: RoleStoreBase | null = null;
 
 /**
- * Returns the shared role store (lazy). An explicitly injected store wins;
- * otherwise, under the unit-test setup, the per-test in-memory store.
+ * Returns the shared role store, created on first use.
+ *
+ * An injected store wins; under unit tests, the per-test in-memory store is used.
  *
  * @returns The role store.
  */
@@ -24,7 +25,7 @@ export function getRoleStore(): RoleStoreBase {
   return instance;
 }
 
-/** Test helper — replace the singleton (`null` restores the default). */
+/** Test helper; replaces the singleton (`null` restores the default). */
 export function _setRoleStore(s: RoleStoreBase | null): void {
   instance = s;
 }

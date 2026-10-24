@@ -1,9 +1,8 @@
 /**
- * Runtime configuration loaded from environment variables.
+ * Runtime configuration for the api app, loaded from environment variables.
  *
- * All values are read once at module init so request handlers stay pure.
- * Defaults target the local-dev compose stack; production overrides come
- * from `.env` or the orchestration layer.
+ * Values are read once at module load. Defaults target the local-dev compose
+ * stack; deployments override them through the environment.
  */
 
 import { z } from 'zod';
@@ -19,28 +18,18 @@ const ConfigSchema = z.object({
   /** Deployment environment; falls back to NODE_ENV when unset. */
   INSTANCE_ENV: z.enum(['development', 'staging', 'production']).optional(),
   /**
-   * Observed ONLY so the startup guard can reject the insecure `0` value in
-   * production. Node reads this directly from process.env for its TLS
-   * behaviour — do not re-derive TLS posture from this field elsewhere. Kept
-   * a free string (not an enum) because Node treats only the exact value `'0'`
-   * as "disable"; any other value (empty, `'true'`, unset) leaves verification
-   * on, and an enum would crash-parse those benign values.
+   * Read only so the startup guard can reject `0` in production. Node reads it
+   * from process.env itself; do not re-derive TLS posture from this field
+   * elsewhere. A free string, because only the exact value `'0'` disables
+   * verification.
    */
   NODE_TLS_REJECT_UNAUTHORIZED: z.string().optional(),
   PORT: z.coerce.number().int().positive().default(4000),
   HOST: z.string().default('0.0.0.0'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
-  /**
-   * Comma-separated list of allowed CORS origins for the BFF and any future
-   * direct browser clients. Use `*` only in dev.
-   */
+  /** Comma-separated allowed CORS origins. Use `*` only in dev. */
   CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:3100'),
-  /**
-   * Postgres connection string. Deliberately has **no default** — the URL
-   * carries credentials, so embedding one in source would ship a usable
-   * secret and mask a misconfigured deploy behind a silent fallback to
-   * localhost. Startup fails when it is unset.
-   */
+  /** Postgres connection string. No default because it carries credentials; startup fails when unset. */
   DATABASE_URL: z.string().min(1, 'DATABASE_URL must be set'),
   /** Run pending DB migrations on startup. Disable in CI/test to avoid races. */
   RUN_MIGRATIONS_ON_BOOT: z
@@ -48,41 +37,27 @@ const ConfigSchema = z.object({
     .default('true')
     .transform((v) => v === 'true'),
   /**
-   * Serve the OpenAPI spec + Scalar reference UI at /api/reference. The API
-   * is internet-reachable, so the docs surface (including admin route paths)
-   * is enumerable when enabled — defaults ON for dev convenience. This flag
-   * is force-disabled under NODE_ENV=production (see {@link apiReferenceEnabled})
-   * so a prod deploy never serves an enumerable route map by accident; opt back
-   * in for prod only via API_REFERENCE_FORCE.
+   * Serve the OpenAPI spec and Scalar UI at /api/reference. Ignored in
+   * production unless API_REFERENCE_FORCE is set (see {@link apiReferenceEnabled}).
    */
   API_REFERENCE_ENABLED: z
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
-  /**
-   * Escape hatch to serve the docs surface even under NODE_ENV=production.
-   * Off by default — must be explicitly set to expose the reference in prod.
-   */
+  /** Serve the API reference even in production. Off by default. */
   API_REFERENCE_FORCE: z
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
-  /**
-   * Public origin of the API service; used to assemble admin email links.
-   * Also advertised as `servers[0].url` in the OpenAPI spec (served and
-   * dumped) — deployments must override this so the docs surface points
-   * callers at the right host.
-   */
+  /** Public origin of the API; used in admin email links and as the OpenAPI `servers[0].url`. */
   PUBLIC_API_URL: z.string().default('http://localhost:4000'),
   /** Public origin of the portal (BFF web app); used in welcome emails. */
   PUBLIC_PORTAL_URL: z.string().default('http://localhost:3000'),
   /** Comma-separated list of admin recipient email addresses. */
   ADMIN_EMAILS: z.string().default(''),
   /**
-   * Owner of the fixed Default org (migration 0028), optional. When set, boot
-   * creates that person's account and makes it the Default org's owner, and
-   * Default-org coordinator approvals go to it; when unset, they go to
-   * `ADMIN_EMAILS` (the flat-instance behaviour).
+   * Optional owner of the Default org. When set, boot makes this account the
+   * Default org's owner and its coordinator reviews go here; otherwise to `ADMIN_EMAILS`.
    */
   DEFAULT_ORG_OWNER_EMAIL: z
     .string()
@@ -95,63 +70,40 @@ const ConfigSchema = z.object({
    *
    *   SIGNALS_UI_URLS=seeker=https://signals-seeker.example/auth/login,provider=https://...
    *
-   * Each network domain (from network.json) is fronted by its own Signals UI
-   * deployment, so this is a map rather than a single origin. Unset ⇒ the
-   * public registration form shows no Signals hand-off at all.
+   * Each network domain has its own Signals UI. Unset means the public form
+   * shows no Signals hand-off.
    *
-   * The value MUST be a Signals **UI** URL (normally `<origin>/auth/login`),
-   * never a Keycloak authorization URL: Keycloak URLs embed one-time `state`
-   * and `code_challenge` values bound to the browser that generated them, so a
-   * hardcoded one fails PKCE/state validation for every user. `/auth/login` is
-   * the page that mints a valid Keycloak URL per attempt.
+   * Use the Signals UI URL (normally `<origin>/auth/login`), never a Keycloak
+   * authorization URL: those carry one-time PKCE/state values and fail for other users.
    */
   SIGNALS_UI_URLS: z.string().default(''),
   /**
-   * Comma-separated allow-list of the onboarding capabilities this deployment
-   * offers when an aggregator **creates** a registration link (#637). Accepted
-   * values today are the network's declared `registration_modes` keys — `form`
-   * and `voice`; `bulk` is reserved for a future bulk-upload gate and does
-   * nothing yet.
+   * Comma-separated onboarding capabilities offered when creating a registration
+   * link. Values are the network's `registration_modes` keys (`form`, `voice`);
+   * `bulk` is reserved and gates nothing yet.
    *
-   * **Absent from the environment ⇒ every capability is enabled**, which is
-   * exactly today's behaviour, so an existing deployment that never sets this
-   * is unaffected. `form,voice` is therefore identical to leaving it unset,
-   * and `form` alone stops voice links being offered or created.
+   * Unset enables every capability. Set but blank enables none and logs a
+   * warning, so this is `.optional()`, not `.default('')`. Deploy config must
+   * omit the key when unconfigured.
    *
-   * A var that is *present but blank* is a misconfiguration, not a default:
-   * it names no capability, so it disables everything and says so loudly. That
-   * is why this is `.optional()` rather than `.default('')` — collapsing the
-   * two would make the dangerous case indistinguishable from the safe one.
-   * Anything shipping this key (compose, Helm ConfigMap) must omit it entirely
-   * when unconfigured rather than render an empty string.
+   * An env var, not YAML, so it can differ per instance.
    *
-   * Deliberately an env var rather than a key in `aggregator.config.yaml`:
-   * every deployment pulls that YAML from the same repo branch, so dropping
-   * `voice` there would disable voice in *every* environment including
-   * production. This var is per-instance.
-   *
-   * Gates **creation only**. An already-issued link keeps resolving in its own
-   * mode — a printed voice QR must not stop working — which is why
-   * `routes/public-registration-links.ts` reads the unfiltered network config.
+   * Gates link creation only; existing links keep working in their own mode,
+   * which is why `routes/public-registration-links.ts` reads the unfiltered
+   * network config.
    */
   AGGREGATOR_ONBOARDING_ENABLED: z.string().optional(),
   /**
-   * Recipient(s) for contact-support submissions (#120-equivalent).
-   * Feature-gated: unset ⇒ endpoint 503, web button hidden. Accepts multiple
-   * comma-separated addresses (all receive the TO copy).
+   * Comma-separated recipients for contact-support submissions.
+   * Unset means the endpoint returns 503 and the web button is hidden.
    */
   SUPPORT_EMAIL: z.string().optional(),
-  /**
-   * Optional CC recipient(s) for contact-support submissions. Accepts
-   * multiple comma-separated addresses. Unset ⇒ no CC header is added.
-   */
+  /** Optional comma-separated CC recipients for contact-support submissions. */
   SUPPORT_CC_EMAIL: z.string().optional(),
   /**
-   * Attachment budget for the contact-support form (#551): total decoded bytes
-   * across all attachments on one submission, and how many files it may carry.
-   * Served to the web form by `GET /v1/support/config`, so raising them needs no
-   * web rebuild. SES rejects a message over 10MB after base64 inflation, so
-   * ~7MB of original file is the practical ceiling whatever these say.
+   * Contact-support attachment limits: total decoded bytes and file count per submission.
+   * Served to the web form by `GET /v1/support/config`. SES caps a message at
+   * 10MB after base64, so about 7MB of files is the real ceiling.
    */
   SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES: z.coerce
     .number()
@@ -161,29 +113,16 @@ const ConfigSchema = z.object({
   SUPPORT_ATTACHMENT_MAX_FILES: z.coerce.number().int().positive().default(3),
 
   // ─── Object storage (bulk uploads + errors.csv) ──────────────────────────
-  /**
-   * S3-compatible endpoint URL. For MinIO in dev, set to
-   * `http://minio:9000` (in-container) or `http://localhost:9000` (host).
-   * For real S3, leave blank — the SDK uses AWS endpoints by region.
-   */
+  /** S3-compatible endpoint URL (MinIO in dev). Leave blank for AWS S3. */
   S3_ENDPOINT: z.string().optional(),
-  /**
-   * Browser-reachable endpoint used to mint pre-signed URLs. Falls back to
-   * S3_ENDPOINT when unset (single-host dev). In production this is the
-   * public hostname (e.g. https://s3.amazonaws.com or
-   * https://files.example.com) while S3_ENDPOINT remains the in-cluster /
-   * VPC-internal hostname for HEAD/PUT/GET ops.
-   */
+  /** Browser-reachable endpoint for pre-signed URLs. Falls back to S3_ENDPOINT. */
   S3_PUBLIC_ENDPOINT: z.string().optional(),
   S3_REGION: z.string().default('us-east-1'),
   /** Bucket holding uploaded CSVs and generated error reports. */
   S3_BUCKET: z.string().default('aggregator-bulk-uploads'),
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
-  /**
-   * Force path-style addressing (bucket.endpoint.com vs endpoint.com/bucket).
-   * Required for MinIO; auto-detected for AWS.
-   */
+  /** Force path-style addressing (`endpoint/bucket`). Required for MinIO. */
   S3_FORCE_PATH_STYLE: z
     .enum(['true', 'false'])
     .default('true')
@@ -201,16 +140,11 @@ const ConfigSchema = z.object({
 
   // ─── Registration links ─────────────────────────────────────────────────
   /**
-   * Base URL of the public landing page that resolves a registration link.
-   * The public URL is `${PUBLIC_LINK_BASE_URL}/${org_slug}/${slug}`; the
-   * aggregator's org_slug namespaces the per-link slug so two aggregators
-   * may use the same slug. Also the value the QR encodes (client-side).
-   * Example: https://aggregator.example.com
+   * Base URL of the public registration-link page. A link is
+   * `${PUBLIC_LINK_BASE_URL}/${org_slug}/${slug}`; the QR encodes it.
    */
   PUBLIC_LINK_BASE_URL: z.string().default('http://localhost:3000'),
-  // ─── Campaign export channel (#579) ─────────────────────────────────────
-  // Per-channel by design: voice (#577) and email (#578) add their own
-  // CAMPAIGN_VOICE_* / CAMPAIGN_EMAIL_* knobs rather than sharing these.
+  // ─── Campaign export channel ────────────────────────────────────────────
   /** Max `item_ids` accepted per export request body (after de-dup). */
   CAMPAIGN_EXPORT_MAX_ITEMS: z.coerce.number().int().positive().default(500),
   /** Ingress rate-limit window (seconds) for export submits, per org. */
@@ -221,13 +155,10 @@ const ConfigSchema = z.object({
   CAMPAIGN_EXPORT_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
   /** BullMQ attempts for an export campaign-process job (retry count on transient failure). */
   CAMPAIGN_EXPORT_ATTEMPTS: z.coerce.number().int().positive().default(3),
-  // Shared with the worker (@aggregator-dpg/shared-primitives/config) so the
-  // two processes can never disagree on what an export releases — the API
-  // only reads this to record `piiFields` on the audit `requested` row
-  // (#617); the worker reads it to actually perform the export.
+  // Shared with the worker. The API reads it only to record audit `piiFields`.
   ...campaignExportConfigFields,
 
-  // ─── Campaign voice channel (#577) ──────────────────────────────────────
+  // ─── Campaign voice channel ─────────────────────────────────────────────
   /** Max `participant_ids` accepted per voice campaign request body (after de-dup). */
   CAMPAIGN_VOICE_MAX_ITEMS: z.coerce.number().int().positive().default(500),
   /** Ingress rate-limit window (seconds) for voice campaign submits, per org. */
@@ -239,29 +170,15 @@ const ConfigSchema = z.object({
   /** BullMQ attempts for a voice campaign job (retry count on transient failure). */
   CAMPAIGN_VOICE_ATTEMPTS: z.coerce.number().int().positive().default(3),
   /**
-   * Non-PII dump download API (#692). The Signals `signals-s3-export` cron
-   * writes three fixed keys — `[<prefix>/]<network>/<instance_id>/<table>.ndjson.gz`
-   * — into this deployment's own S3 bucket (`S3_BUCKET`); there is no manifest
-   * and no dated run folder, so the key root must be configured, never probed.
-   * A wrong value must 404, not silently serve a different dataset.
+   * Key prefix of the non-PII dump in `S3_BUCKET`. Signals writes
+   * `[<prefix>/]<network>/<instance_id>/<table>.ndjson.gz`. A wrong value returns 404.
    */
   CAMPAIGN_DUMP_PREFIX: z.string().default(''),
-  /**
-   * The Signals instance whose dump this deployment serves. One aggregator
-   * deployment serves exactly one Signals instance, so this needs no request
-   * parameter — but it has no default, and the route returns 503
-   * DUMP_NOT_CONFIGURED when it is unset rather than failing the whole API to
-   * boot on deployments that do not use the campaign manager.
-   */
+  /** Signals instance whose dump this deployment serves. Unset makes the dump route return 503. */
   CAMPAIGN_DUMP_INSTANCE_ID: z.string().optional(),
-  /**
-   * Lifetime of the pre-signed dump URLs. The caller is a machine that
-   * downloads immediately, so this is far shorter than a human-facing link.
-   */
+  /** Lifetime of the pre-signed dump URLs; short, because the caller downloads at once. */
   CAMPAIGN_DUMP_URL_TTL_SECONDS: z.coerce.number().int().positive().default(600),
-  // ─── Campaign email channel (#578) ──────────────────────────────────────
-  // Deliberately its own knobs, not shared with the export channel above: an
-  // email blast and a PII export have different safe volumes and cadences.
+  // ─── Campaign email channel ─────────────────────────────────────────────
   /** Max `item_ids` (recipients) accepted per email request body (after de-dup). */
   CAMPAIGN_EMAIL_MAX_ITEMS: z.coerce.number().int().positive().default(200),
   /** Ingress rate-limit window (seconds) for email submits, per org. */
@@ -270,20 +187,13 @@ const ConfigSchema = z.object({
   CAMPAIGN_EMAIL_SUBMIT_MAX: z.coerce.number().int().positive().default(10),
   /** Max active (queued|processing) email jobs allowed per org at once. */
   CAMPAIGN_EMAIL_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
-  /**
-   * BullMQ attempts for an email campaign-process job. Retries are SAFE here
-   * (and deliberately kept at 3, not 1): the worker's per-item terminal-status
-   * guard means a retried job never re-emails an item already marked `sent`, so
-   * durability costs no duplicate sends.
-   */
+  /** BullMQ attempts for an email job. Retries never re-send an item already marked `sent`. */
   CAMPAIGN_EMAIL_ATTEMPTS: z.coerce.number().int().positive().default(3),
 
   // ─── Approval links ───────────────────────────────────────────────────────
   /**
-   * Lifetime of the admin approval/rejection links emailed on a new
-   * aggregator registration (seconds). Drives BOTH the signed-token expiry
-   * and the human-readable "expires in …" wording on the admin email and the
-   * confirmation page, so the two can never drift. Default: 7 days.
+   * Lifetime in seconds of emailed approval links. Sets both the token expiry
+   * and the "expires in" text. Default 7 days.
    */
   APPROVAL_TOKEN_TTL_SECONDS: z.coerce
     .number()
@@ -291,46 +201,35 @@ const ConfigSchema = z.object({
     .positive()
     .default(7 * 24 * 60 * 60),
 
-  /**
-   * Coordinator-invite token lifetime (#700). Default 14 days. Bounds how long
-   * an emailed invite remains usable before the owner must re-mint.
-   */
+  /** Coordinator-invite token lifetime. Default 14 days. */
   INVITE_TOKEN_TTL_SECONDS: z.coerce
     .number()
     .int()
     .positive()
     .default(14 * 24 * 60 * 60),
 
-  /**
-   * Org-owner grant-token lifetime (#701). Default 90 days — long, because the
-   * owner cannot log in and the grant is their only route back to the mint page.
-   */
+  /** Org-owner grant-token lifetime. Default 90 days. */
   GRANT_TOKEN_TTL_SECONDS: z.coerce
     .number()
     .int()
     .positive()
     .default(90 * 24 * 60 * 60),
 
-  // ─── Rate limit (per-org invite mint, #700 §7.2) ────────────────────────
-  // Bounds how many invites one org can mint per window — the mandatory
-  // mitigation that stops a leaked grant becoming a platform-branded spam
-  // amplifier. Follows the PUBLIC_SUBMIT_RATE shape.
+  // ─── Rate limit (per-org invite mint) ───────────────────────────────────
+  // Caps invites per org per window, so a leaked grant cannot be used to send spam.
   INVITE_MINT_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
   INVITE_MINT_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(100),
-  // Per-actor limit on console decisions and edits (Phase 5, design R11).
-  // A coarse guard against a runaway client or a stolen session; fails open.
+  // Per-actor limit on console decisions and edits. Fails open.
   CONSOLE_WRITE_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   CONSOLE_WRITE_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(60),
-  /** Max recipients per single mint request (#701). Default 10. */
+  /** Max recipients per mint request. Default 10. */
   INVITE_MINT_MAX_RECIPIENTS: z.coerce.number().int().positive().default(10),
 
   /**
-   * Window + cap for re-sending an approved org's coordinator-invite link when
-   * its owner re-submits the registration form. Keyed on the STORED owner
-   * email alone, so rotating IPs cannot buy a fresh bucket, and fail-closed —
-   * each admitted call mints another independent 90-day grant, so a downed
-   * Redis must not remove the cap. Deliberately tight: this is a recovery
-   * action a real owner takes once, not a routine request.
+   * Window and cap for re-sending an approved org's link when its owner
+   * re-submits the form. Keyed on the stored owner email (not the client IP)
+   * and fails closed even when Redis is down, because every admitted call mints
+   * another 90-day link.
    */
   ORG_INVITE_RESEND_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
   ORG_INVITE_RESEND_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(3),
@@ -345,11 +244,7 @@ const ConfigSchema = z.object({
     .positive()
     .default(24 * 60 * 60 * 1000),
 
-  /**
-   * Cooling window (in MINUTES) after a rejection before the same owner/
-   * coordinator may re-register (#726). Default 720 (12h). In minutes for
-   * granularity; override via env.
-   */
+  /** Minutes after a rejection before the same owner or coordinator may re-register. Default 720 (12h). */
   REGISTRATION_COOLING_MINUTES: z.coerce.number().int().positive().default(720),
 
   // ─── Schema loader ──────────────────────────────────────────────────────
@@ -361,50 +256,36 @@ const ConfigSchema = z.object({
   PUBLIC_SUBMIT_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(20),
 
   /**
-   * Trust-proxy configuration for Fastify. Controls which upstream addresses
-   * are allowed to supply `X-Forwarded-For` (and therefore decide what
-   * `req.ip` evaluates to — used by the public rate limiter).
-   *
-   * Accepts a comma-separated list of IPs, CIDR ranges, or Fastify named
-   * groups (`loopback`, `linklocal`, `uniquelocal`). Production deployments
-   * MUST set this to the BFF subnet so callers cannot spoof their source IP.
-   * The default `loopback,linklocal,uniquelocal` trusts only RFC1918 private
-   * ranges, which is safe behind a single-host Docker compose dev stack.
+   * Proxies allowed to set `X-Forwarded-For`, which decides `req.ip` for the rate limiter.
+   * Comma-separated IPs, CIDRs or Fastify groups. Production must set the BFF
+   * subnet. The default trusts private ranges only.
    */
   TRUST_PROXY: z.string().default('loopback,linklocal,uniquelocal'),
 
   // ─── SignalStack outward push ───────────────────────────────────────────
-  // Base + Keycloak-bearer credential fields are shared with the worker via
-  // @aggregator-dpg/shared-primitives/config; acting-org-id is api-only.
+  // Shared with the worker; the acting org id below is api-only.
   ...signalStackConfigFields,
   /**
-   * Platform-wide signalstack organisation id under which admin aggregator
-   * upserts are performed (sent as `x-acting-org-id`). Required when
-   * SIGNALSTACK_BASE_URL is set so the aggregator-approval flow can register
-   * each newly-approved aggregator as a signalstack org.
+   * Signals org id sent as `x-acting-org-id` for admin upserts. Required when
+   * SIGNALSTACK_BASE_URL is set, so approval can register the aggregator in Signals.
    */
   SIGNALSTACK_ACTING_ORG_ID: z.string().optional(),
   // ─── RBAC (docs/rbac/rbac-design-aggregator.md) ─────────────────────────
   /**
-   * `off`: no access checks run (nothing is loaded at boot). `log`: every
-   * check runs and a would-deny is logged, but the request continues.
-   * `enforce`: a deny returns 403. Flip per instance after a clean log window.
+   * `off`: no access checks. `log`: checks run and denials are logged, but the
+   * request continues. `enforce`: a denial returns 403.
    */
   RBAC_MODE: z.enum(['off', 'log', 'enforce']).default('off'),
   /**
-   * Deploy-time switch for the CUSTOM-ROLES capability (network-admin role
-   * authoring). `false` (default, opt-in) builds the role snapshot from the
-   * built-in roles alone, so any existing custom-role assignment is inert, the
-   * role-authoring routes are not registered (404), and `GET
-   * /v1/aggregator-config` reports `features.custom_roles: false`. Independent
-   * of — and subordinate to — `RBAC_MODE`: with `RBAC_MODE=off` nothing is
-   * loaded and this flag has no effect.
+   * Enables custom-role authoring by the network admin. When false (default),
+   * only built-in roles load, custom-role assignments grant nothing, and the
+   * authoring routes are not registered. No effect when `RBAC_MODE=off`.
    */
   RBAC_CUSTOM_ROLES_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
-  /** Base URL of the OPA sidecar. Validated as a URL so a typo fails at boot, not per request. */
+  /** Base URL of the OPA sidecar. Validated at boot. */
   OPA_URL: z.string().url().default('http://localhost:8181'),
   /** Per-attempt timeout for an OPA decision. */
   OPA_TIMEOUT_MS: z.coerce.number().int().positive().default(500),
@@ -412,10 +293,7 @@ const ConfigSchema = z.object({
   OPA_RETRIES: z.coerce.number().int().min(0).max(3).default(1),
   /** Base backoff between OPA retries; doubles per retry. */
   OPA_BACKOFF_MS: z.coerce.number().int().positive().default(50),
-  /**
-   * How often each replica re-reads the RBAC catalogue version and reloads
-   * roles and PermissionSets when it moved. `0` disables the timer.
-   */
+  /** How often each replica checks the RBAC catalogue version and reloads on change. `0` disables it. */
   RBAC_CATALOGUE_REFRESH_MS: z.coerce.number().int().min(0).default(30000),
 });
 
@@ -432,8 +310,7 @@ export const corsOrigins: string[] = config.CORS_ORIGINS.split(',')
 /**
  * The configured owner of the Default org, or `null`.
  *
- * Read from the live environment at call time, like {@link supportEmail}, so
- * tests can toggle it within one worker.
+ * Read from the environment at call time, so tests can change it.
  *
  * @returns The lowercased email, or `null` when unset or blank.
  */
@@ -444,35 +321,21 @@ export function defaultOrgOwnerEmail(): string | null {
 /**
  * Recipient address for contact-support submissions.
  *
- * Read from the live environment at **call time** rather than from the
- * frozen `config` snapshot — mirrors {@link defaultOrgOwnerEmail}. Unlike
- * that flag, this one is consumed on every request (`GET /v1/support/config`
- * and `POST /v1/support` both need the current value, not just a
- * startup-time snapshot), and it must be independently toggleable across
- * test cases (configured vs unset) within the same Vitest worker, where the
- * frozen `config.SUPPORT_EMAIL` reflects whatever env was present the first
- * time `config.ts` was imported and cannot be changed afterwards.
+ * Read from the environment at call time, so tests can change it.
  *
- * @returns The configured support recipient(s) as a clean comma-joined list,
- *   or `undefined` when `SUPPORT_EMAIL` is unset/empty (⇒ the support form
- *   reports disabled and `POST /v1/support` returns 503
- *   `SUPPORT_NOT_CONFIGURED`). Multiple comma-separated addresses are
- *   trimmed, de-blanked, and rejoined with `, `.
+ * @returns The recipients joined with `, `, or `undefined` when unset (support is then disabled).
  */
 export function supportEmail(): string | undefined {
   return normaliseEmailList(process.env.SUPPORT_EMAIL);
 }
 
 /**
- * `azp` client ids allowed to reach the campaign-manager routes (PII export
- * #579, and the email/voice APIs that follow — all called by the same
- * `campaign-manager` client). This OVERRIDES the global `KEYCLOAK_ALLOWED_AZP`
- * on those routes, so they accept ONLY these clients — and the global list
- * excludes them, which blocks a campaign-manager token on every other endpoint
- * (default-deny both ways).
+ * `azp` client ids allowed on the campaign routes.
  *
- * @returns The allow-listed `azp` values (comma-separated env;
- *   default `['campaign-manager']`).
+ * Replaces `KEYCLOAK_ALLOWED_AZP` on those routes, so they accept only these clients.
+ * The global list leaves them out, so their tokens are refused on every other route.
+ *
+ * @returns The allowed `azp` values; default `['campaign-manager']`.
  */
 export function campaignManagerAllowedAzp(): string[] {
   const raw = process.env.CAMPAIGN_MANAGER_ALLOWED_AZP?.trim() || 'campaign-manager';
@@ -480,50 +343,31 @@ export function campaignManagerAllowedAzp(): string[] {
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  // Never return an empty list: an empty allow-list disables the azp gate
-  // entirely (assertAllowedAzp treats `[]` as "off"), which would open the most
-  // sensitive route to any client. A pathological value (e.g. `","`) parses to
-  // empty — fall back to the default rather than silently un-gating.
+  // Never return an empty list: `[]` turns the azp check off.
   return parsed.length > 0 ? parsed : ['campaign-manager'];
 }
 
 /**
- * Keycloak `preferred_username` that identifies the campaign-manager system
- * caller on the non-PII dump route (#692).
+ * Keycloak `preferred_username` of the campaign-manager system caller on the non-PII dump route.
  *
- * The dump endpoint is whole-network and has no org scoping, so the calling
- * identity is its only control. The `campaign-manager` client serves two
- * identities — a coordinator via the password grant and the system caller via
- * client_credentials — which share one `azp`, so `azp` alone cannot separate
- * them. `preferred_username` can: Keycloak sets it to
- * `service-account-<client-id>` for the service account, and realm usernames
- * are unique, so no human can hold that value.
+ * The dump is whole-network with no org scope, so this identity is its only control.
+ * Coordinators and the system caller share one `azp`, so the username tells
+ * them apart. Keycloak names the service account `service-account-<client-id>`,
+ * which no human can hold. Read from the environment at call time.
  *
- * Read from the live environment at **call time**, mirroring
- * {@link campaignManagerAllowedAzp}: it must be independently settable across
- * test cases in one Vitest worker, where the frozen `config` snapshot cannot
- * change after first import.
- *
- * @returns The expected service-account username; the default when the env var
- *   is unset, empty, or whitespace-only.
+ * @returns The expected username; the default when the env var is unset or blank.
  */
 export function campaignDumpServiceAccount(): string {
-  // An empty value must not disable the gate — unlike an allow-list there is no
-  // "off" state to fall into, but an empty expected username would match a
-  // token with no `preferred_username` claim at all. Fall back to the default.
+  // An empty value would match a token with no username, so fall back to the default.
   return process.env.CAMPAIGN_DUMP_SERVICE_ACCOUNT?.trim() || 'service-account-campaign-manager';
 }
 
 /**
- * The Signals instance whose non-PII dump this deployment serves (#692).
+ * The Signals instance whose non-PII dump this deployment serves.
  *
- * Read from the live environment at **call time**, mirroring
- * {@link campaignDumpServiceAccount}: the dump route consults it per request and
- * it must be independently settable across test cases in one Vitest worker,
- * where the frozen `config` snapshot cannot change after first import.
+ * Read from the environment at call time.
  *
- * @returns The configured instance id, or `undefined` when unset or blank — the
- *   route turns that into `503 DUMP_NOT_CONFIGURED`.
+ * @returns The instance id, or `undefined` when unset or blank (the route then returns 503).
  */
 export function campaignDumpInstanceId(): string | undefined {
   const raw = process.env.CAMPAIGN_DUMP_INSTANCE_ID?.trim();
@@ -533,24 +377,16 @@ export function campaignDumpInstanceId(): string | undefined {
 /**
  * CC recipient(s) for contact-support submissions.
  *
- * Read from the live environment at **call time** — mirrors
- * {@link supportEmail}'s rationale: consumed on every `POST /v1/support`
- * request (not a startup-only snapshot) and must be independently toggleable
- * across test cases within the same Vitest worker, where the frozen `config`
- * snapshot cannot be changed after first import.
+ * Read from the environment at call time.
  *
- * @returns The configured CC list as a clean comma-joined string, or
- *   `undefined` when `SUPPORT_CC_EMAIL` is unset/empty. Multiple
- *   comma-separated addresses are trimmed, de-blanked, and rejoined with `, `.
+ * @returns The CC list joined with `, `, or `undefined` when unset.
  */
 export function supportCc(): string | undefined {
   return normaliseEmailList(process.env.SUPPORT_CC_EMAIL);
 }
 
 /**
- * Public portal origin surfaced in the support email as the "raised from"
- * link, so support staff can tell which instance a submission came from.
- * Sourced from the deploy-time {@link config.PUBLIC_PORTAL_URL}.
+ * Portal URL shown in the support email, so staff know which instance it came from.
  *
  * @returns The configured portal URL.
  */
@@ -559,16 +395,11 @@ export function supportPortalLink(): string {
 }
 
 /**
- * Attachment limits for the contact-support form (#551).
+ * Attachment limits for the contact-support form.
  *
- * Read from the live environment at **call time**, mirroring
- * {@link supportEmail}'s rationale: both the config endpoint and the submit
- * handler need the current value, and tests must be able to vary the limits
- * across cases within one Vitest worker, where the frozen `config` snapshot
- * cannot change after first import.
+ * Read from the environment at call time.
  *
- * @returns The configured maximum total decoded bytes and file count, falling
- *   back to 5MB / 3 files when unset or not a positive integer.
+ * @returns Max total decoded bytes and file count; 5MB and 3 when unset or invalid.
  */
 export function supportAttachmentLimits(): { maxTotalBytes: number; maxFiles: number } {
   const parsed = z
@@ -592,12 +423,10 @@ export function supportAttachmentLimits(): { maxTotalBytes: number; maxFiles: nu
 }
 
 /**
- * Normalises a comma-separated email env value into a clean, comma-joined
- * list: splits on commas, trims each entry, drops empties, rejoins with `, `.
+ * Normalises a comma-separated email env value: trims entries, drops empties, joins with `, `.
  *
  * @param raw - The raw env value (or `undefined`).
- * @returns The joined list, or `undefined` when nothing usable remains — so
- *   "unset" and "blank/whitespace-only" are treated identically.
+ * @returns The joined list, or `undefined` when nothing remains.
  */
 function normaliseEmailList(raw: string | undefined): string | undefined {
   const list = (raw ?? '')
@@ -608,19 +437,15 @@ function normaliseEmailList(raw: string | undefined): string | undefined {
 }
 
 /**
- * Effective docs-surface switch used to gate the OpenAPI spec + Scalar UI.
+ * Whether to serve the OpenAPI spec and Scalar UI.
  *
- * Secure-by-default on a public API: even when `API_REFERENCE_ENABLED` is on,
- * the enumerable route map is force-disabled under `NODE_ENV=production` unless
- * `API_REFERENCE_FORCE` is also set. Dev/staging keep it on for convenience.
+ * Off in production unless `API_REFERENCE_FORCE` is set.
  */
 export const apiReferenceEnabled: boolean =
   config.API_REFERENCE_ENABLED && (config.NODE_ENV !== 'production' || config.API_REFERENCE_FORCE);
 
 /**
- * Comma-separated ADMIN_EMAILS env value parsed into a clean list.
- * Resilient to wrapping quotes left in by Helm / ConfigMap `| quote`
- * filters, stray whitespace, and newline separators.
+ * Parses an email list env value (commas or newlines; tolerates Helm quoting and whitespace).
  */
 function parseEnvEmailList(raw: string | undefined): string[] {
   return stripHelmQuoting(raw ?? '')
@@ -632,13 +457,10 @@ function parseEnvEmailList(raw: string | undefined): string[] {
 export const adminEmails: string[] = parseEnvEmailList(config.ADMIN_EMAILS);
 
 /**
- * Result of parsing the `SIGNALS_UI_URLS` env value: the successfully parsed
- * `{ domain: url }` map plus a warning string per skipped/malformed entry.
+ * Result of parsing `SIGNALS_UI_URLS`: the `{ domain: url }` map and one warning per skipped entry.
  *
- * The warnings are returned rather than logged directly because this module
- * cannot import the pino logger (`logger.ts` imports `config.ts`, so the
- * reverse import would be circular) — the caller (`app.ts`) logs them once a
- * Fastify instance exists.
+ * Warnings are returned, not logged, because `logger.ts` imports this module;
+ * `app.ts` logs them.
  */
 export interface ParsedSignalsUiUrls {
   urls: Record<string, string>;
@@ -646,8 +468,7 @@ export interface ParsedSignalsUiUrls {
 }
 
 /**
- * Strips a single layer of Helm `| quote`-style wrapping (single or double
- * quotes) plus surrounding whitespace from a raw env value.
+ * Strips one layer of Helm-style quotes and surrounding whitespace from an env value.
  *
  * @param raw - The raw string that may be quote-wrapped by Helm templating.
  * @returns The unwrapped, trimmed string.
@@ -671,16 +492,12 @@ type SignalsUiUrlEntryResult =
  * Parses and validates a single `domain=url` entry from `SIGNALS_UI_URLS`.
  *
  * @param pair - One trimmed, non-empty `domain=url` entry.
- * @returns The parsed `{ domain, url }` pair, or a warning naming the
- *   offending key if the entry is malformed.
+ * @returns The parsed `{ domain, url }`, or a warning when the entry is malformed.
  */
 function parseSignalsUiUrlEntry(pair: string): SignalsUiUrlEntryResult {
   // First `=` only — URLs carry `=` inside query strings.
   const eq = pair.indexOf('=');
   if (eq === -1) {
-    // Called out separately from the invalid-key case below: a bare word is
-    // almost always a comma that should have been an `=` (or vice versa), and
-    // saying "no `=` separator" points straight at it.
     return {
       ok: false,
       warning: `SIGNALS_UI_URLS: skipping entry with no "=" separator: "${pair}"`,
@@ -713,25 +530,16 @@ function parseSignalsUiUrlEntry(pair: string): SignalsUiUrlEntryResult {
 }
 
 /**
- * Parse the `SIGNALS_UI_URLS` env value into a `{ domain: url }` map.
+ * Parses the `SIGNALS_UI_URLS` env value into a `{ domain: url }` map.
  *
- * Exported (unlike `parseEnvEmailList`) so it can be unit-tested without
- * mutating `process.env`, which `config` snapshots at module load.
+ * A malformed entry is skipped with a warning; boot does not fail. For a
+ * duplicate domain the last entry wins, with a warning.
  *
- * A malformed entry is dropped with a warning rather than crashing boot: the
- * Signals hand-off is optional, and one typo must not take the API down. The
- * warning keeps it from being a silent failure.
+ * Domain keys are checked for format only. The check against the network's
+ * domains is {@link unknownSignalsUiUrlDomains}.
  *
- * On a **duplicate domain key** the last entry wins — the map is built by
- * assignment, so a later `seeker=…` overwrites an earlier one. That is a
- * warning too, because a repeated key means one of the two URLs the operator
- * wrote is being thrown away.
- *
- * Domain keys are validated for *format* only, never against the network's
- * declared domains — those resolve asynchronously, long after this runs at
- * module load. `seeker` and `seekr` are equally well-formed here. The
- * cross-check against the real domain list happens once the network config
- * resolves; see `unknownSignalsUiUrlDomains`.
+ * @param raw - The raw env value.
+ * @returns The parsed map and warnings.
  */
 export function parseSignalsUiUrls(raw: string | undefined): ParsedSignalsUiUrls {
   const v = stripHelmQuoting(raw ?? '');
@@ -758,17 +566,8 @@ export function parseSignalsUiUrls(raw: string | undefined): ParsedSignalsUiUrls
 /**
  * Which parsed `SIGNALS_UI_URLS` keys name no domain this network declares.
  *
- * `parseSignalsUiUrls` cannot do this: it runs at module load, whereas the
- * domain list comes from the resolved network config (a file read plus a
- * signalstack `network.json` fetch). So a typo'd key — `seekr=…` — parses
- * perfectly clean and then silently disables the hand-off for `seeker`, which
- * is a worse failure than a malformed URL because nothing warns.
- *
- * Pure and log-only by design: the caller warns, and the parsed map is used
- * unchanged. Filtering unknown keys would be wrong — a domain added to
- * network.json ahead of the ConfigMap rollout (or vice versa) must not be able
- * to turn a working hand-off off, and the api must never fail boot over an
- * optional feature's env var.
+ * Runs once the network config resolves. The caller only logs the result;
+ * the map is used unchanged.
  *
  * @param urls - The parsed `{ domain: url }` map.
  * @param knownDomains - `ResolvedNetworkConfig.domainIds`.
@@ -785,43 +584,26 @@ export function unknownSignalsUiUrlDomains(
 const parsedSignalsUiUrls = parseSignalsUiUrls(config.SIGNALS_UI_URLS);
 
 /**
- * Per-domain Signals UI login URLs, parsed once at boot.
- * Empty when unset — the public form then renders no Signals hand-off.
+ * Per-domain Signals UI login URLs, parsed once at boot. Empty when unset.
  *
- * Frozen, and typed `Readonly`, because every value in here has been checked to
- * be an absolute http(s) URL. That invariant is what lets the web app drop the
- * value straight into an `href`; a mutable module-level export would let any
- * importer quietly add an unvalidated entry and break it from the inside.
+ * Frozen because every value is a checked http(s) URL that the web app puts in an `href`.
  */
 export const signalsUiUrls: Readonly<Record<string, string>> = Object.freeze(
   parsedSignalsUiUrls.urls,
 );
 
 /**
- * Warnings from parsing `SIGNALS_UI_URLS`, one per skipped/malformed entry.
- * Logged once by `app.ts` via `app.log.warn` so a misconfigured env is
- * visible in cluster logs (this module can't log directly — see
- * `ParsedSignalsUiUrls`).
+ * Warnings from parsing `SIGNALS_UI_URLS`; `app.ts` logs them.
  */
 export const signalsUiUrlWarnings: string[] = parsedSignalsUiUrls.warnings;
 
 /**
- * Result of parsing the `AGGREGATOR_ONBOARDING_ENABLED` env value.
- *
- * As with {@link ParsedSignalsUiUrls}, warnings are returned rather than
- * logged: this module cannot import the pino logger (`logger.ts` imports
- * `config.ts`, so the reverse import would be circular). `app.ts` emits them
- * once a Fastify instance exists.
+ * Result of parsing `AGGREGATOR_ONBOARDING_ENABLED`. Warnings are logged by `app.ts`.
  */
 export interface ParsedOnboardingEnabled {
   /**
-   * The allow-listed capability keys, or `null` when the var is **absent from
-   * the environment entirely**. `null` means "no restriction — every
-   * capability is enabled" and is deliberately a different value from `[]`,
-   * which means "explicitly nothing is enabled" (what a value that is present
-   * but names no capability parses to — blank, whitespace-only, empty quotes,
-   * or only separators). Collapsing the two would make an unset var
-   * indistinguishable from one that disables everything.
+   * Allowed capability keys. `null` when the var is unset (everything enabled);
+   * `[]` when it is set but names nothing (nothing enabled).
    */
   capabilities: string[] | null;
   warnings: string[];
@@ -830,51 +612,32 @@ export interface ParsedOnboardingEnabled {
 /**
  * Capability keys the allow-list accepts but which gate nothing yet.
  *
- * Forward-compatibility: a ConfigMap may ship `bulk` ahead of the code that
- * implements bulk gating, and that must neither break boot nor be reported as
- * a typo. Reserved keys are excluded from {@link unknownOnboardingCapabilities}
- * so they get their own, accurate diagnostic — but they are **not** excluded
- * from the allow-list itself, so listing only reserved keys still disables all
- * onboarding (fail-closed; see {@link parseOnboardingEnabled}).
+ * Not reported as unknown by {@link unknownOnboardingCapabilities}. Listing
+ * only reserved keys still disables all onboarding.
  */
 export const RESERVED_ONBOARDING_CAPABILITIES: ReadonlySet<string> = new Set(['bulk']);
 
 /**
- * Parse the `AGGREGATOR_ONBOARDING_ENABLED` allow-list.
+ * Parses the `AGGREGATOR_ONBOARDING_ENABLED` allow-list.
  *
- * Exported so it can be unit-tested without mutating `process.env`. Trims and
- * lowercases each entry, accepts commas and any whitespace (including
- * newlines) as separators, drops empties, de-duplicates, and tolerates a layer
- * of Helm `| quote` wrapping.
+ * Trims and lowercases entries, splits on commas and whitespace, drops
+ * empties and duplicates, and tolerates Helm quoting.
  *
- * Only a genuinely **absent** var enables everything. A var that is present
- * but blank — `""`, `"   "`, a Helm `| quote` over an empty string, a block
- * scalar whose `{{- if }}` rendered nothing — is a misconfiguration, and the
- * one shape most likely to occur in a real deployment. Treating it as "unset"
- * would silently re-enable the very modes the operator set out to withhold,
- * with nothing in the logs to explain it, so it takes the same loud lockout
- * path as `","`.
+ * Only an unset var enables everything. A set but blank var enables nothing
+ * and adds a warning.
  *
- * Values are **not** validated against the network's declared registration
- * modes here — those resolve asynchronously, long after this runs, exactly as
- * with `parseSignalsUiUrls`. `frm` parses perfectly clean at this stage; the
- * cross-check happens once the network config resolves (see
- * {@link unknownOnboardingCapabilities}).
+ * Values are not checked against the network's modes here; see
+ * {@link unknownOnboardingCapabilities}.
  *
- * @param raw - The raw env value (or `undefined` when the var is not set).
- * @returns The parsed capability list (`null` ⇒ all enabled) plus a warning
- *   per duplicate entry, and one more when the var is set yet names nothing.
+ * @param raw - The raw env value (or `undefined` when unset).
+ * @returns The capability list (`null` means all enabled) and warnings.
  */
 export function parseOnboardingEnabled(raw: string | undefined): ParsedOnboardingEnabled {
-  // Genuinely unset — the only path to "everything enabled".
   if (raw === undefined) return { capabilities: null, warnings: [] };
   const v = stripHelmQuoting(raw);
   const capabilities: string[] = [];
   const warnings: string[] = [];
-  // Whitespace counts as a separator alongside `,`: `form voice` is an obvious
-  // operator intent, and splitting on commas alone would turn it into the
-  // single bogus capability `"form voice"` that matches nothing and hard-locks
-  // link creation without so much as a parse warning.
+  // Whitespace also separates, so `form voice` means two capabilities.
   for (const entry of v.split(/[\s,]+/)) {
     const key = entry.trim().toLowerCase();
     if (!key) continue;
@@ -887,9 +650,7 @@ export function parseOnboardingEnabled(raw: string | undefined): ParsedOnboardin
     capabilities.push(key);
   }
   if (capabilities.length === 0) {
-    // Set, but names nothing: blank/whitespace-only (`""`, `"   "`, `"''"`) or
-    // separators only (`",,"`). Treated as "nothing enabled" rather than
-    // "unset" — see the fail-closed rationale above.
+    // Set but names nothing: treated as nothing enabled.
     warnings.push(
       v === ''
         ? 'AGGREGATOR_ONBOARDING_ENABLED is set but blank — it names no capability, so no registration mode will be offered. Remove the variable entirely (not just its value) to enable all of them.'
@@ -902,13 +663,9 @@ export function parseOnboardingEnabled(raw: string | undefined): ParsedOnboardin
 /**
  * The onboarding capabilities this deployment offers, or `null` for "all".
  *
- * Read from the live environment at **call time** rather than from the frozen
- * `config` snapshot — same rationale as {@link supportEmail}: it is consumed
- * per request (the config endpoint and the create-link handler both need the
- * current value) and tests must be able to vary it across cases inside one
- * Vitest worker, where `config` reflects whatever env existed at first import.
+ * Read from the environment at call time.
  *
- * @returns The allow-listed capability keys, or `null` when unset/blank.
+ * @returns The allowed capability keys, or `null` when unset.
  */
 export function onboardingEnabledCapabilities(): readonly string[] | null {
   return parseOnboardingEnabled(process.env.AGGREGATOR_ONBOARDING_ENABLED).capabilities;
@@ -917,14 +674,10 @@ export function onboardingEnabledCapabilities(): readonly string[] | null {
 /**
  * Whether one onboarding capability is enabled for this deployment.
  *
- * The single predicate behind both enforcement points: the
- * `registration_modes` map served by `GET /v1/aggregator-config` (which is
- * what removes the option from the admin dropdown) and the create-link
- * validation (which stops the gate being bypassed by calling the API direct).
+ * Used by `GET /v1/aggregator-config` and by create-link validation.
  *
  * @param capability - A capability / registration-mode key, e.g. `voice`.
- * @returns `true` when the allow-list is unset (everything enabled) or when it
- *   contains the key.
+ * @returns `true` when the allow-list is unset or contains the key.
  */
 export function isOnboardingCapabilityEnabled(capability: string): boolean {
   const enabled = onboardingEnabledCapabilities();
@@ -934,17 +687,11 @@ export function isOnboardingCapabilityEnabled(capability: string): boolean {
 /**
  * The declared registration modes this deployment actually offers.
  *
- * The single derivation of "enabled", shared by all three consumers: the boot
- * cross-check diagnostics, the `registration_modes` map served by
- * `GET /v1/aggregator-config`, and create-link validation. Deriving it
- * independently anywhere would let the diagnostics disagree with enforcement
- * the moment the predicate grows a rule (a wildcard, a reserved key) — an
- * ERROR claiming nothing is enabled where creation works, or silence where
- * every call 400s.
+ * Shared by the boot diagnostics, `GET /v1/aggregator-config` and create-link
+ * validation, so they always agree.
  *
  * @param declared - The network's declared `registration_modes` keys.
- * @returns The subset the allow-list permits, in declared order; the whole
- *   list unchanged when the allow-list is unset.
+ * @returns The permitted subset, in declared order.
  */
 export function enabledRegistrationModes(declared: readonly string[]): string[] {
   return declared.filter((mode) => isOnboardingCapabilityEnabled(mode));
@@ -953,14 +700,10 @@ export function enabledRegistrationModes(declared: readonly string[]): string[] 
 /**
  * Which allow-listed capabilities are reserved keys that gate nothing yet.
  *
- * Split out from {@link unknownOnboardingCapabilities} so a forward-compatible
- * value gets an accurate diagnostic. `bulk` is documented as an accepted
- * value, so reporting it as "matches no registration mode declared by this
- * network" reads as a bug report about a value the docs endorsed.
+ * Reported separately from {@link unknownOnboardingCapabilities}, since these are accepted values.
  *
- * @param capabilities - The parsed allow-list (`null` ⇒ all enabled).
- * @returns The reserved values in listed order; always empty when the
- *   allow-list is unset, since it restricts nothing.
+ * @param capabilities - The parsed allow-list (`null` means all enabled).
+ * @returns The reserved values in listed order; empty when unset.
  */
 export function reservedOnboardingCapabilities(capabilities: readonly string[] | null): string[] {
   if (capabilities === null) return [];
@@ -971,21 +714,12 @@ export function reservedOnboardingCapabilities(capabilities: readonly string[] |
  * Which allow-listed capabilities name no registration mode this network
  * declares.
  *
- * {@link parseOnboardingEnabled} cannot do this — it runs at module load,
- * whereas the declared modes come from the resolved network config. So a typo
- * (`frm` for `form`) parses clean and then withholds every mode with nothing
- * said, which is a worse failure than a malformed value because the dropdown
- * just quietly empties. Mirrors {@link unknownSignalsUiUrlDomains}.
+ * Runs once the network config resolves. The caller only logs the result.
+ * Reserved keys are excluded; see {@link reservedOnboardingCapabilities}.
  *
- * Pure and log-only: the caller warns and the allow-list is used unchanged.
- * Reserved keys are excluded — they are reported separately by
- * {@link reservedOnboardingCapabilities}, because "unrecognised" would be the
- * wrong thing to say about a value this repo documents as accepted.
- *
- * @param capabilities - The parsed allow-list (`null` ⇒ all enabled).
+ * @param capabilities - The parsed allow-list (`null` means all enabled).
  * @param declaredModes - The network's declared `registration_modes` keys.
- * @returns The unrecognised values in listed order; empty when all match (and
- *   always empty when the allow-list is unset, since it restricts nothing).
+ * @returns The unrecognised values in listed order; empty when unset.
  */
 export function unknownOnboardingCapabilities(
   capabilities: readonly string[] | null,
@@ -999,9 +733,7 @@ export function unknownOnboardingCapabilities(
 }
 
 /**
- * Warnings from parsing `AGGREGATOR_ONBOARDING_ENABLED`, emitted once by
- * `app.ts` via `app.log.warn` (this module can't log — see
- * {@link ParsedOnboardingEnabled}).
+ * Warnings from parsing `AGGREGATOR_ONBOARDING_ENABLED`; `app.ts` logs them.
  */
 export const onboardingEnabledWarnings: string[] = parseOnboardingEnabled(
   config.AGGREGATOR_ONBOARDING_ENABLED,

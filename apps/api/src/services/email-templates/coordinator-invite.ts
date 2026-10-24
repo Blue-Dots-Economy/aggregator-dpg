@@ -1,11 +1,9 @@
 /**
- * Coordinator-invite email (#700/#701) — sent to each recipient an org owner
- * invites, carrying the registration link with their personal invite token.
+ * Coordinator-invite email — sent to each recipient an org owner invites,
+ * carrying the registration link with their personal invite token.
  *
  * Belongs to `@aggregator-dpg/api`. Copy lives under `coordinator_invite.*`.
- * The greeting is a derived token on the case registry entry — two copy keys,
- * the first whose conditions hold — because it sits mid-sentence inside
- * `intro` rather than standing as its own block.
+ * The greeting is a derived token on the case registry entry, used inside `intro`.
  */
 
 import { renderCase, type RenderedEmail } from './render-case.js';

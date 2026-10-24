@@ -1,12 +1,11 @@
 /**
- * The online steps of the instance-upgrade tool (`@aggregator-dpg/api`): `enrich`,
- * run in the window after the database commit and before scale-up (design:
- * docs/plans/user-org-migrate-tool-simplification.md §6), and `enable-owners`,
- * the one-off Phase 5 step that lets existing org owners sign in (design
- * the user & org Phase 5 PR, R6 / C15). They talk to
- * Keycloak through the API's own adapter, so it needs the API's full
- * environment (the Job has it); `instance-upgrade.ts` loads this module lazily so `check`
- * and `run` never depend on it. Counts and ids only in the output.
+ * The online steps of the instance-upgrade tool (`@aggregator-dpg/api`).
+ *
+ * `enrich` runs after the database commit and before scale-up. `enable-owners`
+ * is a one-off step that lets existing org owners sign in. Both call Keycloak
+ * through the API's adapter, so they need the API's full environment.
+ * `instance-upgrade.ts` loads this module lazily so `check` and `run` do not
+ * depend on it. Output carries counts and ids only.
  */
 
 import { sql } from 'drizzle-orm';
@@ -39,7 +38,7 @@ export interface EnrichReport {
   notInKeycloak: number;
   conflicts: number;
   failed: number;
-  /** Coordinator ids with no Keycloak user (they cannot log in today either). */
+  /** Coordinator ids with no Keycloak user. */
   absentIds: string[];
   /** Coordinator ids whose login is already recorded differently, or belongs to another account. */
   conflictIds: string[];
@@ -51,14 +50,14 @@ export interface EnrichDeps {
   identities: IdentityStoreBase;
   /** Coordinator ids that have no recorded Keycloak login yet. */
   listCandidates: () => Promise<string[]>;
-  /** Pause between Keycloak calls (the pacing). */
+  /** Pause between Keycloak calls. */
   pause?: (ms: number) => Promise<void>;
 }
 
 /**
- * Records the Keycloak login of every coordinator that has none yet
- * (`findByAttribute('aggregator_id', id)` → `user_identities`), paced.
- * Idempotent: a re-run picks up only what is still missing.
+ * Records the Keycloak login of every coordinator that has none yet, paced.
+ *
+ * Idempotent; a re-run picks up only what is still missing.
  *
  * @param deps - Keycloak, the identity store, the candidate list.
  * @param opts - `dryRun` reads only; `ratePerSecond` (> 0) paces Keycloak calls.
@@ -86,7 +85,7 @@ export async function enrichIdentities(
   const pause = deps.pause ?? sleep;
   const gapMs = Math.ceil(1000 / opts.ratePerSecond);
   for (const id of ids) {
-    // Sequential on purpose: paced against Keycloak.
+    // Sequential: paced against Keycloak.
     const found = await deps.idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, id); // NOSONAR typescript:S9382
     if (!found.ok) report.failed += 1;
     else if (!found.value) {
@@ -117,8 +116,7 @@ async function coordinatorsWithoutLogin(): Promise<string[]> {
 }
 
 /**
- * `enrich`: Keycloak logins, then owner names, with the API's own adapters.
- * Its exit code is the window's identity gate.
+ * Runs `enrich`: records Keycloak logins, then backfills owner names.
  *
  * @param opts - `dryRun` reads only; `ratePerSecond` paces Keycloak calls.
  * @param out - Line printer.
@@ -150,8 +148,9 @@ export async function enrich(
 }
 
 /**
- * The window's identity gate: 0 only when every lookup answered and no login
- * conflicts; coordinators absent from Keycloak do not fail it.
+ * Exit code for `enrich`: 0 only when every lookup answered and no login conflicts.
+ *
+ * Coordinators absent from Keycloak do not fail it.
  *
  * @param identities - The identity step's counts.
  * @param names - The owner-name step's counts.
@@ -192,11 +191,11 @@ export interface EnableOwnersDeps {
 }
 
 /**
- * Gives every active org's owner sign-in access, once, in the window (P5-13):
- * enables the Keycloak user, grants `org_owner`, adds the org's group. Also
- * repairs a missing role or group on owners already enabled. Idempotent and
- * resumable; the Default org (the boot reconcile's) and placeholder owners
- * are skipped.
+ * Gives every active org's owner sign-in access.
+ *
+ * Enables the Keycloak user, grants `org_owner` and adds the org's group, also
+ * repairing owners already enabled. Idempotent. Skips the Default org and
+ * placeholder owners.
  *
  * @param deps - Keycloak, the org list, the grant.
  * @param opts - `dryRun` reads only; `ratePerSecond` (> 0) paces Keycloak calls.
@@ -231,7 +230,7 @@ export async function enableOwnersStep(
       report.noLoginIds.push(org.id);
       continue;
     }
-    // Sequential on purpose: paced against Keycloak.
+    // Sequential: paced against Keycloak.
     const found = await deps.idp.findById(org.ownerKcSub); // NOSONAR typescript:S9382
     if (!found.ok) {
       report.failed += 1;
@@ -260,8 +259,7 @@ async function activeOrgs(): Promise<Organisation[]> {
   const all: Organisation[] = [];
   let cursor: { name: string; id: string } | undefined;
   for (;;) {
-    const page = await store.search({
-      // NOSONAR typescript:S9382
+    const page = /* NOSONAR typescript:S9382 */ await store.search({
       orgIds: null,
       status: 'active',
       limit: 100,
@@ -275,9 +273,10 @@ async function activeOrgs(): Promise<Organisation[]> {
 }
 
 /**
- * `enable-owners`: lets every existing org owner sign in, once, in the window.
- * Exit 1 on any Keycloak error (re-run to resume); owners without a login or
- * with a deleted Keycloak user are listed by org id and do not fail it.
+ * Runs `enable-owners`: lets every existing org owner sign in.
+ *
+ * Exits 1 on any Keycloak error (re-run to resume). Owners without a login or
+ * Keycloak user are listed by org id and do not fail it.
  *
  * @param opts - `dryRun` reads only; `ratePerSecond` paces Keycloak calls.
  * @param out - Line printer.
