@@ -1,6 +1,6 @@
 /**
- * Wire schemas of the console APIs `/v1/user/*` and `/v1/org/*` (user & org
- * Phase 5). Shared by the API (zod → OpenAPI) and the web BFF / console.
+ * Wire schemas of the console APIs `/v1/user/*` and `/v1/org/*`. Shared by the
+ * API (zod → OpenAPI) and the web BFF / console.
  *
  * Wire style as the rest of the API: snake_case keys, no envelope, `.strict()`
  * request bodies. Paging is keyset with an opaque `cursor` string.
@@ -22,7 +22,7 @@ export type UserOrgStatus = z.infer<typeof UserOrgStatusSchema>;
 export const OrgTypeSchema = z.enum(['network_facilitator', 'aggregator']);
 export type OrgType = z.infer<typeof OrgTypeSchema>;
 
-/** A person's contact as the console shows it (plain within reach; P5-8). */
+/** A person's contact as the console shows it, unmasked. */
 export const PersonContactSchema = z.object({
   name: z.string().nullable(),
   email: z.string(),
@@ -246,7 +246,7 @@ export const OwnerAccessResponseSchema = z.object({
 });
 export type OwnerAccessResponse = z.infer<typeof OwnerAccessResponseSchema>;
 
-// ─── RBAC roles (docs/rbac/rbac-design-aggregator.md §4) ───────────────────
+// ─── RBAC roles ────────────────────────────────────────────────────────────
 
 /** A role on the wire: a named set of permissions and the rules for holding it. */
 export const RoleSchema = z.object({
@@ -273,10 +273,8 @@ export const PermissionSchema = z.object({
   description: z.string(),
   sensitive: z.boolean(),
   /**
-   * Whether anything in this build actually checks the permission. The
-   * catalogue runs ahead of the routes, so a role may grant a permission that
-   * nothing enforces yet; the console marks those rather than implying power
-   * the grant does not confer.
+   * Whether any route checks this permission. The console marks permissions
+   * that nothing enforces yet.
    */
   enforced: z.boolean(),
 });

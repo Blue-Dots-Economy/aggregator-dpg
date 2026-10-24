@@ -1,13 +1,8 @@
 /**
  * Contact-detail normalisation shared by every aggregator process.
  *
- * Coarse-grained for MVP: phone numbers keep digits and a single leading `+`,
- * and a bare 10-digit input is assumed to be Indian (`+91`). Swap in
- * libphonenumber-js if richer validation is ever required.
- *
- * Previously duplicated between `apps/api/src/services/phone.ts` and
- * `apps/worker/src/services/phone.ts`; promoted here now that both the API and
- * the worker consume it.
+ * Phone numbers keep digits and one leading `+`. A bare 10-digit number is
+ * treated as Indian (`+91`).
  *
  * @module @aggregator-dpg/shared-primitives
  */
@@ -32,13 +27,10 @@ const MAX_DIGITS = 15;
 const DEFAULT_COUNTRY_CODE = '91';
 
 /**
- * Normalises a phone number to a canonical E.164-ish form that other code can
- * index on. Returns an error result for clearly invalid input rather than
- * throwing, so callers can map it onto their own error shape.
+ * Normalises a phone number to a canonical `+`-prefixed form. Does not throw.
  *
- * @param raw - User-supplied phone string, in any spacing/punctuation.
- * @returns `{ ok: true, value }` with a `+`-prefixed digit string, or
- *   `{ ok: false, error }` describing why the input was rejected.
+ * @param raw - User-supplied phone string, in any spacing or punctuation.
+ * @returns `{ ok: true, value }`, or `{ ok: false, error }` with the reason.
  */
 export function normalisePhone(raw: string): PhoneNormaliseResult {
   if (!raw) return { ok: false, error: { message: 'phone is empty' } };
@@ -74,9 +66,7 @@ export function normalisePhone(raw: string): PhoneNormaliseResult {
 }
 
 /**
- * Normalises an email address for storage and comparison: trimmed and
- * lower-cased, with blank input collapsed to `null` so "absent" and
- * "whitespace only" are indistinguishable downstream.
+ * Trims and lower-cases an email address. Blank input becomes `null`.
  *
  * @param raw - User-supplied email, or `null`/`undefined` when not provided.
  * @returns The normalised address, or `null` when there was nothing usable.

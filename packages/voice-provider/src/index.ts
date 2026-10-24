@@ -1,10 +1,9 @@
 /**
- * Public barrel + provider factory for the campaign voice channel
- * (aggregator-dpg#577). Re-exports the `./interface` contract, the
- * `./egress` rate-limit gate, and `getVoiceProvider` — the only supported
- * way to obtain a concrete {@link VoiceProviderBase} instance. Concrete
- * provider modules (e.g. `./raya.js`) are never imported directly by other
- * packages, per the base-class-pattern rule.
+ * Public barrel and provider factory for the campaign voice channel.
+ *
+ * Re-exports the `./interface` contract and the `./egress` rate-limit gate.
+ * `getVoiceProvider` is the only way to get a concrete
+ * {@link VoiceProviderBase}; other packages never import `./raya.js`.
  *
  * @module @aggregator-dpg/voice-provider
  */
@@ -23,16 +22,14 @@ export interface VoiceProviderConfig {
   /** Provider API key. */
   apiKey: string;
   /**
-   * Per-attempt request timeout in ms. Required — every external call must
-   * carry an explicit timeout (repo `error-handling.md`); there is no
-   * built-in default at this layer.
+   * Per-attempt request timeout in ms. Required; there is no default.
    */
   timeoutMs: number;
   /** Rate-limit gate awaited before every provider HTTP call (see `./egress.js`). */
   acquireSlot: () => Promise<void>;
   /** Optional max total attempts per HTTP call before giving up. Provider-defined default when omitted. */
   maxAttempts?: number;
-  /** Optional `fetch` override; lets callers (tests) inject a stub. */
+  /** Optional `fetch` override, for tests. */
   fetchImpl?: typeof fetch;
 }
 

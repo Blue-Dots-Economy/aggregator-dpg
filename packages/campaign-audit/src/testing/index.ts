@@ -1,8 +1,8 @@
 /**
  * In-memory audit writer for tests, plus input builders.
  *
- * Exposes the rows it captured so tests can assert on them — that read is a
- * TEST affordance only. The production interface stays write-only.
+ * Exposes the captured rows for test assertions. The production interface
+ * stays write-only.
  *
  * @module @aggregator-dpg/campaign-audit/testing
  */
@@ -25,13 +25,12 @@ export type AuditRow =
 /**
  * In-memory {@link CampaignAuditWriterBase} for unit tests.
  *
- * Captures every accepted row (tagged by kind) in `rows` and, when
- * `failWith` is set, THROWS that error from every method instead of
- * returning `err(...)` — this is deliberate: it lets Tasks 5-7 prove their
- * call sites survive an audit writer that throws, the harsher failure mode.
+ * Captures every row (tagged by kind) in `rows`. When `failWith` is set, every
+ * method throws that error instead of returning `err(...)`, so tests can check
+ * callers survive a throwing writer.
  */
 export class CampaignAuditWriterFake extends CampaignAuditWriterBase {
-  /** Rows captured so far, in call order. TEST-ONLY read affordance. */
+  /** Rows captured so far, in call order. */
   readonly rows: AuditRow[] = [];
   /** When set, every method throws this instead of writing a row. */
   failWith: Error | null = null;
@@ -109,8 +108,8 @@ export function buildRequestedAudit(over: Partial<RequestedAuditInput> = {}): Re
 }
 
 /**
- * Builds a valid `completed` input. Defaults are deterministic and contain
- * NO participant PII — only operator/field-name identifiers and counts.
+ * Builds a valid `completed` input. Defaults are deterministic and contain no
+ * participant PII.
  *
  * @param over - Fields to override on top of the defaults.
  * @returns A complete {@link CompletedAuditInput}.
@@ -130,8 +129,8 @@ export function buildCompletedAudit(over: Partial<CompletedAuditInput> = {}): Co
 }
 
 /**
- * Builds a valid `dump` input. Defaults are deterministic and contain NO
- * participant PII — `details` carries only non-PII counts.
+ * Builds a valid `dump` input. Defaults are deterministic and contain no
+ * participant PII.
  *
  * @param over - Fields to override on top of the defaults.
  * @returns A complete {@link DumpAuditInput}.

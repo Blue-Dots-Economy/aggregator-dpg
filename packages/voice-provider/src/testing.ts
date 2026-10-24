@@ -1,22 +1,13 @@
 /**
- * In-memory fake for {@link VoiceProviderBase} — the `./testing` subpath
- * consumers (the campaign worker's voice handler, and this package's own
- * unit tests) import instead of a real Raya connection.
+ * In-memory fake for {@link VoiceProviderBase}, used instead of a real Raya
+ * connection.
  *
- * Records every {@link dispatch} call so tests can assert on what the
- * campaign worker sent, and lets a test pre-arm a per-contact rejection via
- * {@link InMemoryVoiceProvider.setReject} to exercise the partial-batch
- * (`accepted` + `rejected`) path without a real provider error.
+ * Records every {@link dispatch} call. {@link InMemoryVoiceProvider.setReject}
+ * makes a contact fail, to test the partial-batch path.
  *
- * `dispatch()` models Raya's REAL raw response shape internally — including
- * `errors[].value` (the raw rejected phone) and `data[]` (a full echo of the
- * submitted contact rows) — then curates it down to the same persistence
- * whitelist `raya.ts`'s `RayaVoiceProvider` applies before it ever reaches
- * `providerResponse`. The whitelist is duplicated rather than imported: the
- * base-class-pattern forbids importing the concrete Raya adapter by module
- * path even from within this package (`getVoiceProvider` in `./index.js` is
- * the only sanctioned way to obtain a concrete provider). Keep the two lists
- * in step by hand if `raya.ts`'s whitelist ever changes.
+ * `dispatch()` builds Raya's raw response shape, including PII fields, then
+ * reduces it to the same whitelist `raya.ts` uses. The whitelist is copied
+ * because this module must not import `raya.ts`. Keep the two lists in sync.
  *
  * @module @aggregator-dpg/voice-provider/testing
  */
@@ -32,7 +23,7 @@ import {
   type VoiceDispatchResult,
 } from './interface.js';
 
-/** Twin of `raya.ts`'s `CREATE_RESPONSE_PERSIST_KEYS` — see the module note. */
+/** Copy of `raya.ts`'s `CREATE_RESPONSE_PERSIST_KEYS`. */
 const CREATE_RESPONSE_PERSIST_KEYS = [
   'status',
   'message',
@@ -43,7 +34,7 @@ const CREATE_RESPONSE_PERSIST_KEYS = [
   'contactsInserted',
 ] as const;
 
-/** Twin of `raya.ts`'s `START_RESPONSE_PERSIST_KEYS` — see the module note. */
+/** Copy of `raya.ts`'s `START_RESPONSE_PERSIST_KEYS`. */
 const START_RESPONSE_PERSIST_KEYS = [
   'id',
   'status',
@@ -56,7 +47,7 @@ const START_RESPONSE_PERSIST_KEYS = [
   'retry_after_hrs',
 ] as const;
 
-/** Picks only the whitelisted keys present on `payload` — twin of `raya.ts`'s curate helpers. */
+/** Returns only the whitelisted keys present on `payload`. */
 function pickWhitelisted(
   payload: Record<string, unknown>,
   keys: readonly string[],
@@ -70,17 +61,14 @@ function pickWhitelisted(
 
 /**
  * In-memory {@link VoiceProviderBase} implementation. Accepts every contact
- * by default; call {@link setReject} before `dispatch()` to simulate a
- * provider-side per-row rejection (e.g. an invalid phone number).
+ * unless {@link setReject} was called for it.
  */
 export class InMemoryVoiceProvider extends VoiceProviderBase {
   /** Every `dispatch()` call this instance has received, in call order. */
   readonly dispatches: VoiceDispatchInput[] = [];
 
   /**
-   * Pending rejections keyed by contact `ref`. Consumed (one-shot) the next
-   * time a `dispatch()` call includes that `ref`, so a second dispatch for
-   * the same ref succeeds unless re-armed.
+   * Pending rejections keyed by contact `ref`. Each is used once.
    */
   private readonly pendingRejections: Map<string, string> = new Map();
 
@@ -104,8 +92,7 @@ export class InMemoryVoiceProvider extends VoiceProviderBase {
 
     const accepted: string[] = [];
     const rejected: { ref: string; error: string }[] = [];
-    // Modelled on Raya's real `errors[]` shape: `value` echoes the raw
-    // rejected phone number back (PII) — curated out below, same as `raya.ts`.
+    // Matches Raya's `errors[]` shape. `value` is the phone (PII) and is removed below.
     const rawErrors: Array<{ row: number; field: string; value: string; message: string }> = [];
     input.contacts.forEach((contact, index) => {
       const rejection = this.pendingRejections.get(contact.ref);
@@ -125,10 +112,7 @@ export class InMemoryVoiceProvider extends VoiceProviderBase {
 
     const providerBatchRef = `mem-batch-${this.nextBatchSeq++}`;
 
-    // Modelled on Raya's real raw payloads: `data[]` echoes the full
-    // submitted contact rows (name/phone, PII) the way Raya's actual
-    // `POST /batch` response does — see the module note. Never returned
-    // as-is; always passed through `pickWhitelisted` first.
+    // Matches Raya's `POST /batch` response. `data[]` holds PII; never return it as-is.
     const rawCreate: Record<string, unknown> = {
       status: accepted.length > 0 ? 'success' : 'failed',
       message: 'batch created',
@@ -144,8 +128,7 @@ export class InMemoryVoiceProvider extends VoiceProviderBase {
         contact_phone: c.phone,
       })),
     };
-    // Also models an unlisted field (`webhook_url`) to prove curation drops
-    // anything outside the whitelist, not just the two known-PII fields.
+    // `webhook_url` is not whitelisted, so curation must drop it.
     const rawStart: Record<string, unknown> = {
       id: providerBatchRef,
       status: 'Active',

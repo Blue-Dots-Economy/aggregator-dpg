@@ -2,12 +2,11 @@
  * Pure TypeScript evaluation of an access question (`@aggregator-dpg/rbac`).
  *
  * Mirrors `policy/rbac/rbac.rego` rule for rule. The in-memory authorizer uses
- * it, and the shared vectors in `policy/rbac/vectors.json` run against both
- * this function and the Rego policy, so the two cannot drift apart.
+ * it. The vectors in `policy/rbac/vectors.json` run against both this function
+ * and the Rego policy.
  *
  * The policy answers whether the actor holds a permission in the organisation
- * acted on. Reach (which targets) is decided outside it, by the API's scope
- * checks (design D3).
+ * acted on. Reach (which targets) is decided by the API's scope checks.
  *
  * @module @aggregator-dpg/rbac/evaluate
  */

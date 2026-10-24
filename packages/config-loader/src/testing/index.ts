@@ -75,7 +75,7 @@ export class ConfigServiceFake extends ConfigServiceBase {
   }
 
   /**
-   * Replaces the config store and notifies all onChange listeners.
+   * Notifies all onChange listeners. The store is unchanged.
    */
   async reload(): Promise<void> {
     for (const cb of this.listeners) {
@@ -97,8 +97,7 @@ export class ConfigServiceFake extends ConfigServiceBase {
   }
 
   /**
-   * No-op watch — in-memory fake has no files to watch.
-   * Present to satisfy the abstract contract.
+   * No-op. The fake has no files to watch.
    *
    * @returns No-op unsubscribe function.
    */

@@ -1,14 +1,9 @@
 /**
  * Config primitives shared by the api and worker processes.
  *
- * Each process parses its own Zod `ConfigSchema` from `process.env`, but some
- * fields must be identical across processes — kept here as the single source
- * of truth so the two can't drift: the SignalStack outward-push fields
- * (api-key + Keycloak bearer credential, both call the same signals instance
- * as the same service identity), the D7 TLS-posture guard (same enforcement
- * everywhere), and the campaign export field-set (#617 — the worker performs
- * the export the api-side audit log describes, so a divergent copy would let
- * the audit misreport what actually left the system).
+ * Holds config fields and checks that must be the same in both processes: the
+ * SignalStack push fields, the TLS-posture guard, and the campaign export
+ * field-set. Each process spreads them into its own `ConfigSchema`.
  *
  * @module @aggregator-dpg/shared-primitives/config
  */
@@ -17,11 +12,9 @@ import { z } from 'zod';
 import { ConfigError } from '../errors/index.js';
 
 /**
- * SignalStack outward-push env fields common to every process that pushes to
- * SignalStack. Spread into a process's `ConfigSchema`. Process-specific extras
- * are declared alongside the spread: `SIGNALSTACK_ACTING_ORG_ID` is api-only
- * (the aggregator-approval flow); `KEYCLOAK_URL`/`KEYCLOAK_REALM` are declared
- * by each process that mints the bearer token.
+ * SignalStack push env fields shared by every process that pushes to SignalStack.
+ * Process-specific fields such as `SIGNALSTACK_ACTING_ORG_ID` and
+ * `KEYCLOAK_URL`/`KEYCLOAK_REALM` are declared by each process.
  */
 export const signalStackConfigFields = {
   /** Base URL of the signalstack API. When unset, signalstack push is disabled. */
@@ -35,8 +28,7 @@ export const signalStackConfigFields = {
   /**
    * Which credential `HttpSignalStackWriter` sends: `apikey` (default) uses the
    * `SIGNALSTACK_ADMIN_KEY` header; `bearer` fetches a Keycloak
-   * client-credentials token. Must match across processes — both call the same
-   * signals instance as the same service identity.
+   * client-credentials token. Must match across processes.
    */
   SIGNALSTACK_AUTH_MODE: z.enum(['apikey', 'bearer']).default('apikey'),
   /**
@@ -49,7 +41,7 @@ export const signalStackConfigFields = {
   SIGNALSTACK_CLIENT_SECRET: z.string().optional(),
   /**
    * This aggregator's `organization.slug` on the signals side. When set, boot
-   * asserts `SIGNALSTACK_CLIENT_ID` equals it. Optional — the check no-ops when
+   * asserts `SIGNALSTACK_CLIENT_ID` equals it. The check is skipped when
    * unset. Must match across processes.
    */
   SIGNALSTACK_ORG_SLUG: z.string().optional(),
@@ -57,38 +49,20 @@ export const signalStackConfigFields = {
    * Realm holding the signals service client, when it differs from the realm
    * this app authenticates its own users against (`KEYCLOAK_REALM`).
    *
-   * Signals is a shared service and trusts one issuer; the aggregator portal may
-   * live in its own realm. Without this, a single `KEYCLOAK_REALM` would have to
-   * satisfy both, and one of them breaks — portal logins fail JWKS validation, or
-   * signals rejects the service token as an untrusted issuer.
-   *
-   * Optional. Falls back to `KEYCLOAK_REALM`, so deployments where both live in
-   * the same realm are unaffected.
+   * Optional. Falls back to `KEYCLOAK_REALM`.
    */
   SIGNALSTACK_KEYCLOAK_REALM: z.string().optional(),
 } as const;
 
 /**
- * Campaign export field-set, shared by the api and worker processes (#617).
+ * Campaign export field-set, shared by the api and worker processes.
  *
- * The worker reads `CAMPAIGN_EXPORT_FIELDS` to decide what a campaign export
- * actually releases (`contact` = the three canonical contact fields —
- * name/email/phone — only; `full` = the whole decrypted item_state, variable
- * columns). The api reads the SAME key to record `pii_fields` on the
- * `campaign_pii_audit` `requested` row. Kept here and spread into both
- * `ConfigSchema`s — rather than declared separately in each — so the two
- * processes validate and default the value identically.
+ * The worker reads `CAMPAIGN_EXPORT_FIELDS` to decide what an export releases.
+ * The api reads it to record `pii_fields` on the `campaign_pii_audit` row.
+ * Sharing the schema keeps validation and defaults the same.
  *
- * That guarantees the two processes CANNOT DISAGREE ON THE MEANING of a given
- * value (e.g. no risk of one enum drifting from the other's allowed values or
- * default). It does NOT guarantee they see the SAME value at runtime: each
- * process reads `process.env.CAMPAIGN_EXPORT_FIELDS` independently, so if the
- * deployment (compose file, Helm values, etc.) sets the env var for one
- * process's container but not the other's, they will silently default/resolve
- * differently and the audit log will misreport which PII actually left the
- * system (e.g. worker=`full`, api=`contact` would log `[name,email,phone]`
- * while the export shipped the entire item_state). Operators must set this
- * variable on BOTH the api and worker containers.
+ * Each process still reads the env var on its own. Set it on both the api and
+ * worker containers, or the audit log can record the wrong fields.
  */
 export const campaignExportConfigFields = {
   /**
@@ -106,10 +80,9 @@ export interface TlsPostureConfig {
 }
 
 /**
- * Enforces the D7 TLS posture: refuses to start in production (throws) and
- * warns loudly elsewhere when `NODE_TLS_REJECT_UNAUTHORIZED=0` disables all TLS
- * certificate verification. Uses `process.emitWarning` (not the app logger) for
- * the non-fatal path to avoid a config↔logger import cycle at module load.
+ * Rejects `NODE_TLS_REJECT_UNAUTHORIZED=0` in production and warns elsewhere.
+ *
+ * Uses `process.emitWarning`, not the app logger, to avoid an import cycle.
  *
  * @param c - Parsed runtime config.
  * @throws {ConfigError} When `NODE_TLS_REJECT_UNAUTHORIZED=0` in production.
@@ -141,18 +114,9 @@ export interface SignalStackIdentityConfig {
  * Fails hard at boot when the bearer service-auth credential cannot resolve to
  * the right Signals organisation.
  *
- * Signals maps the calling client id → `organization.slug` to decide *which*
- * org a service call acts as, so `SIGNALSTACK_CLIENT_ID` must equal this
- * aggregator's slug there. A mismatch is not a login failure — it authenticates
- * fine and then acts as the wrong (or no) org, which is far harder to diagnose
- * than a refused boot. The expected slug is deployment-specific, so it is
- * configuration (`SIGNALSTACK_ORG_SLUG`), not a constant; the check no-ops when
- * unset.
- *
- * Scope note: a *missing* client id is deliberately NOT fatal here — the
- * signalstack factory already treats incomplete bearer config as "push
- * disabled" (a warn, not a crash), and this guard must not turn that into a
- * boot failure. It only rejects a client id that is present and *wrong*.
+ * Signals picks the acting org from the client id, so `SIGNALSTACK_CLIENT_ID`
+ * must equal `SIGNALSTACK_ORG_SLUG`. A mismatch would act as the wrong org.
+ * The check is skipped when the slug or the client id is unset.
  *
  * @param c - Parsed runtime config.
  * @throws {ConfigError} When bearer mode is on and client id ≠ expected slug.

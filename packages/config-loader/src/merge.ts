@@ -1,8 +1,7 @@
 /**
  * Deep merge utility for config tree assembly.
  *
- * Extracted as a standalone module so it can be tested in isolation and
- * reused by any layer that needs to combine config sources.
+ * Used by any layer that combines config sources.
  *
  * @module @aggregator-dpg/config-loader/merge
  */
@@ -10,10 +9,8 @@
 /**
  * Keys that reach Object.prototype if assigned through bracket notation.
  *
- * `Object.keys` does not surface `__proto__` on an object literal, but it DOES
- * on anything built by `JSON.parse` or a YAML loader, where it is an own
- * enumerable property. Config here is assembled from fetched documents, so the
- * source side is not guaranteed to be a literal.
+ * `JSON.parse` and YAML loaders can produce `__proto__` as an own key, and
+ * config is built from parsed documents.
  */
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -21,8 +18,7 @@ const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
  * Recursively merges source into target. Arrays are replaced, not concatenated.
  * Mutates and returns target.
  *
- * Keys that would reach `Object.prototype` are skipped rather than copied
- * (CodeQL js/prototype-pollution-utility).
+ * Keys that would reach `Object.prototype` are skipped.
  *
  * @param target - Object to merge into (mutated in place).
  * @param source - Object providing override values.
