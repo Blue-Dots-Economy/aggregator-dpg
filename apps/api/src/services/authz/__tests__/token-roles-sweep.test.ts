@@ -3,7 +3,7 @@
  * (`@aggregator-dpg/api`; docs/rbac/rbac-edge-enforcement.md §3.2).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { config } from '../../../config.js';
+import { _setRbacRuntime } from '../runtime.js';
 import {
   reconcileTokenRoles,
   startTokenRolesRepair,
@@ -14,10 +14,8 @@ import {
 import type { TokenRolesOutcome } from '../token-roles.js';
 
 const NOW = 1_800_000_000_000;
-const savedEdge = config.RBAC_EDGE_MODE;
 
 afterEach(() => {
-  config.RBAC_EDGE_MODE = savedEdge;
   stopTokenRolesRepair();
   vi.restoreAllMocks();
 });
@@ -132,8 +130,8 @@ describe('reconcileTokenRoles', () => {
 });
 
 describe('startTokenRolesRepair', () => {
-  it('starts no timer while the edge is off', () => {
-    config.RBAC_EDGE_MODE = 'off';
+  it('starts no timer with RBAC off', () => {
+    _setRbacRuntime(null);
     const spy = vi.spyOn(globalThis, 'setInterval');
     startTokenRolesRepair();
     expect(spy).not.toHaveBeenCalled();

@@ -39,15 +39,15 @@ export interface RbacRuntime {
 }
 
 /**
- * Re-publishes the current snapshot to the edge (`RBAC_EDGE_MODE` not `off`),
- * so a restarted OPA sidecar gets the catalogue back within one tick.
+ * Re-publishes the current snapshot to the edge, in the runtime's mode, so a
+ * restarted OPA sidecar gets the catalogue back within one tick.
  *
- * @returns What happened; `off` also when RBAC is off.
+ * @returns What happened; `off` when RBAC is off.
  */
 export async function publishCurrentToEdge(): Promise<'off' | 'published' | 'failed'> {
   const current = runtime;
   if (!current?.catalogueRevision) return 'off';
-  return publishSnapshotToEdge(current.roles, current.catalogueRevision);
+  return publishSnapshotToEdge(current.roles, current.catalogueRevision, current.mode);
 }
 
 /** What a refresh did. */
@@ -103,14 +103,6 @@ export async function initRbac(
   stopRbacRefresh();
   if (mode === 'off') {
     runtime = null;
-    // The edge expands roles from the catalogue the API publishes; with RBAC
-    // off there is none, so an edge would refuse every capability route.
-    if (config.RBAC_EDGE_MODE !== 'off') {
-      throw new ConfigError('RBAC_EDGE_MODE needs RBAC_MODE log or enforce', {
-        code: 'RBAC_CONFIG_INVALID',
-        details: { rbac_mode: mode, rbac_edge_mode: config.RBAC_EDGE_MODE },
-      });
-    }
     // Custom roles do nothing while RBAC is off; tell the operator.
     if (config.RBAC_CUSTOM_ROLES_ENABLED) {
       logger.warn({
@@ -137,7 +129,7 @@ export async function initRbac(
     }),
   };
   // A failed publish only delays the edge: it is retried on every tick.
-  await publishSnapshotToEdge(snapshot.roles, snapshot.revision);
+  await publishSnapshotToEdge(snapshot.roles, snapshot.revision, mode);
   if (refreshMs > 0) {
     timer = setInterval(
       () => void refreshRbacCatalogue().then(() => publishCurrentToEdge()),
@@ -181,7 +173,7 @@ async function refreshOnce(): Promise<RefreshOutcome> {
       from_revision: current.catalogueRevision,
       to_revision: snapshot.revision,
     });
-    await publishSnapshotToEdge(snapshot.roles, snapshot.revision);
+    await publishSnapshotToEdge(snapshot.roles, snapshot.revision, current.mode);
     return 'reloaded';
   } catch (err) {
     logger.error({

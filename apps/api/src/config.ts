@@ -272,8 +272,15 @@ const ConfigSchema = z.object({
   SIGNALSTACK_ACTING_ORG_ID: z.string().optional(),
   // ─── RBAC (docs/rbac/rbac-design-aggregator.md) ─────────────────────────
   /**
-   * `off`: no access checks. `log`: checks run and denials are logged, but the
-   * request continues. `enforce`: a denial returns 403.
+   * The one RBAC switch, for the API and its edge (Envoy + OPA in front of it,
+   * docs/rbac/rbac-edge-enforcement.md). `off`: nothing is loaded, no check
+   * runs, nothing is published to the edge (deploy no edge). `log`: the API
+   * publishes its role catalogue to OPA and keeps the token `roles` claim in
+   * step; the edge records what it would refuse and the API's per-organisation
+   * checks log a would-deny, but nothing is refused. `enforce`: the edge
+   * refuses a missing route permission (403) and the API's per-organisation
+   * checks refuse. The API itself no longer checks route permissions, so an
+   * instance with `enforce` must run the edge in front of it.
    */
   RBAC_MODE: z.enum(['off', 'log', 'enforce']).default('off'),
   /**
@@ -296,23 +303,13 @@ const ConfigSchema = z.object({
   /** How often each replica checks the RBAC catalogue version and reloads on change. `0` disables it. */
   RBAC_CATALOGUE_REFRESH_MS: z.coerce.number().int().min(0).default(30000),
   /**
-   * Mode of the edge (Envoy + OPA in front of the API,
-   * docs/rbac/rbac-edge-enforcement.md). `off` (default): nothing is published
-   * and no edge is expected. `log` / `enforce`: the API publishes its role
-   * catalogue to the OPA sidecar (`data.catalogue`) on every refresh tick, with
-   * this mode, which the edge policy applies. Independent of `RBAC_MODE` so the
-   * edge can dry-run (`log`) while the API enforces; requires `RBAC_MODE` other
-   * than `off`, which loads the catalogue.
-   */
-  RBAC_EDGE_MODE: z.enum(['off', 'log', 'enforce']).default('off'),
-  /**
-   * With the edge on: how often the API retries failed `roles`-claim writes and
+   * With RBAC on: how often the API retries failed `roles`-claim writes and
    * re-syncs users whose timed role expired (`0` disables). A role that expired
    * stays in the claim until this sweep plus the user's next token refresh.
    */
   RBAC_TOKEN_ROLES_SWEEP_MS: z.coerce.number().int().min(0).default(60_000),
   /**
-   * With the edge on: how often every user's `roles` claim is rewritten from the
+   * With RBAC on: how often every user's `roles` claim is rewritten from the
    * database to repair drift (`0` disables). It also runs once at boot.
    */
   RBAC_TOKEN_ROLES_RECONCILE_MS: z.coerce.number().int().min(0).default(86_400_000),

@@ -559,18 +559,15 @@ services:
       SIGNALSTACK_AUTH_MODE: ${SIGNALSTACK_AUTH_MODE:-apikey}
       SIGNALSTACK_CLIENT_ID: ${SIGNALSTACK_CLIENT_ID:-aggregator-dpg}
       SIGNALSTACK_CLIENT_SECRET: ${SIGNALSTACK_CLIENT_SECRET:-aggregator-dpg-signals-local-dev-secret}
-      # RBAC (docs/rbac/rbac-design-aggregator.md): `log` decides every request
-      # and logs would-denies without blocking; `enforce` returns 403; `off`
-      # skips it. Decisions come from the `opa` service below.
-      RBAC_MODE: ${RBAC_MODE:-log}
+      # RBAC, one switch for the API and its edge (docs/rbac/rbac-edge-enforcement.md).
+      # The API publishes the role catalogue to the `opa` service and keeps the
+      # token `roles` claim in step; aggregator-envoy asks OPA about every
+      # request. `enforce`: the edge refuses a missing route permission before
+      # the API, and the API's per-organisation checks refuse. `log`: nothing is
+      # refused, would-denies are recorded. `off`: no RBAC (then remove
+      # aggregator-envoy, which refuses protected routes without a catalogue).
+      RBAC_MODE: ${RBAC_MODE:-enforce}
       OPA_URL: http://opa:8181
-      # Edge (Envoy + OPA in front of the API): the API publishes the role
-      # catalogue to OPA and keeps the token `roles` claim in step. `enforce`
-      # refuses at the edge, before the API (phase 2 of
-      # docs/rbac/rbac-edge-enforcement.md); `log` only records what it would
-      # refuse; `off` turns the edge's inputs off (the edge then refuses every
-      # protected route, so pair it with removing aggregator-envoy).
-      RBAC_EDGE_MODE: ${RBAC_EDGE_MODE:-enforce}
     volumes:
       - ../config:/app/config:ro
     healthcheck:

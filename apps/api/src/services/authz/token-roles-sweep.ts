@@ -22,6 +22,7 @@ import { users } from '../../db/schema.js';
 import { logger } from '../../logger.js';
 import { getRedis } from '../redis/index.js';
 import { getRoleStore } from '../role-store/index.js';
+import { getRbacRuntime } from './runtime.js';
 import { DIRTY_KEY, syncTokenRoles, type TokenRolesOutcome } from './token-roles.js';
 
 /** What a sweep or reconcile needs; injectable for tests. */
@@ -176,12 +177,12 @@ let reconcileTimer: ReturnType<typeof setInterval> | null = null;
 /**
  * Starts the sweep and the reconcile when the edge is on: a reconcile right
  * away (in the background), then both on their intervals. Call after
- * `initRbac`. A no-op when `RBAC_EDGE_MODE` is `off`; an interval of `0`
+ * `initRbac`. A no-op with `RBAC_MODE=off`; an interval of `0`
  * disables that job.
  */
 export function startTokenRolesRepair(): void {
   stopTokenRolesRepair();
-  if (config.RBAC_EDGE_MODE === 'off') return;
+  if (!getRbacRuntime()) return;
   void reconcileTokenRoles();
   if (config.RBAC_TOKEN_ROLES_SWEEP_MS > 0) {
     sweepTimer = setInterval(() => void sweepTokenRoles(), config.RBAC_TOKEN_ROLES_SWEEP_MS);

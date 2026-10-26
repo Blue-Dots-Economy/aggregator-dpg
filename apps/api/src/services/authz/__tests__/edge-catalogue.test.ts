@@ -12,6 +12,7 @@ import {
   type EdgePublishOptions,
 } from '../edge-catalogue.js';
 import { shippedRoleIndex } from '../testing.js';
+import { TEST_EDGE_FETCH_KEY, type EdgeFetchRecorder } from '../edge-test-hook.js';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -98,26 +99,26 @@ describe('publishEdgeCatalogue', () => {
 });
 
 describe('publishSnapshotToEdge', () => {
-  it('publishes nothing when the edge is off', async () => {
-    const spy = vi.spyOn(globalThis, 'fetch');
+  /** The unit-test setup's recording fetch (src/test-setup.ts). */
+  const recorder = () =>
+    (globalThis as Record<string, unknown>)[TEST_EDGE_FETCH_KEY] as EdgeFetchRecorder;
+
+  it('publishes nothing with RBAC off', async () => {
     expect(await publishSnapshotToEdge(await shippedRoleIndex(), 'r1', 'off')).toBe('off');
-    expect(spy).not.toHaveBeenCalled();
+    expect(recorder().bodies).toHaveLength(0);
   });
 
-  it('publishes the snapshot with the edge mode', async () => {
-    const spy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(null, { status: 204 }));
+  it('publishes the snapshot with the mode', async () => {
     expect(await publishSnapshotToEdge(await shippedRoleIndex(), 'r9', 'enforce')).toBe(
       'published',
     );
-    const body = JSON.parse(String(spy.mock.calls[0]?.[1]?.body)) as EdgeCatalogue;
+    const body = recorder().bodies[0] as EdgeCatalogue;
     expect(body.mode).toBe('enforce');
     expect(body.revision).toBe('r9');
   });
 
   it('reports a failure without throwing', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 400 }));
+    recorder().fetch = (async () => new Response(null, { status: 400 })) as unknown as typeof fetch;
     expect(await publishSnapshotToEdge(await shippedRoleIndex(), 'r1', 'log')).toBe('failed');
   });
 });

@@ -92,7 +92,7 @@ async function main(): Promise<void> {
 
   // RBAC edge: keep every user's token `roles` claim in step with the
   // database. After the owner reconcile above, so the first full reconcile
-  // already sees a new root or Default owner. A no-op with RBAC_EDGE_MODE=off.
+  // already sees a new root or Default owner. A no-op with RBAC_MODE=off.
   startTokenRolesRepair();
 
   // Merge email copy overrides (network, brand, instance) over the bundled

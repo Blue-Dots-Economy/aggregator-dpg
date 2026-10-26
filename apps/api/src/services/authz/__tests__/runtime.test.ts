@@ -17,6 +17,7 @@ import {
 } from '../runtime.js';
 import { InMemoryRbacCatalogue, _setRbacCatalogue } from '../../rbac-catalogue/index.js';
 import { config } from '../../../config.js';
+import { TEST_EDGE_FETCH_KEY, type EdgeFetchRecorder } from '../edge-test-hook.js';
 
 const savedCustomRoles = config.RBAC_CUSTOM_ROLES_ENABLED;
 let store: InMemoryRbacCatalogue;
@@ -191,35 +192,20 @@ describe('CUSTOM-ROLES flag gates the snapshot', () => {
 });
 
 describe('edge catalogue publishing', () => {
-  const savedEdge = config.RBAC_EDGE_MODE;
-  afterEach(() => {
-    config.RBAC_EDGE_MODE = savedEdge;
-    vi.restoreAllMocks();
-  });
+  /** The unit-test setup's recording fetch (src/test-setup.ts). */
+  const recorder = () =>
+    (globalThis as Record<string, unknown>)[TEST_EDGE_FETCH_KEY] as EdgeFetchRecorder;
+  const bodies = () =>
+    recorder().bodies as Array<{ mode: string; revision: string; roles: object }>;
 
-  /** Spies on fetch, answering OPA's 204, and returns the published bodies. */
-  function opa() {
-    const spy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(null, { status: 204 }));
-    return () =>
-      spy.mock.calls.map(
-        (c) => JSON.parse(String(c[1]?.body)) as { mode: string; revision: string; roles: object },
-      );
-  }
-
-  it('publishes nothing while the edge is off', async () => {
-    config.RBAC_EDGE_MODE = 'off';
-    const bodies = opa();
-    await initRbac('enforce', 0);
+  it('publishes nothing with RBAC off', async () => {
+    await initRbac('off');
     expect(await publishCurrentToEdge()).toBe('off');
     expect(bodies()).toHaveLength(0);
   });
 
-  it('publishes the snapshot at boot with the edge mode', async () => {
-    config.RBAC_EDGE_MODE = 'log';
-    const bodies = opa();
-    await initRbac('enforce', 0);
+  it('publishes the snapshot at boot with the RBAC mode', async () => {
+    await initRbac('log', 0);
     expect(bodies()).toHaveLength(1);
     expect(bodies()[0]).toMatchObject({
       mode: 'log',
@@ -229,17 +215,14 @@ describe('edge catalogue publishing', () => {
   });
 
   it('re-publishes the current snapshot on demand (each refresh tick)', async () => {
-    config.RBAC_EDGE_MODE = 'enforce';
-    const bodies = opa();
-    await initRbac('log', 0);
+    await initRbac('enforce', 0);
     expect(await publishCurrentToEdge()).toBe('published');
     expect(bodies()).toHaveLength(2);
+    expect(bodies()[1]!.mode).toBe('enforce');
   });
 
   it('publishes again right after a reload', async () => {
-    config.RBAC_EDGE_MODE = 'enforce';
-    const bodies = opa();
-    await initRbac('log', 0);
+    await initRbac('enforce', 0);
     store.setRoles([...store.storedRoles(), viewer]);
     expect(await refreshRbacCatalogue()).toBe('reloaded');
     expect(bodies()).toHaveLength(2);
@@ -247,14 +230,10 @@ describe('edge catalogue publishing', () => {
   });
 
   it('boots even when the sidecar is down (the next tick retries)', async () => {
-    config.RBAC_EDGE_MODE = 'enforce';
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'));
+    recorder().fetch = (async () => {
+      throw new Error('ECONNREFUSED');
+    }) as unknown as typeof fetch;
     await expect(initRbac('enforce', 0)).resolves.toBeUndefined();
     expect(await publishCurrentToEdge()).toBe('failed');
-  });
-
-  it('refuses to boot with the edge on and RBAC off', async () => {
-    config.RBAC_EDGE_MODE = 'log';
-    await expect(initRbac('off')).rejects.toMatchObject({ code: 'RBAC_CONFIG_INVALID' });
   });
 });

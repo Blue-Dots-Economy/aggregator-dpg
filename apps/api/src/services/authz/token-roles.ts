@@ -9,13 +9,12 @@
  * user's whole list and overwrites it, so a missed or failed write is repaired
  * by the next one (a later change, the sweep, or the reconcile).
  *
- * Runs only with `RBAC_EDGE_MODE` other than `off`. Never throws and never
+ * Runs only with `RBAC_MODE` other than `off`. Never throws and never
  * fails the request that triggered it: a failure is logged and the user is
  * marked for the next sweep.
  */
 
 import { effectiveRoleKeys } from '@aggregator-dpg/rbac';
-import { config } from '../../config.js';
 import { logger } from '../../logger.js';
 import { StoreActorResolver, type Actor, type ActorResult } from '../auth/actor/index.js';
 import { KC_ATTR } from '../idp-admin/attributes.js';
@@ -23,6 +22,7 @@ import { getIdpAdmin } from '../idp-admin/index.js';
 import { IDP_PROVIDER } from '../idp-admin/provider.js';
 import { getIdentityStore } from '../identity-store/index.js';
 import { getRedis } from '../redis/index.js';
+import { TEST_TOKEN_ROLES_OFF_KEY } from './edge-test-hook.js';
 import { getRbacRuntime } from './runtime.js';
 
 /** Keycloak user attribute (and token claim) holding the role keys. */
@@ -199,9 +199,20 @@ async function redisLock<T>(
 export async function syncTokenRoles(
   userId: string,
   reason: string,
-  deps: TokenRolesDeps = defaultTokenRolesDeps(),
+  deps?: TokenRolesDeps,
 ): Promise<TokenRolesOutcome> {
-  if (config.RBAC_EDGE_MODE === 'off' || !getRbacRuntime()) return 'off';
+  if (!getRbacRuntime()) return 'off';
+  // Unit tests: the default dependencies would reach Redis and Keycloak.
+  if (!deps && (globalThis as Record<string, unknown>)[TEST_TOKEN_ROLES_OFF_KEY]) return 'off';
+  return run(userId, reason, deps ?? defaultTokenRolesDeps());
+}
+
+/** One sync with resolved dependencies. */
+async function run(
+  userId: string,
+  reason: string,
+  deps: TokenRolesDeps,
+): Promise<TokenRolesOutcome> {
   const start = Date.now();
   const log = (status: 'success' | 'failure' | 'skipped', extra: Record<string, unknown>) =>
     (status === 'failure' ? logger.warn : logger.info).call(logger, {
@@ -262,7 +273,7 @@ export function requestTokenRolesSync(
   userIds: ReadonlyArray<string | null | undefined>,
   reason: string,
 ): void {
-  if (config.RBAC_EDGE_MODE === 'off') return;
+  if (!getRbacRuntime()) return;
   const ids = [...new Set(userIds.filter((id): id is string => !!id))];
   for (const id of ids) void syncTokenRoles(id, reason);
 }

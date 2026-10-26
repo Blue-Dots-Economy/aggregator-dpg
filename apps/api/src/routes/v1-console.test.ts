@@ -12,6 +12,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { config } from '../config.js';
 import { _setRedis } from '../services/redis/index.js';
+import { TEST_TOKEN_ROLES_OFF_KEY } from '../services/authz/edge-test-hook.js';
 import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import {
   OrganisationStoreFake,
@@ -1116,7 +1117,6 @@ describe('console routes /v1/user, /v1/org', () => {
 
       describe('token roles claim (RBAC edge)', () => {
         const C4 = '00000000-0000-4000-8000-0000000000c4';
-        const savedEdge = config.RBAC_EDGE_MODE;
         /** The `roles` attribute on C4's Keycloak user. */
         const kcRolesOfC4 = async () => {
           const kc = await idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, C4);
@@ -1127,6 +1127,8 @@ describe('console routes /v1/user, /v1/org', () => {
         };
 
         beforeEach(async () => {
+          // This describe checks the real sync: turn the setup's no-op off.
+          delete (globalThis as Record<string, unknown>)[TEST_TOKEN_ROLES_OFF_KEY];
           // The sync's per-user lock; no Redis in unit tests.
           _setRedis({ set: async () => 'OK', eval: async () => 1, sadd: async () => 1 } as never);
           // An active coordinator with a Keycloak user but no recorded login,
@@ -1135,12 +1137,10 @@ describe('console routes /v1/user, /v1/org', () => {
           await idp.createUser({ email: 'c4@x.org', attributes: { [KC_ATTR.AGGREGATOR_ID]: C4 } });
         });
         afterEach(() => {
-          config.RBAC_EDGE_MODE = savedEdge;
           _setRedis(null);
         });
 
         it("writes the coordinator's role keys to Keycloak after an assignment", async () => {
-          config.RBAC_EDGE_MODE = 'log';
           const res = await assign('a', C4, { role_key: 'data_export', org_id: ORG_A });
           expect(res.statusCode).toBe(200);
           await vi.waitFor(async () =>
@@ -1152,14 +1152,6 @@ describe('console routes /v1/user, /v1/org', () => {
           });
           expect(revoked.statusCode).toBe(200);
           await vi.waitFor(async () => expect(await kcRolesOfC4()).toEqual(['coordinator']));
-        });
-
-        it('writes nothing while the edge is off', async () => {
-          config.RBAC_EDGE_MODE = 'off';
-          const res = await assign('a', C4, { role_key: 'data_export', org_id: ORG_A });
-          expect(res.statusCode).toBe(200);
-          await new Promise((r) => setTimeout(r, 50));
-          expect(await kcRolesOfC4()).toBeUndefined();
         });
       });
 

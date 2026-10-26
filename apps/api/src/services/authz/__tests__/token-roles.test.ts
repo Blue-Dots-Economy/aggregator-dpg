@@ -4,7 +4,6 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
-import { config } from '../../../config.js';
 import { buildAdminActor, type Actor, type ActorResult } from '../../auth/actor/index.js';
 import { _setIdpAdmin } from '../../idp-admin/index.js';
 import { IdpAdminFake } from '../../idp-admin/testing.js';
@@ -23,7 +22,6 @@ import {
 const NOW = 1_800_000_000_000;
 const ORG = '00000000-0000-4000-8000-0000000000f1';
 const ROOT = '00000000-0000-4000-8000-0000000000f0';
-const savedEdge = config.RBAC_EDGE_MODE;
 
 const coordinator = (over: Partial<Actor> = {}): Actor => ({
   userId: 'c1',
@@ -53,7 +51,6 @@ function fakeDeps(actor: ActorResult, over: Partial<TokenRolesDeps> = {}) {
 }
 
 beforeEach(async () => {
-  config.RBAC_EDGE_MODE = 'log';
   _setRbacRuntime({
     mode: 'enforce',
     roles: await shippedRoleIndex(),
@@ -62,7 +59,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  config.RBAC_EDGE_MODE = savedEdge;
   _setRbacRuntime(null);
   _setIdpAdmin(null);
   _setIdentityStore(null);
@@ -101,13 +97,6 @@ describe('tokenRolesOf', () => {
 });
 
 describe('syncTokenRoles', () => {
-  it('does nothing while the edge is off', async () => {
-    config.RBAC_EDGE_MODE = 'off';
-    const { deps, writes } = fakeDeps({ ok: true, value: coordinator() });
-    expect(await syncTokenRoles('c1', 'test', deps)).toBe('off');
-    expect(writes).toHaveLength(0);
-  });
-
   it('does nothing while RBAC is off', async () => {
     _setRbacRuntime(null);
     const { deps, writes } = fakeDeps({ ok: true, value: coordinator() });
@@ -264,8 +253,8 @@ describe('the default dependencies', () => {
 });
 
 describe('requestTokenRolesSync', () => {
-  it('starts nothing while the edge is off', () => {
-    config.RBAC_EDGE_MODE = 'off';
+  it('starts nothing with RBAC off', () => {
+    _setRbacRuntime(null);
     expect(() => requestTokenRolesSync(['c1', null, 'c1'], 'test')).not.toThrow();
   });
 });

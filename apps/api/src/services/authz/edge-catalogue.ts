@@ -16,6 +16,7 @@ import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives
 import { err, ok, type Result } from '@aggregator-dpg/shared-primitives/result';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
+import { TEST_EDGE_FETCH_KEY, type EdgeFetchRecorder } from './edge-test-hook.js';
 
 /** The edge's mode: `off` (nothing published), `log` (would-deny logged) or `enforce`. */
 export type EdgeMode = 'off' | 'log' | 'enforce';
@@ -69,13 +70,16 @@ export function edgeCatalogue(
   return { mode, revision, roles: out };
 }
 
-/** The sidecar settings from config. */
+/** The sidecar settings from config; under the unit-test setup, its recording fetch. */
 function optionsFromConfig(): EdgePublishOptions {
+  const test = (globalThis as Record<string, unknown>)[TEST_EDGE_FETCH_KEY] as
+    EdgeFetchRecorder | undefined;
   return {
     baseUrl: config.OPA_URL,
     timeoutMs: config.OPA_TIMEOUT_MS,
     retries: config.OPA_RETRIES,
     backoffMs: config.OPA_BACKOFF_MS,
+    ...(test ? { fetchImpl: test.fetch } : {}),
   };
 }
 
@@ -168,19 +172,19 @@ function failed(e: UpstreamError, start: number): Result<void, BaseError> {
 }
 
 /**
- * Publishes a snapshot when the edge is on (`RBAC_EDGE_MODE` not `off`).
+ * Publishes a snapshot with the edge's mode, which is the API's `RBAC_MODE`.
  * Never throws: a failure is logged and retried on the next refresh tick,
  * and until then the edge refuses capability routes (fail closed).
  *
  * @param roles - The role snapshot.
  * @param revision - Its catalogue revision.
- * @param mode - The edge's mode; defaults to `RBAC_EDGE_MODE`.
- * @returns What happened: `off` (edge off), `published` or `failed`.
+ * @param mode - The mode; `off` publishes nothing.
+ * @returns What happened: `off`, `published` or `failed`.
  */
 export async function publishSnapshotToEdge(
   roles: RoleIndex,
   revision: string,
-  mode: EdgeMode = config.RBAC_EDGE_MODE,
+  mode: EdgeMode,
 ): Promise<'off' | 'published' | 'failed'> {
   if (mode === 'off') return 'off';
   const res = await publishEdgeCatalogue(edgeCatalogue(roles, revision, mode));
