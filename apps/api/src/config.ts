@@ -305,6 +305,17 @@ const ConfigSchema = z.object({
    * than `off`, which loads the catalogue.
    */
   RBAC_EDGE_MODE: z.enum(['off', 'log', 'enforce']).default('off'),
+  /**
+   * With the edge on: how often the API retries failed `roles`-claim writes and
+   * re-syncs users whose timed role expired (`0` disables). A role that expired
+   * stays in the claim until this sweep plus the user's next token refresh.
+   */
+  RBAC_TOKEN_ROLES_SWEEP_MS: z.coerce.number().int().min(0).default(60_000),
+  /**
+   * With the edge on: how often every user's `roles` claim is rewritten from the
+   * database to repair drift (`0` disables). It also runs once at boot.
+   */
+  RBAC_TOKEN_ROLES_RECONCILE_MS: z.coerce.number().int().min(0).default(86_400_000),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

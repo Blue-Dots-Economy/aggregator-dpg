@@ -127,4 +127,15 @@ export abstract class RoleStoreBase {
     revokedBy: string | null,
     audit: AuditEntry,
   ): Promise<RoleStoreResult<number>>;
+
+  /**
+   * Returns the users with an unrevoked assignment that expired in the window
+   * (`from`, `to`]: an expiry is no event, so the token-roles sweep asks for
+   * the users whose roles ran out since it last looked.
+   *
+   * @param from - Window start (exclusive).
+   * @param to - Window end (inclusive).
+   * @returns The user ids, without duplicates, in no particular order.
+   */
+  abstract listUsersExpiredBetween(from: Date, to: Date): Promise<RoleStoreResult<string[]>>;
 }

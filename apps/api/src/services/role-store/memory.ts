@@ -163,4 +163,17 @@ export class InMemoryRoleStore extends RoleStoreBase {
     if (n > 0) this.audit.push(audit);
     return { ok: true, value: n };
   }
+
+  /** {@inheritDoc RoleStoreBase.listUsersExpiredBetween} */
+  async listUsersExpiredBetween(from: Date, to: Date): Promise<RoleStoreResult<string[]>> {
+    const failed = this.fail();
+    if (failed) return failed;
+    const ids = this.assignments
+      .filter(
+        (a) =>
+          a.revokedAt === null && a.expiresAt !== null && a.expiresAt > from && a.expiresAt <= to,
+      )
+      .map((a) => a.userId);
+    return { ok: true, value: [...new Set(ids)] };
+  }
 }
