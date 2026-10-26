@@ -243,4 +243,43 @@ describe('StoreActorResolver', () => {
       if (r.ok) expect(r.value).not.toHaveProperty('roles');
     });
   });
+
+  describe('byUserId (no token: the token-roles sync)', () => {
+    it('resolves a coordinator by its id, even with no recorded login', async () => {
+      coordStore.seed([buildCoordinator({ id: COORD_ID, status: 'active' })]);
+      const r = await resolver.byUserId(COORD_ID);
+      expect(r.ok && r.value?.userType).toBe('coordinator');
+      expect(r.ok && r.value?.active).toBe(true);
+    });
+
+    it('resolves a pending coordinator as inactive', async () => {
+      coordStore.seed([buildCoordinator({ id: COORD_ID, status: 'pending' })]);
+      const r = await resolver.byUserId(COORD_ID);
+      expect(r.ok && r.value?.active).toBe(false);
+    });
+
+    it('resolves an admin by its id, with the active orgs it owns', async () => {
+      orgStore.seedRoot(
+        buildOrganisation({
+          id: 'root-1',
+          slug: 'network',
+          ownerUserId: ADMIN_ID,
+          status: 'active',
+        }),
+      );
+      const r = await resolver.byUserId(ADMIN_ID);
+      expect(r.ok && r.value?.userType).toBe('admin');
+      expect(r.ok && r.value?.orgs.map((o) => o.orgType)).toEqual(['network_facilitator']);
+    });
+
+    it('agrees with resolve() for a linked admin', async () => {
+      identity.seed([{ userId: ADMIN_ID, provider: IDP_PROVIDER, subject: SUBJECT }]);
+      orgStore.seed([
+        buildOrganisation({ id: 'org-a', slug: 'a', ownerUserId: ADMIN_ID, status: 'active' }),
+      ]);
+      expect(await resolver.byUserId(ADMIN_ID)).toEqual(
+        await resolver.resolve({ subject: SUBJECT }),
+      );
+    });
+  });
 });
