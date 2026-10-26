@@ -287,6 +287,9 @@ const ConfigSchema = z.object({
    * Enables custom-role authoring by the network admin. When false (default),
    * only built-in roles load, custom-role assignments grant nothing, and the
    * authoring routes are not registered. No effect when `RBAC_MODE=off`.
+   * Only the edge limits the authoring routes to the network admin, so an
+   * instance that turns this on must run the edge (decision E8,
+   * docs/rbac/rbac-edge-enforcement.md).
    */
   RBAC_CUSTOM_ROLES_ENABLED: z
     .enum(['true', 'false'])
