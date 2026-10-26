@@ -14,6 +14,7 @@
  * marked for the next sweep.
  */
 
+import { randomUUID } from 'node:crypto';
 import { effectiveRoleKeys } from '@aggregator-dpg/rbac';
 import { logger } from '../../logger.js';
 import { StoreActorResolver, type Actor, type ActorResult } from '../auth/actor/index.js';
@@ -159,7 +160,7 @@ async function redisLock<T>(
   fn: () => Promise<T>,
 ): Promise<{ acquired: true; value: T } | { acquired: false }> {
   const key = `rbac:token-roles:lock:${userId}`;
-  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const token = `${process.pid}-${randomUUID()}`;
   const redis = getRedis();
   const deadline = Date.now() + LOCK_WAIT_MS;
   let held = false;

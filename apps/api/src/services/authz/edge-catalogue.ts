@@ -100,7 +100,9 @@ export async function publishEdgeCatalogue(
   doc: EdgeCatalogue,
   options: EdgePublishOptions = optionsFromConfig(),
 ): Promise<Result<void, BaseError>> {
-  const url = options.baseUrl.replace(/\/+$/, '') + CATALOGUE_PATH;
+  let base = options.baseUrl;
+  while (base.endsWith('/')) base = base.slice(0, -1);
+  const url = base + CATALOGUE_PATH;
   const fetchImpl = options.fetchImpl ?? fetch;
   const start = Date.now();
   let lastStatus: number | null = null;

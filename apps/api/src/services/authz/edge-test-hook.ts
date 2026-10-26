@@ -27,9 +27,9 @@ export interface EdgeFetchRecorder {
 export function edgeFetchRecorder(): EdgeFetchRecorder {
   const rec: EdgeFetchRecorder = {
     bodies: [],
-    fetch: (async (_url: string, init?: RequestInit) => {
+    fetch: ((_url: string, init?: RequestInit) => {
       rec.bodies.push(JSON.parse(String(init?.body ?? 'null')));
-      return new Response(null, { status: 204 });
+      return Promise.resolve(new Response(null, { status: 204 }));
     }) as unknown as typeof fetch,
   };
   return rec;
