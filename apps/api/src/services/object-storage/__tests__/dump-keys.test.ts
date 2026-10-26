@@ -60,12 +60,17 @@ describe('dumpObjectKeys', () => {
 });
 
 describe('dumpFilesSchema', () => {
-  it('defaults to user, items, item_actions when unset', () => {
-    expect(dumpFilesSchema.parse(undefined)).toEqual(['user', 'items', 'item_actions']);
+  it('defaults to user, items, item_actions, aggregators when unset', () => {
+    expect(dumpFilesSchema.parse(undefined)).toEqual([
+      'user',
+      'items',
+      'item_actions',
+      'aggregators',
+    ]);
   });
 
   it('treats a blank value as the default', () => {
-    expect(dumpFilesSchema.parse('  ')).toEqual(['user', 'items', 'item_actions']);
+    expect(dumpFilesSchema.parse('  ')).toEqual(['user', 'items', 'item_actions', 'aggregators']);
   });
 
   it('parses a custom list and trims whitespace around each name', () => {

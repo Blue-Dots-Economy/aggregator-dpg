@@ -16,7 +16,7 @@
 
 import { z } from 'zod';
 
-export const DEFAULT_DUMP_FILES = 'user,items,item_actions';
+export const DEFAULT_DUMP_FILES = 'user,items,item_actions,aggregators';
 
 export const dumpFilesSchema = z
   .string()

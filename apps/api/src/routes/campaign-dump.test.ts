@@ -47,6 +47,7 @@ const KEYS = {
   user: 'blue_dot/blue_dot_up/user.ndjson.gz',
   items: 'blue_dot/blue_dot_up/items.ndjson.gz',
   item_actions: 'blue_dot/blue_dot_up/item_actions.ndjson.gz',
+  aggregators: 'blue_dot/blue_dot_up/aggregators.ndjson.gz',
 };
 
 /** Makes every HEAD succeed with a distinct size and timestamp. */
@@ -56,11 +57,13 @@ function allObjectsPresent(): void {
       [KEYS.user]: 12345,
       [KEYS.items]: 23456,
       [KEYS.item_actions]: 34567,
+      [KEYS.aggregators]: 45678,
     };
     const times: Record<string, string> = {
       [KEYS.user]: '2026-08-26T00:30:58.000Z',
       [KEYS.items]: '2026-08-26T00:31:04.000Z',
       [KEYS.item_actions]: '2026-08-26T00:31:12.000Z',
+      [KEYS.aggregators]: '2026-08-26T00:31:16.000Z',
     };
     if (!(key in sizes)) return null;
     return { etag: 'e', contentLength: sizes[key]!, lastModified: new Date(times[key]!) };
@@ -135,18 +138,19 @@ describe('GET /v1/campaign/dump', () => {
     });
   }
 
-  it('returns all three files with pre-signed URLs for the system token, and logs the grant', async () => {
+  it('returns all four default files with pre-signed URLs for the system token, and logs the grant', async () => {
     const infoSpy = vi.spyOn(logger, 'info');
     const res = await get('system');
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.network).toBe('blue_dot');
     expect(body.instance).toBe('blue_dot_up');
-    expect(body.files).toHaveLength(3);
+    expect(body.files).toHaveLength(4);
     expect(body.files.map((f: { table: string }) => f.table)).toEqual([
       'user',
       'items',
       'item_actions',
+      'aggregators',
     ]);
     expect(body.files[0]).toMatchObject({
       table: 'user',
@@ -170,6 +174,7 @@ describe('GET /v1/campaign/dump', () => {
           { key: KEYS.user, last_modified: '2026-08-26T00:30:58.000Z' },
           { key: KEYS.items, last_modified: '2026-08-26T00:31:04.000Z' },
           { key: KEYS.item_actions, last_modified: '2026-08-26T00:31:12.000Z' },
+          { key: KEYS.aggregators, last_modified: '2026-08-26T00:31:16.000Z' },
         ],
       }),
       expect.any(String),
@@ -221,9 +226,9 @@ describe('GET /v1/campaign/dump', () => {
       expect(body.error.code).toBe('DUMP_NOT_AVAILABLE');
       expect(body.error.fields.missing).toEqual([missingKey]);
       expect(body.files).toBeUndefined();
-      // Pins the ordering the all-three-or-none rule rests on: a route that
+      // Pins the ordering the all-or-none rule rests on: a route that
       // signed first and checked `missing` after would still pass every
-      // assertion above while three live download URLs exist for a partial
+      // assertion above while live download URLs exist for a partial
       // snapshot.
       expect(signDownloadUrlMock).not.toHaveBeenCalled();
     },
@@ -231,7 +236,7 @@ describe('GET /v1/campaign/dump', () => {
 
   it('returns 404 DUMP_NOT_AVAILABLE listing every key when none of the objects exist yet, and logs the denial with subject and request id', async () => {
     // The likeliest real 404 state: a fresh environment where the
-    // signals-s3-export cron has never run, so all three keys are absent at
+    // signals-s3-export cron has never run, so every key is absent at
     // once — not the single-key case the `it.each` above exercises.
     const warnSpy = vi.spyOn(logger, 'warn');
     headObjectMock.mockResolvedValue(null);
@@ -239,7 +244,12 @@ describe('GET /v1/campaign/dump', () => {
     expect(res.statusCode).toBe(404);
     const body = res.json();
     expect(body.error.code).toBe('DUMP_NOT_AVAILABLE');
-    expect(body.error.fields.missing).toEqual([KEYS.user, KEYS.items, KEYS.item_actions]);
+    expect(body.error.fields.missing).toEqual([
+      KEYS.user,
+      KEYS.items,
+      KEYS.item_actions,
+      KEYS.aggregators,
+    ]);
     expect(body.files).toBeUndefined();
     expect(signDownloadUrlMock).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(
@@ -339,9 +349,10 @@ describe('GET /v1/campaign/dump', () => {
         'user',
         'items',
         'item_actions',
+        'aggregators',
         'connections',
       ]);
-      expect(res.json().files[3]).toMatchObject({ key: extraKey, size_bytes: 999 });
+      expect(res.json().files[4]).toMatchObject({ key: extraKey, size_bytes: 999 });
     } finally {
       config.CAMPAIGN_DUMP_FILES = previousFiles;
     }
@@ -377,7 +388,7 @@ describe('GET /v1/campaign/dump', () => {
     try {
       const res = await get('system');
       expect(res.statusCode).toBe(200);
-      expect(signDownloadUrlMock).toHaveBeenCalledTimes(3);
+      expect(signDownloadUrlMock).toHaveBeenCalledTimes(4);
       for (const call of signDownloadUrlMock.mock.calls) {
         expect(call[1]).toMatchObject({ ttlSeconds: 137 });
       }
@@ -386,8 +397,8 @@ describe('GET /v1/campaign/dump', () => {
     }
   });
 
-  it('reports the EARLIEST of the three presigned expiries, not an arbitrary one', async () => {
-    // The three presigns run concurrently and can genuinely disagree by a few
+  it('reports the EARLIEST of the presigned expiries, not an arbitrary one', async () => {
+    // The presigns run concurrently and can genuinely disagree by a few
     // ms; the route must report the earliest so `expires_at` never outlives
     // one of the URLs it describes. Distinguishes `Math.min` from "whichever
     // key resolved first" or "the first key in `CAMPAIGN_DUMP_FILES` order" — every
@@ -396,6 +407,7 @@ describe('GET /v1/campaign/dump', () => {
       [KEYS.user]: '2026-08-26T00:50:00.000Z',
       [KEYS.items]: '2026-08-26T00:40:00.000Z',
       [KEYS.item_actions]: '2026-08-26T00:45:00.000Z',
+      [KEYS.aggregators]: '2026-08-26T00:55:00.000Z',
     };
     signDownloadUrlMock.mockImplementation(async (key: string) => ({
       url: `https://s3.public.example/${key}?X-Amz-Signature=abc`,
@@ -420,7 +432,7 @@ describe('GET /v1/campaign/dump', () => {
     const res = await get('system');
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.files).toHaveLength(3);
+    expect(body.files).toHaveLength(4);
     const empty = body.files.find((f: { table: string }) => f.table === 'item_actions');
     expect(empty.size_bytes).toBe(0);
     expect(empty.url).toContain('X-Amz-Signature');
@@ -518,7 +530,7 @@ describe('GET /v1/campaign/dump', () => {
       auditFake.failWith = new Error('audit down');
       const res = await get('system');
       expect(res.statusCode).toBe(200);
-      expect(res.json().files).toHaveLength(3);
+      expect(res.json().files).toHaveLength(4);
     });
 
     it('does not write an audit row for a denied (non-system) caller', async () => {
