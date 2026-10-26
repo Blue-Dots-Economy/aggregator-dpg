@@ -88,7 +88,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
         tags: ['campaign'],
         summary: 'Download the latest non-PII Signals dump',
         description:
-          'Returns a short-lived pre-signed URL for each object in the latest non-PII Signals snapshot, one per table configured in CAMPAIGN_DUMP_TABLES (default: user, items, item_actions), so the caller needs no S3 credentials. Each URL expires after CAMPAIGN_DUMP_URL_TTL_SECONDS (default 600s); fetch promptly rather than caching it. Requires the campaign-manager SYSTEM token (client_credentials grant); a coordinator token is rejected. Whole-network and not org-scoped. The exporter overwrites the objects in place with no cross-object atomicity, so each file carries its own last_modified: a caller that lands mid-run will see them disagree, meaning the snapshot is torn — treat it as such and re-fetch. Returns every configured file or an error, never a partial list.',
+          'Returns a short-lived pre-signed URL for each object in the latest non-PII Signals snapshot, one per file named in CAMPAIGN_DUMP_FILES (names without the .ndjson.gz extension; default: user, items, item_actions), so the caller needs no S3 credentials. Each URL expires after CAMPAIGN_DUMP_URL_TTL_SECONDS (default 600s); fetch promptly rather than caching it. Requires the campaign-manager SYSTEM token (client_credentials grant); a coordinator token is rejected. Whole-network and not org-scoped. The exporter overwrites the objects in place with no cross-object atomicity, so each file carries its own last_modified: a caller that lands mid-run will see them disagree, meaning the snapshot is torn — treat it as such and re-fetch. Returns every configured file or an error, never a partial list.',
         security: [{ bearerAuth: [] }],
         response: {
           200: dumpResponseSchema,
@@ -154,7 +154,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
         const network = (await getNetworkConfig()).network.id;
         const keys = dumpObjectKeys(
           { prefix: config.CAMPAIGN_DUMP_PREFIX, network, instanceId },
-          config.CAMPAIGN_DUMP_TABLES,
+          config.CAMPAIGN_DUMP_FILES,
         );
 
         // HEAD every object before signing anything: the response is

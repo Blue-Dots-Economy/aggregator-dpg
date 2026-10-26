@@ -121,7 +121,7 @@ export const ERR = {
     status: 404,
     title: 'Dump not available',
     detail: 'The non-PII dump has not been published yet. Please retry later.',
-    hint: 'One or more of the expected objects is missing under the configured key root. Either the signals-s3-export cron has not run in this environment yet, or CAMPAIGN_DUMP_PREFIX / CAMPAIGN_DUMP_INSTANCE_ID / CAMPAIGN_DUMP_TABLES does not match what it writes. See response.error.fields.missing for the absent keys.',
+    hint: 'One or more of the expected objects is missing under the configured key root. Either the signals-s3-export cron has not run in this environment yet, or CAMPAIGN_DUMP_PREFIX / CAMPAIGN_DUMP_INSTANCE_ID / CAMPAIGN_DUMP_FILES does not match what it writes. See response.error.fields.missing for the absent keys.',
   },
   DUMP_NOT_CONFIGURED: {
     code: 'DUMP_NOT_CONFIGURED',

@@ -16,16 +16,16 @@
 
 import { z } from 'zod';
 
-export const DEFAULT_DUMP_TABLES = 'user,items,item_actions';
+export const DEFAULT_DUMP_FILES = 'user,items,item_actions';
 
-export const dumpTablesSchema = z
+export const dumpFilesSchema = z
   .string()
   .optional()
-  .transform((raw) => (raw?.trim() || DEFAULT_DUMP_TABLES).split(',').map((t) => t.trim()))
+  .transform((raw) => (raw?.trim() || DEFAULT_DUMP_FILES).split(',').map((t) => t.trim()))
   .pipe(
     z
-      .array(z.string().regex(/^\w+$/, 'table names may contain only letters, digits and _'))
-      .refine((tables) => new Set(tables).size === tables.length, 'table names must be unique'),
+      .array(z.string().regex(/^\w+$/, 'file names may contain only letters, digits and _'))
+      .refine((files) => new Set(files).size === files.length, 'file names must be unique'),
   );
 
 /** Inputs that locate one deployment's dump within the bucket. */
@@ -64,13 +64,13 @@ export function dumpKeyRoot(opts: DumpLocation): string {
  * Builds the full key for every exported table.
  *
  * @param opts - The dump location.
- * @param tables - Tables to serve, from `CAMPAIGN_DUMP_TABLES`.
- * @returns One entry per table, in the given order.
+ * @param files - File names to serve, from `CAMPAIGN_DUMP_FILES`.
+ * @returns One entry per file, in the given order.
  */
 export function dumpObjectKeys(
   opts: DumpLocation,
-  tables: readonly string[],
+  files: readonly string[],
 ): Array<{ table: string; key: string }> {
   const root = dumpKeyRoot(opts);
-  return tables.map((table) => ({ table, key: `${root}/${table}.ndjson.gz` }));
+  return files.map((table) => ({ table, key: `${root}/${table}.ndjson.gz` }));
 }

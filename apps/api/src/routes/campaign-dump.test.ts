@@ -322,11 +322,11 @@ describe('GET /v1/campaign/dump', () => {
     );
   });
 
-  it('serves every table configured in CAMPAIGN_DUMP_TABLES, including an added one', async () => {
+  it('serves every file named in CAMPAIGN_DUMP_FILES, including an added one', async () => {
     const extraKey = 'blue_dot/blue_dot_up/connections.ndjson.gz';
-    const previousTables = config.CAMPAIGN_DUMP_TABLES;
+    const previousFiles = config.CAMPAIGN_DUMP_FILES;
     const previousHead = headObjectMock.getMockImplementation()!;
-    config.CAMPAIGN_DUMP_TABLES = [...previousTables, 'connections'];
+    config.CAMPAIGN_DUMP_FILES = [...previousFiles, 'connections'];
     headObjectMock.mockImplementation(async (key: string) =>
       key === extraKey
         ? { etag: 'e', contentLength: 999, lastModified: new Date('2026-08-26T00:31:20.000Z') }
@@ -343,13 +343,13 @@ describe('GET /v1/campaign/dump', () => {
       ]);
       expect(res.json().files[3]).toMatchObject({ key: extraKey, size_bytes: 999 });
     } finally {
-      config.CAMPAIGN_DUMP_TABLES = previousTables;
+      config.CAMPAIGN_DUMP_FILES = previousFiles;
     }
   });
 
   it('returns 404 DUMP_NOT_AVAILABLE naming only the added table when its object is not written yet', async () => {
-    const previousTables = config.CAMPAIGN_DUMP_TABLES;
-    config.CAMPAIGN_DUMP_TABLES = [...previousTables, 'connections'];
+    const previousFiles = config.CAMPAIGN_DUMP_FILES;
+    config.CAMPAIGN_DUMP_FILES = [...previousFiles, 'connections'];
     try {
       const res = await get('system');
       expect(res.statusCode).toBe(404);
@@ -358,7 +358,7 @@ describe('GET /v1/campaign/dump', () => {
       ]);
       expect(signDownloadUrlMock).not.toHaveBeenCalled();
     } finally {
-      config.CAMPAIGN_DUMP_TABLES = previousTables;
+      config.CAMPAIGN_DUMP_FILES = previousFiles;
     }
   });
 
@@ -390,7 +390,7 @@ describe('GET /v1/campaign/dump', () => {
     // The three presigns run concurrently and can genuinely disagree by a few
     // ms; the route must report the earliest so `expires_at` never outlives
     // one of the URLs it describes. Distinguishes `Math.min` from "whichever
-    // key resolved first" or "the first key in `DUMP_TABLES` order" — every
+    // key resolved first" or "the first key in `CAMPAIGN_DUMP_FILES` order" — every
     // mocked expiry here differs, and the middle one (`items`) is earliest.
     const expiries: Record<string, string> = {
       [KEYS.user]: '2026-08-26T00:50:00.000Z',

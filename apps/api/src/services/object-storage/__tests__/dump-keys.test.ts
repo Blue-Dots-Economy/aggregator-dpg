@@ -6,7 +6,7 @@
  * @module apps/api/services/object-storage/__tests__/dump-keys.test
  */
 import { describe, it, expect } from 'vitest';
-import { dumpKeyRoot, dumpObjectKeys, dumpTablesSchema } from '../dump-keys.js';
+import { dumpKeyRoot, dumpObjectKeys, dumpFilesSchema } from '../dump-keys.js';
 
 describe('dumpKeyRoot', () => {
   it('omits an empty prefix so keys start at the network segment', () => {
@@ -59,17 +59,17 @@ describe('dumpObjectKeys', () => {
   });
 });
 
-describe('dumpTablesSchema', () => {
+describe('dumpFilesSchema', () => {
   it('defaults to user, items, item_actions when unset', () => {
-    expect(dumpTablesSchema.parse(undefined)).toEqual(['user', 'items', 'item_actions']);
+    expect(dumpFilesSchema.parse(undefined)).toEqual(['user', 'items', 'item_actions']);
   });
 
   it('treats a blank value as the default', () => {
-    expect(dumpTablesSchema.parse('  ')).toEqual(['user', 'items', 'item_actions']);
+    expect(dumpFilesSchema.parse('  ')).toEqual(['user', 'items', 'item_actions']);
   });
 
   it('parses a custom list and trims whitespace around each name', () => {
-    expect(dumpTablesSchema.parse(' user , items,item_actions, connections ')).toEqual([
+    expect(dumpFilesSchema.parse(' user , items,item_actions, connections ')).toEqual([
       'user',
       'items',
       'item_actions',
@@ -84,10 +84,10 @@ describe('dumpTablesSchema', () => {
     ['an empty entry', 'user,,items'],
     ['a trailing comma', 'user,items,'],
   ])('rejects %s', (_label, value) => {
-    expect(dumpTablesSchema.safeParse(value).success).toBe(false);
+    expect(dumpFilesSchema.safeParse(value).success).toBe(false);
   });
 
   it('rejects duplicate table names', () => {
-    expect(dumpTablesSchema.safeParse('user,items,user').success).toBe(false);
+    expect(dumpFilesSchema.safeParse('user,items,user').success).toBe(false);
   });
 });
