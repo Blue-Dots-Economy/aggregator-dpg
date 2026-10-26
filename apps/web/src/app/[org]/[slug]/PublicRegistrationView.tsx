@@ -193,6 +193,28 @@ interface ItemLocation {
 }
 
 /**
+ * Removes the URL pattern from a link field (`x-uri`) so the browser does not
+ * check it.
+ *
+ * The network-config loader gives every link field Signals' URL pattern
+ * (#904), and the public submit route enforces it, answering 400 with the
+ * field named in the detail the form shows. The browser must not enforce it
+ * yet: this form only shows field errors after a submit attempt while an
+ * invalid field keeps Submit disabled (#903), so a participant who typed `NA`
+ * would face a dead button with no reason. Drop this once #903 is fixed.
+ *
+ * @param def - One property schema of the cloned form schema; mutated in place.
+ */
+export function dropBrowserLinkPattern(def: Record<string, unknown>): void {
+  if (def['x-uri'] !== true) return;
+  delete def['pattern'];
+  const items = def['items'];
+  if (items && typeof items === 'object' && !Array.isArray(items)) {
+    delete (items as Record<string, unknown>)['pattern'];
+  }
+}
+
+/**
  * Maps a schema property's custom markers onto the uiSchema entry that selects a
  * custom widget, or `null` when the property carries no marker.
  *
@@ -556,6 +578,10 @@ export function PublicRegistrationView({
         delete (def as Record<string, unknown>)['minItems'];
         delete (def as Record<string, unknown>)['minLength'];
         delete (def as Record<string, unknown>)['minimum'];
+      }
+      // Link fields are checked server-side only, for now (#904 / #903).
+      for (const def of Object.values(inlined)) {
+        if (def && typeof def === 'object') dropBrowserLinkPattern(def as Record<string, unknown>);
       }
     }
     return clone;

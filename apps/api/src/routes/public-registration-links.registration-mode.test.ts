@@ -43,6 +43,7 @@ import { _setSchemaLoader } from '../services/schema-loader/index.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import type { ResolvedNetworkConfig } from '@aggregator-dpg/network-config/interface';
+import { applyUrlRule } from '@aggregator-dpg/network-config/uri-fields';
 
 // Hoisted so the vi.mock factory can reference it (mocks are hoisted above
 // module code). Default resolves "allowed" so every existing test in this
@@ -619,6 +620,59 @@ describe('schema validation failure branches (account_and_profile)', () => {
     });
     expect(r.statusCode).toBe(400);
     expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
+  });
+
+  describe('link fields use the Signals URL rule (#904)', () => {
+    // The schema as the network-config loader hands it out: both link
+    // declarations rewritten by `applyUrlRule`.
+    const submit = async (fields: Record<string, unknown>) => {
+      const cfg = buildBlueDotConfig();
+      _setNetworkConfig({
+        ...cfg,
+        domains: {
+          ...cfg.domains,
+          seeker: {
+            ...cfg.domains.seeker,
+            schema: applyUrlRule({
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                phone: { type: 'string' },
+                website: { type: 'string', title: 'Website', 'x-uri': true },
+                catalog_url: { type: 'string', title: 'Catalog URL', format: 'uri' },
+              },
+            }),
+          },
+        },
+      } as ResolvedNetworkConfig);
+      return app.inject({
+        method: 'POST',
+        url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${SLUG_FULL}`,
+        payload: {
+          name: 'A. User',
+          phone: '+919999999999',
+          consent_terms: true,
+          consent_privacy: true,
+          consent_profile: true,
+          year_of_birth: 1990,
+          ...fields,
+        },
+      });
+    };
+
+    it('accepts a web address with no scheme on both kinds of link field', async () => {
+      const r = await submit({ website: 'www.example.org', catalog_url: 'example.org/list' });
+      expect(r.statusCode).toBe(201);
+    });
+
+    it('rejects a value that is not a web address, naming the field in the detail', async () => {
+      const r = await submit({ website: 'NA' });
+      expect(r.statusCode).toBe(400);
+      const error = r.json().error;
+      expect(error.code).toBe('SCHEMA_VALIDATION');
+      expect(error.detail).toBe('Website: Please enter a valid web address.');
+      expect(error.fields.field_errors).toEqual({ website: 'Please enter a valid web address.' });
+    });
   });
 
   describe('conditional requirement (if/then), e.g. category licensed → licence_number + licence_type', () => {
