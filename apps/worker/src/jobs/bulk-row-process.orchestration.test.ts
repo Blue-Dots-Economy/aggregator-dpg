@@ -271,7 +271,7 @@ describe('processBulkRow — edge cases: rejected before persistence', () => {
     const result = await processBulkRow(makeJob());
     expect(result.outcome).toBe('failed');
     expect(result.category).toBe('validation');
-    expect(result.reasons[0]).toContain('/age');
+    expect(result.reasons[0]).toMatch(/^age: /);
   });
 
   it('passes a row through when the only validation errors are missing-required fields', async () => {

@@ -498,7 +498,6 @@
       "privacy_note": "Your details are shared only with the aggregator who issued this link.",
       "validation_error_title": "Form validation failed",
       "validation_required": "Please fill all required fields.",
-      "validation_more": "(and {count} more)",
       "error_network_title": "Network error",
       "error_network_detail": "Could not reach the server.",
       "error_submission_title": "Submission failed",

@@ -48,6 +48,8 @@ A Signals `409 PROFILE_LIMIT_REACHED` is mapped to `SIGNALSTACK_PROFILE_LIMIT_RE
 
 **The local `participants` mirror no longer decides the outcome (#780).** It dedups per phone and used to report `skipped`, which after the client-side gate came down meant a participant was told "already registered" while a second profile had just been created upstream. Signals is the identity authority; the route now skips **only** when the identity is genuinely owned by ANOTHER aggregator — tenant isolation, not deduplication. The `link_submissions` row is inserted before the push, so the corrected verdict is persisted in the same transaction; without that the table records a duplicate for a submission that created a profile.
 
+**A rejected field is named, never a generic push failure (#904).** The route's own Ajv failure returns `400 SCHEMA_VALIDATION` whose `detail` reads `Website: Please enter a valid web address.` (one sentence per field, Signals' wording via `@aggregator-dpg/network-config/field-errors`) plus `fields.field_errors`. A Signals `400 INVALID_ITEM_STATE` on the push is the participant's data, not a server fault: it is returned as the same `400 SCHEMA_VALIDATION` with Signals' per-field messages, not `502 SIGNALSTACK_PUSH_FAILED`.
+
 **Brand `attribution` on `/v1/aggregator-config` is opt-in (signals-dpg#720).** The response only carries an `attribution` array when the resolved `brand.json` declares one, so every deployment that does not is byte-identical to before.
 
 ## Campaign PII audit log (#617)

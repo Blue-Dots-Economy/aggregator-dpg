@@ -498,7 +498,6 @@
       "privacy_note": "ನಿಮ್ಮ ವಿವರಗಳನ್ನು ಈ ಲಿಂಕ್ ನೀಡಿದ ಅಗ್ರಿಗೇಟರ್‌ಗೆ ಮಾತ್ರ ಹಂಚಿಕೊಳ್ಳಲಾಗುತ್ತದೆ.",
       "validation_error_title": "ಫಾರ್ಮ್ ಮೌಲ್ಯೀಕರಣ ವಿಫಲವಾಗಿದೆ",
       "validation_required": "ದಯವಿಟ್ಟು ಎಲ್ಲಾ ಅಗತ್ಯ ಕ್ಷೇತ್ರಗಳನ್ನು ತುಂಬಿಸಿ.",
-      "validation_more": "(ಮತ್ತು {count} ಹೆಚ್ಚು)",
       "error_network_title": "ನೆಟ್‌ವರ್ಕ್ ದೋಷ",
       "error_network_detail": "ಸರ್ವರ್ ತಲುಪಲಾಗಲಿಲ್ಲ.",
       "error_submission_title": "ಸಲ್ಲಿಕೆ ವಿಫಲವಾಗಿದೆ",

@@ -322,6 +322,11 @@ export function exampleValue(
   if (type === 'integer' || type === 'number') return numberExample(prop, type === 'integer');
   if (type === 'boolean') return 'true';
 
+  // A link field: the network-config loader rewrites both `x-uri` and
+  // `format: "uri"` to the Signals URL rule, which marks it `x-uri` and drops
+  // the format (#904). Its pattern is too general for `patternExample`.
+  if (prop['x-uri'] === true) return 'https://example.com';
+
   const fromFormat = formatExample(str(prop, 'format'));
   if (fromFormat !== undefined) return fromFormat;
 

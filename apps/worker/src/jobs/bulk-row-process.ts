@@ -15,6 +15,7 @@
  *   failed   = validation | normalisation | system_error
  */
 
+import { describeSchemaIssue } from '@aggregator-dpg/network-config/field-errors';
 import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import {
@@ -143,7 +144,10 @@ export async function processBulkRow(job: BulkRowProcessJob): Promise<RowOutcome
   // signals handles them.
   const validate = validatorResult.value;
   if (!validate(job.payload)) {
-    const reasons = blockingValidationReasons(validate.errors ?? []);
+    const reasons = blockingValidationReasons(
+      validate.errors ?? [],
+      schemaResult.success ? schemaResult.value : undefined,
+    );
     if (reasons.length > 0) {
       return await commit(
         job,
@@ -602,7 +606,7 @@ export interface SchemaValidationError {
   keyword?: string;
   instancePath?: string;
   schemaPath?: string;
-  params?: { missingProperty?: string };
+  params?: Record<string, unknown>;
   message?: string;
 }
 
@@ -627,16 +631,23 @@ function isConditionalRequired(e: SchemaValidationError): boolean {
  * surfaced so the row fails fast before reaching signals.
  *
  * @param errors - Ajv `validate.errors` (or `[]`).
+ * @param schema - The schema the row was validated against, for URL-field
+ *   wording; optional.
  * @returns One reason string per blocking error; empty when the only failures
  *   were missing top-level required fields.
  */
-export function blockingValidationReasons(errors: readonly SchemaValidationError[]): string[] {
+export function blockingValidationReasons(
+  errors: readonly SchemaValidationError[],
+  schema?: unknown,
+): string[] {
   return errors
     .filter((e) => e.keyword !== 'if' && (e.keyword !== 'required' || isConditionalRequired(e)))
     .map((e) => {
-      const missing = e.keyword === 'required' ? e.params?.missingProperty : undefined;
-      const where = missing ? `${e.instancePath ?? ''}/${missing}` : e.instancePath || e.schemaPath;
-      return `${where}: ${e.message ?? 'invalid'}`;
+      // Signals' wording, keyed by dot path — the same `field: message` shape
+      // errors.csv already uses for a Signals rejection (#904). A failed
+      // pattern reads "Please enter a valid web address.", never the regex.
+      const d = describeSchemaIssue(e, schema);
+      return `${d.field || e.schemaPath || 'row'}: ${d.message}`;
     });
 }
 
