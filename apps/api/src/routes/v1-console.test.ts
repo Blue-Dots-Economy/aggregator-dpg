@@ -966,14 +966,7 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(res.statusCode).toBe(200);
     });
 
-    it('refuses an aggregator owner the network admin capabilities', async () => {
-      const repair = await post(`/v1/org/access/repair/${ORG_A}`, 'a', {});
-      expect(repair.statusCode).toBe(403);
-      expect(permissionOf(repair)).toBe('network.administer');
-      const decide = await post(`/v1/org/decision/${ORG_P}`, 'a', { decision: 'approve' });
-      expect(decide.statusCode).toBe(403);
-      expect(permissionOf(decide)).toBe('orgs.onboard');
-    });
+    // Route permission, decided at the edge: policy/rbac/edge_test.rego (test_real_table_*).
 
     it('lets the network admin repair access', async () => {
       await idp.createUser({ email: 'a@a.org', enabled: false, attributes: {} });
@@ -1093,20 +1086,7 @@ describe('console routes /v1/user, /v1/org', () => {
         expect((await post(`/v1/user/role/revoke/${C3}`, 'a', body)).statusCode).toBe(403);
       });
 
-      it('refuses custom-role writes to a caller without network.administer', async () => {
-        _setRbacRuntime(await testRbacRuntime('log'));
-        const created = await post('/v1/roles/create', 'a', {
-          key: 'helper',
-          name: 'Helper',
-          description: 'x',
-          account_type: 'coordinator',
-          assignable_org_types: ['aggregator'],
-          assigned_by: 'org.manage',
-          permissions: ['profiles.view'],
-        });
-        expect(created.statusCode).toBe(403);
-        expect((await post('/v1/roles/delete/data_export', 'a', {})).statusCode).toBe(403);
-      });
+      // Route permission, decided at the edge: policy/rbac/edge_test.rego (test_real_table_*).
     });
 
     describe('roles API', () => {
@@ -1382,23 +1362,7 @@ describe('console routes /v1/user, /v1/org', () => {
         expect((await get(`/v1/org/read/${ORG_B}`, 'a')).statusCode).toBe(404);
       });
 
-      it('refuses an org route to an admin holding neither permission', async () => {
-        _setRbacRuntime(
-          await testRbacRuntime('enforce', new AuthorizerFake(), []).then(async (rt) => ({
-            ...rt,
-            roles: indexRoles(
-              (await shippedRoles()).map((r) =>
-                r.key === 'org_admin'
-                  ? { ...r, permissions: r.permissions.filter((c) => c !== 'org.manage') }
-                  : r,
-              ),
-            ),
-          })),
-        );
-        const res = await get(`/v1/org/read/${ORG_A}`, 'a');
-        expect(res.statusCode).toBe(403);
-        expect(permissionOf(res)).toBe('org.manage|orgs.onboard');
-      });
+      // Route permission, decided at the edge: policy/rbac/edge_test.rego (test_real_table_*).
 
       it('only logs the narrower scope in log mode', async () => {
         _setRbacRuntime(await testRbacRuntime('log'));
@@ -1530,14 +1494,7 @@ describe('console routes /v1/user, /v1/org', () => {
         ).toContain('verifier');
       });
 
-      it('refuses an organisation owner and a coordinator', async () => {
-        for (const url of ['/v1/rbac/roles', '/v1/rbac/permissions']) {
-          const owner = await get(url, 'a');
-          expect(owner.statusCode).toBe(403);
-          expect(permissionOf(owner)).toBe('network.administer');
-          expect((await get(url, 'coord')).statusCode).toBe(403);
-        }
-      });
+      // Route permission, decided at the edge: policy/rbac/edge_test.rego (test_real_table_*).
 
       it('answers 404 to an owner when access is only logged', async () => {
         _setRbacRuntime(await testRbacRuntime('log'));
@@ -1610,11 +1567,7 @@ describe('console routes /v1/user, /v1/org', () => {
         expect(me.capabilities).toContain('profiles.verify');
       });
 
-      it('refuses an owner creating a role', async () => {
-        const res = await post('/v1/roles/create', 'a', verifier);
-        expect(res.statusCode).toBe(403);
-        expect(permissionOf(res)).toBe('network.administer');
-      });
+      // Route permission, decided at the edge: policy/rbac/edge_test.rego (test_real_table_*).
 
       it('refuses an unknown permission, personal data through the root and a taken key', async () => {
         const unknown = await post('/v1/roles/create', 'na', {

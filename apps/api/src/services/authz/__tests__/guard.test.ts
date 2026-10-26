@@ -10,7 +10,6 @@ import {
   decisionInput,
   listCapabilitiesForTargets,
   permissionsByOrg,
-  requirePermission,
 } from '../guard.js';
 import { _setRbacRuntime } from '../runtime.js';
 import { shippedRoleIndex } from '../testing.js';
@@ -45,8 +44,6 @@ function setup(mode: 'log' | 'enforce', actor: Actor | null = coordinator) {
   return { authorizer, resolver };
 }
 
-const caller = { subject: 's', aggregatorId: 'u-coord' };
-
 afterEach(() => {
   _setRbacRuntime(null);
   _setActorResolver(null);
@@ -78,10 +75,12 @@ describe('decisionInput', () => {
   });
 });
 
-describe('requirePermission', () => {
+// Modes and failure handling of a handler-level check (the per-organisation
+// checks the API keeps; route permissions are decided at the edge).
+describe('checkCapability modes', () => {
   it('does nothing when RBAC is off', async () => {
     const r = req();
-    expect(await requirePermission(r, caller, 'profiles.view')).toEqual({
+    expect(await checkCapability(r, coordinator, 'profiles.view')).toEqual({
       allowed: true,
       mode: 'off',
     });
@@ -90,7 +89,7 @@ describe('requirePermission', () => {
 
   it('allows what the role and the organisation set hold', async () => {
     setup('enforce');
-    expect(await requirePermission(req(), caller, 'profiles.view')).toMatchObject({
+    expect(await checkCapability(req(), coordinator, 'profiles.view')).toMatchObject({
       allowed: true,
       decision: { allow: true },
     });
@@ -99,7 +98,7 @@ describe('requirePermission', () => {
   it('denies in enforce mode and logs a failure', async () => {
     setup('enforce');
     const r = req();
-    const out = await requirePermission(r, caller, 'profiles.view_pii');
+    const out = await checkCapability(r, coordinator, 'profiles.view_pii');
     expect(out).toMatchObject({ allowed: false, decision: { reasons: ['not_held'] } });
     expect(r.spy.warn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -110,29 +109,19 @@ describe('requirePermission', () => {
     );
   });
 
-  it('only logs a deny in log mode', async () => {
+  it('only logs a deny in log mode, unless strict', async () => {
     setup('log');
     const r = req();
-    const out = await requirePermission(r, caller, 'profiles.view_pii');
+    const out = await checkCapability(r, coordinator, 'profiles.view_pii');
     expect(out).toMatchObject({ allowed: true, decision: { allow: false } });
     expect(r.spy.warn).toHaveBeenCalledWith(expect.objectContaining({ status: 'skipped' }));
-  });
-
-  it('denies an unknown caller', async () => {
-    setup('enforce', null);
-    const out = await requirePermission(req(), { subject: 'nobody' }, 'profiles.view');
-    expect(out).toMatchObject({ allowed: false, decision: { reasons: ['unknown_actor'] } });
-  });
-
-  it('denies when the resolver is unavailable', async () => {
-    setup('enforce').resolver.failWith = 'db down';
-    const out = await requirePermission(req(), caller, 'profiles.view');
-    expect(out.decision).toEqual({ allow: false, reasons: ['actor_unavailable'] });
+    const strict = await checkCapability(req(), coordinator, 'profiles.view_pii', { strict: true });
+    expect(strict).toMatchObject({ allowed: false });
   });
 
   it('denies when the engine is unreachable', async () => {
     setup('enforce').authorizer.failWith();
-    const out = await requirePermission(req(), caller, 'profiles.view');
+    const out = await checkCapability(req(), coordinator, 'profiles.view');
     expect(out.decision).toEqual({ allow: false, reasons: ['engine_unavailable'] });
   });
 });

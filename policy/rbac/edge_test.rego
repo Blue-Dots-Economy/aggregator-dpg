@@ -236,3 +236,54 @@ test_real_table_me_is_signed_in if {
 test_real_table_public_submit_needs_no_token if {
 	decide_real(anon("POST", "/public/v1/aggregators/acme/registrations/walk-in")).allowed
 }
+
+# ── Route decisions that moved from the API's unit tests (phase 3) ──────────
+# These used to be asserted as API 403s in apps/api/src/routes/v1-console.test.ts;
+# the API no longer checks route permissions, so they are pinned here against
+# the generated route table.
+
+decide_real_mode(i, mode) := d if {
+	d := edge.decision with input as i with data.catalogue as catalogue(mode)
+}
+
+test_real_table_catalogue_view_is_network_admin_only if {
+	every url in ["/v1/rbac/roles", "/v1/rbac/permissions"] {
+		owner := decide_real(req("GET", url, user(["org_admin"])))
+		owner.http_status == 403
+		body(owner).fields.permission == "network.administer"
+		decide_real(req("GET", url, user(["coordinator"]))).http_status == 403
+		decide_real(req("GET", url, user(["network_admin"]))).allowed
+	}
+}
+
+test_real_table_owner_cannot_create_a_role if {
+	d := decide_real(req("POST", "/v1/roles/create", user(["org_admin"])))
+	d.http_status == 403
+	body(d).fields.permission == "network.administer"
+	decide_real(req("POST", "/v1/roles/create", user(["network_admin"]))).allowed
+}
+
+test_real_table_custom_role_writes_are_strict_in_log_mode if {
+	decide_real_mode(req("POST", "/v1/roles/create", user(["org_admin"])), "log").http_status == 403
+	decide_real_mode(req("POST", "/v1/roles/delete/data_export", user(["org_admin"])), "log").http_status == 403
+	decide_real_mode(req("PATCH", "/v1/roles/update/data_export", user(["org_admin"])), "log").http_status == 403
+}
+
+test_real_table_org_routes_need_org_manage_or_orgs_onboard if {
+	d := decide_real(req("GET", "/v1/org/read/0b1c", user(["coordinator"])))
+	d.http_status == 403
+	body(d).fields.permission == "org.manage|orgs.onboard"
+	decide_real(req("GET", "/v1/org/read/0b1c", user(["org_admin"]))).allowed
+	decide_real(req("GET", "/v1/org/read/0b1c", user(["network_admin"]))).allowed
+}
+
+test_real_table_owner_is_refused_network_admin_org_actions if {
+	repair := decide_real(req("POST", "/v1/org/access/repair/0b1c", user(["org_admin"])))
+	repair.http_status == 403
+	body(repair).fields.permission == "network.administer"
+	decide := decide_real(req("POST", "/v1/org/decision/0b1c", user(["org_admin"])))
+	decide.http_status == 403
+	body(decide).fields.permission == "orgs.onboard"
+	decide_real(req("POST", "/v1/org/access/repair/0b1c", user(["network_admin"]))).allowed
+	decide_real(req("POST", "/v1/org/decision/0b1c", user(["network_admin"]))).allowed
+}

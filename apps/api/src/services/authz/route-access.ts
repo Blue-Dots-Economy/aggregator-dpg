@@ -1,23 +1,17 @@
 /**
  * Route access declarations and their enforcement (`@aggregator-dpg/api`, RBAC).
  *
- * Every route declares who may call it in `config.rbac`; the app refuses to
- * boot without one ({@link assertRouteDeclared}). Each route file's auth
- * wrapper then calls {@link enforceRouteAccess} after the token is verified.
+ * Every route declares who may call it in `config.rbac`, so an unguarded route
+ * is visible in review (#805) and the app refuses to boot without one
+ * ({@link assertRouteDeclared}). The declarations are exported to the edge
+ * ({@link exportRouteTable}), which decides every request before it reaches the
+ * API; each route file's auth wrapper then calls {@link recordRouteCaller}.
  */
 
 import type { FastifyRequest, RouteOptions } from 'fastify';
 import { CapabilitySchema, type Capability } from '@aggregator-dpg/rbac';
-import { httpError } from '../../errors/http-error.js';
 import type { AnyAuthContext, AuthContext } from '../auth/access-token.js';
-import type { Actor } from '../auth/actor/interface.js';
-import {
-  checkAnyCapability,
-  checkCapability,
-  requirePermission,
-  resolveCaller,
-  type TokenIdentity,
-} from './guard.js';
+import type { TokenIdentity } from './guard.js';
 import { getRbacRuntime } from './runtime.js';
 import { recordLoginIdentity } from '../identity-store/record.js';
 
@@ -56,7 +50,7 @@ export interface RouteCaller extends TokenIdentity {
  * Caller facts from an end-user token ({@link AuthContext}).
  *
  * @param ctx - The verified context.
- * @returns The caller for {@link enforceRouteAccess}.
+ * @returns The caller for {@link recordRouteCaller}.
  */
 export function callerFromAuth(ctx: AuthContext): RouteCaller {
   return {
@@ -70,7 +64,7 @@ export function callerFromAuth(ctx: AuthContext): RouteCaller {
  * Caller facts from a user-or-service token ({@link AnyAuthContext}).
  *
  * @param ctx - The verified context.
- * @returns The caller for {@link enforceRouteAccess}.
+ * @returns The caller for {@link recordRouteCaller}.
  */
 export function callerFromAny(ctx: AnyAuthContext): RouteCaller {
   return {
@@ -206,116 +200,28 @@ export function assertRouteDeclared(route: RouteOptions): void {
   for (const m of methods) if (m !== 'HEAD') declared.set(`${m} ${url}`, decl);
 }
 
-/** Logs an access failure and throws in `enforce` mode. */
-function refuse(
-  req: FastifyRequest,
-  access: string,
-  reason: string,
-  userId: string | undefined,
-  mode: 'log' | 'enforce',
-): void {
-  req.log.warn({
-    operation: 'rbac.access',
-    status: mode === 'enforce' ? 'failure' : 'skipped',
-    access,
-    route: req.routeOptions.url,
-    method: req.method,
-    user_id: userId,
-    mode,
-    reasons: [reason],
-  });
-  if (mode === 'enforce') throw httpError('FORBIDDEN', { fields: { permission: access } });
-}
-
-/** Refuses (403 in `enforce` mode) an actor holding none of `capabilities`. */
-async function enforceAny(
-  req: FastifyRequest,
-  actor: Actor,
-  capabilities: readonly Capability[],
-): Promise<void> {
-  const out = await checkAnyCapability(req, actor, capabilities);
-  if (!out.allowed) {
-    throw httpError('FORBIDDEN', { fields: { permission: capabilities.join('|') } });
-  }
-}
-
 /**
- * Applies the route's declaration to an authenticated caller of a route file's
- * own auth wrapper.
+ * Records the caller's login after a route file's auth wrapper verified the
+ * token. Route permissions are decided at the edge (Envoy + OPA,
+ * docs/rbac/rbac-edge-enforcement.md) before the request gets here, so this
+ * checks nothing: each check lives in one place (decision E6).
  *
- * Does nothing when RBAC is off. In `log` mode a failure is logged and the
- * request continues; in `enforce` mode it becomes `403 FORBIDDEN`. A `strict`
- * capability is refused in `log` mode too.
+ * The actor resolver accepts a coordinator only through its recorded login
+ * (handoff H-11), and the token-roles sync finds a coordinator's Keycloak user
+ * through it. Logins are recorded lazily on the first approved request; record
+ * it here too, so a coordinator whose first call is a `self` or `signed_in`
+ * route is known. Best effort, once per process, never overwrites a different
+ * link. A no-op with RBAC off and on service-account routes.
  *
  * @param req - The request; its route's `config.rbac` is read.
  * @param caller - Facts from the verified token.
- * @throws {HttpError} `FORBIDDEN` in `enforce` mode when the check fails.
  */
-export async function enforceRouteAccess(req: FastifyRequest, caller: RouteCaller): Promise<void> {
-  const rt = getRbacRuntime();
-  if (!rt) return;
+export async function recordRouteCaller(req: FastifyRequest, caller: RouteCaller): Promise<void> {
+  if (!getRbacRuntime()) return;
   const decl = req.routeOptions.config.rbac;
-  if (!decl) return;
-
+  if (!decl || !caller.aggregatorId) return;
   // The actor resolver accepts a coordinator only through its recorded login.
-  // Record it here so a first call to a `self` or `signed_in` route resolves.
   // Best effort; never overwrites a different link.
-  if (caller.aggregatorId && !('access' in decl && decl.access === 'service')) {
-    await recordLoginIdentity(caller.aggregatorId, caller.subject, 'rbac.recordIdentity');
-  }
-
-  if ('capability' in decl) {
-    const out = await requirePermission(req, caller, decl.capability, { strict: decl.strict });
-    if (!out.allowed) throw httpError('FORBIDDEN', { fields: { permission: decl.capability } });
-    return;
-  }
-  if ('anyCapability' in decl) {
-    const resolved = await resolveCaller(caller);
-    if ('reason' in resolved) {
-      refuse(req, decl.anyCapability.join('|'), resolved.reason, caller.aggregatorId, rt.mode);
-      return;
-    }
-    await enforceAny(req, resolved.actor, decl.anyCapability);
-    return;
-  }
-  if (decl.access === 'service') {
-    if (!isServiceAccount(caller.preferredUsername)) {
-      refuse(req, decl.access, 'not_service_account', caller.aggregatorId, rt.mode);
-    }
-    return;
-  }
-  if (decl.access === 'self' || decl.access === 'signed_in') {
-    const resolved = await resolveCaller(caller);
-    if ('reason' in resolved) {
-      refuse(req, decl.access, resolved.reason, caller.aggregatorId, rt.mode);
-    } else if (decl.access === 'self' && !resolved.actor.active) {
-      refuse(req, decl.access, 'inactive', caller.aggregatorId, rt.mode);
-    }
-  }
-}
-
-/**
- * Applies the route's declaration to a caller already resolved by
- * `requireActor()` (the console routes), so the actor is read once.
- *
- * @param req - The request; its route's `config.rbac` is read.
- * @param actor - The resolved actor.
- * @throws {HttpError} `FORBIDDEN` in `enforce` mode when the check fails.
- */
-export async function enforceActorRouteAccess(req: FastifyRequest, actor: Actor): Promise<void> {
-  const rt = getRbacRuntime();
-  if (!rt) return;
-  const decl = req.routeOptions.config.rbac;
-  if (!decl) return;
-  if ('capability' in decl) {
-    const out = await checkCapability(req, actor, decl.capability, { strict: decl.strict });
-    if (!out.allowed) throw httpError('FORBIDDEN', { fields: { permission: decl.capability } });
-    return;
-  }
-  if ('anyCapability' in decl) {
-    await enforceAny(req, actor, decl.anyCapability);
-    return;
-  }
-  if (decl.access === 'self' && !actor.active)
-    refuse(req, decl.access, 'inactive', actor.userId, rt.mode);
+  if ('access' in decl && decl.access === 'service') return;
+  await recordLoginIdentity(caller.aggregatorId, caller.subject, 'rbac.recordIdentity');
 }
