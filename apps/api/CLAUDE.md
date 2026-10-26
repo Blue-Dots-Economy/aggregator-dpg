@@ -66,6 +66,8 @@ A Signals `409 PROFILE_LIMIT_REACHED` is mapped to `SIGNALSTACK_PROFILE_LIMIT_RE
 
 **There is no deduplication on either onboarding path.** Verified empirically: two identical public-link submissions both return 201 `passed` and produce two distinct Signals profiles. This is consistent with the `onboard` note above — it always inserts. If dedup is wanted it belongs in Signals, where the identity actually lives; a per-aggregator table cannot see other aggregators anyway.
 
+**A rejected field is named, never a generic push failure (#904).** The route's own Ajv failure returns `400 SCHEMA_VALIDATION` whose `detail` reads `Website: Please enter a valid web address.` (one sentence per field, Signals' wording via `@aggregator-dpg/network-config/field-errors`) plus `fields.field_errors`. A Signals `400 INVALID_ITEM_STATE` on the push is the participant's data, not a server fault: it is returned as the same `400 SCHEMA_VALIDATION` with Signals' per-field messages, not `502 SIGNALSTACK_PUSH_FAILED`.
+
 **Brand `attribution` on `/v1/aggregator-config` is opt-in (signals-dpg#720).** The response only carries an `attribution` array when the resolved `brand.json` declares one, so every deployment that does not is byte-identical to before.
 
 ## Campaign PII audit log (#617)
