@@ -1,8 +1,8 @@
 /**
  * Tests for GET /v1/campaign/dump — the whole-network non-PII dump download
  * (#692). Covers the auth matrix in both directions (including the audit-log
- * line each denial emits), the all-or-nothing rule (no partial `files`
- * list AND no URL minted before every key is confirmed present), the two 503
+ * line each denial emits), the partial-snapshot rule (absent keys reported in
+ * `missing`, no URL minted for them, 404 only when none is present), the two 503
  * branches (each with its own `sub_operation` in the log), non-default TTL
  * propagation with an earliest-of-all `expires_at`, and the invariant that a
  * returned URL is exactly the value the signer issued — never constructed or
@@ -145,6 +145,7 @@ describe('GET /v1/campaign/dump', () => {
     const body = res.json();
     expect(body.network).toBe('blue_dot');
     expect(body.instance).toBe('blue_dot_up');
+    expect(body.missing).toEqual([]);
     expect(body.files).toHaveLength(4);
     expect(body.files.map((f: { table: string }) => f.table)).toEqual([
       'user',
@@ -213,24 +214,30 @@ describe('GET /v1/campaign/dump', () => {
   });
 
   it.each(Object.entries(KEYS))(
-    'returns 404 DUMP_NOT_AVAILABLE and no partial file list when %s is missing, minting no URL at all',
-    async (_table, missingKey) => {
+    'serves the other files and lists %s in missing when its object is absent, minting no URL for it',
+    async (table, missingKey) => {
+      const warnSpy = vi.spyOn(logger, 'warn');
       allObjectsPresent();
       const previous = headObjectMock.getMockImplementation()!;
       headObjectMock.mockImplementation(async (key: string) =>
         key === missingKey ? null : previous(key),
       );
       const res = await get('system');
-      expect(res.statusCode).toBe(404);
+      expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body.error.code).toBe('DUMP_NOT_AVAILABLE');
-      expect(body.error.fields.missing).toEqual([missingKey]);
-      expect(body.files).toBeUndefined();
-      // Pins the ordering the all-or-none rule rests on: a route that
-      // signed first and checked `missing` after would still pass every
-      // assertion above while live download URLs exist for a partial
-      // snapshot.
-      expect(signDownloadUrlMock).not.toHaveBeenCalled();
+      expect(body.missing).toEqual([missingKey]);
+      expect(body.files).toHaveLength(3);
+      expect(body.files.map((f: { table: string }) => f.table)).not.toContain(table);
+      expect(signDownloadUrlMock).toHaveBeenCalledTimes(3);
+      expect(signDownloadUrlMock.mock.calls.map((c) => c[0])).not.toContain(missingKey);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'campaignDump.serve',
+          reason: 'objects_partially_missing',
+          missing: [missingKey],
+        }),
+        expect.any(String),
+      );
     },
   );
 
@@ -358,16 +365,14 @@ describe('GET /v1/campaign/dump', () => {
     }
   });
 
-  it('returns 404 DUMP_NOT_AVAILABLE naming only the added table when its object is not written yet', async () => {
+  it('serves the default files and lists an added file in missing when its object is not written yet', async () => {
     const previousFiles = config.CAMPAIGN_DUMP_FILES;
     config.CAMPAIGN_DUMP_FILES = [...previousFiles, 'connections'];
     try {
       const res = await get('system');
-      expect(res.statusCode).toBe(404);
-      expect(res.json().error.fields.missing).toEqual([
-        'blue_dot/blue_dot_up/connections.ndjson.gz',
-      ]);
-      expect(signDownloadUrlMock).not.toHaveBeenCalled();
+      expect(res.statusCode).toBe(200);
+      expect(res.json().missing).toEqual(['blue_dot/blue_dot_up/connections.ndjson.gz']);
+      expect(res.json().files).toHaveLength(4);
     } finally {
       config.CAMPAIGN_DUMP_FILES = previousFiles;
     }

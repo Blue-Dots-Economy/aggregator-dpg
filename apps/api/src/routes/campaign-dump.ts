@@ -61,6 +61,7 @@ const dumpResponseSchema = z.object({
   instance: z.string(),
   expires_at: z.string(),
   files: z.array(dumpFileSchema),
+  missing: z.array(z.string()),
 });
 
 /** One dump key paired with its resolved HEAD, before the presence gate. */
@@ -88,7 +89,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
         tags: ['campaign'],
         summary: 'Download the latest non-PII Signals dump',
         description:
-          'Returns a short-lived pre-signed URL for each object in the latest non-PII Signals snapshot, one per file named in CAMPAIGN_DUMP_FILES (names without the .ndjson.gz extension; default: user, items, item_actions, aggregators), so the caller needs no S3 credentials. Each URL expires after CAMPAIGN_DUMP_URL_TTL_SECONDS (default 600s); fetch promptly rather than caching it. Requires the campaign-manager SYSTEM token (client_credentials grant); a coordinator token is rejected. Whole-network and not org-scoped. The exporter overwrites the objects in place with no cross-object atomicity, so each file carries its own last_modified: a caller that lands mid-run will see them disagree, meaning the snapshot is torn — treat it as such and re-fetch. Returns every configured file or an error, never a partial list.',
+          'Returns a short-lived pre-signed URL for each object in the latest non-PII Signals snapshot, one per file named in CAMPAIGN_DUMP_FILES (names without the .ndjson.gz extension; default: user, items, item_actions, aggregators), so the caller needs no S3 credentials. Each URL expires after CAMPAIGN_DUMP_URL_TTL_SECONDS (default 600s); fetch promptly rather than caching it. Requires the campaign-manager SYSTEM token (client_credentials grant); a coordinator token is rejected. Whole-network and not org-scoped. The exporter overwrites the objects in place with no cross-object atomicity, so each file carries its own last_modified: a caller that lands mid-run will see them disagree, meaning the snapshot is torn — treat it as such and re-fetch. Configured files absent from S3 are left out of files and listed in missing (their keys); only when none is present does it return 404 DUMP_NOT_AVAILABLE.',
         security: [{ bearerAuth: [] }],
         response: {
           200: dumpResponseSchema,
@@ -157,10 +158,9 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
           config.CAMPAIGN_DUMP_FILES,
         );
 
-        // HEAD every object before signing anything: the response is
-        // all-or-nothing, because a short `files` array would read as
-        // success and the caller would silently import an incomplete snapshot.
-        // No URL is minted until every key has cleared this gate.
+        // HEAD every object before signing anything: absent keys are left out of
+        // `files` and reported in `missing`, so a short `files` array never reads
+        // as a complete snapshot. No URL is minted for a key that failed this gate.
         let heads: DumpKeyHead[];
         try {
           heads = await Promise.all(
@@ -171,7 +171,8 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
         }
 
         const missing = heads.filter((h) => h.head === null).map((h) => h.key);
-        if (missing.length > 0) {
+        const present = heads.filter((h): h is PresentDumpKeyHead => h.head !== null);
+        if (present.length === 0) {
           logger.warn(
             {
               operation: 'campaignDump.serve',
@@ -187,19 +188,18 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
           );
           throw httpError('DUMP_NOT_AVAILABLE', { fields: { missing } });
         }
-
-        // Narrow past the presence gate through a type guard rather than
-        // carrying `ObjectHead | null` (and `?? 0` / `?? null` defensive
-        // fallbacks) into the response build: a genuine 0-byte object (the
-        // exporter writes one for a zero-row table) must stay distinguishable
-        // from a missing one, and `contentLength` must not silently become 0
-        // for the wrong reason. The length check is unreachable given the
-        // `missing` gate above — it guards the narrowing itself, so a future
-        // refactor that separates the two checks fails loudly instead of
-        // shipping a corrupted response.
-        const present = heads.filter((h): h is PresentDumpKeyHead => h.head !== null);
-        if (present.length !== keys.length) {
-          throw new Error('campaignDump: head/key count mismatch after the presence gate');
+        if (missing.length > 0) {
+          logger.warn(
+            {
+              operation: 'campaignDump.serve',
+              status: 'success',
+              reason: 'objects_partially_missing',
+              subject: auth.subject,
+              missing,
+              request_id: req.id,
+            },
+            'non-PII dump served without some configured objects',
+          );
         }
 
         const ttlSeconds = config.CAMPAIGN_DUMP_URL_TTL_SECONDS;
@@ -283,7 +283,11 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
               endpoint: 'GET /v1/campaign/dump',
               requestIp: req.ip,
               ...(traceId ? { traceId } : {}),
-              details: { files: files.length, bytes: files.reduce((n, f) => n + f.size_bytes, 0) },
+              details: {
+                files: files.length,
+                missing: missing.length,
+                bytes: files.reduce((n, f) => n + f.size_bytes, 0),
+              },
             }),
           { operation: 'campaignAudit.dump', correlation_id: dumpCorrelationId, channel: 'dump' },
         );
@@ -296,6 +300,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
             instance: instanceId,
             expires_at: earliestExpiry(signed),
             files,
+            missing,
           });
       } catch (cause) {
         // Every failure past this point in the request is audited too — the
