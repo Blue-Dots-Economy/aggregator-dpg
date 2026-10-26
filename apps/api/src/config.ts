@@ -13,6 +13,7 @@ import {
   campaignExportConfigFields,
   signalStackConfigFields,
 } from '@aggregator-dpg/shared-primitives/config';
+import { dumpFilesSchema } from './services/object-storage/dump-keys.js';
 
 const ConfigSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -239,7 +240,7 @@ const ConfigSchema = z.object({
   CAMPAIGN_VOICE_ATTEMPTS: z.coerce.number().int().positive().default(3),
   /**
    * Non-PII dump download API (#692). The Signals `signals-s3-export` cron
-   * writes three fixed keys — `[<prefix>/]<network>/<instance_id>/<table>.ndjson.gz`
+   * writes one fixed key per table — `[<prefix>/]<network>/<instance_id>/<table>.ndjson.gz`
    * — into this deployment's own S3 bucket (`S3_BUCKET`); there is no manifest
    * and no dated run folder, so the key root must be configured, never probed.
    * A wrong value must 404, not silently serve a different dataset.
@@ -258,6 +259,7 @@ const ConfigSchema = z.object({
    * downloads immediately, so this is far shorter than a human-facing link.
    */
   CAMPAIGN_DUMP_URL_TTL_SECONDS: z.coerce.number().int().positive().default(600),
+  CAMPAIGN_DUMP_FILES: dumpFilesSchema,
   // ─── Campaign email channel (#578) ──────────────────────────────────────
   // Deliberately its own knobs, not shared with the export channel above: an
   // email blast and a PII export have different safe volumes and cadences.
