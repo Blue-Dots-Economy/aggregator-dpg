@@ -3,7 +3,7 @@
  *
  *   GET /v1/campaign/dump → 200 { network, instance, expires_at, files[] }
  *
- * Hands the campaign manager short-lived pre-signed URLs for the three objects
+ * Hands the campaign manager short-lived pre-signed URLs for the objects
  * the Signals `signals-s3-export` cron publishes, so that system no longer
  * needs S3 IAM credentials of its own. The route is an authorisation gate: it
  * never streams the data through the aggregator.
@@ -22,7 +22,7 @@
  * the access. An outright denial (bad/missing/wrong-client token) is not
  * audited there, only logged — no row is possible without a verified actor.
  *
- * The exporter writes three FIXED keys, overwriting them in place with no
+ * The exporter writes one FIXED key per table, overwriting them in place with no
  * manifest and no cross-object atomicity, so there is no run to resolve and no
  * "latest" to look up. The per-file `last_modified` values are the freshness
  * contract: a caller that lands mid-run sees them disagree and decides what to
@@ -35,7 +35,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireCampaignSystemAuth, type CampaignSystemContext } from '../campaign/auth.js';
 import { getNetworkConfig } from '../services/network-config.js';
-import { dumpObjectKeys, type DumpTable } from '../services/object-storage/dump-keys.js';
+import { dumpObjectKeys } from '../services/object-storage/dump-keys.js';
 import {
   headObject,
   signDownloadUrl,
@@ -65,7 +65,7 @@ const dumpResponseSchema = z.object({
 
 /** One dump key paired with its resolved HEAD, before the presence gate. */
 interface DumpKeyHead {
-  table: DumpTable;
+  table: string;
   key: string;
   head: ObjectHead | null;
 }
@@ -88,7 +88,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
         tags: ['campaign'],
         summary: 'Download the latest non-PII Signals dump',
         description:
-          'Returns a short-lived pre-signed URL for each of the three objects in the latest non-PII Signals snapshot (user, items, item_actions), so the caller needs no S3 credentials. Each URL expires after CAMPAIGN_DUMP_URL_TTL_SECONDS (default 600s); fetch promptly rather than caching it. Requires the campaign-manager SYSTEM token (client_credentials grant); a coordinator token is rejected. Whole-network and not org-scoped. The exporter overwrites the three objects in place with no cross-object atomicity, so each file carries its own last_modified: a caller that lands mid-run will see them disagree, meaning the snapshot is torn — treat it as such and re-fetch. Returns all three files or an error, never a partial list.',
+          'Returns a short-lived pre-signed URL for each object in the latest non-PII Signals snapshot, one per table configured in CAMPAIGN_DUMP_TABLES (default: user, items, item_actions), so the caller needs no S3 credentials. Each URL expires after CAMPAIGN_DUMP_URL_TTL_SECONDS (default 600s); fetch promptly rather than caching it. Requires the campaign-manager SYSTEM token (client_credentials grant); a coordinator token is rejected. Whole-network and not org-scoped. The exporter overwrites the objects in place with no cross-object atomicity, so each file carries its own last_modified: a caller that lands mid-run will see them disagree, meaning the snapshot is torn — treat it as such and re-fetch. Returns every configured file or an error, never a partial list.',
         security: [{ bearerAuth: [] }],
         response: {
           200: dumpResponseSchema,
@@ -152,14 +152,13 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
         }
 
         const network = (await getNetworkConfig()).network.id;
-        const keys = dumpObjectKeys({
-          prefix: config.CAMPAIGN_DUMP_PREFIX,
-          network,
-          instanceId,
-        });
+        const keys = dumpObjectKeys(
+          { prefix: config.CAMPAIGN_DUMP_PREFIX, network, instanceId },
+          config.CAMPAIGN_DUMP_TABLES,
+        );
 
         // HEAD every object before signing anything: the response is
-        // all-three-or-nothing, because a short `files` array would read as
+        // all-or-nothing, because a short `files` array would read as
         // success and the caller would silently import an incomplete snapshot.
         // No URL is minted until every key has cleared this gate.
         let heads: DumpKeyHead[];
@@ -224,7 +223,7 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
           url: s.url.url,
         }));
 
-        // `last_modified` is the caller's ONLY signal that the three objects came
+        // `last_modified` is the caller's ONLY signal that the objects came
         // from different runs, so a null quietly removes the one control the
         // torn-snapshot design depends on. S3 should always return LastModified
         // on a successful HEAD; if it did not, say so rather than shipping a
@@ -327,12 +326,12 @@ export async function registerCampaignDumpRoutes(app: FastifyInstance): Promise<
 /**
  * The advertised expiry for the whole response.
  *
- * The three presigns run concurrently, so their `expiresAt` values can differ
+ * The presigns run concurrently, so their `expiresAt` values can differ
  * by however long the slowest one took. Reporting the earliest — never an
- * arbitrary one of the three — guarantees the caller never sees an expiry that
+ * arbitrary one of them — guarantees the caller never sees an expiry that
  * outlives one of the URLs it describes.
  *
- * @param signed - The three presigned objects.
+ * @param signed - The presigned objects.
  * @returns The earliest `expiresAt`, as an ISO 8601 string.
  */
 function earliestExpiry(signed: Array<{ url: SignedDownloadUrl }>): string {

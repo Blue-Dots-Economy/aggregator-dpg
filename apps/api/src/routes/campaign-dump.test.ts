@@ -1,10 +1,10 @@
 /**
  * Tests for GET /v1/campaign/dump — the whole-network non-PII dump download
  * (#692). Covers the auth matrix in both directions (including the audit-log
- * line each denial emits), the all-three-or-nothing rule (no partial `files`
+ * line each denial emits), the all-or-nothing rule (no partial `files`
  * list AND no URL minted before every key is confirmed present), the two 503
  * branches (each with its own `sub_operation` in the log), non-default TTL
- * propagation with an earliest-of-three `expires_at`, and the invariant that a
+ * propagation with an earliest-of-all `expires_at`, and the invariant that a
  * returned URL is exactly the value the signer issued — never constructed or
  * decorated by the route.
  *
@@ -320,6 +320,46 @@ describe('GET /v1/campaign/dump', () => {
       }),
       expect.any(String),
     );
+  });
+
+  it('serves every table configured in CAMPAIGN_DUMP_TABLES, including an added one', async () => {
+    const extraKey = 'blue_dot/blue_dot_up/connections.ndjson.gz';
+    const previousTables = config.CAMPAIGN_DUMP_TABLES;
+    const previousHead = headObjectMock.getMockImplementation()!;
+    config.CAMPAIGN_DUMP_TABLES = [...previousTables, 'connections'];
+    headObjectMock.mockImplementation(async (key: string) =>
+      key === extraKey
+        ? { etag: 'e', contentLength: 999, lastModified: new Date('2026-08-26T00:31:20.000Z') }
+        : previousHead(key),
+    );
+    try {
+      const res = await get('system');
+      expect(res.statusCode).toBe(200);
+      expect(res.json().files.map((f: { table: string }) => f.table)).toEqual([
+        'user',
+        'items',
+        'item_actions',
+        'connections',
+      ]);
+      expect(res.json().files[3]).toMatchObject({ key: extraKey, size_bytes: 999 });
+    } finally {
+      config.CAMPAIGN_DUMP_TABLES = previousTables;
+    }
+  });
+
+  it('returns 404 DUMP_NOT_AVAILABLE naming only the added table when its object is not written yet', async () => {
+    const previousTables = config.CAMPAIGN_DUMP_TABLES;
+    config.CAMPAIGN_DUMP_TABLES = [...previousTables, 'connections'];
+    try {
+      const res = await get('system');
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error.fields.missing).toEqual([
+        'blue_dot/blue_dot_up/connections.ndjson.gz',
+      ]);
+      expect(signDownloadUrlMock).not.toHaveBeenCalled();
+    } finally {
+      config.CAMPAIGN_DUMP_TABLES = previousTables;
+    }
   });
 
   it('presigns every key with the configured TTL', async () => {
