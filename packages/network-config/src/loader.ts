@@ -37,6 +37,7 @@ import {
   type SignalstackNetwork,
 } from './interface.js';
 import { sniffIdentitySelectors } from './sniffer.js';
+import { applyUrlRule } from './uri-fields.js';
 import { resolveConsentSourceOverride, resolveNetworkSourceOverride } from './paths.js';
 
 /**
@@ -423,7 +424,10 @@ function resolveDomains(
       });
     }
     const itemType = itemTypes[0]!;
-    const schema = d.item_schemas[itemType] as Record<string, unknown>;
+    // Link fields get Signals' URL rule here, once, so the registration form,
+    // the public submit route and the bulk worker all validate them exactly as
+    // Signals will on the push (#904).
+    const schema = applyUrlRule(d.item_schemas[itemType] as Record<string, unknown>);
     const identity = pickIdentity(d, schema, overrides[d.id]);
     if (!identity) {
       return err({
