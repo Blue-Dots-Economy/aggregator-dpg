@@ -1,7 +1,7 @@
 // Console routes /v1/user/* and /v1/org/* (user & org Phase 5): who may do
 // what, reach (out of reach → 404), and the decision / edit flows.
 
-import { describe, it, expect, beforeEach, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { CAPABILITIES, indexRoles, permissionDefinitions } from '@aggregator-dpg/rbac';
 import { AuthorizerFake, buildRole } from '@aggregator-dpg/rbac/testing';
 import { _setRbacRuntime, refreshRbacCatalogue } from '../services/authz/runtime.js';
@@ -11,6 +11,7 @@ import { getRbacCatalogue, type InMemoryRbacCatalogue } from '../services/rbac-c
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { config } from '../config.js';
+import { _setRedis } from '../services/redis/index.js';
 import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import {
   OrganisationStoreFake,
@@ -1112,6 +1113,55 @@ describe('console routes /v1/user, /v1/org', () => {
         (res.json() as { error: { fields?: { reason?: string } } }).error.fields?.reason;
       const assign = (who: keyof typeof TOKENS, id: string, body: object) =>
         post(`/v1/user/role/assign/${id}`, who, body);
+
+      describe('token roles claim (RBAC edge)', () => {
+        const C4 = '00000000-0000-4000-8000-0000000000c4';
+        const savedEdge = config.RBAC_EDGE_MODE;
+        /** The `roles` attribute on C4's Keycloak user. */
+        const kcRolesOfC4 = async () => {
+          const kc = await idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, C4);
+          const user = kc.ok
+            ? (kc.value as { attributes?: Record<string, string[]> } | null)
+            : null;
+          return user?.attributes?.['roles'];
+        };
+
+        beforeEach(async () => {
+          // The sync's per-user lock; no Redis in unit tests.
+          _setRedis({ set: async () => 'OK', eval: async () => 1, sadd: async () => 1 } as never);
+          // An active coordinator with a Keycloak user but no recorded login,
+          // found through its aggregator_id attribute.
+          coordinators.seed([coordinator(C4, ORG_A, 'active', 4)]);
+          await idp.createUser({ email: 'c4@x.org', attributes: { [KC_ATTR.AGGREGATOR_ID]: C4 } });
+        });
+        afterEach(() => {
+          config.RBAC_EDGE_MODE = savedEdge;
+          _setRedis(null);
+        });
+
+        it("writes the coordinator's role keys to Keycloak after an assignment", async () => {
+          config.RBAC_EDGE_MODE = 'log';
+          const res = await assign('a', C4, { role_key: 'data_export', org_id: ORG_A });
+          expect(res.statusCode).toBe(200);
+          await vi.waitFor(async () =>
+            expect(await kcRolesOfC4()).toEqual(['coordinator', 'data_export']),
+          );
+          const revoked = await post(`/v1/user/role/revoke/${C4}`, 'a', {
+            role_key: 'data_export',
+            org_id: ORG_A,
+          });
+          expect(revoked.statusCode).toBe(200);
+          await vi.waitFor(async () => expect(await kcRolesOfC4()).toEqual(['coordinator']));
+        });
+
+        it('writes nothing while the edge is off', async () => {
+          config.RBAC_EDGE_MODE = 'off';
+          const res = await assign('a', C4, { role_key: 'data_export', org_id: ORG_A });
+          expect(res.statusCode).toBe(200);
+          await new Promise((r) => setTimeout(r, 50));
+          expect(await kcRolesOfC4()).toBeUndefined();
+        });
+      });
 
       it('lists every role to an admin, and refuses a coordinator', async () => {
         const res = await get('/v1/roles', 'a');

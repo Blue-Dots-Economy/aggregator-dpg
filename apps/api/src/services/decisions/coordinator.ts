@@ -23,6 +23,7 @@ import { getNetworkConfig } from '../network-config.js';
 import { renderApplicantApproved, renderApplicantRejected } from '../email-templates/index.js';
 import { recordLoginIdentity } from '../identity-store/record.js';
 import { revokeRolesOnLeave } from '../authz/roles.js';
+import { requestTokenRolesSync } from '../authz/token-roles.js';
 
 /** What the decider asks for. */
 export type Decision = 'approve' | 'reject';
@@ -240,6 +241,8 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
     if (!current) return { kind: 'not_found' };
     return alreadyDecided(current);
   }
+  // RBAC edge: the coordinator now holds its base role; refresh its token claim.
+  requestTokenRolesSync([aggregator.id], 'coordinator_approved');
   if (signalstackOrgId) {
     const db = await store.updateSignalstackOrgId(aggregator.id, signalstackOrgId, input.decidedBy);
     if (!db.ok)
@@ -312,6 +315,7 @@ async function reject(
   if (aggregator.parentOrgId) {
     await revokeRolesOnLeave(aggregator.id, aggregator.parentOrgId, 'coordinator_rejected');
   }
+  requestTokenRolesSync([aggregator.id], 'coordinator_rejected');
   const stamp = await getIdpAdmin().setUserDecision(kcUser.id, 'rejected');
   if (!stamp.ok) {
     log.warn({ status: 'failure', sub_operation: 'idp.setUserDecision', code: stamp.error.code });
