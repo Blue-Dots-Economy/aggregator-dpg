@@ -37,7 +37,8 @@ export {
   enforceActorRouteAccess,
   enforceRouteAccess,
   enforcedCapabilities,
+  exportRouteTable,
   isServiceAccount,
   listDeclaredRoutes,
 } from './route-access.js';
-export type { RouteAccess, RouteCaller } from './route-access.js';
+export type { RouteAccess, RouteCaller, RouteTable, RouteTableEntry } from './route-access.js';

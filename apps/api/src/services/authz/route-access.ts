@@ -84,7 +84,7 @@ export function callerFromAny(ctx: AnyAuthContext): RouteCaller {
 const SERVICE_ACCOUNT_PREFIX = 'service-account-';
 
 /** Routes registered by plugins, not by this app's route files. */
-const PLUGIN_ROUTE_PREFIXES = ['/api/reference', '/documentation'];
+const PLUGIN_ROUTE_PREFIXES: readonly string[] = ['/api/reference', '/documentation'];
 
 /**
  * Whether a `preferred_username` belongs to a Keycloak service account.
@@ -113,6 +113,46 @@ export function listDeclaredRoutes(): Array<[string, RouteAccess]> {
 /** Test helper — forget every recorded declaration. */
 export function _resetDeclaredRoutes(): void {
   declared.clear();
+}
+
+/** One route of the exported route table. */
+export interface RouteTableEntry {
+  /** HTTP method, upper case. */
+  method: string;
+  /** Path template as registered, e.g. `/v1/user/read/:id`. */
+  path: string;
+  /** The route's `config.rbac` declaration. */
+  access: RouteAccess;
+}
+
+/** The route table the edge policy reads (`policy/rbac/edge/routes.json`). */
+export interface RouteTable {
+  /** Format version, bumped on an incompatible change. */
+  version: 1;
+  /** Path prefixes of plugin routes, which carry no declaration. */
+  unchecked_prefixes: readonly string[];
+  /** Every declared route, sorted by method then path. */
+  routes: RouteTableEntry[];
+}
+
+/**
+ * Exports every route declaration registered so far, for the edge policy.
+ *
+ * The edge (Envoy + OPA, docs/rbac/rbac-edge-enforcement.md §3.1) decides each
+ * request from this table, so it is generated from the same declarations the
+ * boot check records rather than written by hand.
+ *
+ * @returns The route table; empty until the app's routes are registered.
+ */
+export function exportRouteTable(): RouteTable {
+  return {
+    version: 1,
+    unchecked_prefixes: PLUGIN_ROUTE_PREFIXES,
+    routes: listDeclaredRoutes().map(([key, access]) => {
+      const space = key.indexOf(' ');
+      return { method: key.slice(0, space), path: key.slice(space + 1), access };
+    }),
+  };
 }
 
 /**

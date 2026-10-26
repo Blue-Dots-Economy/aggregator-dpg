@@ -70,7 +70,7 @@ Today every route declares its access in `config.rbac` (65 declarations: 34 `cap
 
 Plan:
 
-- **Generate, never hand-write.** A script dumps `listDeclaredRoutes()` (`route-access.ts:111`) to `policy/rbac/routes.json`: method, path template, declaration. Same pattern as the OpenAPI dump (`pnpm --filter @aggregator-dpg/api spec:dump`).
+- **Generate, never hand-write.** A script dumps `listDeclaredRoutes()` (`route-access.ts:111`) to `policy/rbac/edge/routes.json`: method, path template, declaration. Same pattern as the OpenAPI dump (`pnpm --filter @aggregator-dpg/api spec:dump`).
 - **CI drift check.** CI regenerates the file and fails if it changed, like the OpenAPI drift step in `.github/workflows/ci.yml`. A new route cannot ship without its entry.
 - **Matching.** OPA matches the request's method and path against the templates (`/v1/user/read/:id`). Templated registrations such as `/v1/campaign/${channel}` are already concrete in `listDeclaredRoutes()`, so the file holds real paths.
 - **Unknown route = deny.** A request that matches no entry is refused at the edge (the API's 404 for unknown routes becomes Envoy's 403/404, open question 6).

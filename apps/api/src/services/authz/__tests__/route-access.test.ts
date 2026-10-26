@@ -13,6 +13,7 @@ import {
   enforceActorRouteAccess,
   enforceRouteAccess,
   enforcedCapabilities,
+  exportRouteTable,
   isServiceAccount,
   listDeclaredRoutes,
   _resetDeclaredRoutes,
@@ -285,6 +286,39 @@ describe('enforceActorRouteAccess', () => {
     await expect(
       enforceActorRouteAccess(req({ access: 'self' }).r, buildAdminActor({ active: false })),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+});
+
+describe('exportRouteTable', () => {
+  afterEach(() => _resetDeclaredRoutes());
+
+  it('is empty before any route is registered', () => {
+    _resetDeclaredRoutes();
+    expect(exportRouteTable()).toEqual({
+      version: 1,
+      unchecked_prefixes: ['/api/reference', '/documentation'],
+      routes: [],
+    });
+  });
+
+  it('exports each declared route with its method, path template and declaration, sorted', () => {
+    _resetDeclaredRoutes();
+    assertRouteDeclared(route({ access: 'public' }, 'GET', '/v1/b'));
+    assertRouteDeclared(route({ capability: 'org.manage', strict: true }, 'POST', '/v1/a/:id'));
+    assertRouteDeclared(
+      route({ anyCapability: ['org.manage', 'orgs.onboard'] }, ['GET', 'HEAD'], '/v1/a'),
+    );
+    expect(exportRouteTable().routes).toEqual([
+      { method: 'GET', path: '/v1/a', access: { anyCapability: ['org.manage', 'orgs.onboard'] } },
+      { method: 'GET', path: '/v1/b', access: { access: 'public' } },
+      { method: 'POST', path: '/v1/a/:id', access: { capability: 'org.manage', strict: true } },
+    ]);
+  });
+
+  it('leaves plugin routes out (they carry no declaration)', () => {
+    _resetDeclaredRoutes();
+    assertRouteDeclared(route(undefined, 'GET', '/documentation/json'));
+    expect(exportRouteTable().routes).toEqual([]);
   });
 });
 

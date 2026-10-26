@@ -86,6 +86,15 @@ jobs:
           git diff --exit-code openapi.json || {
             echo "::error::openapi.json is stale — run 'pnpm --filter @aggregator-dpg/api spec:dump' and commit"; exit 1; }
 
+      # The edge policy decides each request from this table
+      # (docs/rbac/rbac-edge-enforcement.md §3.1); a route whose declaration
+      # changed without regenerating it would be decided on stale data.
+      - name: RBAC route table drift check
+        run: |
+          pnpm --filter @aggregator-dpg/api routes:dump
+          git diff --exit-code policy/rbac/edge/routes.json || {
+            echo "::error::policy/rbac/edge/routes.json is stale — run 'pnpm --filter @aggregator-dpg/api routes:dump' and commit"; exit 1; }
+
       - name: Dep-cruiser — check interface boundaries
         run: pnpm dep-check
 
