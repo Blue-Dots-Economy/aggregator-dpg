@@ -36,7 +36,8 @@ name: aggregator-dpg
 #
 # ── Host ports ──────────────────────────────────────────────────────────────
 #   Aggregator portal (web)  http://localhost:3100
-#   Aggregator API           http://localhost:4000        /health/live
+#   Aggregator API           http://localhost:4000        /health/live  (through aggregator-envoy, the edge)
+#   Edge (Envoy) admin       http://127.0.0.1:9901        /ready
 #   Signals API              http://localhost:2742        (Swagger at /reference)
 #   Signals UI               http://localhost:5173        (must be 5173 — see note)
 #   Keycloak admin           http://localhost:8080/admin  (admin / KC_ADMIN_PASSWORD)
@@ -481,11 +482,8 @@ services:
     image: aggregator-dpg/api:local
     container_name: sd-aggregator-api
     restart: unless-stopped
-    ports:
-      # Published to the host so email links built from PUBLIC_API_URL
-      # (http://localhost:4000 — e.g. the registration approve/reject pages,
-      # which the API renders as HTML) open from the browser.
-      - "4000:4000"
+    # Not published: every request reaches the API through aggregator-envoy,
+    # which owns host port 4000 (docs/rbac/rbac-edge-enforcement.md §7.1).
     environment:
       NODE_ENV: production
       PORT: "4000"
@@ -566,6 +564,10 @@ services:
       # skips it. Decisions come from the `opa` service below.
       RBAC_MODE: ${RBAC_MODE:-log}
       OPA_URL: http://opa:8181
+      # Edge (Envoy + OPA in front of the API): `log` publishes the role
+      # catalogue to OPA and keeps the token `roles` claim in step, and the
+      # edge only records what it would refuse; `enforce` refuses.
+      RBAC_EDGE_MODE: ${RBAC_EDGE_MODE:-log}
     volumes:
       - ../config:/app/config:ro
     healthcheck:
@@ -597,20 +599,57 @@ services:
   # OPA (RBAC decisions) for aggregator-api, from ../policy/rbac. Deployments
   # run it as a sidecar in the api pod (bluedots-automation).
   opa:
-    image: openpolicyagent/opa:1.21.1@sha256:d3a9a6bd4fbcb0f4403294b0d0b239b07be163ac118a46df7d50045b52e52053
+    # The opa-envoy-plugin build of the same OPA version: besides the REST API
+    # on 8181 (the api's decisions and catalogue push) it answers Envoy's
+    # ext_authz check on 9191 (infra/opa/edge-config.yaml). The static variant
+    # is the multi-arch one.
+    image: openpolicyagent/opa:1.21.1-envoy-1-static@sha256:c1f40d815a15c4ca0ccbdf300e0a3515fccf1d30fbd92e69917ab96bad83811d
     container_name: sd-aggregator-opa
     restart: unless-stopped
-    command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=error", "--ignore=*_test.rego", "--ignore=vectors.json", "/policy"]
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=error", "--config-file=/config/edge-config.yaml", "--ignore=*_test.rego", "--ignore=vectors.json", "/policy"]
     ports:
       - "127.0.0.1:8181:8181"
     volumes:
       - ../policy/rbac:/policy:ro
+      - ../infra/opa:/config:ro
     healthcheck:
       test: ["CMD", "/opa", "eval", "--fail", "--data", "/policy", "--ignore", "*_test.rego", "--ignore", "vectors.json", "data.rbac.not_through_root"]
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 5s
+
+  # Edge in front of aggregator-api (docs/rbac/rbac-edge-enforcement.md): verifies
+  # the Keycloak token, asks OPA whether the caller holds the route's permission,
+  # and forwards only allowed requests. Owns host port 4000, so email links built
+  # from PUBLIC_API_URL (http://localhost:4000, e.g. the approve/reject pages the
+  # API renders) still open from the browser, now through the edge.
+  aggregator-envoy:
+    image: envoyproxy/envoy:v1.34.1@sha256:007da57c2c328a90bd4e6d99b70bd899132f1b4a9426ccafe25437cf84a60c14
+    container_name: sd-aggregator-envoy
+    restart: unless-stopped
+    # Flush the access log every second (stdout is buffered otherwise), so each
+    # edge decision is visible next to the API's log line for the same request.
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "warn", "--file-flush-interval-msec", "1000"]
+    ports:
+      - "4000:4000"
+      - "127.0.0.1:9901:9901"
+    volumes:
+      - ../infra/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    healthcheck:
+      # HTTP/1.1 with a Host header: Envoy's admin port refuses HTTP/1.0 (426).
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9901 && printf 'GET /ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q LIVE <&3"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    depends_on:
+      aggregator-api:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
 
   aggregator-web:
     build:
@@ -624,7 +663,7 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
-      API_BASE_URL: http://aggregator-api:4000
+      API_BASE_URL: http://aggregator-envoy:4000
       # Switchable UI languages — resolved server-side per request, so a restart
       # is enough to change them (no image rebuild). No literal defaults: they
       # would mask the legacy-name fallback below. See the root compose file.
@@ -659,7 +698,7 @@ services:
     volumes:
       - ../config:/app/config:ro
     depends_on:
-      aggregator-api:
+      aggregator-envoy:
         condition: service_healthy
       keycloak:
         condition: service_healthy
