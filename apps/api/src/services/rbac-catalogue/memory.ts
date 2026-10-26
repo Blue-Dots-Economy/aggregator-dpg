@@ -71,12 +71,12 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
   }
 
   /** {@inheritDoc RbacCatalogueBase.listPermissions} */
-  async listPermissions(): Promise<CatalogueStoreResult<StoredPermission[]>> {
-    return (
+  listPermissions(): Promise<CatalogueStoreResult<StoredPermission[]>> {
+    return Promise.resolve(
       this.fail() ?? {
         ok: true,
         value: structuredClone(this.permissions).sort((a, b) => a.key.localeCompare(b.key)),
-      }
+      },
     );
   }
 

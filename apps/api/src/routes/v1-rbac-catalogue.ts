@@ -13,7 +13,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { RoleDefinition } from '@aggregator-dpg/rbac';
+import { compareCodeUnits, type RoleDefinition } from '@aggregator-dpg/rbac';
 import {
   CataloguePermissionsResponseSchema,
   CatalogueRolesResponseSchema,
@@ -39,13 +39,13 @@ export function toCatalogueRole(r: RoleDefinition): CatalogueRole {
     description: r.description,
     is_builtin: r.isBuiltin,
     held_by: r.accountType === 'admin' ? 'org_owners' : 'coordinators',
-    held_in: [...r.assignableOrgTypes].sort(),
+    held_in: [...r.assignableOrgTypes].sort(compareCodeUnits),
     granted: r.baseFor
       ? { via: 'membership', membership: r.baseFor }
       : // The snapshot passed `assertRoleCatalogue`: an additional role always has `assignedBy`.
         { via: 'assignment', assigned_by: r.assignedBy ?? '' },
     max_days: r.maxDays,
-    permissions: [...r.permissions].sort(),
+    permissions: [...r.permissions].sort(compareCodeUnits),
   };
 }
 
@@ -71,7 +71,7 @@ export function toCataloguePermissions(
     action: p.action,
     personal_data: p.sensitive,
     retired: p.deprecated,
-    granted_by_roles: (grantedBy.get(p.key) ?? []).sort(),
+    granted_by_roles: (grantedBy.get(p.key) ?? []).sort(compareCodeUnits),
   }));
 }
 
