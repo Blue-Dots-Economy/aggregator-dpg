@@ -295,6 +295,16 @@ const ConfigSchema = z.object({
   OPA_BACKOFF_MS: z.coerce.number().int().positive().default(50),
   /** How often each replica checks the RBAC catalogue version and reloads on change. `0` disables it. */
   RBAC_CATALOGUE_REFRESH_MS: z.coerce.number().int().min(0).default(30000),
+  /**
+   * Mode of the edge (Envoy + OPA in front of the API,
+   * docs/rbac/rbac-edge-enforcement.md). `off` (default): nothing is published
+   * and no edge is expected. `log` / `enforce`: the API publishes its role
+   * catalogue to the OPA sidecar (`data.catalogue`) on every refresh tick, with
+   * this mode, which the edge policy applies. Independent of `RBAC_MODE` so the
+   * edge can dry-run (`log`) while the API enforces; requires `RBAC_MODE` other
+   * than `off`, which loads the catalogue.
+   */
+  RBAC_EDGE_MODE: z.enum(['off', 'log', 'enforce']).default('off'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

@@ -23,6 +23,7 @@ import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
 import { getRbacCatalogue, type RbacCatalogueBase } from '../rbac-catalogue/index.js';
+import { publishSnapshotToEdge } from './edge-catalogue.js';
 
 /** `off`, `log` (decide and log, never block) or `enforce`. */
 export type RbacMode = 'off' | 'log' | 'enforce';
@@ -35,6 +36,18 @@ export interface RbacRuntime {
   authorizer: AuthorizerBase;
   /** The catalogue revision the snapshot was read at; absent when set by a test. */
   catalogueRevision?: string;
+}
+
+/**
+ * Re-publishes the current snapshot to the edge (`RBAC_EDGE_MODE` not `off`),
+ * so a restarted OPA sidecar gets the catalogue back within one tick.
+ *
+ * @returns What happened; `off` also when RBAC is off.
+ */
+export async function publishCurrentToEdge(): Promise<'off' | 'published' | 'failed'> {
+  const current = runtime;
+  if (!current?.catalogueRevision) return 'off';
+  return publishSnapshotToEdge(current.roles, current.catalogueRevision);
 }
 
 /** What a refresh did. */
@@ -90,6 +103,14 @@ export async function initRbac(
   stopRbacRefresh();
   if (mode === 'off') {
     runtime = null;
+    // The edge expands roles from the catalogue the API publishes; with RBAC
+    // off there is none, so an edge would refuse every capability route.
+    if (config.RBAC_EDGE_MODE !== 'off') {
+      throw new ConfigError('RBAC_EDGE_MODE needs RBAC_MODE log or enforce', {
+        code: 'RBAC_CONFIG_INVALID',
+        details: { rbac_mode: mode, rbac_edge_mode: config.RBAC_EDGE_MODE },
+      });
+    }
     // Custom roles do nothing while RBAC is off; tell the operator.
     if (config.RBAC_CUSTOM_ROLES_ENABLED) {
       logger.warn({
@@ -115,8 +136,13 @@ export async function initRbac(
       backoffMs: config.OPA_BACKOFF_MS,
     }),
   };
+  // A failed publish only delays the edge: it is retried on every tick.
+  await publishSnapshotToEdge(snapshot.roles, snapshot.revision);
   if (refreshMs > 0) {
-    timer = setInterval(() => void refreshRbacCatalogue(), refreshMs);
+    timer = setInterval(
+      () => void refreshRbacCatalogue().then(() => publishCurrentToEdge()),
+      refreshMs,
+    );
     timer.unref();
   }
   logger.info({
@@ -155,6 +181,7 @@ async function refreshOnce(): Promise<RefreshOutcome> {
       from_revision: current.catalogueRevision,
       to_revision: snapshot.revision,
     });
+    await publishSnapshotToEdge(snapshot.roles, snapshot.revision);
     return 'reloaded';
   } catch (err) {
     logger.error({
