@@ -36,6 +36,9 @@ export interface FieldError {
   message: string;
 }
 
+/** Per-field copy for a failed `pattern`, authored in network.json (same marker as Signals). */
+const FIELD_ERROR_MESSAGE_MARKER = 'x-error-message';
+
 /** How many allowed values an enum message lists before eliding (matches Signals). */
 const ENUM_VALUES_SHOWN = 10;
 
@@ -87,10 +90,11 @@ export function fieldLabel(schema: unknown, field: string): string {
 /**
  * Turns one ajv issue into a field name, a label and a readable message.
  *
- * A failed `pattern` never shows the regex: a link field (`x-uri` on the field
- * or on the array holding it) reads "Please enter a valid web address.", any
- * other field "Please enter a valid <title>.". An `enum` lists up to ten allowed
- * values. Other keywords keep ajv's message.
+ * A failed `pattern` never shows the regex: the field's `x-error-message` wins,
+ * then a link field (`x-uri` on the field or on the array holding it) reads
+ * "Please enter a valid web address.", any other field "Please enter a valid
+ * <title>.". `minLength: 1` reads "is required". An `enum` lists up to ten
+ * allowed values. Other keywords keep ajv's message.
  *
  * @param issue - One entry of ajv's `validate.errors`.
  * @param schema - The schema the value was validated against, used for the
@@ -106,6 +110,9 @@ export function describeSchemaIssue(issue: SchemaIssue, schema: unknown): FieldE
   if (issue.keyword === 'additionalProperties' && typeof params.additionalProperty === 'string') {
     segments.push(params.additionalProperty);
   }
+  if (issue.keyword === 'unevaluatedProperties' && typeof params.unevaluatedProperty === 'string') {
+    segments.push(params.unevaluatedProperty);
+  }
   const field = segments.join('.');
   const trail = schemaTrail(schema, segments);
   const titled = nearestTitled(trail);
@@ -117,7 +124,12 @@ export function describeSchemaIssue(issue: SchemaIssue, schema: unknown): FieldE
       message = 'is required';
       break;
     case 'additionalProperties':
+    case 'unevaluatedProperties':
       message = 'is not an allowed field';
+      break;
+    case 'minLength':
+      // `minLength: 1` is how a schema says "required and not blank".
+      message = params.limit === 1 ? 'is required' : (issue.message ?? 'is invalid');
       break;
     case 'enum': {
       const allowed = Array.isArray(params.allowedValues) ? params.allowedValues : [];
@@ -130,10 +142,11 @@ export function describeSchemaIssue(issue: SchemaIssue, schema: unknown): FieldE
       break;
     }
     case 'pattern': {
+      const authored = trail.at(-1)?.[FIELD_ERROR_MESSAGE_MARKER];
       const isLink = trail.slice(-2).some((s) => s['x-uri'] === true);
-      message = isLink
-        ? 'Please enter a valid web address.'
-        : `Please enter a valid ${titled ? String(titled.title) : 'value'}.`;
+      if (typeof authored === 'string' && authored.trim()) message = authored;
+      else if (isLink) message = 'Please enter a valid web address.';
+      else message = `Please enter a valid ${titled ? String(titled.title) : 'value'}.`;
       break;
     }
     default:

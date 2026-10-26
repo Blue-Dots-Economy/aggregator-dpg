@@ -916,7 +916,7 @@ async function loadLiveLinkByOrgAndSlug(
 function fieldErrorMap(errors: readonly FieldError[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const e of errors) {
-    if (e.field && !(e.field in out)) out[e.field] = e.message;
+    if (e.field && !Object.hasOwn(out, e.field)) out[e.field] = e.message;
   }
   return out;
 }

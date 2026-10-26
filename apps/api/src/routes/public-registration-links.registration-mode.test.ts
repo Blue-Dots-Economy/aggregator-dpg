@@ -625,7 +625,10 @@ describe('schema validation failure branches (account_and_profile)', () => {
   describe('link fields use the Signals URL rule (#904)', () => {
     // The schema as the network-config loader hands it out: both link
     // declarations rewritten by `applyUrlRule`.
-    const submit = async (fields: Record<string, unknown>) => {
+    const submit = async (
+      fields: Record<string, unknown>,
+      extraProperties: Record<string, unknown> = {},
+    ) => {
       const cfg = buildBlueDotConfig();
       _setNetworkConfig({
         ...cfg,
@@ -640,6 +643,7 @@ describe('schema validation failure branches (account_and_profile)', () => {
                 phone: { type: 'string' },
                 website: { type: 'string', title: 'Website', 'x-uri': true },
                 catalog_url: { type: 'string', title: 'Catalog URL', format: 'uri' },
+                ...extraProperties,
               },
             }),
           },
@@ -672,6 +676,17 @@ describe('schema validation failure branches (account_and_profile)', () => {
       expect(error.code).toBe('SCHEMA_VALIDATION');
       expect(error.detail).toBe('Website: Please enter a valid web address.');
       expect(error.fields.field_errors).toEqual({ website: 'Please enter a valid web address.' });
+    });
+
+    it('keeps a field whose name is an Object.prototype member in field_errors', async () => {
+      const r = await submit(
+        { constructor: 'NA' },
+        { constructor: { type: 'string', title: 'Builder site', 'x-uri': true } },
+      );
+      expect(r.statusCode).toBe(400);
+      expect(r.json().error.fields.field_errors).toEqual({
+        constructor: 'Please enter a valid web address.',
+      });
     });
   });
 

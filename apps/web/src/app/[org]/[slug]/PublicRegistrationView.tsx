@@ -255,9 +255,13 @@ export function toErrorSchema(fieldErrors: unknown): ErrorSchema | undefined {
   let marked = false;
   for (const [path, message] of Object.entries(fieldErrors as Record<string, unknown>)) {
     if (typeof message !== 'string' || !path) continue;
+    const segments = path.split('.');
+    // Keys come from the server (and, through it, from Signals): a `__proto__`
+    // segment would write onto Object.prototype, so such a path is skipped.
+    if (segments.includes('__proto__')) continue;
     let node = root;
-    for (const seg of path.split('.')) {
-      node[seg] = (node[seg] as Record<string, unknown> | undefined) ?? {};
+    for (const seg of segments) {
+      if (!Object.hasOwn(node, seg)) node[seg] = {};
       node = node[seg] as Record<string, unknown>;
     }
     node['__errors'] = [...((node['__errors'] as string[] | undefined) ?? []), message];

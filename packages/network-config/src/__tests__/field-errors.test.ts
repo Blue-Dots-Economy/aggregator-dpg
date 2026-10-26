@@ -93,6 +93,55 @@ describe('describeSchemaIssue', () => {
     ).toEqual({ field: 'x', label: 'x', message: 'is not an allowed field' });
   });
 
+  it("uses the field's own x-error-message for a failed pattern", () => {
+    const schema = {
+      properties: {
+        pin: {
+          type: 'string',
+          title: 'PIN code',
+          pattern: '^\\d{6}$',
+          'x-error-message': 'Enter a 6-digit PIN code.',
+        },
+      },
+    };
+    expect(
+      describeSchemaIssue({ keyword: 'pattern', instancePath: '/pin', message: 'x' }, schema),
+    ).toEqual({ field: 'pin', label: 'PIN code', message: 'Enter a 6-digit PIN code.' });
+  });
+
+  it('reads minLength 1 as "is required", other minLengths keep ajv\'s message', () => {
+    expect(
+      describeSchemaIssue(
+        { keyword: 'minLength', instancePath: '/website', params: { limit: 1 }, message: 'x' },
+        SCHEMA,
+      ).message,
+    ).toBe('is required');
+    expect(
+      describeSchemaIssue(
+        {
+          keyword: 'minLength',
+          instancePath: '/website',
+          params: { limit: 5 },
+          message: 'must NOT have fewer than 5 characters',
+        },
+        SCHEMA,
+      ).message,
+    ).toBe('must NOT have fewer than 5 characters');
+  });
+
+  it('names an unevaluated key like an unknown one', () => {
+    expect(
+      describeSchemaIssue(
+        {
+          keyword: 'unevaluatedProperties',
+          instancePath: '',
+          params: { unevaluatedProperty: 'x' },
+        },
+        SCHEMA,
+      ),
+    ).toEqual({ field: 'x', label: 'x', message: 'is not an allowed field' });
+  });
+
   it("falls back to ajv's own message for other keywords", () => {
     expect(
       describeSchemaIssue(

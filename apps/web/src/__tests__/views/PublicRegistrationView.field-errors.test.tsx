@@ -172,6 +172,21 @@ describe('toErrorSchema', () => {
     });
   });
 
+  it('never writes through __proto__, and keeps fields named like Object members', () => {
+    const fromServer = JSON.parse(
+      '{"__proto__.polluted":"x","constructor.prototype":"y","toString":"z"}',
+    ) as Record<string, unknown>;
+    const schema = toErrorSchema(fromServer)!;
+    expect('polluted' in schema).toBe(false);
+    expect(Object.getPrototypeOf(schema)).toBe(Object.prototype);
+    expect(schema).toEqual({
+      constructor: { prototype: { __errors: ['y'] } },
+      toString: { __errors: ['z'] },
+    });
+    expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+    expect(({} as Record<string, unknown>)['__errors']).toBeUndefined();
+  });
+
   it('returns undefined when there is nothing usable to mark', () => {
     expect(toErrorSchema(undefined)).toBeUndefined();
     expect(toErrorSchema(['x'])).toBeUndefined();
