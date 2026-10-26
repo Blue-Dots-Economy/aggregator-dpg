@@ -65,16 +65,16 @@ export class InMemoryRoleStore extends RoleStoreBase {
   }
 
   /** {@inheritDoc RoleStoreBase.listLiveForUsers} */
-  async listLiveForUsers(
+  listLiveForUsers(
     userIds: readonly string[],
     now: Date,
   ): Promise<RoleStoreResult<UserRoleRecord[]>> {
     const wanted = new Set(userIds);
-    return (
+    return Promise.resolve(
       this.fail() ?? {
         ok: true,
         value: this.assignments.filter((a) => wanted.has(a.userId) && this.live(a, now)),
-      }
+      },
     );
   }
 
