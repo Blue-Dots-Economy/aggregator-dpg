@@ -33,7 +33,9 @@ catalogue(mode) := {
 
 req(method, path, payload) := {"attributes": {
 	"request": {"http": {"method": method, "path": path, "headers": {"x-request-id": "req-1"}}},
-	"metadata_context": {"filter_metadata": {"envoy.filters.http.jwt_authn": {"jwt_payload": payload}}},
+	# The shape the opa-envoy-plugin hands OPA (protobuf JSON names), as captured
+	# from a real Envoy with jwt_authn `payload_in_metadata: jwt_payload`.
+	"metadataContext": {"filterMetadata": {"envoy.filters.http.jwt_authn": {"jwt_payload": payload}}},
 }}
 
 anon(method, path) := {"attributes": {"request": {"http": {"method": method, "path": path, "headers": {}}}}}
@@ -92,6 +94,15 @@ test_permissions_are_the_union_over_roles if {
 
 test_unknown_role_keys_grant_nothing if {
 	decide(req("POST", "/v1/links/create", user(["superuser"])), "enforce").http_status == 403
+}
+
+# The proto field names are not what the plugin sends; a token there is not seen.
+test_snake_case_metadata_is_not_a_token if {
+	i := {"attributes": {
+		"request": {"http": {"method": "POST", "path": "/v1/links/create", "headers": {}}},
+		"metadata_context": {"filter_metadata": {"envoy.filters.http.jwt_authn": {"jwt_payload": user(["coordinator"])}}},
+	}}
+	decide(i, "enforce").http_status == 401
 }
 
 test_missing_token_on_a_protected_route_is_401 if {
