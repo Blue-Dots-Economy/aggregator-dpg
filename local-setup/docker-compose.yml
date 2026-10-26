@@ -564,10 +564,13 @@ services:
       # skips it. Decisions come from the `opa` service below.
       RBAC_MODE: ${RBAC_MODE:-log}
       OPA_URL: http://opa:8181
-      # Edge (Envoy + OPA in front of the API): `log` publishes the role
-      # catalogue to OPA and keeps the token `roles` claim in step, and the
-      # edge only records what it would refuse; `enforce` refuses.
-      RBAC_EDGE_MODE: ${RBAC_EDGE_MODE:-log}
+      # Edge (Envoy + OPA in front of the API): the API publishes the role
+      # catalogue to OPA and keeps the token `roles` claim in step. `enforce`
+      # refuses at the edge, before the API (phase 2 of
+      # docs/rbac/rbac-edge-enforcement.md); `log` only records what it would
+      # refuse; `off` turns the edge's inputs off (the edge then refuses every
+      # protected route, so pair it with removing aggregator-envoy).
+      RBAC_EDGE_MODE: ${RBAC_EDGE_MODE:-enforce}
     volumes:
       - ../config:/app/config:ro
     healthcheck:
