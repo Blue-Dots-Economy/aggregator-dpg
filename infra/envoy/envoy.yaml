@@ -135,6 +135,11 @@ static_resources:
     - name: keycloak
       type: STRICT_DNS
       connect_timeout: 2s
+      # Start serving without waiting for Keycloak's DNS: the edge must not stay
+      # down (every route, public ones included) because Keycloak's name does not
+      # resolve yet. Until it does, a request with a token is refused (401: its
+      # signature cannot be checked), so this fails closed.
+      wait_for_warm_on_init: false
       load_assignment:
         cluster_name: keycloak
         endpoints:
