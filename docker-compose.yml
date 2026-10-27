@@ -639,8 +639,8 @@ services:
   # In front of the api (docs/rbac/rbac-edge-enforcement.md): verifies the
   # Keycloak token, asks OPA whether the caller holds the route's permission,
   # and forwards only allowed requests. nginx (/backend/) and web reach the api
-  # only through it. Fills in infra/envoy/envoy.yaml's placeholders for this
-  # stack: the issuer is the public one the api expects (KEYCLOAK_URL); the
+  # only through it. infra/envoy/render.sh fills in envoy.yaml's placeholders
+  # from the environment below: the issuer is the public one the api expects (KEYCLOAK_URL); the
   # signing keys are fetched from Keycloak inside the network. The access log
   # (operation rbac.edge) is flushed every second.
   envoy:
@@ -648,19 +648,20 @@ services:
     container_name: aggregator-envoy
     restart: unless-stopped
     environment:
+      ADMIN_ADDRESS: 0.0.0.0
+      LISTEN_PORT: "4000"
       API_HOST: api
+      API_PORT: "4000"
+      OPA_HOST: opa
+      KEYCLOAK_HOST: keycloak
+      KEYCLOAK_PORT: "8080"
       JWT_ISSUER: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/auth/realms/${KEYCLOAK_REALM:-bluedots}"
       JWKS_URI: "http://keycloak:8080/auth/realms/${KEYCLOAK_REALM:-bluedots}/protocol/openid-connect/certs"
-    command:
-      - sh
-      - -c
-      - >-
-        sed -e "s|__API_HOST__|$$API_HOST|" -e "s|__JWT_ISSUER__|$$JWT_ISSUER|" -e "s|__JWKS_URI__|$$JWKS_URI|"
-        /etc/envoy/envoy.template.yaml > /tmp/envoy.yaml &&
-        exec envoy -c /tmp/envoy.yaml --log-level warn --file-flush-interval-msec 1000
+    command: ["sh", "/etc/envoy/render.sh", "--log-level", "warn", "--file-flush-interval-msec", "1000"]
     # No host port mapping — reached through nginx and web only.
     volumes:
       - ./infra/envoy/envoy.yaml:/etc/envoy/envoy.template.yaml:ro
+      - ./infra/envoy/render.sh:/etc/envoy/render.sh:ro
     healthcheck:
       # HTTP/1.1 with a Host header: Envoy's admin port refuses HTTP/1.0 (426).
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9901 && printf 'GET /ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q LIVE <&3"]

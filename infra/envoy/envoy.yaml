@@ -12,22 +12,23 @@
 # the request id the API logs under, and no personal data: the path is logged
 # without its query string and no token or header values are logged.
 #
-# A template: each stack fills in three placeholders at start (sed, then
-# `envoy -c` the result), because the API's service name and Keycloak's issuer
-# differ between stacks:
-#   __API_HOST__    the API's hostname    (local-setup: aggregator-api, root compose: api)
-#   __JWT_ISSUER__  the tokens' `iss`     (the URL Keycloak puts in every token)
-#   __JWKS_URI__    Keycloak's signing keys, fetched from inside the network
-# A deployment runs Envoy as a sidecar and points the API cluster at 127.0.0.1.
+# A template: each placeholder (a variable name between double underscores)
+# is replaced with that environment variable before Envoy starts, because hosts, ports and Keycloak's issuer differ
+# between the compose stacks and a deployment (Envoy as a sidecar in the API
+# pod, everything on 127.0.0.1). infra/envoy/render.sh does it for compose; the
+# deployment's init container applies the same rule. A missing variable stops
+# the start. The names: ADMIN_ADDRESS, LISTEN_PORT, API_HOST, API_PORT,
+# OPA_HOST, KEYCLOAK_HOST, KEYCLOAK_PORT, JWT_ISSUER (the tokens' `iss`) and
+# JWKS_URI (Keycloak's signing keys, fetched through the keycloak cluster).
 admin:
   address:
-    socket_address: { address: 0.0.0.0, port_value: 9901 }
+    socket_address: { address: __ADMIN_ADDRESS__, port_value: 9901 }
 
 static_resources:
   listeners:
     - name: aggregator_api
       address:
-        socket_address: { address: 0.0.0.0, port_value: 4000 }
+        socket_address: { address: 0.0.0.0, port_value: __LISTEN_PORT__ }
       filter_chains:
         - filters:
             - name: envoy.filters.network.http_connection_manager
@@ -113,7 +114,10 @@ static_resources:
         endpoints:
           - lb_endpoints:
               - endpoint:
-                  { address: { socket_address: { address: __API_HOST__, port_value: 4000 } } }
+                  {
+                    address:
+                      { socket_address: { address: __API_HOST__, port_value: __API_PORT__ } },
+                  }
     - name: opa
       type: STRICT_DNS
       connect_timeout: 1s
@@ -126,7 +130,8 @@ static_resources:
         cluster_name: opa
         endpoints:
           - lb_endpoints:
-              - endpoint: { address: { socket_address: { address: opa, port_value: 9191 } } }
+              - endpoint:
+                  { address: { socket_address: { address: __OPA_HOST__, port_value: 9191 } } }
     - name: keycloak
       type: STRICT_DNS
       connect_timeout: 2s
@@ -134,4 +139,11 @@ static_resources:
         cluster_name: keycloak
         endpoints:
           - lb_endpoints:
-              - endpoint: { address: { socket_address: { address: keycloak, port_value: 8080 } } }
+              - endpoint:
+                  {
+                    address:
+                      {
+                        socket_address:
+                          { address: __KEYCLOAK_HOST__, port_value: __KEYCLOAK_PORT__ },
+                      },
+                  }
