@@ -9,6 +9,7 @@ import {
   checkCapability,
   decisionInput,
   listCapabilitiesForTargets,
+  permissionsByOrg,
   requirePermission,
 } from '../guard.js';
 import { _setRbacRuntime } from '../runtime.js';
@@ -238,5 +239,32 @@ describe('listCapabilitiesForTargets', () => {
   it('returns null when RBAC is off', async () => {
     _setRbacRuntime(null);
     expect(await listCapabilitiesForTargets(req(), buildAdminActor(), [])).toBeNull();
+  });
+});
+
+describe('permissionsByOrg', () => {
+  it('asks once for organisations that pose the same question', async () => {
+    const { authorizer } = setup('enforce', null);
+    const orgs = Array.from({ length: 4 }, (_, i) => ({
+      id: `org-${i}`,
+      orgType: 'aggregator' as const,
+      relation: 'owner' as const,
+      isDefault: false,
+    }));
+    const actor = buildAdminActor({ orgs });
+
+    const perms = await permissionsByOrg(req(), actor, null);
+
+    // Same role in each organisation, so one engine call answers all four —
+    // this runs on every coordinator read and search (#873 manage scope).
+    expect(authorizer.listCalls).toHaveLength(1);
+    expect(Object.keys(perms ?? {})).toHaveLength(4);
+    expect(perms?.['org-0']).toContain('org.manage');
+    expect(perms?.['org-0']).toEqual(perms?.['org-3']);
+  });
+
+  it('returns null when RBAC is off', async () => {
+    _setRbacRuntime(null);
+    expect(await permissionsByOrg(req(), buildAdminActor(), null)).toBeNull();
   });
 });

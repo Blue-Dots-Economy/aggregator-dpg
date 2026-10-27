@@ -16,7 +16,8 @@ import type {
   UserRolesResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
-import { Card } from '../ui/Card';
+import { I } from '../../icons';
+import { ConsoleSection } from './ConsoleUi';
 import { errorKey, sendConsole } from '../../lib/console-client';
 
 /** Code-unit order, as `sort()` without a compare function; locale-independent. */
@@ -97,46 +98,68 @@ export function RolesPanel({
   }
 
   return (
-    <Card className="p-4 flex flex-col gap-3 text-[13.5px]">
-      <span className="bd-label">{title ?? t('roles.title')}</span>
-      {base.map((b) => (
-        <span key={b.role_key} data-testid={`role-base-${b.role_key}`} className="text-ink-600">
-          {t('roles.base', { role: nameOf(b.role_key) })}
-        </span>
-      ))}
-      {shown.map((key) => {
-        const live = liveOf(key);
-        const days = maxDaysOf(key);
-        return (
-          <div key={key} className="flex flex-wrap items-center gap-3">
-            <span className="font-semibold">{nameOf(key)}</span>
-            <span data-testid={`role-${key}`} className="text-ink-600">
-              {live
-                ? live.expires_at
-                  ? t('roles.until', { date: live.expires_at.slice(0, 10) })
-                  : t('roles.no_expiry')
-                : t('roles.none')}
-            </span>
-            {live ? (
-              assignable.has(key) ? (
-                <Button kind="danger" disabled={busy} onClick={() => void revoke(key)}>
-                  {t('roles.revoke')}
-                </Button>
-              ) : null
-            ) : (
-              <Button disabled={busy} onClick={() => void assign(key)}>
-                {days ? t('roles.assign_for', { days }) : t('roles.assign')}
-              </Button>
-            )}
+    <ConsoleSection title={title ?? t('roles.title')}>
+      <div className="flex flex-col gap-4 text-[13.5px]">
+        {base.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {base.map((b) => (
+              <span
+                key={b.role_key}
+                data-testid={`role-base-${b.role_key}`}
+                className="inline-flex items-center gap-1.5 rounded-full bg-(--bd-primary-50) text-primary-600 px-3 py-1 text-[12.5px] font-semibold"
+              >
+                <I.shield size={13} />
+                {t('roles.base', { role: nameOf(b.role_key) })}
+              </span>
+            ))}
           </div>
-        );
-      })}
-      <span className="text-[12px] text-ink-500">{t('roles.hint')}</span>
-      {note ? (
-        <p role="status" className="text-ink-600">
-          {note}
-        </p>
-      ) : null}
-    </Card>
+        ) : null}
+        {shown.length > 0 ? (
+          <ul className="rounded-[12px] border border-(--bd-border)">
+            {shown.map((key) => {
+              const live = liveOf(key);
+              const days = maxDaysOf(key);
+              return (
+                <li
+                  key={key}
+                  className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-(--bd-border-soft) last:border-b-0"
+                >
+                  <span className="font-semibold text-ink-900 min-w-[140px]">{nameOf(key)}</span>
+                  <span
+                    data-testid={`role-${key}`}
+                    className={live ? 'text-emerald-700' : 'text-ink-500'}
+                  >
+                    {live
+                      ? live.expires_at
+                        ? t('roles.until', { date: live.expires_at.slice(0, 10) })
+                        : t('roles.no_expiry')
+                      : t('roles.none')}
+                  </span>
+                  <span className="ml-auto">
+                    {live ? (
+                      assignable.has(key) ? (
+                        <Button kind="danger" disabled={busy} onClick={() => void revoke(key)}>
+                          {t('roles.revoke')}
+                        </Button>
+                      ) : null
+                    ) : (
+                      <Button kind="soft" disabled={busy} onClick={() => void assign(key)}>
+                        {days ? t('roles.assign_for', { days }) : t('roles.assign')}
+                      </Button>
+                    )}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+        <span className="text-[12px] text-ink-500">{t('roles.hint')}</span>
+        {note ? (
+          <p role="status" className="text-ink-600">
+            {note}
+          </p>
+        ) : null}
+      </div>
+    </ConsoleSection>
   );
 }

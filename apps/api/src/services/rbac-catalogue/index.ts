@@ -1,6 +1,7 @@
 /**
- * Public surface and factory for the RBAC catalogue store (`@aggregator-dpg/api`).
- * Returns a process-wide singleton. Tests replace it with `_setRbacCatalogue`.
+ * Public surface + factory for the RBAC catalogue store (`@aggregator-dpg/api`,
+ * R4). Returns a process-wide singleton; tests override it with
+ * `_setRbacCatalogue`.
  */
 
 import type { RbacCatalogueBase } from './interface.js';
@@ -10,8 +11,8 @@ import { TEST_RBAC_CATALOGUE_KEY } from './test-hook.js';
 let instance: RbacCatalogueBase | null = null;
 
 /**
- * Returns the shared catalogue store, created on first use.
- * An injected store wins, then the per-test in-memory store under unit tests.
+ * Returns the shared catalogue store (lazy). An explicitly injected store wins;
+ * otherwise, under the unit-test setup, the per-test in-memory store.
  *
  * @returns The catalogue store.
  */
@@ -23,12 +24,17 @@ export function getRbacCatalogue(): RbacCatalogueBase {
   return instance;
 }
 
-/** Test helper: replaces the singleton. `null` restores the default. */
+/** Test helper — replace the singleton (`null` restores the default). */
 export function _setRbacCatalogue(s: RbacCatalogueBase | null): void {
   instance = s;
 }
 
 export { RbacCatalogueBase } from './interface.js';
-export type { CatalogueSnapshot, CatalogueStoreError, CatalogueStoreResult } from './interface.js';
+export type {
+  CatalogueSnapshot,
+  CatalogueStoreError,
+  CatalogueStoreResult,
+  StoredPermission,
+} from './interface.js';
 export { InMemoryRbacCatalogue } from './memory.js';
 export { PostgresRbacCatalogue } from './postgres.js';

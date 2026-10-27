@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.bluedots.org/aggregator/blue_dot/up-gzb/registration.v1.json",
-  "title": "Aggregator Registration",
+  "title": "Coordinator Registration",
   "description": "UP-GZB variant of the coordinator signup payload. Adds the sub-org / institution name from the Aug 2026 schema review and the `service_provider` aggregator type this network serves. A complete copy, not a partial: the validator compiles one schema with no merge layer. Other deployments keep using config/schemas/aggregator/registration.v1.json.",
   "type": "object",
   "additionalProperties": false,

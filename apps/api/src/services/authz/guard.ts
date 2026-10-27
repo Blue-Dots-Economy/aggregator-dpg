@@ -156,7 +156,7 @@ async function decide(authorizer: AuthorizerBase, input: DecisionInput): Promise
 function outcome(
   req: GuardRequest,
   mode: Exclude<RbacMode, 'off'>,
-  capability: Capability,
+  capability: Capability | string,
   userId: string | undefined,
   decision: Decision,
   start: number,
@@ -320,4 +320,64 @@ export async function listCapabilitiesForTargets(
     out.set(target.id, (await answer) ?? []);
   }
   return out;
+}
+
+/**
+ * Checks whether a resolved actor holds at least one of `capabilities`, for a
+ * route two kinds of principal share (an organisation's owner and the network
+ * admin). Logs one decision, not one per capability. Never throws.
+ *
+ * @param req - The request (for its logger and route).
+ * @param actor - The resolved actor.
+ * @param capabilities - The permissions, any one of which suffices.
+ * @param options - The organisation acted on, and a clock for tests.
+ * @returns Whether to continue, the mode, and the decision.
+ */
+export async function checkAnyCapability(
+  req: GuardRequest,
+  actor: Actor,
+  capabilities: readonly Capability[],
+  options: CheckOptions = {},
+): Promise<GuardOutcome> {
+  const rt = getRbacRuntime();
+  if (!rt) return { allowed: true, mode: 'off' };
+  const start = Date.now();
+  const now = options.now ?? Date.now();
+  let last: Decision = { allow: false, reasons: ['not_held'] };
+  for (const capability of capabilities) {
+    last = await decide(
+      rt.authorizer,
+      decisionInput(rt.roles, actor, capability, options.target, now),
+    );
+    if (last.allow) return outcome(req, rt.mode, capability, actor.userId, last, start);
+  }
+  return outcome(req, rt.mode, capabilities.join('|'), actor.userId, last, start);
+}
+
+/**
+ * The permissions a resolved actor holds in each organisation it belongs to
+ * or owns, for the portal. Never throws.
+ *
+ * Asks once per *distinct* question rather than once per organisation: the
+ * manage-scope checks (#873) call this on every coordinator read, search and
+ * decision, and an owner holding the same role in each of its organisations
+ * would otherwise pay one sequential engine round-trip per organisation.
+ *
+ * @param req - The request (for its logger).
+ * @param actor - The resolved actor.
+ * @param rootId - The root organisation's id (every aggregator organisation's ancestor), when known.
+ * @returns Permissions per organisation id; `null` when RBAC is off.
+ */
+export async function permissionsByOrg(
+  req: GuardRequest,
+  actor: Actor,
+  rootId: string | null,
+): Promise<Record<string, Capability[]> | null> {
+  const targets: TargetOrg[] = actor.orgs.map((o) => ({
+    id: o.id,
+    orgType: o.orgType,
+    ancestorIds: o.orgType === 'aggregator' && rootId ? [rootId] : [],
+  }));
+  const byOrg = await listCapabilitiesForTargets(req, actor, targets);
+  return byOrg === null ? null : Object.fromEntries(byOrg);
 }
