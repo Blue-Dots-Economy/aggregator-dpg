@@ -12,8 +12,13 @@
 # the request id the API logs under, and no personal data: the path is logged
 # without its query string and no token or header values are logged.
 #
-# Hostnames are the local-setup compose service names; a deployment points the
-# clusters at 127.0.0.1 (sidecars in the API pod) and its own issuer.
+# A template: each stack fills in three placeholders at start (sed, then
+# `envoy -c` the result), because the API's service name and Keycloak's issuer
+# differ between stacks:
+#   __API_HOST__    the API's hostname    (local-setup: aggregator-api, root compose: api)
+#   __JWT_ISSUER__  the tokens' `iss`     (the URL Keycloak puts in every token)
+#   __JWKS_URI__    Keycloak's signing keys, fetched from inside the network
+# A deployment runs Envoy as a sidecar and points the API cluster at 127.0.0.1.
 admin:
   address:
     socket_address: { address: 0.0.0.0, port_value: 9901 }
@@ -69,10 +74,10 @@ static_resources:
                       '@type': type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
                       providers:
                         keycloak:
-                          issuer: http://keycloak:8080/realms/bluedots
+                          issuer: __JWT_ISSUER__
                           remote_jwks:
                             http_uri:
-                              uri: http://keycloak:8080/realms/bluedots/protocol/openid-connect/certs
+                              uri: __JWKS_URI__
                               cluster: keycloak
                               timeout: 5s
                             cache_duration: 300s
@@ -108,7 +113,7 @@ static_resources:
         endpoints:
           - lb_endpoints:
               - endpoint:
-                  { address: { socket_address: { address: aggregator-api, port_value: 4000 } } }
+                  { address: { socket_address: { address: __API_HOST__, port_value: 4000 } } }
     - name: opa
       type: STRICT_DNS
       connect_timeout: 1s

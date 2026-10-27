@@ -628,14 +628,25 @@ services:
     image: envoyproxy/envoy:v1.34.1@sha256:007da57c2c328a90bd4e6d99b70bd899132f1b4a9426ccafe25437cf84a60c14
     container_name: sd-aggregator-envoy
     restart: unless-stopped
-    # Flush the access log every second (stdout is buffered otherwise), so each
-    # edge decision is visible next to the API's log line for the same request.
-    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "warn", "--file-flush-interval-msec", "1000"]
+    # Fills in infra/envoy/envoy.yaml's placeholders for this stack, then starts
+    # Envoy. The access log is flushed every second (stdout is buffered
+    # otherwise), so each edge decision shows next to the API's log line.
+    environment:
+      API_HOST: aggregator-api
+      JWT_ISSUER: http://keycloak:8080/realms/bluedots
+      JWKS_URI: http://keycloak:8080/realms/bluedots/protocol/openid-connect/certs
+    command:
+      - sh
+      - -c
+      - >-
+        sed -e "s|__API_HOST__|$$API_HOST|" -e "s|__JWT_ISSUER__|$$JWT_ISSUER|" -e "s|__JWKS_URI__|$$JWKS_URI|"
+        /etc/envoy/envoy.template.yaml > /tmp/envoy.yaml &&
+        exec envoy -c /tmp/envoy.yaml --log-level warn --file-flush-interval-msec 1000
     ports:
       - "4000:4000"
       - "127.0.0.1:9901:9901"
     volumes:
-      - ../infra/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ../infra/envoy/envoy.yaml:/etc/envoy/envoy.template.yaml:ro
     healthcheck:
       # HTTP/1.1 with a Host header: Envoy's admin port refuses HTTP/1.0 (426).
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9901 && printf 'GET /ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q LIVE <&3"]

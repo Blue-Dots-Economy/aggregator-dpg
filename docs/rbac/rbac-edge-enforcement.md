@@ -194,7 +194,9 @@ Phases 1 and 2 are reversible by configuration (mode and Envoy filter). Phase 3 
 | —                                                                                                                      | Envoy needs Keycloak's JWKS: issuer `http://keycloak:8080/realms/bluedots`, as the API uses today                                                                       |
 | Keycloak declares no roles attribute                                                                                   | `roles` declared admin-only and its mapper added (`infra/keycloak/init/apply-user-profile.sh`, `infra/keycloak/realms/realm.json`)                                      |
 
-The hybrid-dev and docker-only modes (root `docker-compose.yml`, `docker-compose.dev.yml`) and the `local-stack` skill need the same change.
+The root `docker-compose.yml` (the docker-only / VM stack, and `pnpm stack:up`, which layers `docker-compose.dev.yml` on it) has the same edge: an `envoy` service in front of `api`, the opa-envoy-plugin build of `opa`, and nginx's `/backend/` and the web app routed through Envoy (`API_BASE_URL=http://envoy:4000`). Its default stays `RBAC_MODE=log`. `infra/envoy/envoy.yaml` is a template both stacks fill in at start: the API's hostname, the token issuer (the public `…/auth/realms/<realm>` in the root stack) and the JWKS URL.
+
+Running the API on the host (`pnpm dev`) has no edge: requests reach it directly, so it must not run `RBAC_MODE=enforce`.
 
 ### 7.2 Deployment (bluedots-automation)
 
