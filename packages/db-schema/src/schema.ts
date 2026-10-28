@@ -166,15 +166,13 @@ export const campaignChannelEnum = pgEnum('campaign_channel', ['export', 'email'
  * Which phase of a campaign this audit row records; the result is in `campaignAuditOutcomeEnum`.
  *
  * A campaign writes `requested` then `completed` with the same correlation
- * id. A dump writes one `completed` row.
+ * id.
  */
 export const campaignAuditEventEnum = pgEnum('campaign_audit_event', ['requested', 'completed']);
 
 /**
- * The audited action.
- *
- * Adds `dump` to the campaign channels. A dump releases the whole-network
- * snapshot and has no org scope.
+ * The audited action. `dump` is no longer written (the dump route is gone) but
+ * stays so existing audit rows remain valid.
  */
 export const campaignAuditChannelEnum = pgEnum('campaign_audit_channel', [
   'export',
@@ -789,14 +787,14 @@ export const campaignPiiAudit = pgTable(
   'campaign_pii_audit',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    // The `campaign_job.id`. A dump has no job, so a new uuid is used per request.
+    // The `campaign_job.id`.
     correlationId: uuid('correlation_id').notNull(),
     event: campaignAuditEventEnum('event').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 
     // ── Who ────────────────────────────────────────────────────────────────
     actorUserId: text('actor_user_id'),
-    // NULL for a dump: the system account has no org.
+    // NULL only on historical `dump` rows.
     actorSignalstackOrgId: text('actor_signalstack_org_id'),
     actorAzp: text('actor_azp'),
     // Export-link recipient. An operator address, never a participant's.
@@ -837,7 +835,7 @@ export const campaignPiiAudit = pgTable(
     failedCount: integer('failed_count'),
     sentCount: integer('sent_count'),
 
-    // Non-PII extras, e.g. `{ files, bytes }` for a dump.
+    // Non-PII extras.
     details: jsonb('details').$type<Record<string, unknown>>(),
   },
   (table) => [
