@@ -418,6 +418,85 @@ describe('InMemoryOrganisationStore — listPending, search, delete and details'
     }
   });
 
+  it('search filters by known_as', async () => {
+    const store = new OrganisationStoreFake();
+    store.seed([
+      buildOrganisation({ id: 'a', slug: 'a', displayName: 'Alpha' }),
+      buildOrganisation({ id: 'b', slug: 'b', displayName: 'Beta', knownAs: 'district' }),
+    ]);
+    const r = await store.search({ orgIds: null, knownAs: 'district', limit: 20 });
+    expect(r.ok && r.value.rows.map((o) => o.id)).toEqual(['b']);
+    const none = await store.search({ orgIds: null, knownAs: 'ngo', limit: 20 });
+    expect(none.ok && none.value.rows).toEqual([]);
+  });
+
+  it('create defaults known_as to aggregator, keeps a given key, and update changes it', async () => {
+    const store = new InMemoryOrganisationStore();
+    const plain = await mk(store, 'ka1', 'ka1@x.org');
+    expect(plain.ok && plain.value.knownAs).toBe('aggregator');
+    const given = await store.create({
+      recordConsent: NO_CONSENT_WRITE,
+      slug: 'ka2',
+      displayName: 'KA2',
+      ownerEmail: 'ka2@x.org',
+      knownAs: 'district',
+    });
+    expect(given.ok && given.value.knownAs).toBe('district');
+    if (!plain.ok) throw new Error('seed');
+    const u = await store.update(plain.value.id, { knownAs: 'state' });
+    expect(u.ok && u.value.knownAs).toBe('state');
+    const untouched = await store.update(plain.value.id, { url: 'https://ka.example' });
+    expect(untouched.ok && untouched.value.knownAs).toBe('state');
+  });
+
+  it('update moves an org to another parent, with its name', async () => {
+    const store = new OrganisationStoreFake();
+    store.seed([
+      buildOrganisation({ id: 'p', slug: 'p', displayName: 'Parent' }),
+      buildOrganisation({ id: 'c', slug: 'c', displayName: 'Child', parentId: 'x' }),
+    ]);
+    const r = await store.update('c', { parentId: 'p' });
+    expect(r.ok && [r.value.parentId, r.value.parentName]).toEqual(['p', 'Parent']);
+  });
+
+  it('descendantIds lists every org below the given ones, at any depth, without them', async () => {
+    const store = new OrganisationStoreFake();
+    store.seed([
+      buildOrganisation({ id: 's', slug: 's' }),
+      buildOrganisation({ id: 'd', slug: 'd', parentId: 's' }),
+      buildOrganisation({ id: 'a', slug: 'a', parentId: 'd', status: 'pending' }),
+      buildOrganisation({ id: 'x', slug: 'x' }),
+      buildOrganisation({ id: 'y', slug: 'y', parentId: 'x' }),
+    ]);
+    const r = await store.descendantIds(['s']);
+    expect(r.ok && [...r.value].sort()).toEqual(['a', 'd']);
+    const both = await store.descendantIds(['s', 'd']);
+    expect(both.ok && both.value).toEqual(['a']);
+    expect(await store.descendantIds([])).toEqual({ ok: true, value: [] });
+  });
+
+  it('hasChildren reports whether any org sits under an org', async () => {
+    const store = new OrganisationStoreFake();
+    store.seed([
+      buildOrganisation({ id: 'p', slug: 'p' }),
+      buildOrganisation({ id: 'c', slug: 'c', parentId: 'p', status: 'inactive' }),
+    ]);
+    expect(await store.hasChildren('p')).toEqual({ ok: true, value: true });
+    expect(await store.hasChildren('c')).toEqual({ ok: true, value: false });
+  });
+
+  it('countByKnownAs counts pending and active orgs per key', async () => {
+    const store = new OrganisationStoreFake();
+    store.seed([
+      buildOrganisation({ id: 'a', slug: 'a', knownAs: 'state', status: 'active' }),
+      buildOrganisation({ id: 'b', slug: 'b', knownAs: 'state', status: 'pending' }),
+      buildOrganisation({ id: 'c', slug: 'c', knownAs: 'district', status: 'active' }),
+      buildOrganisation({ id: 'd', slug: 'd', knownAs: 'district', status: 'inactive' }),
+    ]);
+    const r = await store.countByKnownAs();
+    expect(r.ok && r.value).toEqual({ state: 2, district: 1 });
+  });
+
   it('search breaks a same-name tie by id', async () => {
     const store = new OrganisationStoreFake();
     store.seed([
@@ -474,5 +553,66 @@ describe('InMemoryOrganisationStore — listPending, search, delete and details'
     expect(aborted.ok && aborted.value).toBe('aborted');
     const stillThere = await store.findById(c.value.id);
     expect(stillThere.ok && stillThere.value).not.toBeNull();
+  });
+});
+
+describe('InMemoryOrganisationStore — parents and descendants', () => {
+  const root = buildOrganisation({
+    id: 'root',
+    slug: 'network',
+    displayName: 'Network',
+    status: 'active',
+  });
+  const create = (store: InMemoryOrganisationStore, slug: string, parentId?: string) =>
+    store.create({
+      recordConsent: NO_CONSENT_WRITE,
+      slug,
+      displayName: slug.toUpperCase(),
+      ownerEmail: `${slug}@x.org`,
+      ...(parentId === undefined ? {} : { parentId }),
+    });
+
+  it('create puts an org under the root when no parent is given', async () => {
+    const store = new OrganisationStoreFake();
+    store.seedRoot(root);
+    const r = await create(store, 'top');
+    expect(r.ok && [r.value.parentId, r.value.parentName]).toEqual(['root', 'Network']);
+  });
+
+  it.each([
+    ['unknown', 'missing'],
+    ['pending', 'pending'],
+    ['inactive', 'inactive'],
+    ['Default', 'd0'],
+  ])('create refuses a %s parent with INVALID_PARENT and stores nothing', async (_l, parentId) => {
+    const store = new OrganisationStoreFake();
+    store.seedRoot(root);
+    store.seed([
+      buildOrganisation({ id: 'pending', slug: 'p', status: 'pending' }),
+      buildOrganisation({ id: 'inactive', slug: 'i', status: 'inactive' }),
+      buildDefaultOrg({ id: 'd0' }),
+    ]);
+    const r = await create(store, 'child', parentId);
+    expect(!r.ok && r.error.code).toBe('INVALID_PARENT');
+    const found = await store.findBySlug('child');
+    expect(found.ok && found.value).toBeNull();
+  });
+
+  it('search descendantsOf returns every org below, at any depth, and nothing else', async () => {
+    const store = new OrganisationStoreFake();
+    store.seed([
+      buildOrganisation({ id: 's', slug: 's', displayName: 'State', parentId: 'root' }),
+      buildOrganisation({ id: 'd', slug: 'd', displayName: 'District', parentId: 's' }),
+      buildOrganisation({ id: 'a', slug: 'a', displayName: 'Agg', parentId: 'd' }),
+      buildOrganisation({ id: 'x', slug: 'x', displayName: 'Other', parentId: 'root' }),
+    ]);
+    const fromState = await store.search({ orgIds: null, descendantsOf: 's' });
+    expect(fromState.ok && fromState.value.rows.map((o) => o.id)).toEqual(['a', 'd']);
+    const fromDistrict = await store.search({ orgIds: null, descendantsOf: 'd' });
+    expect(fromDistrict.ok && fromDistrict.value.rows.map((o) => o.id)).toEqual(['a']);
+    const leaf = await store.search({ orgIds: null, descendantsOf: 'a' });
+    expect(leaf.ok && leaf.value.rows).toEqual([]);
+    const withStatus = await store.search({ orgIds: null, descendantsOf: 's', status: 'active' });
+    expect(withStatus.ok && withStatus.value.rows).toEqual([]);
   });
 });

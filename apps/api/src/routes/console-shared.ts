@@ -10,6 +10,8 @@
 import type { FastifyBaseLogger, FastifyReply } from 'fastify';
 import { getMailer } from '@aggregator-dpg/mailer';
 import type { Org, User } from '@aggregator-dpg/shared-primitives/user-org';
+import type { KnownAsConfig } from '@aggregator-dpg/network-config/interface';
+import { labelOf, levelOf } from '../services/known-as.js';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import type { Coordinator } from '../services/user-store/index.js';
@@ -81,14 +83,20 @@ export function toWireUser(a: Coordinator, opts: { masked?: boolean } = {}): Use
 /**
  * Maps an organisation to its wire shape.
  *
+ * The root carries no "known as" value. A key no longer in the config list
+ * keeps its key with a null label and level.
+ *
  * @param o - The org.
+ * @param knownAs - The instance's "known as" list, for the label and level.
  * @param orgType - `network_facilitator` for the root, else `aggregator`.
  * @returns The `OrgSchema` shape.
  */
 export function toWireOrg(
   o: Organisation,
+  knownAs: KnownAsConfig,
   orgType: 'network_facilitator' | 'aggregator' = 'aggregator',
 ): Org {
+  const isRoot = orgType === 'network_facilitator';
   return {
     id: o.id,
     slug: o.slug,
@@ -100,18 +108,30 @@ export function toWireOrg(
     locations: o.locations,
     legal_name: o.legalName,
     gst_number: o.gstNumber,
+    known_as: isRoot ? null : o.knownAs,
+    known_as_label: isRoot ? null : labelOf(knownAs, o.knownAs),
+    level: isRoot ? 0 : levelOf(knownAs, o.knownAs),
+    parent_id: o.parentId,
+    parent_name: o.parentName,
     created_at: o.createdAt.toISOString(),
     updated_at: o.updatedAt.toISOString(),
   };
 }
 
 /** The owner's contact on the wire. */
-export function ownerContact(o: Organisation): {
+export function ownerContact(
+  o: Organisation,
+  opts: { masked?: boolean } = {},
+): {
   name: string | null;
   email: string;
   phone: string | null;
 } {
-  return { name: o.ownerName, email: o.ownerEmail, phone: o.ownerPhone };
+  return {
+    name: o.ownerName,
+    email: opts.masked ? maskEmail(o.ownerEmail) : o.ownerEmail,
+    phone: opts.masked ? maskPhone(o.ownerPhone) : o.ownerPhone,
+  };
 }
 
 const encode = (v: unknown): string => Buffer.from(JSON.stringify(v)).toString('base64url');

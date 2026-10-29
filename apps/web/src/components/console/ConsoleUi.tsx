@@ -85,6 +85,42 @@ export function ConsoleSection({
 }
 
 /**
+ * A console section that starts closed and opens on a click on its header.
+ *
+ * Built on `<details>`, so it works without client code and is keyboard
+ * accessible.
+ *
+ * @param props.title - The section title.
+ * @param props.hint - Short text at the right of the header, e.g. a count.
+ */
+export function ConsoleCollapsible({
+  title,
+  hint,
+  children,
+}: {
+  title: ReactNode;
+  hint?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <details className="group bd-card bd-shadow overflow-hidden">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 select-none hover:bg-ink-50 [&::-webkit-details-marker]:hidden">
+        <span className="flex items-center gap-2">
+          <I.chevR
+            size={16}
+            className="text-ink-400 transition-transform group-open:rotate-90"
+            aria-hidden
+          />
+          <h2 className="font-display font-bold text-[16px] text-ink-900">{title}</h2>
+        </span>
+        {hint ? <span className="text-[12.5px] text-ink-500">{hint}</span> : null}
+      </summary>
+      <div className="border-t border-(--bd-border-soft) p-5">{children}</div>
+    </details>
+  );
+}
+
+/**
  * Label / value pairs in a responsive grid.
  *
  * @param props.items - The pairs, in order.

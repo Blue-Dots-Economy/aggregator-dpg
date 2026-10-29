@@ -22,6 +22,12 @@ export type UserOrgStatus = z.infer<typeof UserOrgStatusSchema>;
 export const OrgTypeSchema = z.enum(['network_facilitator', 'aggregator']);
 export type OrgType = z.infer<typeof OrgTypeSchema>;
 
+/** Key of an org's "known as" label. Membership in the instance list is checked by the API. */
+export const KnownAsKeySchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9_]*$/)
+  .max(64);
+
 /** A person's contact as the console shows it, unmasked. */
 export const PersonContactSchema = z.object({
   name: z.string().nullable(),
@@ -182,6 +188,16 @@ export const OrgSchema = z.object({
   locations: z.array(BecknLocationSchema),
   legal_name: z.string().nullable(),
   gst_number: z.string().nullable(),
+  /** Key of the org's "known as" label; null for the network facilitator. */
+  known_as: z.string().nullable(),
+  /** Configured label for `known_as`; null for the root or a key no longer configured. */
+  known_as_label: z.string().nullable(),
+  /** Level of `known_as`: 0 for the network facilitator; null for a key no longer configured. */
+  level: z.number().int().nullable(),
+  /** The parent org's id; null for the network facilitator. */
+  parent_id: z.string().nullable(),
+  /** The parent org's name; null for the network facilitator. */
+  parent_name: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -203,6 +219,9 @@ export const OrgSearchRequestSchema = z
       .object({
         status: UserOrgStatusSchema.optional(),
         name_prefix: z.string().trim().min(1).max(100).optional(),
+        known_as: KnownAsKeySchema.optional(),
+        /** Only orgs below this org, at any depth; the org must be within the caller's reach. */
+        descendants_of: z.string().uuid().optional(),
       })
       .strict()
       .default({}),
@@ -231,6 +250,9 @@ export const OrgMetadataUpdateRequestSchema = z
     locations: z.array(BecknLocationSchema).max(25).optional(),
     legal_name: z.string().trim().max(200).nullable().optional(),
     gst_number: z.string().trim().max(32).nullable().optional(),
+    known_as: KnownAsKeySchema.optional(),
+    /** New parent; required when `known_as` moves the org to another level. */
+    parent_id: z.string().uuid().optional(),
   })
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: 'at least one field is required' });
@@ -423,3 +445,21 @@ export const UpdateRoleRequestSchema = z
   })
   .strict();
 export type UpdateRoleRequest = z.infer<typeof UpdateRoleRequestSchema>;
+
+// ─── Hierarchy levels ───────────────────────────────────────────────────────
+
+/** `GET /v1/org/hierarchy`: the configured levels, read-only. */
+export const OrgHierarchyResponseSchema = z.object({
+  /** The network facilitator, level 0: the top of the tree. */
+  network: z.object({ id: z.string(), name: z.string() }),
+  /** Level 1, 2, … each with its values and how many pending and active orgs carry each. */
+  levels: z.array(
+    z.object({
+      level: z.number().int(),
+      values: z.array(
+        z.object({ key: z.string(), label: z.string(), org_count: z.number().int() }),
+      ),
+    }),
+  ),
+});
+export type OrgHierarchyResponse = z.infer<typeof OrgHierarchyResponseSchema>;

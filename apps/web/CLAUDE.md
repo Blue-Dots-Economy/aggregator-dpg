@@ -4,7 +4,7 @@ Guidance specific to working inside `apps/web`. Read the root `CLAUDE.md` first 
 
 ## Two auth helpers, disjoint usage today — nothing in code stops you picking the wrong one
 
-- **Anonymous**: `getServiceAccessToken()` (`lib/service-token.ts`) does a Keycloak `client_credentials` grant, cached in-process until ~30s before expiry. It's wrapped by `proxyServiceRequest()` (`lib/bff-service-proxy.ts`) and used by exactly 3 routes today: `api/aggregator/register`, `api/org/register`, `api/orgs` — genuinely pre-session (registration/listing) endpoints.
+- **Anonymous**: `getServiceAccessToken()` (`lib/service-token.ts`) does a Keycloak `client_credentials` grant, cached in-process until ~30s before expiry. It's wrapped by `proxyServiceRequest()` (`lib/bff-service-proxy.ts`) and used by exactly 4 routes today: `api/aggregator/register`, `api/org/register`, `api/orgs`, `api/orgs/parents` — genuinely pre-session (registration/listing) endpoints.
 - **Authenticated**: `callApi()` (`lib/upstream-client.ts`) reads the Redis session, transparently refreshes the access token 60s before expiry (killing the session on refresh failure), and attaches the caller's own Bearer token. Used by all other API routes plus the protected layout.
 
 **This split is convention-enforced only.** A new authenticated data route wired to `proxyServiceRequest`/`getServiceAccessToken` instead of `callApi` would authorize with the aggregator-wide service-account token rather than the caller's own — the concrete cross-aggregator data-leak shape to watch for. When adding a route: if it needs to know _which_ aggregator/coordinator is calling, it must use `callApi`; only genuinely pre-session registration/lookup endpoints should use the service-token path.

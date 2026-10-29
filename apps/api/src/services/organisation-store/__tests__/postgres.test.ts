@@ -14,6 +14,8 @@
  * @module @aggregator-dpg/api
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
 import { PostgresOrganisationStore } from '../postgres.js';
 import { _setDbClients } from '../../../db/client.js';
 import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
@@ -51,6 +53,7 @@ function makeFakeDb(resolveRaw: (chain: ChainCall[]) => unknown): unknown {
               gstNumber: r['gstNumber'] ?? null,
             },
             ownerKcSub: (r['ownerKcSub'] as string | null) ?? null,
+            parentName: (r['parentName'] as string | null) ?? null,
             c: {
               id: 'c'.repeat(64),
               email: String(r['ownerEmail']).toLowerCase(),
@@ -135,6 +138,9 @@ function makeRow(overrides: Partial<Organisation> = {}): Organisation {
     locations: [],
     legalName: null,
     gstNumber: null,
+    knownAs: 'aggregator',
+    parentId: null,
+    parentName: null,
     ...overrides,
   };
 }
@@ -659,4 +665,121 @@ describe('PostgresOrganisationStore — consent in the create transaction (0029)
       error: { code: 'CONSENT_WRITE_FAILED', message: 'consent could not be recorded' },
     });
   });
+});
+
+/** Every string literal inside a Drizzle `sql` object (visited once each). */
+function sqlText(node: unknown, seen = new Set<unknown>()): string {
+  if (typeof node === 'string') return node;
+  if (!node || typeof node !== 'object' || seen.has(node)) return '';
+  seen.add(node);
+  return Object.values(node as Record<string, unknown>)
+    .map((v) => sqlText(v, seen))
+    .join(' ');
+}
+
+describe('PostgresOrganisationStore.search — descendantsOf', () => {
+  it('adds a recursive subtree filter only when descendantsOf is set', async () => {
+    const wheres: unknown[] = [];
+    const db = makeFakeDb((chain) => {
+      wheres.push(callArgs(chain, 'where')?.[0]);
+      return [makeRow()];
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresOrganisationStore();
+
+    const below = await store.search({ orgIds: null, descendantsOf: 'state-id' });
+    expect(below.ok && below.value.rows).toHaveLength(1);
+    await store.search({ orgIds: null });
+
+    expect(sqlText(wheres[0])).toContain('WITH RECURSIVE');
+    expect(sqlText(wheres[1])).not.toContain('WITH RECURSIVE');
+  });
+});
+
+describe('PostgresOrganisationStore — known_as and parents', () => {
+  it('update writes known_as and parent_id from the patch', async () => {
+    let captured: ChainCall[] = [];
+    const db = makeFakeDb((chain) => {
+      if (isOrgWrite(chain) || captured.length === 0) captured = chain;
+      return [makeRow({ knownAs: 'district', parentId: 'p1', parentName: 'Parent' })];
+    });
+    _setDbClients(null, db as never);
+    const r = await new PostgresOrganisationStore().update('org-1', {
+      knownAs: 'district',
+      parentId: 'p1',
+    });
+    expect(r.ok && [r.value.knownAs, r.value.parentId]).toEqual(['district', 'p1']);
+    expect(callArgs(captured, 'set')?.[0]).toMatchObject({ knownAs: 'district', parentId: 'p1' });
+  });
+
+  it('search adds a known_as filter only when given', async () => {
+    const wheres: unknown[] = [];
+    const db = makeFakeDb((chain) => {
+      wheres.push(callArgs(chain, 'where')?.[0]);
+      return [makeRow()];
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresOrganisationStore();
+    await store.search({ orgIds: null, knownAs: 'district' });
+    await store.search({ orgIds: null });
+    const render = (w: unknown) => new PgDialect().sqlToQuery(w as SQL).sql;
+    expect(render(wheres[0])).toContain('"known_as" = ');
+    expect(render(wheres[1])).not.toContain('"known_as"');
+  });
+
+  it('descendantIds runs one recursive query and leaves out the given ids', async () => {
+    // The fake answers raw SQL with the row id 'admin-1': a given id, so it is left out.
+    _setDbClients(null, makeFakeDb(() => []) as never);
+    const r = await new PostgresOrganisationStore().descendantIds(['admin-1']);
+    expect(r.ok && r.value).toEqual([]);
+    expect(await new PostgresOrganisationStore().descendantIds([])).toEqual({
+      ok: true,
+      value: [],
+    });
+  });
+
+  it('descendantIds returns DB_UNAVAILABLE when the driver throws', async () => {
+    const failing = {
+      execute: () => Promise.reject(Object.assign(new Error('boom'), { code: '57P01' })),
+    };
+    _setDbClients(null, failing as never);
+    const r = await new PostgresOrganisationStore().descendantIds(['p']);
+    expect(!r.ok && r.error.code).toBe('DB_UNAVAILABLE');
+  });
+
+  it('hasChildren is true when a row has the org as parent', async () => {
+    _setDbClients(null, makeFakeDb(() => [{ id: 'c1' }]) as never);
+    expect(await new PostgresOrganisationStore().hasChildren('p')).toEqual({
+      ok: true,
+      value: true,
+    });
+    _setDbClients(null, makeFakeDb(() => []) as never);
+    expect(await new PostgresOrganisationStore().hasChildren('p')).toEqual({
+      ok: true,
+      value: false,
+    });
+  });
+
+  it('countByKnownAs maps grouped rows to a count per key', async () => {
+    const db = makeFakeDb(() => [
+      { key: 'state', n: 3 },
+      { key: 'district', n: '1' },
+    ]);
+    _setDbClients(null, db as never);
+    const r = await new PostgresOrganisationStore().countByKnownAs();
+    expect(r.ok && r.value).toEqual({ state: 3, district: 1 });
+  });
+
+  it.each(['hasChildren', 'countByKnownAs'] as const)(
+    '%s returns DB_UNAVAILABLE when the driver throws',
+    async (op) => {
+      const db = makeFakeDb(() => {
+        throw new Error('boom');
+      });
+      _setDbClients(null, db as never);
+      const store = new PostgresOrganisationStore();
+      const r = op === 'hasChildren' ? await store.hasChildren('p') : await store.countByKnownAs();
+      expect(!r.ok && r.error.code).toBe('DB_UNAVAILABLE');
+    },
+  );
 });

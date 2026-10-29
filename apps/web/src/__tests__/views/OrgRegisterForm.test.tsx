@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import messages from '@/i18n/messages/en.json';
 
@@ -74,7 +75,63 @@ vi.mock('@/components/consent/ConsentGate', () => ({
   },
 }));
 
+// Native-select shim for the shadcn Select so onValueChange is fire-able.
+vi.mock('@/components/ui/Select', () => ({
+  Select: ({
+    children,
+    onValueChange,
+    disabled,
+    value,
+  }: {
+    children?: ReactNode;
+    onValueChange?: (v: string) => void;
+    disabled?: boolean;
+    value?: string;
+  }) => (
+    <select
+      data-testid="parent-select"
+      disabled={disabled}
+      {...(value !== undefined ? { value } : {})}
+      onChange={(e) => onValueChange?.(e.target.value)}
+    >
+      {children}
+    </select>
+  ),
+  SelectTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  SelectValue: ({ placeholder }: { placeholder?: string }) => (
+    <option value="">{placeholder}</option>
+  ),
+  SelectContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  SelectItem: ({ value, children }: { value: string; children?: ReactNode }) => (
+    <option value={value}>{children}</option>
+  ),
+}));
+
 import { OrgRegisterForm } from '@/app/(public)/register/OrgRegisterForm';
+
+const PARENTS = [
+  {
+    id: 'p-root',
+    name: 'Blue Dots',
+    is_root: true,
+    known_as_label: null,
+    child_known_as_label: 'State',
+  },
+  {
+    id: 'p-state',
+    name: 'State Org',
+    is_root: false,
+    known_as_label: 'State',
+    child_known_as_label: 'District',
+  },
+  {
+    id: 'p-plain',
+    name: 'Plain Org',
+    is_root: false,
+    known_as_label: null,
+    child_known_as_label: null,
+  },
+];
 
 const orgSchema = {
   title: 'Organisation Registration',
@@ -89,21 +146,31 @@ const consentContentFixture = {
   privacy: { version: 1, title: 'Privacy', content: 'Privacy body' },
 };
 
-function renderForm(props: Record<string, unknown> = {}) {
+/** Renders the form; the parent list is pre-loaded unless `parents: null` (then it is fetched). */
+function renderForm(props: Record<string, unknown> = {}, parents: typeof PARENTS | null = PARENTS) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  if (parents) client.setQueryData(['org-parents'], { parents });
   return render(
-    <NextIntlClientProvider locale="en" messages={messages}>
-      <OrgRegisterForm
-        schema={orgSchema}
-        uiSchema={{}}
-        consentContent={consentContentFixture}
-        {...props}
-      />
-    </NextIntlClientProvider>,
+    <QueryClientProvider client={client}>
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <OrgRegisterForm
+          schema={orgSchema}
+          uiSchema={{}}
+          consentContent={consentContentFixture}
+          {...props}
+        />
+      </NextIntlClientProvider>
+    </QueryClientProvider>,
   );
 }
 
-/** Opens via submit, then accepts the (shimmed) gate. */
-async function submitAndAcceptGate() {
+function pickParent(id = 'p-root') {
+  fireEvent.change(screen.getByTestId('parent-select'), { target: { value: id } });
+}
+
+/** Picks a parent, opens via submit, then accepts the (shimmed) gate. */
+async function submitAndAcceptGate(parentId = 'p-root') {
+  pickParent(parentId);
   fireEvent.submit(screen.getByTestId('rjsf-shim'));
   await screen.findByRole('dialog');
   act(() => {
@@ -140,6 +207,7 @@ describe('<OrgRegisterForm />', () => {
     const body = JSON.parse(calls[0]!.body) as Record<string, unknown>;
     expect(body['display_name']).toBe('Enable India');
     expect(body['consent']).toMatchObject({ value: true });
+    expect(body['parent_id']).toBe('p-root');
 
     expect(await screen.findByText('enable-india-ab12')).toBeInTheDocument();
     expect(screen.getByText(messages.register.org_success_heading)).toBeInTheDocument();
@@ -249,6 +317,7 @@ describe('<OrgRegisterForm />', () => {
     // to show. Without the fix this is a dead Submit button: no gate, no
     // error, no way for the user to tell what happened.
     renderForm({ consentContent: undefined });
+    pickParent();
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
 
     expect(await screen.findByRole('alert')).toBeInTheDocument();
@@ -256,5 +325,75 @@ describe('<OrgRegisterForm />', () => {
     expect(screen.getByText(messages.register.consent.load_failed_detail)).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  describe('parent organisation', () => {
+    it('lists the root as top level and labels the others with their known-as label', () => {
+      originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn() as unknown as typeof fetch;
+      renderForm();
+      expect(screen.getByRole('option', { name: 'Blue Dots (Top level)' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'State Org (State)' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Plain Org' })).toBeInTheDocument();
+    });
+
+    it('sends the picked parent', async () => {
+      originalFetch = globalThis.fetch;
+      const bodies: Record<string, unknown>[] = [];
+      globalThis.fetch = vi.fn(async (_input: unknown, init?: { body?: string }) => {
+        bodies.push(JSON.parse(init?.body ?? '{}') as Record<string, unknown>);
+        return new Response(JSON.stringify({ slug: 's' }), { status: 201 });
+      }) as unknown as typeof fetch;
+      renderForm();
+      await submitAndAcceptGate('p-state');
+      await waitFor(() => expect(bodies).toHaveLength(1));
+      expect(bodies[0]?.['parent_id']).toBe('p-state');
+    });
+
+    it('tells the registrant what the new org will be known as', () => {
+      originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn() as unknown as typeof fetch;
+      renderForm();
+      expect(screen.queryByText(/will be known as/)).toBeNull();
+      pickParent('p-state');
+      expect(screen.getByText('Your organisation will be known as District.')).toBeInTheDocument();
+      pickParent('p-plain');
+      expect(screen.queryByText(/will be known as/)).toBeNull();
+    });
+
+    it('keeps submit disabled until a parent is picked', () => {
+      originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn() as unknown as typeof fetch;
+      renderForm();
+      const submit = screen.getByRole('button', { name: messages.register.org_submit });
+      expect(submit).toBeDisabled();
+    });
+
+    it('refuses a submit without a parent: error shown, no gate, nothing posted', async () => {
+      originalFetch = globalThis.fetch;
+      const fetchSpy = vi.fn();
+      globalThis.fetch = fetchSpy as unknown as typeof fetch;
+      renderForm();
+      fireEvent.submit(screen.getByTestId('rjsf-shim'));
+      expect(await screen.findByRole('alert')).toBeInTheDocument();
+      expect(screen.getByText(messages.register.parent_selector_required)).toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('shows an error with a working retry when the list fails to load', async () => {
+      originalFetch = globalThis.fetch;
+      let attempt = 0;
+      globalThis.fetch = vi.fn(async () => {
+        attempt += 1;
+        return attempt === 1
+          ? new Response(JSON.stringify({ error: { code: 'DB_UNAVAILABLE' } }), { status: 503 })
+          : new Response(JSON.stringify({ parents: PARENTS }), { status: 200 });
+      }) as unknown as typeof fetch;
+      renderForm({}, null);
+      expect(await screen.findByText(messages.register.parent_selector_error)).toBeInTheDocument();
+      fireEvent.click(screen.getByText(messages.register.org_selector_retry));
+      expect(await screen.findByRole('option', { name: 'State Org (State)' })).toBeInTheDocument();
+    });
   });
 });

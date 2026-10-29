@@ -375,6 +375,8 @@ export const organisations = pgTable(
       .default(sql`'[]'::jsonb`),
     legalName: text('legal_name'),
     gstNumber: text('gst_number'),
+    /** Key of the org's "known as" label, from the instance config list. Validated by the API. */
+    knownAs: text('known_as').notNull().default('aggregator'),
     // Schema-driven registration fields. Also holds `website`, `address` and
     // `coordinates`, which are copied into `url` and `locations`.
     profile: jsonb('profile')

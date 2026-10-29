@@ -13,6 +13,7 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import messages from '@/i18n/messages/en.json';
 
@@ -41,6 +42,29 @@ vi.mock('@/components/forms/RjsfThemed', () => ({
 }));
 
 // ConsentGate is NOT mocked here — that is the entire point of this file.
+
+// Native-select shim for the shadcn Select so a parent can be picked.
+vi.mock('@/components/ui/Select', () => ({
+  Select: ({
+    children,
+    onValueChange,
+  }: {
+    children?: ReactNode;
+    onValueChange?: (v: string) => void;
+  }) => (
+    <select data-testid="parent-select" onChange={(e) => onValueChange?.(e.target.value)}>
+      {children}
+    </select>
+  ),
+  SelectTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  SelectValue: ({ placeholder }: { placeholder?: string }) => (
+    <option value="">{placeholder}</option>
+  ),
+  SelectContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  SelectItem: ({ value, children }: { value: string; children?: ReactNode }) => (
+    <option value={value}>{children}</option>
+  ),
+}));
 
 import { OrgRegisterForm } from '@/app/(public)/register/OrgRegisterForm';
 
@@ -94,10 +118,16 @@ function stubScrollerToMaxAndScroll() {
 }
 
 function renderForm() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(['org-parents'], {
+    parents: [{ id: 'p-root', name: 'Blue Dots', is_root: true, known_as_label: null }],
+  });
   return render(
-    <NextIntlClientProvider locale="en" messages={messages}>
-      <OrgRegisterForm schema={orgSchema} uiSchema={{}} consentContent={consentContentFixture} />
-    </NextIntlClientProvider>,
+    <QueryClientProvider client={client}>
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <OrgRegisterForm schema={orgSchema} uiSchema={{}} consentContent={consentContentFixture} />
+      </NextIntlClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -120,6 +150,7 @@ describe('<OrgRegisterForm /> with the real ConsentGate', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
       // Submitting opens it: false -> true, in the DOM for the first time.
+      fireEvent.change(screen.getByTestId('parent-select'), { target: { value: 'p-root' } });
       fireEvent.submit(screen.getByTestId('rjsf-shim'));
       await screen.findByRole('dialog');
 

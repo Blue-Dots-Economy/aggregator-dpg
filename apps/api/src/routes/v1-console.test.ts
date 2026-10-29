@@ -20,6 +20,7 @@ import {
   buildDefaultOrg,
   _setOrganisationStore,
 } from '../services/organisation-store/index.js';
+import type { Organisation } from '../services/organisation-store/index.js';
 import { IdpAdminFake, _setIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -107,8 +108,37 @@ describe('console routes /v1/user, /v1/org', () => {
     });
   }
 
-  const savedCustomRoles = config.RBAC_CUSTOM_ROLES_ENABLED;
+  /** Pins a config: State (level 1), District (2), Aggregator and Training Partner (3). */
+  function useKnownAs(): void {
+    const base = buildBlueDotConfig();
+    _setNetworkConfig(
+      buildBlueDotConfig({
+        aggregator: {
+          ...base.aggregator,
+          organisation: {
+            known_as: {
+              values: [
+                { key: 'state', label: 'State', level: 1 },
+                { key: 'district', label: 'District', level: 2 },
+                { key: 'aggregator', label: 'Aggregator', level: 3 },
+                { key: 'training_partner', label: 'Training Partner', level: 3 },
+              ],
+              default: 'aggregator',
+            },
+          },
+        },
+      }),
+    );
+  }
 
+  /** Re-seeds an org with some fields changed. */
+  async function setOrg(id: string, fields: Partial<Organisation>): Promise<void> {
+    const r = await orgs.findById(id);
+    if (!r.ok || !r.value) throw new Error('seed');
+    orgs.seed([{ ...r.value, ...fields }]);
+  }
+
+  const savedCustomRoles = config.RBAC_CUSTOM_ROLES_ENABLED;
   beforeEach(async () => {
     _resetJwks();
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
@@ -335,6 +365,28 @@ describe('console routes /v1/user, /v1/org', () => {
       };
       expect(root.org.org_type).toBe('network_facilitator');
     });
+
+    it('returns known_as with its label and level; level 0 for the root; null for a stale key', async () => {
+      useKnownAs();
+      type Read = {
+        org: { known_as: string | null; known_as_label: string | null; level: number | null };
+      };
+      const a = (await get(`/v1/org/read/${ORG_A}`, 'a')).json() as Read;
+      expect(a.org).toMatchObject({
+        known_as: 'aggregator',
+        known_as_label: 'Aggregator',
+        level: 3,
+      });
+      const root = (await get(`/v1/org/read/${ROOT}`, 'na')).json() as Read;
+      expect(root.org).toMatchObject({ known_as: null, known_as_label: null, level: 0 });
+      await setOrg(ORG_A, { knownAs: 'retired_key' });
+      const stale = (await get(`/v1/org/read/${ORG_A}`, 'a')).json() as Read;
+      expect(stale.org).toMatchObject({
+        known_as: 'retired_key',
+        known_as_label: null,
+        level: null,
+      });
+    });
   });
 
   describe('POST /v1/user/search', () => {
@@ -475,6 +527,78 @@ describe('console routes /v1/user, /v1/org', () => {
         ORG_P,
       ]);
     });
+
+    it('filters by known_as and returns the label', async () => {
+      useKnownAs();
+      await setOrg(ORG_B, { knownAs: 'district' });
+      const res = await post('/v1/org/search', 'na', { filter: { known_as: 'district' } });
+      const body = res.json() as { orgs: Array<{ id: string; known_as_label: string | null }> };
+      expect(body.orgs.map((o) => o.id)).toEqual([ORG_B]);
+      expect(body.orgs[0]?.known_as_label).toBe('District');
+    });
+
+    it('refuses a malformed known_as filter (400)', async () => {
+      const res = await post('/v1/org/search', 'na', { filter: { known_as: 'Bad-Key' } });
+      expect(res.statusCode).toBe(400);
+    });
+
+    describe('descendants_of', () => {
+      // ROOT → Alpha (ORG_A) → Beta (ORG_B) → Pending Org (ORG_P).
+      beforeEach(async () => {
+        for (const [id, parentId, parentName] of [
+          [ORG_A, ROOT, 'The Network'],
+          [ORG_B, ORG_A, 'Alpha'],
+          [ORG_P, ORG_B, 'Beta'],
+        ] as const) {
+          const r = await orgs.findById(id);
+          if (!r.ok || !r.value) throw new Error('seed');
+          orgs.seed([{ ...r.value, parentId, parentName }]);
+        }
+      });
+      const below = (token: string, id: string) =>
+        post('/v1/org/search', token, { filter: { descendants_of: id } });
+
+      it('lists every org below an owned org, with its parent, at any depth', async () => {
+        const res = await below('a', ORG_A);
+        expect(res.statusCode).toBe(200);
+        const body = res.json() as { orgs: Array<{ id: string; parent_name: string | null }> };
+        expect(body.orgs.map((o) => [o.id, o.parent_name])).toEqual([
+          [ORG_B, 'Alpha'],
+          [ORG_P, 'Beta'],
+        ]);
+      });
+
+      it('lists only the orgs below a lower org', async () => {
+        expect(ids(await below('b', ORG_B))).toEqual([ORG_P]);
+      });
+
+      it('answers an empty page below an org out of reach', async () => {
+        expect(ids(await below('b', ORG_A))).toEqual([]);
+      });
+
+      it('lets the network admin list below any org', async () => {
+        expect(ids(await below('na', ORG_A))).toEqual([ORG_B, ORG_P].sort());
+      });
+
+      it('narrows with the other filters', async () => {
+        const res = await post('/v1/org/search', 'a', {
+          filter: { descendants_of: ORG_A, status: 'pending' },
+        });
+        expect(ids(res)).toEqual([ORG_P]);
+      });
+
+      it('lets an owner read the orgs below its own, but not edit them', async () => {
+        expect(ids(await post('/v1/org/search', 'a', {}))).toEqual([ORG_A, ORG_B, ORG_P].sort());
+        expect((await get(`/v1/org/read/${ORG_B}`, 'a')).statusCode).toBe(200);
+        const edit = await patch(`/v1/org/metadata/update/${ORG_B}`, 'a', { url: null });
+        expect(edit.statusCode).toBe(404);
+      });
+
+      it('refuses a descendants_of that is not a uuid (400)', async () => {
+        const res = await post('/v1/org/search', 'a', { filter: { descendants_of: 'alpha' } });
+        expect(res.statusCode).toBe(400);
+      });
+    });
   });
 
   describe('PATCH /v1/org/metadata/update/:id', () => {
@@ -520,6 +644,199 @@ describe('console routes /v1/user, /v1/org', () => {
     it('refuses an empty body', async () => {
       const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {});
       expect(res.statusCode).toBe(400);
+    });
+
+    describe('known_as and parent', () => {
+      // Beta is a State under the network; Alpha starts as an Aggregator under the network.
+      beforeEach(async () => {
+        useKnownAs();
+        await setOrg(ORG_B, { knownAs: 'state', parentId: ROOT, parentName: 'The Network' });
+        await setOrg(ORG_A, { parentId: ROOT, parentName: 'The Network' });
+      });
+      const update = (who: keyof typeof TOKENS, body: object, id = ORG_A) =>
+        patch(`/v1/org/metadata/update/${id}`, who, body);
+      const fieldsOf = (res: { json: () => unknown }) =>
+        (res.json() as { error: { fields: Record<string, string> } }).error.fields;
+
+      it('moves an org to a new level under a parent one level up, and tells the owner', async () => {
+        const res = await update('na', { known_as: 'district', parent_id: ORG_B });
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toMatchObject({
+          known_as: 'district',
+          known_as_label: 'District',
+          level: 2,
+          parent_id: ORG_B,
+          parent_name: 'Beta',
+        });
+        const notice = mailer.outbox.find((m) => m.to === 'a@a.org');
+        expect(notice?.html).toContain('known as');
+        expect(notice?.html).toContain('parent organisation');
+      });
+
+      it('puts a level-1 value directly under the network', async () => {
+        const res = await update('na', { known_as: 'state', parent_id: ROOT });
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toMatchObject({ level: 1, parent_id: ROOT });
+      });
+
+      it('needs parent_id when the level changes', async () => {
+        const res = await update('na', { known_as: 'district' });
+        expect(res.statusCode).toBe(400);
+        expect(fieldsOf(res)).toEqual({ parent_id: 'required' });
+      });
+
+      it.each([
+        ['the network for a level-2 value', { known_as: 'district', parent_id: ROOT }],
+        ['a level-1 org for a level-1 value', { known_as: 'state', parent_id: ORG_B }],
+        ['a pending org', { known_as: 'district', parent_id: ORG_P }],
+        ['the Default org', { known_as: 'district', parent_id: DEFAULT }],
+        ['the org itself', { known_as: 'district', parent_id: ORG_A }],
+      ])('refuses %s as parent (400) and changes nothing', async (_c, body) => {
+        await setOrg(ORG_P, { knownAs: 'state' });
+        const res = await update('na', body);
+        expect(res.statusCode).toBe(400);
+        expect(fieldsOf(res)).toEqual({ parent_id: 'invalid' });
+        const stored = await orgs.findById(ORG_A);
+        expect(stored.ok && [stored.value?.knownAs, stored.value?.parentId]).toEqual([
+          'aggregator',
+          ROOT,
+        ]);
+      });
+
+      it('checks the current parent when only known_as changes within a level', async () => {
+        // Alpha sits under the network, which is not a level-2 org.
+        const res = await update('na', { known_as: 'training_partner' });
+        expect(res.statusCode).toBe(400);
+        expect(fieldsOf(res)).toEqual({ parent_id: 'invalid' });
+      });
+
+      it('refuses an org with child orgs (409)', async () => {
+        await setOrg(ORG_P, { parentId: ORG_A });
+        const res = await update('na', { known_as: 'district', parent_id: ORG_B });
+        expect(res.statusCode).toBe(409);
+        expect(fieldsOf(res)).toEqual({ reason: 'has_children' });
+      });
+
+      it('refuses known_as or parent_id to an owner (403)', async () => {
+        expect((await update('a', { known_as: 'district', parent_id: ORG_B })).statusCode).toBe(
+          403,
+        );
+        expect((await update('a', { parent_id: ORG_B })).statusCode).toBe(403);
+      });
+
+      it('refuses a known_as that is not configured (400)', async () => {
+        const res = await update('na', { known_as: 'ngo', parent_id: ORG_B });
+        expect(res.statusCode).toBe(400);
+        expect(fieldsOf(res)).toEqual({ known_as: 'invalid' });
+      });
+
+      it("never changes the Default org's placement (409)", async () => {
+        const res = await update('na', { known_as: 'state', parent_id: ROOT }, DEFAULT);
+        expect(res.statusCode).toBe(409);
+      });
+
+      it('accepts an unchanged known_as and parent without checks', async () => {
+        const res = await update('na', { known_as: 'aggregator', parent_id: ROOT, url: null });
+        expect(res.statusCode).toBe(200);
+      });
+    });
+  });
+
+  describe('GET /v1/org/hierarchy', () => {
+    beforeEach(async () => {
+      useKnownAs();
+      await setOrg(ORG_B, { knownAs: 'state' });
+      await setOrg(ORG_P, { knownAs: 'district' });
+    });
+
+    it('shows the network and each level with its values and live org counts', async () => {
+      const res = await get('/v1/org/hierarchy', 'na');
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        network: { id: ROOT, name: 'The Network' },
+        levels: [
+          { level: 1, values: [{ key: 'state', label: 'State', org_count: 1 }] },
+          { level: 2, values: [{ key: 'district', label: 'District', org_count: 1 }] },
+          {
+            level: 3,
+            values: [
+              // Default and Alpha.
+              { key: 'aggregator', label: 'Aggregator', org_count: 2 },
+              { key: 'training_partner', label: 'Training Partner', org_count: 0 },
+            ],
+          },
+        ],
+      });
+    });
+
+    it('is the network admin’s only (403 for an owner)', async () => {
+      expect((await get('/v1/org/hierarchy', 'a')).statusCode).toBe(403);
+    });
+
+    it('answers 503 when the counts cannot be read', async () => {
+      vi.spyOn(orgs, 'countByKnownAs').mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'down' },
+      });
+      expect((await get('/v1/org/hierarchy', 'na')).statusCode).toBe(503);
+    });
+  });
+
+  describe('owners read the orgs below theirs, read-only', () => {
+    // Beta sits under Alpha: Alpha's owner (a) views Beta and its coordinator C2.
+    beforeEach(async () => {
+      await setOrg(ORG_B, { parentId: ORG_A, parentName: 'Alpha' });
+    });
+    type Users = { users: Array<{ id: string; contact: { email: string } }> };
+    const emailOf = (res: { json: () => unknown }, id: string) =>
+      (res.json() as Users).users.find((u) => u.id === id)?.contact.email;
+
+    it('lists its own orgs and every org below, never the one above', async () => {
+      const ids = (res: { json: () => unknown }) =>
+        (res.json() as { orgs: Array<{ id: string }> }).orgs.map((o) => o.id).sort();
+      expect(ids(await post('/v1/org/search', 'a', {}))).toEqual([ORG_A, ORG_B].sort());
+      expect(ids(await post('/v1/org/search', 'b', {}))).toEqual([ORG_B]);
+    });
+
+    it('reads an org below with its owner contact masked, but not an org above', async () => {
+      const res = await get(`/v1/org/read/${ORG_B}`, 'a');
+      expect(res.statusCode).toBe(200);
+      const owner = (res.json() as { owner: { contact: { email: string } } }).owner;
+      expect(owner.contact.email).not.toBe('b@b.org');
+      expect((await get(`/v1/org/read/${ORG_A}`, 'b')).statusCode).toBe(404);
+    });
+
+    it('cannot edit an org below (404)', async () => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_B}`, 'a', { url: null });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('lists coordinators below with masked contacts, its own unmasked', async () => {
+      const res = await post('/v1/user/search', 'a', {});
+      const ids = (res.json() as Users).users.map((u) => u.id).sort();
+      expect(ids).toEqual([C1, C2, C3].sort());
+      expect(emailOf(res, C2)).not.toBe('c2@x.org');
+      expect(emailOf(res, C1)).toBe('c1@x.org');
+    });
+
+    it('filters coordinators to an org below', async () => {
+      const res = await post('/v1/user/search', 'a', { filter: { org_id: ORG_B } });
+      expect((res.json() as Users).users.map((u) => u.id)).toEqual([C2]);
+    });
+
+    it('reads a coordinator below masked, but cannot decide it (404)', async () => {
+      const read = await get(`/v1/user/read/${C2}`, 'a');
+      expect(read.statusCode).toBe(200);
+      expect((read.json() as { contact: { email: string } }).contact.email).not.toBe('c2@x.org');
+      const decide = await post(`/v1/user/decision/${C2}`, 'a', { decision: 'approve' });
+      expect(decide.statusCode).toBe(404);
+    });
+
+    it('sees nothing of a sibling org', async () => {
+      await setOrg(ORG_B, { parentId: ROOT, parentName: 'The Network' });
+      expect((await get(`/v1/org/read/${ORG_B}`, 'a')).statusCode).toBe(404);
+      const res = await post('/v1/user/search', 'a', { filter: { org_id: ORG_B } });
+      expect((res.json() as Users).users).toEqual([]);
     });
   });
 

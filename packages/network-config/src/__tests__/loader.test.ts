@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { FileNetworkConfigLoader } from '../loader.js';
-import { AggregatorConfigSchema } from '../interface.js';
+import { AggregatorConfigSchema, DEFAULT_KNOWN_AS } from '../interface.js';
 import { URL_PATTERN } from '../uri-fields.js';
 
 const BLUE_DOT_YAML = `
@@ -394,6 +394,81 @@ describe('AggregatorConfigSchema.registration_modes', () => {
       },
     });
     expect(result.success).toBe(true);
+  });
+
+  it('defaults organisation.known_as to Aggregator when the block is absent', () => {
+    const result = AggregatorConfigSchema.safeParse({ aggregator: baseAggregator });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.aggregator.organisation.known_as).toEqual(DEFAULT_KNOWN_AS);
+  });
+
+  it('accepts values with levels, several at one level', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: {
+        ...baseAggregator,
+        organisation: {
+          known_as: {
+            values: [
+              { key: 'state', label: 'State', level: 1 },
+              { key: 'district', label: 'District', level: 2 },
+              { key: 'aggregator', label: 'Aggregator', level: 3 },
+              { key: 'training_partner', label: 'Training Partner', level: 3 },
+            ],
+            default: 'aggregator',
+          },
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.aggregator.organisation.known_as.values.map((v) => v.level)).toEqual([
+      1, 2, 3, 3,
+    ]);
+  });
+
+  it.each([
+    [
+      'a default not in values',
+      { default: 'ngo', values: [{ key: 'aggregator', label: 'A', level: 1 }] },
+    ],
+    [
+      'duplicate keys',
+      {
+        default: 'aggregator',
+        values: [
+          { key: 'aggregator', label: 'A', level: 1 },
+          { key: 'aggregator', label: 'B', level: 1 },
+        ],
+      },
+    ],
+    ['a malformed key', { default: 'Bad-Key', values: [{ key: 'Bad-Key', label: 'A', level: 1 }] }],
+    ['an empty list', { default: 'aggregator', values: [] }],
+    [
+      'a blank label',
+      { default: 'aggregator', values: [{ key: 'aggregator', label: ' ', level: 1 }] },
+    ],
+    [
+      'a label over 60 characters',
+      { default: 'aggregator', values: [{ key: 'aggregator', label: 'x'.repeat(61), level: 1 }] },
+    ],
+    ['a missing level', { default: 'aggregator', values: [{ key: 'aggregator', label: 'A' }] }],
+    ['level 0', { default: 'aggregator', values: [{ key: 'aggregator', label: 'A', level: 0 }] }],
+    [
+      'a gap in the levels',
+      {
+        default: 'aggregator',
+        values: [
+          { key: 'state', label: 'S', level: 1 },
+          { key: 'aggregator', label: 'A', level: 3 },
+        ],
+      },
+    ],
+  ])('rejects known_as with %s', (_case, knownAs) => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: { ...baseAggregator, organisation: { known_as: knownAs } },
+    });
+    expect(result.success).toBe(false);
   });
 
   it('rejects non-snake_case mode keys', () => {

@@ -43,10 +43,17 @@ import { getConsentLedger } from '../services/consent-ledger/index.js';
 import type { RecordConsentHook } from '../services/consent-ledger/hook.js';
 import { stampConsent } from '../services/registration-consent.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
+import { getNetworkConfig } from '../services/network-config.js';
+import { childKnownAs, labelOf, levelOf, NETWORK_LEVEL } from '../services/known-as.js';
 import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
 
 const OrgCreateBodySchema = z.object({
   display_name: z.string().min(1).max(200),
+  /**
+   * Parent org: the root or an active, non-Default aggregator org (`GET /v1/orgs/parents`).
+   * The root when omitted.
+   */
+  parent_id: z.string().uuid().optional(),
   state: z.string().max(200).optional(),
   owner: z.object({
     name: z.string().min(1).max(200),
@@ -97,6 +104,7 @@ const OrgCreateBodySchema = z.object({
  */
 const ORG_COLUMN_BACKED_KEYS: ReadonlySet<string> = new Set([
   'display_name',
+  'parent_id',
   'state',
   'owner',
   'consent',
@@ -126,6 +134,21 @@ const OrgCreatedResponseSchema = z
     message: z.string(),
   })
   .passthrough();
+
+const OrgParentsResponseSchema = z.object({
+  parents: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      /** True for the network root (a top-level org). */
+      is_root: z.boolean(),
+      /** The org's "known as" label, from its level; null for the root. */
+      known_as_label: z.string().nullable(),
+      /** The "known as" label an org registered under this one gets. */
+      child_known_as_label: z.string().nullable(),
+    }),
+  ),
+});
 
 const OrgListResponseSchema = z
   .object({
@@ -189,6 +212,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
             displayName: row.displayName,
             ownerEmail: row.ownerEmail,
             ownerPhone: row.ownerPhone ?? '',
+            parentName: row.parentName,
           },
           log,
         );
@@ -360,6 +384,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         });
       }
       const recordConsent = await orgConsentWriter({ consent: orgConsent, log });
+      const knownAs = await knownAsForNewOrg(body.parent_id);
       let slug = slugFromName(body.display_name);
       const createOnce = (s: string) =>
         orgStore.create({
@@ -376,6 +401,8 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           profile: buildOrgProfile(body),
           // The schema file that resolved; NULL means unknown.
           profileRef: orgProfileRef,
+          knownAs,
+          ...(body.parent_id ? { parentId: body.parent_id } : {}),
           recordConsent,
         });
       // Each retry depends on the previous outcome, so the attempts are sequential.
@@ -393,6 +420,12 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         }
         if (created.error.code === 'DUPLICATE_SLUG') {
           throw httpError('ORG_SLUG_TAKEN', { fields: { slug } });
+        }
+        if (created.error.code === 'INVALID_PARENT') {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: 'parent_id must be the network or an active organisation.',
+            fields: { parent_id: 'invalid' },
+          });
         }
         // A concurrent registration took the email or phone after the pre-check.
         if (created.error.code === 'DUPLICATE_EMAIL') {
@@ -489,6 +522,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           displayName: body.display_name,
           ownerEmail: body.owner.email,
           ownerPhone: phoneE164,
+          parentName: org.parentName,
         },
         log,
       );
@@ -510,6 +544,69 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         status: 'pending',
         message: 'Organisation submitted. A reviewer will approve it before coordinators can join.',
       });
+    },
+  );
+
+  app.get(
+    '/v1/orgs/parents',
+    {
+      config: { rbac: { access: 'service' } },
+      schema: {
+        tags: ['aggregator-orgs'],
+        summary: 'List the orgs a new org can register under',
+        description:
+          'Returns the network root first, then active aggregator orgs other than the Default org, sorted by name, each with its "known as" label and the label an org registered under it would get.',
+        response: { 200: OrgParentsResponseSchema, ...errorResponses(401, 500, 503) },
+      },
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const auth = await authenticateAny(req);
+      if (!auth.ok) {
+        throw httpError('UNAUTHORIZED', {
+          detail: auth.error.message,
+          fields: { reason: auth.error.code },
+        });
+      }
+      await recordRouteCaller(req, callerFromAny(auth.context));
+      const store = getOrganisationStore();
+      const [root, active] = await Promise.all([store.findRoot(), store.listActive()]);
+      if (!root.ok) {
+        throw httpError('DB_UNAVAILABLE', {
+          cause: new Error(root.error.message),
+          fields: { sub_operation: 'orgStore.findRoot' },
+        });
+      }
+      if (!active.ok) {
+        throw httpError('DB_UNAVAILABLE', {
+          cause: new Error(active.error.message),
+          fields: { sub_operation: 'orgStore.listActive' },
+        });
+      }
+      const cfg = (await getNetworkConfig()).aggregator.organisation.known_as;
+      const childLabel = (level: number | null) => labelOf(cfg, childKnownAs(cfg, level));
+      const parents = [
+        ...(root.value
+          ? [
+              {
+                id: root.value.id,
+                name: root.value.displayName,
+                is_root: true,
+                known_as_label: null,
+                child_known_as_label: childLabel(NETWORK_LEVEL),
+              },
+            ]
+          : []),
+        ...active.value
+          .filter((o) => !o.isDefault)
+          .map((o) => ({
+            id: o.id,
+            name: o.displayName,
+            is_root: false,
+            known_as_label: labelOf(cfg, o.knownAs),
+            child_known_as_label: childLabel(levelOf(cfg, o.knownAs)),
+          })),
+      ];
+      return reply.status(200).send({ parents });
     },
   );
 
@@ -549,6 +646,39 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
       });
     },
   );
+}
+
+/**
+ * The "known as" value for a new org: the only value one level below its
+ * parent, else the config default.
+ *
+ * A parent that cannot be read yields the default; the store then refuses an
+ * invalid parent with `INVALID_PARENT`.
+ *
+ * @param parentId - The requested parent; the network when omitted.
+ * @returns The value key.
+ * @throws {HttpError} DB_UNAVAILABLE when the parent lookup fails.
+ */
+async function knownAsForNewOrg(parentId: string | undefined): Promise<string> {
+  const cfg = (await getNetworkConfig()).aggregator.organisation.known_as;
+  if (parentId === undefined) return childKnownAs(cfg, NETWORK_LEVEL);
+  const store = getOrganisationStore();
+  const parent = await store.findById(parentId);
+  if (!parent.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(parent.error.message),
+      fields: { sub_operation: 'orgStore.findById' },
+    });
+  }
+  if (parent.value) return childKnownAs(cfg, levelOf(cfg, parent.value.knownAs));
+  const root = await store.findRoot();
+  if (!root.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(root.error.message),
+      fields: { sub_operation: 'orgStore.findRoot' },
+    });
+  }
+  return childKnownAs(cfg, root.value?.id === parentId ? NETWORK_LEVEL : null);
 }
 
 /**

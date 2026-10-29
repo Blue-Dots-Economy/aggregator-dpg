@@ -17,6 +17,9 @@ import type { RecordConsentHook } from '../consent-ledger/hook.js';
 /** Slug of the fixed Default org, which holds coordinators with no other org. */
 export const DEFAULT_ORG_SLUG = 'default';
 
+/** Column default of `organisations.known_as` (migration 0032). */
+export const DEFAULT_KNOWN_AS_KEY = 'aggregator';
+
 export interface Organisation {
   id: string;
   slug: string;
@@ -61,6 +64,12 @@ export interface Organisation {
   locations: BecknLocation[];
   legalName: string | null;
   gstNumber: string | null;
+  /** Key of the org's "known as" label, from the instance config list. */
+  knownAs: string;
+  /** The parent org's id; the root for a top-level org, `null` for the root itself. */
+  parentId: string | null;
+  /** The parent org's name; `null` for the root. */
+  parentName: string | null;
 }
 
 export interface CreateOrgInput {
@@ -78,6 +87,13 @@ export interface CreateOrgInput {
   /** Org details from the registration form's website and address. */
   url?: string | null;
   locations?: BecknLocation[];
+  /** "Known as" key; the column default (`aggregator`) when omitted. */
+  knownAs?: string;
+  /**
+   * Parent org id; the root when omitted. Must be the root or an active,
+   * non-Default aggregator org, else `INVALID_PARENT`.
+   */
+  parentId?: string;
   /**
    * Writes the org's consent ledger row inside the create transaction.
    * Required, so no org is created without a consent record.
@@ -98,6 +114,10 @@ export interface UpdateOrgPatch {
   locations?: BecknLocation[];
   legalName?: string | null;
   gstNumber?: string | null;
+  /** "Known as" key; the caller validates it against the config list. */
+  knownAs?: string;
+  /** New parent org id; the caller checks it is a valid parent and that the org has no children. */
+  parentId?: string;
   /** Who made this write: an admin user id, `'self'` or `'admin'`. */
   updatedBy?: string;
 }
@@ -117,6 +137,10 @@ export interface SearchOrgsFilter {
   status?: AggregatorStatus;
   /** Case-insensitive name prefix. */
   namePrefix?: string;
+  /** Exact "known as" key. */
+  knownAs?: string;
+  /** Only orgs below this org, at any depth (the org itself excluded). */
+  descendantsOf?: string;
   cursor?: OrgCursor;
   /** 1..100, default 20. */
   limit?: number;
@@ -139,6 +163,8 @@ export type OrgStoreError =
   | { code: 'DUPLICATE_EMAIL'; message: string }
   /** The owner's phone already belongs to another person. */
   | { code: 'DUPLICATE_PHONE'; message: string }
+  /** The requested parent is not the root or an active, non-Default aggregator org. */
+  | { code: 'INVALID_PARENT'; message: string }
   /** The `recordConsent` hook failed; nothing was created. */
   | { code: 'CONSENT_WRITE_FAILED'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
@@ -244,6 +270,26 @@ export abstract class OrganisationStoreBase {
    * @returns One page; an empty scope returns no rows.
    */
   abstract search(filter: SearchOrgsFilter): Promise<OrgStoreResult<SearchOrgsPage>>;
+  /**
+   * Ids of every aggregator org below the given orgs, at any depth, any status.
+   *
+   * @param ids - The orgs to look below; an empty list returns none.
+   * @returns The descendant ids, without the given ids themselves.
+   */
+  abstract descendantIds(ids: readonly string[]): Promise<OrgStoreResult<string[]>>;
+  /**
+   * Whether any org (any status) has this org as its parent.
+   *
+   * @param id - The org id.
+   * @returns `true` inside `ok` when it has a child org.
+   */
+  abstract hasChildren(id: string): Promise<OrgStoreResult<boolean>>;
+  /**
+   * Counts pending and active aggregator orgs per "known as" key.
+   *
+   * @returns Count per key; a key with no org is absent.
+   */
+  abstract countByKnownAs(): Promise<OrgStoreResult<Record<string, number>>>;
   /**
    * Deletes an org only while it is still `pending` and older than `cutoff`.
    *

@@ -825,6 +825,10 @@
                     "minLength": 1,
                     "maxLength": 200
                   },
+                  "parent_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
                   "state": {
                     "type": "string",
                     "maxLength": 200
@@ -1106,6 +1110,219 @@
             }
           },
           "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orgs/parents": {
+      "get": {
+        "summary": "List the orgs a new org can register under",
+        "tags": [
+          "aggregator-orgs"
+        ],
+        "description": "Returns the network root first, then active aggregator orgs other than the Default org, sorted by name, each with its \"known as\" label and the label an org registered under it would get.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "parents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "is_root": {
+                            "type": "boolean"
+                          },
+                          "known_as_label": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "child_known_as_label": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "is_root",
+                          "known_as_label",
+                          "child_known_as_label"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "parents"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -3727,7 +3944,7 @@
         "tags": [
           "console"
         ],
-        "description": "Filters by org, status and served domain; an org outside reach yields an empty page. Keyset paged by an opaque cursor.",
+        "description": "Filters by org, status and served domain; an org outside reach yields an empty page. An owner also sees, read-only and with masked contacts, the coordinators of every organisation below its own. Keyset paged by an opaque cursor.",
         "requestBody": {
           "required": true,
           "content": {
@@ -5573,6 +5790,7 @@
         "tags": [
           "console"
         ],
+        "description": "An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked.",
         "parameters": [
           {
             "schema": {
@@ -5708,6 +5926,26 @@
                           "type": "string",
                           "nullable": true
                         },
+                        "known_as": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "known_as_label": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "level": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "parent_id": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "parent_name": {
+                          "type": "string",
+                          "nullable": true
+                        },
                         "created_at": {
                           "type": "string"
                         },
@@ -5726,6 +5964,11 @@
                         "locations",
                         "legal_name",
                         "gst_number",
+                        "known_as",
+                        "known_as_label",
+                        "level",
+                        "parent_id",
+                        "parent_name",
                         "created_at",
                         "updated_at"
                       ],
@@ -5997,7 +6240,7 @@
         "tags": [
           "console"
         ],
-        "description": "The network admin sees every aggregator organisation; an owner sees the ones it owns. Filters by status and a case-insensitive name prefix; keyset paged by an opaque cursor.",
+        "description": "The network admin sees every aggregator organisation; an owner sees the ones it owns and, read-only, every one below them. With `descendants_of` set to an org within reach, lists every org below it instead (read-only). Filters by status, a case-insensitive name prefix and the \"known as\" key; keyset paged by an opaque cursor.",
         "requestBody": {
           "required": true,
           "content": {
@@ -6021,6 +6264,15 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 100
+                      },
+                      "known_as": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_]*$",
+                        "maxLength": 64
+                      },
+                      "descendants_of": {
+                        "type": "string",
+                        "format": "uuid"
                       }
                     },
                     "additionalProperties": false,
@@ -6168,6 +6420,26 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "known_as": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "known_as_label": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "level": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "parent_id": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "parent_name": {
+                            "type": "string",
+                            "nullable": true
+                          },
                           "created_at": {
                             "type": "string"
                           },
@@ -6192,6 +6464,11 @@
                           "locations",
                           "legal_name",
                           "gst_number",
+                          "known_as",
+                          "known_as_label",
+                          "level",
+                          "parent_id",
+                          "parent_name",
                           "created_at",
                           "updated_at",
                           "coordinator_count",
@@ -6427,7 +6704,7 @@
         "tags": [
           "console"
         ],
-        "description": "url, locations, legal name and GST number: the owner or the network admin. The name: the network admin only (the slug never changes). The Default org's details are not editable. Rendered for every coordinator of the org at once.",
+        "description": "url, locations, legal name and GST number: the owner or the network admin. The name, known_as and parent_id: the network admin only (the slug never changes). known_as must be a configured value; a value at level N needs a parent at level N-1 (the network for level 1), so a change of level must send parent_id. An org with child orgs cannot change known_as or parent (409). The Default org's details are not editable. Rendered for every coordinator of the org at once.",
         "requestBody": {
           "required": true,
           "content": {
@@ -6529,6 +6806,15 @@
                     "type": "string",
                     "maxLength": 32,
                     "nullable": true
+                  },
+                  "known_as": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$",
+                    "maxLength": 64
+                  },
+                  "parent_id": {
+                    "type": "string",
+                    "format": "uuid"
                   }
                 },
                 "additionalProperties": false
@@ -6668,6 +6954,26 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "known_as": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "known_as_label": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "level": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "parent_id": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "parent_name": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "created_at": {
                       "type": "string"
                     },
@@ -6686,6 +6992,11 @@
                     "locations",
                     "legal_name",
                     "gst_number",
+                    "known_as",
+                    "known_as_label",
+                    "level",
+                    "parent_id",
+                    "parent_name",
                     "created_at",
                     "updated_at"
                   ],
@@ -7783,6 +8094,242 @@
             }
           },
           "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/org/hierarchy": {
+      "get": {
+        "summary": "The configured organisation levels and their org counts (network admin)",
+        "tags": [
+          "console"
+        ],
+        "description": "Read-only. Level 1 sits directly under the network. Each level lists its \"known as\" values from the instance config, with how many pending and active organisations carry each.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "network": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "levels": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "level": {
+                            "type": "integer"
+                          },
+                          "values": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "key": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "org_count": {
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "key",
+                                "label",
+                                "org_count"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "level",
+                          "values"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "network",
+                    "levels"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
             "description": "Default Response",
             "content": {
               "application/json": {

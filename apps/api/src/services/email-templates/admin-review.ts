@@ -18,6 +18,8 @@ export interface AdminReviewVars {
    */
   entityLabel?: string;
   state?: string | undefined;
+  /** Name of the parent organisation, for an organisation registration. */
+  parent?: string | undefined;
   about?: string | undefined;
   /**
    * The email the coordinator was invited at. When it differs from
@@ -63,6 +65,7 @@ export function renderAdminReview(v: AdminReviewVars): {
   const rows: Array<{ label: string; value: string; style?: string }> = [
     { label: 'Association', value: escapeHtml(v.association) },
     { label: 'Type', value: escapeHtml(label), style: 'text-transform:capitalize;' },
+    ...(v.parent ? [{ label: 'Parent', value: escapeHtml(v.parent) }] : []),
     { label: 'Contact', value: escapeHtml(v.applicantName) },
     { label: 'Email', value: escapeHtml(v.applicantEmail) },
     ...(emailMismatch
@@ -129,7 +132,7 @@ ${aboutBlock}
 
 Association: ${v.association}
 Type:        ${label}
-Contact:     ${v.applicantName}
+${v.parent ? `Parent:      ${v.parent}\n` : ''}Contact:     ${v.applicantName}
 Email:       ${v.applicantEmail}
 ${emailMismatch ? `Invited email: ${v.invitedEmail} (registering with a different email)\n` : ''}Phone:       ${v.applicantPhone}
 ${v.state ? `State:       ${v.state}\n` : ''}Submitted:   ${submitted}

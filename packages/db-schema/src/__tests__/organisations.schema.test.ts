@@ -33,6 +33,12 @@ describe('organisations schema (migration 0028)', () => {
     expect(organisations.locations.hasDefault).toBe(true);
   });
 
+  it('declares known_as as a required column defaulting to aggregator (migration 0032)', () => {
+    expect(organisations.knownAs.name).toBe('known_as');
+    expect(organisations.knownAs.notNull).toBe(true);
+    expect(organisations.knownAs.default).toBe('aggregator');
+  });
+
   it('has the two org types', () => {
     expect(orgTypeEnum.enumValues).toEqual(['network_facilitator', 'aggregator']);
   });

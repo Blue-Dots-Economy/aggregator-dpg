@@ -69,6 +69,29 @@ vi.mock('@/hooks/useAggregatorConfig', () => {
   };
 });
 
+// Native-select shim for the shadcn Select so the parent org can be picked.
+vi.mock('@/components/ui/Select', () => ({
+  Select: ({
+    children,
+    onValueChange,
+  }: {
+    children?: ReactNode;
+    onValueChange?: (v: string) => void;
+  }) => (
+    <select data-testid="parent-select" onChange={(e) => onValueChange?.(e.target.value)}>
+      {children}
+    </select>
+  ),
+  SelectTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  SelectValue: ({ placeholder }: { placeholder?: string }) => (
+    <option value="">{placeholder}</option>
+  ),
+  SelectContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  SelectItem: ({ value, children }: { value: string; children?: ReactNode }) => (
+    <option value={value}>{children}</option>
+  ),
+}));
+
 import { OwnerRegisterView } from '@/app/(public)/register/owner/OwnerRegisterView';
 
 const orgSchema = { title: 'Organisation Registration', type: 'object', properties: {} } as never;
@@ -79,6 +102,9 @@ const consentContentFixture = {
 
 function renderView(props: Record<string, unknown> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(['org-parents'], {
+    parents: [{ id: 'p-root', name: 'Blue Dots', is_root: true, known_as_label: null }],
+  });
   return render(
     <QueryClientProvider client={client}>
       <NextIntlClientProvider locale="en" messages={messages}>
@@ -157,6 +183,7 @@ describe('OwnerRegisterView', () => {
     }) as unknown as typeof fetch;
 
     renderView();
+    fireEvent.change(screen.getByTestId('parent-select'), { target: { value: 'p-root' } });
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
@@ -182,6 +209,7 @@ describe('OwnerRegisterView', () => {
     }) as unknown as typeof fetch;
 
     renderView({ orgConsentContent: null });
+    fireEvent.change(screen.getByTestId('parent-select'), { target: { value: 'p-root' } });
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
 
     expect(await screen.findByRole('alert')).toBeInTheDocument();

@@ -2,13 +2,14 @@
 
 /**
  * The network admin's organisation list. Each name opens the organisation, and
- * a pending org is approved or rejected in place. A 409 ALREADY_DECIDED
- * response updates the row in place. Owner access is repaired on the
- * organisation's page.
+ * a pending org is approved or rejected in place; the page then refreshes so
+ * the levels and the tree follow. A 409 ALREADY_DECIDED response updates the
+ * row in place. Owner access is repaired on the organisation's page.
  */
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import type {
   OrgDecisionResponse,
@@ -22,6 +23,7 @@ type OrgRow = OrgSearchResponse['orgs'][number];
 
 export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
   const t = useTranslations('console');
+  const router = useRouter();
   const [rows, setRows] = useState(orgs);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -39,6 +41,7 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
     if (r.ok) {
       setStatus(id, r.data.status);
       note(id, t('coordinator.decided'));
+      router.refresh();
     } else if (r.error.code === 'ALREADY_DECIDED') {
       const status = r.error.fields?.['status'] as OrgRow['status'] | undefined;
       if (status) setStatus(id, status);
@@ -59,6 +62,8 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
         <thead>
           <tr>
             <th>{t('orgs.col_name')}</th>
+            <th>{t('orgs.col_known_as')}</th>
+            <th>{t('orgs.col_parent')}</th>
             <th>{t('orgs.col_status')}</th>
             <th>{t('orgs.col_counts')}</th>
             {showActions ? <th style={{ textAlign: 'right' }}>{t('orgs.col_actions')}</th> : null}
@@ -80,6 +85,8 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
                   </output>
                 ) : null}
               </td>
+              <td className="text-ink-600">{o.known_as_label ?? o.known_as ?? '—'}</td>
+              <td className="text-ink-600">{o.parent_name ?? '—'}</td>
               <td>
                 <ConsoleStatusPill status={o.status} />
               </td>

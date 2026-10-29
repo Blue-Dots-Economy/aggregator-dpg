@@ -24,6 +24,8 @@ import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { _setSubmitRateChecker } from '../services/submit-rate.js';
 import { _setOrgInviteResendRateChecker } from '../services/org-invite-resend-rate.js';
 import type * as ConfigLoaderFs from '@aggregator-dpg/config-loader/fs';
+import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
+import { _setNetworkConfig } from '../services/network-config.js';
 
 const { loadConsentConfigMock } = vi.hoisted(() => ({ loadConsentConfigMock: vi.fn() }));
 vi.mock('@aggregator-dpg/config-loader/fs', async (importOriginal) => {
@@ -71,6 +73,7 @@ describe('aggregator-orgs routes', () => {
     userStore = new UserStoreFake();
     _setUserStore(userStore);
     _setOrganisationStore(orgStore);
+    _setNetworkConfig(buildBlueDotConfig());
     _setIdpAdmin(idp);
     _setMailer(mailer);
     _setConsentLedger(consentLedger);
@@ -93,6 +96,7 @@ describe('aggregator-orgs routes', () => {
     _setAccessTokenVerifier(null);
     _setSubmitRateChecker(null);
     _setOrgInviteResendRateChecker(null);
+    _setNetworkConfig(null);
   });
 
   const orgBody = {
@@ -372,6 +376,206 @@ describe('aggregator-orgs routes', () => {
     expect(body.orgs).toEqual([
       { id: buildDefaultOrg().id, slug: 'default', display_name: 'Default' },
     ]);
+  });
+
+  describe('parent org (org nesting)', () => {
+    const ROOT_ID = '00000000-0000-4000-8000-0000000000f0';
+    const STATE_ID = '00000000-0000-4000-8000-0000000000f1';
+    const root = buildOrganisation({
+      id: ROOT_ID,
+      slug: 'network',
+      displayName: 'Blue Dots Network',
+      ownerEmail: 'nf@test.local',
+      status: 'active',
+    });
+    const state = buildOrganisation({
+      id: STATE_ID,
+      slug: 'state',
+      displayName: 'State Org',
+      ownerEmail: 'state@test.local',
+      status: 'active',
+      parentId: ROOT_ID,
+      knownAs: 'state',
+    });
+    const create = (payload: Record<string, unknown>) =>
+      app.inject({ method: 'POST', url: '/v1/orgs/create', headers: AUTH_HEADER, payload });
+    const storedParent = async (orgId: string) => {
+      const r = await orgStore.findById(orgId);
+      return r.ok ? r.value?.parentId : undefined;
+    };
+
+    beforeEach(() => {
+      orgStore.seedRoot(root);
+      orgStore.seed([state]);
+      const base = buildBlueDotConfig();
+      _setNetworkConfig(
+        buildBlueDotConfig({
+          aggregator: {
+            ...base.aggregator,
+            organisation: {
+              known_as: {
+                values: [
+                  { key: 'state', label: 'State', level: 1 },
+                  { key: 'district', label: 'District', level: 2 },
+                  { key: 'aggregator', label: 'Aggregator', level: 3 },
+                ],
+                default: 'aggregator',
+              },
+            },
+          },
+        }),
+      );
+    });
+
+    it('puts the org under the root when parent_id is omitted, as a level-1 value', async () => {
+      const res = await create(orgBody);
+      expect(res.statusCode).toBe(201);
+      const orgId = (res.json() as { org_id: string }).org_id;
+      expect(await storedParent(orgId)).toBe(ROOT_ID);
+      const stored = await orgStore.findById(orgId);
+      expect(stored.ok && stored.value?.knownAs).toBe('state');
+    });
+
+    it('gives the default when the parent sits at the deepest level', async () => {
+      const aggId = '00000000-0000-4000-8000-0000000000f3';
+      orgStore.seed([
+        buildOrganisation({
+          id: aggId,
+          slug: 'agg',
+          displayName: 'Agg Org',
+          ownerEmail: 'agg@test.local',
+          status: 'active',
+          knownAs: 'aggregator',
+        }),
+      ]);
+      const res = await create({ ...orgBody, parent_id: aggId });
+      expect(res.statusCode).toBe(201);
+      const stored = await orgStore.findById((res.json() as { org_id: string }).org_id);
+      expect(stored.ok && stored.value?.knownAs).toBe('aggregator');
+    });
+
+    it('puts the org under the requested parent, keeps parent_id out of the profile, and names the parent in the review email', async () => {
+      const res = await create({ ...orgBody, parent_id: STATE_ID });
+      expect(res.statusCode).toBe(201);
+      const orgId = (res.json() as { org_id: string }).org_id;
+      expect(await storedParent(orgId)).toBe(STATE_ID);
+      const stored = await orgStore.findById(orgId);
+      expect(stored.ok && stored.value?.profile).not.toHaveProperty('parent_id');
+      // One level below a State org.
+      expect(stored.ok && stored.value?.knownAs).toBe('district');
+      expect(mailer.outbox[0]?.text).toContain('Parent:      State Org');
+    });
+
+    it.each([
+      ['an unknown org', '00000000-0000-4000-8000-0000000000ff'],
+      ['the Default org', buildDefaultOrg().id],
+    ])('400s with fields.parent_id for %s and creates nothing', async (_label, parentId) => {
+      orgStore.seed([buildDefaultOrg()]);
+      const createGroup = vi.spyOn(idp, 'createGroup');
+      const res = await create({ ...orgBody, parent_id: parentId });
+      expect(res.statusCode).toBe(400);
+      const body = res.json() as { error: { fields: Record<string, string> } };
+      expect(body.error.fields).toMatchObject({ parent_id: 'invalid' });
+      const owner = await orgStore.findByOwnerEmail(orgBody.owner.email);
+      expect(owner.ok && owner.value).toBeNull();
+      expect(createGroup).not.toHaveBeenCalled();
+    });
+
+    it('400s on a parent_id that is not a uuid', async () => {
+      const res = await create({ ...orgBody, parent_id: 'state' });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('GET /v1/orgs/parents lists the root first, then active non-Default orgs with their label', async () => {
+      orgStore.seed([
+        buildDefaultOrg(),
+        buildOrganisation({ id: 'o-p', slug: 'p', displayName: 'Pending', status: 'pending' }),
+      ]);
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/orgs/parents',
+        headers: AUTH_HEADER,
+      });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { parents: unknown[] }).parents).toEqual([
+        {
+          id: ROOT_ID,
+          name: 'Blue Dots Network',
+          is_root: true,
+          known_as_label: null,
+          child_known_as_label: 'State',
+        },
+        {
+          id: STATE_ID,
+          name: 'State Org',
+          is_root: false,
+          known_as_label: 'State',
+          child_known_as_label: 'District',
+        },
+      ]);
+    });
+
+    it('GET /v1/orgs/parents labels each org by its known_as, with the value a child would get', async () => {
+      orgStore.seed([
+        buildOrganisation({
+          id: '00000000-0000-4000-8000-0000000000f2',
+          slug: 'district',
+          displayName: 'District Org',
+          ownerEmail: 'district@test.local',
+          status: 'active',
+          knownAs: 'district',
+        }),
+        buildOrganisation({
+          id: '00000000-0000-4000-8000-0000000000f4',
+          slug: 'stale',
+          displayName: 'Stale Org',
+          ownerEmail: 'stale@test.local',
+          status: 'active',
+          knownAs: 'retired_key',
+        }),
+      ]);
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/orgs/parents',
+        headers: AUTH_HEADER,
+      });
+      const parents = (
+        res.json() as {
+          parents: {
+            name: string;
+            known_as_label: string | null;
+            child_known_as_label: string | null;
+          }[];
+        }
+      ).parents;
+      expect(parents.find((p) => p.name === 'District Org')).toMatchObject({
+        known_as_label: 'District',
+        child_known_as_label: 'Aggregator',
+      });
+      // A key no longer configured: no label, and a child gets the default.
+      expect(parents.find((p) => p.name === 'Stale Org')).toMatchObject({
+        known_as_label: null,
+        child_known_as_label: 'Aggregator',
+      });
+    });
+
+    it('GET /v1/orgs/parents 503s when the store is down', async () => {
+      vi.spyOn(orgStore, 'listActive').mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'down' },
+      });
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/orgs/parents',
+        headers: AUTH_HEADER,
+      });
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('GET /v1/orgs/parents 401s without a token', async () => {
+      const res = await app.inject({ method: 'GET', url: '/v1/orgs/parents' });
+      expect(res.statusCode).toBe(401);
+    });
   });
 
   it("stores the form's website and address as the org's url and location (0028)", async () => {
@@ -783,6 +987,15 @@ describe('aggregator-orgs routes', () => {
       }
       async listOwnedBy(): Promise<OrgStoreResult<Organisation[]>> {
         return { ok: true, value: [] };
+      }
+      async descendantIds(): Promise<OrgStoreResult<string[]>> {
+        return { ok: true, value: [] };
+      }
+      async hasChildren(): Promise<OrgStoreResult<boolean>> {
+        return { ok: true, value: false };
+      }
+      async countByKnownAs(): Promise<OrgStoreResult<Record<string, number>>> {
+        return { ok: true, value: {} };
       }
       async search(): Promise<OrgStoreResult<{ rows: Organisation[]; nextCursor: null }>> {
         return { ok: true, value: { rows: [], nextCursor: null } };

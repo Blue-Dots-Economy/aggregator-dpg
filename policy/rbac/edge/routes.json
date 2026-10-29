@@ -182,6 +182,13 @@
     },
     {
       "method": "GET",
+      "path": "/v1/org/hierarchy",
+      "access": {
+        "capability": "network.administer"
+      }
+    },
+    {
+      "method": "GET",
       "path": "/v1/org/read/:id",
       "access": {
         "anyCapability": [
@@ -193,6 +200,13 @@
     {
       "method": "GET",
       "path": "/v1/orgs",
+      "access": {
+        "access": "service"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v1/orgs/parents",
       "access": {
         "access": "service"
       }

@@ -14,6 +14,7 @@
  */
 
 import { and, asc, desc, eq, gt, inArray, lt, ne, or, sql, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { organisations, contact, userIdentities, users } from '../../db/schema.js';
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getDb } from '../../db/client.js';
@@ -48,6 +49,17 @@ class ConsentHookError extends Error {
   }
 }
 
+/** The requested parent is not a valid parent; `create` maps it to `INVALID_PARENT`. */
+class InvalidParentError extends Error {
+  constructor() {
+    super('invalid parent');
+    this.name = 'InvalidParentError';
+  }
+}
+
+/** The parent org, joined to read its name. */
+const parentOrg = alias(organisations, 'parent_org');
+
 export class PostgresOrganisationStore extends OrganisationStoreBase {
   async create(input: CreateOrgInput): Promise<OrgStoreResult<Organisation>> {
     const start = Date.now();
@@ -61,25 +73,20 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
         const ownerUserId = await linkAdminAccount(tx, contactId);
         if (input.ownerKcSub)
           await linkIdentity(tx, ownerUserId, IDP_PROVIDER, input.ownerKcSub, 'admin');
-        // Every aggregator org sits under the network-facilitator root.
-        const [root] = await tx
-          .select({ id: organisations.id })
-          .from(organisations)
-          .where(eq(organisations.orgType, 'network_facilitator'))
-          .limit(1);
-        if (!root) throw new Error('network-facilitator root missing');
+        const parentId = await resolveParent(tx, input.parentId);
         const [row] = await tx
           .insert(organisations)
           .values({
             slug: input.slug,
             name: input.displayName,
             orgType: 'aggregator',
-            parentId: root.id,
+            parentId,
             state: input.state ?? null,
             orgOwner: ownerUserId,
             kcGroupId: input.kcGroupId ?? null,
             url: input.url ?? null,
             locations: input.locations ?? [],
+            ...(input.knownAs === undefined ? {} : { knownAs: input.knownAs }),
             profile: input.profile ?? {},
             profileRef: input.profileRef ?? null,
             createdBy: 'self',
@@ -100,6 +107,15 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       if (!created) return errResult('DB_UNAVAILABLE', 'org row not readable after insert');
       return { ok: true, value: created };
     } catch (e) {
+      if (e instanceof InvalidParentError) {
+        logger.warn({
+          operation: 'orgStore.create',
+          status: 'failure',
+          error: 'INVALID_PARENT',
+          latency_ms: Date.now() - start,
+        });
+        return errResult('INVALID_PARENT', 'parent is not the root or an active organisation');
+      }
       if (e instanceof ConsentHookError) {
         logger.error({
           operation: 'orgStore.create',
@@ -257,6 +273,16 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       const conds: (SQL | undefined)[] = [];
       if (filter.orgIds !== null) conds.push(inArray(organisations.id, filter.orgIds));
       if (filter.status) conds.push(eq(organisations.status, filter.status));
+      if (filter.knownAs) conds.push(eq(organisations.knownAs, filter.knownAs));
+      if (filter.descendantsOf) {
+        // UNION (not UNION ALL) stops at a repeated id, so a cycle cannot loop.
+        conds.push(sql`${organisations.id} IN (
+          WITH RECURSIVE below(id) AS (
+            SELECT id FROM ${organisations} WHERE parent_id = ${filter.descendantsOf}
+            UNION
+            SELECT o.id FROM ${organisations} o JOIN below b ON o.parent_id = b.id)
+          SELECT id FROM below)`);
+      }
       if (filter.namePrefix) {
         // A prefix match on the name; LIKE wildcards in the input are escaped.
         const p = filter.namePrefix.toLowerCase().replace(/[\\%_]/g, (m) => `\\${m}`);
@@ -287,6 +313,54 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       };
     } catch (e) {
       return mapDbError('orgStore.search', e);
+    }
+  }
+
+  async descendantIds(ids: readonly string[]): Promise<OrgStoreResult<string[]>> {
+    if (ids.length === 0) return { ok: true, value: [] };
+    try {
+      // UNION (not UNION ALL) stops at a repeated id, so a cycle cannot loop.
+      const rows = await getDb().execute<{ id: string }>(sql`
+        WITH RECURSIVE below(id) AS (
+          SELECT o.id FROM ${organisations} o
+           WHERE o.parent_id IN (${sql.join(
+             ids.map((id) => sql`${id}::uuid`),
+             sql`, `,
+           )}) AND o.org_type = 'aggregator'
+          UNION
+          SELECT o.id FROM ${organisations} o JOIN below b ON o.parent_id = b.id
+           WHERE o.org_type = 'aggregator')
+        SELECT id FROM below`);
+      const given = new Set(ids);
+      return { ok: true, value: rows.rows.map((r) => r.id).filter((id) => !given.has(id)) };
+    } catch (e) {
+      return mapDbError('orgStore.descendantIds', e);
+    }
+  }
+
+  async hasChildren(id: string): Promise<OrgStoreResult<boolean>> {
+    try {
+      const [row] = await getDb()
+        .select({ id: organisations.id })
+        .from(organisations)
+        .where(eq(organisations.parentId, id))
+        .limit(1);
+      return { ok: true, value: row !== undefined };
+    } catch (e) {
+      return mapDbError('orgStore.hasChildren', e);
+    }
+  }
+
+  async countByKnownAs(): Promise<OrgStoreResult<Record<string, number>>> {
+    try {
+      const rows = await getDb()
+        .select({ key: organisations.knownAs, n: sql<number>`count(*)::int` })
+        .from(organisations)
+        .where(scoped(inArray(organisations.status, ['pending', 'active'])))
+        .groupBy(organisations.knownAs);
+      return { ok: true, value: Object.fromEntries(rows.map((r) => [r.key, Number(r.n)])) };
+    } catch (e) {
+      return mapDbError('orgStore.countByKnownAs', e);
     }
   }
 
@@ -356,8 +430,14 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
    */
   private selectJoined(db: DbExecutor = getDb()) {
     return db
-      .select({ o: organisations, c: contact, ownerKcSub: userIdentities.subject })
+      .select({
+        o: organisations,
+        c: contact,
+        ownerKcSub: userIdentities.subject,
+        parentName: parentOrg.name,
+      })
       .from(organisations)
+      .leftJoin(parentOrg, eq(parentOrg.id, organisations.parentId))
       .innerJoin(users, eq(users.id, organisations.orgOwner))
       .innerJoin(contact, eq(contact.id, users.contactId))
       .leftJoin(
@@ -412,6 +492,7 @@ type JoinedRow = {
   o: typeof organisations.$inferSelect;
   c: typeof contact.$inferSelect;
   ownerKcSub: string | null;
+  parentName: string | null;
 };
 
 function toDomain(row: JoinedRow): Organisation {
@@ -440,7 +521,52 @@ function toDomain(row: JoinedRow): Organisation {
     locations: (o.locations ?? []) as BecknLocation[],
     legalName: o.legalName,
     gstNumber: o.gstNumber,
+    knownAs: o.knownAs,
+    parentId: o.parentId,
+    parentName: row.parentName,
   };
+}
+
+/**
+ * Picks the parent for a new org and locks it until the create commits.
+ *
+ * The lock keeps a concurrent decision from deactivating the parent first.
+ *
+ * @param tx - The create transaction.
+ * @param requested - The requested parent id; the root when absent.
+ * @returns The parent id.
+ * @throws {InvalidParentError} When the requested org is not the root or an active, non-Default aggregator org.
+ */
+async function resolveParent(tx: DbExecutor, requested: string | undefined): Promise<string> {
+  if (requested === undefined) {
+    const [root] = await tx
+      .select({ id: organisations.id })
+      .from(organisations)
+      .where(eq(organisations.orgType, 'network_facilitator'))
+      .limit(1);
+    if (!root) throw new Error('network-facilitator root missing');
+    return root.id;
+  }
+  const [parent] = await tx
+    .select({ id: organisations.id })
+    .from(organisations)
+    .where(
+      and(
+        eq(organisations.id, requested),
+        or(
+          eq(organisations.orgType, 'network_facilitator'),
+          and(
+            eq(organisations.orgType, 'aggregator'),
+            eq(organisations.status, 'active'),
+            ne(organisations.slug, DEFAULT_ORG_SLUG),
+          ),
+        ),
+      ),
+    )
+    .for('share')
+    .limit(1);
+  if (!parent) throw new InvalidParentError();
+  return parent.id;
 }
 
 /**

@@ -1,8 +1,9 @@
 /**
  * Console home page.
  *
- * An owner sees its organisations with coordinator and pending counts. The
- * network admin also sees the network and the organisations awaiting review.
+ * An owner sees its organisations with coordinator and pending counts, and a
+ * summary of the organisations below them. The network admin also sees the
+ * network and the organisations awaiting review.
  */
 
 import Link from 'next/link';
@@ -27,6 +28,7 @@ export default async function ConsoleHomePage() {
 
   let owned: OrgRow[];
   let pending: OrgRow[] = [];
+  let below: OrgRow[] = [];
   if (me.is_network_admin) {
     // The network admin's own aggregator orgs (the Default org).
     const ids = me.orgs.filter((o) => o.org_type === 'aggregator').map((o) => o.id);
@@ -43,7 +45,11 @@ export default async function ConsoleHomePage() {
       })
     ).orgs;
   } else {
-    owned = (await consoleRead<OrgSearchResponse>('/v1/org/search', { limit: 50 })).orgs;
+    // Search also returns, read-only, the orgs below the owner's own.
+    const reach = (await consoleRead<OrgSearchResponse>('/v1/org/search', { limit: 100 })).orgs;
+    const ownIds = new Set(me.orgs.map((o) => o.id));
+    owned = reach.filter((o) => ownIds.has(o.id));
+    below = reach.filter((o) => !ownIds.has(o.id));
   }
   const root = me.orgs.find((o) => o.org_type === 'network_facilitator');
 
@@ -109,7 +115,7 @@ export default async function ConsoleHomePage() {
             flush
             action={
               pending.length > 0 ? (
-                <Link className={buttonClass('soft')} href="/console/orgs?status=pending">
+                <Link className={buttonClass('soft')} href="/console/orgs#pending">
                   {t('home.review')}
                 </Link>
               ) : null
@@ -137,6 +143,24 @@ export default async function ConsoleHomePage() {
                 ))}
               </ul>
             )}
+          </ConsoleSection>
+        ) : null}
+
+        {below.length > 0 ? (
+          <ConsoleSection
+            title={t('home.below_heading')}
+            action={
+              <Link className={buttonClass('soft')} href="/console/orgs">
+                {t('home.below_view')}
+              </Link>
+            }
+          >
+            <p className="text-[13.5px] text-ink-600">
+              {t('home.below_summary', {
+                orgs: below.length,
+                coordinators: below.reduce((n, o) => n + o.coordinator_count, 0),
+              })}
+            </p>
           </ConsoleSection>
         ) : null}
       </div>

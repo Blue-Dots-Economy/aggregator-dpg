@@ -6,7 +6,7 @@
 
 import { InMemoryOrganisationStore } from './memory.js';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
-import { DEFAULT_ORG_SLUG, type Organisation } from './interface.js';
+import { DEFAULT_KNOWN_AS_KEY, DEFAULT_ORG_SLUG, type Organisation } from './interface.js';
 export { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
 
 export class OrganisationStoreFake extends InMemoryOrganisationStore {
@@ -71,6 +71,9 @@ export function buildOrganisation(overrides: Partial<Organisation> = {}): Organi
     locations: [],
     legalName: null,
     gstNumber: null,
+    knownAs: DEFAULT_KNOWN_AS_KEY,
+    parentId: null,
+    parentName: null,
     ...overrides,
   };
 }

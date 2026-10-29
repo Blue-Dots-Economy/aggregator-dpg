@@ -121,3 +121,17 @@ aggregator:
   # ── Admin email recipients (registration approval notifications) ───────────
   admin_emails:
     - admin@bbmp.gov.in
+
+  # ── Organisation "known as" values and levels ──────────────────────────────
+  # The values the network admin can give each aggregator organisation in the
+  # console. The database stores the key; the label is what the console shows.
+  # `level` places the value in the hierarchy: 1 sits directly under the
+  # network, and a level-N organisation's parent is a level N-1 organisation.
+  # Several values can share a level; levels run from 1 with no gap. A new
+  # organisation gets the only value one level below its parent, else
+  # `default`. Omit the block and every organisation is "Aggregator" (level 1).
+  organisation:
+    known_as:
+      values:
+        - { key: aggregator, label: Aggregator, level: 1 }
+      default: aggregator

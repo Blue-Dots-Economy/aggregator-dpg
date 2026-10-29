@@ -12,6 +12,7 @@ import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import {
   OrganisationStoreBase,
   DEFAULT_ORG_SLUG,
+  DEFAULT_KNOWN_AS_KEY,
   type Organisation,
   type CreateOrgInput,
   type OrgStoreError,
@@ -44,6 +45,10 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       (o) => o.displayName.trim().toLowerCase() === nameKey && NON_TERMINAL.has(o.status),
     );
     if (nameTaken) return err('DUPLICATE_NAME', `organisation name already in use`);
+    const parent = this.resolveParent(input.parentId);
+    if (input.parentId !== undefined && !parent) {
+      return err('INVALID_PARENT', 'parent is not the root or an active organisation');
+    }
     let id: string;
     try {
       id = contactId(input.ownerEmail, input.ownerPhone ?? null);
@@ -90,6 +95,9 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       locations: input.locations ?? [],
       legalName: null,
       gstNumber: null,
+      knownAs: input.knownAs ?? DEFAULT_KNOWN_AS_KEY,
+      parentId: parent?.id ?? null,
+      parentName: parent?.displayName ?? null,
     };
     this.byId.set(row.id, row);
     return { ok: true, value: row };
@@ -191,6 +199,8 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       locations: patch.locations ?? existing.locations,
       legalName: patch.legalName !== undefined ? patch.legalName : existing.legalName,
       gstNumber: patch.gstNumber !== undefined ? patch.gstNumber : existing.gstNumber,
+      knownAs: patch.knownAs ?? existing.knownAs,
+      ...(patch.parentId === undefined ? {} : this.parentFields(patch.parentId)),
       state: patch.state !== undefined ? patch.state : existing.state,
       // As in Postgres: a recorded login is only ever added, never cleared.
       ownerKcSub: patch.ownerKcSub ? patch.ownerKcSub : existing.ownerKcSub,
@@ -225,6 +235,11 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       rows = rows.filter((o) => scope.has(o.id));
     }
     if (filter.status) rows = rows.filter((o) => o.status === filter.status);
+    if (filter.knownAs) rows = rows.filter((o) => o.knownAs === filter.knownAs);
+    if (filter.descendantsOf) {
+      const below = this.descendantIdsOf(filter.descendantsOf);
+      rows = rows.filter((o) => below.has(o.id));
+    }
     if (filter.namePrefix) {
       const p = filter.namePrefix.toLowerCase();
       rows = rows.filter((o) => o.displayName.toLowerCase().startsWith(p));
@@ -248,6 +263,34 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     });
   }
 
+  descendantIds(ids: readonly string[]): Promise<OrgStoreResult<string[]>> {
+    const found = new Set<string>();
+    for (const id of ids) for (const d of this.descendantIdsOf(id)) found.add(d);
+    for (const id of ids) found.delete(id);
+    return Promise.resolve({ ok: true, value: [...found] });
+  }
+
+  hasChildren(id: string): Promise<OrgStoreResult<boolean>> {
+    return Promise.resolve({
+      ok: true,
+      value: [...this.byId.values()].some((o) => o.parentId === id),
+    });
+  }
+
+  countByKnownAs(): Promise<OrgStoreResult<Record<string, number>>> {
+    const counts: Record<string, number> = {};
+    for (const o of this.byId.values()) {
+      if (NON_TERMINAL.has(o.status)) counts[o.knownAs] = (counts[o.knownAs] ?? 0) + 1;
+    }
+    return Promise.resolve({ ok: true, value: counts });
+  }
+
+  /** The parent columns for a move, read from the root or a stored org. */
+  private parentFields(id: string): Pick<Organisation, 'parentId' | 'parentName'> {
+    const parent = this.root?.id === id ? this.root : this.byId.get(id);
+    return { parentId: id, parentName: parent?.displayName ?? null };
+  }
+
   async deleteIfPending(
     id: string,
     cutoff: Date,
@@ -264,6 +307,36 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     if (!(await beforeCommit())) return { ok: true, value: 'aborted' };
     this.byId.delete(id);
     return { ok: true, value: 'deleted' };
+  }
+
+  /**
+   * Picks the parent for a new org, as Postgres does.
+   *
+   * @param requested - The requested parent id; the root when absent.
+   * @returns The parent, or `null` when the request is not a valid parent (or no root is seeded).
+   */
+  private resolveParent(requested: string | undefined): Organisation | null {
+    if (requested === undefined) return this.root;
+    if (this.root?.id === requested) return this.root;
+    const o = this.byId.get(requested);
+    return o && o.status === 'active' && !o.isDefault ? o : null;
+  }
+
+  /** Ids of every org below `id`, at any depth. */
+  private descendantIdsOf(id: string): Set<string> {
+    const found = new Set<string>();
+    let frontier = [id];
+    while (frontier.length > 0) {
+      const next: string[] = [];
+      for (const o of this.byId.values()) {
+        if (o.parentId && frontier.includes(o.parentId) && !found.has(o.id)) {
+          found.add(o.id);
+          next.push(o.id);
+        }
+      }
+      frontier = next;
+    }
+    return found;
   }
 
   private casFromPending(
