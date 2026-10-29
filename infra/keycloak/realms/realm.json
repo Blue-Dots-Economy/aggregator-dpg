@@ -527,6 +527,22 @@
           }
         },
         {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "roles",
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "multivalued": "true",
+            "aggregate.attrs": "false"
+          }
+        },
+        {
           "name": "aggregator-api-audience",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-audience-mapper",
@@ -774,7 +790,7 @@
     {
       "clientId": "campaign-manager",
       "name": "Campaign Manager",
-      "description": "Confidential client for the external campaign-manager system (#692). Direct grant lets a coordinator obtain a token for org-scoped campaign routes. Not for browser login.",
+      "description": "Confidential client for the external campaign manager. Direct grant lets a coordinator obtain a token for org-scoped campaign routes. Not for browser login.",
       "enabled": true,
       "publicClient": false,
       "clientAuthenticatorType": "client-secret",
@@ -782,7 +798,7 @@
       "directAccessGrantsEnabled": true,
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
-      "serviceAccountsEnabled": true,
+      "serviceAccountsEnabled": false,
       "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email", "basic"],
       "optionalClientScopes": ["address", "phone", "offline_access", "microprofile-jwt"],
       "protocolMappers": [

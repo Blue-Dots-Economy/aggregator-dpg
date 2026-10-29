@@ -26,7 +26,7 @@ import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
-import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
+import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 
 interface LinkMetrics {
   total: number;
@@ -751,7 +751,7 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   if (!result.context.aggregatorId) {
     throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
   }
-  await enforceRouteAccess(req, callerFromAuth(result.context));
+  await recordRouteCaller(req, callerFromAuth(result.context));
   return result.context;
 }
 

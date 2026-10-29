@@ -12,7 +12,7 @@ import type { FastifyRequest } from 'fastify';
 import { authenticate, type AuthContext } from '../services/auth/access-token.js';
 import { campaignManagerAllowedAzp } from '../config.js';
 import { httpError } from '../errors/http-error.js';
-import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
+import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 
 /**
  * Authenticates a campaign request and returns the auth context, or throws the
@@ -28,7 +28,7 @@ export async function requireCampaignAuth(req: FastifyRequest): Promise<AuthCont
     const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
     throw httpError(code, { detail: result.error.message, fields: { reason: result.error.code } });
   }
-  await enforceRouteAccess(req, callerFromAuth(result.context));
+  await recordRouteCaller(req, callerFromAuth(result.context));
   return result.context;
 }
 

@@ -127,6 +127,23 @@ suite('role store (migration 0030) — integration', () => {
     expect(live.ok && live.value.map((r) => r.roleKey)).toEqual(['data_export']);
   });
 
+  it('lists the users whose unrevoked role expired in a window', async () => {
+    const c = await newCoordinator();
+    const now = Date.now();
+    await pool.query(
+      `INSERT INTO user_role (user_id, role_key, org_id, granted_at, expires_at)
+       VALUES ($1, 'pii_access', $2, $3, $4)`,
+      [c.id, defaultOrgId, new Date(now - DAY), new Date(now - 1000)],
+    );
+    const inWindow = await store.listUsersExpiredBetween(new Date(now - 60_000), new Date(now));
+    expect(inWindow.ok && inWindow.value).toContain(c.id);
+    const before = await store.listUsersExpiredBetween(
+      new Date(now - 2 * DAY),
+      new Date(now - DAY),
+    );
+    expect(before.ok && before.value).not.toContain(c.id);
+  });
+
   it('revokes every live role in an organisation with one audit row', async () => {
     const c = await newCoordinator();
     for (const roleKey of ['pii_access', 'data_export']) {

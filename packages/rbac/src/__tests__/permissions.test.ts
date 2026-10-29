@@ -3,6 +3,7 @@ import { BUILTIN_ROLES } from '../builtin-roles.js';
 import {
   baseRoleOf,
   effectivePermissions,
+  effectiveRoleKeys,
   indexRoles,
   type HeldRole,
   type Membership,
@@ -134,6 +135,93 @@ describe('effectivePermissions', () => {
     };
     expect(effectivePermissions(index, inB, new Set(['B']), NOW)).toContain(
       'profiles.act_on_behalf',
+    );
+  });
+});
+
+describe('effectiveRoleKeys', () => {
+  const live = (roleKey: string, orgId = 'A', expiresAt: number | null = null): HeldRole => ({
+    roleKey,
+    orgId,
+    expiresAt,
+  });
+
+  it("lists a coordinator's base role", () => {
+    expect(effectiveRoleKeys(index, coordinator(), NOW)).toEqual(['coordinator']);
+  });
+
+  it('adds live additional roles, sorted and without duplicates', () => {
+    const keys = effectiveRoleKeys(
+      index,
+      coordinator([live('pii_access', 'A', NOW + 1000), live('data_export'), live('data_export')]),
+      NOW,
+    );
+    expect(keys).toEqual(['coordinator', 'data_export', 'pii_access']);
+  });
+
+  it('leaves out an expired role', () => {
+    expect(effectiveRoleKeys(index, coordinator([live('pii_access', 'A', NOW)]), NOW)).toEqual([
+      'coordinator',
+    ]);
+  });
+
+  it('leaves out a role held in an organisation the user is not part of', () => {
+    expect(effectiveRoleKeys(index, coordinator([live('data_export', 'B')]), NOW)).toEqual([
+      'coordinator',
+    ]);
+  });
+
+  it('leaves out a role for another account type and an unknown key', () => {
+    const keys = effectiveRoleKeys(
+      index,
+      coordinator([live('admin_actor'), live('no_such_role')]),
+      NOW,
+    );
+    expect(keys).toEqual(['coordinator']);
+  });
+
+  it('lists every base role of an owner of the root and an aggregator organisation', () => {
+    const keys = effectiveRoleKeys(
+      index,
+      { userType: 'admin', memberships: [ROOT, ownerOf('B')], held: [] },
+      NOW,
+    );
+    expect(keys).toEqual(['network_admin', 'org_admin']);
+  });
+
+  it('is empty for a user with no memberships', () => {
+    expect(effectiveRoleKeys(index, { userType: 'admin', memberships: [], held: [] }, NOW)).toEqual(
+      [],
+    );
+  });
+
+  it('leaves out a role that grants nothing where it is held (personal data through the root)', () => {
+    const piiOnly = buildRole({
+      key: 'root_pii',
+      accountType: 'admin',
+      assignableOrgTypes: ['network_facilitator'],
+      permissions: ['profiles.view_pii'],
+    });
+    const idx = indexRoles([...BUILTIN_ROLES, piiOnly]);
+    const keys = effectiveRoleKeys(
+      idx,
+      { userType: 'admin', memberships: [ROOT], held: [live('root_pii', 'NF')] },
+      NOW,
+    );
+    expect(keys).toEqual(['network_admin']);
+  });
+
+  it("matches effectivePermissions: the listed roles' permissions are the route-level answer", () => {
+    const subject: PermissionSubject = {
+      userType: 'admin',
+      memberships: [ROOT, ownerOf('B')],
+      held: [live('org_onboarder', 'B')],
+    };
+    const fromKeys = new Set(
+      effectiveRoleKeys(index, subject, NOW).flatMap((k) => index.byKey.get(k)?.permissions ?? []),
+    );
+    expect([...fromKeys].sort()).toEqual(
+      [...effectivePermissions(index, subject, null, NOW)].sort(),
     );
   });
 });

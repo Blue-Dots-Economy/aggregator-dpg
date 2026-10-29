@@ -14,14 +14,11 @@ export {
 export type { RbacMode, RbacRuntime, RefreshOutcome } from './runtime.js';
 export {
   actorPermissions,
-  checkAnyCapability,
   checkCapability,
   decisionInput,
   listActorCapabilities,
   listCapabilitiesForTargets,
   permissionsByOrg,
-  requirePermission,
-  resolveCaller,
 } from './guard.js';
 export type {
   CheckOptions,
@@ -34,10 +31,10 @@ export {
   assertRouteDeclared,
   callerFromAny,
   callerFromAuth,
-  enforceActorRouteAccess,
-  enforceRouteAccess,
   enforcedCapabilities,
+  exportRouteTable,
   isServiceAccount,
   listDeclaredRoutes,
+  recordRouteCaller,
 } from './route-access.js';
-export type { RouteAccess, RouteCaller } from './route-access.js';
+export type { RouteAccess, RouteCaller, RouteTable, RouteTableEntry } from './route-access.js';

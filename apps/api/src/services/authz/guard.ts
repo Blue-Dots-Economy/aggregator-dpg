@@ -19,7 +19,7 @@ import {
   type OrgType,
   type RoleIndex,
 } from '@aggregator-dpg/rbac';
-import { getActorResolver, type Actor } from '../auth/actor/index.js';
+import type { Actor } from '../auth/actor/index.js';
 import { getRbacRuntime, type RbacMode } from './runtime.js';
 
 /** What the caller should do with the request. */
@@ -65,24 +65,6 @@ export interface TokenIdentity {
   aggregatorId?: string | undefined;
   /** Keycloak `sub`. */
   subject: string;
-}
-
-/**
- * Resolves the caller through the actor resolver.
- *
- * @param identity - Claims from the verified token.
- * @returns The actor, or a deny reason (`actor_unavailable`, `unknown_actor`).
- */
-export async function resolveCaller(
-  identity: TokenIdentity,
-): Promise<{ actor: Actor } | { reason: string }> {
-  const res = await getActorResolver().resolve({
-    subject: identity.subject,
-    ...(identity.aggregatorId ? { aggregatorId: identity.aggregatorId } : {}),
-  });
-  if (!res.ok) return { reason: 'actor_unavailable' };
-  if (!res.value) return { reason: 'unknown_actor' };
-  return { actor: res.value };
 }
 
 /**
@@ -215,39 +197,6 @@ export async function checkCapability(
 }
 
 /**
- * Resolves the caller, then checks `capability`. Never throws: an unknown
- * caller, a database failure or an unreachable engine count as a deny.
- *
- * @param req - The request (for its logger and route).
- * @param identity - Claims from the verified token.
- * @param capability - The permission the route declares.
- * @param options - `strict` (deny in `log` mode too) and a clock for tests.
- * @returns Whether to continue, the mode, and the decision.
- */
-export async function requirePermission(
-  req: GuardRequest,
-  identity: TokenIdentity,
-  capability: Capability,
-  options: Omit<CheckOptions, 'target'> = {},
-): Promise<GuardOutcome> {
-  const rt = getRbacRuntime();
-  if (!rt) return { allowed: true, mode: 'off' };
-  const start = Date.now();
-  const resolved = await resolveCaller(identity);
-  if ('reason' in resolved) {
-    return outcome(
-      req,
-      options.strict ? 'enforce' : rt.mode,
-      capability,
-      identity.aggregatorId,
-      { allow: false, reasons: [resolved.reason] },
-      start,
-    );
-  }
-  return checkCapability(req, resolved.actor, capability, options);
-}
-
-/**
  * Lists the permissions a resolved actor holds, for the portal. Never throws.
  *
  * @param req - The request (for its logger).
@@ -320,38 +269,6 @@ export async function listCapabilitiesForTargets(
     out.set(target.id, (await answer) ?? []);
   }
   return out;
-}
-
-/**
- * Checks whether a resolved actor holds at least one of `capabilities`, for a
- * route two kinds of principal share (an organisation's owner and the network
- * admin). Logs one decision, not one per capability. Never throws.
- *
- * @param req - The request (for its logger and route).
- * @param actor - The resolved actor.
- * @param capabilities - The permissions, any one of which suffices.
- * @param options - The organisation acted on, and a clock for tests.
- * @returns Whether to continue, the mode, and the decision.
- */
-export async function checkAnyCapability(
-  req: GuardRequest,
-  actor: Actor,
-  capabilities: readonly Capability[],
-  options: CheckOptions = {},
-): Promise<GuardOutcome> {
-  const rt = getRbacRuntime();
-  if (!rt) return { allowed: true, mode: 'off' };
-  const start = Date.now();
-  const now = options.now ?? Date.now();
-  let last: Decision = { allow: false, reasons: ['not_held'] };
-  for (const capability of capabilities) {
-    last = await decide(
-      rt.authorizer,
-      decisionInput(rt.roles, actor, capability, options.target, now),
-    );
-    if (last.allow) return outcome(req, rt.mode, capability, actor.userId, last, start);
-  }
-  return outcome(req, rt.mode, capabilities.join('|'), actor.userId, last, start);
 }
 
 /**

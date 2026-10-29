@@ -493,7 +493,6 @@
       "privacy_note": "आपका विवरण केवल उस एग्रीगेटर के साथ साझा किया जाता है जिसने यह लिंक जारी किया है।",
       "validation_error_title": "फ़ॉर्म सत्यापन विफल",
       "validation_required": "कृपया सभी आवश्यक फ़ील्ड भरें।",
-      "validation_more": "(और {count} अधिक)",
       "error_network_title": "नेटवर्क त्रुटि",
       "error_network_detail": "सर्वर तक नहीं पहुंचा जा सका।",
       "error_submission_title": "जमा करना विफल",

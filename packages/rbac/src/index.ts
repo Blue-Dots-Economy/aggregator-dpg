@@ -16,5 +16,5 @@ export { OpaAuthorizer } from './opa/index.js';
 export type { OpaAuthorizerOptions } from './opa/index.js';
 export { InMemoryAuthorizer } from './in-memory/index.js';
 export { roleCatalogueIssues, assertRoleCatalogue } from './roles.js';
-export { indexRoles, baseRoleOf, effectivePermissions } from './permissions.js';
+export { indexRoles, baseRoleOf, effectivePermissions, effectiveRoleKeys } from './permissions.js';
 export type { PermissionSubject, RoleIndex } from './permissions.js';

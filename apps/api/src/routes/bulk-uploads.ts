@@ -42,7 +42,7 @@ import { config } from '../config.js';
 import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getRedis } from '../services/redis/index.js';
-import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
+import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 
 /**
  * Returns the valid participant types for the active network.
@@ -857,7 +857,7 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   if (!result.context.aggregatorId) {
     throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
   }
-  await enforceRouteAccess(req, callerFromAuth(result.context));
+  await recordRouteCaller(req, callerFromAuth(result.context));
   return result.context;
 }
 

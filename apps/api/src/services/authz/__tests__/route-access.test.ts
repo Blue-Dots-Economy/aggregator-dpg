@@ -10,17 +10,18 @@ import { buildApp } from '../../../app.js';
 import { config } from '../../../config.js';
 import {
   assertRouteDeclared,
-  enforceActorRouteAccess,
-  enforceRouteAccess,
   enforcedCapabilities,
+  exportRouteTable,
   isServiceAccount,
   listDeclaredRoutes,
+  recordRouteCaller,
   _resetDeclaredRoutes,
   type RouteAccess,
 } from '../route-access.js';
 import { _setRbacRuntime } from '../runtime.js';
 import { shippedRoleIndex } from '../testing.js';
-import { ActorResolverFake, _setActorResolver, buildAdminActor } from '../../auth/actor/index.js';
+import { ActorResolverFake, _setActorResolver } from '../../auth/actor/index.js';
+import { getIdentityStore } from '../../identity-store/index.js';
 
 const roles = await shippedRoleIndex();
 
@@ -107,184 +108,81 @@ describe('isServiceAccount', () => {
   });
 });
 
-describe('enforceRouteAccess', () => {
-  const caller = { subject: 's', aggregatorId: 'u1' };
+// Route permissions are decided at the edge (docs/rbac/rbac-edge-enforcement.md;
+// policy/rbac/edge_test.rego); the API only records the caller's login here.
+describe('recordRouteCaller', () => {
+  const linked = async (userId: string) => {
+    const r = await getIdentityStore().subjectOf(userId, 'keycloak');
+    return r.ok ? r.value : 'store failed';
+  };
+  const caller = (aggregatorId?: string) => ({
+    subject: `sub-${aggregatorId ?? 'none'}`,
+    ...(aggregatorId ? { aggregatorId } : {}),
+  });
+
+  it("records a coordinator's login on a declared route", async () => {
+    setup('enforce');
+    await recordRouteCaller(req({ capability: 'profiles.view' }).r, caller('c-1'));
+    expect(await linked('c-1')).toBe('sub-c-1');
+  });
+
+  it('never refuses, whatever the caller holds (the edge decided)', async () => {
+    setup('enforce', false);
+    for (const decl of [
+      { capability: 'profiles.view_pii' },
+      { anyCapability: ['org.manage', 'network.administer'] },
+      { access: 'self' },
+      { access: 'signed_in' },
+    ] as RouteAccess[]) {
+      const { r, warn } = req(decl);
+      await expect(recordRouteCaller(r, caller('c-2'))).resolves.toBeUndefined();
+      expect(warn).not.toHaveBeenCalled();
+    }
+  });
+
+  it('records nothing on service routes or without an aggregator_id', async () => {
+    setup('enforce');
+    await recordRouteCaller(req({ access: 'service' }).r, caller('c-3'));
+    await recordRouteCaller(req({ capability: 'profiles.view' }).r, caller());
+    expect(await linked('c-3')).toBeNull();
+  });
 
   it('does nothing when RBAC is off', async () => {
-    await expect(
-      enforceRouteAccess(req({ capability: 'profiles.view_pii' }).r, caller),
-    ).resolves.toBeUndefined();
-  });
-
-  it('lets an allowed capability through', async () => {
-    setup('enforce');
-    await expect(
-      enforceRouteAccess(req({ capability: 'profiles.view' }).r, caller),
-    ).resolves.toBeUndefined();
-  });
-
-  it('returns 403 for a denied capability in enforce mode', async () => {
-    setup('enforce');
-    await expect(
-      enforceRouteAccess(req({ capability: 'profiles.view_pii' }).r, caller),
-    ).rejects.toMatchObject({
-      code: 'FORBIDDEN',
-      fields: { permission: 'profiles.view_pii' },
-    });
-  });
-
-  it('only logs a denied capability in log mode', async () => {
-    setup('log');
-    await expect(
-      enforceRouteAccess(req({ capability: 'profiles.view_pii' }).r, caller),
-    ).resolves.toBeUndefined();
-  });
-
-  it('lets a caller holding any one of the capabilities through', async () => {
-    setup('enforce');
-    await expect(
-      enforceRouteAccess(req({ anyCapability: ['profiles.view_pii', 'profiles.view'] }).r, caller),
-    ).resolves.toBeUndefined();
-  });
-
-  it('returns 403 naming every capability when none is held', async () => {
-    setup('enforce');
-    await expect(
-      enforceRouteAccess(
-        req({ anyCapability: ['profiles.view_pii', 'profiles.export'] }).r,
-        caller,
-      ),
-    ).rejects.toMatchObject({
-      code: 'FORBIDDEN',
-      fields: { permission: 'profiles.view_pii|profiles.export' },
-    });
-  });
-
-  it('only logs a missing any-of capability, or an unknown caller, in log mode', async () => {
-    setup('log');
-    const any = req({ anyCapability: ['profiles.view_pii', 'profiles.export'] });
-    await expect(enforceRouteAccess(any.r, caller)).resolves.toBeUndefined();
-    const unknown = req({ anyCapability: ['profiles.view'] });
-    await expect(enforceRouteAccess(unknown.r, { subject: 'nobody' })).resolves.toBeUndefined();
-    expect(unknown.warn).toHaveBeenCalled();
-  });
-
-  it('refuses an unknown caller on an any-of route in enforce mode', async () => {
-    setup('enforce');
-    await expect(
-      enforceRouteAccess(req({ anyCapability: ['profiles.view'] }).r, { subject: 'nobody' }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
-  });
-
-  it('requires a service account for service routes', async () => {
-    setup('enforce');
-    await expect(enforceRouteAccess(req({ access: 'service' }).r, caller)).rejects.toMatchObject({
-      code: 'FORBIDDEN',
-    });
-    await expect(
-      enforceRouteAccess(req({ access: 'service' }).r, {
-        ...caller,
-        preferredUsername: 'service-account-x',
-      }),
-    ).resolves.toBeUndefined();
-  });
-
-  it('logs and lets a non-service caller through in log mode', async () => {
-    setup('log');
-    const { r, warn } = req({ access: 'service' });
-    await expect(enforceRouteAccess(r, caller)).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        operation: 'rbac.access',
-        reasons: ['not_service_account'],
-        status: 'skipped',
-      }),
-    );
-  });
-
-  it('requires an active account for self routes', async () => {
-    setup('enforce', false);
-    await expect(enforceRouteAccess(req({ access: 'self' }).r, caller)).rejects.toMatchObject({
-      code: 'FORBIDDEN',
-    });
-  });
-
-  it('accepts an inactive but known account for signed_in routes', async () => {
-    setup('enforce', false);
-    await expect(
-      enforceRouteAccess(req({ access: 'signed_in' }).r, caller),
-    ).resolves.toBeUndefined();
-  });
-
-  it('refuses an unknown account for signed_in routes', async () => {
-    setup('enforce');
-    await expect(
-      enforceRouteAccess(req({ access: 'signed_in' }).r, { subject: 'nobody' }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
-  });
-
-  it('leaves link-token and public routes to the route', async () => {
-    setup('enforce');
-    await expect(
-      enforceRouteAccess(req({ access: 'link_token' }).r, { subject: 'x' }),
-    ).resolves.toBeUndefined();
-    await expect(
-      enforceRouteAccess(req({ access: 'public' }).r, { subject: 'x' }),
-    ).resolves.toBeUndefined();
+    await recordRouteCaller(req({ capability: 'profiles.view' }).r, caller('c-4'));
+    expect(await linked('c-4')).toBeNull();
   });
 });
 
-describe('enforceActorRouteAccess', () => {
-  it('does nothing when RBAC is off', async () => {
-    await expect(
-      enforceActorRouteAccess(req({ capability: 'network.administer' }).r, buildAdminActor()),
-    ).resolves.toBeUndefined();
-  });
+describe('exportRouteTable', () => {
+  afterEach(() => _resetDeclaredRoutes());
 
-  it('checks a console route capability on the resolved actor', async () => {
-    setup('enforce');
-    await expect(
-      enforceActorRouteAccess(req({ capability: 'org.manage' }).r, buildAdminActor()),
-    ).resolves.toBeUndefined();
-    await expect(
-      enforceActorRouteAccess(req({ capability: 'network.administer' }).r, buildAdminActor()),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN', fields: { permission: 'network.administer' } });
-  });
-
-  it('checks an any-of console route on the resolved actor', async () => {
-    setup('enforce');
-    await expect(
-      enforceActorRouteAccess(
-        req({ anyCapability: ['network.administer', 'org.manage'] }).r,
-        buildAdminActor(),
-      ),
-    ).resolves.toBeUndefined();
-    await expect(
-      enforceActorRouteAccess(
-        req({ anyCapability: ['network.administer', 'orgs.onboard'] }).r,
-        buildAdminActor(),
-      ),
-    ).rejects.toMatchObject({
-      code: 'FORBIDDEN',
-      fields: { permission: 'network.administer|orgs.onboard' },
+  it('is empty before any route is registered', () => {
+    _resetDeclaredRoutes();
+    expect(exportRouteTable()).toEqual({
+      version: 1,
+      unchecked_prefixes: ['/api/reference', '/documentation'],
+      routes: [],
     });
   });
 
-  it('only logs a missing console capability in log mode', async () => {
-    setup('log');
-    await expect(
-      enforceActorRouteAccess(req({ capability: 'network.administer' }).r, buildAdminActor()),
-    ).resolves.toBeUndefined();
+  it('exports each declared route with its method, path template and declaration, sorted', () => {
+    _resetDeclaredRoutes();
+    assertRouteDeclared(route({ access: 'public' }, 'GET', '/v1/b'));
+    assertRouteDeclared(route({ capability: 'org.manage', strict: true }, 'POST', '/v1/a/:id'));
+    assertRouteDeclared(
+      route({ anyCapability: ['org.manage', 'orgs.onboard'] }, ['GET', 'HEAD'], '/v1/a'),
+    );
+    expect(exportRouteTable().routes).toEqual([
+      { method: 'GET', path: '/v1/a', access: { anyCapability: ['org.manage', 'orgs.onboard'] } },
+      { method: 'GET', path: '/v1/b', access: { access: 'public' } },
+      { method: 'POST', path: '/v1/a/:id', access: { capability: 'org.manage', strict: true } },
+    ]);
   });
 
-  it('accepts a signed-in actor and refuses an inactive one on self routes', async () => {
-    setup('enforce');
-    await expect(
-      enforceActorRouteAccess(req({ access: 'signed_in' }).r, buildAdminActor({ active: false })),
-    ).resolves.toBeUndefined();
-    await expect(
-      enforceActorRouteAccess(req({ access: 'self' }).r, buildAdminActor({ active: false })),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  it('leaves plugin routes out (they carry no declaration)', () => {
+    _resetDeclaredRoutes();
+    assertRouteDeclared(route(undefined, 'GET', '/documentation/json'));
+    expect(exportRouteTable().routes).toEqual([]);
   });
 });
 

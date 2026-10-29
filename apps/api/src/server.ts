@@ -23,6 +23,7 @@ import {
 import { getIdpAdmin } from './services/idp-admin/index.js';
 import { setApprovalBrand } from './views/approval-pages.js';
 import { initRbac, stopRbacRefresh } from './services/authz/index.js';
+import { startTokenRolesRepair, stopTokenRolesRepair } from './services/authz/token-roles-sweep.js';
 import { setEmailBrand } from './services/email-templates/shared.js';
 import {
   loadEmailMessageOverrides,
@@ -89,6 +90,11 @@ async function main(): Promise<void> {
     );
   }
 
+  // RBAC edge: keep every user's token `roles` claim in step with the
+  // database. After the owner reconcile above, so the first full reconcile
+  // already sees a new root or Default owner. A no-op with RBAC_MODE=off.
+  startTokenRolesRepair();
+
   // Merge email copy overrides (network, brand, instance) over the bundled
   // defaults. A missing or unreadable override is skipped; a key missing from
   // the defaults stops boot.
@@ -106,6 +112,7 @@ async function main(): Promise<void> {
       // Drain HTTP first, then close every backing connection.
       await app.close();
       stopRbacRefresh();
+      stopTokenRolesRepair();
       await closeDb();
       await Promise.allSettled([
         closeRateLimiter(),
