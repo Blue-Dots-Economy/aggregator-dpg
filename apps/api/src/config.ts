@@ -339,21 +339,6 @@ export function campaignManagerAllowedAzp(): string[] {
 }
 
 /**
- * Keycloak `preferred_username` of the campaign-manager system caller, which
- * `requireCampaignAuth` rejects on the org-scoped campaign routes.
- *
- * Coordinators and the system caller share one `azp`, so the username tells
- * them apart. Keycloak names the service account `service-account-<client-id>`,
- * which no human can hold. Read from the environment at call time.
- *
- * @returns The expected username; the default when the env var is unset or blank.
- */
-export function campaignDumpServiceAccount(): string {
-  // An empty value would match a token with no username, so fall back to the default.
-  return process.env.CAMPAIGN_DUMP_SERVICE_ACCOUNT?.trim() || 'service-account-campaign-manager';
-}
-
-/**
  * CC recipient(s) for contact-support submissions.
  *
  * Read from the environment at call time.
