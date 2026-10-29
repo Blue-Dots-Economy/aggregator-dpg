@@ -90,16 +90,64 @@ export function effectivePermissions(
   orgIds: ReadonlySet<string> | null,
   now: number,
 ): Capability[] {
+  const out = new Set<Capability>();
+  for (const [role, orgType] of countedRoles(index, subject, orgIds, now)) {
+    for (const p of grantedThrough(role, orgType)) out.add(p);
+  }
+  return [...out].sort(compareCodeUnits);
+}
+
+/**
+ * The keys of the roles that give a user at least one permission, in any of
+ * its organisations: what the access token's `roles` claim carries for the
+ * edge check (docs/rbac/rbac-edge-enforcement.md §3.2).
+ *
+ * Same rules as {@link effectivePermissions} with no target organisation, so
+ * "holds permission P through one of these roles" at the edge equals the API's
+ * route-level answer. A role held only where it grants nothing (for example a
+ * personal-data-only role in the root organisation) is left out. The claim
+ * has no organisation, so a role held in the root that grants personal data
+ * alongside other permissions reads at the edge as granting it everywhere;
+ * no built-in role does, and the API's checks remain the second layer.
+ * Account state is not checked here: the caller lists no roles for an
+ * inactive account.
+ *
+ * @param index - The role catalogue.
+ * @param subject - The user's account type, memberships and additional roles.
+ * @param now - Epoch milliseconds, for expiry.
+ * @returns The role keys, sorted, without duplicates.
+ */
+export function effectiveRoleKeys(
+  index: RoleIndex,
+  subject: PermissionSubject,
+  now: number,
+): string[] {
+  const out = new Set<string>();
+  for (const [role, orgType] of countedRoles(index, subject, null, now)) {
+    if (grantedThrough(role, orgType).length > 0) out.add(role.key);
+  }
+  return [...out].sort(compareCodeUnits);
+}
+
+/**
+ * Every role that counts for the subject where a question applies, with the
+ * type of the organisation it is held in: base roles from memberships, then
+ * unexpired additional roles held in one of the subject's organisations, each
+ * only for its own account type and an organisation type it can be held in.
+ */
+function countedRoles(
+  index: RoleIndex,
+  subject: PermissionSubject,
+  orgIds: ReadonlySet<string> | null,
+  now: number,
+): Array<[RoleDefinition, OrgType]> {
   const orgTypeOf = new Map(subject.memberships.map((m) => [m.orgId, m.orgType]));
   const applies = (orgId: string) => orgIds === null || orgIds.has(orgId);
-  const out = new Set<Capability>();
+  const out: Array<[RoleDefinition, OrgType]> = [];
   const add = (role: RoleDefinition | undefined, orgType: OrgType | undefined) => {
     if (!role || !orgType || role.accountType !== subject.userType) return;
     if (!role.assignableOrgTypes.includes(orgType)) return;
-    for (const p of role.permissions) {
-      if (orgType === 'network_facilitator' && NOT_THROUGH_ROOT.includes(p)) continue;
-      out.add(p);
-    }
+    out.push([role, orgType]);
   };
   for (const m of subject.memberships) {
     if (applies(m.orgId)) add(baseRoleOf(index, m), m.orgType);
@@ -109,5 +157,12 @@ export function effectivePermissions(
     if (h.expiresAt !== null && h.expiresAt <= now) continue;
     add(index.byKey.get(h.roleKey), orgTypeOf.get(h.orgId));
   }
-  return [...out].sort(compareCodeUnits);
+  return out;
+}
+
+/** A role's permissions held in an organisation of `orgType`: never personal data through the root. */
+function grantedThrough(role: RoleDefinition, orgType: OrgType): readonly Capability[] {
+  return orgType === 'network_facilitator'
+    ? role.permissions.filter((p) => !NOT_THROUGH_ROOT.includes(p))
+    : role.permissions;
 }

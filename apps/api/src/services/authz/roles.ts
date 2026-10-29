@@ -16,6 +16,7 @@ import { getUserStore } from '../user-store/index.js';
 import { getOrganisationStore } from '../organisation-store/index.js';
 import type { Actor } from '../auth/actor/index.js';
 import { getRoleStore, type UserRoleRecord } from '../role-store/index.js';
+import { requestTokenRolesSync } from './token-roles.js';
 import { actorPermissions, checkCapability, type TargetOrg } from './guard.js';
 import { reachesOrg } from './scope.js';
 import { getRbacRuntime, type RbacRuntime } from './runtime.js';
@@ -234,6 +235,7 @@ export async function assignRole(
     },
   );
   if (!created.ok) return fail({ kind: 'unavailable', message: created.error.message });
+  requestTokenRolesSync([userId], 'role_assigned');
   return { ok: true, value: created.value };
 }
 
@@ -279,6 +281,7 @@ export async function revokeRole(
     details: { role: roleKey },
   });
   if (!revoked.ok) return fail({ kind: 'unavailable', message: revoked.error.message });
+  if (revoked.value !== null) requestTokenRolesSync([userId], 'role_revoked');
   return { ok: true, value: revoked.value !== null };
 }
 
@@ -321,5 +324,6 @@ export async function revokeRolesOnLeave(
       revoked: res.value,
       reason,
     });
+    requestTokenRolesSync([userId], reason);
   }
 }

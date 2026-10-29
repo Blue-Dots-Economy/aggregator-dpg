@@ -23,6 +23,7 @@ import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
 import { getRbacCatalogue, type RbacCatalogueBase } from '../rbac-catalogue/index.js';
+import { publishSnapshotToEdge } from './edge-catalogue.js';
 
 /** `off`, `log` (decide and log, never block) or `enforce`. */
 export type RbacMode = 'off' | 'log' | 'enforce';
@@ -35,6 +36,18 @@ export interface RbacRuntime {
   authorizer: AuthorizerBase;
   /** The catalogue revision the snapshot was read at; absent when set by a test. */
   catalogueRevision?: string;
+}
+
+/**
+ * Re-publishes the current snapshot to the edge, in the runtime's mode, so a
+ * restarted OPA sidecar gets the catalogue back within one tick.
+ *
+ * @returns What happened; `off` when RBAC is off.
+ */
+export async function publishCurrentToEdge(): Promise<'off' | 'published' | 'failed'> {
+  const current = runtime;
+  if (!current?.catalogueRevision) return 'off';
+  return publishSnapshotToEdge(current.roles, current.catalogueRevision, current.mode);
 }
 
 /** What a refresh did. */
@@ -115,8 +128,13 @@ export async function initRbac(
       backoffMs: config.OPA_BACKOFF_MS,
     }),
   };
+  // A failed publish only delays the edge: it is retried on every tick.
+  await publishSnapshotToEdge(snapshot.roles, snapshot.revision, mode);
   if (refreshMs > 0) {
-    timer = setInterval(() => void refreshRbacCatalogue(), refreshMs);
+    timer = setInterval(
+      () => void refreshRbacCatalogue().then(() => publishCurrentToEdge()),
+      refreshMs,
+    );
     timer.unref();
   }
   logger.info({
@@ -155,6 +173,7 @@ async function refreshOnce(): Promise<RefreshOutcome> {
       from_revision: current.catalogueRevision,
       to_revision: snapshot.revision,
     });
+    await publishSnapshotToEdge(snapshot.roles, snapshot.revision, current.mode);
     return 'reloaded';
   } catch (err) {
     logger.error({

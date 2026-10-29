@@ -16,7 +16,7 @@ import type { IdpAdminAdapter } from '../services/idp-admin/index.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
-import { callerFromAny, enforceRouteAccess, isServiceAccount } from '../services/authz/index.js';
+import { callerFromAny, recordRouteCaller, isServiceAccount } from '../services/authz/index.js';
 
 /** Minimal Result shape the prune helper needs from an idp delete. */
 type DeleteResult = { ok: true } | { ok: false; error: { code: string } };
@@ -158,7 +158,7 @@ export async function registerAggregatorMaintenanceRoutes(app: FastifyInstance):
           fields: { subject: auth.context.subject },
         });
       }
-      await enforceRouteAccess(req, callerFromAny(auth.context));
+      await recordRouteCaller(req, callerFromAny(auth.context));
 
       const store = getUserStore();
       const idp = getIdpAdmin();

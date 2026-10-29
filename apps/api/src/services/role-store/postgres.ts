@@ -6,7 +6,7 @@
  * SQLSTATE only, never the driver message (it holds query parameters).
  */
 
-import { and, desc, eq, gt, inArray, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, lte, or } from 'drizzle-orm';
 import { getDb } from '../../db/client.js';
 import { iamAudit, userRole } from '../../db/schema.js';
 import { pgErrorCode } from '../../db/pg-error.js';
@@ -195,6 +195,25 @@ export class PostgresRoleStore extends RoleStoreBase {
       return { ok: true, value: n };
     } catch (e) {
       return dbFailure('roleStore.revokeAllInOrg', e);
+    }
+  }
+
+  /** {@inheritDoc RoleStoreBase.listUsersExpiredBetween} */
+  async listUsersExpiredBetween(from: Date, to: Date): Promise<RoleStoreResult<string[]>> {
+    try {
+      const rows = await getDb()
+        .selectDistinct({ userId: userRole.userId })
+        .from(userRole)
+        .where(
+          and(
+            isNull(userRole.revokedAt),
+            gt(userRole.expiresAt, from),
+            lte(userRole.expiresAt, to),
+          ),
+        );
+      return { ok: true, value: rows.map((r) => r.userId) };
+    } catch (e) {
+      return dbFailure('roleStore.listUsersExpiredBetween', e);
     }
   }
 }

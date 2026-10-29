@@ -18,7 +18,7 @@ import { getSignalStackWriter } from '../services/signalstack.js';
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
 import { buildDecryptedProfilesCsv } from '@aggregator-dpg/profile-csv';
 import { httpError } from '../errors/http-error.js';
-import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
+import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 
 /**
  * Lifecycle statuses the dashboard shows. Paused and retired are excluded.
@@ -404,7 +404,7 @@ async function resolveActingOrgId(auth: AuthContext, log: FastifyRequest['log'])
 async function requireApprovedAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await requireApproved(req);
   if (result.ok) {
-    await enforceRouteAccess(req, callerFromAuth(result.context));
+    await recordRouteCaller(req, callerFromAuth(result.context));
     return result.context;
   }
   if (result.error.code === 'MISSING_AGGREGATOR_ID') {

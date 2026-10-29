@@ -24,14 +24,14 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "marked": "^18.0.14",
+    "marked": "^18.1.1",
     "sanitize-html": "^2.18.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
     "@types/node": "^26.6.3",
-    "@types/sanitize-html": "^2.13.0",
+    "@types/sanitize-html": "^2.16.2",
     "@vitest/coverage-v8": "^4.1.12",
     "typescript": "^6.0.3",
     "vitest": "^4.1.12"

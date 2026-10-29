@@ -48,7 +48,7 @@ jobs:
           fetch-depth: 0
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -85,6 +85,15 @@ jobs:
           pnpm --filter @aggregator-dpg/api spec:dump
           git diff --exit-code openapi.json || {
             echo "::error::openapi.json is stale — run 'pnpm --filter @aggregator-dpg/api spec:dump' and commit"; exit 1; }
+
+      # The edge policy decides each request from this table
+      # (docs/rbac/rbac-edge-enforcement.md §3.1); a route whose declaration
+      # changed without regenerating it would be decided on stale data.
+      - name: RBAC route table drift check
+        run: |
+          pnpm --filter @aggregator-dpg/api routes:dump
+          git diff --exit-code policy/rbac/edge/routes.json || {
+            echo "::error::policy/rbac/edge/routes.json is stale — run 'pnpm --filter @aggregator-dpg/api routes:dump' and commit"; exit 1; }
 
       - name: Dep-cruiser — check interface boundaries
         run: pnpm dep-check
@@ -155,7 +164,7 @@ jobs:
           persist-credentials: false
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm

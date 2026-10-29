@@ -10,12 +10,14 @@ import { buildRole } from '@aggregator-dpg/rbac/testing';
 import {
   getRbacRuntime,
   initRbac,
+  publishCurrentToEdge,
   refreshRbacCatalogue,
   stopRbacRefresh,
   _setRbacRuntime,
 } from '../runtime.js';
 import { InMemoryRbacCatalogue, _setRbacCatalogue } from '../../rbac-catalogue/index.js';
 import { config } from '../../../config.js';
+import { TEST_EDGE_FETCH_KEY, type EdgeFetchRecorder } from '../edge-test-hook.js';
 
 const savedCustomRoles = config.RBAC_CUSTOM_ROLES_ENABLED;
 let store: InMemoryRbacCatalogue;
@@ -186,5 +188,52 @@ describe('CUSTOM-ROLES flag gates the snapshot', () => {
     store.setRoles([...store.storedRoles(), viewer]);
     await initRbac('log', 0);
     expect(roleKeys()).toContain('viewer');
+  });
+});
+
+describe('edge catalogue publishing', () => {
+  /** The unit-test setup's recording fetch (src/test-setup.ts). */
+  const recorder = () =>
+    (globalThis as Record<string, unknown>)[TEST_EDGE_FETCH_KEY] as EdgeFetchRecorder;
+  const bodies = () =>
+    recorder().bodies as Array<{ mode: string; revision: string; roles: object }>;
+
+  it('publishes nothing with RBAC off', async () => {
+    await initRbac('off');
+    expect(await publishCurrentToEdge()).toBe('off');
+    expect(bodies()).toHaveLength(0);
+  });
+
+  it('publishes the snapshot at boot with the RBAC mode', async () => {
+    await initRbac('log', 0);
+    expect(bodies()).toHaveLength(1);
+    expect(bodies()[0]).toMatchObject({
+      mode: 'log',
+      revision: getRbacRuntime()!.catalogueRevision,
+    });
+    expect(Object.keys(bodies()[0]!.roles)).toContain('coordinator');
+  });
+
+  it('re-publishes the current snapshot on demand (each refresh tick)', async () => {
+    await initRbac('enforce', 0);
+    expect(await publishCurrentToEdge()).toBe('published');
+    expect(bodies()).toHaveLength(2);
+    expect(bodies()[1]!.mode).toBe('enforce');
+  });
+
+  it('publishes again right after a reload', async () => {
+    await initRbac('enforce', 0);
+    store.setRoles([...store.storedRoles(), viewer]);
+    expect(await refreshRbacCatalogue()).toBe('reloaded');
+    expect(bodies()).toHaveLength(2);
+    expect(Object.keys(bodies()[1]!.roles)).toContain('viewer');
+  });
+
+  it('boots even when the sidecar is down (the next tick retries)', async () => {
+    recorder().fetch = (async () => {
+      throw new Error('ECONNREFUSED');
+    }) as unknown as typeof fetch;
+    await expect(initRbac('enforce', 0)).resolves.toBeUndefined();
+    expect(await publishCurrentToEdge()).toBe('failed');
   });
 });

@@ -10,7 +10,6 @@ import type { FastifyRequest } from 'fastify';
 import { authenticateAny, type AnyAuthContext } from '../access-token.js';
 import { httpError } from '../../../errors/http-error.js';
 import { getActorResolver } from './index.js';
-import { enforceActorRouteAccess } from '../../authz/route-access.js';
 import type { Actor } from './interface.js';
 
 /** A verified, resolved caller. */
@@ -75,8 +74,5 @@ export async function requireActor(
   } else if (!actor.active) {
     throw httpError('NOT_ORG_ADMIN');
   }
-  // Check the route's capability (`config.rbac`). No-op with RBAC_MODE=off,
-  // logs in `log`, 403 in `enforce`.
-  await enforceActorRouteAccess(req, actor);
   return { actor, auth: auth.context };
 }

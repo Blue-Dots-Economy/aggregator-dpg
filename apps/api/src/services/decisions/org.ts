@@ -19,6 +19,7 @@ import { getOrganisationStore, type Organisation } from '../organisation-store/i
 import { getIdpAdmin, OWNER_REALM_ROLE } from '../idp-admin/index.js';
 import { renderApplicantRejected, renderOrgOwnerApproved } from '../email-templates/index.js';
 import { deciderOf, type Decision } from './coordinator.js';
+import { requestTokenRolesSync } from '../authz/token-roles.js';
 
 /** The `already_decided` outcome of a decided org. */
 function alreadyDecided(org: Organisation): OrgDecisionOutcome {
@@ -197,6 +198,8 @@ export async function decideOrg(input: OrgDecisionInput): Promise<OrgDecisionOut
 
   // Approved: give the owner sign-in access. Soft-fail per step; "repair access" re-runs it.
   const ownerAccess = await grantOwnerAccess(org, log);
+  // RBAC edge: the owner now holds Org Admin in this organisation.
+  requestTokenRolesSync([org.ownerUserId], 'org_approved');
   const mail = renderOrgOwnerApproved({
     orgName: org.displayName,
     ownerEmail: org.ownerEmail,

@@ -6,14 +6,14 @@ Access control for the aggregator portal and API, on the user and organisation m
 
 ## Highlights
 
-| Item              | Decision                                                                                                                                                                                   |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Model             | NIST core RBAC per organisation, on the user-org model: base roles come from membership (`users.org_id`, `organisations.org_owner`); `user_role` holds additional roles (decisions D5, D7) |
-| Access            | Union of the permissions of the user's base and additional roles in the organisation acted on or its ancestors                                                                             |
-| Built-in roles    | Defined in `config/rbac.yaml`, re-applied at every start; custom roles live only in the database (decision D6)                                                                             |
-| Decide            | Per request: the actor resolver reads the user, their memberships and their additional roles; OPA decides the permission (403); `scope.ts` decides reach (404)                             |
-| Time-bound access | PII Access is a role assigned with an expiry (90 days at most)                                                                                                                             |
-| Scope             | aggregator-dpg; signals-dpg unchanged in v1                                                                                                                                                |
+| Item              | Decision                                                                                                                                                                                                                                                                    |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model             | NIST core RBAC per organisation, on the user-org model: base roles come from membership (`users.org_id`, `organisations.org_owner`); `user_role` holds additional roles (decisions D5, D7)                                                                                  |
+| Access            | Union of the permissions of the user's base and additional roles in the organisation acted on or its ancestors                                                                                                                                                              |
+| Built-in roles    | Defined in code (`packages/rbac/src/builtin-roles.ts`) and seeded by migration 0031; custom roles live only in the database (decision D6)                                                                                                                                   |
+| Decide            | Per request: the Envoy + OPA edge decides the route permission from the token's `roles` claim (403, [rbac-edge-enforcement.md](rbac-edge-enforcement.md)); in the API the actor resolver reads the user, `scope.ts` decides reach (404) and the per-organisation checks run |
+| Time-bound access | PII Access is a role assigned with an expiry (90 days at most)                                                                                                                                                                                                              |
+| Scope             | aggregator-dpg; signals-dpg unchanged in v1                                                                                                                                                                                                                                 |
 
 ---
 
@@ -244,20 +244,22 @@ Every assignment checks, in order: the target is in reach (else 404), the role i
 
 ```mermaid
 flowchart LR
-    C["Code catalogue<br/>15 permissions"]
-    Y["config/rbac.yaml<br/>built-in roles"]
+    C["Code catalogue<br/>permissions"]
+    Y["builtin-roles.ts<br/>built-in roles"]
+    M["Migration 0031<br/>seed"]
     T[("permission · role<br/>role_permission")]
     S["Role snapshot<br/>per API replica"]
-    C -->|1 sync| T
-    Y -->|2 sync| T
+    C -->|1 generate| M
+    Y -->|1 generate| M
+    M -->|2 seed| T
     T -->|3 load| S
     T -->|4 every 30 s| S
 ```
 
 | Step | What happens                                                                                                                                                                                                                                    |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | At start the API upserts every permission the code knows and marks the rest `deprecated`                                                                                                                                                        |
-| 2    | It upserts the built-in roles and their permissions from `rbac.yaml`, under an advisory lock; custom roles are not touched                                                                                                                      |
+| 1    | The permission catalogue (`CAPABILITIES`) and the built-in roles (`BUILTIN_ROLES`) live in `packages/rbac`; migration `0031_rbac_seed.sql` is generated from them. Changing a built-in role means a new migration, never an edit to 0031        |
+| 2    | The migration seeds `permission`, `role` and `role_permission`; the API does no sync at start, and custom roles are not touched                                                                                                                 |
 | 3    | It loads every role and its permissions into a snapshot; an invalid built-in role stops the boot                                                                                                                                                |
 | 4    | Each replica re-reads a checksum of `role` and `role_permission` every `RBAC_CATALOGUE_REFRESH_MS` (default 30 000) and reloads when it changed; the replica that edited a role reloads at once. An invalid change keeps the last good snapshot |
 
@@ -312,7 +314,7 @@ Blue: aggregator-dpg. Grey: outside it.
 | D3  | Where reach is decided                                                                | `scope.ts`, outside OPA                                                                                                                 | Out of reach answers 404 (no existence oracle); `scope.ts` also filters lists, which OPA cannot                                                                    |
 | D4  | How the Default organisation is restricted                                            | A rule on that organisation (`isDefault`): its owner approves coordinators but cannot invite into it or edit it                         | The restriction belongs to the Default organisation, not to a role                                                                                                 |
 | D5  | Access model                                                                          | NIST core RBAC per organisation: permissions grouped into roles, roles assigned to users in organisations, access = union of live roles | The standard model (NIST INCITS 359, Superset / Flask-AppBuilder, multi-tenant SaaS practice); organisation kinds differ by which roles are assignable there       |
-| D6  | Where built-in and custom roles are defined                                           | Built-in roles in `config/rbac.yaml`, re-applied at every start; custom roles only in the database                                      | Built-in roles stay reviewed and identical on every instance (Superset's rule: do not edit the built-ins); custom roles change without a release                   |
+| D6  | Where built-in and custom roles are defined                                           | Built-in roles in code, seeded by migration 0031 and changed only by a new migration; custom roles only in the database                 | Built-in roles stay reviewed and identical on every instance (Superset's rule: do not edit the built-ins); custom roles change without a release                   |
 | D7  | How base roles relate to membership                                                   | Derived from `users.org_id` and `organisations.org_owner`, never stored; `user_role` holds additional roles only                        | One source of truth for membership, as the user-org model and Phase 5's resolver already have it; the planned `user_orgs.role` becomes a foreign key to `role.key` |
 
 | #   | Revisit when                                                                                                                              | Changing it means                                                                                                 |
