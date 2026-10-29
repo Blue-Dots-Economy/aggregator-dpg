@@ -260,8 +260,9 @@ describe('audit rows never contain a participant PII value (#617)', () => {
     assertNoPii(audit.rows);
 
     const details = (rows[0] as { details?: Record<string, unknown> }).details;
-    expect(details && Object.keys(details).sort()).toEqual(['bytes', 'files']);
+    expect(details && Object.keys(details).sort()).toEqual(['bytes', 'files', 'missing']);
     expect(typeof details?.files).toBe('number');
+    expect(typeof details?.missing).toBe('number');
     expect(typeof details?.bytes).toBe('number');
   });
 

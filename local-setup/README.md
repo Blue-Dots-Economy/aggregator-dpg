@@ -6,8 +6,8 @@ Signal Stack ecosystem, wired for localhost:
 - **aggregator-dpg** (this repo) — portal (web) + API + worker
 - **signals-dpg** (upstream, sibling repo) — the Signals Stack backend
 - shared infra — Postgres (3 DBs), two Redis, Keycloak, MinIO, Mailpit
-- **signals-search** — opt-in behind `--profile search`: relevance-ranked
-  discover + match scores instead of recency order
+- **signals-search** (optional, `docker-compose.search.yml`) — relevance-ranked
+  discover + match scores (search API, ingestion worker, bge-m3 embedder)
 
 👉 **Full walkthrough: [`LOCAL_SETUP.md`](./LOCAL_SETUP.md)** (Track A = all-in-Docker,
 Track B = hybrid hot-reload).
@@ -28,7 +28,7 @@ and is always run **from this directory**:
 
 ```bash
 cd aggregator-dpg/local-setup
-cp .env.example .env          # then ./gen-secrets.sh, and set ADMIN_EMAILS (see LOCAL_SETUP.md §2)
+cp .env.example .env          # then ./gen-secrets.sh (see LOCAL_SETUP.md §2)
 # once; safe to re-run
 grep -qE '^[[:space:]]*127\.0\.0\.1[[:space:]]+keycloak([[:space:]]|$)' /etc/hosts \
   || sudo sh -c "printf '\n127.0.0.1 keycloak\n' >> /etc/hosts"
@@ -39,13 +39,24 @@ docker compose ps             # wait for keycloak + aggregator-api healthy
 Portal → http://localhost:3100 · Signals UI → http://localhost:5173 ·
 Mailpit → http://localhost:8025 · Keycloak → http://localhost:8080/admin
 
+**With signals-search** (relevance ranking + match scores; Search API on
+http://localhost:3110):
+
+```bash
+docker compose -f docker-compose.search.yml up -d --build
+```
+
+Needs **≈6 GB** of Docker memory (**≥10 GB** with search — the embedder alone wants 3-4 GB) and a
+`docker login dhi.io` before the first build — see `LOCAL_SETUP.md` §0–§1.
+
 ## Contents
 
 | File                                 | Purpose                                                                   |
 | ------------------------------------ | ------------------------------------------------------------------------- |
-| `docker-compose.yml`                 | the unified stack (both DPGs + shared infra)                              |
+| `docker-compose.yml`                 | the unified stack (both DPGs + shared infra), without search              |
+| `docker-compose.search.yml`          | the stack WITH signals-search — includes `docker-compose.yml`, adds API, worker, embedder |
 | `.env.example`                       | single root env — copy to `.env`, then run `gen-secrets.sh`               |
-| `gen-secrets.sh`                     | fills every `CHANGE_ME_*` placeholder in `.env` with a fresh random value |
+| `gen-secrets.sh`                     | fills every `CHANGE_ME_*` placeholder in `.env` (incl. the signals-search apikey) |
 | `LOCAL_SETUP.md`                     | from-scratch setup guide, both run modes, troubleshooting                 |
 | `infra/postgres.Dockerfile`          | Postgres 17 + PostGIS + pgvector image                                    |
 | `infra/postgres-init/`               | creates the `signals` + `keycloak` DBs on first boot                      |
@@ -53,20 +64,3 @@ Mailpit → http://localhost:8025 · Keycloak → http://localhost:8080/admin
 
 > This is **local dev only**. The repo-root `../docker-compose.yml` is the
 > separate VM/prod nginx+certbot ingress variant for aggregator-dpg alone.
-
-## Optional — relevance ranking (`--profile search`)
-
-```bash
-cp .env.search.example .env.search    # mint the apikey first — LOCAL_SETUP.md §10.3
-docker compose --profile search up -d
-```
-
-Adds `sd-signals-search-api` (host **:3110** — the portal owns 3100),
-`sd-signals-search-worker`, and `sd-tei-embeddings` (BAAI/bge-m3 via TEI). Both
-images are pulled **prebuilt from public GHCR**, so unlike the two DPGs this
-stack builds from source, signals-search needs no checkout and no `docker login`.
-
-Opt-in because the embedder loads a ~2.3 GB model on CPU and wants 3-4 GB on top
-of this stack's existing ~11 containers — budget **≥10 GB** of Docker memory with
-it on. Config details in `LOCAL_SETUP.md` §10; the canonical reference for
-signals-search's own settings is signals-dpg's `LOCAL_SETUP.md` §7.

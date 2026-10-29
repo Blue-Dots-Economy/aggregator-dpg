@@ -421,6 +421,37 @@ describe('POST /public/v1/aggregators/:orgSlug/registrations/:slug — lifecycle
     expect((r.json() as { error: { code: string } }).error.code).toBe('SIGNALSTACK_PUSH_FAILED');
   });
 
+  it("400s with Signals' per-field messages when Signals rejects the profile data (#904)", async () => {
+    signalstack.onboard = async () =>
+      err(
+        new UpstreamError(
+          'signalstack onboard returned 400: INVALID_ITEM_STATE: Invalid item_state: website: Please enter a valid web address.',
+          {
+            code: 'SIGNALSTACK_BAD_REQUEST',
+            details: {
+              status: 400,
+              upstreamCode: 'INVALID_ITEM_STATE',
+              signalsMessage: 'Invalid item_state: website: Please enter a valid web address.',
+              signalsFields: { website: 'Please enter a valid web address.' },
+            },
+          },
+        ),
+      );
+    const r = await app.inject({
+      method: 'POST',
+      url: `/public/v1/aggregators/${ORG_SLUG}/registrations/${LINK_SLUG}`,
+      payload: { ...basePayload, phone: '+919876500093', email: 'badsite@example.com' },
+    });
+    expect(r.statusCode).toBe(400);
+    const error = (
+      r.json() as { error: { code: string; detail: string; fields: Record<string, unknown> } }
+    ).error;
+    expect(error.code).toBe('SCHEMA_VALIDATION');
+    expect(error.detail).toBe('website: Please enter a valid web address.');
+    expect(error.fields['field_errors']).toEqual({ website: 'Please enter a valid web address.' });
+    expect(error.fields['upstream_code']).toBe('INVALID_ITEM_STATE');
+  });
+
   it('400s (U18_REGISTRATION_REDIRECT) when signalstack maps the push to U18_NOT_ALLOWED', async () => {
     // Defensive belt-and-braces mapping: the route's own U18 gate already
     // strips age/compliance for a derived-minor submit, so this exercises

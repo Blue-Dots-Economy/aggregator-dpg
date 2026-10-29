@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildCsvTemplate } from '../index.js';
+import { URL_PATTERN, applyUrlRule } from '@aggregator-dpg/network-config/uri-fields';
 
 /** Trimmed-down purple_dot-style seeker schema exercising every value kind. */
 const SEEKER_SCHEMA = {
@@ -124,6 +125,23 @@ describe('buildCsvTemplate', () => {
     expect(get('catalog_url')).toMatch(/^https?:\/\//);
     expect(get('consented')).toBe('true');
     expect(get('beneficiary_name').length).toBeGreaterThan(0);
+  });
+
+  it('samples a web address for a link field once the URL rule has rewritten it (#904)', () => {
+    const schema = applyUrlRule({
+      type: 'object',
+      properties: {
+        website: { type: 'string', title: 'Website', 'x-uri': true },
+        catalog_url: { type: 'string', format: 'uri' },
+      },
+    });
+    const { header, example } = parse(buildCsvTemplate(schema));
+    const urlRe = new RegExp(URL_PATTERN, 'u');
+    for (const col of ['website', 'catalog_url']) {
+      const cell = example[header.indexOf(col)] ?? '';
+      expect(cell).toBe('https://example.com');
+      expect(urlRe.test(cell)).toBe(true);
+    }
   });
 
   it('keeps backward-compatible header-only output when example row disabled', () => {

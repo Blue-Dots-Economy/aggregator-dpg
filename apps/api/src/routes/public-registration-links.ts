@@ -21,6 +21,12 @@ import type { RegistrationLink } from '../services/registration-links-store/inde
 import { getUserStore } from '../services/user-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { domainRequiresConsent } from '@aggregator-dpg/network-config/interface';
+import {
+  describeSchemaIssue,
+  fieldLabel,
+  formatFieldErrors,
+  type FieldError,
+} from '@aggregator-dpg/network-config/field-errors';
 import { resolveSubmissionShape, publicHintI18nKey } from '../services/registration-mode/index.js';
 import { getSchemaLoader } from '../services/schema-loader/index.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
@@ -455,9 +461,12 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             (e) => e.keyword !== 'if' && (e.keyword !== 'required' || isConditionalRequired(e)),
           );
           if (issues.length > 0) {
+            // Name each failed field in Signals' wording (#904): the form shows
+            // `detail` in its banner, so it must say which field is wrong.
+            const described = issues.map((e) => describeSchemaIssue(e, linkDomainCfg.schema));
             throw httpError('SCHEMA_VALIDATION', {
-              detail: 'Submission failed schema validation.',
-              fields: { issues },
+              detail: formatFieldErrors(described),
+              fields: { issues, field_errors: fieldErrorMap(described) },
             });
           }
         }
@@ -576,6 +585,33 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
             if (result.error.message.includes('U18_NOT_ALLOWED')) {
               throw httpError('U18_REGISTRATION_REDIRECT', {
                 fields: { code: result.error.code, message: result.error.message },
+                cause: result.error,
+              });
+            }
+            // Signals rejected the profile data itself (#904). That is the
+            // participant's input, not a server fault: answer 400 with Signals'
+            // per-field messages so the form names the field, instead of the
+            // generic 502 below.
+            const details = result.error.details as
+              { upstreamCode?: unknown; signalsFields?: unknown } | undefined;
+            if (
+              details?.upstreamCode === 'INVALID_ITEM_STATE' &&
+              isStringMap(details.signalsFields) &&
+              Object.keys(details.signalsFields).length > 0
+            ) {
+              const signalsFields = details.signalsFields;
+              throw httpError('SCHEMA_VALIDATION', {
+                detail: formatFieldErrors(
+                  Object.entries(signalsFields).map(([field, message]) => ({
+                    field,
+                    label: fieldLabel(linkDomainCfg.schema, field),
+                    message,
+                  })),
+                ),
+                fields: {
+                  field_errors: signalsFields,
+                  upstream_code: details.upstreamCode,
+                },
                 cause: result.error,
               });
             }
@@ -730,4 +766,29 @@ async function loadLiveLinkByOrgAndSlug(
     });
   }
   return found.value;
+}
+
+/**
+ * Collapses described field errors into `{ field: message }`, first message
+ * per field, the same shape as Signals' `fields` map.
+ *
+ * @param errors - Described field errors in report order.
+ * @returns One message per field; field-less errors are left out.
+ */
+function fieldErrorMap(errors: readonly FieldError[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const e of errors) {
+    if (e.field && !Object.hasOwn(out, e.field)) out[e.field] = e.message;
+  }
+  return out;
+}
+
+/** True for a plain `{ string: string }` object such as Signals' `fields` map. */
+function isStringMap(value: unknown): value is Record<string, string> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.values(value).every((v) => typeof v === 'string')
+  );
 }
