@@ -5708,6 +5708,16 @@
                           "type": "string",
                           "nullable": true
                         },
+                        "description": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "domains": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
                         "created_at": {
                           "type": "string"
                         },
@@ -5726,6 +5736,8 @@
                         "locations",
                         "legal_name",
                         "gst_number",
+                        "description",
+                        "domains",
                         "created_at",
                         "updated_at"
                       ],
@@ -6168,6 +6180,16 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "description": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "domains": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
                           "created_at": {
                             "type": "string"
                           },
@@ -6192,6 +6214,8 @@
                           "locations",
                           "legal_name",
                           "gst_number",
+                          "description",
+                          "domains",
                           "created_at",
                           "updated_at",
                           "coordinator_count",
@@ -6427,7 +6451,7 @@
         "tags": [
           "console"
         ],
-        "description": "url, locations, legal name and GST number: the owner or the network admin. The name: the network admin only (the slug never changes). The Default org's details are not editable. Rendered for every coordinator of the org at once.",
+        "description": "Every field, the name included, is the org's owner's only (the slug never changes). The network admin views other owners' orgs but does not edit them (403). The Default org's details are not editable. url, locations, legal name and GST number are rendered for every coordinator of the org; description and domains are shown in the console only.",
         "requestBody": {
           "required": true,
           "content": {
@@ -6529,6 +6553,19 @@
                     "type": "string",
                     "maxLength": 32,
                     "nullable": true
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "nullable": true
+                  },
+                  "domains": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "maxItems": 50
                   }
                 },
                 "additionalProperties": false
@@ -6668,6 +6705,16 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "domains": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "created_at": {
                       "type": "string"
                     },
@@ -6686,6 +6733,8 @@
                     "locations",
                     "legal_name",
                     "gst_number",
+                    "description",
+                    "domains",
                     "created_at",
                     "updated_at"
                   ],

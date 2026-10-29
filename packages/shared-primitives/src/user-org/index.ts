@@ -182,6 +182,9 @@ export const OrgSchema = z.object({
   locations: z.array(BecknLocationSchema),
   legal_name: z.string().nullable(),
   gst_number: z.string().nullable(),
+  description: z.string().nullable(),
+  /** Network domain ids the org says it serves; `[]` = not stated. */
+  domains: z.array(z.string()),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -223,7 +226,10 @@ export const OrgSearchResponseSchema = z.object({
 });
 export type OrgSearchResponse = z.infer<typeof OrgSearchResponseSchema>;
 
-/** `PATCH /v1/org/metadata/update/:id`. `name` is the network admin's only. */
+/**
+ * `PATCH /v1/org/metadata/update/:id`. `name` is the network admin's only; every
+ * other field is the org owner's only.
+ */
 export const OrgMetadataUpdateRequestSchema = z
   .object({
     name: z.string().trim().min(2).max(200).optional(),
@@ -231,6 +237,13 @@ export const OrgMetadataUpdateRequestSchema = z
     locations: z.array(BecknLocationSchema).max(25).optional(),
     legal_name: z.string().trim().max(200).nullable().optional(),
     gst_number: z.string().trim().max(32).nullable().optional(),
+    description: z.string().trim().max(1000).nullable().optional(),
+    /** Network domain ids; `[]` clears the list. The API checks them against the network. */
+    domains: z
+      .array(z.string().min(1))
+      .max(50)
+      .refine((d) => new Set(d).size === d.length, { message: 'domains must be unique' })
+      .optional(),
   })
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: 'at least one field is required' });

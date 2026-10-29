@@ -3,7 +3,7 @@
  *
  *   GET   /v1/org/read/:id              one org within reach, owner and counts
  *   POST  /v1/org/search                orgs within reach, by name, keyset paged
- *   PATCH /v1/org/metadata/update/:id   org details (name: network admin only)
+ *   PATCH /v1/org/metadata/update/:id   org details, name included (owner only)
  *   POST  /v1/org/decision/:id          approve / reject a pending org (network admin)
  *   POST  /v1/org/access/repair/:id     re-apply the owner's sign-in access (network admin)
  *
@@ -36,12 +36,11 @@ import {
 import { isNetworkAdmin, requireActor, type Actor } from '../services/auth/actor/index.js';
 import { reachableOrgIds, reachesOrg } from '../services/authz/scope.js';
 import { decideOrg, grantOwnerAccess } from '../services/decisions/org.js';
+import { getNetworkConfig } from '../services/network-config.js';
 import {
   decodeOrgCursor,
   encodeOrgCursor,
   guardWriteRate,
-  listPhrase,
-  notifyOwnerOfAdminAction,
   ownerContact,
   toWireOrg,
 } from './console-shared.js';
@@ -90,14 +89,31 @@ function requireNetworkAdmin(actor: Actor): void {
   if (!isNetworkAdmin(actor)) throw httpError('FORBIDDEN');
 }
 
-/** Wire field label of each editable org detail, for logs and owner notices. */
-const FIELD_LABELS: Record<string, string> = {
-  name: 'the name',
-  url: 'the website',
-  locations: 'the locations',
-  legal_name: 'the legal name',
-  gst_number: 'the GST number',
-};
+/**
+ * Refuses an edit by anyone but the org's owner, with 403. The network admin
+ * views other owners' orgs but does not change them.
+ *
+ * @throws {HttpError} FORBIDDEN.
+ */
+function requireOrgOwner(actor: Actor, org: Organisation): void {
+  if (org.ownerUserId !== actor.userId) throw httpError('FORBIDDEN');
+}
+
+/**
+ * Refuses domain ids the active network does not have, with 400 naming the field.
+ *
+ * @throws {HttpError} SCHEMA_VALIDATION.
+ */
+async function assertKnownDomains(domains: string[]): Promise<void> {
+  const networkCfg = await getNetworkConfig();
+  const unknown = domains.filter((d) => !networkCfg.domainIds.includes(d));
+  if (unknown.length > 0) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'domains lists a domain this network does not have.',
+      fields: { field: 'domains', unknown },
+    });
+  }
+}
 
 /**
  * Registers the `/v1/org/*` console routes.
@@ -184,7 +200,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: "Update an organisation's details",
         description:
-          "url, locations, legal name and GST number: the owner or the network admin. The name: the network admin only (the slug never changes). The Default org's details are not editable. Rendered for every coordinator of the org at once.",
+          "Every field, the name included, is the org's owner's only (the slug never changes). The network admin views other owners' orgs but does not edit them (403). The Default org's details are not editable. url, locations, legal name and GST number are rendered for every coordinator of the org; description and domains are shown in the console only.",
         params: IdParamsSchema,
         body: OrgMetadataUpdateRequestSchema,
         response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
@@ -198,7 +214,8 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       if (orgType !== 'aggregator' || org.isDefault) {
         throw httpError('CONFLICT', { detail: "This organisation's details are not editable." });
       }
-      if (body.name !== undefined && !isNetworkAdmin(actor)) throw httpError('FORBIDDEN');
+      requireOrgOwner(actor, org);
+      if (body.domains !== undefined) await assertKnownDomains(body.domains);
       await guardWriteRate(actor, reply);
 
       const patch: UpdateOrgPatch = { updatedBy: actor.userId };
@@ -207,6 +224,9 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       if (body.locations !== undefined) patch.locations = body.locations;
       if (body.legal_name !== undefined) patch.legalName = body.legal_name;
       if (body.gst_number !== undefined) patch.gstNumber = body.gst_number;
+      // An empty description is stored as "none".
+      if (body.description !== undefined) patch.description = body.description || null;
+      if (body.domains !== undefined) patch.domains = body.domains;
 
       const updated = await getOrganisationStore().update(org.id, patch);
       if (!updated.ok) {
@@ -214,20 +234,13 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         if (updated.error.code === 'NOT_FOUND') throw httpError('NOT_FOUND');
         dbDown('orgStore.update', updated.error.message);
       }
-      const fields = Object.keys(body);
       req.log.info({
         operation: 'console.org.update',
         status: 'success',
         actor_id: actor.userId,
         target_id: org.id,
-        fields,
+        fields: Object.keys(body),
       });
-      await notifyOwnerOfAdminAction(
-        actor,
-        updated.value,
-        `updated ${listPhrase(fields.map((f) => FIELD_LABELS[f] ?? f))}`,
-        req.log,
-      );
       return reply.status(200).send(toWireOrg(updated.value));
     },
   );

@@ -101,9 +101,7 @@ describe('user-org wire schemas', () => {
       false,
     );
     expect(UserSearchRequestSchema.safeParse({ unknown: 1 }).success).toBe(false);
-    expect(
-      UserSearchResponseSchema.parse({ users: [], next_cursor: null }),
-    ).toBeTruthy();
+    expect(UserSearchResponseSchema.parse({ users: [], next_cursor: null })).toBeTruthy();
   });
 
   it('validates the invite request bounds and response shape', () => {
@@ -129,13 +127,15 @@ describe('user-org wire schemas', () => {
     expect(DecisionRequestSchema.parse({ decision: 'approve' })).toBeTruthy();
     expect(DecisionRequestSchema.parse({ decision: 'reject', reason: 'dup' })).toBeTruthy();
     expect(DecisionRequestSchema.safeParse({ decision: 'maybe' }).success).toBe(false);
-    expect(DecisionResponseSchema.parse({ id: 'u1', status: 'active', notified: true })).toBeTruthy();
+    expect(
+      DecisionResponseSchema.parse({ id: 'u1', status: 'active', notified: true }),
+    ).toBeTruthy();
 
     expect(UserMetadataUpdateRequestSchema.parse({ serves: ['agri', 'edu'] })).toBeTruthy();
     expect(UserMetadataUpdateRequestSchema.parse({ serves: [] })).toBeTruthy();
-    expect(
-      UserMetadataUpdateRequestSchema.safeParse({ serves: Array(51).fill('x') }).success,
-    ).toBe(false);
+    expect(UserMetadataUpdateRequestSchema.safeParse({ serves: Array(51).fill('x') }).success).toBe(
+      false,
+    );
   });
 
   it('parses org read/search responses', () => {
@@ -150,6 +150,8 @@ describe('user-org wire schemas', () => {
       locations: [location],
       legal_name: null,
       gst_number: null,
+      description: null,
+      domains: [],
       created_at: 't',
       updated_at: 't',
     };
@@ -184,6 +186,22 @@ describe('user-org wire schemas', () => {
     }
     expect(OrgMetadataUpdateRequestSchema.safeParse({ url: 'not a url' }).success).toBe(false);
     expect(OrgMetadataUpdateRequestSchema.safeParse({ name: 'x' }).success).toBe(false);
+  });
+
+  it('org metadata update: description and domains', () => {
+    expect(OrgMetadataUpdateRequestSchema.parse({ description: '  About us  ' }).description).toBe(
+      'About us',
+    );
+    expect(OrgMetadataUpdateRequestSchema.parse({ description: null }).description).toBeNull();
+    expect(
+      OrgMetadataUpdateRequestSchema.safeParse({ description: 'x'.repeat(1001) }).success,
+    ).toBe(false);
+    expect(OrgMetadataUpdateRequestSchema.parse({ domains: [] }).domains).toEqual([]);
+    expect(OrgMetadataUpdateRequestSchema.parse({ domains: ['seeker', 'provider'] })).toBeTruthy();
+    expect(
+      OrgMetadataUpdateRequestSchema.safeParse({ domains: ['seeker', 'seeker'] }).success,
+    ).toBe(false);
+    expect(OrgMetadataUpdateRequestSchema.safeParse({ domains: [''] }).success).toBe(false);
   });
 
   it('parses the org decision and owner-access responses', () => {

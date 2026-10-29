@@ -490,22 +490,25 @@ describe('console routes /v1/user, /v1/org', () => {
       });
     });
 
-    it('refuses the name to an owner (403)', async () => {
-      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { name: 'Alpha 2' });
-      expect(res.statusCode).toBe(403);
+    it('lets the owner rename, keeping the slug', async () => {
+      const before = await orgs.findById(ORG_A);
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { name: 'Alpha Two' });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { name: string; slug: string };
+      expect(body.name).toBe('Alpha Two');
+      expect(body.slug).toBe(before.ok ? before.value?.slug : undefined);
     });
 
-    it('lets the network admin rename, and tells the owner (C13)', async () => {
+    it('refuses the network admin a rename of another owner’s org (403), with no email', async () => {
       const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'na', { name: 'Alpha Two' });
-      expect(res.statusCode).toBe(200);
-      expect((res.json() as { name: string }).name).toBe('Alpha Two');
-      const notice = mailer.outbox.find((m) => m.to === 'a@a.org');
-      expect(notice?.html).toContain('updated the name');
-      expect(notice?.html).not.toContain('Alpha Two</strong> as');
+      expect(res.statusCode).toBe(403);
+      const after = await orgs.findById(ORG_A);
+      expect(after.ok ? after.value?.displayName : undefined).not.toBe('Alpha Two');
+      expect(mailer.outbox.find((m) => m.to === 'a@a.org')).toBeUndefined();
     });
 
     it('answers ORG_NAME_TAKEN for a duplicate name', async () => {
-      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'na', { name: 'beta' });
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { name: 'beta' });
       expect(res.statusCode).toBe(409);
       expect((res.json() as { error: { code: string } }).error.code).toBe('ORG_NAME_TAKEN');
     });
@@ -520,6 +523,98 @@ describe('console routes /v1/user, /v1/org', () => {
     it('refuses an empty body', async () => {
       const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {});
       expect(res.statusCode).toBe(400);
+    });
+
+    it('lets the owner set the description and domains, and reads them back', async () => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        description: '  Skilled trade jobs for rural seekers.  ',
+        domains: ['seeker'],
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        description: 'Skilled trade jobs for rural seekers.',
+        domains: ['seeker'],
+      });
+      const read = (await get(`/v1/org/read/${ORG_A}`, 'a')).json() as {
+        org: { description: string | null; domains: string[] };
+      };
+      expect(read.org).toMatchObject({
+        description: 'Skilled trade jobs for rural seekers.',
+        domains: ['seeker'],
+      });
+    });
+
+    it('stores an empty description as none and clears the domains', async () => {
+      await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        description: 'x',
+        domains: ['seeker', 'provider'],
+      });
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        description: '   ',
+        domains: [],
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ description: null, domains: [] });
+    });
+
+    it('refuses a domain the network does not have (400, field named), saving nothing', async () => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        description: 'not saved',
+        domains: ['seeker', 'astronaut'],
+      });
+      expect(res.statusCode).toBe(400);
+      const error = (res.json() as { error: { code: string; fields: Record<string, unknown> } })
+        .error;
+      expect(error.code).toBe('SCHEMA_VALIDATION');
+      expect(error.fields).toMatchObject({ field: 'domains', unknown: ['astronaut'] });
+      const read = (await get(`/v1/org/read/${ORG_A}`, 'a')).json() as {
+        org: { description: string | null };
+      };
+      expect(read.org.description).toBeNull();
+    });
+
+    it('refuses duplicate domains and an over-long description (400)', async () => {
+      const dup = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        domains: ['seeker', 'seeker'],
+      });
+      expect(dup.statusCode).toBe(400);
+      const long = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        description: 'x'.repeat(1001),
+      });
+      expect(long.statusCode).toBe(400);
+    });
+
+    it.each([
+      ['name', { name: 'Alpha Two' }],
+      ['url', { url: 'https://x.example.org' }],
+      ['locations', { locations: [] }],
+      ['legal name', { legal_name: 'Alpha Pvt Ltd' }],
+      ['GST number', { gst_number: '27AAAAA0000A1Z5' }],
+      ['description', { description: 'x' }],
+      ['domains', { domains: ['seeker'] }],
+    ])("refuses the network admin's edit of another owner's %s (403)", async (_label, body) => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'na', body);
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('lets the owner change every field in one save', async () => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        name: 'Alpha Two',
+        url: 'https://alpha.example.org',
+        legal_name: 'Alpha Pvt Ltd',
+        gst_number: '27AAAAA0000A1Z5',
+        description: 'About Alpha.',
+        domains: ['provider', 'seeker'],
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        name: 'Alpha Two',
+        url: 'https://alpha.example.org',
+        legal_name: 'Alpha Pvt Ltd',
+        gst_number: '27AAAAA0000A1Z5',
+        description: 'About Alpha.',
+        domains: ['provider', 'seeker'],
+      });
     });
   });
 
