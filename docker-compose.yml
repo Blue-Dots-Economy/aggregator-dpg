@@ -6,6 +6,8 @@ name: aggregator-dpg
 # Apps:        web (Next.js BFF), api (Fastify), worker (BullMQ consumer).
 # Edge:        jonasal/nginx-certbot terminates TLS on :443 and proxies all
 #              browser-facing traffic — no service exposes its own host port.
+#              Requests for the api go through `envoy` first, which decides
+#              route permissions with OPA (docs/rbac/rbac-edge-enforcement.md).
 #
 # Quick start (VM, real domain, Let's Encrypt cert):
 #   cp infra/env.template .env
@@ -307,7 +309,8 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
-      API_BASE_URL: ${API_BASE_URL:-http://api:4000}
+      # The api behind its edge (`envoy`), never the api directly.
+      API_BASE_URL: ${API_BASE_URL:-http://envoy:4000}
       # Switchable UI languages, comma-separated and ordered; `en` is always
       # included as the fallback. Read per request by the root layout, so
       # changing this needs only a container restart. Set it to `en,hi` to drop
@@ -419,7 +422,7 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
-      api:
+      envoy:
         condition: service_healthy
 
   api:
@@ -570,13 +573,14 @@ services:
       # cert, or NODE_EXTRA_CA_CERTS for a real internal CA.
       NODE_TLS_REJECT_UNAUTHORIZED: ${NODE_TLS_REJECT_UNAUTHORIZED:-1}
       INSTANCE_ENV: ${INSTANCE_ENV:-production}
-      # RBAC (docs/rbac/rbac-design-aggregator.md). `off` loads nothing; `log`
-      # decides and logs would-denies; `enforce` returns 403. Decisions come
-      # from the `opa` service below. `log` here so local runs exercise the
-      # policy without blocking anything; set RBAC_MODE=off to skip it.
+      # RBAC (docs/rbac/rbac-edge-enforcement.md): one switch for the api and
+      # its edge (`envoy` + `opa` below). `off` loads nothing; `log` records
+      # would-denies at the edge and in the api's per-organisation checks;
+      # `enforce` refuses. `log` here so local runs exercise the policy without
+      # blocking anything.
       RBAC_MODE: ${RBAC_MODE:-log}
       OPA_URL: ${OPA_URL:-http://opa:8181}
-    # No host port mapping — exposed only via nginx at /backend/.
+    # No host port mapping — reached only through `envoy` (nginx /backend/, web).
     # See `extra_hosts` rationale on the web service: api hits Keycloak via
     # the public URL for both admin REST + JWKS, so we short-circuit DNS to
     # the host gateway where nginx listens.
@@ -608,26 +612,71 @@ services:
         condition: service_healthy
 
   # ── OPA (RBAC decisions) ──────────────────────────────────────────────────
-  # Serves POST /v1/data/rbac/decision from policy/rbac/*.rego. Only queried
+  # The opa-envoy-plugin build: the REST API on 8181 serves the api's own
+  # decisions (POST /v1/data/rbac/decision) and its catalogue push, and 9191
+  # answers Envoy's ext_authz check (infra/opa/edge-config.yaml). Only used
   # when the api runs with RBAC_MODE=log|enforce. Deployments run it as a
   # sidecar in the api pod (bluedots-automation).
   opa:
-    image: openpolicyagent/opa:1.21.1@sha256:d3a9a6bd4fbcb0f4403294b0d0b239b07be163ac118a46df7d50045b52e52053
+    image: openpolicyagent/opa:1.21.1-envoy-1-static@sha256:c1f40d815a15c4ca0ccbdf300e0a3515fccf1d30fbd92e69917ab96bad83811d
     container_name: aggregator-opa
     restart: unless-stopped
-    command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=error", "--ignore=*_test.rego", "--ignore=vectors.json", "/policy"]
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=error", "--config-file=/config/edge-config.yaml", "--ignore=*_test.rego", "--ignore=vectors.json", "/policy"]
     # Host port for hybrid dev (`pnpm dev` on the host, OPA_URL defaults to
     # http://localhost:8181). Loopback only.
     ports:
       - "127.0.0.1:8181:8181"
     volumes:
       - ./policy/rbac:/policy:ro
+      - ./infra/opa:/config:ro
     healthcheck:
       test: ["CMD", "/opa", "eval", "--fail", "--data", "/policy", "--ignore", "*_test.rego", "--ignore", "vectors.json", "data.rbac.not_through_root"]
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 5s
+
+  # ── Envoy (RBAC edge) ─────────────────────────────────────────────────────
+  # In front of the api (docs/rbac/rbac-edge-enforcement.md): verifies the
+  # Keycloak token, asks OPA whether the caller holds the route's permission,
+  # and forwards only allowed requests. nginx (/backend/) and web reach the api
+  # only through it. infra/envoy/render.sh fills in envoy.yaml's placeholders
+  # from the environment below: the issuer is the public one the api expects (KEYCLOAK_URL); the
+  # signing keys are fetched from Keycloak inside the network. The access log
+  # (operation rbac.edge) is flushed every second.
+  envoy:
+    image: envoyproxy/envoy:v1.34.1@sha256:007da57c2c328a90bd4e6d99b70bd899132f1b4a9426ccafe25437cf84a60c14
+    container_name: aggregator-envoy
+    restart: unless-stopped
+    environment:
+      ADMIN_ADDRESS: 0.0.0.0
+      LISTEN_PORT: "4000"
+      API_HOST: api
+      API_PORT: "4000"
+      OPA_HOST: opa
+      KEYCLOAK_HOST: keycloak
+      KEYCLOAK_PORT: "8080"
+      JWT_ISSUER: "${PUBLIC_PROTOCOL:-http}://${PUBLIC_HOST:-localhost}/auth/realms/${KEYCLOAK_REALM:-bluedots}"
+      JWKS_URI: "http://keycloak:8080/auth/realms/${KEYCLOAK_REALM:-bluedots}/protocol/openid-connect/certs"
+    command: ["sh", "/etc/envoy/render.sh", "--log-level", "warn", "--file-flush-interval-msec", "1000"]
+    # No host port mapping — reached through nginx and web only.
+    volumes:
+      - ./infra/envoy/envoy.yaml:/etc/envoy/envoy.template.yaml:ro
+      - ./infra/envoy/render.sh:/etc/envoy/render.sh:ro
+    healthcheck:
+      # HTTP/1.1 with a Host header: Envoy's admin port refuses HTTP/1.0 (426).
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9901 && printf 'GET /ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q LIVE <&3"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    depends_on:
+      api:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
 
   # ── Bulk-upload + cron worker ────────────────────────────────────────────
   # BullMQ consumer for: bulk-file-process, bulk-row-process, bulk-finalise,
@@ -771,7 +820,7 @@ services:
     depends_on:
       web:
         condition: service_started
-      api:
+      envoy:
         condition: service_healthy
       keycloak:
         condition: service_healthy

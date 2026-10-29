@@ -83,10 +83,26 @@ export class StoreActorResolver extends ActorResolverBase {
     const userId = linked.value;
 
     // A coordinator login without the claim is still a coordinator, never an admin.
+    return this.byUserId(userId);
+  }
+
+  /**
+   * The actor of an account by its id, with no token: a coordinator when the
+   * id is one, else an admin and the active organisations it owns. Used to
+   * keep the token's `roles` claim in step with the database.
+   *
+   * @param userId - The account (`users.id`).
+   * @returns The actor; null when no such account; `UNAVAILABLE` when a store failed.
+   */
+  async byUserId(userId: string): Promise<ActorResult> {
     const asCoordinator = await getUserStore().findById(userId);
     if (!asCoordinator.ok) return unavailable(asCoordinator.error.message);
     if (asCoordinator.value) return this.coordinator(userId);
+    return this.admin(userId);
+  }
 
+  /** An admin account and the active organisations it owns. */
+  private async admin(userId: string): Promise<ActorResult> {
     const orgStore = getOrganisationStore();
     const [owned, root] = await Promise.all([orgStore.listOwnedBy(userId), orgStore.findRoot()]);
     if (!owned.ok) return unavailable(owned.error.message);

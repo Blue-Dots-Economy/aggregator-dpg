@@ -1,7 +1,7 @@
 // Console routes /v1/user/* and /v1/org/* (user & org Phase 5): who may do
 // what, reach (out of reach → 404), and the decision / edit flows.
 
-import { describe, it, expect, beforeEach, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { CAPABILITIES, indexRoles, permissionDefinitions } from '@aggregator-dpg/rbac';
 import { AuthorizerFake, buildRole } from '@aggregator-dpg/rbac/testing';
 import { _setRbacRuntime, refreshRbacCatalogue } from '../services/authz/runtime.js';
@@ -11,6 +11,8 @@ import { getRbacCatalogue, type InMemoryRbacCatalogue } from '../services/rbac-c
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { config } from '../config.js';
+import { _setRedis } from '../services/redis/index.js';
+import { TEST_TOKEN_ROLES_OFF_KEY } from '../services/authz/edge-test-hook.js';
 import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import {
   OrganisationStoreFake,
@@ -964,14 +966,7 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(res.statusCode).toBe(200);
     });
 
-    it('refuses an aggregator owner the network admin capabilities', async () => {
-      const repair = await post(`/v1/org/access/repair/${ORG_A}`, 'a', {});
-      expect(repair.statusCode).toBe(403);
-      expect(permissionOf(repair)).toBe('network.administer');
-      const decide = await post(`/v1/org/decision/${ORG_P}`, 'a', { decision: 'approve' });
-      expect(decide.statusCode).toBe(403);
-      expect(permissionOf(decide)).toBe('orgs.onboard');
-    });
+    // Route permission, decided at the edge: policy/rbac/edge_test.rego (test_real_table_*).
 
     it('lets the network admin repair access', async () => {
       await idp.createUser({ email: 'a@a.org', enabled: false, attributes: {} });
@@ -1091,20 +1086,7 @@ describe('console routes /v1/user, /v1/org', () => {
         expect((await post(`/v1/user/role/revoke/${C3}`, 'a', body)).statusCode).toBe(403);
       });
 
-      it('refuses custom-role writes to a caller without network.administer', async () => {
-        _setRbacRuntime(await testRbacRuntime('log'));
-        const created = await post('/v1/roles/create', 'a', {
-          key: 'helper',
-          name: 'Helper',
-          description: 'x',
-          account_type: 'coordinator',
-          assignable_org_types: ['aggregator'],
-          assigned_by: 'org.manage',
-          permissions: ['profiles.view'],
-        });
-        expect(created.statusCode).toBe(403);
-        expect((await post('/v1/roles/delete/data_export', 'a', {})).statusCode).toBe(403);
-      });
+      // Route permission, decided at the edge: policy/rbac/edge_test.rego (test_real_table_*).
     });
 
     describe('roles API', () => {
@@ -1112,6 +1094,46 @@ describe('console routes /v1/user, /v1/org', () => {
         (res.json() as { error: { fields?: { reason?: string } } }).error.fields?.reason;
       const assign = (who: keyof typeof TOKENS, id: string, body: object) =>
         post(`/v1/user/role/assign/${id}`, who, body);
+
+      describe('token roles claim (RBAC edge)', () => {
+        const C4 = '00000000-0000-4000-8000-0000000000c4';
+        /** The `roles` attribute on C4's Keycloak user. */
+        const kcRolesOfC4 = async () => {
+          const kc = await idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, C4);
+          const user = kc.ok
+            ? (kc.value as { attributes?: Record<string, string[]> } | null)
+            : null;
+          return user?.attributes?.['roles'];
+        };
+
+        beforeEach(async () => {
+          // This describe checks the real sync: turn the setup's no-op off.
+          delete (globalThis as Record<string, unknown>)[TEST_TOKEN_ROLES_OFF_KEY];
+          // The sync's per-user lock; no Redis in unit tests.
+          _setRedis({ set: async () => 'OK', eval: async () => 1, sadd: async () => 1 } as never);
+          // An active coordinator with a Keycloak user but no recorded login,
+          // found through its aggregator_id attribute.
+          coordinators.seed([coordinator(C4, ORG_A, 'active', 4)]);
+          await idp.createUser({ email: 'c4@x.org', attributes: { [KC_ATTR.AGGREGATOR_ID]: C4 } });
+        });
+        afterEach(() => {
+          _setRedis(null);
+        });
+
+        it("writes the coordinator's role keys to Keycloak after an assignment", async () => {
+          const res = await assign('a', C4, { role_key: 'data_export', org_id: ORG_A });
+          expect(res.statusCode).toBe(200);
+          await vi.waitFor(async () =>
+            expect(await kcRolesOfC4()).toEqual(['coordinator', 'data_export']),
+          );
+          const revoked = await post(`/v1/user/role/revoke/${C4}`, 'a', {
+            role_key: 'data_export',
+            org_id: ORG_A,
+          });
+          expect(revoked.statusCode).toBe(200);
+          await vi.waitFor(async () => expect(await kcRolesOfC4()).toEqual(['coordinator']));
+        });
+      });
 
       it('lists every role to an admin, and refuses a coordinator', async () => {
         const res = await get('/v1/roles', 'a');
@@ -1340,23 +1362,7 @@ describe('console routes /v1/user, /v1/org', () => {
         expect((await get(`/v1/org/read/${ORG_B}`, 'a')).statusCode).toBe(404);
       });
 
-      it('refuses an org route to an admin holding neither permission', async () => {
-        _setRbacRuntime(
-          await testRbacRuntime('enforce', new AuthorizerFake(), []).then(async (rt) => ({
-            ...rt,
-            roles: indexRoles(
-              (await shippedRoles()).map((r) =>
-                r.key === 'org_admin'
-                  ? { ...r, permissions: r.permissions.filter((c) => c !== 'org.manage') }
-                  : r,
-              ),
-            ),
-          })),
-        );
-        const res = await get(`/v1/org/read/${ORG_A}`, 'a');
-        expect(res.statusCode).toBe(403);
-        expect(permissionOf(res)).toBe('org.manage|orgs.onboard');
-      });
+      // Route permission, decided at the edge: policy/rbac/edge_test.rego (test_real_table_*).
 
       it('only logs the narrower scope in log mode', async () => {
         _setRbacRuntime(await testRbacRuntime('log'));
@@ -1488,14 +1494,7 @@ describe('console routes /v1/user, /v1/org', () => {
         ).toContain('verifier');
       });
 
-      it('refuses an organisation owner and a coordinator', async () => {
-        for (const url of ['/v1/rbac/roles', '/v1/rbac/permissions']) {
-          const owner = await get(url, 'a');
-          expect(owner.statusCode).toBe(403);
-          expect(permissionOf(owner)).toBe('network.administer');
-          expect((await get(url, 'coord')).statusCode).toBe(403);
-        }
-      });
+      // Route permission, decided at the edge: policy/rbac/edge_test.rego (test_real_table_*).
 
       it('answers 404 to an owner when access is only logged', async () => {
         _setRbacRuntime(await testRbacRuntime('log'));
@@ -1568,11 +1567,7 @@ describe('console routes /v1/user, /v1/org', () => {
         expect(me.capabilities).toContain('profiles.verify');
       });
 
-      it('refuses an owner creating a role', async () => {
-        const res = await post('/v1/roles/create', 'a', verifier);
-        expect(res.statusCode).toBe(403);
-        expect(permissionOf(res)).toBe('network.administer');
-      });
+      // Route permission, decided at the edge: policy/rbac/edge_test.rego (test_real_table_*).
 
       it('refuses an unknown permission, personal data through the root and a taken key', async () => {
         const unknown = await post('/v1/roles/create', 'na', {

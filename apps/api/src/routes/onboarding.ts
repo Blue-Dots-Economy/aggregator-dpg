@@ -17,7 +17,7 @@ import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
-import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
+import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 
 const RangeQuerySchema = z.object({
   from: z.string().datetime({ offset: true }).optional(),
@@ -162,6 +162,6 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   if (!result.context.aggregatorId) {
     throw httpError('UNAUTHORIZED', { detail: 'Token missing aggregator_id claim.' });
   }
-  await enforceRouteAccess(req, callerFromAuth(result.context));
+  await recordRouteCaller(req, callerFromAuth(result.context));
   return result.context;
 }

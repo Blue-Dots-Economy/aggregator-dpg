@@ -87,13 +87,16 @@ UPDATED=$(printf '%s' "$PROFILE" | jq --arg policy "$POLICY" '
   | .attributes = (
       # The aggregator identity attributes drive the portal gate and the token
       # claims apps act on (aggregator_id, aggregator_type, signalstack_org_id,
-      # signals_acting_orgs); only the API'"'"'s service account writes them, so
-      # they are declared admin-only. Forced: any earlier declaration is replaced.
-      ([(.attributes // [])[] | select(.name as $n | ["aggregator_id", "decision_made", "aggregator_type", "signalstack_org_id"] | index($n) | not)] + [
+      # signals_acting_orgs, roles); only the API'"'"'s service account writes them,
+      # so they are declared admin-only. Forced: any earlier declaration is replaced.
+      # `roles` is the user'"'"'s live role keys for the edge check
+      # (docs/rbac/rbac-edge-enforcement.md §3.2), one value per role.
+      ([(.attributes // [])[] | select(.name as $n | ["aggregator_id", "decision_made", "aggregator_type", "signalstack_org_id", "roles"] | index($n) | not)] + [
         { name: "aggregator_id", displayName: "Aggregator id", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: false },
         { name: "decision_made", displayName: "Registration decision", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: false },
         { name: "aggregator_type", displayName: "Aggregator type", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: false },
         { name: "signalstack_org_id", displayName: "Signals organisation id", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: false },
+        { name: "roles", displayName: "Roles", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: true },
         {
           name: "phoneNumber",
           displayName: "Phone Number",
@@ -133,9 +136,9 @@ STILL_REQUIRED=$(printf '%s' "$VERIFY" | jq -r '[.attributes[]? | select(.name =
 
 echo "[kc-init] unmanagedAttributePolicy=${GOT_POLICY} phoneNumber declared=${HAS_PHONE}"
 
-ADMIN_ONLY=$(printf '%s' "$VERIFY" | jq -r '[.attributes[]? | select(.name as $n | ["aggregator_id", "decision_made", "aggregator_type", "signalstack_org_id"] | index($n)) | select(.permissions.edit == ["admin"])] | length')
-if [ "${ADMIN_ONLY:-0}" -lt 4 ]; then
-  echo "[kc-init] aggregator_id / decision_made / aggregator_type / signalstack_org_id are not all declared admin-only"
+ADMIN_ONLY=$(printf '%s' "$VERIFY" | jq -r '[.attributes[]? | select(.name as $n | ["aggregator_id", "decision_made", "aggregator_type", "signalstack_org_id", "roles"] | index($n)) | select(.permissions.edit == ["admin"])] | length')
+if [ "${ADMIN_ONLY:-0}" -lt 5 ]; then
+  echo "[kc-init] aggregator_id / decision_made / aggregator_type / signalstack_org_id / roles are not all declared admin-only"
   exit 1
 fi
 
@@ -340,6 +343,7 @@ else
     user_attr="$2"
     claim_name="$3"
     userinfo_claim="$4"
+    multivalued="${5:-false}"
     existing=$(curl -fsS "${KC_URL}/admin/realms/${REALM}/clients/${PORTAL_UUID}/protocol-mappers/models" \
       -H "Authorization: Bearer ${TOKEN}" \
       | jq -r --arg n "${mapper_name}" '[.[] | select(.name == $n)] | length')
@@ -360,7 +364,7 @@ else
     "id.token.claim": "false",
     "access.token.claim": "true",
     "userinfo.token.claim": "${userinfo_claim}",
-    "multivalued": "false",
+    "multivalued": "${multivalued}",
     "aggregate.attrs": "false"
   }
 }
@@ -381,6 +385,8 @@ EOF
 
   ensure_mapper "decision_made" "decision_made" "decision_made" "false"
   ensure_mapper "phone_number"  "phoneNumber"   "phone_number"  "true"
+  # Live role keys for the edge check; access token only, one value per role.
+  ensure_mapper "roles"         "roles"         "roles"         "false" "true"
 fi
 
 # ────────────────────────────────────────────────────────────────────────────

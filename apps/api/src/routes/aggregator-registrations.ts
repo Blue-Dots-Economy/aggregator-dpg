@@ -51,7 +51,7 @@ import { KC_ATTR } from '../services/idp-admin/index.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import type { ErrorCode } from '../errors/codes.js';
-import { callerFromAny, enforceRouteAccess } from '../services/authz/index.js';
+import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
 
 const SLUG_RETRIES = 3;
 
@@ -169,7 +169,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             fields: { reason: auth.error.code },
           });
         }
-        await enforceRouteAccess(req, callerFromAny(auth.context));
+        await recordRouteCaller(req, callerFromAny(auth.context));
 
         // Already validated and parsed by the route schema.
         const body = req.body as z.infer<typeof RegistrationPayloadSchema>;

@@ -31,7 +31,7 @@ import type { IdpUser } from '../services/idp-admin/index.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
-import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
+import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 
 // ─── Body schemas ───────────────────────────────────────────────────────────
 
@@ -367,7 +367,7 @@ function pickAttribute(user: IdpUser | null, name: string): string | undefined {
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await authenticate(req);
   if (result.ok) {
-    await enforceRouteAccess(req, callerFromAuth(result.context));
+    await recordRouteCaller(req, callerFromAuth(result.context));
     return result.context;
   }
   const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';

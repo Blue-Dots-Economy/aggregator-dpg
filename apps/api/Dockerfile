@@ -47,9 +47,15 @@ COPY --from=builder --chown=node:node /app/apps/api/drizzle ./drizzle
 # Operator SQL for the instance-upgrade tool (dist/tools/instance-upgrade.js resolves it at
 # `../../sql`, i.e. /app/sql): the checks, verify gates, counts and fixes.
 COPY --from=builder --chown=node:node /app/scripts/sql ./sql
-# RBAC policy for the OPA sidecar: a deploy's init container copies it out of
-# this image (/app/policy/rbac/rbac.rego), so the policy matches this build.
+# RBAC policy for the OPA sidecar, and the Envoy edge config: a deploy's init
+# container copies them out of this image, so the sidecars run what this build
+# was tested with. rbac.rego serves the API's own decisions; edge.rego and the
+# route table (edge/routes.json) serve the edge (docs/rbac/rbac-edge-enforcement.md);
+# envoy.yaml is the edge's template, filled in by the init container.
 COPY --from=builder --chown=node:node /app/policy/rbac/rbac.rego ./policy/rbac/rbac.rego
+COPY --from=builder --chown=node:node /app/policy/rbac/edge.rego ./policy/rbac/edge.rego
+COPY --from=builder --chown=node:node /app/policy/rbac/edge/routes.json ./policy/rbac/edge/routes.json
+COPY --from=builder --chown=node:node /app/infra/envoy/envoy.yaml ./policy/envoy/envoy.yaml
 USER node
 EXPOSE 4000
 CMD ["node", "dist/server.js"]

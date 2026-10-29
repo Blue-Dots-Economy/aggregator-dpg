@@ -28,7 +28,7 @@ import {
   supportBodyLimitBytes,
   validateSupportAttachments,
 } from '../services/support-attachments.js';
-import { callerFromAuth, enforceRouteAccess } from '../services/authz/index.js';
+import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 
 const SupportRequestSchema = z
   .object({
@@ -216,7 +216,7 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
 async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await authenticate(req);
   if (result.ok) {
-    await enforceRouteAccess(req, callerFromAuth(result.context));
+    await recordRouteCaller(req, callerFromAuth(result.context));
     return result.context;
   }
   const code = result.error.code === 'MISSING_AGGREGATOR_ID' ? 'FORBIDDEN' : 'UNAUTHORIZED';
