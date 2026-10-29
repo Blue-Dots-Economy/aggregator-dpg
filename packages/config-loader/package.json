@@ -34,7 +34,7 @@
   "dependencies": {
     "@aggregator-dpg/shared-primitives": "workspace:*",
     "js-yaml": "^5.5.0",
-    "zod": "^3.24.0"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
