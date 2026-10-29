@@ -10,11 +10,15 @@ on:
     branches:
       - main
       - develop
+      # release/**: hotfix tags are CI-gated on the release branch commit, and hotfix PRs target it.
+      - 'release/**'
   pull_request:
     branches:
       - main
       - develop
       - feature
+      # release/**: hotfix tags are CI-gated on the release branch commit, and hotfix PRs target it.
+      - 'release/**'
   workflow_dispatch:
 
 concurrency:
