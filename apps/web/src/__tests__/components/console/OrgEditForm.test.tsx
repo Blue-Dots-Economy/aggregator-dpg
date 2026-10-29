@@ -3,7 +3,8 @@
  *
  * Covers: owner editing vs read-only rendering (the Default org, and a
  * non-owner such as the network admin), the locations list (populated +
- * empty), description and domains display and editing, a no-change submit (no
+ * empty), description and domains display and editing (the
+ * domains multi-select), a no-change submit (no
  * network call), a successful patch, a field-clearing patch, and an error
  * response.
  */
@@ -54,7 +55,14 @@ const respond = (body: unknown, status: number) =>
 
 describe('<OrgEditForm />', () => {
   const original = global.fetch;
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Radix Popover (the domains multi-select) reads these; jsdom lacks them.
+    Element.prototype.hasPointerCapture = vi.fn().mockReturnValue(false);
+    Element.prototype.setPointerCapture = vi.fn();
+    Element.prototype.releasePointerCapture = vi.fn();
+    Element.prototype.scrollIntoView = vi.fn();
+  });
   afterEach(() => {
     global.fetch = original;
   });
@@ -64,8 +72,11 @@ describe('<OrgEditForm />', () => {
     expect(screen.getByLabelText(messages.console.org.name)).not.toBeDisabled();
     expect(screen.getByLabelText(messages.console.org.url)).toHaveValue('https://acme.example');
     expect(screen.getByLabelText(messages.console.org.description)).toHaveValue('');
-    expect(screen.getByRole('checkbox', { name: 'Seekers' })).not.toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'Providers' })).not.toBeChecked();
+    expect(screen.getByLabelText(messages.console.org.domains)).toHaveAttribute(
+      'aria-haspopup',
+      'listbox',
+    );
+    expect(screen.getByText(messages.console.org.domains_placeholder)).toBeInTheDocument();
     expect(screen.getByText('1 Main St, Bengaluru, KA')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: messages.console.org.save })).toBeInTheDocument();
     expect(screen.queryByText(messages.console.org.read_only)).toBeNull();
@@ -90,7 +101,7 @@ describe('<OrgEditForm />', () => {
     );
     expect(screen.getByText(messages.console.org.details_owner_only)).toBeInTheDocument();
     expect(screen.queryByRole('textbox')).toBeNull();
-    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.queryByLabelText(messages.console.org.domains)).toBeNull();
     expect(screen.queryByRole('button', { name: messages.console.org.save })).toBeNull();
     expect(screen.getByText('Acme Org')).toBeInTheDocument();
     expect(screen.getByText(/Line one/)).toHaveClass('whitespace-pre-line');
@@ -202,9 +213,11 @@ describe('<OrgEditForm />', () => {
     fireEvent.change(screen.getByLabelText(messages.console.org.description), {
       target: { value: '  About Acme.  ' },
     });
-    // Ticked in reverse order; sent in the network's order.
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Providers' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Seekers' }));
+    // Picked in reverse order; sent in the network's order.
+    fireEvent.click(screen.getByLabelText(messages.console.org.domains));
+    fireEvent.click(await screen.findByRole('button', { name: 'Providers', exact: true }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Seekers', exact: true }));
+    expect(screen.getByRole('button', { name: 'Remove Providers' })).toBeInTheDocument();
     // The counter counts what was typed, spaces included.
     expect(screen.getByText(/15\/1000/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
@@ -221,11 +234,11 @@ describe('<OrgEditForm />', () => {
   it('sends null for a cleared description and [] for cleared domains', async () => {
     global.fetch = respond({ ...baseOrg, description: null, domains: [] }, 200) as never;
     renderForm({ ...baseOrg, description: 'Old', domains: ['seeker'] }, true, true);
-    expect(screen.getByRole('checkbox', { name: 'Seekers' })).toBeChecked();
+    expect(screen.getByText('Seekers')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(messages.console.org.description), {
       target: { value: '' },
     });
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Seekers' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Seekers' }));
     fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
     await waitFor(() =>
       expect(global.fetch).toHaveBeenCalledWith(

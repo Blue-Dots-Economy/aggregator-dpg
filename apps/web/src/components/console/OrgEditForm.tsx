@@ -15,6 +15,7 @@ import { I } from '../../icons';
 import { ConsoleSection, DetailList } from './ConsoleUi';
 import { Input } from '../ui/Input';
 import { Label } from '../ui/Label';
+import { MultiSelect } from '../ui/MultiSelect';
 import { errorKey, sendConsole } from '../../lib/console-client';
 
 /** Longest description the API accepts. */
@@ -51,10 +52,6 @@ export function OrgEditForm({
   const [orgDomains, setOrgDomains] = useState<string[]>(org.domains);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  function toggleDomain(id: string) {
-    setOrgDomains((d) => (d.includes(id) ? d.filter((x) => x !== id) : [...d, id]));
-  }
 
   async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -151,42 +148,36 @@ export function OrgEditForm({
             <Label htmlFor="org-gst">{t('org.gst_number')}</Label>
             <Input id="org-gst" value={gst} onChange={(e) => setGst(e.target.value)} />
           </div>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="org-description">{t('org.description')}</Label>
-          <textarea
-            id="org-description"
-            className="bd-input min-h-[110px]"
-            maxLength={DESCRIPTION_MAX}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-          <span className="text-[12px] text-ink-500">
-            {t('org.description_hint')} {description.length}/{DESCRIPTION_MAX}
-          </span>
-        </div>
-        {domains.length > 0 ? (
-          <fieldset className="flex flex-col gap-1.5 text-[13.5px]">
-            <legend className="bd-label mb-1.5">{t('org.domains')}</legend>
-            <div className="flex flex-wrap gap-2">
-              {domains.map((d) => (
-                <label
-                  key={d.id}
-                  className="inline-flex items-center gap-2 rounded-[10px] border border-(--bd-border) px-3 py-2 cursor-pointer hover:bg-(--bd-border-soft)"
-                >
-                  <input
-                    type="checkbox"
-                    className="w-4 h-4"
-                    style={{ accentColor: 'var(--bd-primary-600)' }}
-                    checked={orgDomains.includes(d.id)}
-                    onChange={() => toggleDomain(d.id)}
-                  />
-                  {d.label}
-                </label>
-              ))}
+          {domains.length > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="org-domains">{t('org.domains')}</Label>
+              <MultiSelect
+                id="org-domains"
+                options={domains.map((d) => ({ value: d.id, label: d.label }))}
+                value={orgDomains}
+                onChange={setOrgDomains}
+                placeholder={t('org.domains_placeholder')}
+              />
             </div>
-          </fieldset>
-        ) : null}
+          ) : null}
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <Label htmlFor="org-description">{t('org.description')}</Label>
+            <textarea
+              id="org-description"
+              className="bd-input min-h-[110px] resize-y"
+              maxLength={DESCRIPTION_MAX}
+              placeholder={t('org.description_placeholder')}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+            <div className="flex justify-between gap-3 text-[12px] text-ink-500">
+              <span>{t('org.description_hint')}</span>
+              <span aria-live="polite">
+                {description.length}/{DESCRIPTION_MAX}
+              </span>
+            </div>
+          </div>
+        </div>
         <div className="flex flex-col gap-1.5 text-[13.5px]">
           <span className="bd-label">{t('org.locations')}</span>
           {addresses.length ? (
