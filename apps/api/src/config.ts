@@ -12,6 +12,7 @@ import {
   campaignExportConfigFields,
   signalStackConfigFields,
 } from '@aggregator-dpg/shared-primitives/config';
+import { dumpFilesSchema } from './services/object-storage/dump-keys.js';
 
 const ConfigSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -178,6 +179,7 @@ const ConfigSchema = z.object({
   CAMPAIGN_DUMP_INSTANCE_ID: z.string().optional(),
   /** Lifetime of the pre-signed dump URLs; short, because the caller downloads at once. */
   CAMPAIGN_DUMP_URL_TTL_SECONDS: z.coerce.number().int().positive().default(600),
+  CAMPAIGN_DUMP_FILES: dumpFilesSchema,
   // ─── Campaign email channel ─────────────────────────────────────────────
   /** Max `item_ids` (recipients) accepted per email request body (after de-dup). */
   CAMPAIGN_EMAIL_MAX_ITEMS: z.coerce.number().int().positive().default(200),

@@ -11,11 +11,19 @@
  * @module apps/api/services/object-storage/dump-keys
  */
 
-/** Tables the exporter publishes, in the order the API reports them. */
-export const DUMP_TABLES = ['user', 'items', 'item_actions'] as const;
+import { z } from 'zod';
 
-/** One of the three exported tables. */
-export type DumpTable = (typeof DUMP_TABLES)[number];
+export const DEFAULT_DUMP_FILES = 'user,items,item_actions,aggregators';
+
+export const dumpFilesSchema = z
+  .string()
+  .optional()
+  .transform((raw) => (raw?.trim() || DEFAULT_DUMP_FILES).split(',').map((t) => t.trim()))
+  .pipe(
+    z
+      .array(z.string().regex(/^\w+$/, 'file names may contain only letters, digits and _'))
+      .refine((files) => new Set(files).size === files.length, 'file names must be unique'),
+  );
 
 /** Inputs that locate one deployment's dump within the bucket. */
 export interface DumpLocation {
@@ -28,7 +36,7 @@ export interface DumpLocation {
 }
 
 /**
- * Builds the key prefix shared by this deployment's three dump objects.
+ * Builds the key prefix shared by this deployment's dump objects.
  *
  * Leading, trailing and repeated slashes in the prefix are dropped. `network`
  * and `instanceId` are used as-is, so a malformed value gives a key that 404s.
@@ -47,9 +55,13 @@ export function dumpKeyRoot(opts: DumpLocation): string {
  * Builds the full key for every exported table.
  *
  * @param opts - The dump location.
- * @returns One entry per table, in {@link DUMP_TABLES} order.
+ * @param files - File names to serve, from `CAMPAIGN_DUMP_FILES`.
+ * @returns One entry per file, in the given order.
  */
-export function dumpObjectKeys(opts: DumpLocation): Array<{ table: DumpTable; key: string }> {
+export function dumpObjectKeys(
+  opts: DumpLocation,
+  files: readonly string[],
+): Array<{ table: string; key: string }> {
   const root = dumpKeyRoot(opts);
-  return DUMP_TABLES.map((table) => ({ table, key: `${root}/${table}.ndjson.gz` }));
+  return files.map((table) => ({ table, key: `${root}/${table}.ndjson.gz` }));
 }

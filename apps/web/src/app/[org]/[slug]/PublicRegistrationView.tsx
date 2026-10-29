@@ -2,7 +2,11 @@
 
 import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import type { RJSFSchema, UiSchema } from '@rjsf/utils';
+import type { ErrorSchema, RJSFSchema, RJSFValidationError, UiSchema } from '@rjsf/utils';
+import {
+  describeSchemaIssue,
+  formatFieldErrors,
+} from '@aggregator-dpg/network-config/field-errors';
 import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
@@ -132,7 +136,12 @@ interface SubmitResponse {
 }
 
 interface ApiErrorEnvelope {
-  error?: { code?: string; title?: string; detail?: string };
+  error?: {
+    code?: string;
+    title?: string;
+    detail?: string;
+    fields?: { field_errors?: unknown };
+  };
 }
 
 /**
@@ -142,6 +151,75 @@ interface ItemLocation {
   lat: number;
   lng: number;
   label?: string;
+}
+
+/**
+ * Rewrites RJSF's validation errors into the wording the participant sees.
+ *
+ * Each message comes from the shared `field-errors` rules, so a failed URL
+ * reads "Please enter a valid web address." and a failed pattern never shows
+ * its regex. The banner text (`stack`) is prefixed with the field's title, e.g.
+ * `Website: Please enter a valid web address.` — the same sentence the API
+ * returns when the server catches it (#903 / #904).
+ *
+ * @param errors - RJSF's errors for the current form data.
+ * @param schema - The schema the form validated against (titles, URL marker).
+ * @returns The same errors with readable `message` and `stack`.
+ */
+export function readableFormErrors(
+  errors: RJSFValidationError[],
+  schema: unknown,
+): RJSFValidationError[] {
+  return errors.map((e) => {
+    const params = (e.params ?? {}) as Record<string, unknown>;
+    // RJSF's `property` (".address.city") already ends with the missing key
+    // for a `required` error; `describeSchemaIssue` appends it again itself.
+    const segments = (e.property ?? '').split('.').filter(Boolean);
+    if (e.name === 'required' && segments.at(-1) === params['missingProperty']) segments.pop();
+    if (e.name === 'additionalProperties' && segments.at(-1) === params['additionalProperty']) {
+      segments.pop();
+    }
+    const d = describeSchemaIssue(
+      {
+        ...(e.name !== undefined ? { keyword: e.name } : {}),
+        instancePath: segments.map((seg) => `/${seg}`).join(''),
+        params,
+        ...(e.message !== undefined ? { message: e.message } : {}),
+      },
+      schema,
+    );
+    return { ...e, message: d.message, stack: formatFieldErrors([d]) };
+  });
+}
+
+/**
+ * Turns the API's `fields.field_errors` (`{ "address.city": "message" }`) into
+ * an RJSF error schema, so each rejected field is marked inline.
+ *
+ * @param fieldErrors - The `field_errors` map from an error response, if any.
+ * @returns The error schema, or `undefined` when there is nothing to mark.
+ */
+export function toErrorSchema(fieldErrors: unknown): ErrorSchema | undefined {
+  if (!fieldErrors || typeof fieldErrors !== 'object' || Array.isArray(fieldErrors)) {
+    return undefined;
+  }
+  const root: Record<string, unknown> = {};
+  let marked = false;
+  for (const [path, message] of Object.entries(fieldErrors as Record<string, unknown>)) {
+    if (typeof message !== 'string' || !path) continue;
+    const segments = path.split('.');
+    // Keys come from the server (and, through it, from Signals): a `__proto__`
+    // segment would write onto Object.prototype, so such a path is skipped.
+    if (segments.includes('__proto__')) continue;
+    let node = root;
+    for (const seg of segments) {
+      if (!Object.hasOwn(node, seg)) node[seg] = {};
+      node = node[seg] as Record<string, unknown>;
+    }
+    node['__errors'] = [...((node['__errors'] as string[] | undefined) ?? []), message];
+    marked = true;
+  }
+  return marked ? (root as ErrorSchema) : undefined;
 }
 
 /**
@@ -238,8 +316,9 @@ export function PublicRegistrationView({
   const [lookup, setLookup] = useState<LookupOutcome | null>(null);
   // Show required-field errors only after the user types or tries to submit.
   const [showValidation, setShowValidation] = useState(false);
-  // Form validity from RjsfThemedForm; enables the submit button.
-  const [canSubmit, setCanSubmit] = useState(false);
+  // Field errors the server returned for the last submit, shown inline;
+  // cleared as soon as the participant edits the form.
+  const [serverFieldErrors, setServerFieldErrors] = useState<ErrorSchema | undefined>(undefined);
   // Coordinates the registrant picked from the address autocomplete, sent as
   // `item_locations` so Signals stores that point. Empty when nothing was
   // picked; Signals then geocodes the address text.
@@ -618,6 +697,11 @@ export function PublicRegistrationView({
       }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as ApiErrorEnvelope;
+        const inline = toErrorSchema(body.error?.fields?.field_errors);
+        if (inline) {
+          setServerFieldErrors(inline);
+          setShowValidation(true);
+        }
         setState({
           status: 'error',
           title: body.error?.title ?? t('error_submission_title'),
@@ -1021,21 +1105,26 @@ export function PublicRegistrationView({
                       // The multi-value widget already emits this shape.
                       onLocationsResolved: (coords: ItemLocation[]) => setResolvedLocations(coords),
                     }}
-                    onChange={(e) => setFormData(e.formData as Record<string, unknown>)}
-                    onValidityChange={setCanSubmit}
+                    onChange={(e) => {
+                      setFormData(e.formData as Record<string, unknown>);
+                      if (serverFieldErrors) setServerFieldErrors(undefined);
+                    }}
                     onSubmit={handleSubmit}
-                    // Live-validate only after the user types or tries to submit.
+                    // Submit is never disabled by an invalid field: the click
+                    // validates, reveals errors and lands in `onError`. Live
+                    // validation starts only then.
                     liveValidate={showValidation}
                     showErrorList={showValidation ? 'top' : false}
                     focusOnFirstError
                     noHtml5Validate
+                    transformErrors={(errors) => readableFormErrors(errors, formSchema)}
+                    {...(serverFieldErrors ? { extraErrors: serverFieldErrors } : {})}
                     onError={(errors) => {
                       setShowValidation(true);
-                      const first = errors?.[0]?.message ?? t('validation_required');
                       setState({
                         status: 'error',
                         title: t('validation_error_title'),
-                        detail: `${first}${errors.length > 1 ? ` ${t('validation_more', { count: errors.length - 1 })}` : ''}`,
+                        detail: errors.map((e) => e.stack).join(' ') || t('validation_required'),
                         code: 'VALIDATION',
                       });
                     }}
@@ -1074,9 +1163,7 @@ export function PublicRegistrationView({
                         // it. Consent does not disable the button; submit opens
                         // the consent gate when needed.
                         const blocked =
-                          state.status === 'submitting' ||
-                          !canSubmit ||
-                          (showBirthYear && !yobValid);
+                          state.status === 'submitting' || (showBirthYear && !yobValid);
                         return (
                           <button
                             type="submit"

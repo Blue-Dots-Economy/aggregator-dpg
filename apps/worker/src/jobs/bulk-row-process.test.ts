@@ -101,7 +101,7 @@ describe('blockingValidationReasons', () => {
   it('surfaces a type error as a blocking reason', () => {
     const reasons = blockingValidationReasons([typeErr]);
     expect(reasons).toHaveLength(1);
-    expect(reasons[0]).toContain('/age');
+    expect(reasons[0]).toBe('age: must be number');
     expect(reasons[0]).toContain('must be number');
   });
 
@@ -130,16 +130,13 @@ describe('blockingValidationReasons', () => {
         conditionalRequired('licence_type'),
         ifErr,
       ]),
-    ).toEqual([
-      "/licence_number: must have required property 'licence_number'",
-      "/licence_type: must have required property 'licence_type'",
-    ]);
+    ).toEqual(['licence_number: is required', 'licence_type: is required']);
   });
 
   it('still treats a top-level required gap as advisory next to a conditional one', () => {
     expect(
       blockingValidationReasons([required, conditionalRequired('licence_number'), ifErr]),
-    ).toEqual(["/licence_number: must have required property 'licence_number'"]);
+    ).toEqual(['licence_number: is required']);
   });
 
   it('still fails a content error inside a conditional branch, without the if summary', () => {
@@ -150,21 +147,36 @@ describe('blockingValidationReasons', () => {
     };
     const reasons = blockingValidationReasons([licencePattern, ifErr]);
     expect(reasons).toHaveLength(1);
-    expect(reasons[0]).toContain('/licence_number');
+    expect(reasons[0]).toBe('licence_number: Please enter a valid value.');
     expect(reasons.join(' ')).not.toContain('"then"');
   });
 
   it('keeps only the non-required errors when required + content errors are mixed', () => {
     const reasons = blockingValidationReasons([required, typeErr, enumErr]);
     expect(reasons).toHaveLength(2);
-    expect(reasons.join(' ')).toContain('/age');
-    expect(reasons.join(' ')).toContain('/status');
+    expect(reasons).toEqual([
+      'age: must be number',
+      'status: must be equal to one of the allowed values',
+    ]);
     expect(reasons.join(' ')).not.toContain('required property');
+  });
+
+  it('words a failed link field as Signals does, never showing the regex (#904)', () => {
+    const schema = {
+      type: 'object',
+      properties: { website: { type: 'string', 'x-uri': true, pattern: '^x$' } },
+    };
+    expect(
+      blockingValidationReasons(
+        [{ keyword: 'pattern', instancePath: '/website', message: 'must match pattern "^x$"' }],
+        schema,
+      ),
+    ).toEqual(['website: Please enter a valid web address.']);
   });
 
   it('falls back to schemaPath and a default message when instancePath/message are absent', () => {
     const reasons = blockingValidationReasons([{ keyword: 'pattern', schemaPath: '#/pattern' }]);
-    expect(reasons).toEqual(['#/pattern: invalid']);
+    expect(reasons).toEqual(['#/pattern: Please enter a valid value.']);
   });
 });
 

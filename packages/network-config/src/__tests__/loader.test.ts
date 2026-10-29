@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { FileNetworkConfigLoader } from '../loader.js';
 import { AggregatorConfigSchema } from '../interface.js';
+import { URL_PATTERN } from '../uri-fields.js';
 
 const BLUE_DOT_YAML = `
 aggregator:
@@ -88,6 +89,32 @@ describe('FileNetworkConfigLoader', () => {
       phone: 'hiringManagerPhoneNumber',
       email: 'hiringManagerEmail',
     });
+  });
+
+  it('gives every link field the Signals URL rule in the resolved schema (#904)', async () => {
+    const network = structuredClone(BLUE_DOT_NETWORK);
+    Object.assign(network.domains[0]!.item_schemas['profile_1.0']!.properties, {
+      website: { type: 'string', 'x-uri': true },
+      catalog_url: { type: 'string', format: 'uri' },
+    });
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: async () =>
+        new Response(JSON.stringify(network), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const props = (
+      result.value.domains['seeker']?.schema as { properties: Record<string, unknown> }
+    ).properties;
+    expect(props['website']).toEqual({ type: 'string', 'x-uri': true, pattern: URL_PATTERN });
+    expect(props['catalog_url']).toEqual({ type: 'string', 'x-uri': true, pattern: URL_PATTERN });
+    // Identity sniffing still sees the untouched contact fields.
+    expect(result.value.domains['seeker']?.identity.email).toBe('email');
   });
 
   it('returns CONFIG_FILE_MISSING when the YAML is absent', async () => {
