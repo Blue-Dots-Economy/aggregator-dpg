@@ -681,16 +681,22 @@ on a running stack.
 > error-keyed troubleshooting table. This section covers only what differs in
 > the unified stack.
 
-Both images are **public on GHCR**: no `docker login`, and no `signals-search`
-checkout (signals-search is pulled prebuilt).
+signals-search is **built from its `main` branch on GitHub** on start: no
+`signals-search` checkout, and no image tag to keep current (only release tags
+publish images). The build uses `dhi.io` base images, so it needs the same
+`docker login dhi.io` as the rest of the stack. The first start takes a few
+minutes longer while it builds. To run a published release image instead, set
+`SIGNALS_SEARCH_IMAGE=ghcr.io/blue-dots-economy/signals-search:<release-tag>` and
+`SIGNALS_SEARCH_PULL_POLICY=missing` in `.env`. `SIGNALS_SEARCH_GIT` points the
+build at another branch or fork.
 
-> **On Apple Silicon / arm64 these run emulated.** Both images are amd64-only, so
-> the compose pins `platform: linux/amd64` — without it the pull fails with
-> `no matching manifest for linux/arm64/v8`. It works (bge-m3 serves a 1024-dim
-> embedding ~35s after start on an M-series host), just slower. Upstream TEI has
-> no arm64 build, so the embedder cannot be made native; the search app can, via
-> `SIGNALS_SEARCH_IMAGE=signals-search:local` + `SEARCH_PLATFORM=linux/arm64` in
-> `.env`.
+> **On Apple Silicon / arm64 the embedder runs emulated.** Upstream TEI has no
+> arm64 build, so the compose pins `platform: linux/amd64` on `tei-embeddings`;
+> without it the pull fails with `no matching manifest for linux/arm64/v8`. It
+> works (bge-m3 serves a 1024-dim embedding ~35s after start on an M-series
+> host), just slower. The search app is built natively, so it needs nothing
+> extra. If you switch to a published signals-search image, that image is
+> amd64-only: also set `DOCKER_DEFAULT_PLATFORM=linux/amd64`.
 
 ### 10.1 What differs from signals-dpg's own stack
 
