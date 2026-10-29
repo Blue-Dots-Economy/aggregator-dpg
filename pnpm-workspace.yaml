@@ -61,38 +61,23 @@ overrides:
   # (mailto header injection via percent-encoded field-name desynchronization).
   # Fixed in 2.4.7 / 3.1.8 / 4.1.5. Each selector is widened to catch its own
   # prior output; the two majors stay on separate copies.
-  # Raised again: 3.1.8 and 4.1.5 (the versions the prior floors produced) —
-  # CVE-2026-110180 (host canonicalization bypass), CVE-2026-110306 (XSS via
-  # scheme decoding), CVE-2026-110095 (path traversal via relative URI
-  # normalization), CVE-2026-110725 (XSS via unescaped colon in relative
-  # paths). Fixed in 3.1.9 / 4.2.3.
+  # Raised again: 3.1.8/4.1.5 -> CVE-2026-110180/110306/110095/110725
+  # (host/XSS/path-traversal bypasses). Fixed in 3.1.9 / 4.2.3.
   'fast-uri@>=3.0.0 <3.1.9': 3.1.9
   'fast-uri@>=4.0.0 <4.2.3': 4.2.3
 
-  # vite 7.3.6 and launch-editor 2.14.1 arrive as vitest's own transitive
-  # deps — nothing here declares either directly, so bumping vitest's own
-  # ^4.1.11 specifier does not move them.
-  #   vite: CVE-2026-112946 (files outside server.fs.allow served when
-  #     project paths match system paths) and CVE-2026-112945 (cross-origin
-  #     script execution via custom middleware). Fixed in 7.3.7.
-  #   launch-editor: CVE-2026-112942 (fs.existsSync() bypass on Windows),
-  #     CVE-2026-112943 (escapeCmdArgs() omits % escaping), CVE-2026-112944
-  #     (editor CLI flag misinterpretation -> arbitrary command execution).
-  #     Fixed in 2.14.2.
+  # vite/launch-editor arrive via vitest, declared nowhere here.
+  # CVE-2026-112946/112945 (vite) and CVE-2026-112942/112943/112944
+  # (launch-editor). Fixed in 7.3.7 / 2.14.2.
   'vite@<7.3.7': 7.3.7
   'launch-editor@<2.14.2': 2.14.2
 
-  # js-yaml 4.3.1 arrives via cosmiconfig (eslint config loading), a
-  # different major line from the ^5.4.2 declared directly in config-loader
-  # and schema-service. CVE-2026-84375: maxTotalMergeKeys does not limit CPU
-  # use for empty merge sources. Fixed in 4.3.2.
+  # js-yaml 4.3.1, via cosmiconfig — a different major line from the ^5.4.2
+  # declared directly elsewhere. CVE-2026-84375. Fixed in 4.3.2.
   'js-yaml@<4.3.2': 4.3.2
 
-  # undici 7.29.1 (via @scalar/json-magic, apps/api docs tooling) and 8.11.2
-  # (via jsdom, test-only) -> CVE-2026-109869 (DoS via unhandled stream error
-  # on excessive content-encodings), CVE-2026-109841 (SRI bypass via
-  # non-lowercase algorithm tokens), CVE-2026-109924 (DoS via EventSource
-  # memory exhaustion). Fixed in 7.30.1 / 8.12.2.
+  # undici 7.29.1/8.11.2 (via @scalar/json-magic, jsdom) -> CVE-2026-109869/
+  # 109841/109924 (DoS, SRI bypass). Fixed in 7.30.1 / 8.12.2.
   'undici@>=7.0.0 <7.30.1': 7.30.1
   'undici@>=8.0.0 <8.12.2': 8.12.2
 
