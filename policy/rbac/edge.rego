@@ -34,6 +34,16 @@ method := "GET" if {
 
 path := split(http.path, "?")[0]
 
+# The path's segments, percent-decoded. Fastify decodes the path before it
+# matches static segments (`/v1/rol%65s` is `/v1/roles`), so the edge must too,
+# or it would decide an encoded request against a different route. `+` is a
+# literal in a path. A segment that does not decode leaves the path unmatched.
+segments := decoded if {
+	raw := split(path, "/")
+	decoded := [urlquery.decode(replace(s, "+", "%2B")) | some s in raw]
+	count(decoded) == count(raw)
+}
+
 request_id := object.get(object.get(http, "headers", {}), "x-request-id", "")
 
 jwt_payload := input.attributes.metadataContext.filterMetadata["envoy.filters.http.jwt_authn"].jwt_payload
@@ -91,7 +101,7 @@ candidates[shape] := r if {
 	some r in data.edge.routes
 	r.method == method
 	tpl := split(r.path, "/")
-	segs := split(path, "/")
+	segs := segments
 	count(tpl) == count(segs)
 	every i, t in tpl {
 		segment_matches(t, segs[i])

@@ -126,7 +126,7 @@ The catalogue is the built-in roles (`packages/rbac/src/builtin-roles.ts`, seede
 The API pushes the catalogue, with the RBAC mode, to its own OPA sidecar (`PUT /v1/data/catalogue`, `apps/api/src/services/authz/edge-catalogue.ts`) at boot and on every refresh tick, not only when the revision changes, so a restarted OPA is filled again within one tick (`apps/api/src/services/authz/runtime.ts`).
 
 - OPA keeps the last catalogue it received, in memory. If it restarts empty, the edge refuses every permission route until the API pushes again (fail closed); `public` routes pass as soon as OPA answers.
-- The edge policy is its own package, `policy/rbac/edge.rego` (tests in `policy/rbac/edge_test.rego`): it expands the token's role keys with the catalogue and matches the request against `policy/rbac/edge/routes.json`.
+- The edge policy is its own package, `policy/rbac/edge.rego` (tests in `policy/rbac/edge_test.rego`): it expands the token's role keys with the catalogue and matches the request against `policy/rbac/edge/routes.json`. It percent-decodes each path segment before matching, as Fastify does, so an encoded path (`/v1/bulk-uploads/te%6dplate`) is decided against the route the API serves.
 - An OPA bundle served from the API or object storage was the alternative (open question 3); the push was chosen.
 
 ---

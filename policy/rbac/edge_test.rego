@@ -146,6 +146,34 @@ test_static_segment_beats_a_parameter if {
 	d.dynamic_metadata.rbac_edge.route == "/v1/user/read/me"
 }
 
+test_an_encoded_static_segment_matches_the_static_route if {
+	# Fastify serves /v1/user/read/m%65 as /v1/user/read/me, so the edge decides it as that route.
+	d := decide(req("GET", "/v1/user/read/m%65", user(["coordinator"])), "enforce")
+	d.allowed
+	d.dynamic_metadata.rbac_edge.route == "/v1/user/read/me"
+}
+
+test_an_encoded_static_segment_is_held_to_its_own_permission if {
+	d := decide(req("POST", "/v1/links/cr%65ate", user(["org_admin"])), "enforce")
+	d.http_status == 403
+	d.dynamic_metadata.rbac_edge.permission == "profiles.onboard"
+}
+
+test_an_encoded_slash_stays_inside_one_segment if {
+	d := decide(req("GET", "/v1/user/read/a%2Fb", user(["org_admin"])), "enforce")
+	d.allowed
+	d.dynamic_metadata.rbac_edge.route == "/v1/user/read/:id"
+}
+
+test_a_plus_is_not_a_space if {
+	d := decide(req("GET", "/v1/user/read/a+b", user(["org_admin"])), "enforce")
+	d.dynamic_metadata.rbac_edge.route == "/v1/user/read/:id"
+}
+
+test_an_invalid_escape_is_404 if {
+	decide(req("GET", "/v1/user/read/%zz", user(["network_admin"])), "enforce").http_status == 404
+}
+
 test_head_is_decided_as_get if decide(anon("HEAD", "/v1/aggregator-config"), "enforce").allowed
 
 test_query_string_is_ignored if {
@@ -286,4 +314,12 @@ test_real_table_owner_is_refused_network_admin_org_actions if {
 	body(decide).fields.permission == "orgs.onboard"
 	decide_real(req("POST", "/v1/org/access/repair/0b1c", user(["network_admin"]))).allowed
 	decide_real(req("POST", "/v1/org/decision/0b1c", user(["network_admin"]))).allowed
+}
+
+test_real_table_encoded_template_path_keeps_its_permission if {
+	# /v1/bulk-uploads/te%6dplate is the template route in Fastify, not /v1/bulk-uploads/:id.
+	d := decide_real(req("GET", "/v1/bulk-uploads/te%6dplate", user(["org_admin"])))
+	d.http_status == 403
+	body(d).fields.permission == "profiles.onboard"
+	d.dynamic_metadata.rbac_edge.route == "/v1/bulk-uploads/template"
 }
