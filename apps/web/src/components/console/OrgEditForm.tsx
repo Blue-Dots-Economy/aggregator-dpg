@@ -10,6 +10,7 @@
 import { useState, type ReactNode, type SubmitEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import type { Org } from '@aggregator-dpg/shared-primitives/user-org';
+import { isValidGstin, isValidWebsite } from '@aggregator-dpg/shared-primitives/org-details';
 import { Button } from '../ui/Button';
 import { I } from '../../icons';
 import { ConsoleSection, DetailList } from './ConsoleUi';
@@ -23,6 +24,12 @@ const DESCRIPTION_MAX = 1000;
 
 /** Trimmed value, or null when blank (clears the field). */
 const orNull = (v: string) => (v.trim() ? v.trim() : null);
+
+/** Fields whose errors the form shows under the input. */
+type CheckedField = 'url' | 'gst_number' | 'domains';
+
+/** Classes that mark an input whose value was refused. */
+const INVALID_INPUT = 'border-rose-400 ring-4 ring-rose-100';
 
 /** Whether two id lists hold the same ids, in any order. */
 const sameIds = (a: readonly string[], b: readonly string[]) =>
@@ -51,7 +58,45 @@ export function OrgEditForm({
   const [description, setDescription] = useState(org.description ?? '');
   const [orgDomains, setOrgDomains] = useState<string[]>(org.domains);
   const [message, setMessage] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<CheckedField, string>>>({});
   const [busy, setBusy] = useState(false);
+
+  /** Translated message for a refused field; the server's text for any other. */
+  function fieldMessage(field: string, serverMessage: string): string {
+    if (field === 'url') return t('org.invalid_url');
+    if (field === 'gst_number') return t('org.invalid_gst');
+    return serverMessage;
+  }
+
+  /** Drops a field's error once its value is edited. */
+  function clearError(field: CheckedField) {
+    setFieldErrors((errors) => {
+      if (!errors[field]) return errors;
+      const next = { ...errors };
+      delete next[field];
+      return next;
+    });
+  }
+
+  /** Error state of one input: its message, and the props that mark it. */
+  function errorOf(field: CheckedField) {
+    const text = fieldErrors[field];
+    return {
+      text,
+      inputProps: text
+        ? {
+            'aria-invalid': true,
+            'aria-describedby': `org-${field}-error`,
+            className: INVALID_INPUT,
+          }
+        : {},
+      node: text ? (
+        <span id={`org-${field}-error`} className="text-[12px] text-rose-600">
+          {text}
+        </span>
+      ) : null,
+    };
+  }
 
   async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -65,6 +110,19 @@ export function OrgEditForm({
       // Sent in configuration order, so the stored list reads the same everywhere.
       patch['domains'] = domains.map((d) => d.id).filter((id) => orgDomains.includes(id));
     }
+    // Only values being sent are checked, as the API does; a stored value is left alone.
+    const errors: Partial<Record<CheckedField, string>> = {};
+    if (typeof patch['url'] === 'string' && !isValidWebsite(patch['url'])) {
+      errors.url = t('org.invalid_url');
+    }
+    if (typeof patch['gst_number'] === 'string' && !isValidGstin(patch['gst_number'])) {
+      errors.gst_number = t('org.invalid_gst');
+    }
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setMessage(t('org.fix_fields'));
+      return;
+    }
     if (Object.keys(patch).length === 0) {
       setMessage(t('org.saved'));
       return;
@@ -75,10 +133,26 @@ export function OrgEditForm({
     if (r.ok) {
       setCurrent(r.data);
       setOrgDomains(r.data.domains);
+      // The API stores the GST number upper-cased.
+      setGst(r.data.gst_number ?? '');
       setMessage(t('org.saved'));
-    } else {
-      setMessage(t(errorKey(r)));
+      return;
     }
+    const serverErrors = r.error.fields?.['field_errors'];
+    if (r.status === 400 && serverErrors && typeof serverErrors === 'object') {
+      const mapped: Partial<Record<CheckedField, string>> = {};
+      for (const [field, text] of Object.entries(serverErrors as Record<string, unknown>)) {
+        if (field === 'url' || field === 'gst_number' || field === 'domains') {
+          mapped[field] = fieldMessage(field, String(text));
+        }
+      }
+      if (Object.keys(mapped).length > 0) {
+        setFieldErrors(mapped);
+        setMessage(t('org.fix_fields'));
+        return;
+      }
+    }
+    setMessage(t(errorKey(r)));
   }
 
   const addresses = current.locations
@@ -124,9 +198,13 @@ export function OrgEditForm({
     );
   }
 
+  const urlError = errorOf('url');
+  const gstError = errorOf('gst_number');
+  const domainsError = errorOf('domains');
+
   return (
     <ConsoleSection title={t('org.details')}>
-      <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
+      <form noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="org-name">{t('org.name')}</Label>
@@ -134,7 +212,19 @@ export function OrgEditForm({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="org-url">{t('org.url')}</Label>
-            <Input id="org-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} />
+            <Input
+              id="org-url"
+              inputMode="url"
+              autoComplete="url"
+              placeholder={t('org.url_placeholder')}
+              value={url}
+              onChange={(e) => {
+                setUrl(e.target.value);
+                clearError('url');
+              }}
+              {...urlError.inputProps}
+            />
+            {urlError.node}
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="org-legal">{t('org.legal_name')}</Label>
@@ -146,7 +236,19 @@ export function OrgEditForm({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="org-gst">{t('org.gst_number')}</Label>
-            <Input id="org-gst" value={gst} onChange={(e) => setGst(e.target.value)} />
+            <Input
+              id="org-gst"
+              autoCapitalize="characters"
+              maxLength={15}
+              placeholder={t('org.gst_placeholder')}
+              value={gst}
+              onChange={(e) => {
+                setGst(e.target.value);
+                clearError('gst_number');
+              }}
+              {...gstError.inputProps}
+            />
+            {gstError.node}
           </div>
           {domains.length > 0 ? (
             <div className="flex flex-col gap-1.5">
@@ -155,9 +257,14 @@ export function OrgEditForm({
                 id="org-domains"
                 options={domains.map((d) => ({ value: d.id, label: d.label }))}
                 value={orgDomains}
-                onChange={setOrgDomains}
+                onChange={(next) => {
+                  setOrgDomains(next);
+                  clearError('domains');
+                }}
                 placeholder={t('org.domains_placeholder')}
+                {...(domainsError.text ? { className: INVALID_INPUT } : {})}
               />
+              {domainsError.node}
             </div>
           ) : null}
           <div className="flex flex-col gap-1.5 sm:col-span-2">

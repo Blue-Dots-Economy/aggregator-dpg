@@ -257,4 +257,98 @@ describe('<OrgEditForm />', () => {
     fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
     expect(await screen.findByText(messages.console.errors.name_taken)).toBeInTheDocument();
   });
+
+  it.each(['acme.example', 'http://acme.example', 'not a url'])(
+    'refuses the website %s before sending, under the field',
+    async (value) => {
+      global.fetch = respond({}, 200) as never;
+      renderForm(baseOrg, true, true);
+      const input = screen.getByLabelText(messages.console.org.url);
+      fireEvent.change(input, { target: { value } });
+      fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
+      expect(await screen.findByText(messages.console.org.invalid_url)).toBeInTheDocument();
+      expect(input).toHaveAttribute('aria-invalid', 'true');
+      expect(screen.getByRole('status')).toHaveTextContent(messages.console.org.fix_fields);
+      expect(global.fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses a GSTIN with a wrong check character before sending', async () => {
+    global.fetch = respond({}, 200) as never;
+    renderForm(baseOrg, true, true);
+    fireEvent.change(screen.getByLabelText(messages.console.org.gst_number), {
+      target: { value: '29ABCDE1234F1Z5' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
+    expect(await screen.findByText(messages.console.org.invalid_gst)).toBeInTheDocument();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('clears a field error once the field is edited', async () => {
+    renderForm(baseOrg, true, true);
+    const input = screen.getByLabelText(messages.console.org.url);
+    fireEvent.change(input, { target: { value: 'acme.example' } });
+    fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
+    await screen.findByText(messages.console.org.invalid_url);
+    fireEvent.change(input, { target: { value: 'https://acme.example' } });
+    expect(screen.queryByText(messages.console.org.invalid_url)).toBeNull();
+    expect(input).not.toHaveAttribute('aria-invalid');
+  });
+
+  it('sends a valid GSTIN typed in lower case and shows the stored upper-case value', async () => {
+    global.fetch = respond({ ...baseOrg, gst_number: '29ABCDE1234F1ZW' }, 200) as never;
+    renderForm(baseOrg, true, true);
+    const input = screen.getByLabelText(messages.console.org.gst_number);
+    fireEvent.change(input, { target: { value: '29abcde1234f1zw' } });
+    fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
+    await waitFor(() => expect(input).toHaveValue('29ABCDE1234F1ZW'));
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ body: JSON.stringify({ gst_number: '29abcde1234f1zw' }) }),
+    );
+  });
+
+  it('does not check a stored value that is not being changed', async () => {
+    global.fetch = respond(
+      { ...baseOrg, url: 'http://legacy.example', legal_name: 'X' },
+      200,
+    ) as never;
+    renderForm({ ...baseOrg, url: 'http://legacy.example' }, true, true);
+    fireEvent.change(screen.getByLabelText(messages.console.org.legal_name), {
+      target: { value: 'X' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ body: JSON.stringify({ legal_name: 'X' }) }),
+      ),
+    );
+    expect(screen.queryByText(messages.console.org.invalid_url)).toBeNull();
+  });
+
+  it('shows the server field errors under the matching fields', async () => {
+    global.fetch = respond(
+      {
+        error: {
+          code: 'SCHEMA_VALIDATION',
+          fields: {
+            field_errors: {
+              gst_number: 'Please enter a valid GSTIN.',
+              domains: 'This network has no domain astronaut.',
+            },
+          },
+        },
+      },
+      400,
+    ) as never;
+    renderForm(baseOrg, true, true);
+    fireEvent.change(screen.getByLabelText(messages.console.org.gst_number), {
+      target: { value: '27AAPFU0939F1ZV' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
+    expect(await screen.findByText(messages.console.org.invalid_gst)).toBeInTheDocument();
+    expect(screen.getByText('This network has no domain astronaut.')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(messages.console.org.fix_fields);
+  });
 });
