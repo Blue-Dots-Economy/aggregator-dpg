@@ -82,7 +82,7 @@ describe('countOrgs', () => {
 describe('NetworkOrgsView', () => {
   it('lists the Default organisation under All without counting it', () => {
     renderView({ orgs: [...orgs, defaultOrg] });
-    expect(filter(/^All organisations\s*4/)).toBeInTheDocument();
+    expect(filter(/^All organisations\s*4/)).toHaveTextContent('Default not counted');
     expect(screen.getByRole('heading', { level: 2, name: /^Network\s*4$/ })).toBeInTheDocument();
     expect(orgLinks().map((a) => a.textContent)).toEqual(
       expect.arrayContaining([expect.stringContaining('Default')]),

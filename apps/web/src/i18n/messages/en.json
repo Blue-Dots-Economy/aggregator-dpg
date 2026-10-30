@@ -762,7 +762,7 @@
       "tile": {
         "all": {
           "label": "All organisations",
-          "sub": "In the network"
+          "sub": "In the network, Default not counted"
         },
         "active": {
           "label": "Active",
