@@ -333,7 +333,6 @@ function RolesView({
   if (roles.length === 0) return <Empty>{t('roles_empty')}</Empty>;
   if (visible.length === 0) return <Empty>{t('no_match', { query })}</Empty>;
   const current = visible.find((r) => r.key === selected) ?? visible[0]!;
-  const total = permissions.filter((p) => !p.retired).length;
   const scopes: Array<{ id: Scope; icon: LucideIcon; title: string; hint: string }> = [
     { id: 'network', icon: Globe, title: t('scope_network'), hint: t('scope_network_hint') },
     {
@@ -364,7 +363,6 @@ function RolesView({
                 </span>
               </div>
               {list.map((r) => {
-                const pd = r.permissions.filter((p) => personal.has(p)).length;
                 const assigned = r.granted.via === 'assignment';
                 return (
                   <button
@@ -397,16 +395,19 @@ function RolesView({
                         <span className="flex flex-wrap items-center gap-2 font-bold text-ink-900">
                           {r.name}
                           <Badge tone={assigned ? 'muted' : 'brand'}>
-                            {assigned ? t('via_assigned') : t('via_membership')}
+                            {assigned ? t('via_assigned') : t('via_automatic')}
                           </Badge>
                           {r.is_builtin ? null : <Badge tone="muted">{t('custom')}</Badge>}
                         </span>
-                        <span className="block font-mono text-[11.5px] text-ink-500">{r.key}</span>
+                        {r.description ? (
+                          <span className="block truncate text-[12.5px] text-ink-500">
+                            {r.description}
+                          </span>
+                        ) : null}
                       </span>
                     </span>
-                    <span className="flex items-center gap-2 text-[12px] whitespace-nowrap text-ink-500">
+                    <span className="text-[12px] whitespace-nowrap text-ink-500">
                       {t('permission_count', { count: r.permissions.length })}
-                      <Bar personal={pd} other={r.permissions.length - pd} total={total} />
                     </span>
                   </button>
                 );
@@ -419,29 +420,11 @@ function RolesView({
         role={current}
         permissions={permissions}
         personal={personal}
-        total={total}
+        total={permissions.filter((p) => !p.retired).length}
         onPermission={onPermission}
         query={query}
       />
     </div>
-  );
-}
-
-/** A short bar: the share of all permissions a role grants, personal data in red. */
-function Bar({
-  personal,
-  other,
-  total,
-}: Readonly<{ personal: number; other: number; total: number }>) {
-  const pct = (n: number) => `${total ? (n / total) * 100 : 0}%`;
-  return (
-    <span
-      aria-hidden="true"
-      className="flex h-[5px] w-16 overflow-hidden rounded-full bg-(--bd-border-soft)"
-    >
-      <i className="bg-rose-500" style={{ width: pct(personal) }} />
-      <i className="bg-(--bd-primary)" style={{ width: pct(other) }} />
-    </span>
   );
 }
 
@@ -480,7 +463,7 @@ function RoleDetail({
             <div className="font-mono text-[12px] text-ink-500">{role.key}</div>
           </div>
           <Badge tone={assigned ? 'muted' : 'brand'}>
-            {assigned ? t('via_assigned') : t('via_membership')}
+            {assigned ? t('via_assigned') : t('via_automatic')}
           </Badge>
         </div>
         {role.description ? <p className="text-ink-700">{role.description}</p> : null}

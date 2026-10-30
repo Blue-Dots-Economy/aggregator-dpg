@@ -1070,7 +1070,6 @@
       "scope_aggregator": "Aggregator organisations",
       "scope_aggregator_hint": "Every organisation below",
       "via_assigned": "Assigned",
-      "via_membership": "Membership",
       "custom": "Custom",
       "max_days": "Max days",
       "footer_assigned": "Given to people by someone allowed to assign it",
