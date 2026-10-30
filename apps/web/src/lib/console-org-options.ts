@@ -46,44 +46,70 @@ export interface OrgOption {
   label: string;
 }
 
+/** One organisation in tree order, with its path and level. */
+export interface OrgTreeEntry {
+  org: OrgRow;
+  /** Names from the topmost listed ancestor down to this org. */
+  path: string[];
+  /** 0 for a topmost listed org, then 1, 2, … below it. */
+  level: number;
+  /** The last of its siblings. */
+  last: boolean;
+  /** For each ancestor level, whether that ancestor has later siblings (its line continues). */
+  continues: boolean[];
+}
+
 /**
- * Orders orgs as their tree (parents before children, siblings by name) and
- * labels each with its path.
+ * Orders orgs as their tree: parents before children, siblings by name.
  *
  * An org whose parent is not in the list starts a path of its own, so every
  * org appears once.
  *
- * @param orgs - The reachable orgs, in any order.
- * @returns The options in tree order.
+ * @param orgs - The orgs, in any order.
+ * @returns Each org with its path and level, in tree order.
  */
-export function orgOptionsInTreeOrder(orgs: readonly OrgRow[]): OrgOption[] {
+export function orgsInTreeOrder(orgs: readonly OrgRow[]): OrgTreeEntry[] {
   const ids = new Set(orgs.map((o) => o.id));
   const byParent = new Map<string | null, OrgRow[]>();
   for (const o of orgs) {
     const parent = o.parent_id && ids.has(o.parent_id) ? o.parent_id : null;
     byParent.set(parent, [...(byParent.get(parent) ?? []), o]);
   }
-  const out: OrgOption[] = [];
+  const out: OrgTreeEntry[] = [];
   const seen = new Set<string>();
-  const walk = (parent: string | null, path: string[]) => {
-    const kids = [...(byParent.get(parent) ?? [])].sort((a, b) =>
-      a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
-    );
-    for (const o of kids) {
-      if (seen.has(o.id)) continue;
+  const walk = (parent: string | null, path: string[], continues: boolean[]) => {
+    const kids = [...(byParent.get(parent) ?? [])]
+      .filter((o) => !seen.has(o.id))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    kids.forEach((o, i) => {
+      if (seen.has(o.id)) return;
       seen.add(o.id);
+      const last = i === kids.length - 1;
       const names = [...path, o.name];
-      const knownAs = o.known_as_name ?? o.known_as;
-      out.push({
-        id: o.id,
-        name: o.name,
-        label: `${names.join(' › ')}${knownAs ? ` (${knownAs})` : ''}`,
-      });
-      walk(o.id, names);
-    }
+      out.push({ org: o, path: names, level: path.length, last, continues });
+      walk(o.id, names, [...continues, !last]);
+    });
   };
-  walk(null, []);
+  walk(null, [], []);
   return out;
+}
+
+/**
+ * Orders orgs as their tree (parents before children, siblings by name) and
+ * labels each with its path.
+ *
+ * @param orgs - The reachable orgs, in any order.
+ * @returns The options in tree order.
+ */
+export function orgOptionsInTreeOrder(orgs: readonly OrgRow[]): OrgOption[] {
+  return orgsInTreeOrder(orgs).map(({ org, path }) => {
+    const knownAs = org.known_as_name ?? org.known_as;
+    return {
+      id: org.id,
+      name: org.name,
+      label: `${path.join(' › ')}${knownAs ? ` (${knownAs})` : ''}`,
+    };
+  });
 }
 
 /**

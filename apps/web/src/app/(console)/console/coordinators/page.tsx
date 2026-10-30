@@ -21,7 +21,11 @@ import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
 import { getConsoleActor } from '@/lib/console-actor';
 import { canInvite } from '@/lib/capabilities';
 import { RoleBadges } from '@/components/console/RoleBadges';
-import { networkDomains, servedLabels } from '@/lib/console-domains.server';
+import { networkDomains, servedDomains } from '@/lib/console-domains.server';
+import { DomainChips } from '@/components/console/DomainChips';
+import { initialsOf } from '@/lib/initials';
+import { Clock, Eye, UserCheck, Users, UserX } from 'lucide-react';
+import { CountTile, type TileTone } from '@/components/console/CountTile';
 import { CoordinatorFilters } from '@/components/console/CoordinatorFilters';
 import { readReachableOrgs } from '@/lib/console-hierarchy.server';
 import { orgOptionsInTreeOrder } from '@/lib/console-org-options';
@@ -32,6 +36,13 @@ import { I } from '@/icons';
 
 const STATUSES = ['pending', 'active', 'inactive', 'retired'] as const;
 const UUID_RE = /^[0-9a-f-]{36}$/i;
+
+/** Coordinators read per status to count it; more show as "N+". */
+const COUNT_LIMIT = 100;
+
+/** The status filters shown as counts above the list. */
+const COUNTED = ['all', 'active', 'pending', 'inactive'] as const;
+type Counted = (typeof COUNTED)[number];
 
 export default async function ConsoleCoordinatorsPage({
   searchParams,
@@ -60,6 +71,7 @@ export default async function ConsoleCoordinatorsPage({
     readReachableOrgs(),
     getConsoleActor(),
   ]);
+  const counts = await countCoordinators(orgs, orgId, serves);
   const orgOptions = orgOptionsInTreeOrder(orgs);
   const orgById = new Map(orgs.map((o) => [o.id, o]));
   // Same gate the sidebar link used to apply, now checked here instead.
@@ -106,20 +118,56 @@ export default async function ConsoleCoordinatorsPage({
     <>
       <Topbar title={t('coordinators.heading')} subtitle={t('coordinators.subtitle')} />
       <div className="flex flex-col gap-6">
+        <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
+          {COUNTED.map((f) => {
+            const c = counts[f];
+            const rest = Object.fromEntries(Object.entries(keep).filter(([k]) => k !== 'status'));
+            const q = new URLSearchParams(f === 'all' ? rest : { ...rest, status: f }).toString();
+            const { icon: Icon, tone } = COUNT_TILE[f];
+            const selected = (status ?? 'all') === f;
+            return (
+              <CountTile
+                key={f}
+                icon={<Icon size={20} strokeWidth={2} />}
+                tone={tone}
+                label={t(`org_home.tile.${f}.label`)}
+                count={c.more ? `${c.n}+` : String(c.n)}
+                sub={
+                  f === 'pending' && c.n === 0
+                    ? t('org_home.tile.pending.none')
+                    : t(`org_home.tile.${f}.sub`)
+                }
+                muted={f === 'pending' && c.n === 0}
+                selected={selected}
+                showLabel={t('org_home.tile_show')}
+                showingLabel={t('org_home.tile_showing')}
+                href={`/console/coordinators${q ? `?${q}` : ''}`}
+              />
+            );
+          })}
+        </div>
         <ConsoleSection flush>
-          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-(--bd-border-soft) px-5 py-4">
-            <CoordinatorFilters
-              action="/console/coordinators"
-              values={{ orgId: orgId ?? '', status: status ?? '', serves: serves ?? '' }}
-              orgs={orgOptions}
-              domains={domains}
-            />
-            {showInvite ? (
-              <Link className={buttonClass('primary')} href="/console/invite">
-                <I.mail size={14} />
-                {t('nav.invite')}
-              </Link>
-            ) : null}
+          <div className="flex flex-wrap items-center gap-3 border-b border-(--bd-border-soft) px-[18px] py-3.5">
+            <h2 className="flex items-center gap-2 font-display text-[15px] font-bold text-ink-900">
+              {t('coordinators.heading')}
+              <span className="rounded-full bg-(--bd-border-soft) px-2 text-[12px] font-bold text-ink-500">
+                {page.next_cursor ? `${page.users.length}+` : page.users.length}
+              </span>
+            </h2>
+            <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+              <CoordinatorFilters
+                action="/console/coordinators"
+                values={{ orgId: orgId ?? '', status: status ?? '', serves: serves ?? '' }}
+                orgs={orgOptions}
+                domains={domains}
+              />
+              {showInvite ? (
+                <Link className={buttonClass('primary')} href="/console/invite">
+                  <I.mail size={14} />
+                  {t('nav.invite')}
+                </Link>
+              ) : null}
+            </div>
           </div>
           {chips.length > 0 ? (
             <div className="flex flex-wrap items-center gap-2 border-b border-(--bd-border-soft) px-5 py-3">
@@ -146,50 +194,82 @@ export default async function ConsoleCoordinatorsPage({
           {page.users.length === 0 ? (
             <EmptyState>{t('coordinators.empty')}</EmptyState>
           ) : (
-            <div className="overflow-x-auto scroll-x">
+            <div className="scroll-x max-h-[min(640px,70vh)] overflow-auto overscroll-contain">
               <table className="bd-table">
-                <thead>
+                <thead className="sticky top-0 z-[1]">
                   <tr>
                     <th>{t('coordinators.coordinator')}</th>
                     <th>{t('coordinators.organisation')}</th>
                     <th>{t('coordinators.status')}</th>
                     <th>{t('coordinators.serves')}</th>
                     {showAccess ? <th>{t('coordinators.access')}</th> : null}
+                    <th>{t('org_home.col_action')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {page.users.map((u) => (
                     <tr key={u.id}>
                       <td>
-                        <Link
-                          className="font-semibold text-primary-600 hover:underline"
-                          href={`/console/coordinators/${u.id}`}
-                        >
-                          {u.contact.name ?? u.contact.email}
-                        </Link>
-                        {u.contact.name ? (
-                          <div className="text-[12px] text-ink-500">{u.contact.email}</div>
-                        ) : null}
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span
+                            aria-hidden="true"
+                            className="grid h-[34px] w-[34px] flex-none place-items-center rounded-full bg-(--bd-primary-50) text-[12px] font-bold text-(--bd-primary-600)"
+                          >
+                            {initialsOf(u.contact.name ?? u.contact.email)}
+                          </span>
+                          <div className="min-w-0">
+                            <Link
+                              className="block truncate font-bold text-ink-900 hover:text-(--bd-primary-600) hover:underline"
+                              href={`/console/coordinators/${u.id}`}
+                            >
+                              {u.contact.name ?? u.contact.email}
+                            </Link>
+                            {u.contact.name ? (
+                              <div className="truncate text-[12.5px] text-ink-500">
+                                {u.contact.email}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
                       </td>
                       <td>
                         <OrgCell
                           org={u.org_id ? orgById.get(u.org_id) : undefined}
                           registeredName={u.name}
-                          registeredAs={t('coordinators.registered_as', { name: u.name })}
                         />
                       </td>
                       <td>
                         <ConsoleStatusPill status={u.status} />
                       </td>
-                      <td className="bd-wrap">
-                        {servedLabels(u.serves, domains)?.join(', ') ??
-                          t('coordinators.every_domain')}
+                      <td>
+                        <DomainChips domains={servedDomains(u.serves, domains)} />
                       </td>
                       {showAccess ? (
                         <td>
                           <RoleBadges roles={u.roles ?? []} names={roleNames} />
                         </td>
                       ) : null}
+                      <td className="whitespace-nowrap">
+                        {u.status === 'pending' ? (
+                          <Link
+                            href={`/console/coordinators/${u.id}`}
+                            className="rounded-lg px-2.5 py-1.5 text-[13px] font-semibold text-(--bd-primary-600) hover:bg-(--bd-primary-50)"
+                          >
+                            {t('org_home.review')}
+                          </Link>
+                        ) : (
+                          <Link
+                            href={`/console/coordinators/${u.id}`}
+                            aria-label={t('org_home.view_named', {
+                              name: u.contact.name ?? u.contact.email,
+                            })}
+                            title={t('org_home.view')}
+                            className="inline-grid h-8 w-8 place-items-center rounded-lg text-ink-500 hover:bg-(--bd-primary-50) hover:text-(--bd-primary-600)"
+                          >
+                            <Eye size={17} />
+                          </Link>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -217,11 +297,9 @@ export default async function ConsoleCoordinatorsPage({
 function OrgCell({
   org,
   registeredName,
-  registeredAs,
 }: Readonly<{
   org: UserSearchOrg | undefined;
   registeredName: string;
-  registeredAs: string;
 }>) {
   if (!org) return <span className="text-ink-700">{registeredName}</span>;
   const knownAs = org.known_as_name ?? org.known_as;
@@ -240,9 +318,50 @@ function OrgCell({
           </span>
         ) : null}
       </div>
-      {registeredName !== org.name ? (
-        <span className="text-[12px] text-ink-500">{registeredAs}</span>
-      ) : null}
     </div>
   );
+}
+
+const COUNT_TILE: Record<Counted, { icon: typeof Users; tone: TileTone }> = {
+  all: { icon: Users, tone: 'primary' },
+  active: { icon: UserCheck, tone: 'green' },
+  pending: { icon: Clock, tone: 'amber' },
+  inactive: { icon: UserX, tone: 'rose' },
+};
+
+/**
+ * Counts the coordinators in reach by status. Without a domain filter the
+ * total and pending counts are exact, from the organisations; the others
+ * are counted from up to {@link COUNT_LIMIT} coordinators per status.
+ *
+ * @param orgs - The organisations in reach, with their counts.
+ * @param orgId - The organisation filter, if any.
+ * @param serves - The domain filter, if any.
+ * @returns Each count, and whether more exist than were counted.
+ */
+async function countCoordinators(
+  orgs: ReadonlyArray<UserSearchOrg>,
+  orgId: string | undefined,
+  serves: string | undefined,
+): Promise<Record<Counted, { n: number; more: boolean }>> {
+  const read = async (status?: 'active' | 'pending' | 'inactive') => {
+    const r = await consoleRead<UserSearchResponse>('/v1/user/search', {
+      filter: {
+        ...(status ? { status } : {}),
+        ...(orgId ? { org_id: orgId } : {}),
+        ...(serves ? { serves } : {}),
+      },
+      limit: COUNT_LIMIT,
+    });
+    return { n: r.users.length, more: r.next_cursor !== null };
+  };
+  const scope = orgId ? orgs.filter((o) => o.id === orgId) : orgs;
+  const exact = (n: number) => ({ n, more: false });
+  const [active, inactive, all, pending] = await Promise.all([
+    read('active'),
+    read('inactive'),
+    serves ? read() : exact(scope.reduce((n, o) => n + o.coordinator_count, 0)),
+    serves ? read('pending') : exact(scope.reduce((n, o) => n + o.pending_count, 0)),
+  ]);
+  return { all, active, pending, inactive };
 }

@@ -191,7 +191,7 @@ describe('<OrgEditForm />', () => {
       const select = screen.getByLabelText(messages.console.org.known_as);
       expect(select).toHaveValue('aggregator');
       expect(screen.getByRole('option', { name: 'District' })).toBeInTheDocument();
-      expect(screen.queryByLabelText(messages.console.org.parent)).toBeNull();
+      expect(screen.queryByLabelText(messages.console.orgs.col_parent)).toBeNull();
     });
 
     it('sends only the new value, never a parent', async () => {

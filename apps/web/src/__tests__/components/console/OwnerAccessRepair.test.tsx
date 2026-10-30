@@ -47,10 +47,10 @@ describe('<OwnerAccessRepair />', () => {
     );
   });
 
-  it('shows a generic error when the repair fails', async () => {
+  it('shows a plain message when the repair fails on the server', async () => {
     global.fetch = respond({ error: { code: 'BOOM' } }, 500) as never;
     renderIt();
     fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.repair }));
-    expect(await screen.findByText(messages.console.errors.generic)).toBeInTheDocument();
+    expect(await screen.findByText(messages.console.errors.server)).toBeInTheDocument();
   });
 });

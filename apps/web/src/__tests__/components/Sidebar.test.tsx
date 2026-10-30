@@ -214,7 +214,7 @@ describe('<Sidebar />', () => {
 
   it('renders the org initials and org name in the footer card', () => {
     render(<Sidebar />);
-    expect(screen.getByText('AC')).toBeInTheDocument();
+    expect(screen.getByText('AO')).toBeInTheDocument();
     expect(screen.getByText('Acme Org')).toBeInTheDocument();
   });
 

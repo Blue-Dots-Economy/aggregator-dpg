@@ -82,5 +82,9 @@ export function errorKey(r: { status: number; error: ConsoleError }): string {
     if (fields['parent_id'] === 'invalid') return 'errors.parent_invalid';
     if (fields['known_as'] === 'invalid') return 'errors.known_as_invalid';
   }
+  if (r.status === 0) return 'errors.network';
+  if (r.status === 401) return 'errors.signed_out';
+  if (r.status === 403) return 'errors.forbidden';
+  if (r.status >= 500) return 'errors.server';
   return 'errors.generic';
 }

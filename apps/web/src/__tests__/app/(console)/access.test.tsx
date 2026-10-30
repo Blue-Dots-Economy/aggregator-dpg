@@ -54,8 +54,8 @@ const bodies: Record<string, unknown> = {
 };
 
 const pages = [
-  ['roles', RolesPage, 'No roles.', 'access.subtitle_roles'],
-  ['permissions', PermissionsPage, 'No permissions.', 'access.subtitle_permissions'],
+  ['roles', RolesPage, 'No roles.', messages.console.access.subtitle_roles],
+  ['permissions', PermissionsPage, 'No permissions.', messages.console.access.subtitle_permissions],
 ] as const;
 
 describe.each(pages)('console access %s page', (_name, Page, emptyText, subtitle) => {

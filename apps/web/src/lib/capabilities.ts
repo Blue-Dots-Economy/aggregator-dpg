@@ -82,3 +82,20 @@ export function canInvite(me: ManageScopeSource): boolean {
 export function canViewCoordinators(me: ManageScopeSource): boolean {
   return can(me.capabilities, 'org.manage') || can(me.capabilities, 'network.administer');
 }
+
+/** The console home page. */
+export const CONSOLE_HOME_HREF = '/console';
+const COORDINATORS_LIST_HREF = '/console/coordinators';
+
+/**
+ * Where the caller's coordinator list lives. An owner of one organisation sees
+ * it on the console home; everyone else uses the coordinators page.
+ *
+ * @param me - The caller's `read/me` answer.
+ * @returns The page that lists the caller's coordinators.
+ */
+export function coordinatorsHref(me: ManageScopeSource & { is_network_admin: boolean }): string {
+  if (me.is_network_admin) return COORDINATORS_LIST_HREF;
+  const owned = me.orgs.filter((o) => o.org_type === 'aggregator' && !o.is_default);
+  return owned.length === 1 ? CONSOLE_HOME_HREF : COORDINATORS_LIST_HREF;
+}

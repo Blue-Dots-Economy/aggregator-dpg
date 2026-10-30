@@ -1,175 +1,130 @@
 /**
- * Console home page.
- *
- * An owner sees its organisations with coordinator and pending counts, and a
- * summary of the organisations below them. The network admin also sees the
- * network and the organisations awaiting review.
+ * Console home page: the coordinators of an owner of one organisation, with a
+ * summary of the organisations below it. Everyone else is sent to the
+ * organisations page.
  */
 
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type {
   OrgReadResponse,
   OrgSearchResponse,
+  UserSearchResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
 import { readReachableOrgs } from '@/lib/console-hierarchy.server';
+import { canInvite, CONSOLE_HOME_HREF, coordinatorsHref } from '@/lib/capabilities';
+import { networkDomains, servedDomains } from '@/lib/console-domains.server';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
-import { ConsoleSection, ConsoleStatusPill, EmptyState } from '@/components/console/ConsoleUi';
+import { ConsoleSection, ConsoleStatusPill } from '@/components/console/ConsoleUi';
+import { OrgCoordinators, type OrgCoordinatorRow } from '@/components/console/OrgCoordinators';
+import { I } from '@/icons';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
+/** Coordinators loaded for the single-organisation view, the API's page maximum. */
+const ORG_HOME_LIMIT = 100;
+
 export default async function ConsoleHomePage() {
-  const t = await getTranslations('console');
   const actor = await getConsoleActor();
   if (!actor.ok) return null; // the layout already redirected
   const me = actor.me;
+  // Everyone but an owner of one organisation works from the organisations page.
+  if (coordinatorsHref(me) !== CONSOLE_HOME_HREF) redirect('/console/orgs');
 
-  // The actor's own aggregator orgs, read by id.
-  const ownIds = me.orgs.filter((o) => o.org_type === 'aggregator').map((o) => o.id);
-  const readOwned = Promise.all(
-    ownIds.map(async (id): Promise<OrgRow> => {
-      const r = await consoleRead<OrgReadResponse>(`/v1/org/read/${id}`);
-      return {
-        ...r.org,
-        coordinator_count: r.coordinator_count,
-        child_count: r.child_count,
-        pending_count: r.pending_count,
-      };
+  const homeOrgId = me.orgs.find((o) => o.org_type === 'aggregator' && !o.is_default)?.id;
+  if (!homeOrgId) redirect('/console/orgs');
+  const [read, reach] = await Promise.all([
+    consoleRead<OrgReadResponse>(`/v1/org/read/${homeOrgId}`),
+    readReachableOrgs(),
+  ]);
+  const homeOrg: OrgRow = {
+    ...read.org,
+    coordinator_count: read.coordinator_count,
+    child_count: read.child_count,
+    pending_count: read.pending_count,
+  };
+  const below = reach.filter((o) => o.id !== homeOrgId);
+  return renderOrgHome(homeOrg, below, canInvite(me));
+}
+
+/** The owner's single organisation with its coordinators. */
+async function renderOrgHome(org: OrgRow, below: OrgRow[], showInvite: boolean) {
+  const t = await getTranslations('console');
+  const [page, domains] = await Promise.all([
+    consoleRead<UserSearchResponse>('/v1/user/search', {
+      filter: { org_id: org.id },
+      limit: ORG_HOME_LIMIT,
     }),
-  );
-  let owned: OrgRow[];
-  let pending: OrgRow[] = [];
-  let below: OrgRow[] = [];
-  if (me.is_network_admin) {
-    [owned, pending] = await Promise.all([
-      readOwned,
-      consoleRead<OrgSearchResponse>('/v1/org/search', {
-        filter: { status: 'pending' },
-        limit: 50,
-      }).then((r) => r.orgs),
-    ]);
-  } else {
-    // For an owner, the reachable orgs are its own and every org below them.
-    const [own, reach] = await Promise.all([readOwned, readReachableOrgs()]);
-    owned = own;
-    below = reach.filter((o) => !ownIds.includes(o.id));
-  }
-  const root = me.orgs.find((o) => o.org_type === 'network_facilitator');
-
+    networkDomains(),
+  ]);
+  const rows: OrgCoordinatorRow[] = page.users.map((u) => ({
+    id: u.id,
+    name: u.contact.name ?? u.contact.email,
+    email: u.contact.name ? u.contact.email : null,
+    organisation: u.name,
+    status: u.status,
+    domains: servedDomains(u.serves, domains),
+  }));
   return (
     <>
-      <Topbar
-        title={root ? `${t('home.network_heading')}: ${root.name}` : t('home.heading')}
-        subtitle={me.is_network_admin ? t('home.subtitle_admin') : t('home.subtitle_owner')}
-      />
-      <div className="flex flex-col gap-6">
-        <ConsoleSection title={root ? t('home.heading') : undefined}>
-          {owned.length === 0 ? (
-            <p className="text-[13.5px] text-ink-500">{t('home.no_orgs')}</p>
-          ) : (
-            <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {owned.map((o) => (
-                <li
-                  key={o.id}
-                  className="rounded-[12px] border border-(--bd-border) p-4 flex flex-col gap-3"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <Link
-                      className="font-display font-bold text-[16px] text-ink-900 hover:text-primary-600 hover:underline min-w-0 truncate"
-                      href={`/console/orgs/${o.id}`}
-                    >
-                      {o.name}
-                    </Link>
-                    <ConsoleStatusPill status={o.status} />
-                  </div>
-                  <div className="flex gap-6">
-                    <Link
-                      className="group rounded-[8px] -m-1 p-1 hover:bg-(--bd-border-soft)"
-                      href={`/console/coordinators?org_id=${o.id}`}
-                    >
-                      <div className="font-display font-bold text-[24px] leading-none text-ink-900">
-                        {o.coordinator_count}
-                      </div>
-                      <div className="text-[12px] text-ink-500 mt-1 group-hover:underline">
-                        {t('home.coordinators_label')}
-                      </div>
-                    </Link>
-                    <Link
-                      className="group rounded-[8px] -m-1 p-1 hover:bg-(--bd-border-soft)"
-                      href={`/console/coordinators?org_id=${o.id}&status=pending`}
-                    >
-                      <div className="font-display font-bold text-[24px] leading-none text-amber-600">
-                        {o.pending_count}
-                      </div>
-                      <div className="text-[12px] text-ink-500 mt-1 group-hover:underline">
-                        {t('home.pending_label')}
-                      </div>
-                    </Link>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </ConsoleSection>
-
-        {me.is_network_admin ? (
-          <ConsoleSection
-            title={t('home.pending_orgs')}
-            flush
-            action={
-              pending.length > 0 ? (
-                <Link className={buttonClass('soft')} href="/console/orgs#pending">
-                  {t('home.review')}
-                </Link>
-              ) : null
-            }
-          >
-            {pending.length === 0 ? (
-              <EmptyState>{t('home.none_pending')}</EmptyState>
-            ) : (
-              <ul>
-                {pending.map((o) => (
-                  <li
-                    key={o.id}
-                    className="flex items-center justify-between gap-3 px-5 py-3 border-b border-(--bd-border-soft) last:border-b-0"
-                  >
-                    <span className="flex items-center gap-3 min-w-0">
-                      <Link
-                        className="font-semibold text-primary-600 hover:underline truncate"
-                        href={`/console/orgs/${o.id}`}
-                      >
-                        {o.name}
-                      </Link>
-                      <ConsoleStatusPill status={o.status} />
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </ConsoleSection>
-        ) : null}
-
-        {below.length > 0 ? (
-          <ConsoleSection
-            title={t('home.below_heading')}
-            action={
-              <Link className={buttonClass('soft')} href="/console/orgs">
-                {t('home.below_view')}
-              </Link>
-            }
-          >
-            <p className="text-[13.5px] text-ink-600">
-              {t('home.below_summary', {
-                orgs: below.length,
-                coordinators: below.reduce((n, o) => n + o.coordinator_count, 0),
-              })}
-            </p>
-          </ConsoleSection>
-        ) : null}
+      <Topbar title={t('org_home.heading')} subtitle={t('org_home.subtitle')} />
+      <div className="flex flex-col gap-4">
+        <div className="bd-card bd-shadow flex flex-wrap items-center gap-3.5 px-5 py-4">
+          <span className="grid h-10 w-10 flex-none place-items-center rounded-[11px] bg-(--bd-primary-50) text-(--bd-primary)">
+            <I.briefcase size={20} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2.5 font-display text-[17px] font-extrabold text-ink-900">
+              <span className="truncate">{org.name}</span>
+              <ConsoleStatusPill status={org.status} />
+            </div>
+            <div className="text-[12.5px] text-ink-500">{t('org_home.owner_note')}</div>
+          </div>
+          {showInvite ? (
+            <Link
+              className={`${buttonClass('primary')} w-full justify-center sm:ml-auto sm:w-auto`}
+              href="/console/invite"
+            >
+              <I.mail size={16} />
+              {t('org_home.invite')}
+            </Link>
+          ) : null}
+        </div>
+        <OrgCoordinators
+          rows={rows}
+          total={org.coordinator_count}
+          pending={org.pending_count}
+          complete={page.next_cursor === null}
+          allHref={`/console/coordinators?org_id=${org.id}`}
+        />
+        {below.length > 0 ? await renderBelowSummary(below) : null}
       </div>
     </>
+  );
+}
+
+/** A summary of the organisations below the owner's own, with a link to them. */
+async function renderBelowSummary(below: OrgRow[]) {
+  const t = await getTranslations('console');
+  return (
+    <ConsoleSection
+      title={t('home.below_heading')}
+      action={
+        <Link className={buttonClass('soft')} href="/console/orgs">
+          {t('home.below_view')}
+        </Link>
+      }
+    >
+      <p className="text-[13.5px] text-ink-600">
+        {t('home.below_summary', {
+          orgs: below.length,
+          coordinators: below.reduce((n, o) => n + o.coordinator_count, 0),
+        })}
+      </p>
+    </ConsoleSection>
   );
 }

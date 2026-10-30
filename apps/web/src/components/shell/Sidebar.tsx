@@ -19,6 +19,7 @@ import {
   type AggregatorConfigPayload,
 } from '../../hooks/useAggregatorConfig';
 import { cn } from '../../lib/cn';
+import { initialsOf } from '../../lib/initials';
 
 /** One sidebar link. */
 export interface NavItem {
@@ -42,7 +43,7 @@ export interface SidebarAccount {
    * clicked (e.g. contact details). Omit to leave the card non-interactive,
    * as before — the sign-out button is unaffected either way.
    */
-  details?: ReadonlyArray<{ label: string; value: string }>;
+  details?: ReadonlyArray<{ label: string; value: string; icon?: IconName }>;
 }
 
 /** Whether `n` is the current page's link. */
@@ -145,7 +146,7 @@ function SidebarPanel({
 }: SidebarPanelProps) {
   const t = useTranslations('nav');
   const { signOut, supportEnabled } = useAuth();
-  const initials = account.title.slice(0, 2).toUpperCase();
+  const initials = initialsOf(account.title);
 
   const [detailsOpen, setDetailsOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
@@ -231,15 +232,46 @@ function SidebarPanel({
 
         <div className="p-3 shrink-0 relative" ref={accountRef}>
           {account.details && account.details.length > 0 && detailsOpen && (
-            <div className="absolute bottom-full left-0 right-0 mb-2 rounded-[12px] bg-(--bd-card) border border-(--bd-border) shadow-xl p-3 flex flex-col gap-3">
-              {account.details.map((d) => (
-                <div key={d.label} className="min-w-0">
-                  <div className="text-[10.5px] uppercase tracking-[0.06em] font-semibold text-(--bd-fg-muted)">
-                    {d.label}
-                  </div>
-                  <div className="mt-0.5 text-[13px] text-(--bd-fg) wrap-break-word">{d.value}</div>
+            <div
+              role="dialog"
+              aria-label={account.title}
+              className="absolute bottom-full left-3 right-3 mb-2 overflow-hidden rounded-[14px] border border-(--bd-border) bg-(--bd-card) shadow-xl"
+            >
+              <div className="flex items-center gap-3 border-b border-(--bd-border-soft) bg-linear-to-br from-(--bd-tint-primary) to-(--bd-card) px-4 py-3.5">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-(--bd-brand) font-display text-[13px] font-bold text-white">
+                  {initials}
                 </div>
-              ))}
+                <div className="min-w-0">
+                  <div className="truncate text-[14px] font-bold text-(--bd-fg)">
+                    {account.title}
+                  </div>
+                  <div className="truncate text-[12px] text-(--bd-fg-muted)">
+                    {account.subtitle}
+                  </div>
+                </div>
+              </div>
+              <dl className="flex flex-col gap-1 p-2">
+                {account.details.map((d) => {
+                  const Ic = d.icon ? I[d.icon] : null;
+                  return (
+                    <div key={d.label} className="flex items-center gap-3 rounded-[10px] px-2 py-2">
+                      {Ic ? (
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-(--bd-border-soft) text-(--bd-fg-muted)">
+                          <Ic size={15} />
+                        </span>
+                      ) : null}
+                      <div className="min-w-0">
+                        <dt className="text-[11px] font-semibold text-(--bd-fg-muted)">
+                          {d.label}
+                        </dt>
+                        <dd className="wrap-break-word text-[13px] font-medium text-(--bd-fg)">
+                          {d.value}
+                        </dd>
+                      </div>
+                    </div>
+                  );
+                })}
+              </dl>
             </div>
           )}
           <div className="rounded-[12px] bg-linear-to-br from-(--bd-tint-primary) to-(--bd-card) border border-(--bd-border) p-3 flex items-center gap-2.5">

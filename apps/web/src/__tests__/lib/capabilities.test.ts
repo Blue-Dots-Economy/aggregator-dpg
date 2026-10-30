@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { can, canInvite, canManageOrg, canViewCoordinators } from '@/lib/capabilities';
+import {
+  can,
+  canInvite,
+  canManageOrg,
+  canViewCoordinators,
+  coordinatorsHref,
+} from '@/lib/capabilities';
 
 describe('can', () => {
   it('allows everything when access control is off', () => {
@@ -90,5 +96,36 @@ describe('canViewCoordinators', () => {
     expect(canViewCoordinators({ capabilities: ['network.administer'], orgs: [] })).toBe(true);
     expect(canViewCoordinators({ capabilities: ['profiles.view'], orgs: [] })).toBe(false);
     expect(canViewCoordinators({ capabilities: null, orgs: [] })).toBe(true);
+  });
+});
+
+describe('coordinatorsHref', () => {
+  const org = (id: string, over: { org_type?: string; is_default?: boolean } = {}) => ({
+    id,
+    org_type: 'aggregator',
+    is_default: false,
+    ...over,
+  });
+
+  it('sends an owner of one organisation to the console home', () => {
+    expect(coordinatorsHref({ is_network_admin: false, orgs: [org('a')] })).toBe('/console');
+  });
+
+  it('sends an owner of several organisations to the coordinators page', () => {
+    expect(coordinatorsHref({ is_network_admin: false, orgs: [org('a'), org('b')] })).toBe(
+      '/console/coordinators',
+    );
+  });
+
+  it('sends the network admin to the coordinators page', () => {
+    expect(coordinatorsHref({ is_network_admin: true, orgs: [org('a')] })).toBe(
+      '/console/coordinators',
+    );
+  });
+
+  it('does not count the Default organisation', () => {
+    expect(
+      coordinatorsHref({ is_network_admin: false, orgs: [org('d', { is_default: true })] }),
+    ).toBe('/console/coordinators');
   });
 });

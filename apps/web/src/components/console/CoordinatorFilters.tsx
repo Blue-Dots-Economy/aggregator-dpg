@@ -10,6 +10,7 @@
 
 import type { ChangeEvent, ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
+import { Building2, ChevronDown, CircleDot, Layers } from 'lucide-react';
 import { Button } from '../ui/Button';
 import type { OrgOption } from '../../lib/console-org-options';
 
@@ -51,12 +52,26 @@ export function CoordinatorFilters({
     }
     form.requestSubmit();
   };
-  const field = (label: string, select: ReactNode) => (
-    <label className="flex flex-col gap-1">
-      <span className="text-[12px] font-medium text-(--bd-fg-muted)">{label}</span>
+  /** A compact select with a leading icon; the label is for screen readers. */
+  const field = (label: string, icon: ReactNode, select: ReactNode) => (
+    <label
+      title={label}
+      className="relative flex h-9 items-center rounded-[10px] border border-(--bd-border) bg-(--bd-bg) text-ink-700 focus-within:border-(--bd-primary) focus-within:bg-(--bd-card) focus-within:shadow-[0_0_0_3px_var(--bd-primary-50)] hover:border-(--bd-primary-100)"
+    >
+      <span className="sr-only">{label}</span>
+      <span aria-hidden="true" className="pointer-events-none absolute left-3 text-ink-400">
+        {icon}
+      </span>
       {select}
+      <ChevronDown
+        size={14}
+        aria-hidden="true"
+        className="pointer-events-none absolute right-2.5 text-ink-400"
+      />
     </label>
   );
+  const SELECT =
+    'h-full max-w-[280px] cursor-pointer appearance-none truncate rounded-[10px] bg-transparent py-0 pr-8 pl-9 text-[13px] font-semibold outline-none';
   return (
     // Keyed on the values: a link to other filters (Clear filters, a chip) is a
     // client navigation, and the selects only read their value when created.
@@ -64,17 +79,13 @@ export function CoordinatorFilters({
       key={`${values.orgId}|${values.status}|${values.serves}`}
       method="get"
       action={action}
-      className="flex flex-wrap items-end gap-3 text-[13.5px]"
+      className="flex flex-wrap items-center gap-2"
     >
       {orgs.length > 1
         ? field(
             t('coordinators.org_filter'),
-            <select
-              name="org_id"
-              defaultValue={values.orgId}
-              className="bd-input min-w-[240px] max-w-[360px]"
-              onChange={submit}
-            >
+            <Building2 size={15} />,
+            <select name="org_id" defaultValue={values.orgId} className={SELECT} onChange={submit}>
               <option value="">{t('coordinators.all_orgs')}</option>
               {orgs.map((o) => (
                 <option key={o.id} value={o.id}>
@@ -86,12 +97,8 @@ export function CoordinatorFilters({
         : null}
       {field(
         t('coordinators.status_filter'),
-        <select
-          name="status"
-          defaultValue={values.status}
-          className="bd-input min-w-[150px]"
-          onChange={submit}
-        >
+        <CircleDot size={15} />,
+        <select name="status" defaultValue={values.status} className={SELECT} onChange={submit}>
           <option value="">{t('coordinators.all')}</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
@@ -103,12 +110,8 @@ export function CoordinatorFilters({
       {domains.length > 0
         ? field(
             t('coordinators.serves_filter'),
-            <select
-              name="serves"
-              defaultValue={values.serves}
-              className="bd-input min-w-[150px]"
-              onChange={submit}
-            >
+            <Layers size={15} />,
+            <select name="serves" defaultValue={values.serves} className={SELECT} onChange={submit}>
               <option value="">{t('coordinators.all_domains')}</option>
               {domains.map((d) => (
                 <option key={d.id} value={d.id}>
