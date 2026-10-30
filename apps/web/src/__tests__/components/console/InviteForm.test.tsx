@@ -5,7 +5,7 @@
  * pasted text into chips (dedupe, invalid marking, removal), optional names,
  * the one-line result with a reason per status, invalid addresses blocking the
  * send, the per-send cap, the help panel with its
- * limits, a generic error, and switching the chosen organisation.
+ * limits, a plain message for each kind of failure, and switching the chosen organisation.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -161,7 +161,7 @@ describe('<InviteForm />', () => {
 
     await waitFor(() => expect(screen.getByText('3 invites sent')).toBeInTheDocument());
     const line = screen.getByText(/^Not sent:/);
-    expect(line).toHaveTextContent('known@x.org (already active)');
+    expect(line).toHaveTextContent('known@x.org (already a coordinator here)');
     expect(line).toHaveTextContent('gone@x.org (previously rejected)');
     expect(line).toHaveTextContent('dup@x.org (listed twice)');
     expect(global.fetch).toHaveBeenCalledWith(
@@ -227,7 +227,7 @@ describe('<InviteForm />', () => {
     expect(screen.getByText('Up to 10 emails per send.')).toBeInTheDocument();
   });
 
-  it('shows the at-a-time note when the list is exactly full, with nothing waiting', () => {
+  it('shows the at-a-time note when the list is exactly full, with nothing left out', () => {
     render(
       <NextIntlClientProvider locale="en" messages={messages}>
         <InviteForm orgs={orgs} maxRecipients={2} />
@@ -237,7 +237,7 @@ describe('<InviteForm />', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       "You've added the most you can send at once (2). Send these invites, then add more.",
     );
-    expect(screen.queryByText(/lined up/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/not added/)).not.toBeInTheDocument();
   });
 
   it('renders in Hindi when the Hindi catalogue is active', () => {
@@ -250,7 +250,8 @@ describe('<InviteForm />', () => {
     expect(screen.getByRole('button', { name: /आमंत्रण भेजें/ })).toBeInTheDocument();
   });
 
-  it('keeps emails beyond the cap waiting and moves them up as places free', () => {
+  it('stops at the configured cap and says how many addresses were not added', () => {
+    global.fetch = respond({}, 200) as never;
     render(
       <NextIntlClientProvider locale="en" messages={messages}>
         <InviteForm orgs={orgs} maxRecipients={2} />
@@ -259,35 +260,27 @@ describe('<InviteForm />', () => {
     typeAddresses('a@x.org b@x.org c@x.org d@x.org');
     expect(screen.getByText('2 of 2')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent(
-      "You've added the most you can send at once (2). 2 more emails are lined up and will appear here after you send these.",
+      "You've added the most you can send at once (2). 2 more emails were not added. Send these invites, then add the rest.",
     );
     expect(emailBox()).toBeDisabled();
     expect(emailBox()).toHaveAttribute('placeholder', 'Limit reached');
     expect(screen.queryByRole('button', { name: 'Remove c@x.org' })).not.toBeInTheDocument();
     expect(sendButton()).toHaveTextContent('Send 2 invites');
-    // Removing one moves the next waiting email into the list.
     fireEvent.click(screen.getAllByRole('button', { name: 'Remove b@x.org' })[0]!);
-    expect(screen.getAllByRole('button', { name: 'Remove c@x.org' }).length).toBeGreaterThan(0);
-    expect(screen.getByRole('status')).toHaveTextContent('1 more email is lined up');
+    expect(emailBox()).toBeEnabled();
+    expect(screen.queryByText(/not added/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/at once/)).not.toBeInTheDocument();
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it('loads the waiting emails after a send and sends them next', async () => {
-    global.fetch = respond({ sent: 2, resent: 0, invalid: [], existing: [] }, 200) as never;
-    render(
-      <NextIntlClientProvider locale="en" messages={messages}>
-        <InviteForm orgs={orgs} maxRecipients={2} />
-      </NextIntlClientProvider>,
-    );
-    typeAddresses('a@x.org b@x.org c@x.org');
+  it('clears the previous result once the list is edited', async () => {
+    global.fetch = respond({ sent: 1, resent: 0, invalid: [], existing: [] }, 200) as never;
+    renderForm();
+    typeAddresses('a@x.org');
     fireEvent.click(sendButton());
-    await waitFor(() => expect(screen.getByText('2 invites sent')).toBeInTheDocument());
-    expect(screen.getAllByRole('button', { name: 'Remove c@x.org' }).length).toBeGreaterThan(0);
-    expect(screen.queryByRole('button', { name: 'Remove a@x.org' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/lined up/)).not.toBeInTheDocument();
-    expect(sendButton()).toHaveTextContent('Send 1 invite');
-    // Editing the list clears the previous result.
-    typeAddresses('e@x.org');
-    expect(screen.queryByText('2 invites sent')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('1 invite sent')).toBeInTheDocument());
+    typeAddresses('b@x.org');
+    expect(screen.queryByText('1 invite sent')).not.toBeInTheDocument();
   });
 
   it('falls back to the API message when the API cap is lower than the form knew', async () => {
@@ -303,12 +296,38 @@ describe('<InviteForm />', () => {
     expect(screen.getByLabelText('Name for a@x.org')).toBeInTheDocument();
   });
 
-  it('shows the generic error for other failures', async () => {
-    global.fetch = respond({ error: { code: 'BOOM' } }, 500) as never;
+  it.each([
+    [500, 'server'],
+    [503, 'server'],
+    [400, 'invalid'],
+    [401, 'signed_out'],
+    [403, 'forbidden'],
+    [404, 'org_unavailable'],
+    [409, 'org_unavailable'],
+    [429, 'rate_limited'],
+    [418, 'generic'],
+  ] as const)(
+    'shows a plain message for a %i failure and keeps the emails',
+    async (status, key) => {
+      global.fetch = respond({ error: { code: 'ANY' } }, status) as never;
+      renderForm();
+      typeAddresses('a@x.org');
+      fireEvent.click(sendButton());
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        messages.console.invite.error[key],
+      );
+      expect(screen.getByLabelText('Name for a@x.org')).toBeInTheDocument();
+    },
+  );
+
+  it('says the server could not be reached when the request fails', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch')) as never;
     renderForm();
     typeAddresses('a@x.org');
     fireEvent.click(sendButton());
-    expect(await screen.findByRole('alert')).toHaveTextContent(messages.console.errors.generic);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      messages.console.invite.error.network,
+    );
   });
 
   it('posts to the chosen organisation after switching the select', async () => {

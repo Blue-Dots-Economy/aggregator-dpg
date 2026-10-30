@@ -826,16 +826,16 @@
       "sent": "{count, plural, =0 {No invites sent} one {# invite sent} other {# invites sent}}",
       "not_sent": "Not sent:",
       "reason": {
-        "active": "already active",
-        "pending": "waiting for your review",
+        "active": "already a coordinator here",
+        "pending": "already registered, waiting for your approval",
         "inactive": "previously rejected",
-        "retired": "deactivated",
-        "invalid_email": "not a valid email",
+        "retired": "account deactivated",
+        "invalid_email": "not a valid email address",
         "duplicate_in_batch": "listed twice",
-        "store_error": "could not be sent, try again",
-        "other": "not sent"
+        "store_error": "couldn't be sent, please try again",
+        "other": "couldn't be sent"
       },
-      "too_many": "Too many emails in one send. Send fewer at a time.",
+      "too_many": "That's more emails than can be sent at once. Remove some and try again.",
       "dismiss": "Dismiss",
       "help": {
         "heading": "How it works",
@@ -853,18 +853,28 @@
         },
         "limits": "Up to {max} emails per send."
       },
-      "no_orgs": "None of your organisations accepts invites.",
+      "no_orgs": "None of your organisations can send invites yet.",
       "role": "Role: Coordinator",
       "breadcrumb": "Breadcrumb",
       "breadcrumb_current": "Invite",
       "limit_reached": "Limit reached",
-      "waiting_note": "You've added the most you can send at once ({max}). {count, plural, one {# more email is} other {# more emails are}} lined up and will appear here after you send these.",
+      "skipped_note": "You've added the most you can send at once ({max}). {count, plural, one {# more email was} other {# more emails were}} not added. Send these invites, then add the rest.",
       "remove_invalid": "Remove them",
       "note_empty": "Add at least one email to continue.",
       "note_fix": "Fix the highlighted emails to continue.",
       "sending": "Sending…",
       "limit_note": "You've added the most you can send at once ({max}). Send these invites, then add more.",
-      "breadcrumb_parent": "Coordinators"
+      "breadcrumb_parent": "Coordinators",
+      "error": {
+        "network": "We couldn't reach the server. Check your internet connection and try again.",
+        "invalid": "We couldn't send these invites. Check the emails and try again.",
+        "signed_out": "You've been signed out. Sign in again, then send the invites.",
+        "forbidden": "You don't have permission to invite coordinators to this organisation.",
+        "org_unavailable": "This organisation can't take invites right now. Refresh the page and try again.",
+        "rate_limited": "Too many requests in a short time. Wait a minute and try again.",
+        "server": "Something went wrong on our side. Your emails are still here, so try again in a few minutes.",
+        "generic": "The invites couldn't be sent. Please try again."
+      }
     },
     "account": {
       "heading": "My account",

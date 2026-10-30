@@ -25,7 +25,7 @@ import { Button } from '../ui/Button';
 import { I } from '../../icons';
 import { cn } from '../../lib/cn';
 import { ConsoleSection } from './ConsoleUi';
-import { errorKey, sendConsole, type ConsoleError } from '../../lib/console-client';
+import { sendConsole, type ConsoleError } from '../../lib/console-client';
 import { DEFAULT_MAX_INVITES } from '../../lib/invite-limit';
 import { useLeaveWarning } from '../../hooks/useLeaveWarning';
 
@@ -82,17 +82,18 @@ export function parseRecipients(text: string, current: readonly Recipient[]): Re
 }
 
 /**
- * Moves recipients from the front of `waiting` into `list` until `list` holds `max`.
+ * Appends the addresses in `text` to `current`, up to `max` in total.
  *
- * @returns The filled list and the recipients still waiting.
+ * @returns The new list and how many addresses did not fit.
  */
-function fill(
-  list: readonly Recipient[],
-  waiting: readonly Recipient[],
+function appendCapped(
+  text: string,
+  current: readonly Recipient[],
   max: number,
-): { list: Recipient[]; waiting: Recipient[] } {
-  const room = Math.max(max - list.length, 0);
-  return { list: [...list, ...waiting.slice(0, room)], waiting: waiting.slice(room) };
+): { list: Recipient[]; skipped: number } {
+  const added = parseRecipients(text, current);
+  const room = Math.max(max - current.length, 0);
+  return { list: [...current, ...added.slice(0, room)], skipped: Math.max(added.length - room, 0) };
 }
 
 /** The addresses the API did not email, with the reason key for each. */
@@ -104,12 +105,20 @@ function notSentOf(res: UserInviteResponse): NotSent[] {
 }
 
 /**
- * The message key for a failed send. The per-send cap is an API setting, so a
- * cap lower than the form knew shows the API's own message.
+ * The message key for a failed send, worded for the person sending the invites.
+ * The per-send cap is an API setting, so a cap lower than the form knew has its
+ * own message.
  */
 function failureKey(r: { status: number; error: ConsoleError }): string {
   if (r.status === 400 && r.error.fields?.field === 'recipients') return 'invite.too_many';
-  return errorKey(r);
+  if (r.status === 0) return 'invite.error.network';
+  if (r.status === 400) return 'invite.error.invalid';
+  if (r.status === 401) return 'invite.error.signed_out';
+  if (r.status === 403) return 'invite.error.forbidden';
+  if (r.status === 404 || r.status === 409) return 'invite.error.org_unavailable';
+  if (r.status === 429) return 'invite.error.rate_limited';
+  if (r.status >= 500) return 'invite.error.server';
+  return 'invite.error.generic';
 }
 
 /** Renders a `<kbd>` chunk in rich message text. */
@@ -148,7 +157,7 @@ export function InviteForm({
   const [orgId, setOrgId] = useState(orgs[0]?.id ?? '');
   const [draft, setDraft] = useState('');
   const [recipients, setRecipients] = useState<Recipient[]>([]);
-  const [waiting, setWaiting] = useState<Recipient[]>([]);
+  const [skipped, setSkipped] = useState(0);
   const [result, setResult] = useState<{ sent: number; notSent: NotSent[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -157,22 +166,16 @@ export function InviteForm({
   const invalidCount = recipients.length - valid.length;
   const full = recipients.length >= maxRecipients;
 
-  useLeaveWarning(recipients.length > 0 || waiting.length > 0 || draft.trim() !== '');
+  useLeaveWarning(recipients.length > 0 || draft.trim() !== '');
 
-  /** Sets the list, filling free places from the emails waiting beyond the per-send cap. */
-  function update(list: Recipient[], queue: Recipient[] = waiting) {
-    const next = fill(list, queue, maxRecipients);
-    setRecipients(next.list);
-    setWaiting(next.waiting);
-  }
-
-  /** Recipients parsed from `text` that are not already listed or waiting. */
-  function parseNew(text: string): Recipient[] {
-    return parseRecipients(text, [...recipients, ...waiting]);
+  function update(list: Recipient[], skippedNow = 0) {
+    setRecipients(list);
+    setSkipped(skippedNow);
   }
 
   function add(text: string) {
-    update(recipients, [...waiting, ...parseNew(text)]);
+    const next = appendCapped(text, recipients, maxRecipients);
+    update(next.list, next.skipped);
     setDraft('');
     setResult(null);
   }
@@ -210,12 +213,14 @@ export function InviteForm({
   async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     // Text still in the box counts, as if the user had pressed Enter.
-    const next = fill(recipients, [...waiting, ...parseNew(draft)], maxRecipients);
+    const next = draft.trim()
+      ? appendCapped(draft, recipients, maxRecipients)
+      : { list: recipients, skipped: 0 };
     const all = next.list;
     setDraft('');
     // Nothing valid, or an invalid address still in the list: show the list and its message.
     if (!all.some((r) => r.valid) || all.some((r) => !r.valid)) {
-      update(all, next.waiting);
+      update(all, next.skipped);
       return;
     }
     setBusy(true);
@@ -229,9 +234,9 @@ export function InviteForm({
     setBusy(false);
     if (r.ok) {
       setResult({ sent: r.data.sent + r.data.resent, notSent: notSentOf(r.data) });
-      update([], next.waiting);
+      update([]);
     } else {
-      update(all, next.waiting);
+      update(all, next.skipped);
       setResult(null);
       setError(t(failureKey(r)));
     }
@@ -312,7 +317,7 @@ export function InviteForm({
               {t.rich('invite.recipients_hint', { kbd: renderKbd })}
             </span>
 
-            {full ? <LimitNote waiting={waiting.length} max={maxRecipients} /> : null}
+            {full ? <LimitNote skipped={skipped} max={maxRecipients} /> : null}
 
             {invalidCount ? (
               <InvalidBanner count={invalidCount} onRemove={() => update(valid)} />
@@ -338,7 +343,7 @@ export function InviteForm({
               {recipients.length ? (
                 <Button
                   kind="ghost"
-                  onClick={() => update([], [])}
+                  onClick={() => update([])}
                   className="w-full justify-center sm:w-auto"
                 >
                   {t('invite.clear')}
@@ -464,15 +469,15 @@ function CountMeter({ count, max }: Readonly<{ count: number; max: number }>) {
   );
 }
 
-/** Says that only `max` can be sent at a time, and how many emails wait for the next send. */
-function LimitNote({ waiting, max }: Readonly<{ waiting: number; max: number }>) {
+/** Says that only `max` can be sent at a time, and how many emails were not added. */
+function LimitNote({ skipped, max }: Readonly<{ skipped: number; max: number }>) {
   const t = useTranslations('console');
   return (
     <output className="flex items-start gap-2.5 rounded-[10px] bg-(--bd-primary-50) px-3 py-2.5 text-[13px] text-(--bd-primary-600)">
       <Info size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
       <span>
-        {waiting
-          ? t('invite.waiting_note', { max, count: waiting })
+        {skipped
+          ? t('invite.skipped_note', { max, count: skipped })
           : t('invite.limit_note', { max })}
       </span>
     </output>
