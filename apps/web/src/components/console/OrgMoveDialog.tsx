@@ -222,7 +222,13 @@ function MoveDialog({
         )}
         {message ? <output className="text-[13px] text-rose-600">{message}</output> : null}
         <div className="flex items-center justify-end gap-3">
-          <Button kind="ghost" onClick={() => dialogRef.current?.close?.()}>
+          <Button
+            kind="ghost"
+            onClick={() => {
+              dialogRef.current?.close?.();
+              onClose();
+            }}
+          >
             {t('org.move_cancel')}
           </Button>
           <Button type="submit" disabled={busy || !ready}>

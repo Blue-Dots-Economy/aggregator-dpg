@@ -45,6 +45,7 @@ import {
   DESCENDANT_LEVEL_CAP,
   buildTree,
   canParent,
+  knownAsBlocksMove,
   moveRefusal,
   newChildRefusal,
   parentOptionRefusal,
@@ -259,8 +260,14 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           UPDATE ${organisations} o SET depth = o.depth + ${delta}::int
             FROM sub WHERE o.id = sub.id
           RETURNING o.id, o.depth, o.known_as`);
+        // The moved org needs an allowed value; an org below it is skipped
+        // when its value is no longer configured (knownAsBlocksMove).
         const failing = moved.rows
-          .filter((r) => !rules.knownAsAllowed(r.known_as, Number(r.depth)))
+          .filter((r) =>
+            r.id === id
+              ? !rules.knownAsAllowed(r.known_as, Number(r.depth))
+              : knownAsBlocksMove(rules, r.known_as, Number(r.depth)),
+          )
           .map((r) => r.id);
         if (failing.length > 0) throw new TreeRefusalError('KNOWN_AS_DEPTH', failing);
         return { oldParentId, movedCount: moved.rows.length };

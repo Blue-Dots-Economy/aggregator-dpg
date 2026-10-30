@@ -84,6 +84,8 @@ export interface TreeRules {
   maxTotalOrgs: number;
   /** Whether `key` may be used at `depth`. */
   knownAsAllowed(key: string, depth: number): boolean;
+  /** Whether `key` is a value the instance still configures (the system value included). */
+  knownAsConfigured(key: string): boolean;
   /** The "known as" key a new org gets at `depth`. */
   suggestFor(depth: number): string;
 }

@@ -97,7 +97,7 @@ async function main(): Promise<void> {
     const cfg = await getNetworkConfig();
     await warnOrgTreeOverLimits(getOrganisationStore(), cfg.aggregator.organisation, logger);
   } catch (err) {
-    logger.warn({
+    logger.error({
       operation: 'orgTree.bootCheck',
       status: 'failure',
       error: err instanceof Error ? err.message : String(err),

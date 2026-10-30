@@ -682,6 +682,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
     maxChildren: null,
     maxTotalOrgs: 50,
     knownAsAllowed: () => true,
+    knownAsConfigured: () => true,
     suggestFor: (depth) => `suggest-${depth}`,
     ...over,
   });
@@ -991,6 +992,39 @@ describe('InMemoryOrganisationStore — tree rules', () => {
         rules({ knownAsAllowed: (k) => k !== 'state' }),
       );
       expect(!refused.ok && refused.error).toMatchObject({ code: 'KNOWN_AS_DEPTH', orgIds: ['b'] });
+    });
+  });
+
+  describe('move with a "known as" value no longer configured', () => {
+    // 'gone' is no longer configured; 'district' is allowed only at depth 2.
+    const stale = rules({
+      knownAsConfigured: (k) => k !== 'gone',
+      knownAsAllowed: (k, d) => k !== 'gone' && (k !== 'district' || d === 2),
+    });
+    const withB = (knownAs: string) => {
+      const store = tree();
+      store.seed([org('b', 'a', 2, { knownAs })]);
+      return store;
+    };
+
+    it('does not let an org below with a stale value block the move', async () => {
+      const r = await withB('gone').move('a', { parentId: 'c' }, stale);
+      expect(r.ok && r.value.movedCount).toBe(2);
+      const parents = await withB('gone').parentOptions('a', stale);
+      const toC = parents.ok ? parents.value.options.find((o) => o.org.id === 'c') : undefined;
+      expect(toC).toMatchObject({ ok: true, reason: null });
+    });
+
+    it('still refuses a configured value below that the new depth does not allow', async () => {
+      const r = await withB('district').move('a', { parentId: 'c' }, stale);
+      expect(!r.ok && r.error).toMatchObject({ code: 'KNOWN_AS_DEPTH', orgIds: ['b'] });
+    });
+
+    it('still refuses the moved org itself with a stale value', async () => {
+      const store = tree();
+      store.seed([org('a', 'root', 1, { knownAs: 'gone' })]);
+      const r = await store.move('a', { parentId: 'c' }, stale);
+      expect(!r.ok && r.error).toMatchObject({ code: 'KNOWN_AS_DEPTH', orgIds: ['a'] });
     });
   });
 

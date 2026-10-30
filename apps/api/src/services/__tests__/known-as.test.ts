@@ -107,6 +107,9 @@ describe('treeRules', () => {
     expect(rules.knownAsAllowed('district', 2)).toBe(true);
     expect(rules.suggestFor(1)).toBe('state');
     expect(rules.suggestFor(3)).toBe('aggregator');
+    expect(rules.knownAsConfigured('district')).toBe(true);
+    expect(rules.knownAsConfigured('aggregator')).toBe(true);
+    expect(rules.knownAsConfigured('gone')).toBe(false);
   });
 
   it('gives a null child limit when max_children is unset', () => {

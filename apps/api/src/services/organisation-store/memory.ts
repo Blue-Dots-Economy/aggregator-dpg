@@ -26,6 +26,7 @@ import {
   DESCENDANT_LEVEL_CAP,
   buildTree,
   counts,
+  knownAsBlocksMove,
   moveRefusal,
   newChildRefusal,
   parentOptionRefusal,
@@ -203,7 +204,15 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
           }
         : { ...row, depth: row.depth + delta };
     });
-    const failing = moved.filter((o) => !rules.knownAsAllowed(o.knownAs, o.depth)).map((o) => o.id);
+    // As Postgres: the moved org needs an allowed value; an org below it is
+    // skipped when its value is no longer configured.
+    const failing = moved
+      .filter((o) =>
+        o.id === id
+          ? !rules.knownAsAllowed(o.knownAs, o.depth)
+          : knownAsBlocksMove(rules, o.knownAs, o.depth),
+      )
+      .map((o) => o.id);
     if (failing.length > 0) return knownAsDepth(failing);
     for (const o of moved) this.byId.set(o.id, o);
     return { ok: true, value: { org: moved[0]!, oldParentId, movedCount: moved.length } };

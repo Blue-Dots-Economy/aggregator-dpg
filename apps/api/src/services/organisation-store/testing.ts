@@ -113,6 +113,7 @@ export function permissiveTreeRules(overrides: Partial<TreeRules> = {}): TreeRul
     maxChildren: null,
     maxTotalOrgs: 100_000,
     knownAsAllowed: () => true,
+    knownAsConfigured: () => true,
     suggestFor: () => SYSTEM_KNOWN_AS.key,
     ...overrides,
   };

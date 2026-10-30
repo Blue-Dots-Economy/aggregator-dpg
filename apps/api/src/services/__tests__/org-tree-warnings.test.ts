@@ -40,30 +40,54 @@ const checks = (warn: ReturnType<typeof vi.fn>) =>
   );
 
 describe('warnOrgTreeOverLimits', () => {
-  it('logs one warning per kind with counts only', async () => {
+  it('logs one entry per kind with counts only; a total over the limit is an error', async () => {
     const warn = vi.fn();
-    await warnOrgTreeOverLimits(seeded(), cfg({ max_children: 1, max_total_orgs: 2 }), { warn });
+    const error = vi.fn();
+    await warnOrgTreeOverLimits(seeded(), cfg({ max_children: 1, max_total_orgs: 2 }), {
+      warn,
+      error,
+    });
     expect(checks(warn)).toEqual({
       depth: expect.objectContaining({ org_count: 1, max_depth: 2 }),
-      total: expect.objectContaining({ total_orgs: 3, max_total_orgs: 2 }),
       known_as: expect.objectContaining({ org_count: 1 }),
     });
-    for (const [e] of warn.mock.calls) {
+    expect(checks(error)).toEqual({
+      total: expect.objectContaining({
+        total_orgs: 3,
+        max_total_orgs: 2,
+        registration: 'closed',
+      }),
+    });
+    for (const [e] of [...warn.mock.calls, ...error.mock.calls]) {
       expect(e).toMatchObject({ operation: 'orgTree.bootCheck', status: 'success' });
     }
+  });
+
+  it('warns, not errors, when the total is exactly at the limit', async () => {
+    const warn = vi.fn();
+    const error = vi.fn();
+    await warnOrgTreeOverLimits(seeded(), cfg({ max_depth: 3, max_total_orgs: 3 }), {
+      warn,
+      error,
+    });
+    expect(checks(warn).total).toMatchObject({ total_orgs: 3, registration: 'closed' });
+    expect(error).not.toHaveBeenCalled();
   });
 
   it('counts orgs with more children than max_children, the root included', async () => {
     const store = seeded();
     store.seed([buildOrganisation({ id: 'e', slug: 'e', parentId: ROOT })]);
     const warn = vi.fn();
-    await warnOrgTreeOverLimits(store, cfg({ max_depth: 3, max_children: 1 }), { warn });
+    await warnOrgTreeOverLimits(store, cfg({ max_depth: 3, max_children: 1 }), {
+      warn,
+      error: vi.fn(),
+    });
     expect(checks(warn).children).toMatchObject({ org_count: 1, max_children: 1 });
   });
 
   it('logs only the kinds over a limit', async () => {
     const warn = vi.fn();
-    await warnOrgTreeOverLimits(seeded(), cfg({ max_depth: 3 }), { warn });
+    await warnOrgTreeOverLimits(seeded(), cfg({ max_depth: 3 }), { warn, error: vi.fn() });
     // C's "state" is not allowed at depth 3.
     expect(Object.keys(checks(warn))).toEqual(['known_as']);
   });
@@ -74,20 +98,22 @@ describe('warnOrgTreeOverLimits', () => {
       buildOrganisation({ id: 'c', slug: 'c', parentId: 'b', depth: 3, knownAs: 'gone' }),
     ]);
     const warn = vi.fn();
-    await warnOrgTreeOverLimits(store, cfg({ max_depth: 3 }), { warn });
+    await warnOrgTreeOverLimits(store, cfg({ max_depth: 3 }), { warn, error: vi.fn() });
     expect(checks(warn).known_as).toMatchObject({ org_count: 1 });
   });
 
-  it('logs a failure and returns when the store cannot be read', async () => {
+  it('logs a failure as an error and returns when the store cannot be read', async () => {
     const store = seeded();
     vi.spyOn(store, 'search').mockResolvedValueOnce({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'down' },
     });
     const warn = vi.fn();
-    await warnOrgTreeOverLimits(store, cfg(), { warn });
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0]?.[0]).toMatchObject({
+    const error = vi.fn();
+    await warnOrgTreeOverLimits(store, cfg(), { warn, error });
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0]?.[0]).toMatchObject({
       operation: 'orgTree.bootCheck',
       status: 'failure',
       error: 'down',

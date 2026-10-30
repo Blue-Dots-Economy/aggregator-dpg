@@ -106,6 +106,17 @@ describe('<OrgMoveDialog />', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
+  it('closes on Cancel and opens again on Move', async () => {
+    global.fetch = fetchWith(json({})) as never;
+    renderIt();
+    await parentSelect();
+    fireEvent.click(screen.getByRole('button', { name: messages.console.org.move_cancel }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: messages.console.org.move }));
+    expect(await parentSelect()).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
   it('loads the candidates, disables a refused one with its reason, and shows the count', async () => {
     global.fetch = fetchWith(json({})) as never;
     renderIt();

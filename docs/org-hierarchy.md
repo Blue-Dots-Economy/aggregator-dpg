@@ -21,7 +21,7 @@ Set in the instance config under `aggregator.organisation.hierarchy`:
 - Counts include `pending` and `active` orgs. Rejected and deleted orgs do not count.
 - The Default org is not counted, is never a parent and is never moved.
 - An org can take a child when it is the root or an active non-Default org, its depth is below `max_depth`, and it has fewer children than `max_children`.
-- Lowering a limit leaves existing orgs as they are. New creates, revivals and moves are refused until the counts are within the limit. The API logs a warning at boot with the counts (`orgTree.bootCheck`).
+- Lowering a limit leaves existing orgs as they are. New creates, revivals and moves are refused until the counts are within the limit. The API logs the counts at boot (`orgTree.bootCheck`): a warning per kind, and an error when the total is over `max_total_orgs`, because that closes self-registration.
 
 ## `known_as`
 
@@ -51,11 +51,11 @@ An owner reads, view-only, every org and coordinator below the orgs it owns (`se
 
 ## Upgrading an existing instance
 
-No manual data step is needed. Migration 0032 runs at API boot and is safe while older pods still serve (it is in the boot-safe list in `migration-guards.ts`).
+No manual data step is needed. Migration 0032 runs at API boot and is safe while older pods still serve (migrations after the 0023–0029 instance upgrade run at boot; see `migration-guards.ts`).
 
 - **Data.** `known_as` is added with the default `aggregator`, so every existing org is "Aggregator" without a table rewrite. `depth` is filled from the parent chain: every org directly under the root gets 1. The migration is idempotent. `scripts/sql/organisation-verify.sql` gate V9 checks the result.
 - **Config.** An instance config without `aggregator.organisation` keeps a flat tree: every org directly under the network, at most 50 orgs, and every org "Aggregator". Add the block only to use levels, more depth or a different total.
-- **Instances already over a limit.** Existing orgs are kept, with their coordinators, as they are. The API logs `orgTree.bootCheck` warnings with the counts. Self-registration of new orgs is closed (`accepting: false`, `409 ORG_TOTAL_LIMIT`), and so are revivals and moves that break a limit. Approving an org that is already pending is not limited. Coordinator registration into existing orgs is not affected. An instance with more than 50 orgs should set `max_total_orgs` before it upgrades.
+- **Instances already over a limit.** Existing orgs are kept, with their coordinators, as they are. The API logs `orgTree.bootCheck` with the counts; a total over `max_total_orgs` is logged as an error (`registration: "closed"`). Self-registration of new orgs is closed (`accepting: false`, `409 ORG_TOTAL_LIMIT`), and so are revivals and moves that break a limit. Approving an org that is already pending is not limited. Coordinator registration into existing orgs is not affected. **Release checklist:** count the instance's pending and active orgs (the Default org excluded) before upgrading; if there are 50 or more, set `max_total_orgs` above that count first, or self-registration closes on the first boot.
 - **Rollout order.** Deploy the API before the web app. Older API pods insert orgs without `depth`; the `BEFORE INSERT` trigger fills it. Older web pods work with the new API: the new response fields are additive and `parent_id` on `POST /v1/orgs/create` is optional. The new web app needs `GET /v1/orgs/parents`, so against an older API the org registration form shows an error and a retry button.
 - **RBAC edge.** `policy/rbac/edge/routes.json` adds `GET /v1/org/hierarchy`, `GET /v1/org/parent/options/:id`, `PATCH /v1/org/parent/update/:id` and `GET /v1/orgs/parents`. Where the edge policy is enforced, ship the updated policy bundle with the release; until then the edge refuses these routes.
 - **Rollback.** The columns, trigger and CHECK stay. Older code ignores the columns, and the trigger fills `depth` on its inserts. Orgs placed under another org keep that parent.

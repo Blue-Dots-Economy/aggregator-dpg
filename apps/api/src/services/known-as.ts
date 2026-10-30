@@ -89,6 +89,8 @@ export function treeRules(org: OrganisationConfig): TreeRules {
     maxChildren: org.hierarchy.max_children ?? null,
     maxTotalOrgs: org.hierarchy.max_total_orgs,
     knownAsAllowed: (key, depth) => isAllowedAt(org.known_as, key, depth),
+    knownAsConfigured: (key) =>
+      key === SYSTEM_KNOWN_AS.key || org.known_as.values.some((v) => v.key === key),
     suggestFor: (depth) => suggestFor(org.known_as, depth),
   };
 }

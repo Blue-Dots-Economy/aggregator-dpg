@@ -2,8 +2,10 @@
  * Boot-time check of the organisation tree against its config (`@aggregator-dpg/api`).
  *
  * Existing orgs may sit outside the limits after a config change. They stay as
- * they are; only new creates and moves are checked. This logs one warning per
- * kind of excess, with counts only, so an operator can see it. It never stops boot.
+ * they are; only new creates and moves are checked. This logs one entry per
+ * kind of excess, with counts only, so an operator can see it. More orgs than
+ * `max_total_orgs` is logged as an error, because it closes self-registration
+ * of new orgs. It never stops boot.
  */
 
 import type { OrganisationConfig } from '@aggregator-dpg/network-config/interface';
@@ -46,16 +48,18 @@ async function countedOrgs(store: OrganisationStoreBase): Promise<Organisation[]
  * Kinds: orgs deeper than `max_depth`; orgs (the root included) with more
  * children than `max_children`; more orgs than `max_total_orgs`; orgs whose
  * `known_as` key is not configured or not allowed at their depth. Counts
- * pending and active orgs only, the Default org excluded. A failure is logged and ends the check; it never throws.
+ * pending and active orgs only, the Default org excluded. A total over the
+ * limit, and a failure of the check, are logged as errors; a failure ends the
+ * check and never throws.
  *
  * @param store - The organisation store.
  * @param cfg - The instance's `organisation` config.
- * @param log - Logger; only `warn` is used.
+ * @param log - Logger.
  */
 export async function warnOrgTreeOverLimits(
   store: OrganisationStoreBase,
   cfg: OrganisationConfig,
-  log: { warn(obj: object): void },
+  log: { warn(obj: object): void; error(obj: object): void },
 ): Promise<void> {
   const { max_depth, max_children, max_total_orgs } = cfg.hierarchy;
   const warn = (check: string, fields: object) =>
@@ -74,13 +78,23 @@ export async function warnOrgTreeOverLimits(
     }
 
     if (orgs.length > max_total_orgs) {
-      warn('total', { total_orgs: orgs.length, max_total_orgs });
+      // New orgs cannot register until the limit is raised.
+      log.error({
+        operation: OPERATION,
+        status: 'success',
+        check: 'total',
+        total_orgs: orgs.length,
+        max_total_orgs,
+        registration: 'closed',
+      });
+    } else if (orgs.length === max_total_orgs) {
+      warn('total', { total_orgs: orgs.length, max_total_orgs, registration: 'closed' });
     }
 
     const stale = orgs.filter((o) => !isAllowedAt(cfg.known_as, o.knownAs, o.depth)).length;
     if (stale > 0) warn('known_as', { org_count: stale });
   } catch (e) {
-    log.warn({
+    log.error({
       operation: OPERATION,
       status: 'failure',
       error: e instanceof Error ? e.message : String(e),

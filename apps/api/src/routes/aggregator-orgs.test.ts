@@ -623,6 +623,15 @@ describe('aggregator-orgs routes', () => {
       });
     });
 
+    it('names the new parent in the review email after a revive', async () => {
+      orgStore.seed([rejected({ parentId: ROOT_ID, parentName: 'Blue Dots Network', depth: 1 })]);
+      const res = await create({ ...orgBody, parent_id: STATE_ID });
+      expect(res.statusCode).toBe(200);
+      const review = mailer.outbox.at(-1);
+      expect(review?.text).toContain('Parent:      State Org');
+      expect(review?.text).not.toContain('Blue Dots Network');
+    });
+
     it('revives a rejected org under the root when parent_id is omitted', async () => {
       orgStore.seed([district, rejected({ parentId: district.id, depth: 3 })]);
       const res = await create(orgBody);

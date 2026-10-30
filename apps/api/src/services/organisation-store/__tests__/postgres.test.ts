@@ -784,6 +784,7 @@ describe('PostgresOrganisationStore — tree rules', () => {
     maxChildren: null,
     maxTotalOrgs: 50,
     knownAsAllowed: () => true,
+    knownAsConfigured: () => true,
     suggestFor: () => 'aggregator',
   };
 
@@ -881,5 +882,245 @@ describe('PostgresOrganisationStore — tree rules', () => {
     _setDbClients(null, db as never);
     const r = await call(new PostgresOrganisationStore());
     expect(!r.ok && r.error.code).toBe('DB_UNAVAILABLE');
+  });
+});
+
+describe('PostgresOrganisationStore — move and revive statements', () => {
+  const dialect = new PgDialect();
+  const baseRules: TreeRules = {
+    maxDepth: 5,
+    maxChildren: null,
+    maxTotalOrgs: 50,
+    knownAsAllowed: () => true,
+    knownAsConfigured: () => true,
+    suggestFor: (depth) => `suggest-${depth}`,
+  };
+  type NodeRow = {
+    id: string;
+    parentId: string | null;
+    depth: number;
+    status: string;
+    orgType: 'network_facilitator' | 'aggregator';
+    slug: string;
+    knownAs: string;
+  };
+  const node = (id: string, parentId: string | null, depth: number, knownAs = 'aggregator') =>
+    ({
+      id,
+      parentId,
+      depth,
+      status: 'active',
+      orgType: parentId === null ? 'network_facilitator' : 'aggregator',
+      slug: id,
+      knownAs,
+    }) as NodeRow;
+
+  /** A joined read row (`selectJoined`), built from a domain row like makeFakeDb does. */
+  const joined = (r: Organisation) => ({
+    o: {
+      ...r,
+      name: r.displayName,
+      orgOwner: r.ownerUserId,
+      orgType: 'aggregator',
+      url: r.url,
+      locations: r.locations,
+      legalName: r.legalName,
+      gstNumber: r.gstNumber,
+    },
+    ownerKcSub: r.ownerKcSub,
+    parentName: r.parentName,
+    c: {
+      id: 'c'.repeat(64),
+      email: r.ownerEmail,
+      phone: r.ownerPhone,
+      name: r.ownerName,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    },
+  });
+
+  interface Script {
+    tree?: NodeRow[];
+    /** Rows returned by the recursive depth update. */
+    moved?: Array<{ id: string; depth: number; known_as: string }>;
+    /** revive: the rejected row, a child, the parent, live counts. */
+    rejected?: { knownAs: string } | null;
+    child?: boolean;
+    parent?: NodeRow;
+    live?: number;
+    read?: Organisation;
+  }
+
+  /** A Drizzle-like executor answering each statement from the script, recording writes. */
+  function scripted(script: Script) {
+    const sets: Array<Record<string, unknown>> = [];
+    const executed: string[] = [];
+    const params: unknown[][] = [];
+    const resolve = (chain: ChainCall[]): unknown => {
+      const first = chain[0];
+      if (first?.method === 'execute') {
+        const q = dialect.sqlToQuery(first.args[0] as SQL);
+        executed.push(q.sql);
+        params.push(q.params);
+        return { rows: q.sql.includes('WITH RECURSIVE sub') ? (script.moved ?? []) : [] };
+      }
+      if (first?.method === 'update') {
+        sets.push(callArgs(chain, 'set')?.[0] as Record<string, unknown>);
+        return [];
+      }
+      if (chain.some((c) => c.method === 'innerJoin')) {
+        return script.read ? [joined(script.read)] : [];
+      }
+      const fields = Object.keys((callArgs(chain, 'select')?.[0] ?? {}) as object);
+      const forArg = callArgs(chain, 'for')?.[0];
+      if (forArg === 'update') return [{ id: 'locked' }];
+      if (forArg === 'share') return script.parent ? [script.parent] : [];
+      if (!chain.some((c) => c.method === 'where')) return script.tree ?? [];
+      if (fields.length === 1 && fields[0] === 'knownAs') {
+        return script.rejected ? [script.rejected] : [];
+      }
+      if (fields.length === 1 && fields[0] === 'id') return script.child ? [{ id: 'kid' }] : [];
+      if (fields.length === 1 && fields[0] === 'n') return [{ n: script.live ?? 0 }];
+      return [];
+    };
+    const build = (chain: ChainCall[]): unknown =>
+      new Proxy(
+        {},
+        {
+          get(_t, prop: string | symbol) {
+            if (prop === 'transaction') {
+              return (fn: (tx: unknown) => Promise<unknown>) => fn(build([]));
+            }
+            if (prop === 'then') {
+              return (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) => {
+                try {
+                  return Promise.resolve(resolve(chain)).then(ok, bad);
+                } catch (e) {
+                  return bad ? Promise.resolve(bad(e)) : Promise.reject(e);
+                }
+              };
+            }
+            return (...args: unknown[]) => build([...chain, { method: String(prop), args }]);
+          },
+        },
+      );
+    _setDbClients(null, build([]) as never);
+    return { sets, executed, params, store: new PostgresOrganisationStore() };
+  }
+
+  // root ─ a(1) ─ b(2);  root ─ c(1) ─ d(2)
+  const tree = (bKnownAs = 'aggregator') => [
+    node('root', null, 0),
+    node('a', 'root', 1),
+    node('b', 'a', 2, bKnownAs),
+    node('c', 'root', 1),
+    node('d', 'c', 2),
+  ];
+  const depthUpdate = (s: { executed: string[]; params: unknown[][] }) => {
+    const i = s.executed.findIndex((q) => q.includes('WITH RECURSIVE sub'));
+    return i < 0 ? null : s.params[i];
+  };
+
+  it('moves an org and its subtree two levels deeper with one depth update', async () => {
+    const s = scripted({
+      tree: tree(),
+      moved: [
+        { id: 'a', depth: 3, known_as: 'aggregator' },
+        { id: 'b', depth: 4, known_as: 'aggregator' },
+      ],
+      read: makeRow({ id: 'a', depth: 3, parentId: 'd' }),
+    });
+    const r = await s.store.move('a', { parentId: 'd' }, baseRules);
+    expect(r.ok && [r.value.movedCount, r.value.oldParentId]).toEqual([2, 'root']);
+    expect(s.sets[0]).toMatchObject({ parentId: 'd' });
+    expect(depthUpdate(s)).toEqual(['a', 2]);
+  });
+
+  it('shifts depth by a negative delta when moving to a shallower parent', async () => {
+    const s = scripted({
+      tree: tree(),
+      moved: [{ id: 'b', depth: 1, known_as: 'aggregator' }],
+      read: makeRow({ id: 'b', depth: 1, parentId: 'root' }),
+    });
+    const r = await s.store.move('b', { parentId: 'root' }, baseRules);
+    expect(r.ok && r.value.movedCount).toBe(1);
+    expect(depthUpdate(s)).toEqual(['b', -1]);
+  });
+
+  it('refuses with exactly the orgs whose value the new depth does not allow', async () => {
+    const s = scripted({
+      tree: tree('district'),
+      moved: [
+        { id: 'a', depth: 2, known_as: 'aggregator' },
+        { id: 'b', depth: 3, known_as: 'district' },
+      ],
+    });
+    const rules = {
+      ...baseRules,
+      knownAsAllowed: (k: string, d: number) => k !== 'district' || d === 2,
+    };
+    const r = await s.store.move('a', { parentId: 'c' }, rules);
+    expect(!r.ok && r.error).toMatchObject({ code: 'KNOWN_AS_DEPTH', orgIds: ['b'] });
+  });
+
+  it('does not let an org below with a value no longer configured block the move', async () => {
+    const s = scripted({
+      tree: tree('gone'),
+      moved: [
+        { id: 'a', depth: 2, known_as: 'aggregator' },
+        { id: 'b', depth: 3, known_as: 'gone' },
+      ],
+      read: makeRow({ id: 'a', depth: 2, parentId: 'c' }),
+    });
+    const rules = {
+      ...baseRules,
+      knownAsConfigured: (k: string) => k !== 'gone',
+      knownAsAllowed: (k: string) => k !== 'gone',
+    };
+    const r = await s.store.move('a', { parentId: 'c' }, rules);
+    expect(r.ok && r.value.movedCount).toBe(2);
+  });
+
+  it('sends no write for a move to the current parent without a new value', async () => {
+    const s = scripted({ tree: tree(), read: makeRow({ id: 'b', depth: 2, parentId: 'a' }) });
+    const r = await s.store.move('b', { parentId: 'a' }, baseRules);
+    expect(r.ok && r.value.movedCount).toBe(0);
+    expect(s.sets).toEqual([]);
+    expect(depthUpdate(s)).toBeNull();
+  });
+
+  it('revive refuses a rejected org that has a child (NOT_MOVABLE) and writes nothing', async () => {
+    const s = scripted({ rejected: { knownAs: 'aggregator' }, child: true });
+    const r = await s.store.revive('a', 'c', baseRules);
+    expect(!r.ok && r.error.code).toBe('NOT_MOVABLE');
+    expect(s.sets).toEqual([]);
+  });
+
+  it('revive places the org under the new parent, one level down, with a suggested value', async () => {
+    const s = scripted({
+      rejected: { knownAs: 'state' },
+      parent: node('c', 'root', 1),
+      live: 1,
+      read: makeRow({ id: 'a', depth: 2, parentId: 'c', status: 'pending' }),
+    });
+    const rules = {
+      ...baseRules,
+      knownAsAllowed: (k: string, d: number) => k !== 'state' || d === 1,
+    };
+    const r = await s.store.revive('a', 'c', rules);
+    expect(r.ok && r.value.parentId).toBe('c');
+    expect(s.sets[0]).toMatchObject({
+      parentId: 'c',
+      depth: 2,
+      knownAs: 'suggest-2',
+      status: 'pending',
+      rejectedAt: null,
+    });
+  });
+
+  it('revive answers NOT_FOUND when the org is no longer rejected', async () => {
+    const s = scripted({ rejected: null });
+    const r = await s.store.revive('a', 'c', baseRules);
+    expect(!r.ok && r.error.code).toBe('NOT_FOUND');
   });
 });

@@ -350,7 +350,8 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
               fields: { sub_operation: 'orgStore.revive' },
             });
           }
-          return reclaimOrgReview(prior);
+          // The revived row: it may sit under a new parent now.
+          return reclaimOrgReview(revived.value);
         }
         if (prior.status === 'active') {
           // Approved: re-send the sign-in link. Mail goes to the stored owner
