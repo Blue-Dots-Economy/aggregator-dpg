@@ -22,7 +22,7 @@ import { OrgsTable } from '@/components/console/OrgsTable';
 import { HierarchySettings } from '@/components/console/HierarchySettings';
 import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
 import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
-import { ORG_FILTERS, type OrgFilter } from '@/components/console/OrgStatusTiles';
+import { ORG_FILTERS, type OrgFilter } from '@/lib/org-filters';
 import { ConsoleCollapsible, ConsoleSection } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
 

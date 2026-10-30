@@ -18,13 +18,8 @@ import { I } from '../../icons';
 import { cn } from '../../lib/cn';
 import { ChildOrgsTree } from './ChildOrgsTree';
 import { ConsoleStatusPill } from './ConsoleUi';
-import {
-  ORG_FILTERS,
-  OrgStatusTiles,
-  countOrgs,
-  matchesFilter,
-  type OrgFilter,
-} from './OrgStatusTiles';
+import { OrgStatusTiles } from './OrgStatusTiles';
+import { ORG_FILTERS, countOrgs, matchesFilter, type OrgFilter } from '../../lib/org-filters';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 

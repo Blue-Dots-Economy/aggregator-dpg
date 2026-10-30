@@ -8,7 +8,8 @@ import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
-import { OrgStatusTiles, countOrgs } from '@/components/console/OrgStatusTiles';
+import { OrgStatusTiles } from '@/components/console/OrgStatusTiles';
+import { countOrgs } from '@/lib/org-filters';
 
 type Row = OrgSearchResponse['orgs'][number];
 
