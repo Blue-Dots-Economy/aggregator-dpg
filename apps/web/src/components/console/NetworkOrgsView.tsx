@@ -158,7 +158,7 @@ export function NetworkOrgsView({
           <h2 className="flex items-center gap-2 font-display text-[15px] font-bold text-ink-900">
             {t('orgs.network')}
             <span className="rounded-full bg-(--bd-border-soft) px-2 text-[12px] font-bold text-ink-500">
-              {rows.length}
+              {rows.filter((r) => !r.org.is_default).length}
             </span>
           </h2>
           {filter === 'all' ? null : (

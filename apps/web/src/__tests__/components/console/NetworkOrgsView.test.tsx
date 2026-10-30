@@ -62,13 +62,35 @@ const filter = (name: RegExp) => screen.getByRole('button', { name });
 const orgLinks = () =>
   screen.getAllByRole('link').filter((a) => a.getAttribute('href')?.startsWith('/console/orgs/'));
 
+const defaultOrg = org('def', 'Default', { is_default: true, coordinator_count: 2 });
+
 describe('countOrgs', () => {
   it('counts every organisation and each status', () => {
     expect(countOrgs(orgs)).toEqual({ all: 4, active: 2, pending: 1, inactive: 1 });
   });
+
+  it('leaves the Default organisation out, as the organisation limit does', () => {
+    expect(countOrgs([...orgs, defaultOrg])).toEqual({
+      all: 4,
+      active: 2,
+      pending: 1,
+      inactive: 1,
+    });
+  });
 });
 
 describe('NetworkOrgsView', () => {
+  it('lists the Default organisation under All without counting it', () => {
+    renderView({ orgs: [...orgs, defaultOrg] });
+    expect(filter(/^All organisations\s*4/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: /^Network\s*4$/ })).toBeInTheDocument();
+    expect(orgLinks().map((a) => a.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining('Default')]),
+    );
+    fireEvent.click(filter(/^Active\s*2/));
+    expect(orgLinks().some((a) => a.textContent?.includes('Default'))).toBe(false);
+  });
+
   it('shows the network with its organisation limit', () => {
     renderView();
     expect(screen.getAllByText('Blue Dots').length).toBeGreaterThan(0);

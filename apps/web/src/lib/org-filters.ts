@@ -18,15 +18,17 @@ export const ORG_FILTERS: readonly OrgFilter[] = ['all', 'active', 'pending', 'i
 export type OrgCounts = Record<OrgFilter, number>;
 
 /**
- * Counts organisations by status.
+ * Counts organisations by status. The Default organisation is left out, as it
+ * is from the organisation limit.
  *
  * @param orgs - The organisations, any status.
  * @returns The total and the count for each status filter.
  */
 export function countOrgs(orgs: readonly OrgRow[]): OrgCounts {
-  const of = (s: OrgRow['status']) => orgs.filter((o) => o.status === s).length;
+  const counted = orgs.filter((o) => !o.is_default);
+  const of = (s: OrgRow['status']) => counted.filter((o) => o.status === s).length;
   return {
-    all: orgs.length,
+    all: counted.length,
     active: of('active'),
     pending: of('pending'),
     inactive: of('inactive'),
@@ -34,11 +36,13 @@ export function countOrgs(orgs: readonly OrgRow[]): OrgCounts {
 }
 
 /**
- * Whether an organisation passes a filter.
+ * Whether an organisation passes a filter. The Default organisation shows only
+ * under `all`, because the status tiles do not count it.
  *
  * @param org - The organisation.
  * @param filter - The tile filter.
  */
 export function matchesFilter(org: OrgRow, filter: OrgFilter): boolean {
-  return filter === 'all' || org.status === filter;
+  if (filter === 'all') return true;
+  return !org.is_default && org.status === filter;
 }
