@@ -858,12 +858,12 @@
       "breadcrumb": "Breadcrumb",
       "breadcrumb_current": "Invite",
       "limit_reached": "Limit reached",
-      "skipped": "{count, plural, one {# email} other {# emails}} skipped.",
+      "waiting_note": "You've added the most you can send at once ({max}). {count, plural, one {# more email is} other {# more emails are}} lined up and will appear here after you send these.",
       "remove_invalid": "Remove them",
       "note_empty": "Add at least one email to continue.",
       "note_fix": "Fix the highlighted emails to continue.",
       "sending": "Sending…",
-      "limit_note": "You can send {max} at a time. Send these first, then add more.",
+      "limit_note": "You've added the most you can send at once ({max}). Send these invites, then add more.",
       "breadcrumb_parent": "Coordinators"
     },
     "account": {

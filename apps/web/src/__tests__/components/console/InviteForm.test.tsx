@@ -227,7 +227,7 @@ describe('<InviteForm />', () => {
     expect(screen.getByText('Up to 10 emails per send.')).toBeInTheDocument();
   });
 
-  it('shows the at-a-time note when the list is exactly full, without a skipped count', () => {
+  it('shows the at-a-time note when the list is exactly full, with nothing waiting', () => {
     render(
       <NextIntlClientProvider locale="en" messages={messages}>
         <InviteForm orgs={orgs} maxRecipients={2} />
@@ -235,9 +235,9 @@ describe('<InviteForm />', () => {
     );
     typeAddresses('a@x.org b@x.org');
     expect(screen.getByRole('status')).toHaveTextContent(
-      'You can send 2 at a time. Send these first, then add more.',
+      "You've added the most you can send at once (2). Send these invites, then add more.",
     );
-    expect(screen.queryByText(/skipped/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/lined up/)).not.toBeInTheDocument();
   });
 
   it('renders in Hindi when the Hindi catalogue is active', () => {
@@ -250,8 +250,7 @@ describe('<InviteForm />', () => {
     expect(screen.getByRole('button', { name: /आमंत्रण भेजें/ })).toBeInTheDocument();
   });
 
-  it('stops at the configured cap and says how many addresses were skipped', () => {
-    global.fetch = respond({}, 200) as never;
+  it('keeps emails beyond the cap waiting and moves them up as places free', () => {
     render(
       <NextIntlClientProvider locale="en" messages={messages}>
         <InviteForm orgs={orgs} maxRecipients={2} />
@@ -260,17 +259,35 @@ describe('<InviteForm />', () => {
     typeAddresses('a@x.org b@x.org c@x.org d@x.org');
     expect(screen.getByText('2 of 2')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent(
-      '2 emails skipped. You can send 2 at a time. Send these first, then add more.',
+      "You've added the most you can send at once (2). 2 more emails are lined up and will appear here after you send these.",
     );
     expect(emailBox()).toBeDisabled();
     expect(emailBox()).toHaveAttribute('placeholder', 'Limit reached');
     expect(screen.queryByRole('button', { name: 'Remove c@x.org' })).not.toBeInTheDocument();
     expect(sendButton()).toHaveTextContent('Send 2 invites');
+    // Removing one moves the next waiting email into the list.
     fireEvent.click(screen.getAllByRole('button', { name: 'Remove b@x.org' })[0]!);
-    expect(emailBox()).toBeEnabled();
-    expect(screen.queryByText(/skipped/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/at a time/)).not.toBeInTheDocument();
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(screen.getAllByRole('button', { name: 'Remove c@x.org' }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('status')).toHaveTextContent('1 more email is lined up');
+  });
+
+  it('loads the waiting emails after a send and sends them next', async () => {
+    global.fetch = respond({ sent: 2, resent: 0, invalid: [], existing: [] }, 200) as never;
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <InviteForm orgs={orgs} maxRecipients={2} />
+      </NextIntlClientProvider>,
+    );
+    typeAddresses('a@x.org b@x.org c@x.org');
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(screen.getByText('2 invites sent')).toBeInTheDocument());
+    expect(screen.getAllByRole('button', { name: 'Remove c@x.org' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Remove a@x.org' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/lined up/)).not.toBeInTheDocument();
+    expect(sendButton()).toHaveTextContent('Send 1 invite');
+    // Editing the list clears the previous result.
+    typeAddresses('e@x.org');
+    expect(screen.queryByText('2 invites sent')).not.toBeInTheDocument();
   });
 
   it('falls back to the API message when the API cap is lower than the form knew', async () => {

@@ -18,7 +18,7 @@ import {
 } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
-import { Check, FileText, Mail, X } from 'lucide-react';
+import { Check, FileText, Info, Mail, X } from 'lucide-react';
 import type { UserInviteResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { isEmailAddress, normaliseEmail } from '@aggregator-dpg/shared-primitives/phone';
 import { Button } from '../ui/Button';
@@ -82,18 +82,17 @@ export function parseRecipients(text: string, current: readonly Recipient[]): Re
 }
 
 /**
- * Appends the addresses in `text` to `current`, up to `max` in total.
+ * Moves recipients from the front of `waiting` into `list` until `list` holds `max`.
  *
- * @returns The new list and how many addresses did not fit.
+ * @returns The filled list and the recipients still waiting.
  */
-function appendCapped(
-  text: string,
-  current: readonly Recipient[],
+function fill(
+  list: readonly Recipient[],
+  waiting: readonly Recipient[],
   max: number,
-): { list: Recipient[]; skipped: number } {
-  const added = parseRecipients(text, current);
-  const room = Math.max(max - current.length, 0);
-  return { list: [...current, ...added.slice(0, room)], skipped: Math.max(added.length - room, 0) };
+): { list: Recipient[]; waiting: Recipient[] } {
+  const room = Math.max(max - list.length, 0);
+  return { list: [...list, ...waiting.slice(0, room)], waiting: waiting.slice(room) };
 }
 
 /** The addresses the API did not email, with the reason key for each. */
@@ -149,7 +148,7 @@ export function InviteForm({
   const [orgId, setOrgId] = useState(orgs[0]?.id ?? '');
   const [draft, setDraft] = useState('');
   const [recipients, setRecipients] = useState<Recipient[]>([]);
-  const [skipped, setSkipped] = useState(0);
+  const [waiting, setWaiting] = useState<Recipient[]>([]);
   const [result, setResult] = useState<{ sent: number; notSent: NotSent[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -158,26 +157,34 @@ export function InviteForm({
   const invalidCount = recipients.length - valid.length;
   const full = recipients.length >= maxRecipients;
 
-  useLeaveWarning(recipients.length > 0 || draft.trim() !== '');
+  useLeaveWarning(recipients.length > 0 || waiting.length > 0 || draft.trim() !== '');
 
-  function update(list: Recipient[], skippedNow = 0) {
-    setRecipients(list);
-    setSkipped(skippedNow);
+  /** Sets the list, filling free places from the emails waiting beyond the per-send cap. */
+  function update(list: Recipient[], queue: Recipient[] = waiting) {
+    const next = fill(list, queue, maxRecipients);
+    setRecipients(next.list);
+    setWaiting(next.waiting);
+  }
+
+  /** Recipients parsed from `text` that are not already listed or waiting. */
+  function parseNew(text: string): Recipient[] {
+    return parseRecipients(text, [...recipients, ...waiting]);
   }
 
   function add(text: string) {
-    const next = appendCapped(text, recipients, maxRecipients);
-    update(next.list, next.skipped);
+    update(recipients, [...waiting, ...parseNew(text)]);
     setDraft('');
+    setResult(null);
   }
 
   function remove(email: string) {
     update(recipients.filter((r) => r.email !== email));
+    setResult(null);
   }
 
   /** Moves a chip back into the text box so it can be corrected. */
   function edit(email: string) {
-    update(recipients.filter((r) => r.email !== email));
+    remove(email);
     setDraft(email);
   }
 
@@ -203,14 +210,12 @@ export function InviteForm({
   async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     // Text still in the box counts, as if the user had pressed Enter.
-    const next = draft.trim()
-      ? appendCapped(draft, recipients, maxRecipients)
-      : { list: recipients, skipped: 0 };
+    const next = fill(recipients, [...waiting, ...parseNew(draft)], maxRecipients);
     const all = next.list;
     setDraft('');
     // Nothing valid, or an invalid address still in the list: show the list and its message.
     if (!all.some((r) => r.valid) || all.some((r) => !r.valid)) {
-      update(all, next.skipped);
+      update(all, next.waiting);
       return;
     }
     setBusy(true);
@@ -224,9 +229,9 @@ export function InviteForm({
     setBusy(false);
     if (r.ok) {
       setResult({ sent: r.data.sent + r.data.resent, notSent: notSentOf(r.data) });
-      update([]);
+      update([], next.waiting);
     } else {
-      update(all, next.skipped);
+      update(all, next.waiting);
       setResult(null);
       setError(t(failureKey(r)));
     }
@@ -307,7 +312,7 @@ export function InviteForm({
               {t.rich('invite.recipients_hint', { kbd: renderKbd })}
             </span>
 
-            {full ? <LimitNote skipped={skipped} max={maxRecipients} /> : null}
+            {full ? <LimitNote waiting={waiting.length} max={maxRecipients} /> : null}
 
             {invalidCount ? (
               <InvalidBanner count={invalidCount} onRemove={() => update(valid)} />
@@ -323,12 +328,17 @@ export function InviteForm({
           </div>
 
           <footer className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-b-[14px] border-t border-(--bd-border-soft) bg-(--bd-bg) px-[22px] py-4">
-            {footNote ? <span className="text-[12.5px] text-ink-500">{footNote}</span> : null}
+            {footNote ? (
+              <span className="inline-flex items-center gap-1.5 text-[12.5px] text-ink-500">
+                <Info size={14} aria-hidden="true" className="shrink-0" />
+                {footNote}
+              </span>
+            ) : null}
             <div className="ml-auto flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row">
               {recipients.length ? (
                 <Button
                   kind="ghost"
-                  onClick={() => update([])}
+                  onClick={() => update([], [])}
                   className="w-full justify-center sm:w-auto"
                 >
                   {t('invite.clear')}
@@ -454,15 +464,16 @@ function CountMeter({ count, max }: Readonly<{ count: number; max: number }>) {
   );
 }
 
-/** Says that only `max` can be sent at a time, and how many did not fit. */
-function LimitNote({ skipped, max }: Readonly<{ skipped: number; max: number }>) {
+/** Says that only `max` can be sent at a time, and how many emails wait for the next send. */
+function LimitNote({ waiting, max }: Readonly<{ waiting: number; max: number }>) {
   const t = useTranslations('console');
   return (
-    <output className="flex items-start gap-2.5 rounded-[10px] bg-amber-50 px-3 py-2.5 text-[13px] text-amber-800">
-      <I.alert size={16} className="mt-0.5 shrink-0 text-amber-600" />
+    <output className="flex items-start gap-2.5 rounded-[10px] bg-(--bd-primary-50) px-3 py-2.5 text-[13px] text-(--bd-primary-600)">
+      <Info size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
       <span>
-        {skipped ? `${t('invite.skipped', { count: skipped })} ` : null}
-        {t('invite.limit_note', { max })}
+        {waiting
+          ? t('invite.waiting_note', { max, count: waiting })
+          : t('invite.limit_note', { max })}
       </span>
     </output>
   );
