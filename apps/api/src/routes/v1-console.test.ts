@@ -34,10 +34,7 @@ import {
   RegistrationInvitesStoreFake,
   _setRegistrationInvitesStore,
 } from '../services/registration-invites-store/index.js';
-import {
-  _setInviteMintRateChecker,
-  _setInviteIpRateChecker,
-} from '../services/invite-mint-rate.js';
+import { _setInviteIpRateChecker } from '../services/invite-mint-rate.js';
 import { err } from '@aggregator-dpg/shared-primitives/result';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 
@@ -231,7 +228,6 @@ describe('console routes /v1/user, /v1/org', () => {
     _setSignalStackWriter(new SignalStackWriterFake());
     _setRegistrationInvitesStore(new RegistrationInvitesStoreFake());
     _setConsoleWriteRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
-    _setInviteMintRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
     _setInviteIpRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
     _setAccessTokenVerifier(async (token) => {
       const claims = TOKENS[token];
@@ -252,7 +248,6 @@ describe('console routes /v1/user, /v1/org', () => {
     _setSignalStackWriter(null);
     _setRegistrationInvitesStore(null);
     _setConsoleWriteRateChecker(null);
-    _setInviteMintRateChecker(null);
     _setInviteIpRateChecker(null);
     _setAccessTokenVerifier(null);
     config.RBAC_CUSTOM_ROLES_ENABLED = savedCustomRoles;
@@ -1225,21 +1220,11 @@ describe('console routes /v1/user, /v1/org', () => {
     });
   });
 
-  describe('v1-user: invite rate limit and too-many-recipients', () => {
+  describe('v1-user: too-many-recipients', () => {
     it('400 when a request carries more than the per-request recipient cap', async () => {
       const recipients = Array.from({ length: 11 }, (_, i) => ({ email: `r${i}@x.org` }));
       const res = await post('/v1/user/create', 'a', { org_id: ORG_A, recipients });
       expect(res.statusCode).toBe(400);
-    });
-
-    it('429 with Retry-After when the per-org invite budget is spent', async () => {
-      _setInviteMintRateChecker(async () => ({ allowed: false, retryAfterSeconds: 45 }));
-      const res = await post('/v1/user/create', 'a', {
-        org_id: ORG_A,
-        recipients: [{ email: 'new@x.org' }],
-      });
-      expect(res.statusCode).toBe(429);
-      expect(res.headers['retry-after']).toBe('45');
     });
   });
 

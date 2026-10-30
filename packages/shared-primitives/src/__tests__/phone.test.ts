@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { normalisePhone, normaliseEmail } from '../phone/index.js';
+import { normalisePhone, normaliseEmail, isEmailAddress } from '../phone/index.js';
 
 describe('normalisePhone', () => {
   it('keeps already-canonical E.164', () => {
@@ -92,5 +92,23 @@ describe('normaliseEmail', () => {
 
   it('leaves an already-normalised address untouched', () => {
     expect(normaliseEmail('ravi@x.io')).toBe('ravi@x.io');
+  });
+});
+
+describe('isEmailAddress', () => {
+  it('accepts a plain address and a sub-domain', () => {
+    expect(isEmailAddress('asha@example.org')).toBe(true);
+    expect(isEmailAddress('a.b+c@mail.example.co.in')).toBe(true);
+  });
+
+  it('rejects text without a dotted domain', () => {
+    expect(isEmailAddress('not-an-email')).toBe(false);
+    expect(isEmailAddress('asha@example')).toBe(false);
+    expect(isEmailAddress('asha@.org')).toBe(false);
+  });
+
+  it('rejects spaces and a second @', () => {
+    expect(isEmailAddress('asha @example.org')).toBe(false);
+    expect(isEmailAddress('a@b@example.org')).toBe(false);
   });
 });

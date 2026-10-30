@@ -51,7 +51,6 @@ import {
 } from '../services/authz/manage-scope.js';
 import { decideCoordinator } from '../services/decisions/coordinator.js';
 import { mintInviteBatch } from '../services/invites/mint.js';
-import { checkInviteMintRate } from '../services/invite-mint-rate.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { getNetworkConfig } from '../services/network-config.js';
@@ -410,7 +409,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         body: UserInviteRequestSchema,
         response: {
           200: UserInviteResponseSchema,
-          ...errorResponses(400, 401, 403, 404, 409, 429, 503),
+          ...errorResponses(400, 401, 403, 404, 409, 503),
         },
       },
     },
@@ -427,15 +426,6 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const org = await loadOrg(body.org_id);
       // The Default org takes no invites.
       if (org.status !== 'active' || org.isDefault) throw httpError('TARGET_ORG_INACTIVE');
-
-      const rl = await checkInviteMintRate(org.id, body.recipients.length);
-      if (!rl.allowed) {
-        void reply.header('Retry-After', String(rl.retryAfterSeconds));
-        throw httpError('RATE_LIMITED', {
-          detail: `Retry in ${rl.retryAfterSeconds}s.`,
-          fields: { retry_after_seconds: rl.retryAfterSeconds },
-        });
-      }
 
       const log = req.log.child({ operation: 'console.user.invite', actor_id: actor.userId });
       const summary = await mintInviteBatch({

@@ -20,7 +20,7 @@ import { getRegistrationInvitesStore } from '../services/registration-invites-st
 import { mintInviteBatch } from '../services/invites/mint.js';
 import { verifyGrantToken } from '../services/grant-token.js';
 import { ownerSignInUrl } from '../services/decisions/org.js';
-import { checkInviteMintRate, checkInviteIpRate } from '../services/invite-mint-rate.js';
+import { checkInviteIpRate } from '../services/invite-mint-rate.js';
 import { getMailer } from '@aggregator-dpg/mailer';
 import { renderOwnerGrantRefreshed } from '../services/email-templates/index.js';
 import { httpError } from '../errors/http-error.js';
@@ -33,8 +33,7 @@ const RecipientSchema = z.object({
 
 const MintBodySchema = z.object({
   grant: z.string().min(1),
-  // Per-request recipient cap (INVITE_MINT_MAX_RECIPIENTS). Keep it at or below
-  // the per-org rate limit so one full batch fits.
+  // Per-request recipient cap (INVITE_MINT_MAX_RECIPIENTS).
   recipients: z.array(RecipientSchema).min(1).max(config.INVITE_MINT_MAX_RECIPIENTS),
 });
 
@@ -62,7 +61,7 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
         tags: ['invites'],
         summary: 'Mint coordinator invites (owner grant-authed)',
         description:
-          'Authed by the owner grant token. A valid grant mints/refreshes one 14-day invite per recipient and emails each. An expired grant mints nothing and re-mails a fresh grant to the registered owner (recovery). Per-org rate limited.',
+          'Authed by the owner grant token. A valid grant mints/refreshes one 14-day invite per recipient and emails each. An expired grant mints nothing and re-mails a fresh grant to the registered owner (recovery). Per-IP rate limited.',
         body: MintBodySchema,
         response: { 200: MintResponseSchema, ...errorResponses(400, 409, 429, 503) },
       },
@@ -71,7 +70,7 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
       const log = req.log.child({ operation: 'invites.mint' });
       const body = req.body as z.infer<typeof MintBodySchema>;
 
-      // Per-IP throttle, fail-open. The per-org limit below is fail-closed.
+      // Per-IP throttle, fail-open.
       const ipRl = await checkInviteIpRate(req.ip);
       if (!ipRl.allowed) {
         void reply.header('Retry-After', String(ipRl.retryAfterSeconds));
@@ -102,18 +101,6 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
       // The Default org takes no invites.
       if (orgRow?.status !== 'active' || orgRow.isDefault) {
         throw httpError('TARGET_ORG_INACTIVE');
-      }
-
-      // The per-org limit covers both recovery and minting: recovery costs one
-      // slot, a mint costs one per recipient.
-      const cost = grant.expired ? 1 : body.recipients.length;
-      const rl = await checkInviteMintRate(orgId, cost);
-      if (!rl.allowed) {
-        void reply.header('Retry-After', String(rl.retryAfterSeconds));
-        throw httpError('RATE_LIMITED', {
-          detail: `Retry in ${rl.retryAfterSeconds}s.`,
-          fields: { retry_after_seconds: rl.retryAfterSeconds },
-        });
       }
 
       // Expired grant: mail a sign-in link to the registered owner address,

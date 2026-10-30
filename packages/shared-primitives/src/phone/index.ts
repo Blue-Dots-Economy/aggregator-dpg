@@ -76,3 +76,17 @@ export function normaliseEmail(raw: string | undefined | null): string | null {
   const trimmed = raw.trim();
   return trimmed === '' ? null : trimmed.toLowerCase();
 }
+
+// Simple email check to reject obvious garbage. Linear: no catastrophic backtracking.
+const EMAIL_RE = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
+
+/**
+ * Whether `email` looks like an email address: one `@`, no spaces, and a
+ * dotted domain. A shape check only; it does not prove the mailbox exists.
+ *
+ * @param email - The address, already trimmed.
+ * @returns `true` when the shape is acceptable.
+ */
+export function isEmailAddress(email: string): boolean {
+  return EMAIL_RE.test(email);
+}
