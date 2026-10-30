@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
@@ -7,7 +7,7 @@ import type {
   CataloguePermission,
   CatalogueRole,
 } from '@aggregator-dpg/shared-primitives/user-org';
-import { AccessCatalogue, AccessTabs, type AccessTab } from '@/components/console/AccessCatalogue';
+import { AccessCatalogue, type AccessTab } from '@/components/console/AccessCatalogue';
 
 const ROLES: CatalogueRole[] = [
   {
@@ -76,159 +76,143 @@ const withIntl = (ui: ReactNode) =>
 const show = (tab: AccessTab) =>
   withIntl(<AccessCatalogue tab={tab} roles={ROLES} permissions={PERMISSIONS} />);
 
-/** The cards or rows under a group heading. */
-const group = (title: string) =>
-  within(screen.getByRole('heading', { name: title }).closest('section') as HTMLElement);
-
-/** The visible text of each cell of a table row. */
-const cells = (testId: string) =>
-  within(screen.getByTestId(testId))
-    .getAllByRole('cell')
-    .map((c) => c.textContent);
-
+const tab = (name: string) => screen.getByRole('tab', { name: new RegExp(`^${name}`) });
 const search = (text: string) =>
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: text } });
 
-describe('<AccessCatalogue /> summary', () => {
-  it('counts roles, live permissions (noting retired ones), personal data and custom roles', () => {
+describe('<AccessCatalogue /> summary and tabs', () => {
+  it('counts roles, live permissions, personal-data permissions and custom roles', () => {
     show('roles');
-    const tile = (label: string) =>
-      within(screen.getByTestId('access-summary')).getByText(label).closest('.bd-card')
-        ?.textContent;
-    expect(tile('Roles')).toBe('3Roles');
-    expect(tile('Permissions')).toBe('1Permissions · 1 retired');
-    expect(tile('Expose personal data')).toBe('1Expose personal data');
-    expect(tile('Custom roles')).toBe('1Custom roles');
-  });
-});
-
-describe('<AccessCatalogue /> roles', () => {
-  it('groups built-in roles by how they are held, and custom roles apart', () => {
-    show('roles');
-    expect(group('From membership').getByTestId('role-network_admin')).toBeInTheDocument();
-    expect(group('Assigned').getByTestId('role-pii_access')).toBeInTheDocument();
-    expect(group('Assigned').queryByTestId('role-verifier')).toBeNull();
-    expect(group('Custom roles').getByTestId('role-verifier')).toBeInTheDocument();
-  });
-
-  it('shows who holds a role, where, its validity, and links its permissions', () => {
-    show('roles');
-    const card = within(screen.getByTestId('role-pii_access'));
-    expect(card.getByText('Sees and exports decrypted profile details.')).toBeInTheDocument();
-    expect(card.getByText('Coordinators · Aggregator organisations')).toBeInTheDocument();
-    expect(card.getByText('Valid for up to 90 days')).toBeInTheDocument();
-    expect(card.getByText('1 permission')).toBeInTheDocument();
-    const chip = card.getByRole('link', { name: 'profiles.view_pii' });
-    expect(chip).toHaveAttribute(
-      'href',
-      '/console/access/permissions#permission-profiles.view_pii',
+    expect(screen.getByRole('button', { name: /^Permissions\s*1/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Roles\s*3/ })).toBeInTheDocument();
+    expect(screen.getByText(messages.console.access.stat_custom).closest('div')).toHaveTextContent(
+      '1',
     );
-    expect(chip).toHaveAttribute('title', 'Personal data');
   });
 
-  it('marks a custom role, a one-day validity and a role granting nothing', () => {
-    show('roles');
-    const card = within(screen.getByTestId('role-verifier'));
-    expect(card.getByText('Valid for up to 1 day')).toBeInTheDocument();
-    expect(card.getByText('No permissions')).toBeInTheDocument();
-    const admin = within(screen.getByTestId('role-network_admin'));
-    expect(admin.queryByText(/Valid for/)).toBeNull();
-    expect(admin.getByRole('link', { name: 'org.manage' })).not.toHaveAttribute('title');
-  });
-
-  it('narrows the roles by name, key, description or permission', () => {
-    show('roles');
-    search('view_pii');
-    expect(screen.getByTestId('role-pii_access')).toBeInTheDocument();
-    expect(screen.queryByTestId('role-network_admin')).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'From membership' })).toBeNull();
-    search('nothing-like-this');
-    expect(screen.getByText('Nothing matches “nothing-like-this”.')).toBeInTheDocument();
+  it('opens the tab it was given and switches between the three', () => {
+    show('permissions');
+    expect(tab('Permissions')).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(tab('Matrix'));
+    expect(screen.getByText(messages.console.access.subtitle_matrix)).toBeInTheDocument();
+    fireEvent.click(tab('Roles'));
+    expect(screen.getByText(messages.console.access.subtitle_roles)).toBeInTheDocument();
   });
 
   it('has no controls to create, edit, delete or assign', () => {
     show('roles');
-    expect(screen.queryAllByRole('button')).toEqual([]);
-    expect(screen.queryAllByRole('checkbox')).toEqual([]);
-    expect(screen.queryAllByRole('combobox')).toEqual([]);
-    expect(screen.getAllByRole('searchbox')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /^(create|edit|delete|assign)$/i })).toBeNull();
+  });
+});
+
+describe('<AccessCatalogue /> roles', () => {
+  it('groups roles by where they are held and shows the first one in detail', () => {
+    show('roles');
+    expect(screen.getByText(messages.console.access.scope_network)).toBeInTheDocument();
+    expect(screen.getByText(messages.console.access.scope_aggregator)).toBeInTheDocument();
+    const detail = screen.getByRole('complementary', { name: 'Network Admin' });
+    expect(detail).toHaveTextContent('network.administer');
+    expect(detail).toHaveTextContent(messages.console.access.footer_membership);
+  });
+
+  it('shows another role, its validity and a custom role with no permissions', () => {
+    show('roles');
+    fireEvent.click(screen.getByRole('button', { name: /PII Access/ }));
+    const pii = screen.getByRole('complementary', { name: 'PII Access' });
+    expect(pii).toHaveTextContent('Valid for up to 90 days');
+    expect(pii).toHaveTextContent(messages.console.access.footer_assigned);
+    fireEvent.click(screen.getByRole('button', { name: /Verifier/ }));
+    const verifier = screen.getByRole('complementary', { name: 'Verifier' });
+    expect(verifier).toHaveTextContent('No permissions');
+    expect(screen.getByRole('button', { name: /Verifier/ })).toHaveTextContent(
+      messages.console.access.custom,
+    );
+  });
+
+  it('narrows roles by search and says so when nothing matches', () => {
+    show('roles');
+    search('view_pii');
+    expect(screen.queryByRole('button', { name: /Network Admin/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /PII Access/ })).toBeInTheDocument();
+    search('nothing-like-this');
+    expect(screen.getByText('Nothing matches “nothing-like-this”.')).toBeInTheDocument();
+  });
+
+  it('keeps only roles that expose personal data when that filter is on', () => {
+    show('roles');
+    fireEvent.click(screen.getByRole('button', { name: messages.console.access.personal_only }));
+    expect(screen.queryByRole('button', { name: /Network Admin/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /PII Access/ })).toBeInTheDocument();
+  });
+
+  it('opens a permission from a role on the permissions tab', () => {
+    show('roles');
+    fireEvent.click(screen.getByRole('button', { name: /PII Access/ }));
+    fireEvent.click(screen.getByRole('button', { name: /profiles\.view_pii/ }));
+    expect(tab('Permissions')).toHaveAttribute('aria-selected', 'true');
+    expect(document.getElementById('permission-profiles.view_pii')).toBeInTheDocument();
   });
 
   it('says so when there are no roles', () => {
     withIntl(<AccessCatalogue tab="roles" roles={[]} permissions={PERMISSIONS} />);
-    expect(screen.getByText('No roles.')).toBeInTheDocument();
+    expect(screen.getByText(messages.console.access.roles_empty)).toBeInTheDocument();
   });
 });
 
 describe('<AccessCatalogue /> permissions', () => {
-  it('lists each permission in a table with its personal-data flag and granting roles', () => {
+  it('lists each permission by area with its personal-data flag and granting roles', () => {
     show('permissions');
-    expect(cells('permission-profiles.view_pii')).toEqual([
-      'profiles.view_pii',
-      'See and export decrypted details',
-      'Yes',
-      'PII Access',
-    ]);
-    expect(
-      within(screen.getByTestId('permission-profiles.view_pii')).getByRole('link', {
-        name: 'PII Access',
-      }),
-    ).toHaveAttribute('href', '/console/access/roles#role-pii_access');
+    const pii = document.getElementById('permission-profiles.view_pii')!;
+    expect(pii).toHaveTextContent('See and export decrypted details');
+    expect(pii).toHaveTextContent(messages.console.access.yes);
+    expect(within(pii).getByRole('button', { name: 'PII Access' })).toBeInTheDocument();
+    expect(screen.getByText('profiles.*')).toBeInTheDocument();
   });
 
-  it('tags a retired permission, and says when no role grants it', () => {
+  it('tags a retired permission and says when no role grants it', () => {
     show('permissions');
-    expect(cells('permission-agreement.manage')).toEqual([
-      'agreement.manageRetired',
-      'Create and link agreements (terms, privacy, consent)',
-      'No',
-      'No role grants it',
-    ]);
-    expect(cells('permission-profiles.view_pii')[0]).not.toMatch(/Retired/);
+    const row = document.getElementById('permission-agreement.manage')!;
+    expect(row).toHaveTextContent(messages.console.access.retired);
+    expect(row).toHaveTextContent(messages.console.access.granted_by_none);
   });
 
-  it('narrows the permissions by key, description or role name', () => {
+  it('opens a granting role on the roles tab', () => {
+    show('permissions');
+    fireEvent.click(screen.getByRole('button', { name: 'PII Access' }));
+    expect(tab('Roles')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('complementary', { name: 'PII Access' })).toBeInTheDocument();
+  });
+
+  it('narrows permissions by key, description or role name', () => {
     show('permissions');
     search('pii access');
-    expect(screen.getByTestId('permission-profiles.view_pii')).toBeInTheDocument();
-    expect(screen.queryByTestId('permission-agreement.manage')).toBeNull();
+    expect(document.getElementById('permission-agreement.manage')).toBeNull();
+    expect(document.getElementById('permission-profiles.view_pii')).toBeInTheDocument();
   });
 
   it('says so when there are no permissions', () => {
     withIntl(<AccessCatalogue tab="permissions" roles={ROLES} permissions={[]} />);
-    expect(screen.getByText('No permissions.')).toBeInTheDocument();
+    expect(screen.getByText(messages.console.access.permissions_empty)).toBeInTheDocument();
   });
 });
 
-describe('<AccessCatalogue /> links between the tabs', () => {
-  afterEach(() => {
-    window.location.hash = '';
+describe('<AccessCatalogue /> matrix', () => {
+  it('marks which role grants each live permission and totals each role', () => {
+    show('matrix');
+    const row = screen.getByText('profiles.view_pii').closest('tr')!;
+    expect(within(row).getAllByLabelText(messages.console.access.yes)).toHaveLength(1);
+    expect(screen.queryByText('agreement.manage')).toBeNull();
+    expect(screen.getByText(messages.console.access.total).closest('tr')).toHaveTextContent(
+      /2\s*1\s*0/,
+    );
   });
-
-  it('marks and scrolls to the card or row the link points at', () => {
-    const scroll = vi.fn();
-    Element.prototype.scrollIntoView = scroll;
-    window.location.hash = '#permission-profiles.view_pii';
-    show('permissions');
-    expect(screen.getByTestId('permission-profiles.view_pii')).toHaveClass('bd-anchor-on');
-    expect(screen.getByTestId('permission-agreement.manage')).not.toHaveClass('bd-anchor-on');
-    expect(scroll).toHaveBeenCalledTimes(1);
-  });
-
-  it('marks nothing without a hash', () => {
-    show('roles');
-    expect(document.querySelector('.bd-anchor-on')).toBeNull();
-  });
-});
-
-describe('<AccessTabs />', () => {
-  it('links both lists and marks the one on show', () => {
-    withIntl(<AccessTabs current="permissions" />);
-    const roles = screen.getByRole('link', { name: 'Roles' });
-    const permissions = screen.getByRole('link', { name: 'Permissions' });
-    expect(roles).toHaveAttribute('href', '/console/access/roles');
-    expect(roles).not.toHaveAttribute('aria-current');
-    expect(permissions).toHaveAttribute('href', '/console/access/permissions');
-    expect(permissions).toHaveAttribute('aria-current', 'page');
+  it('keeps every role when the search names a permission, and narrows to a named role', () => {
+    show('matrix');
+    search('decrypted');
+    const row = screen.getByText('profiles.view_pii').closest('tr')!;
+    expect(within(row).getAllByLabelText(messages.console.access.yes)).toHaveLength(1);
+    expect(screen.getAllByRole('columnheader')).toHaveLength(ROLES.length + 1);
+    search('pii access');
+    expect(screen.getAllByRole('columnheader')).toHaveLength(2);
   });
 });

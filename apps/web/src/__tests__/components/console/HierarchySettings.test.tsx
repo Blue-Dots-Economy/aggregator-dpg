@@ -60,6 +60,13 @@ describe('<HierarchySettings />', () => {
     expect(row('District')).toHaveTextContent('depths 1, 2');
   });
 
+  it('shows how much of the organisation limit is used', () => {
+    renderIt();
+    const bar = screen.getByRole('progressbar', { name: messages.console.orgs.total_orgs });
+    expect(bar).toHaveAttribute('aria-valuenow', '7');
+    expect(bar).toHaveAttribute('aria-valuemax', '50');
+  });
+
   it('offers no edit actions', () => {
     renderIt();
     expect(screen.queryByRole('button')).toBeNull();

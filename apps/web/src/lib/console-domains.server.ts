@@ -35,16 +35,16 @@ export async function networkDomains(): Promise<ConsoleDomain[]> {
 }
 
 /**
- * Labels for a coordinator's served domains.
+ * The domains a coordinator serves, with their labels.
  *
  * @param serves - Domain ids served; empty means every domain.
  * @param domains - From {@link networkDomains}.
- * @returns The labels (an unknown id shows as-is); every domain's label when `serves` is empty.
+ * @returns The served domains (an unknown id keeps its id as the label); every domain when `serves` is empty.
  */
-export function servedLabels(
+export function servedDomains(
   serves: readonly string[],
   domains: readonly ConsoleDomain[],
-): string[] {
-  if (serves.length === 0) return domains.map((d) => d.label);
-  return serves.map((id) => domains.find((d) => d.id === id)?.label ?? id);
+): ConsoleDomain[] {
+  if (serves.length === 0) return [...domains];
+  return serves.map((id) => ({ id, label: domains.find((d) => d.id === id)?.label ?? id }));
 }

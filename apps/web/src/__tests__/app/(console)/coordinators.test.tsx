@@ -23,7 +23,7 @@ vi.mock('@/lib/console-api.server', () => ({
 }));
 vi.mock('@/lib/console-domains.server', () => ({
   networkDomains: vi.fn(async () => []),
-  servedLabels: vi.fn(() => []),
+  servedDomains: vi.fn(() => []),
 }));
 vi.mock('@/lib/console-hierarchy.server', () => ({ readReachableOrgs: vi.fn(async () => []) }));
 vi.mock('next-intl/server', () => ({
@@ -174,6 +174,34 @@ describe('console coordinators page — filters', () => {
   const renderWith = (params: Record<string, string>) =>
     ConsoleCoordinatorsPage({ searchParams: Promise.resolve(params) });
 
+  it('counts coordinators by status, exactly from the organisations where it can', async () => {
+    vi.mocked(readReachableOrgs).mockResolvedValue([
+      orgRow(ORG_K, 'Karnataka', { coordinator_count: 7, pending_count: 2 }),
+      orgRow(ORG_M, 'Mysuru', { coordinator_count: 3, pending_count: 0 }),
+    ]);
+    show(await renderWith({}));
+    const all = screen.getByRole('link', { name: /console\.org_home\.tile\.all\.label\s*10/ });
+    expect(all).toHaveAttribute('href', '/console/coordinators');
+    const pending = screen.getByRole('link', {
+      name: /console\.org_home\.tile\.pending\.label\s*2/,
+    });
+    expect(pending).toHaveAttribute('href', '/console/coordinators?status=pending');
+    expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', {
+      filter: { status: 'active' },
+      limit: 100,
+    });
+  });
+
+  it('marks the status filter in use among the counts', async () => {
+    show(await renderWith({ status: 'inactive', org_id: ORG_M }));
+    const rejected = screen.getByRole('link', { name: /console\.org_home\.tile\.inactive\.label/ });
+    expect(rejected).toHaveAttribute(
+      'href',
+      `/console/coordinators?org_id=${ORG_M}&status=inactive`,
+    );
+    expect(rejected.className).toContain('border-rose-500');
+  });
+
   it('lists organisations in tree order with their path and label', async () => {
     show(await renderWith({}));
     const options = screen
@@ -225,7 +253,7 @@ describe('console coordinators page — filters', () => {
     expect(screen.queryByText('console.coordinators.clear_all')).toBeNull();
   });
 
-  it("names the coordinator's organisation with its label, and the registered name when it differs", async () => {
+  it("names the coordinator's organisation with its label, without the registered name", async () => {
     vi.mocked(consoleRead).mockResolvedValue({
       users: [coordinatorRow({}), coordinatorRow({ id: 'c2', name: 'Asha Skills', org_id: ORG_K })],
       next_cursor: null,
@@ -233,6 +261,6 @@ describe('console coordinators page — filters', () => {
     show(await renderWith({}));
     const mysuru = screen.getAllByRole('link', { name: 'Mysuru' })[0]!;
     expect(mysuru).toHaveAttribute('href', `/console/orgs/${ORG_M}`);
-    expect(screen.getByText('console.coordinators.registered_as')).toBeInTheDocument();
+    expect(screen.queryByText('console.coordinators.registered_as')).toBeNull();
   });
 });

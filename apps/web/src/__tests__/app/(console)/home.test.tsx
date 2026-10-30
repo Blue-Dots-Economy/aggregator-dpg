@@ -19,18 +19,21 @@ import type {
 
 vi.mock('@/lib/console-actor', () => ({ getConsoleActor: vi.fn() }));
 vi.mock('@/lib/console-api.server', () => ({ consoleRead: vi.fn() }));
-vi.mock('@/lib/console-hierarchy.server', () => ({
-  readReachableOrgs: vi.fn(),
-  readNetworkOrgs: vi.fn(),
-}));
+vi.mock('@/lib/console-hierarchy.server', () => ({ readReachableOrgs: vi.fn() }));
 vi.mock('@/lib/console-domains.server', () => ({
   networkDomains: vi.fn(async () => []),
+  servedDomains: vi.fn(() => []),
 }));
 vi.mock('next-intl/server', () => ({
   getTranslations: vi.fn(
     async () => (key: string, values?: Record<string, unknown>) =>
       values ? `console.${key} ${JSON.stringify(values)}` : `console.${key}`,
   ),
+}));
+vi.mock('next/navigation', () => ({
+  redirect: vi.fn((to: string) => {
+    throw new Error(`redirect:${to}`);
+  }),
 }));
 vi.mock('@/components/shell/Topbar', () => ({
   Topbar: ({ title }: { title: string }) => <h1>{title}</h1>,
@@ -39,7 +42,7 @@ vi.mock('@/components/shell/Topbar', () => ({
 import ConsoleHomePage from '@/app/(console)/console/page';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
-import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
+import { readReachableOrgs } from '@/lib/console-hierarchy.server';
 
 type Row = OrgSearchResponse['orgs'][number];
 
@@ -168,19 +171,13 @@ describe('console home — owner', () => {
     expect(screen.getByText(/home\.below_summary.*"orgs":100/)).toBeInTheDocument();
   });
 
-  it('keeps the organisation cards for an owner of several organisations', async () => {
+  it('sends an owner of several organisations to the organisations page', async () => {
     vi.mocked(getConsoleActor).mockResolvedValue({
       ok: true,
       me: me([meOrg('org-1', 'Edge Org A'), meOrg('org-2', 'Edge Org B')]),
     });
-    mockReads([row('org-1', 'Edge Org A'), row('org-2', 'Edge Org B')]);
-    await show();
-    expect(screen.getByRole('heading', { name: 'console.home.heading' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Edge Org B' })).toHaveAttribute(
-      'href',
-      '/console/orgs/org-2',
-    );
-    expect(consoleRead).not.toHaveBeenCalledWith('/v1/user/search', expect.anything());
+    await expect(ConsoleHomePage()).rejects.toThrow('redirect:/console/orgs');
+    expect(consoleRead).not.toHaveBeenCalled();
   });
 
   it('hides Invite when the owner cannot invite', async () => {
@@ -199,7 +196,7 @@ describe('console home — owner', () => {
 describe('console home — network admin', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('shows the network, tiles that open the list, pending organisations and its own', async () => {
+  it('sends the network admin to the organisations page', async () => {
     vi.mocked(getConsoleActor).mockResolvedValue({
       ok: true,
       me: me(
@@ -207,39 +204,10 @@ describe('console home — network admin', () => {
           meOrg('root', 'Blue Dots', { org_type: 'network_facilitator' }),
           meOrg('def', 'Default', { is_default: true }),
         ],
-        { is_network_admin: true, capabilities: ['network.administer'] },
+        { is_network_admin: true },
       ),
     });
-    mockReads([row('def', 'Default', { is_default: true })]);
-    vi.mocked(readNetworkOrgs).mockResolvedValue({
-      orgs: [
-        row('a', 'Edge Org A'),
-        row('p', 'Pending Co', { status: 'pending' }),
-        row('def', 'Default', { is_default: true }),
-      ],
-      more: false,
-    });
-    await show();
-    expect(
-      screen.getByRole('heading', { name: 'console.home.network_heading: Blue Dots' }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /^Organisations\s*3/ })).toHaveAttribute(
-      'href',
-      '/console/orgs?view=list',
-    );
-    expect(screen.getByRole('link', { name: /^Pending review\s*1/ })).toHaveAttribute(
-      'href',
-      '/console/orgs?status=pending',
-    );
-    expect(screen.getByRole('button', { name: messages.console.orgs.approve })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Pending Co' })).toHaveAttribute(
-      'href',
-      '/console/orgs/p',
-    );
-    expect(screen.getByRole('link', { name: /console\.nav\.access/ })).toHaveAttribute(
-      'href',
-      '/console/access/roles',
-    );
-    expect(readNetworkOrgs).toHaveBeenCalledWith('root');
+    await expect(ConsoleHomePage()).rejects.toThrow('redirect:/console/orgs');
+    expect(consoleRead).not.toHaveBeenCalled();
   });
 });

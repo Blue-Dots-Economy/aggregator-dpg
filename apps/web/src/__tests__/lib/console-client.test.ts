@@ -91,6 +91,16 @@ describe('errorKey (console-client)', () => {
       }),
     ).toBe('errors.known_as_invalid');
   });
+  it.each([
+    [0, 'errors.network'],
+    [401, 'errors.signed_out'],
+    [403, 'errors.forbidden'],
+    [500, 'errors.server'],
+    [503, 'errors.server'],
+  ])('maps status %i to a plain message', (status, key) => {
+    expect(errorKey({ status, error: {} })).toBe(key);
+  });
+
   it('falls back to generic', () => {
     expect(errorKey({ status: 400, error: { code: 'OTHER' } })).toBe('errors.generic');
     expect(errorKey({ status: 400, error: {} })).toBe('errors.generic');

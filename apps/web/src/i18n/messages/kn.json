@@ -661,17 +661,8 @@
       "org_owner": "Organisation owner"
     },
     "home": {
-      "heading": "Your organisations",
-      "network_heading": "Network",
-      "none_pending": "Nothing is waiting for review.",
       "coordinators": "{count} coordinators",
       "pending": "{count} pending",
-      "open": "Open",
-      "no_orgs": "You don't manage an active organisation.",
-      "subtitle_admin": "The network, your organisations and what is waiting for review.",
-      "subtitle_owner": "Your organisations and their coordinators.",
-      "coordinators_label": "Coordinators",
-      "pending_label": "Pending review",
       "below_heading": "Organisations below yours",
       "below_summary": "{orgs, plural, one {# organisation} other {# organisations}} with {coordinators, plural, one {# coordinator} other {# coordinators}} sit below yours. You can view them; their owners manage them.",
       "below_view": "View organisations"
@@ -690,13 +681,10 @@
       "read_only": "The Default organisation's details can't be edited here.",
       "name_admin_only": "Only the network administrator can rename an organisation.",
       "known_as_admin_only": "Only the network administrator can change what an organisation is known as.",
-      "known_as_not_allowed": "This value is not configured or not allowed at this depth. Pick another one.",
+      "known_as_not_allowed": "ಆ ಆಯ್ಕೆ ಈ ಹಂತದಲ್ಲಿ ಲಭ್ಯವಿಲ್ಲ. ಬೇರೆ ಆರಿಸಿ.",
       "owner": "Owner",
-      "status": "Status",
       "view_coordinators": "View coordinators",
       "owner_roles": "Owner's roles",
-      "parent": "Parent organisation",
-      "depth": "Depth",
       "child_count": "Child organisations",
       "children_of_max": "{count} of {max}",
       "children": "Child organisations",
@@ -706,8 +694,6 @@
       "children_below": "{count, plural, one {# organisation below} other {# organisations below}}",
       "children_expand": "Show the organisations below {name}",
       "children_collapse": "Hide the organisations below {name}",
-      "overview": "Overview",
-      "subtitle": "Organisation details, owner and coordinators.",
       "viewed_from_above": "This organisation sits below yours, so you can view it. Only its owner and the network administrator can change it.",
       "move": "Move",
       "move_title": "Move {name}",
@@ -725,7 +711,20 @@
       "move_reason_full": "full",
       "move_reason_depth": "too deep",
       "move_reason_known_as_depth": "an organisation below would get a \"known as\" name not allowed at its depth",
-      "move_reason_other": "not available"
+      "move_reason_other": "not available",
+      "under": "{parent} ಅಡಿಯಲ್ಲಿ",
+      "level": "ಹಂತ {depth}",
+      "created": "{date} ರಂದು ರಚಿಸಲಾಗಿದೆ",
+      "tile": {
+        "coordinators": "ಸಂಯೋಜಕರು",
+        "coordinators_sub": "ಈ ಸಂಸ್ಥೆಯಲ್ಲಿ",
+        "pending": "ಪರಿಶೀಲನೆ ಬಾಕಿ",
+        "pending_sub": "ಮಾಲೀಕರಿಗಾಗಿ ಕಾಯುತ್ತಿದೆ",
+        "pending_none": "ಪರಿಶೀಲಿಸಲು ಏನೂ ಇಲ್ಲ",
+        "children_sub": "ನೇರವಾಗಿ ಕೆಳಗೆ",
+        "level": "ಹಂತ",
+        "level_sub": "ನೆಟ್‌ವರ್ಕ್‌ನಿಂದ ಕೆಳಗಿನ ಹಂತಗಳು"
+      }
     },
     "orgs": {
       "heading": "Organisations",
@@ -744,8 +743,7 @@
       "col_actions": "Actions",
       "depth": "Depth {depth}",
       "hierarchy": "Hierarchy settings",
-      "hierarchy_summary": "{total} of {max} organisations",
-      "hierarchy_hint": "These settings come from the instance configuration and can't be changed here.",
+      "hierarchy_hint": "ಇವುಗಳನ್ನು ನೆಟ್‌ವರ್ಕ್ ಸ್ಥಾಪಿಸುವಾಗ ನಿಗದಿಪಡಿಸಲಾಗುತ್ತದೆ ಮತ್ತು ಇಲ್ಲಿ ಬದಲಾಯಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.",
       "max_depth": "Maximum depth",
       "max_children": "Child organisations per organisation",
       "no_limit": "No limit",
@@ -763,7 +761,7 @@
       "yours": "Your organisation",
       "tile": {
         "all": {
-          "label": "ಸಂಸ್ಥೆಗಳು",
+          "label": "ಎಲ್ಲಾ ಸಂಸ್ಥೆಗಳು",
           "sub": "ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ"
         },
         "active": {
@@ -780,18 +778,12 @@
           "sub": "ಅನುಮೋದಿಸಲಾಗಿಲ್ಲ"
         }
       },
-      "tile_show": "ಪಟ್ಟಿ ನೋಡಿ",
-      "tile_showing": "ಕೆಳಗೆ ತೋರಿಸಲಾಗಿದೆ",
       "view_tree": "ಮರ",
       "view_list": "ಪಟ್ಟಿ",
       "view_label": "ಹೀಗೆ ತೋರಿಸಿ",
       "search": "ಸಂಸ್ಥೆಗಳನ್ನು ಹುಡುಕಿ",
-      "filter_label": "ಸಂಸ್ಥೆಗಳನ್ನು ತೋರಿಸಿ",
-      "filter_all": "ಎಲ್ಲಾ",
-      "filter_pending": "ಬಾಕಿ",
       "col_children": "ಉಪ-ಸಂಸ್ಥೆಗಳು",
       "col_view": "ಕ್ರಿಯೆ",
-      "view_named": "{name} ನೋಡಿ",
       "review_heading": "ನಿಮ್ಮ ಪರಿಶೀಲನೆಗಾಗಿ ಕಾಯುತ್ತಿದೆ ({count})",
       "error": {
         "network": "ಸರ್ವರ್ ತಲುಪಲು ಆಗಲಿಲ್ಲ. ನಿಮ್ಮ ಇಂಟರ್ನೆಟ್ ಸಂಪರ್ಕ ಪರಿಶೀಲಿಸಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
@@ -801,12 +793,23 @@
         "rate_limited": "ಕಡಿಮೆ ಸಮಯದಲ್ಲಿ ಹೆಚ್ಚು ಬದಲಾವಣೆಗಳು. ಒಂದು ನಿಮಿಷ ಕಾಯಿರಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
         "server": "ನಮ್ಮ ಕಡೆಯಿಂದ ಏನೋ ತಪ್ಪಾಗಿದೆ. ಕೆಲವು ನಿಮಿಷಗಳ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
         "generic": "ಅದು ಆಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
-      }
+      },
+      "max_depth_sub": "ನೆಟ್‌ವರ್ಕ್‌ನ ಕೆಳಗಿನ ಹಂತಗಳು",
+      "max_children_sub": "ಒಂದು ಸಂಸ್ಥೆಯ ನೇರವಾಗಿ ಕೆಳಗೆ",
+      "total_orgs_sub": "ಬಾಕಿ ಮತ್ತು ಸಕ್ರಿಯ, ಡೀಫಾಲ್ಟ್ ಎಣಿಸಿಲ್ಲ",
+      "network_note": "ನೆಟ್‌ವರ್ಕ್ · ನೀವು ನೆಟ್‌ವರ್ಕ್ ನಿರ್ವಾಹಕರು",
+      "capacity": "ಬಳಸಿದ ಸಂಸ್ಥೆಗಳು",
+      "network_known_as": "ನೆಟ್‌ವರ್ಕ್",
+      "clear_filter": "ಫಿಲ್ಟರ್ ತೆರವುಗೊಳಿಸಿ",
+      "empty_pending": "ಪರಿಶೀಲನೆಗಾಗಿ ಯಾವುದೇ ಸಂಸ್ಥೆ ಕಾಯುತ್ತಿಲ್ಲ.",
+      "open": "ತೆರೆಯಿರಿ",
+      "none": "ಯಾವುದೂ ಇಲ್ಲ",
+      "read_only": "ಓದಲು ಮಾತ್ರ"
     },
     "coordinators": {
       "heading": "Coordinators",
       "status_filter": "Status",
-      "all": "All",
+      "all": "ಎಲ್ಲಾ ಸ್ಥಿತಿಗಳು",
       "empty": "No coordinators match.",
       "next": "Next page",
       "name": "Name",
@@ -824,8 +827,7 @@
       "serves_filter": "Serves",
       "all_domains": "All domains",
       "clear_filter": "Remove the {label} filter",
-      "clear_all": "Clear filters",
-      "registered_as": "Registered as {name}"
+      "clear_all": "Clear filters"
     },
     "coordinator": {
       "approve": "ಅನುಮೋದಿಸಿ",
@@ -950,25 +952,29 @@
       "retired": "Retired"
     },
     "errors": {
-      "generic": "Something went wrong. Please try again.",
-      "rate_limited": "Too many changes in a short time. Wait a moment and try again.",
-      "not_found": "Not found.",
-      "name_taken": "That name is already taken.",
-      "role_not_allowed": "This role cannot be given to this user here.",
-      "role_invalid": "This role breaks a role rule. Check its permissions and where it can be held.",
-      "role_exists": "A role with that key already exists.",
-      "role_builtin": "Built-in roles cannot be changed here.",
-      "role_in_use": "This role is assigned to someone. Revoke it first.",
-      "role_limit": "This instance has the most custom roles allowed.",
-      "depth_limit": "The organisation can't be placed this deep. Choose a parent higher up.",
-      "child_limit": "The selected parent organisation can't take more organisations.",
-      "total_limit": "The network already has the most organisations allowed.",
-      "parent_cycle": "An organisation can't be moved under itself or an organisation below it.",
-      "known_as_depth": "A \"known as\" value isn't allowed at the new depth. Change it for this organisation or those below it first.",
-      "busy": "The organisation is being changed elsewhere. Try again in a moment.",
-      "not_movable": "This organisation can't be moved.",
-      "parent_invalid": "The selected parent organisation can't take organisations.",
-      "known_as_invalid": "That \"known as\" value isn't configured."
+      "generic": "ಅದು ಆಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+      "rate_limited": "ಕಡಿಮೆ ಸಮಯದಲ್ಲಿ ಹೆಚ್ಚು ಬದಲಾವಣೆಗಳು. ಒಂದು ನಿಮಿಷ ಕಾಯಿರಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+      "not_found": "ಇದು ಸಿಗಲಿಲ್ಲ. ಇದನ್ನು ತೆಗೆದುಹಾಕಿರಬಹುದು. ಪುಟವನ್ನು ರಿಫ್ರೆಶ್ ಮಾಡಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+      "name_taken": "ಆ ಹೆಸರು ಈಗಾಗಲೇ ಬಳಕೆಯಲ್ಲಿದೆ.",
+      "role_not_allowed": "ಈ ಪಾತ್ರವನ್ನು ಇಲ್ಲಿ ಈ ಬಳಕೆದಾರರಿಗೆ ನೀಡಲು ಸಾಧ್ಯವಿಲ್ಲ.",
+      "role_invalid": "ಈ ಪಾತ್ರದ ಅನುಮತಿಗಳು ಅಥವಾ ಅದನ್ನು ಹೊಂದುವ ಸ್ಥಳ ಒಟ್ಟಿಗೆ ಅನುಮತಿಸಲಾಗಿಲ್ಲ. ಅವುಗಳನ್ನು ಬದಲಿಸಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+      "role_exists": "ಆ ಹೆಸರಿನ ಪಾತ್ರ ಈಗಾಗಲೇ ಇದೆ. ಬೇರೆ ಹೆಸರು ಆರಿಸಿ.",
+      "role_builtin": "ಅಂತರ್ನಿರ್ಮಿತ ಪಾತ್ರಗಳನ್ನು ಬದಲಾಯಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.",
+      "role_in_use": "ಈ ಪಾತ್ರ ಇನ್ನೂ ಯಾರಿಗೋ ಇದೆ. ಮೊದಲು ಅವರಿಂದ ತೆಗೆದುಹಾಕಿ.",
+      "role_limit": "ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ ಈಗಾಗಲೇ ಗರಿಷ್ಠ ಕಸ್ಟಮ್ ಪಾತ್ರಗಳಿವೆ.",
+      "depth_limit": "ಸಂಸ್ಥೆಯನ್ನು ಇಷ್ಟು ಕೆಳಗೆ ಇರಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ. ಮೇಲಿನ ಮಾತೃ ಸಂಸ್ಥೆ ಆರಿಸಿ.",
+      "child_limit": "ಆಯ್ದ ಮಾತೃ ಸಂಸ್ಥೆ ಇನ್ನಷ್ಟು ಸಂಸ್ಥೆಗಳನ್ನು ತೆಗೆದುಕೊಳ್ಳಲು ಸಾಧ್ಯವಿಲ್ಲ.",
+      "total_limit": "ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ ಈಗಾಗಲೇ ಗರಿಷ್ಠ ಸಂಸ್ಥೆಗಳಿವೆ.",
+      "parent_cycle": "ಸಂಸ್ಥೆಯನ್ನು ತನ್ನ ಅಡಿಯಲ್ಲಿ ಅಥವಾ ತನ್ನ ಕೆಳಗಿನ ಸಂಸ್ಥೆಯ ಅಡಿಯಲ್ಲಿ ಸರಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.",
+      "known_as_depth": "ಹೊಸ ಹಂತದಲ್ಲಿ \"ಎಂದು ಕರೆಯಲ್ಪಡುವ\" ಮೌಲ್ಯ ಅನುಮತಿಸಲಾಗಿಲ್ಲ. ಮೊದಲು ಅದನ್ನು ಬದಲಿಸಿ.",
+      "busy": "ಸಂಸ್ಥೆಯನ್ನು ಬೇರೆಡೆ ಬದಲಾಯಿಸಲಾಗುತ್ತಿದೆ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+      "not_movable": "ಈ ಸಂಸ್ಥೆಯನ್ನು ಸರಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.",
+      "parent_invalid": "ಆಯ್ದ ಮಾತೃ ಸಂಸ್ಥೆ ಸಂಸ್ಥೆಗಳನ್ನು ತೆಗೆದುಕೊಳ್ಳಲು ಸಾಧ್ಯವಿಲ್ಲ.",
+      "known_as_invalid": "ಆ \"ಎಂದು ಕರೆಯಲ್ಪಡುವ\" ಆಯ್ಕೆ ಲಭ್ಯವಿಲ್ಲ. ಬೇರೆ ಆರಿಸಿ.",
+      "network": "ಸರ್ವರ್ ತಲುಪಲು ಆಗಲಿಲ್ಲ. ನಿಮ್ಮ ಇಂಟರ್ನೆಟ್ ಸಂಪರ್ಕ ಪರಿಶೀಲಿಸಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+      "signed_out": "ನೀವು ಸೈನ್ ಔಟ್ ಆಗಿದ್ದೀರಿ. ಮತ್ತೆ ಸೈನ್ ಇನ್ ಮಾಡಿ, ನಂತರ ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.",
+      "forbidden": "ಇದನ್ನು ಮಾಡಲು ನಿಮಗೆ ಅನುಮತಿ ಇಲ್ಲ.",
+      "server": "ನಮ್ಮ ಕಡೆಯಿಂದ ಏನೋ ತಪ್ಪಾಗಿದೆ. ಕೆಲವು ನಿಮಿಷಗಳ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
     },
     "roles": {
       "title": "ಪಾತ್ರಗಳು",
@@ -999,7 +1005,7 @@
     },
     "roles_admin": {
       "title": "Roles",
-      "off": "Access control is off on this instance.",
+      "off": "ಪಾತ್ರಗಳನ್ನು ಈಗ ನಿರ್ವಹಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ. ನಿಮ್ಮ ತಾಂತ್ರಿಕ ತಂಡದ ಸಹಾಯ ಪಡೆಯಿರಿ.",
       "builtin": "Built-in roles",
       "builtin_hint": "Defined with the release; they cannot be changed here.",
       "custom": "Custom roles",
@@ -1023,18 +1029,17 @@
       "assigned_by": "Assigned by holders of",
       "max_days": "Longest validity (days, empty = none)",
       "permissions": "Permissions",
-      "not_enforced": "not enforced yet"
+      "not_enforced": "ಇನ್ನೂ ಬಳಕೆಯಲ್ಲಿಲ್ಲ"
     },
     "access": {
       "title": "Roles and permissions",
       "subtitle_roles": "Every role on the network: who holds it and the permissions it grants.",
       "subtitle_permissions": "Every permission on the network and the roles that grant it.",
-      "off": "Roles and permissions are unavailable: access control is off on this instance, or the catalogue could not be read.",
+      "off": "ಪಾತ್ರಗಳು ಮತ್ತು ಅನುಮತಿಗಳನ್ನು ಈಗ ತೋರಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ. ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ, ಅಥವಾ ನಿಮ್ಮ ತಾಂತ್ರಿಕ ತಂಡದ ಸಹಾಯ ಪಡೆಯಿರಿ.",
       "tab_roles": "Roles",
       "tab_permissions": "Permissions",
       "stat_roles": "Roles",
       "stat_permissions": "Permissions",
-      "stat_retired": "{count} retired",
       "stat_personal_data": "Expose personal data",
       "stat_custom": "Custom roles",
       "search_roles": "Search roles or permissions",
@@ -1042,21 +1047,13 @@
       "no_match": "Nothing matches “{query}”.",
       "roles_empty": "No roles.",
       "permissions_empty": "No permissions.",
-      "group_membership": "From membership",
-      "group_membership_hint": "Held automatically by everyone with that membership.",
-      "group_assigned": "Assigned",
-      "group_assigned_hint": "Given to a person in an organisation by someone allowed to assign it.",
-      "group_custom": "Custom roles",
-      "group_custom_hint": "Created by the network admin from existing permissions; assigned like the roles above.",
       "held_by_org_owners": "Organisation owners",
       "held_by_coordinators": "Coordinators",
       "org_aggregator": "Aggregator organisations",
       "org_network_facilitator": "The network organisation",
-      "held_line": "{holders} · {orgs}",
       "valid_for": "Valid for up to {count, plural, one {# day} other {# days}}",
       "permission_count": "{count, plural, =0 {No permissions} one {# permission} other {# permissions}}",
       "personal_data": "Personal data",
-      "legend_personal_data": "Exposes personal data",
       "retired": "Retired",
       "col_permission": "Permission",
       "col_description": "Description",
@@ -1064,7 +1061,32 @@
       "col_granted_by": "Granted by roles",
       "yes": "Yes",
       "no": "No",
-      "granted_by_none": "No role grants it"
+      "granted_by_none": "No role grants it",
+      "subtitle_matrix": "ಯಾವ ಪಾತ್ರ ಯಾವ ಅನುಮತಿ ನೀಡುತ್ತದೆ, ಒಂದು ನೋಟದಲ್ಲಿ.",
+      "tab_matrix": "ಮ್ಯಾಟ್ರಿಕ್ಸ್",
+      "personal_only": "ವೈಯಕ್ತಿಕ ಡೇಟಾ ಮಾತ್ರ",
+      "scope_network": "ನೆಟ್‌ವರ್ಕ್ ಸಂಸ್ಥೆ",
+      "scope_network_hint": "ನೆಟ್‌ವರ್ಕ್‌ನ ಮೇಲ್ಭಾಗ",
+      "scope_aggregator": "ಅಗ್ರಿಗೇಟರ್ ಸಂಸ್ಥೆಗಳು",
+      "scope_aggregator_hint": "ಕೆಳಗಿನ ಎಲ್ಲಾ ಸಂಸ್ಥೆಗಳು",
+      "via_assigned": "ನೀಡಲಾಗಿದೆ",
+      "via_membership": "ಸದಸ್ಯತ್ವ",
+      "custom": "ಕಸ್ಟಮ್",
+      "max_days": "ಗರಿಷ್ಠ ದಿನಗಳು",
+      "footer_assigned": "ನೀಡಲು ಅನುಮತಿ ಇರುವವರು ಜನರಿಗೆ ನೀಡುತ್ತಾರೆ",
+      "footer_membership": "ಸದಸ್ಯತ್ವದ ಮೂಲಕ ತಾನಾಗಿಯೇ ಬರುತ್ತದೆ",
+      "matrix_empty": "ಯಾವುದೂ ಹೊಂದಿಕೆಯಾಗುತ್ತಿಲ್ಲ.",
+      "total": "ಈ ಪಾತ್ರದ ಅನುಮತಿಗಳು",
+      "hint": "“ವೈಯಕ್ತಿಕ ಡೇಟಾ” ಎಂದು ಗುರುತಿಸಿದ ಅನುಮತಿಗಳು ಖಾಸಗಿ ವಿವರಗಳನ್ನು ತೋರಿಸುತ್ತವೆ. ಹೆಚ್ಚು ನೋಡಲು ಅನುಮತಿ ಅಥವಾ ಪಾತ್ರದ ಮೇಲೆ ಕ್ಲಿಕ್ ಮಾಡಿ.",
+      "via_automatic": "ಸ್ವಯಂಚಾಲಿತ",
+      "stat_roles_sub": "ಅಂತರ್ಗತ ಮತ್ತು ಕಸ್ಟಮ್",
+      "stat_permissions_sub": "ಪಾತ್ರಗಳು ಏನು ಮಾಡಬಹುದು",
+      "stat_personal_data_sub": "ಖಾಸಗಿ ವಿವರಗಳನ್ನು ನೋಡಲು ಬಿಡುತ್ತವೆ",
+      "stat_custom_sub": "ಈ ನೆಟ್‌ವರ್ಕ್‌ಗಾಗಿ ಸೇರಿಸಲಾಗಿದೆ",
+      "tile_show": "ಪಟ್ಟಿ ನೋಡಿ",
+      "tile_showing": "ಕೆಳಗೆ ತೋರಿಸಲಾಗುತ್ತಿದೆ",
+      "tile_filter": "ಇವನ್ನು ಮಾತ್ರ ತೋರಿಸಿ",
+      "tile_filtering": "ಇವನ್ನು ಮಾತ್ರ ತೋರಿಸಲಾಗುತ್ತಿದೆ"
     },
     "org_home": {
       "heading": "ನಿಮ್ಮ ಸಂಸ್ಥೆ",
@@ -1109,8 +1131,16 @@
       "empty_pending": "ಪರಿಶೀಲನೆಗಾಗಿ ಯಾವುದೇ ಸಂಯೋಜಕರು ಕಾಯುತ್ತಿಲ್ಲ.",
       "partial": "ಹೊಸ {count} ತೋರಿಸಲಾಗುತ್ತಿದೆ. <link>ಎಲ್ಲಾ ಸಂಯೋಜಕರನ್ನು ನೋಡಿ</link>"
     },
-    "network_home": {
-      "owner_note": "ನೀವು ನೆಟ್‌ವರ್ಕ್ ನಿರ್ವಾಹಕರು"
+    "page_error": {
+      "title": "ಈ ಪುಟ ಲೋಡ್ ಆಗಲಿಲ್ಲ",
+      "body": "ನಮ್ಮ ಕಡೆಯಿಂದ ಏನೋ ತಪ್ಪಾಗಿದೆ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ, ಅಥವಾ ಕನ್ಸೋಲ್‌ಗೆ ಹಿಂತಿರುಗಿ.",
+      "retry": "ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ",
+      "home": "ಕನ್ಸೋಲ್‌ಗೆ ಹೋಗಿ"
+    },
+    "page_not_found": {
+      "title": "ಅದು ಸಿಗಲಿಲ್ಲ",
+      "body": "ಅದನ್ನು ತೆಗೆದುಹಾಕಿರಬಹುದು, ಅಥವಾ ನಿಮಗೆ ಅದರ ಪ್ರವೇಶವಿಲ್ಲದಿರಬಹುದು.",
+      "home": "ಕನ್ಸೋಲ್‌ಗೆ ಹೋಗಿ"
     }
   }
 }

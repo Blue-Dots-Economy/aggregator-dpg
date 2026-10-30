@@ -111,7 +111,11 @@
   --bd-table-head-bg: #161c33;
   --bd-table-group-bg: #1a2038;
   --bd-tint-amber: #2a210e;
-  --bd-tint-primary: #1a1f3b;
+  /* Brand tints over the dark surface. !important: the theme provider sets
+     the light tints inline on <html>. */
+  --bd-tint-primary: color-mix(in srgb, var(--bd-primary) 18%, #0b1020);
+  --bd-primary-50: color-mix(in srgb, var(--bd-primary) 18%, #0b1020) !important;
+  --bd-primary-100: color-mix(in srgb, var(--bd-primary) 30%, #0b1020) !important;
   --bd-tint-rose: #2a1418;
   --bd-tint-emerald: #0e2a1f;
   --bd-tint-sky: #0e1f2a;
@@ -149,6 +153,26 @@
 
 .dark .border-ink-100 { border-color: #2c334d; }
 .dark .border-ink-200 { border-color: #353c54; }
+
+/* Brand and status tints: light shades become dark tints, their text lightens. */
+.dark .text-primary-600,
+.dark .text-\(--bd-primary-600\) { color: #a5b4fc; }
+.dark .bg-amber-50 { background-color: var(--bd-tint-amber); }
+.dark .bg-amber-100 { background-color: #3a2c10; }
+.dark .bg-emerald-50 { background-color: var(--bd-tint-emerald); }
+.dark .bg-rose-50 { background-color: var(--bd-tint-rose); }
+.dark .text-amber-600,
+.dark .text-amber-700,
+.dark .text-amber-800 { color: #fbbf24; }
+.dark .text-emerald-600,
+.dark .text-emerald-700,
+.dark .text-emerald-800 { color: #34d399; }
+.dark .text-rose-600,
+.dark .text-rose-700,
+.dark .text-rose-800 { color: #fb7185; }
+.dark .border-amber-200 { border-color: #4a3a14; }
+.dark .border-emerald-200 { border-color: #134e3a; }
+.dark .border-rose-200 { border-color: #4c1d24; }
 
 /* Force-light scope — applied by (public)/layout.tsx so /login and
    /register always render in light theme even when the authenticated

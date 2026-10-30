@@ -3,12 +3,13 @@
 /**
  * A console count tile: a label, a large number, a short line and a tinted
  * icon. As a button it filters a list on the page; as a link it opens the
- * list elsewhere. The selected tile is tinted in its own colour.
+ * list elsewhere; with neither it only shows the count. The selected tile is
+ * tinted in its own colour.
  */
 
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { ArrowRight, Check, type LucideIcon } from 'lucide-react';
+import { ArrowRight, Check } from 'lucide-react';
 import { cn } from '../../lib/cn';
 
 /** The colour of a tile, by what it counts. */
@@ -41,11 +42,12 @@ const TONE: Record<TileTone, { badge: string; count: string; selected: string }>
   },
 };
 
-const BASE =
-  'group bd-card bd-shadow flex cursor-pointer items-start justify-between gap-3 px-[18px] py-4 text-left transition-[background-color,border-color,box-shadow,transform] duration-300 ease-out hover:-translate-y-px hover:border-(--bd-primary-100) hover:shadow-md focus-visible:outline-2 focus-visible:outline-(--bd-primary) active:scale-[0.98] motion-reduce:transition-none';
+const BASE = 'bd-card bd-shadow flex items-start justify-between gap-3 px-[18px] py-4 text-left';
+const INTERACTIVE =
+  'group cursor-pointer transition-[background-color,border-color,box-shadow,transform] duration-300 ease-out hover:-translate-y-px hover:border-(--bd-primary-100) hover:shadow-md focus-visible:outline-2 focus-visible:outline-(--bd-primary) active:scale-[0.98] motion-reduce:transition-none';
 
 export function CountTile({
-  icon: Icon,
+  icon,
   tone,
   label,
   count,
@@ -57,7 +59,8 @@ export function CountTile({
   onClick,
   href,
 }: Readonly<{
-  icon: LucideIcon;
+  /** The icon element, sized 20 (an element, so server pages can pass it). */
+  icon: ReactNode;
   tone: TileTone;
   label: string;
   count: string;
@@ -66,7 +69,7 @@ export function CountTile({
   muted?: boolean;
   selected?: boolean;
   /** The hint on an unselected tile, such as "View list". */
-  showLabel: string;
+  showLabel?: string;
   /** The hint on the selected tile, such as "Showing below". */
   showingLabel?: string;
   /** Makes the tile a button that filters this page. */
@@ -93,7 +96,7 @@ export function CountTile({
             <Check size={13} aria-hidden="true" />
             {showingLabel}
           </span>
-        ) : (
+        ) : showLabel ? (
           <span className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-(--bd-primary-600) opacity-80 group-hover:opacity-100">
             {showLabel}
             <ArrowRight
@@ -102,23 +105,26 @@ export function CountTile({
               className="transition-transform group-hover:translate-x-0.5"
             />
           </span>
-        )}
+        ) : null}
       </span>
       <span
         aria-hidden="true"
         className={cn('grid h-10 w-10 flex-none place-items-center rounded-[11px]', look.badge)}
       >
-        <Icon size={20} strokeWidth={2} />
+        {icon}
       </span>
     </>
   );
-  const className = cn(BASE, selected && look.selected);
+  const className = cn(BASE, INTERACTIVE, selected && look.selected);
   if (href) {
     return (
-      <Link href={href} className={className}>
+      <Link href={href} className={cn(className, 'text-inherit no-underline hover:no-underline')}>
         {body}
       </Link>
     );
+  }
+  if (!onClick) {
+    return <div className={BASE}>{body}</div>;
   }
   return (
     <button type="button" aria-pressed={selected} onClick={onClick} className={className}>

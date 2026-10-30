@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState, type SubmitEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { FolderInput } from 'lucide-react';
 import type {
   OrgHierarchyResponse,
   OrgParentOptionsResponse,
@@ -56,7 +57,11 @@ export function OrgMoveDialog({
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button kind="ghost" onClick={() => setOpen(true)}>
+      <Button
+        kind="soft"
+        icon={<FolderInput size={15} aria-hidden="true" />}
+        onClick={() => setOpen(true)}
+      >
         {t('org.move')}
       </Button>
       {open ? (

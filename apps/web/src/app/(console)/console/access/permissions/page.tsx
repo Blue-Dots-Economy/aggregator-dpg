@@ -29,7 +29,7 @@ export default async function ConsoleAccessPermissionsPage() {
   ]);
   return (
     <>
-      <Topbar title={t('title')} subtitle={t('subtitle_permissions')} />
+      <Topbar title={t('title')} />
       {roles && permissions ? (
         <AccessCatalogue
           tab="permissions"

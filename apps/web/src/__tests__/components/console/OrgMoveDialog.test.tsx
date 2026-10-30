@@ -181,9 +181,9 @@ describe('<OrgMoveDialog />', () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it('shows an error when the candidates cannot be read', async () => {
+  it('shows a plain message when the candidates cannot be read', async () => {
     global.fetch = vi.fn(async () => json({ error: { code: 'BOOM' } }, 500)) as never;
     renderIt();
-    expect(await screen.findByText(messages.console.errors.generic)).toBeInTheDocument();
+    expect(await screen.findByText(messages.console.errors.server)).toBeInTheDocument();
   });
 });

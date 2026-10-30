@@ -37,7 +37,6 @@ type Filter = 'all' | 'active' | 'pending' | 'inactive';
 
 const FILTERS: readonly Filter[] = ['all', 'active', 'pending', 'inactive'];
 
-/** The icon and colours of each count tile. */
 /** The icon and colour of each count tile. */
 const TILE: Record<Filter, { icon: LucideIcon; tone: TileTone }> = {
   all: { icon: Users, tone: 'primary' },
@@ -45,6 +44,12 @@ const TILE: Record<Filter, { icon: LucideIcon; tone: TileTone }> = {
   pending: { icon: Clock, tone: 'amber' },
   inactive: { icon: UserX, tone: 'rose' },
 };
+
+/** The icon of a count tile. */
+function TileIcon({ f }: Readonly<{ f: Filter }>) {
+  const Icon = TILE[f].icon;
+  return <Icon size={20} strokeWidth={2} />;
+}
 
 /** Whether a row matches the search text (already lower-cased). */
 function matches(row: OrgCoordinatorRow, query: string): boolean {
@@ -98,7 +103,7 @@ export function OrgCoordinators({
         {FILTERS.map((f) => (
           <CountTile
             key={f}
-            icon={TILE[f].icon}
+            icon={<TileIcon f={f} />}
             tone={TILE[f].tone}
             label={t(`tile.${f}.label`)}
             count={countOf(f)}

@@ -51,7 +51,6 @@ describe('<ConsoleSidebar />', () => {
       .getAllByRole('link')
       .map((a) => [a.textContent, a.getAttribute('href')]);
     expect(links).toEqual([
-      ['nav.home', '/console'],
       ['nav.organisations', '/console/orgs'],
       ['nav.coordinators', '/console/coordinators'],
       ['nav.access', '/console/access/roles'],
@@ -65,7 +64,7 @@ describe('<ConsoleSidebar />', () => {
     const hrefs = within(aside())
       .getAllByRole('link')
       .map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual(['/console', '/console/orgs']);
+    expect(hrefs).toEqual(['/console/orgs']);
   });
 
   it('names the home link Coordinators when the home page lists them', () => {
@@ -75,10 +74,12 @@ describe('<ConsoleSidebar />', () => {
     expect(links[0]).toHaveAccessibleName('nav.coordinators');
   });
 
-  it('marks home active only on /console itself', () => {
+  it('marks the home link active only on /console itself', () => {
     usePathname.mockReturnValue('/console/orgs/123');
-    render(<ConsoleSidebar canViewAccess account={account} />);
-    expect(within(aside()).getByRole('link', { name: 'nav.home' })).not.toHaveClass('nav-active');
+    render(<ConsoleSidebar canManage={false} homeIsCoordinators account={account} />);
+    expect(within(aside()).getByRole('link', { name: 'nav.coordinators' })).not.toHaveClass(
+      'nav-active',
+    );
     expect(within(aside()).getByRole('link', { name: 'nav.organisations' })).toHaveClass(
       'nav-active',
     );

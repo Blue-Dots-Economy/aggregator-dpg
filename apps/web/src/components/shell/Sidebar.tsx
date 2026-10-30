@@ -294,13 +294,6 @@ function SidebarPanel({
                     {account.subtitle}
                   </div>
                 </div>
-                <I.chevD
-                  size={14}
-                  className={cn(
-                    'shrink-0 text-(--bd-fg-muted) transition-transform',
-                    detailsOpen ? '' : 'rotate-180',
-                  )}
-                />
               </button>
             ) : (
               <>
