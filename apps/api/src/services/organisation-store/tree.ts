@@ -162,18 +162,6 @@ export function moveRefusal(
 }
 
 /**
- * Checks `parentId` as a move option for `id`: the move checks, then the "known as" values below.
- *
- * The moved org's own value is not checked, because the move can give it a new one.
- *
- * @param tree - The snapshot.
- * @param id - The org to move.
- * @param parentId - The candidate parent.
- * @param rules - Tree limits and "known as" rules.
- * @returns The refusal code, `KNOWN_AS_DEPTH` when an org below would sit at a depth its
- *   value does not allow, or `null` when the option is allowed.
- */
-/**
  * Whether an org below a moved org blocks the move with its "known as" value.
  *
  * A value the instance no longer configures does not block: the move does not
@@ -189,6 +177,18 @@ export function knownAsBlocksMove(rules: TreeRules, key: string, depth: number):
   return rules.knownAsConfigured(key) && !rules.knownAsAllowed(key, depth);
 }
 
+/**
+ * Checks `parentId` as a move option for `id`: the move checks, then the "known as" values below.
+ *
+ * The moved org's own value is not checked, because the move can give it a new one.
+ *
+ * @param tree - The snapshot.
+ * @param id - The org to move.
+ * @param parentId - The candidate parent.
+ * @param rules - Tree limits and "known as" rules.
+ * @returns The refusal code, `KNOWN_AS_DEPTH` when an org below would sit at a depth its
+ *   value does not allow, or `null` when the option is allowed.
+ */
 export function parentOptionRefusal(
   tree: Tree,
   id: string,
