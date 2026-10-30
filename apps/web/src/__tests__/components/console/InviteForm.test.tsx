@@ -105,6 +105,35 @@ describe('<InviteForm />', () => {
     expect(screen.queryByRole('button', { name: 'Remove typo@x.or' })).not.toBeInTheDocument();
   });
 
+  it('keeps the name when a chip is moved back into the box and added again', () => {
+    renderForm();
+    typeAddresses('asha@x.og');
+    fireEvent.change(screen.getByLabelText('Name for asha@x.og'), { target: { value: 'Asha' } });
+    fireEvent.keyDown(emailBox(), { key: 'Backspace' });
+    typeAddresses('asha@x.org');
+    expect(screen.getByLabelText('Name for asha@x.org')).toHaveValue('Asha');
+  });
+
+  it('keeps the name when a chip is double-clicked to fix it', () => {
+    renderForm();
+    typeAddresses('ravi@x.og');
+    fireEvent.change(screen.getByLabelText('Name for ravi@x.og'), { target: { value: 'Ravi' } });
+    // The chip comes first; the names list shows the address again.
+    fireEvent.doubleClick(screen.getAllByText('ravi@x.og')[0]!);
+    typeAddresses('ravi@x.org');
+    expect(screen.getByLabelText('Name for ravi@x.org')).toHaveValue('Ravi');
+  });
+
+  it('drops the kept name once the box is emptied, so another address does not get it', () => {
+    renderForm();
+    typeAddresses('asha@x.og');
+    fireEvent.change(screen.getByLabelText('Name for asha@x.og'), { target: { value: 'Asha' } });
+    fireEvent.keyDown(emailBox(), { key: 'Backspace' });
+    fireEvent.change(emailBox(), { target: { value: '' } });
+    typeAddresses('ravi@x.org');
+    expect(screen.getByLabelText('Name for ravi@x.org')).toHaveValue('');
+  });
+
   it('asks before the page is reloaded or closed only while emails are unsent', () => {
     const unloadBlocked = () => {
       const ev = new Event('beforeunload', { cancelable: true });

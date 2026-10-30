@@ -158,6 +158,8 @@ export function InviteForm({
   const [draft, setDraft] = useState('');
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [skipped, setSkipped] = useState(0);
+  // The name of a chip moved back into the box, given back when it is added again.
+  const [heldName, setHeldName] = useState('');
   const [result, setResult] = useState<{ sent: number; notSent: NotSent[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -173,9 +175,17 @@ export function InviteForm({
     setSkipped(skippedNow);
   }
 
+  /** Gives the held name to the first address added from the box, then drops it. */
+  function withHeldName(list: Recipient[]): Recipient[] {
+    if (!heldName || list.length <= recipients.length) return list;
+    setHeldName('');
+    const i = recipients.length;
+    return list.map((r, j) => (j === i ? { ...r, name: heldName } : r));
+  }
+
   function add(text: string) {
     const next = appendCapped(text, recipients, maxRecipients);
-    update(next.list, next.skipped);
+    update(withHeldName(next.list), next.skipped);
     setDraft('');
     setResult(null);
   }
@@ -185,8 +195,9 @@ export function InviteForm({
     setResult(null);
   }
 
-  /** Moves a chip back into the text box so it can be corrected. */
+  /** Moves a chip back into the text box so it can be corrected; its name is kept. */
   function edit(email: string) {
+    setHeldName(recipients.find((r) => r.email === email)?.name ?? '');
     remove(email);
     setDraft(email);
   }
@@ -216,7 +227,7 @@ export function InviteForm({
     const next = draft.trim()
       ? appendCapped(draft, recipients, maxRecipients)
       : { list: recipients, skipped: 0 };
-    const all = next.list;
+    const all = withHeldName(next.list);
     setDraft('');
     // Nothing valid, or an invalid address still in the list: show the list and its message.
     if (!all.some((r) => r.valid) || all.some((r) => !r.valid)) {
@@ -303,7 +314,10 @@ export function InviteForm({
                 spellCheck={false}
                 value={draft}
                 disabled={full}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  if (!e.target.value) setHeldName('');
+                }}
                 onKeyDown={onKeyDown}
                 onPaste={onPaste}
                 onBlur={() => draft.trim() && add(draft)}
