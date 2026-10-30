@@ -1,5 +1,5 @@
--- Verify migration 0028 (`organisations`), read-only. Run AFTER the train.
--- Gates (must be 0): V1–V5. Informational: V6–V8. Counts only — never PII.
+-- Verify migrations 0028 (`organisations`) and 0032 (`depth`), read-only. Run AFTER the train.
+-- Gates (must be 0): V1–V5, V9. Informational: V6–V8. Counts only — never PII.
 -- Run by the instance-upgrade tool (`instance-upgrade run` inside its transaction, `instance-upgrade check`).
 -- Rows: `check_id | category | n` (`gate` must be 0; `info` is reported).
 \set ON_ERROR_STOP on
@@ -50,3 +50,9 @@ SELECT 'V7 legacy_org_details_' || k AS check_id, 'info' AS category, count(*) A
 SELECT 'V8 orgs_without_details' AS check_id, 'info' AS category, count(*) AS n
   FROM organisations
  WHERE org_type = 'aggregator' AND url IS NULL AND locations = '[]'::jsonb;
+
+-- V9  orgs whose depth is not their parent's depth + 1 (0 for the root)
+SELECT 'V9 depth_chain' AS check_id, 'gate' AS category, count(*) AS n
+  FROM organisations o LEFT JOIN organisations p ON p.id = o.parent_id
+ WHERE (o.parent_id IS NULL AND o.depth <> 0)
+    OR (o.parent_id IS NOT NULL AND o.depth IS DISTINCT FROM p.depth + 1);

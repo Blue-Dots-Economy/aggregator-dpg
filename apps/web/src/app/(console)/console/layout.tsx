@@ -54,7 +54,6 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
           the coordinator portal (#793). */}
       <div className="flex flex-col lg:flex-row min-h-dvh">
         <ConsoleSidebar
-          isNetworkAdmin={me.is_network_admin}
           canManage={canViewCoordinators(me)}
           canViewAccess={me.is_network_admin && can(me.capabilities, 'network.administer')}
           account={{

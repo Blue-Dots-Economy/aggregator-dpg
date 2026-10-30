@@ -225,6 +225,13 @@
       "when": 1791600000000,
       "tag": "0031_rbac_seed",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791700000000,
+      "tag": "0032_org_known_as",
+      "breakpoints": true
     }
   ]
 }

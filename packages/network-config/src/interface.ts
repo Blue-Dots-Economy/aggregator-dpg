@@ -15,6 +15,7 @@
 import { z } from 'zod';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
+import { KnownAsKeySchema } from '@aggregator-dpg/shared-primitives/user-org';
 
 // ─── Coordinator YAML schema ──────────────────────────────────────────────────
 
@@ -291,6 +292,121 @@ export const RegistrationModeSchema = z.object({
 });
 export type RegistrationMode = z.infer<typeof RegistrationModeSchema>;
 
+/** Longest "known as" name. */
+export const KNOWN_AS_NAME_MAX = 60;
+
+/** The built-in "known as" value. Allowed at every depth; the fallback for every new org. */
+export const SYSTEM_KNOWN_AS = { key: 'aggregator', name: 'Aggregator' } as const;
+
+/** One instance "known as" value. No `depths` means any depth. */
+export const KnownAsValueSchema = z.object({
+  key: KnownAsKeySchema,
+  name: z.string().trim().min(1).max(KNOWN_AS_NAME_MAX),
+  /** The depths where the value is allowed; 1 is directly under the network. */
+  depths: z.array(z.number().int()).min(1).optional(),
+});
+export type KnownAsValue = z.infer<typeof KnownAsValueSchema>;
+
+/** The "known as" value a new org gets at one depth. */
+export const KnownAsSuggestionSchema = z.object({
+  depth: z.number().int(),
+  key: KnownAsKeySchema,
+});
+export type KnownAsSuggestion = z.infer<typeof KnownAsSuggestionSchema>;
+
+/**
+ * The instance "known as" values, added to the built-in {@link SYSTEM_KNOWN_AS}.
+ *
+ * The database stores the key on each org. A depth with no suggestion gives
+ * new orgs the system value.
+ */
+export const KnownAsConfigSchema = z.object({
+  values: z.array(KnownAsValueSchema).default([]),
+  suggest: z.array(KnownAsSuggestionSchema).default([]),
+});
+export type KnownAsConfig = z.infer<typeof KnownAsConfigSchema>;
+
+/** Tree limits. Pending and active orgs count; the root and the Default org do not. */
+export const HierarchyConfigSchema = z.object({
+  /** The deepest an aggregator org can be; 1 keeps every org directly under the network. */
+  max_depth: z.number().int().min(1).max(10).default(1),
+  /** The most direct children of any org, the network included. Unset means no limit. */
+  max_children: z.number().int().min(1).optional(),
+  /** The most aggregator orgs in the instance. */
+  max_total_orgs: z.number().int().min(1).default(50),
+});
+export type HierarchyConfig = z.infer<typeof HierarchyConfigSchema>;
+
+/**
+ * Organisation settings: tree limits and "known as" values.
+ *
+ * Checks the "known as" depths against `hierarchy.max_depth`.
+ */
+export const OrganisationConfigSchema = z
+  .object({
+    hierarchy: HierarchyConfigSchema.default({}),
+    known_as: KnownAsConfigSchema.default({}),
+  })
+  .superRefine((org, ctx) => {
+    const maxDepth = org.hierarchy.max_depth;
+    const { values, suggest } = org.known_as;
+    const issue = (path: (string | number)[], message: string) =>
+      ctx.addIssue({ code: 'custom', path: ['known_as', ...path], message });
+
+    const keys = values.map((v) => v.key);
+    if (new Set(keys).size !== keys.length) {
+      issue(['values'], 'known_as keys must be unique');
+    }
+    values.forEach((v, i) => {
+      if (v.key === SYSTEM_KNOWN_AS.key) {
+        issue(['values', i, 'key'], `known_as value "${v.key}" is built in; remove it from values`);
+      }
+      for (const d of v.depths ?? []) {
+        if (d < 1 || d > maxDepth) {
+          issue(
+            ['values', i, 'depths'],
+            `known_as value "${v.key}" lists depth ${d}; depths must be between 1 and max_depth (${maxDepth})`,
+          );
+        }
+      }
+    });
+
+    const seen = new Set<number>();
+    suggest.forEach((s, i) => {
+      if (seen.has(s.depth)) {
+        issue(
+          ['suggest', i, 'depth'],
+          `known_as suggest has more than one entry for depth ${s.depth}`,
+        );
+      }
+      seen.add(s.depth);
+      if (s.depth < 1 || s.depth > maxDepth) {
+        issue(
+          ['suggest', i, 'depth'],
+          `known_as suggest depth ${s.depth} must be between 1 and max_depth (${maxDepth})`,
+        );
+        return;
+      }
+      if (s.key === SYSTEM_KNOWN_AS.key) return;
+      const v = values.find((x) => x.key === s.key);
+      if (!v) {
+        issue(['suggest', i, 'key'], `known_as suggest key "${s.key}" is not one of values`);
+      } else if (v.depths && !v.depths.includes(s.depth)) {
+        issue(
+          ['suggest', i, 'key'],
+          `known_as suggest key "${s.key}" is not allowed at depth ${s.depth}`,
+        );
+      }
+    });
+  });
+export type OrganisationConfig = z.infer<typeof OrganisationConfigSchema>;
+
+/** The organisation settings used when an instance declares none. */
+export const DEFAULT_ORGANISATION: OrganisationConfig = {
+  hierarchy: { max_depth: 1, max_total_orgs: 50 },
+  known_as: { values: [], suggest: [] },
+};
+
 /**
  * Root aggregator config — the YAML the operator edits per deployment.
  */
@@ -311,6 +427,7 @@ export const AggregatorYamlSchema = z.object({
         public_hint_i18n_key: null,
       },
     }),
+    organisation: OrganisationConfigSchema.default({}),
   }),
 });
 export type AggregatorYaml = z.infer<typeof AggregatorYamlSchema>;

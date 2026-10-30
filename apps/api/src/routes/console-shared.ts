@@ -1,7 +1,8 @@
 /**
  * Shared helpers of the console routes `/v1/user/*` and `/v1/org/*` in
  * `@aggregator-dpg/api`: wire mappers, keyset cursors, the per-actor write
- * limit, decision-outcome mapping and the owner notice.
+ * limit, decision-outcome mapping, the owner notice and the org tree error
+ * mapping (also used by org registration).
  *
  * Console logs carry actor id, target id and field names only. Never log
  * values, contact data or a decision reason.
@@ -10,10 +11,12 @@
 import type { FastifyBaseLogger, FastifyReply } from 'fastify';
 import { getMailer } from '@aggregator-dpg/mailer';
 import type { Org, User } from '@aggregator-dpg/shared-primitives/user-org';
+import type { KnownAsConfig } from '@aggregator-dpg/network-config/interface';
+import { nameOf } from '../services/known-as.js';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import type { Coordinator } from '../services/user-store/index.js';
-import type { Organisation } from '../services/organisation-store/index.js';
+import type { Organisation, OrgStoreError } from '../services/organisation-store/index.js';
 import type { CoordinatorCursor } from '../services/user-store/interface.js';
 import type { OrgCursor } from '../services/organisation-store/interface.js';
 import { isNetworkAdmin, type Actor } from '../services/auth/actor/index.js';
@@ -81,14 +84,20 @@ export function toWireUser(a: Coordinator, opts: { masked?: boolean } = {}): Use
 /**
  * Maps an organisation to its wire shape.
  *
+ * The root carries no "known as" value. A key no longer in the config list
+ * keeps its key with a null name.
+ *
  * @param o - The org.
+ * @param knownAs - The instance's "known as" list, for the name.
  * @param orgType - `network_facilitator` for the root, else `aggregator`.
  * @returns The `OrgSchema` shape.
  */
 export function toWireOrg(
   o: Organisation,
+  knownAs: KnownAsConfig,
   orgType: 'network_facilitator' | 'aggregator' = 'aggregator',
 ): Org {
+  const isRoot = orgType === 'network_facilitator';
   return {
     id: o.id,
     slug: o.slug,
@@ -100,18 +109,30 @@ export function toWireOrg(
     locations: o.locations,
     legal_name: o.legalName,
     gst_number: o.gstNumber,
+    known_as: isRoot ? null : o.knownAs,
+    known_as_name: isRoot ? null : nameOf(knownAs, o.knownAs),
+    depth: o.depth,
+    parent_id: o.parentId,
+    parent_name: o.parentName,
     created_at: o.createdAt.toISOString(),
     updated_at: o.updatedAt.toISOString(),
   };
 }
 
 /** The owner's contact on the wire. */
-export function ownerContact(o: Organisation): {
+export function ownerContact(
+  o: Organisation,
+  opts: { masked?: boolean } = {},
+): {
   name: string | null;
   email: string;
   phone: string | null;
 } {
-  return { name: o.ownerName, email: o.ownerEmail, phone: o.ownerPhone };
+  return {
+    name: o.ownerName,
+    email: opts.masked ? maskEmail(o.ownerEmail) : o.ownerEmail,
+    phone: opts.masked ? maskPhone(o.ownerPhone) : o.ownerPhone,
+  };
 }
 
 const encode = (v: unknown): string => Buffer.from(JSON.stringify(v)).toString('base64url');
@@ -251,4 +272,46 @@ export async function notifyOwnerOfAdminAction(
 export function listPhrase(names: string[]): string {
   if (names.length <= 1) return names[0] ?? '';
   return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
+
+/**
+ * Throws the HTTP error for an organisation tree refusal from the store.
+ *
+ * Returns without throwing for any other store error, so the caller maps it.
+ *
+ * @param e - The store error.
+ * @param fields - Error fields added to `ORG_DEPTH_LIMIT` and `ORG_CHILD_LIMIT`.
+ * @throws {HttpError} CONFLICT, SCHEMA_VALIDATION, ORG_PARENT_CYCLE, ORG_DEPTH_LIMIT, ORG_CHILD_LIMIT, ORG_TOTAL_LIMIT or KNOWN_AS_DEPTH.
+ */
+export function throwTreeRefusal(e: OrgStoreError, fields?: Record<string, unknown>): void {
+  const limitFields = fields ? { fields } : {};
+  switch (e.code) {
+    case 'NOT_MOVABLE':
+      throw httpError('CONFLICT', {
+        detail: 'This organisation cannot be moved.',
+        fields: { reason: 'not_movable' },
+      });
+    case 'ORG_BUSY':
+      throw httpError('CONFLICT', {
+        detail: 'The organisation is being changed. Try again.',
+        fields: { reason: 'busy' },
+      });
+    case 'INVALID_PARENT':
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: 'The parent must be the network or an active organisation.',
+        fields: { parent_id: 'invalid' },
+      });
+    case 'PARENT_CYCLE':
+      throw httpError('ORG_PARENT_CYCLE');
+    case 'DEPTH_LIMIT':
+      throw httpError('ORG_DEPTH_LIMIT', limitFields);
+    case 'CHILD_LIMIT':
+      throw httpError('ORG_CHILD_LIMIT', limitFields);
+    case 'TOTAL_LIMIT':
+      throw httpError('ORG_TOTAL_LIMIT');
+    case 'KNOWN_AS_DEPTH':
+      throw httpError('KNOWN_AS_DEPTH', { fields: { org_ids: e.orgIds } });
+    default:
+      return;
+  }
 }

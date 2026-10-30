@@ -46,7 +46,7 @@ beforeEach(() => {
 
 describe('<ConsoleSidebar />', () => {
   it('gives the network admin every console link, with the brand and portal label', () => {
-    render(<ConsoleSidebar isNetworkAdmin canViewAccess account={account} />);
+    render(<ConsoleSidebar canViewAccess account={account} />);
     const links = within(aside())
       .getAllByRole('link')
       .map((a) => [a.textContent, a.getAttribute('href')]);
@@ -60,17 +60,17 @@ describe('<ConsoleSidebar />', () => {
     expect(within(aside()).getByText('nav.portal_label')).toBeInTheDocument();
   });
 
-  it('leaves out organisations, roles and, without org.manage, coordinators and invites', () => {
-    render(<ConsoleSidebar isNetworkAdmin={false} canManage={false} account={account} />);
+  it('gives every admin Organisations; leaves out roles and, without org.manage, coordinators', () => {
+    render(<ConsoleSidebar canManage={false} account={account} />);
     const hrefs = within(aside())
       .getAllByRole('link')
       .map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual(['/console']);
+    expect(hrefs).toEqual(['/console', '/console/orgs']);
   });
 
   it('marks home active only on /console itself', () => {
     usePathname.mockReturnValue('/console/orgs/123');
-    render(<ConsoleSidebar isNetworkAdmin canViewAccess account={account} />);
+    render(<ConsoleSidebar canViewAccess account={account} />);
     expect(within(aside()).getByRole('link', { name: 'nav.home' })).not.toHaveClass('nav-active');
     expect(within(aside()).getByRole('link', { name: 'nav.organisations' })).toHaveClass(
       'nav-active',
@@ -79,12 +79,12 @@ describe('<ConsoleSidebar />', () => {
 
   it('keeps the roles and permissions link active on the permissions table', () => {
     usePathname.mockReturnValue('/console/access/permissions');
-    render(<ConsoleSidebar isNetworkAdmin canViewAccess account={account} />);
+    render(<ConsoleSidebar canViewAccess account={account} />);
     expect(within(aside()).getByRole('link', { name: 'nav.access' })).toHaveClass('nav-active');
   });
 
   it('shows the account card with the role, and sign-out, but no contact support', () => {
-    render(<ConsoleSidebar isNetworkAdmin account={account} />);
+    render(<ConsoleSidebar account={account} />);
     expect(within(aside()).getByText('Asha Rao')).toBeInTheDocument();
     expect(within(aside()).getByText('AS')).toBeInTheDocument();
     expect(within(aside()).getByText('nav.network_admin')).toBeInTheDocument();
@@ -93,7 +93,7 @@ describe('<ConsoleSidebar />', () => {
   });
 
   it('has no account-details pop-up, and the card is plain text, without `details`', () => {
-    render(<ConsoleSidebar isNetworkAdmin account={account} />);
+    render(<ConsoleSidebar account={account} />);
     expect(within(aside()).queryByRole('button', { name: /Asha Rao/ })).toBeNull();
   });
 
@@ -104,7 +104,7 @@ describe('<ConsoleSidebar />', () => {
       ...account,
       details: [{ label: 'Email', value: 'asha@example.org' }],
     };
-    render(<ConsoleSidebar isNetworkAdmin account={withDetails} />);
+    render(<ConsoleSidebar account={withDetails} />);
     const toggle = within(aside()).getByRole('button', { name: /Asha Rao/ });
 
     expect(screen.queryByText('asha@example.org')).toBeNull();
@@ -121,7 +121,7 @@ describe('<ConsoleSidebar />', () => {
   });
 
   it('never offers Invite from the sidebar: it lives on the Coordinators page instead (#873)', () => {
-    render(<ConsoleSidebar isNetworkAdmin canManage account={account} />);
+    render(<ConsoleSidebar canManage account={account} />);
     const hrefs = within(aside())
       .getAllByRole('link')
       .map((a) => a.getAttribute('href'));

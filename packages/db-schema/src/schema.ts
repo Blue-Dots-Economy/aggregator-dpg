@@ -32,6 +32,7 @@ import {
   timestamp,
   jsonb,
   integer,
+  smallint,
   boolean,
   pgEnum,
   uniqueIndex,
@@ -373,6 +374,10 @@ export const organisations = pgTable(
       .default(sql`'[]'::jsonb`),
     legalName: text('legal_name'),
     gstNumber: text('gst_number'),
+    /** Key of the org's "known as" value, from the instance config list. Validated by the API. */
+    knownAs: text('known_as').notNull().default('aggregator'),
+    /** Depth in the tree: root 0, top-level 1. Set by the store (migration 0032). */
+    depth: smallint('depth').notNull(),
     // Schema-driven registration fields. Also holds `website`, `address` and
     // `coordinates`, which are copied into `url` and `locations`.
     profile: jsonb('profile')

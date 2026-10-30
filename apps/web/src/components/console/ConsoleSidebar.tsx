@@ -17,18 +17,15 @@ import { AppSidebar, type NavItem, type SidebarAccount } from '../shell/Sidebar'
 /**
  * Builds the console links for the actor and renders the shared sidebar.
  *
- * @param props.isNetworkAdmin - The root organisation's owner.
  * @param props.canManage - Holds `org.manage` (coordinators).
  * @param props.canViewAccess - May open the roles and permissions view.
  * @param props.account - The account card: the admin's name and role.
  */
 export function ConsoleSidebar({
-  isNetworkAdmin,
   canManage = true,
   canViewAccess = false,
   account,
 }: {
-  isNetworkAdmin: boolean;
   canManage?: boolean;
   canViewAccess?: boolean;
   account: SidebarAccount;
@@ -36,9 +33,7 @@ export function ConsoleSidebar({
   const t = useTranslations('console');
   const nav: NavItem[] = [
     { to: '/console', label: t('nav.home'), icon: 'trending', exact: true },
-    ...(isNetworkAdmin
-      ? [{ to: '/console/orgs', label: t('nav.organisations'), icon: 'briefcase' as const }]
-      : []),
+    { to: '/console/orgs', label: t('nav.organisations'), icon: 'briefcase' as const },
     ...(canManage
       ? [{ to: '/console/coordinators', label: t('nav.coordinators'), icon: 'users' as const }]
       : []),

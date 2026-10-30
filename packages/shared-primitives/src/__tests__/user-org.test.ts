@@ -22,6 +22,9 @@ import {
   OrgSearchResponseSchema,
   OrgMetadataUpdateRequestSchema,
   OrgDecisionResponseSchema,
+  OrgHierarchyResponseSchema,
+  OrgParentUpdateRequestSchema,
+  OrgParentOptionsResponseSchema,
   OwnerAccessResponseSchema,
 } from '../user-org/index.js';
 
@@ -101,9 +104,7 @@ describe('user-org wire schemas', () => {
       false,
     );
     expect(UserSearchRequestSchema.safeParse({ unknown: 1 }).success).toBe(false);
-    expect(
-      UserSearchResponseSchema.parse({ users: [], next_cursor: null }),
-    ).toBeTruthy();
+    expect(UserSearchResponseSchema.parse({ users: [], next_cursor: null })).toBeTruthy();
   });
 
   it('validates the invite request bounds and response shape', () => {
@@ -129,13 +130,15 @@ describe('user-org wire schemas', () => {
     expect(DecisionRequestSchema.parse({ decision: 'approve' })).toBeTruthy();
     expect(DecisionRequestSchema.parse({ decision: 'reject', reason: 'dup' })).toBeTruthy();
     expect(DecisionRequestSchema.safeParse({ decision: 'maybe' }).success).toBe(false);
-    expect(DecisionResponseSchema.parse({ id: 'u1', status: 'active', notified: true })).toBeTruthy();
+    expect(
+      DecisionResponseSchema.parse({ id: 'u1', status: 'active', notified: true }),
+    ).toBeTruthy();
 
     expect(UserMetadataUpdateRequestSchema.parse({ serves: ['agri', 'edu'] })).toBeTruthy();
     expect(UserMetadataUpdateRequestSchema.parse({ serves: [] })).toBeTruthy();
-    expect(
-      UserMetadataUpdateRequestSchema.safeParse({ serves: Array(51).fill('x') }).success,
-    ).toBe(false);
+    expect(UserMetadataUpdateRequestSchema.safeParse({ serves: Array(51).fill('x') }).success).toBe(
+      false,
+    );
   });
 
   it('parses org read/search responses', () => {
@@ -150,26 +153,110 @@ describe('user-org wire schemas', () => {
       locations: [location],
       legal_name: null,
       gst_number: null,
+      known_as: 'aggregator',
+      known_as_name: 'Aggregator',
+      depth: 1,
+      parent_id: 'root',
+      parent_name: 'Network',
       created_at: 't',
       updated_at: 't',
     };
     expect(OrgSchema.parse(org)).toBeTruthy();
+    expect(OrgSchema.parse({ ...org, known_as: null, known_as_name: null })).toBeTruthy();
+    expect(OrgSchema.safeParse({ ...org, known_as: undefined }).success).toBe(false);
+    expect(OrgSchema.parse({ ...org, depth: 0 })).toBeTruthy();
+    expect(OrgSchema.safeParse({ ...org, depth: null }).success).toBe(false);
+    expect(OrgSchema.safeParse({ ...org, depth: 1.5 }).success).toBe(false);
+    expect(OrgSchema.safeParse({ ...org, depth: undefined }).success).toBe(false);
+    expect(OrgSchema.parse({ ...org, parent_id: null, parent_name: null })).toBeTruthy();
+    expect(OrgSchema.safeParse({ ...org, parent_id: undefined }).success).toBe(false);
     expect(
       OrgReadResponseSchema.parse({
         org,
         owner: { id: 'a1', contact },
         coordinator_count: 3,
+        child_count: 2,
         pending_count: 1,
       }),
     ).toBeTruthy();
+    expect(
+      OrgReadResponseSchema.safeParse({
+        org,
+        owner: { id: 'a1', contact },
+        coordinator_count: 3,
+        pending_count: 1,
+      }).success,
+    ).toBe(false);
     expect(OrgSearchRequestSchema.parse({ filter: { name_prefix: 'or' } })).toBeTruthy();
     expect(OrgSearchRequestSchema.parse({}).filter).toEqual({});
+    expect(OrgSearchRequestSchema.parse({ filter: { known_as: 'training_partner' } })).toBeTruthy();
+    expect(OrgSearchRequestSchema.safeParse({ filter: { known_as: 'Bad-Key' } }).success).toBe(
+      false,
+    );
+    expect(
+      OrgSearchRequestSchema.parse({
+        filter: { descendants_of: '00000000-0000-4000-8000-000000000001' },
+      }),
+    ).toBeTruthy();
+    expect(
+      OrgSearchRequestSchema.safeParse({ filter: { descendants_of: 'not-a-uuid' } }).success,
+    ).toBe(false);
     expect(
       OrgSearchResponseSchema.parse({
-        orgs: [{ ...org, coordinator_count: 3, pending_count: 1 }],
+        orgs: [{ ...org, coordinator_count: 3, child_count: 0, pending_count: 1 }],
         next_cursor: null,
       }),
     ).toBeTruthy();
+    expect(
+      OrgSearchResponseSchema.safeParse({
+        orgs: [{ ...org, coordinator_count: 3, pending_count: 1 }],
+        next_cursor: null,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('org parent update takes a parent id and an optional known_as key', () => {
+    const parent = '00000000-0000-4000-8000-000000000001';
+    expect(OrgParentUpdateRequestSchema.parse({ parent_id: parent })).toEqual({
+      parent_id: parent,
+    });
+    expect(OrgParentUpdateRequestSchema.parse({ parent_id: parent, known_as: 'district' })).toEqual(
+      { parent_id: parent, known_as: 'district' },
+    );
+    for (const bad of [
+      {},
+      { known_as: 'district' },
+      { parent_id: 'not-a-uuid' },
+      { parent_id: parent, known_as: 'Bad-Key' },
+      { parent_id: parent, name: 'x' },
+    ]) {
+      expect(OrgParentUpdateRequestSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
+  it('parses the parent options response', () => {
+    const option = {
+      id: 'p1',
+      name: 'Parent',
+      depth: 1,
+      known_as_name: 'Aggregator',
+      ok: true,
+      reason: null,
+    };
+    expect(
+      OrgParentOptionsResponseSchema.parse({
+        subtree_size: 3,
+        options: [option, { ...option, known_as_name: null, ok: false, reason: 'CHILD_LIMIT' }],
+      }),
+    ).toBeTruthy();
+    expect(OrgParentOptionsResponseSchema.parse({ subtree_size: 1, options: [] })).toBeTruthy();
+    expect(OrgParentOptionsResponseSchema.safeParse({ options: [] }).success).toBe(false);
+    expect(
+      OrgParentOptionsResponseSchema.safeParse({
+        subtree_size: 1,
+        options: [{ ...option, depth: 1.5 }],
+      }).success,
+    ).toBe(false);
   });
 
   it('org metadata update requires at least one field (the refine branch)', () => {
@@ -184,6 +271,38 @@ describe('user-org wire schemas', () => {
     }
     expect(OrgMetadataUpdateRequestSchema.safeParse({ url: 'not a url' }).success).toBe(false);
     expect(OrgMetadataUpdateRequestSchema.safeParse({ name: 'x' }).success).toBe(false);
+  });
+
+  it('org metadata update accepts a known_as key and refuses a parent id', () => {
+    expect(OrgMetadataUpdateRequestSchema.parse({ known_as: 'district' })).toEqual({
+      known_as: 'district',
+    });
+    const parent = '00000000-0000-4000-8000-000000000001';
+    for (const bad of [{ known_as: 'Bad-Key' }, { parent_id: parent }]) {
+      expect(OrgMetadataUpdateRequestSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
+  it('parses the hierarchy response', () => {
+    const body = {
+      network: { id: 'root', name: 'Network' },
+      limits: { max_depth: 3, max_children: null, max_total_orgs: 50 },
+      total_orgs: 4,
+      known_as: {
+        values: [
+          { key: 'aggregator', name: 'Aggregator', depths: null, system: true, org_count: 3 },
+          { key: 'state', name: 'State', depths: [1], system: false, org_count: 1 },
+        ],
+        suggest: [{ depth: 1, key: 'state' }],
+      },
+    };
+    expect(OrgHierarchyResponseSchema.parse(body)).toEqual(body);
+    expect(
+      OrgHierarchyResponseSchema.safeParse({ ...body, limits: { max_depth: 3 } }).success,
+    ).toBe(false);
+    expect(
+      OrgHierarchyResponseSchema.safeParse({ network: body.network, levels: [] }).success,
+    ).toBe(false);
   });
 
   it('parses the org decision and owner-access responses', () => {

@@ -12,6 +12,7 @@ import { ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import {
+  DEFAULT_ORGANISATION,
   NetworkConfigLoaderBase,
   type NetworkConfigError,
   type ResolvedDomain,
@@ -75,6 +76,7 @@ function buildConfig(
           signals_cta: true,
         },
       },
+      organisation: DEFAULT_ORGANISATION,
     },
     network: {
       id: fixture.networkId,

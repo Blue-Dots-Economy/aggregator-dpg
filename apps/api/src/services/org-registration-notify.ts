@@ -16,6 +16,8 @@ export interface OrgReviewNotifyInput {
   ownerEmail: string;
   /** Org owner's phone (E.164) — shown in the review email's Phone row. */
   ownerPhone: string;
+  /** Parent organisation's name; omitted when unknown. */
+  parentName?: string | null;
 }
 
 /**
@@ -38,6 +40,7 @@ export async function sendOrgReviewEmail(
       applicantPhone: input.ownerPhone,
       recipients: parseAdminEmails(),
       entityLabel: 'organisation',
+      ...(input.parentName ? { parentName: input.parentName } : {}),
       logOperation: 'org-registration-notify.sendOrgReviewEmail',
     },
     log,

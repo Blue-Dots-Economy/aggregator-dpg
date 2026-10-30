@@ -10,6 +10,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { Org } from '@aggregator-dpg/shared-primitives/user-org';
+
+const refresh = vi.fn();
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
+
 import { OrgEditForm } from '@/components/console/OrgEditForm';
 
 const baseOrg: Org = {
@@ -28,14 +32,30 @@ const baseOrg: Org = {
   ],
   legal_name: 'Acme Private Ltd',
   gst_number: 'GST123',
+  known_as: 'aggregator',
+  known_as_name: 'Aggregator',
+  depth: 3,
+  parent_id: 'd1',
+  parent_name: null,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
 };
 
-function renderForm(org: Org, editable: boolean, canRename: boolean) {
+/** Values allowed at the org's depth, as the page passes them. */
+const KNOWN_AS = [
+  { key: 'aggregator', name: 'Aggregator' },
+  { key: 'district', name: 'District' },
+];
+
+function renderForm(
+  org: Org,
+  editable: boolean,
+  canRename: boolean,
+  knownAs: typeof KNOWN_AS = [],
+) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <OrgEditForm org={org} editable={editable} canRename={canRename} />
+      <OrgEditForm org={org} editable={editable} canRename={canRename} knownAsOptions={knownAs} />
     </NextIntlClientProvider>,
   );
 }
@@ -61,12 +81,17 @@ describe('<OrgEditForm />', () => {
 
   it('shows read-only details as text, with no inputs or save button', () => {
     renderForm({ ...baseOrg, gst_number: null }, false, false);
-    expect(screen.getByText(messages.console.org.read_only)).toBeInTheDocument();
+    expect(screen.queryByText(messages.console.org.read_only)).toBeNull();
     expect(screen.queryByRole('button', { name: messages.console.org.save })).toBeNull();
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.getByText('Acme Org')).toBeInTheDocument();
     expect(screen.getByText('1 Main St, Bengaluru, KA')).toBeInTheDocument();
     expect(screen.getByText('—')).toBeInTheDocument();
+  });
+
+  it('says the Default org is not editable only for the Default org', () => {
+    renderForm({ ...baseOrg, is_default: true }, false, false);
+    expect(screen.getByText(messages.console.org.read_only)).toBeInTheDocument();
   });
 
   it('shows "no locations" when a read-only org has none', () => {
@@ -158,6 +183,140 @@ describe('<OrgEditForm />', () => {
         expect.objectContaining({ body: JSON.stringify({ name: 'Acme Renamed' }) }),
       ),
     );
+  });
+
+  describe('known_as (network admin)', () => {
+    it('offers the values allowed at the depth by name, and no parent field', () => {
+      renderForm(baseOrg, true, true, KNOWN_AS);
+      const select = screen.getByLabelText(messages.console.org.known_as);
+      expect(select).toHaveValue('aggregator');
+      expect(screen.getByRole('option', { name: 'District' })).toBeInTheDocument();
+      expect(screen.queryByLabelText(messages.console.org.parent)).toBeNull();
+    });
+
+    it('sends only the new value, never a parent', async () => {
+      global.fetch = respond(
+        { ...baseOrg, known_as: 'district', known_as_name: 'District' },
+        200,
+      ) as never;
+      renderForm(baseOrg, true, true, KNOWN_AS);
+      fireEvent.change(screen.getByLabelText(messages.console.org.known_as), {
+        target: { value: 'district' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
+      await waitFor(() =>
+        expect(global.fetch).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({ body: JSON.stringify({ known_as: 'district' }) }),
+        ),
+      );
+      expect(await screen.findByText(messages.console.org.saved)).toBeInTheDocument();
+    });
+
+    it('refreshes the page after a save so the rest of the page follows', async () => {
+      global.fetch = respond(
+        { ...baseOrg, known_as: 'district', known_as_name: 'District' },
+        200,
+      ) as never;
+      renderForm(baseOrg, true, true, KNOWN_AS);
+      fireEvent.change(screen.getByLabelText(messages.console.org.known_as), {
+        target: { value: 'district' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
+      await waitFor(() => expect(refresh).toHaveBeenCalled());
+    });
+
+    it('shows the newer values the page passes after a move', () => {
+      const { rerender } = renderForm(
+        { ...baseOrg, known_as: 'district', known_as_name: 'District', depth: 2 },
+        true,
+        true,
+        KNOWN_AS,
+      );
+      const moved: Org = {
+        ...baseOrg,
+        known_as: 'training_partner',
+        known_as_name: 'Training Partner',
+        depth: 3,
+        parent_id: 'p2',
+        updated_at: '2026-02-01T00:00:00Z',
+      };
+      const atDepth3 = [
+        { key: 'aggregator', name: 'Aggregator' },
+        { key: 'training_partner', name: 'Training Partner' },
+      ];
+      rerender(
+        <NextIntlClientProvider locale="en" messages={messages}>
+          <OrgEditForm org={moved} editable canRename knownAsOptions={atDepth3} />
+        </NextIntlClientProvider>,
+      );
+      expect(screen.getByLabelText(messages.console.org.known_as)).toHaveValue('training_partner');
+      expect(screen.queryByText(messages.console.org.known_as_not_allowed)).toBeNull();
+    });
+
+    it('shows a key no longer configured as the raw key with a note', () => {
+      renderForm(
+        { ...baseOrg, known_as: 'retired_key', known_as_name: null },
+        true,
+        true,
+        KNOWN_AS,
+      );
+      expect(screen.getByLabelText(messages.console.org.known_as)).toHaveValue('retired_key');
+      expect(screen.getByRole('option', { name: 'retired_key' })).toBeInTheDocument();
+      expect(screen.getByText(messages.console.org.known_as_not_allowed)).toBeInTheDocument();
+    });
+
+    it('shows the API message when the value is not allowed', async () => {
+      global.fetch = respond({ error: { code: 'KNOWN_AS_DEPTH' } }, 400) as never;
+      renderForm(baseOrg, true, true, KNOWN_AS);
+      fireEvent.change(screen.getByLabelText(messages.console.org.known_as), {
+        target: { value: 'district' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
+      expect(await screen.findByText(messages.console.errors.known_as_depth)).toBeInTheDocument();
+    });
+  });
+
+  it('shows known_as read-only with the admin-only hint to an owner', () => {
+    renderForm(baseOrg, true, false);
+    const field = screen.getByLabelText(messages.console.org.known_as);
+    expect(field).toBeDisabled();
+    expect(field).toHaveValue('Aggregator');
+    expect(screen.getByText(messages.console.org.known_as_admin_only)).toBeInTheDocument();
+  });
+
+  it('never sends known_as when the value is unchanged', async () => {
+    global.fetch = respond({ ...baseOrg, url: 'https://other.example' }, 200) as never;
+    renderForm(baseOrg, true, true, KNOWN_AS);
+    fireEvent.change(screen.getByLabelText(messages.console.org.url), {
+      target: { value: 'https://other.example' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ body: JSON.stringify({ url: 'https://other.example' }) }),
+      ),
+    );
+  });
+
+  it('lists known_as in the read-only view, and omits it for the root', () => {
+    const { unmount } = renderForm(baseOrg, false, false);
+    expect(screen.getByText(messages.console.org.known_as)).toBeInTheDocument();
+    expect(screen.getByText('Aggregator')).toBeInTheDocument();
+    unmount();
+    renderForm(
+      {
+        ...baseOrg,
+        org_type: 'network_facilitator',
+        known_as: null,
+        known_as_name: null,
+        depth: 0,
+      },
+      false,
+      false,
+    );
+    expect(screen.queryByText(messages.console.org.known_as)).toBeNull();
   });
 
   it('shows the name-taken error when the API rejects a rename', async () => {

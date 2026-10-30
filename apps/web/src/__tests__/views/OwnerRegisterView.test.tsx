@@ -79,6 +79,18 @@ const consentContentFixture = {
 
 function renderView(props: Record<string, unknown> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(['org-parents'], {
+    accepting: true,
+    parents: [
+      {
+        id: 'p-root',
+        name: 'Blue Dots',
+        is_root: true,
+        known_as_name: null,
+        child_known_as_name: 'Aggregator',
+      },
+    ],
+  });
   return render(
     <QueryClientProvider client={client}>
       <NextIntlClientProvider locale="en" messages={messages}>

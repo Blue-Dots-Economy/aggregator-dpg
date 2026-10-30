@@ -94,6 +94,8 @@ export interface ReviewEmailInput {
   org?: string;
   /** What was registered; sets the email subject and heading (default `aggregator`). */
   entityLabel?: string;
+  /** Parent organisation's name, for an organisation registration. */
+  parentName?: string;
   /** Log operation name for the delivery-failure warning. */
   logOperation: string;
 }
@@ -121,6 +123,7 @@ export async function sendReviewEmail(
     ...(input.invitedEmail ? { invitedEmail: input.invitedEmail } : {}),
     association: input.applicantName,
     ...(input.entityLabel ? { entityLabel: input.entityLabel } : {}),
+    ...(input.parentName ? { parent: input.parentName } : {}),
     reviewUrl: `${base}?token=${encodeURIComponent(token)}`,
     submittedAt: new Date(),
     expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),

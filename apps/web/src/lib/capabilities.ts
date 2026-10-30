@@ -37,14 +37,17 @@ interface ManageScopeSource {
 /**
  * Whether the caller may manage an organisation's coordinators (invite,
  * decide, edit): `org.manage` in that organisation, or in the root, which
- * applies to every organisation (#873). Mirrors the API's manage scope.
+ * applies to every organisation (#873). With access control off: the network
+ * admin, or the organisation's owner. An organisation only viewed from above
+ * is never managed. Mirrors the API's manage scope.
  *
  * @param me - The caller's `read/me` answer.
  * @param orgId - The organisation.
  * @returns True when the organisation should be offered.
  */
 export function canManageOrg(me: ManageScopeSource, orgId: string): boolean {
-  if (me.capabilities == null) return true;
+  const isRootOwner = me.orgs.some((o) => o.org_type === 'network_facilitator');
+  if (me.capabilities == null) return isRootOwner || me.orgs.some((o) => o.id === orgId);
   const holds = (o: ManageScopeSource['orgs'][number] | undefined) =>
     o?.capabilities?.includes('org.manage') ?? false;
   if (holds(me.orgs.find((o) => o.org_type === 'network_facilitator'))) return true;

@@ -1,8 +1,9 @@
 /**
  * Console home page.
  *
- * An owner sees its organisations with coordinator and pending counts. The
- * network admin also sees the network and the organisations awaiting review.
+ * An owner sees its organisations with coordinator and pending counts, and a
+ * summary of the organisations below them. The network admin also sees the
+ * network and the organisations awaiting review.
  */
 
 import Link from 'next/link';
@@ -13,6 +14,7 @@ import type {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
+import { readReachableOrgs } from '@/lib/console-hierarchy.server';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
 import { ConsoleSection, ConsoleStatusPill, EmptyState } from '@/components/console/ConsoleUi';
@@ -25,25 +27,35 @@ export default async function ConsoleHomePage() {
   if (!actor.ok) return null; // the layout already redirected
   const me = actor.me;
 
+  // The actor's own aggregator orgs, read by id.
+  const ownIds = me.orgs.filter((o) => o.org_type === 'aggregator').map((o) => o.id);
+  const readOwned = Promise.all(
+    ownIds.map(async (id): Promise<OrgRow> => {
+      const r = await consoleRead<OrgReadResponse>(`/v1/org/read/${id}`);
+      return {
+        ...r.org,
+        coordinator_count: r.coordinator_count,
+        child_count: r.child_count,
+        pending_count: r.pending_count,
+      };
+    }),
+  );
   let owned: OrgRow[];
   let pending: OrgRow[] = [];
+  let below: OrgRow[] = [];
   if (me.is_network_admin) {
-    // The network admin's own aggregator orgs (the Default org).
-    const ids = me.orgs.filter((o) => o.org_type === 'aggregator').map((o) => o.id);
-    owned = await Promise.all(
-      ids.map(async (id) => {
-        const r = await consoleRead<OrgReadResponse>(`/v1/org/read/${id}`);
-        return { ...r.org, coordinator_count: r.coordinator_count, pending_count: r.pending_count };
-      }),
-    );
-    pending = (
-      await consoleRead<OrgSearchResponse>('/v1/org/search', {
+    [owned, pending] = await Promise.all([
+      readOwned,
+      consoleRead<OrgSearchResponse>('/v1/org/search', {
         filter: { status: 'pending' },
         limit: 50,
-      })
-    ).orgs;
+      }).then((r) => r.orgs),
+    ]);
   } else {
-    owned = (await consoleRead<OrgSearchResponse>('/v1/org/search', { limit: 50 })).orgs;
+    // For an owner, the reachable orgs are its own and every org below them.
+    const [own, reach] = await Promise.all([readOwned, readReachableOrgs()]);
+    owned = own;
+    below = reach.filter((o) => !ownIds.includes(o.id));
   }
   const root = me.orgs.find((o) => o.org_type === 'network_facilitator');
 
@@ -109,7 +121,7 @@ export default async function ConsoleHomePage() {
             flush
             action={
               pending.length > 0 ? (
-                <Link className={buttonClass('soft')} href="/console/orgs?status=pending">
+                <Link className={buttonClass('soft')} href="/console/orgs#pending">
                   {t('home.review')}
                 </Link>
               ) : null
@@ -137,6 +149,24 @@ export default async function ConsoleHomePage() {
                 ))}
               </ul>
             )}
+          </ConsoleSection>
+        ) : null}
+
+        {below.length > 0 ? (
+          <ConsoleSection
+            title={t('home.below_heading')}
+            action={
+              <Link className={buttonClass('soft')} href="/console/orgs">
+                {t('home.below_view')}
+              </Link>
+            }
+          >
+            <p className="text-[13.5px] text-ink-600">
+              {t('home.below_summary', {
+                orgs: below.length,
+                coordinators: below.reduce((n, o) => n + o.coordinator_count, 0),
+              })}
+            </p>
           </ConsoleSection>
         ) : null}
       </div>

@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { FileNetworkConfigLoader } from '../loader.js';
-import { AggregatorConfigSchema } from '../interface.js';
+import { AggregatorConfigSchema, DEFAULT_ORGANISATION } from '../interface.js';
 import { URL_PATTERN } from '../uri-fields.js';
 
 const BLUE_DOT_YAML = `
@@ -394,6 +394,130 @@ describe('AggregatorConfigSchema.registration_modes', () => {
       },
     });
     expect(result.success).toBe(true);
+  });
+
+  it('defaults organisation to a flat tree with only the system value when the block is absent', () => {
+    const result = AggregatorConfigSchema.safeParse({ aggregator: baseAggregator });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.aggregator.organisation).toEqual(DEFAULT_ORGANISATION);
+    expect(DEFAULT_ORGANISATION).toEqual({
+      hierarchy: { max_depth: 1, max_total_orgs: 50 },
+      known_as: { values: [], suggest: [] },
+    });
+  });
+
+  it('accepts limits, values at several depths and suggestions', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: {
+        ...baseAggregator,
+        organisation: {
+          hierarchy: { max_depth: 3, max_children: 50, max_total_orgs: 200 },
+          known_as: {
+            values: [
+              { key: 'state', name: 'State', depths: [1] },
+              { key: 'district', name: 'District', depths: [1, 2] },
+              { key: 'training_partner', name: 'Training Partner' },
+            ],
+            suggest: [
+              { depth: 1, key: 'state' },
+              { depth: 2, key: 'district' },
+              { depth: 3, key: 'aggregator' },
+            ],
+          },
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const org = result.data.aggregator.organisation;
+    expect(org.hierarchy).toEqual({ max_depth: 3, max_children: 50, max_total_orgs: 200 });
+    expect(org.known_as.values.map((v) => v.depths)).toEqual([[1], [1, 2], undefined]);
+    expect(org.known_as.suggest).toHaveLength(3);
+  });
+
+  it('fills hierarchy and known_as defaults inside a partial block', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: { ...baseAggregator, organisation: { hierarchy: { max_depth: 2 } } },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.aggregator.organisation).toEqual({
+      hierarchy: { max_depth: 2, max_total_orgs: 50 },
+      known_as: { values: [], suggest: [] },
+    });
+  });
+
+  it.each([
+    ['max_depth 0', { max_depth: 0 }, {}],
+    ['max_depth 11', { max_depth: 11 }, {}],
+    ['a fractional max_depth', { max_depth: 1.5 }, {}],
+    ['max_children 0', { max_children: 0 }, {}],
+    ['max_total_orgs 0', { max_total_orgs: 0 }, {}],
+    ['the system value listed', {}, { values: [{ key: 'aggregator', name: 'Aggregator' }] }],
+    [
+      'duplicate keys',
+      {},
+      {
+        values: [
+          { key: 'state', name: 'A' },
+          { key: 'state', name: 'B' },
+        ],
+      },
+    ],
+    ['a malformed key', {}, { values: [{ key: 'Bad-Key', name: 'A' }] }],
+    ['a blank name', {}, { values: [{ key: 'state', name: ' ' }] }],
+    ['a name over 60 characters', {}, { values: [{ key: 'state', name: 'x'.repeat(61) }] }],
+    ['a value with label instead of name', {}, { values: [{ key: 'state', label: 'State' }] }],
+    ['an empty depths list', {}, { values: [{ key: 'state', name: 'S', depths: [] }] }],
+    ['depth 0 in depths', {}, { values: [{ key: 'state', name: 'S', depths: [0] }] }],
+    [
+      'a depth above max_depth',
+      { max_depth: 2 },
+      { values: [{ key: 'state', name: 'S', depths: [3] }] },
+    ],
+    ['a suggestion above max_depth', {}, { suggest: [{ depth: 2, key: 'aggregator' }] }],
+    ['a suggestion at depth 0', {}, { suggest: [{ depth: 0, key: 'aggregator' }] }],
+    [
+      'two suggestions for one depth',
+      {},
+      {
+        suggest: [
+          { depth: 1, key: 'aggregator' },
+          { depth: 1, key: 'aggregator' },
+        ],
+      },
+    ],
+    ['a suggestion with an unknown key', {}, { suggest: [{ depth: 1, key: 'state' }] }],
+    [
+      'a suggestion not allowed at its depth',
+      { max_depth: 2 },
+      {
+        values: [{ key: 'state', name: 'S', depths: [1] }],
+        suggest: [{ depth: 2, key: 'state' }],
+      },
+    ],
+  ])('rejects organisation with %s', (_case, hierarchy, knownAs) => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: { ...baseAggregator, organisation: { hierarchy, known_as: knownAs } },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('names the problem in the error message', () => {
+    const result = AggregatorConfigSchema.safeParse({
+      aggregator: {
+        ...baseAggregator,
+        organisation: {
+          known_as: { values: [{ key: 'state', name: 'S', depths: [2] }] },
+        },
+      },
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => i.message).join('\n')).toMatch(
+      /known_as value "state" lists depth 2; depths must be between 1 and max_depth \(1\)/,
+    );
   });
 
   it('rejects non-snake_case mode keys', () => {

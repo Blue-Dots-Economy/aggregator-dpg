@@ -10,6 +10,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
+
+const refresh = vi.fn();
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
+
 import { OrgsTable } from '@/components/console/OrgsTable';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
@@ -25,9 +29,15 @@ const pendingOrg: OrgRow = {
   locations: [],
   legal_name: null,
   gst_number: null,
+  known_as: 'aggregator',
+  known_as_name: 'Aggregator',
+  depth: 1,
+  parent_id: null,
+  parent_name: 'State One',
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
   coordinator_count: 3,
+  child_count: 0,
   pending_count: 1,
 };
 
@@ -69,6 +79,15 @@ describe('<OrgsTable />', () => {
     expect(screen.getByText(/3 coordinators/)).toBeInTheDocument();
   });
 
+  it('shows the known_as label, falling back to the key', () => {
+    renderTable([pendingOrg, { ...activeOrg, known_as: 'retired_label', known_as_name: null }]);
+    expect(
+      screen.getByRole('columnheader', { name: messages.console.orgs.col_known_as }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Aggregator')).toBeInTheDocument();
+    expect(screen.getByText('retired_label')).toBeInTheDocument();
+  });
+
   it('shows approve/reject for a pending org, and no other row action', () => {
     renderTable([pendingOrg, activeOrg]);
     expect(screen.getAllByRole('button', { name: messages.console.orgs.approve })).toHaveLength(1);
@@ -97,6 +116,14 @@ describe('<OrgsTable />', () => {
       `/api/console/org/decision/${pendingOrg.id}`,
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ decision: 'approve' }) }),
     );
+    // The hierarchy settings and the tree on the page follow the decision.
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it('shows the parent organisation', () => {
+    renderTable([pendingOrg]);
+    expect(screen.getByText(messages.console.orgs.col_parent)).toBeInTheDocument();
+    expect(screen.getByText('State One')).toBeInTheDocument();
   });
 
   it('updates the row when the decision was already made elsewhere (C10)', async () => {

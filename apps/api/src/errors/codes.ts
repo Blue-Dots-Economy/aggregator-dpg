@@ -409,6 +409,42 @@ export const ERR = {
       'An organisation with this name is already registered or pending. Please choose a different name.',
     hint: 'organisations partial-unique name (case-insensitive) collision over non-terminal aggregator orgs.',
   },
+  ORG_DEPTH_LIMIT: {
+    code: 'ORG_DEPTH_LIMIT',
+    status: 409,
+    title: 'Too many levels',
+    detail: 'The organisation cannot be placed this deep. Choose a parent higher in the tree.',
+    hint: 'Store DEPTH_LIMIT: parent depth + 1 (+ subtree height on a move) exceeds organisation.hierarchy.max_depth.',
+  },
+  ORG_CHILD_LIMIT: {
+    code: 'ORG_CHILD_LIMIT',
+    status: 409,
+    title: 'Parent organisation is full',
+    detail:
+      'The selected parent organisation cannot take more organisations. Choose another parent.',
+    hint: 'Store CHILD_LIMIT: pending + active children of the parent (Default excluded) reached organisation.hierarchy.max_children.',
+  },
+  ORG_TOTAL_LIMIT: {
+    code: 'ORG_TOTAL_LIMIT',
+    status: 409,
+    title: 'Registration closed',
+    detail: 'This network is not accepting new organisations right now.',
+    hint: 'Store TOTAL_LIMIT: pending + active aggregator orgs (root and Default excluded) reached organisation.hierarchy.max_total_orgs.',
+  },
+  ORG_PARENT_CYCLE: {
+    code: 'ORG_PARENT_CYCLE',
+    status: 400,
+    title: 'Invalid parent',
+    detail: 'An organisation cannot be moved under itself or an organisation below it.',
+    hint: 'Store PARENT_CYCLE: the requested parent is the org or one of its descendants.',
+  },
+  KNOWN_AS_DEPTH: {
+    code: 'KNOWN_AS_DEPTH',
+    status: 400,
+    title: 'Name not allowed at this depth',
+    detail: 'The "known as" name is not allowed at the organisation\'s depth.',
+    hint: 'Store KNOWN_AS_DEPTH: knownAsAllowed(key, depth) is false. `fields.org_ids` lists the orgs.',
+  },
   REGISTRATION_COOLING: {
     code: 'REGISTRATION_COOLING',
     status: 409,

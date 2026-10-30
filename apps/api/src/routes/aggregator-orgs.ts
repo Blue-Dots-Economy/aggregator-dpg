@@ -38,15 +38,24 @@ const ORG_SLUG_RETRIES = 3;
 import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
+import { throwTreeRefusal } from './console-shared.js';
+import { newChildRefusal } from '../services/organisation-store/tree.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
 import type { RecordConsentHook } from '../services/consent-ledger/hook.js';
 import { stampConsent } from '../services/registration-consent.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
+import { getNetworkConfig } from '../services/network-config.js';
+import { nameOf, suggestFor, treeRules } from '../services/known-as.js';
 import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
 
 const OrgCreateBodySchema = z.object({
   display_name: z.string().min(1).max(200),
+  /**
+   * Parent org: the root or an active, non-Default aggregator org (`GET /v1/orgs/parents`).
+   * The root when omitted.
+   */
+  parent_id: z.string().uuid().optional(),
   state: z.string().max(200).optional(),
   owner: z.object({
     name: z.string().min(1).max(200),
@@ -97,6 +106,7 @@ const OrgCreateBodySchema = z.object({
  */
 const ORG_COLUMN_BACKED_KEYS: ReadonlySet<string> = new Set([
   'display_name',
+  'parent_id',
   'state',
   'owner',
   'consent',
@@ -127,6 +137,24 @@ const OrgCreatedResponseSchema = z
   })
   .passthrough();
 
+const OrgParentsResponseSchema = z.object({
+  /** False when the instance is at `max_total_orgs` or no org can take a child. */
+  accepting: z.boolean(),
+  /** Orgs that can take a child now. */
+  parents: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      /** True for the network root. */
+      is_root: z.boolean(),
+      /** The name of the org's "known as" value; null for the root and for a key no longer configured. */
+      known_as_name: z.string().nullable(),
+      /** The name of the "known as" value an org registered under this one gets. */
+      child_known_as_name: z.string().nullable(),
+    }),
+  ),
+});
+
 const OrgListResponseSchema = z
   .object({
     orgs: z.array(z.object({ id: z.string(), slug: z.string(), display_name: z.string() })),
@@ -147,7 +175,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         tags: ['aggregator-orgs'],
         summary: 'Submit a new parent-org registration',
         description:
-          'Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link.',
+          'Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link. A rejected org registering again is set back to pending under the parent in this request, with the same checks. 409 ORG_DEPTH_LIMIT or ORG_CHILD_LIMIT (with fields.parent_id) when the parent cannot take the org; 409 ORG_TOTAL_LIMIT when the instance is full.',
         body: OrgCreateBodySchema,
         response: { 201: OrgCreatedResponseSchema, ...errorResponses(400, 401, 409, 500, 503) },
       },
@@ -189,6 +217,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
             displayName: row.displayName,
             ownerEmail: row.ownerEmail,
             ownerPhone: row.ownerPhone ?? '',
+            parentName: row.parentName,
           },
           log,
         );
@@ -295,6 +324,8 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         const prior = existing.value;
         // Never write the submitted fields: the submit is anonymous, so an
         // email match alone must not change the org. Stored values are used.
+        // The parent is the one exception: a rejected org is revived under the
+        // submitted parent, and it stays pending until an admin approves it.
         if (prior.status === 'inactive') {
           // Rejected: refuse until the cooling window from `rejected_at` ends,
           // then revive the same row to pending and re-send the review link.
@@ -304,17 +335,23 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
               fields: { email: body.owner.email, retry_after: retryAfter },
             });
           }
-          const revived = await orgStore.update(prior.id, {
-            status: 'pending',
-            rejectedAt: null,
-          });
+          const rules = treeRules((await getNetworkConfig()).aggregator.organisation);
+          const revived = await orgStore.revive(prior.id, body.parent_id, rules);
           if (!revived.ok) {
+            throwTreeRefusal(revived.error, { parent_id: body.parent_id ?? null });
+            // The row stopped being a rejected org after it was read.
+            if (revived.error.code === 'NOT_FOUND') {
+              throw httpError('CONFLICT', {
+                detail: 'The organisation changed while it was being registered again. Try again.',
+              });
+            }
             throw httpError('DB_UNAVAILABLE', {
               cause: new Error(revived.error.message),
-              fields: { sub_operation: 'orgStore.reviveRejected' },
+              fields: { sub_operation: 'orgStore.revive' },
             });
           }
-          return reclaimOrgReview(prior);
+          // The revived row: it may sit under a new parent now.
+          return reclaimOrgReview(revived.value);
         }
         if (prior.status === 'active') {
           // Approved: re-send the sign-in link. Mail goes to the stored owner
@@ -360,24 +397,29 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         });
       }
       const recordConsent = await orgConsentWriter({ consent: orgConsent, log });
+      const rules = treeRules((await getNetworkConfig()).aggregator.organisation);
       let slug = slugFromName(body.display_name);
       const createOnce = (s: string) =>
-        orgStore.create({
-          slug: s,
-          displayName: body.display_name,
-          // Schemas with an address block collect the state there.
-          state: body.address?.addressRegion ?? body.state ?? null,
-          ownerEmail: ownerEmail,
-          ownerPhone: phoneE164,
-          ownerName: body.owner.name,
-          // The same values are also kept in `profile` and `state`.
-          url: orgUrlFrom(body.website),
-          locations: orgLocationsFrom(body.address, body.state, body.coordinates),
-          profile: buildOrgProfile(body),
-          // The schema file that resolved; NULL means unknown.
-          profileRef: orgProfileRef,
-          recordConsent,
-        });
+        orgStore.create(
+          {
+            slug: s,
+            displayName: body.display_name,
+            // Schemas with an address block collect the state there.
+            state: body.address?.addressRegion ?? body.state ?? null,
+            ownerEmail: ownerEmail,
+            ownerPhone: phoneE164,
+            ownerName: body.owner.name,
+            // The same values are also kept in `profile` and `state`.
+            url: orgUrlFrom(body.website),
+            locations: orgLocationsFrom(body.address, body.state, body.coordinates),
+            profile: buildOrgProfile(body),
+            // The schema file that resolved; NULL means unknown.
+            profileRef: orgProfileRef,
+            ...(body.parent_id ? { parentId: body.parent_id } : {}),
+            recordConsent,
+          },
+          rules,
+        );
       // Each retry depends on the previous outcome, so the attempts are sequential.
       const createWithRetry = async (attempt: number): ReturnType<typeof createOnce> => {
         const result = await createOnce(slug);
@@ -394,6 +436,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         if (created.error.code === 'DUPLICATE_SLUG') {
           throw httpError('ORG_SLUG_TAKEN', { fields: { slug } });
         }
+        throwTreeRefusal(created.error, { parent_id: body.parent_id ?? null });
         // A concurrent registration took the email or phone after the pre-check.
         if (created.error.code === 'DUPLICATE_EMAIL') {
           throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
@@ -489,6 +532,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           displayName: body.display_name,
           ownerEmail: body.owner.email,
           ownerPhone: phoneE164,
+          parentName: org.parentName,
         },
         log,
       );
@@ -510,6 +554,85 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         status: 'pending',
         message: 'Organisation submitted. A reviewer will approve it before coordinators can join.',
       });
+    },
+  );
+
+  app.get(
+    '/v1/orgs/parents',
+    {
+      config: { rbac: { access: 'service' } },
+      schema: {
+        tags: ['aggregator-orgs'],
+        summary: 'List the orgs a new org can register under',
+        description:
+          'Returns the network root first, then active aggregator orgs other than the Default org, sorted by name, that can take a child now; each with its "known as" name and the name an org registered under it would get. `accepting` is false when the instance is full or no org can take a child.',
+        response: { 200: OrgParentsResponseSchema, ...errorResponses(401, 500, 503) },
+      },
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const auth = await authenticateAny(req);
+      if (!auth.ok) {
+        throw httpError('UNAUTHORIZED', {
+          detail: auth.error.message,
+          fields: { reason: auth.error.code },
+        });
+      }
+      await recordRouteCaller(req, callerFromAny(auth.context));
+      const store = getOrganisationStore();
+      const [root, active, total] = await Promise.all([
+        store.findRoot(),
+        store.listActive(),
+        store.countTotal(),
+      ]);
+      if (!root.ok) {
+        throw httpError('DB_UNAVAILABLE', {
+          cause: new Error(root.error.message),
+          fields: { sub_operation: 'orgStore.findRoot' },
+        });
+      }
+      if (!active.ok) {
+        throw httpError('DB_UNAVAILABLE', {
+          cause: new Error(active.error.message),
+          fields: { sub_operation: 'orgStore.listActive' },
+        });
+      }
+      if (!total.ok) {
+        throw httpError('DB_UNAVAILABLE', {
+          cause: new Error(total.error.message),
+          fields: { sub_operation: 'orgStore.countTotal' },
+        });
+      }
+      const candidates = [
+        ...(root.value ? [root.value] : []),
+        ...active.value.filter((o) => !o.isDefault),
+      ];
+      const children = await store.childCounts(candidates.map((o) => o.id));
+      if (!children.ok) {
+        throw httpError('DB_UNAVAILABLE', {
+          cause: new Error(children.error.message),
+          fields: { sub_operation: 'orgStore.childCounts' },
+        });
+      }
+      const org = (await getNetworkConfig()).aggregator.organisation;
+      const rules = treeRules(org);
+      // The instance total is reported by `accepting`, not per parent.
+      const parents = candidates
+        .filter((o) => {
+          const refused = newChildRefusal(o.depth, children.value[o.id] ?? 0, total.value, rules);
+          return refused === null || refused === 'TOTAL_LIMIT';
+        })
+        .map((o) => {
+          const isRoot = o.id === root.value?.id;
+          return {
+            id: o.id,
+            name: o.displayName,
+            is_root: isRoot,
+            known_as_name: isRoot ? null : nameOf(org.known_as, o.knownAs),
+            child_known_as_name: nameOf(org.known_as, suggestFor(org.known_as, o.depth + 1)),
+          };
+        });
+      const accepting = total.value < rules.maxTotalOrgs && parents.length > 0;
+      return reply.status(200).send({ accepting, parents });
     },
   );
 

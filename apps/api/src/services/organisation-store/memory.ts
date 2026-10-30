@@ -20,7 +20,19 @@ import {
   type OrgDeleteIfPendingOutcome,
   type SearchOrgsFilter,
   type SearchOrgsPage,
+  type TreeRules,
 } from './interface.js';
+import {
+  DESCENDANT_LEVEL_CAP,
+  buildTree,
+  counts,
+  knownAsBlocksMove,
+  moveRefusal,
+  newChildRefusal,
+  parentOptionRefusal,
+  subtree,
+  type Tree,
+} from './tree.js';
 
 const NON_TERMINAL = new Set(['pending', 'active']);
 
@@ -32,8 +44,17 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
   protected readonly coordinatorContacts = new Set<string>();
   /** The network-facilitator root, when a test seeds one. */
   protected root: Organisation | null = null;
+  /** Tail of the tree-lock queue; see {@link withTreeLock}. */
+  private treeLock: Promise<unknown> = Promise.resolve();
 
-  async create(input: CreateOrgInput): Promise<OrgStoreResult<Organisation>> {
+  create(input: CreateOrgInput, rules: TreeRules): Promise<OrgStoreResult<Organisation>> {
+    return this.withTreeLock(() => this.createLocked(input, rules));
+  }
+
+  private async createLocked(
+    input: CreateOrgInput,
+    rules: TreeRules,
+  ): Promise<OrgStoreResult<Organisation>> {
     const slugTaken = [...this.byId.values()].some(
       (o) => o.slug === input.slug && NON_TERMINAL.has(o.status),
     );
@@ -44,6 +65,13 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       (o) => o.displayName.trim().toLowerCase() === nameKey && NON_TERMINAL.has(o.status),
     );
     if (nameTaken) return err('DUPLICATE_NAME', `organisation name already in use`);
+    const parent = this.resolveParent(input.parentId);
+    if (input.parentId !== undefined && !parent) {
+      return err('INVALID_PARENT', 'parent is not the root or an active organisation');
+    }
+    const depth = (parent?.depth ?? 0) + 1;
+    const refused = this.limitRefusal(parent?.id ?? null, depth - 1, rules);
+    if (refused) return err(refused, 'organisation tree limit reached');
     let id: string;
     try {
       id = contactId(input.ownerEmail, input.ownerPhone ?? null);
@@ -90,9 +118,142 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       locations: input.locations ?? [],
       legalName: null,
       gstNumber: null,
+      knownAs: rules.suggestFor(depth),
+      depth,
+      parentId: parent?.id ?? null,
+      parentName: parent?.displayName ?? null,
     };
     this.byId.set(row.id, row);
     return { ok: true, value: row };
+  }
+
+  revive(
+    id: string,
+    parentId: string | undefined,
+    rules: TreeRules,
+  ): Promise<OrgStoreResult<Organisation>> {
+    return this.withTreeLock(() => {
+      const org = this.byId.get(id);
+      if (org?.status !== 'inactive') return Promise.resolve(err('NOT_FOUND', id));
+      if (this.treeSnapshot().children.has(id)) {
+        return Promise.resolve(err('NOT_MOVABLE', 'a rejected org with child orgs'));
+      }
+      const parent = this.resolveParent(parentId);
+      if (parentId !== undefined && !parent) {
+        return Promise.resolve(
+          err('INVALID_PARENT', 'parent is not the root or an active organisation'),
+        );
+      }
+      const depth = (parent?.depth ?? 0) + 1;
+      const refused = this.limitRefusal(parent?.id ?? null, depth - 1, rules);
+      if (refused) return Promise.resolve(err(refused, 'organisation tree limit reached'));
+      const next: Organisation = {
+        ...org,
+        parentId: parent?.id ?? null,
+        parentName: parent?.displayName ?? null,
+        depth,
+        knownAs: rules.knownAsAllowed(org.knownAs, depth) ? org.knownAs : rules.suggestFor(depth),
+        status: 'pending',
+        rejectedAt: null,
+        updatedAt: new Date(),
+      };
+      this.byId.set(id, next);
+      return Promise.resolve({ ok: true, value: next });
+    });
+  }
+
+  move(
+    id: string,
+    change: { parentId: string; knownAs?: string },
+    rules: TreeRules,
+  ): Promise<
+    OrgStoreResult<{ org: Organisation; oldParentId: string | null; movedCount: number }>
+  > {
+    return this.withTreeLock(() => Promise.resolve(this.moveLocked(id, change, rules)));
+  }
+
+  private moveLocked(
+    id: string,
+    change: { parentId: string; knownAs?: string },
+    rules: TreeRules,
+  ): OrgStoreResult<{ org: Organisation; oldParentId: string | null; movedCount: number }> {
+    const tree = this.treeSnapshot();
+    const refused = moveRefusal(tree, id, change.parentId, rules);
+    if (refused) return err(refused, refused === 'NOT_FOUND' ? id : 'move refused');
+    const org = this.byId.get(id)!;
+    const oldParentId = org.parentId;
+    if (org.parentId === change.parentId) {
+      if (change.knownAs === undefined) {
+        return { ok: true, value: { org, oldParentId, movedCount: 0 } };
+      }
+      if (!rules.knownAsAllowed(change.knownAs, org.depth)) return knownAsDepth([id]);
+      const next = { ...org, knownAs: change.knownAs, updatedAt: new Date() };
+      this.byId.set(id, next);
+      return { ok: true, value: { org: next, oldParentId, movedCount: 0 } };
+    }
+    const delta = tree.byId.get(change.parentId)!.depth + 1 - org.depth;
+    const moved = subtree(tree, id).map((n) => {
+      const row = this.byId.get(n.id)!;
+      return n.id === id
+        ? {
+            ...row,
+            ...this.parentFields(change.parentId),
+            knownAs: change.knownAs ?? row.knownAs,
+            depth: row.depth + delta,
+            updatedAt: new Date(),
+          }
+        : { ...row, depth: row.depth + delta };
+    });
+    // As Postgres: the moved org needs an allowed value; an org below it is
+    // skipped when its value is no longer configured.
+    const failing = moved
+      .filter((o) =>
+        o.id === id
+          ? !rules.knownAsAllowed(o.knownAs, o.depth)
+          : knownAsBlocksMove(rules, o.knownAs, o.depth),
+      )
+      .map((o) => o.id);
+    if (failing.length > 0) return knownAsDepth(failing);
+    for (const o of moved) this.byId.set(o.id, o);
+    return { ok: true, value: { org: moved[0]!, oldParentId, movedCount: moved.length } };
+  }
+
+  parentOptions(
+    id: string,
+    rules: TreeRules,
+  ): Promise<
+    OrgStoreResult<{
+      subtreeSize: number;
+      options: Array<{ org: Organisation; ok: boolean; reason: OrgStoreError['code'] | null }>;
+    }>
+  > {
+    if (!this.byId.has(id)) return Promise.resolve(err('NOT_FOUND', id));
+    const tree = this.treeSnapshot();
+    // The root first, then by name, as Postgres orders them.
+    const candidates = [
+      ...(this.root ? [this.root] : []),
+      ...[...this.byId.values()].sort(byName),
+    ].filter((o) => o.id !== id);
+    const options = candidates.map((o) => {
+      const reason = parentOptionRefusal(tree, id, o.id, rules);
+      return { org: o, ok: reason === null, reason };
+    });
+    return Promise.resolve({
+      ok: true,
+      value: { subtreeSize: subtree(tree, id).length, options },
+    });
+  }
+
+  childCounts(ids: readonly string[]): Promise<OrgStoreResult<Record<string, number>>> {
+    const out: Record<string, number> = Object.fromEntries(ids.map((id) => [id, 0]));
+    for (const o of this.byId.values()) {
+      if (o.parentId !== null && o.parentId in out && counts(o)) out[o.parentId]! += 1;
+    }
+    return Promise.resolve({ ok: true, value: out });
+  }
+
+  countTotal(): Promise<OrgStoreResult<number>> {
+    return Promise.resolve({ ok: true, value: [...this.byId.values()].filter(counts).length });
   }
 
   findById(id: string): Promise<OrgStoreResult<Organisation | null>> {
@@ -172,9 +333,33 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     return Promise.resolve({ ok: true, value: undefined });
   }
 
-  update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<Organisation>> {
+  update(
+    id: string,
+    patch: UpdateOrgPatch,
+    rules?: TreeRules,
+  ): Promise<OrgStoreResult<Organisation>> {
+    if (patch.knownAs === undefined) return Promise.resolve(this.updateNow(id, patch));
+    return this.withTreeLock(() => Promise.resolve(this.updateNow(id, patch, rules)));
+  }
+
+  /**
+   * Applies an update; with `patch.knownAs`, the caller holds the tree lock.
+   *
+   * @param id - The org id.
+   * @param patch - The fields to change.
+   * @param rules - "Known as" rules; a key is refused without them.
+   * @returns The updated org.
+   */
+  private updateNow(
+    id: string,
+    patch: UpdateOrgPatch,
+    rules?: TreeRules,
+  ): OrgStoreResult<Organisation> {
     const existing = this.byId.get(id);
-    if (!existing) return Promise.resolve(err('NOT_FOUND', id));
+    if (!existing) return err('NOT_FOUND', id);
+    if (patch.knownAs !== undefined && !rules?.knownAsAllowed(patch.knownAs, existing.depth)) {
+      return knownAsDepth([id]);
+    }
     if (patch.displayName !== undefined) {
       // As in Postgres: names are unique (case-insensitively) among live orgs.
       const key = patch.displayName.trim().toLowerCase();
@@ -182,7 +367,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
         (o) =>
           o.id !== id && o.displayName.trim().toLowerCase() === key && NON_TERMINAL.has(o.status),
       );
-      if (taken) return Promise.resolve(err('DUPLICATE_NAME', 'organisation name already in use'));
+      if (taken) return err('DUPLICATE_NAME', 'organisation name already in use');
     }
     const next: Organisation = {
       ...existing,
@@ -191,6 +376,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       locations: patch.locations ?? existing.locations,
       legalName: patch.legalName !== undefined ? patch.legalName : existing.legalName,
       gstNumber: patch.gstNumber !== undefined ? patch.gstNumber : existing.gstNumber,
+      knownAs: patch.knownAs ?? existing.knownAs,
       state: patch.state !== undefined ? patch.state : existing.state,
       // As in Postgres: a recorded login is only ever added, never cleared.
       ownerKcSub: patch.ownerKcSub ? patch.ownerKcSub : existing.ownerKcSub,
@@ -201,7 +387,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       updatedAt: new Date(),
     };
     this.byId.set(id, next);
-    return Promise.resolve({ ok: true, value: next });
+    return { ok: true, value: next };
   }
 
   async approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
@@ -225,6 +411,11 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       rows = rows.filter((o) => scope.has(o.id));
     }
     if (filter.status) rows = rows.filter((o) => o.status === filter.status);
+    if (filter.knownAs) rows = rows.filter((o) => o.knownAs === filter.knownAs);
+    if (filter.descendantsOf) {
+      const below = this.descendantIdsOf(filter.descendantsOf);
+      rows = rows.filter((o) => below.has(o.id));
+    }
     if (filter.namePrefix) {
       const p = filter.namePrefix.toLowerCase();
       rows = rows.filter((o) => o.displayName.toLowerCase().startsWith(p));
@@ -248,6 +439,27 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     });
   }
 
+  descendantIds(ids: readonly string[]): Promise<OrgStoreResult<string[]>> {
+    const found = new Set<string>();
+    for (const id of ids) for (const d of this.descendantIdsOf(id)) found.add(d);
+    for (const id of ids) found.delete(id);
+    return Promise.resolve({ ok: true, value: [...found] });
+  }
+
+  countByKnownAs(): Promise<OrgStoreResult<Record<string, number>>> {
+    const counts: Record<string, number> = {};
+    for (const o of this.byId.values()) {
+      if (NON_TERMINAL.has(o.status)) counts[o.knownAs] = (counts[o.knownAs] ?? 0) + 1;
+    }
+    return Promise.resolve({ ok: true, value: counts });
+  }
+
+  /** The parent columns for a move, read from the root or a stored org. */
+  private parentFields(id: string): Pick<Organisation, 'parentId' | 'parentName'> {
+    const parent = this.root?.id === id ? this.root : this.byId.get(id);
+    return { parentId: id, parentName: parent?.displayName ?? null };
+  }
+
   async deleteIfPending(
     id: string,
     cutoff: Date,
@@ -264,6 +476,66 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     if (!(await beforeCommit())) return { ok: true, value: 'aborted' };
     this.byId.delete(id);
     return { ok: true, value: 'deleted' };
+  }
+
+  /**
+   * Runs `fn` after every earlier tree write has finished, as the Postgres tree lock does.
+   *
+   * @param fn - The tree write.
+   * @returns What `fn` returns.
+   */
+  private withTreeLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.treeLock.then(fn, fn);
+    this.treeLock = run.catch(() => undefined);
+    return run;
+  }
+
+  /** The tree as the shared checks see it: the root and every stored org. */
+  private treeSnapshot(): Tree {
+    return buildTree(
+      [...(this.root ? [this.root] : []), ...this.byId.values()].map((o) => ({
+        id: o.id,
+        parentId: o.parentId,
+        depth: o.depth,
+        status: o.status,
+        isRoot: o === this.root,
+        isDefault: o.isDefault,
+        knownAs: o.knownAs,
+      })),
+    );
+  }
+
+  /**
+   * Checks the limits for one more org under a parent.
+   *
+   * @param parentId - The parent id; `null` for a top-level org when no root is seeded.
+   * @param parentDepth - The parent's depth.
+   * @param rules - Tree limits.
+   * @returns The refusal code, or `null` when the org fits.
+   */
+  private limitRefusal(parentId: string | null, parentDepth: number, rules: TreeRules) {
+    const live = [...this.byId.values()].filter(counts);
+    const children = live.filter((o) => o.parentId === parentId).length;
+    return newChildRefusal(parentDepth, children, live.length, rules);
+  }
+
+  /**
+   * Picks the parent for a new org, as Postgres does.
+   *
+   * @param requested - The requested parent id; the root when absent.
+   * @returns The parent, or `null` when the request is not a valid parent (or no root is seeded).
+   */
+  private resolveParent(requested: string | undefined): Organisation | null {
+    if (requested === undefined) return this.root;
+    if (this.root?.id === requested) return this.root;
+    const o = this.byId.get(requested);
+    return o && o.status === 'active' && !o.isDefault ? o : null;
+  }
+
+  /** Ids of every org below `id`, at most {@link DESCENDANT_LEVEL_CAP} levels down. */
+  private descendantIdsOf(id: string): Set<string> {
+    const below = subtree(this.treeSnapshot(), id, DESCENDANT_LEVEL_CAP).slice(1);
+    return new Set(below.map((n) => n.id));
   }
 
   private casFromPending(
@@ -300,8 +572,18 @@ function pickOwned(
   );
 }
 
-function err<T>(code: OrgStoreError['code'], message: string): OrgStoreResult<T> {
+function err<T>(
+  code: Exclude<OrgStoreError['code'], 'KNOWN_AS_DEPTH'>,
+  message: string,
+): OrgStoreResult<T> {
   return { ok: false, error: { code, message } };
+}
+
+function knownAsDepth<T>(orgIds: string[]): OrgStoreResult<T> {
+  return {
+    ok: false,
+    error: { code: 'KNOWN_AS_DEPTH', message: 'known_as not allowed at depth', orgIds },
+  };
 }
 
 /** Orders orgs as Postgres does: lower(name), then id. */

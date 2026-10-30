@@ -18,8 +18,11 @@ describe('canManageOrg', () => {
   const root = { id: 'root', org_type: 'network_facilitator' };
   const owned = { id: 'own', org_type: 'aggregator', capabilities: ['org.manage'] };
 
-  it('allows every organisation when access control is off', () => {
-    expect(canManageOrg({ capabilities: null, orgs: [] }, 'any')).toBe(true);
+  it('with access control off, allows the network admin everywhere and an owner its own orgs', () => {
+    expect(canManageOrg({ capabilities: null, orgs: [root] }, 'any')).toBe(true);
+    expect(canManageOrg({ capabilities: null, orgs: [owned] }, 'own')).toBe(true);
+    // An org below the owner's own is only viewed.
+    expect(canManageOrg({ capabilities: null, orgs: [owned] }, 'below')).toBe(false);
   });
 
   it('allows only organisations where org.manage is held', () => {

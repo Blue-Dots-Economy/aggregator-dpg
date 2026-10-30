@@ -20,7 +20,7 @@ import {
 } from '../migration-guards.js';
 
 /** Migrations after the instance upgrade, each additive and safe to apply at boot. */
-const BOOT_SAFE_AFTER_UPGRADE = ['0030_rbac', '0031_rbac_seed'];
+const BOOT_SAFE_AFTER_UPGRADE = ['0030_rbac', '0031_rbac_seed', '0032_org_known_as'];
 
 const journal: JournalEntry[] = [
   { when: 1788400000000, tag: '0022_campaign_pii_audit' },
