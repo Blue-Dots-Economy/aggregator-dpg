@@ -3,7 +3,7 @@
 /**
  * The network admin's organisation list. Each name opens the organisation, and
  * a pending org is approved or rejected in place; the page then refreshes so
- * the levels and the tree follow. A 409 ALREADY_DECIDED response updates the
+ * the hierarchy settings and the tree follow. A 409 ALREADY_DECIDED response updates the
  * row in place. Owner access is repaired on the organisation's page.
  */
 
@@ -85,7 +85,7 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
                   </output>
                 ) : null}
               </td>
-              <td className="text-ink-600">{o.known_as_label ?? o.known_as ?? '—'}</td>
+              <td className="text-ink-600">{o.known_as_name ?? o.known_as ?? '—'}</td>
               <td className="text-ink-600">{o.parent_name ?? '—'}</td>
               <td>
                 <ConsoleStatusPill status={o.status} />

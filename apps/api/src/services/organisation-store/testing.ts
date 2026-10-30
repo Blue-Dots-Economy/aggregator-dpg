@@ -6,7 +6,8 @@
 
 import { InMemoryOrganisationStore } from './memory.js';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
-import { DEFAULT_KNOWN_AS_KEY, DEFAULT_ORG_SLUG, type Organisation } from './interface.js';
+import { SYSTEM_KNOWN_AS } from '@aggregator-dpg/network-config/interface';
+import { DEFAULT_ORG_SLUG, type Organisation, type TreeRules } from './interface.js';
 export { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
 
 export class OrganisationStoreFake extends InMemoryOrganisationStore {
@@ -71,7 +72,8 @@ export function buildOrganisation(overrides: Partial<Organisation> = {}): Organi
     locations: [],
     legalName: null,
     gstNumber: null,
-    knownAs: DEFAULT_KNOWN_AS_KEY,
+    knownAs: SYSTEM_KNOWN_AS.key,
+    depth: 1,
     parentId: null,
     parentName: null,
     ...overrides,
@@ -94,4 +96,24 @@ export function buildDefaultOrg(overrides: Partial<Organisation> = {}): Organisa
     isDefault: true,
     ...overrides,
   });
+}
+
+/**
+ * Tree rules that refuse nothing a test normally builds.
+ *
+ * Depth up to 10, no per-parent limit, a large total, every "known as" key
+ * allowed at every depth, and the system key suggested.
+ *
+ * @param overrides - Rules to replace.
+ * @returns The rules.
+ */
+export function permissiveTreeRules(overrides: Partial<TreeRules> = {}): TreeRules {
+  return {
+    maxDepth: 10,
+    maxChildren: null,
+    maxTotalOrgs: 100_000,
+    knownAsAllowed: () => true,
+    suggestFor: () => SYSTEM_KNOWN_AS.key,
+    ...overrides,
+  };
 }

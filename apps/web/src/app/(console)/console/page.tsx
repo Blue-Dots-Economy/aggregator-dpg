@@ -14,6 +14,7 @@ import type {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
+import { readReachableOrgs } from '@/lib/console-hierarchy.server';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
 import { ConsoleSection, ConsoleStatusPill, EmptyState } from '@/components/console/ConsoleUi';
@@ -26,30 +27,35 @@ export default async function ConsoleHomePage() {
   if (!actor.ok) return null; // the layout already redirected
   const me = actor.me;
 
+  // The actor's own aggregator orgs, read by id.
+  const ownIds = me.orgs.filter((o) => o.org_type === 'aggregator').map((o) => o.id);
+  const readOwned = Promise.all(
+    ownIds.map(async (id): Promise<OrgRow> => {
+      const r = await consoleRead<OrgReadResponse>(`/v1/org/read/${id}`);
+      return {
+        ...r.org,
+        coordinator_count: r.coordinator_count,
+        child_count: r.child_count,
+        pending_count: r.pending_count,
+      };
+    }),
+  );
   let owned: OrgRow[];
   let pending: OrgRow[] = [];
   let below: OrgRow[] = [];
   if (me.is_network_admin) {
-    // The network admin's own aggregator orgs (the Default org).
-    const ids = me.orgs.filter((o) => o.org_type === 'aggregator').map((o) => o.id);
-    owned = await Promise.all(
-      ids.map(async (id) => {
-        const r = await consoleRead<OrgReadResponse>(`/v1/org/read/${id}`);
-        return { ...r.org, coordinator_count: r.coordinator_count, pending_count: r.pending_count };
-      }),
-    );
-    pending = (
-      await consoleRead<OrgSearchResponse>('/v1/org/search', {
+    [owned, pending] = await Promise.all([
+      readOwned,
+      consoleRead<OrgSearchResponse>('/v1/org/search', {
         filter: { status: 'pending' },
         limit: 50,
-      })
-    ).orgs;
+      }).then((r) => r.orgs),
+    ]);
   } else {
-    // Search also returns, read-only, the orgs below the owner's own.
-    const reach = (await consoleRead<OrgSearchResponse>('/v1/org/search', { limit: 100 })).orgs;
-    const ownIds = new Set(me.orgs.map((o) => o.id));
-    owned = reach.filter((o) => ownIds.has(o.id));
-    below = reach.filter((o) => !ownIds.has(o.id));
+    // For an owner, the reachable orgs are its own and every org below them.
+    const [own, reach] = await Promise.all([readOwned, readReachableOrgs()]);
+    owned = own;
+    below = reach.filter((o) => !ownIds.includes(o.id));
   }
   const root = me.orgs.find((o) => o.org_type === 'network_facilitator');
 

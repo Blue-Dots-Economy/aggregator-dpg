@@ -36,6 +36,7 @@ import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import { getDb, getPool, closeDb, _setDbClients } from '../client.js';
 import { PostgresUserStore } from '../../services/user-store/postgres.js';
 import { PostgresOrganisationStore } from '../../services/organisation-store/postgres.js';
+import { permissiveTreeRules } from '../../services/organisation-store/testing.js';
 import { NO_CONSENT_WRITE } from '../../services/consent-ledger/hook.js';
 
 const realUrl = process.env.INTEGRATION_DATABASE_URL;
@@ -363,14 +364,17 @@ suite('contact (migration 0025) — integration', () => {
       const store = new PostgresOrganisationStore();
       const email = `it-${randomUUID().slice(0, 8)}@example.org`;
       const p = phone();
-      const created = await store.create({
-        recordConsent: NO_CONSENT_WRITE,
-        slug: `it-org-${randomUUID().slice(0, 8)}`,
-        displayName: `IT Org ${randomUUID().slice(0, 8)}`,
-        ownerEmail: email.toUpperCase(),
-        ownerPhone: p,
-        ownerName: 'Owner Name',
-      });
+      const created = await store.create(
+        {
+          recordConsent: NO_CONSENT_WRITE,
+          slug: `it-org-${randomUUID().slice(0, 8)}`,
+          displayName: `IT Org ${randomUUID().slice(0, 8)}`,
+          ownerEmail: email.toUpperCase(),
+          ownerPhone: p,
+          ownerName: 'Owner Name',
+        },
+        permissiveTreeRules(),
+      );
       expect(created.ok).toBe(true);
       if (!created.ok) return;
       try {
@@ -607,13 +611,16 @@ suite('contact (migration 0025) — integration', () => {
         orgId: defaultOrgId,
         updatedBy: 'it',
       });
-      const org = await orgStore.create({
-        recordConsent: NO_CONSENT_WRITE,
-        slug: `it-org-${randomUUID().slice(0, 8)}`,
-        displayName: `IT Org ${randomUUID().slice(0, 8)}`,
-        ownerEmail: email,
-        ownerPhone: p,
-      });
+      const org = await orgStore.create(
+        {
+          recordConsent: NO_CONSENT_WRITE,
+          slug: `it-org-${randomUUID().slice(0, 8)}`,
+          displayName: `IT Org ${randomUUID().slice(0, 8)}`,
+          ownerEmail: email,
+          ownerPhone: p,
+        },
+        permissiveTreeRules(),
+      );
       if (!coord.ok || !org.ok) throw new Error('setup failed');
       try {
         expect(coord.value.contactId).toBe(org.value.contactId);
@@ -655,13 +662,16 @@ suite('contact (migration 0025) — integration', () => {
       if (!headSchema) ctx.skip();
       const store = new PostgresOrganisationStore();
       const p = phone();
-      const created = await store.create({
-        recordConsent: NO_CONSENT_WRITE,
-        slug: `it-org-${randomUUID().slice(0, 8)}`,
-        displayName: `IT Org ${randomUUID().slice(0, 8)}`,
-        ownerEmail: `it-${randomUUID().slice(0, 8)}@example.org`,
-        ownerPhone: p,
-      });
+      const created = await store.create(
+        {
+          recordConsent: NO_CONSENT_WRITE,
+          slug: `it-org-${randomUUID().slice(0, 8)}`,
+          displayName: `IT Org ${randomUUID().slice(0, 8)}`,
+          ownerEmail: `it-${randomUUID().slice(0, 8)}@example.org`,
+          ownerPhone: p,
+        },
+        permissiveTreeRules(),
+      );
       if (!created.ok) throw new Error('create failed');
       try {
         await store.update(created.value.id, { status: 'inactive' });
@@ -806,14 +816,17 @@ suite('contact (migration 0025) — integration', () => {
       const orgStore = new PostgresOrganisationStore();
       const ownerEmail = `it-${randomUUID().slice(0, 8)}@example.org`;
       const ownerPhone = phone();
-      const org = await orgStore.create({
-        recordConsent: NO_CONSENT_WRITE,
-        slug: `it-org-${randomUUID().slice(0, 8)}`,
-        displayName: `IT Org ${randomUUID().slice(0, 8)}`,
-        ownerEmail,
-        ownerPhone,
-        ownerName: 'Owner Name',
-      });
+      const org = await orgStore.create(
+        {
+          recordConsent: NO_CONSENT_WRITE,
+          slug: `it-org-${randomUUID().slice(0, 8)}`,
+          displayName: `IT Org ${randomUUID().slice(0, 8)}`,
+          ownerEmail,
+          ownerPhone,
+          ownerName: 'Owner Name',
+        },
+        permissiveTreeRules(),
+      );
       const coord = await aggStore.create({
         recordConsent: NO_CONSENT_WRITE,
         orgSlug: `it-${randomUUID().slice(0, 8)}`,

@@ -30,13 +30,14 @@ const pendingOrg: OrgRow = {
   legal_name: null,
   gst_number: null,
   known_as: 'aggregator',
-  known_as_label: 'Aggregator',
-  level: 1,
+  known_as_name: 'Aggregator',
+  depth: 1,
   parent_id: null,
   parent_name: 'State One',
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
   coordinator_count: 3,
+  child_count: 0,
   pending_count: 1,
 };
 
@@ -79,7 +80,7 @@ describe('<OrgsTable />', () => {
   });
 
   it('shows the known_as label, falling back to the key', () => {
-    renderTable([pendingOrg, { ...activeOrg, known_as: 'retired_label', known_as_label: null }]);
+    renderTable([pendingOrg, { ...activeOrg, known_as: 'retired_label', known_as_name: null }]);
     expect(
       screen.getByRole('columnheader', { name: messages.console.orgs.col_known_as }),
     ).toBeInTheDocument();
@@ -115,7 +116,7 @@ describe('<OrgsTable />', () => {
       `/api/console/org/decision/${pendingOrg.id}`,
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ decision: 'approve' }) }),
     );
-    // The levels and the tree on the page follow the decision.
+    // The hierarchy settings and the tree on the page follow the decision.
     expect(refresh).toHaveBeenCalled();
   });
 

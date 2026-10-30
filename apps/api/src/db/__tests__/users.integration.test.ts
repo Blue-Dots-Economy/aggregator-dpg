@@ -18,6 +18,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { getDb, getPool, closeDb, _setDbClients } from '../client.js';
 import { PostgresUserStore } from '../../services/user-store/postgres.js';
 import { PostgresOrganisationStore } from '../../services/organisation-store/postgres.js';
+import { permissiveTreeRules } from '../../services/organisation-store/testing.js';
 import { PostgresIdentityStore } from '../../services/identity-store/postgres.js';
 import { NO_CONSENT_WRITE } from '../../services/consent-ledger/hook.js';
 
@@ -80,14 +81,17 @@ suite('users (migration 0027) — integration', () => {
   }
 
   async function newOrg(ownerEmail = email(), ownerPhone = phone()) {
-    const r = await orgStore.create({
-      recordConsent: NO_CONSENT_WRITE,
-      slug: `it-org-${randomUUID().slice(0, 8)}`,
-      displayName: `IT Org ${randomUUID().slice(0, 8)}`,
-      ownerEmail,
-      ownerPhone,
-      ownerName: 'Owner',
-    });
+    const r = await orgStore.create(
+      {
+        recordConsent: NO_CONSENT_WRITE,
+        slug: `it-org-${randomUUID().slice(0, 8)}`,
+        displayName: `IT Org ${randomUUID().slice(0, 8)}`,
+        ownerEmail,
+        ownerPhone,
+        ownerName: 'Owner',
+      },
+      permissiveTreeRules(),
+    );
     if (!r.ok) throw new Error(`org create failed: ${r.error.code}`);
     return r.value;
   }

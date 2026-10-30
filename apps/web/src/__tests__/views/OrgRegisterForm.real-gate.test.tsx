@@ -43,29 +43,6 @@ vi.mock('@/components/forms/RjsfThemed', () => ({
 
 // ConsentGate is NOT mocked here — that is the entire point of this file.
 
-// Native-select shim for the shadcn Select so a parent can be picked.
-vi.mock('@/components/ui/Select', () => ({
-  Select: ({
-    children,
-    onValueChange,
-  }: {
-    children?: ReactNode;
-    onValueChange?: (v: string) => void;
-  }) => (
-    <select data-testid="parent-select" onChange={(e) => onValueChange?.(e.target.value)}>
-      {children}
-    </select>
-  ),
-  SelectTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  SelectValue: ({ placeholder }: { placeholder?: string }) => (
-    <option value="">{placeholder}</option>
-  ),
-  SelectContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  SelectItem: ({ value, children }: { value: string; children?: ReactNode }) => (
-    <option value={value}>{children}</option>
-  ),
-}));
-
 import { OrgRegisterForm } from '@/app/(public)/register/OrgRegisterForm';
 
 const orgSchema = {
@@ -120,7 +97,16 @@ function stubScrollerToMaxAndScroll() {
 function renderForm() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(['org-parents'], {
-    parents: [{ id: 'p-root', name: 'Blue Dots', is_root: true, known_as_label: null }],
+    accepting: true,
+    parents: [
+      {
+        id: 'p-root',
+        name: 'Blue Dots',
+        is_root: true,
+        known_as_name: null,
+        child_known_as_name: 'Aggregator',
+      },
+    ],
   });
   return render(
     <QueryClientProvider client={client}>
@@ -150,7 +136,6 @@ describe('<OrgRegisterForm /> with the real ConsentGate', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
       // Submitting opens it: false -> true, in the DOM for the first time.
-      fireEvent.change(screen.getByTestId('parent-select'), { target: { value: 'p-root' } });
       fireEvent.submit(screen.getByTestId('rjsf-shim'));
       await screen.findByRole('dialog');
 

@@ -116,7 +116,16 @@ describe('GET /api/orgs/parents', () => {
       calls.push({ url: input.toString(), init: init ?? null });
       return new Response(
         JSON.stringify({
-          parents: [{ id: 'r', name: 'Network', is_root: true, known_as_label: null }],
+          accepting: true,
+          parents: [
+            {
+              id: 'r',
+              name: 'Network',
+              is_root: true,
+              known_as_name: null,
+              child_known_as_name: 'Aggregator',
+            },
+          ],
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
@@ -124,7 +133,8 @@ describe('GET /api/orgs/parents', () => {
 
     const res = await GET_PARENTS(new Request('http://localhost/api/orgs/parents') as never);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { parents: { id: string }[] };
+    const body = (await res.json()) as { accepting: boolean; parents: { id: string }[] };
+    expect(body.accepting).toBe(true);
     expect(body.parents.map((p) => p.id)).toEqual(['r']);
     expect(calls[0]!.url).toBe('http://api.test/v1/orgs/parents');
     const init = calls[0]!.init as { headers?: Record<string, string>; cache?: string };

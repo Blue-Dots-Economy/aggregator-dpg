@@ -22,7 +22,7 @@ export type UserOrgStatus = z.infer<typeof UserOrgStatusSchema>;
 export const OrgTypeSchema = z.enum(['network_facilitator', 'aggregator']);
 export type OrgType = z.infer<typeof OrgTypeSchema>;
 
-/** Key of an org's "known as" label. Membership in the instance list is checked by the API. */
+/** Key of an org's "known as" value. Membership in the instance list is checked by the API. */
 export const KnownAsKeySchema = z
   .string()
   .regex(/^[a-z][a-z0-9_]*$/)
@@ -188,12 +188,12 @@ export const OrgSchema = z.object({
   locations: z.array(BecknLocationSchema),
   legal_name: z.string().nullable(),
   gst_number: z.string().nullable(),
-  /** Key of the org's "known as" label; null for the network facilitator. */
+  /** Key of the org's "known as" value; null for the network facilitator. */
   known_as: z.string().nullable(),
-  /** Configured label for `known_as`; null for the root or a key no longer configured. */
-  known_as_label: z.string().nullable(),
-  /** Level of `known_as`: 0 for the network facilitator; null for a key no longer configured. */
-  level: z.number().int().nullable(),
+  /** Configured name for `known_as`; null for the root or a key no longer configured. */
+  known_as_name: z.string().nullable(),
+  /** Depth in the tree: 0 for the network facilitator, 1 for a top-level org. */
+  depth: z.number().int(),
   /** The parent org's id; null for the network facilitator. */
   parent_id: z.string().nullable(),
   /** The parent org's name; null for the network facilitator. */
@@ -208,6 +208,8 @@ export const OrgReadResponseSchema = z.object({
   org: OrgSchema,
   owner: z.object({ id: z.string(), contact: PersonContactSchema }),
   coordinator_count: z.number().int(),
+  /** Pending and active direct child orgs, Default excluded. */
+  child_count: z.number().int(),
   pending_count: z.number().int(),
 });
 export type OrgReadResponse = z.infer<typeof OrgReadResponseSchema>;
@@ -235,6 +237,8 @@ export const OrgSearchResponseSchema = z.object({
   orgs: z.array(
     OrgSchema.extend({
       coordinator_count: z.number().int(),
+      /** Pending and active direct child orgs, Default excluded. */
+      child_count: z.number().int(),
       pending_count: z.number().int(),
     }),
   ),
@@ -250,13 +254,41 @@ export const OrgMetadataUpdateRequestSchema = z
     locations: z.array(BecknLocationSchema).max(25).optional(),
     legal_name: z.string().trim().max(200).nullable().optional(),
     gst_number: z.string().trim().max(32).nullable().optional(),
+    /** Must be allowed at the org's depth. Network admin only. */
     known_as: KnownAsKeySchema.optional(),
-    /** New parent; required when `known_as` moves the org to another level. */
-    parent_id: z.string().uuid().optional(),
   })
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: 'at least one field is required' });
 export type OrgMetadataUpdateRequest = z.infer<typeof OrgMetadataUpdateRequestSchema>;
+
+/** `PATCH /v1/org/parent/update/:id`: moves the org under a new parent. Network admin only. */
+export const OrgParentUpdateRequestSchema = z
+  .object({
+    parent_id: z.string().uuid(),
+    /** New "known as" key for the moved org; must be allowed at its new depth. */
+    known_as: KnownAsKeySchema.optional(),
+  })
+  .strict();
+export type OrgParentUpdateRequest = z.infer<typeof OrgParentUpdateRequestSchema>;
+
+/** `GET /v1/org/parent/options/:id`: candidate parents for a move. Network admin only. */
+export const OrgParentOptionsResponseSchema = z.object({
+  /** Number of orgs that move: the org and every org below it. */
+  subtree_size: z.number().int(),
+  options: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      depth: z.number().int(),
+      known_as_name: z.string().nullable(),
+      /** Whether the move to this parent would succeed. */
+      ok: z.boolean(),
+      /** The error code the move would give; null when `ok`. */
+      reason: z.string().nullable(),
+    }),
+  ),
+});
+export type OrgParentOptionsResponse = z.infer<typeof OrgParentOptionsResponseSchema>;
 
 /** `POST /v1/org/decision/:id` response: adds what owner access achieved. */
 export const OrgDecisionResponseSchema = DecisionResponseSchema.extend({
@@ -446,20 +478,38 @@ export const UpdateRoleRequestSchema = z
   .strict();
 export type UpdateRoleRequest = z.infer<typeof UpdateRoleRequestSchema>;
 
-// ─── Hierarchy levels ───────────────────────────────────────────────────────
+// ─── Hierarchy settings ─────────────────────────────────────────────────────
 
-/** `GET /v1/org/hierarchy`: the configured levels, read-only. */
+/** `GET /v1/org/hierarchy`: tree limits and "known as" values, read-only. */
 export const OrgHierarchyResponseSchema = z.object({
-  /** The network facilitator, level 0: the top of the tree. */
+  /** The network facilitator, depth 0: the top of the tree. */
   network: z.object({ id: z.string(), name: z.string() }),
-  /** Level 1, 2, … each with its values and how many pending and active orgs carry each. */
-  levels: z.array(
-    z.object({
-      level: z.number().int(),
-      values: z.array(
-        z.object({ key: z.string(), label: z.string(), org_count: z.number().int() }),
-      ),
-    }),
-  ),
+  limits: z.object({
+    /** The deepest an aggregator org can be; 1 keeps every org under the network. */
+    max_depth: z.number().int(),
+    /** The most pending and active direct children of any org; null is no limit. */
+    max_children: z.number().int().nullable(),
+    /** The most pending and active aggregator orgs, Default excluded. */
+    max_total_orgs: z.number().int(),
+  }),
+  /** Pending and active aggregator orgs, Default excluded. */
+  total_orgs: z.number().int(),
+  known_as: z.object({
+    /** The system value first, then the instance values in config order. */
+    values: z.array(
+      z.object({
+        key: z.string(),
+        name: z.string(),
+        /** Depths where the value is allowed; null is any depth. */
+        depths: z.array(z.number().int()).nullable(),
+        /** True for the built-in `aggregator` value. */
+        system: z.boolean(),
+        /** Pending and active orgs carrying the value. */
+        org_count: z.number().int(),
+      }),
+    ),
+    /** The value a new self-registered org gets at a depth; other depths get `aggregator`. */
+    suggest: z.array(z.object({ depth: z.number().int(), key: z.string() })),
+  }),
 });
 export type OrgHierarchyResponse = z.infer<typeof OrgHierarchyResponseSchema>;

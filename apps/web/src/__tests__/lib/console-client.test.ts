@@ -59,6 +59,38 @@ describe('errorKey (console-client)', () => {
   it('maps ORG_NAME_TAKEN to name_taken', () => {
     expect(errorKey({ status: 409, error: { code: 'ORG_NAME_TAKEN' } })).toBe('errors.name_taken');
   });
+  it.each([
+    ['ORG_DEPTH_LIMIT', 409, 'errors.depth_limit'],
+    ['ORG_CHILD_LIMIT', 409, 'errors.child_limit'],
+    ['ORG_TOTAL_LIMIT', 409, 'errors.total_limit'],
+    ['ORG_PARENT_CYCLE', 400, 'errors.parent_cycle'],
+    ['KNOWN_AS_DEPTH', 400, 'errors.known_as_depth'],
+  ])('maps %s', (code, status, key) => {
+    expect(errorKey({ status, error: { code } })).toBe(key);
+  });
+  it('maps a CONFLICT by its reason', () => {
+    expect(errorKey({ status: 409, error: { code: 'CONFLICT', fields: { reason: 'busy' } } })).toBe(
+      'errors.busy',
+    );
+    expect(
+      errorKey({ status: 409, error: { code: 'CONFLICT', fields: { reason: 'not_movable' } } }),
+    ).toBe('errors.not_movable');
+    expect(errorKey({ status: 409, error: { code: 'CONFLICT' } })).toBe('errors.generic');
+  });
+  it('maps an invalid parent or known-as field', () => {
+    expect(
+      errorKey({
+        status: 400,
+        error: { code: 'SCHEMA_VALIDATION', fields: { parent_id: 'invalid' } },
+      }),
+    ).toBe('errors.parent_invalid');
+    expect(
+      errorKey({
+        status: 400,
+        error: { code: 'SCHEMA_VALIDATION', fields: { known_as: 'invalid' } },
+      }),
+    ).toBe('errors.known_as_invalid');
+  });
   it('falls back to generic', () => {
     expect(errorKey({ status: 400, error: { code: 'OTHER' } })).toBe('errors.generic');
     expect(errorKey({ status: 400, error: {} })).toBe('errors.generic');

@@ -24,7 +24,7 @@ export async function withOrgsBelow(
   if (ids === null || ids.length === 0) return { ok: true, value: ids };
   const below = await getOrganisationStore().descendantIds(ids);
   if (!below.ok) return below;
-  return { ok: true, value: [...ids, ...below.value.filter((id) => !ids.includes(id))] };
+  return { ok: true, value: [...ids, ...below.value] };
 }
 
 /**

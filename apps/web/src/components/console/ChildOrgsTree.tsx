@@ -4,8 +4,8 @@
  * Read-only tree of the organisations below an organisation, at any depth.
  *
  * Shown on the organisation page. Rooted at that organisation; each branch can
- * be collapsed. Names link to the organisation only for the network admin; an
- * owner cannot open an organisation below its own.
+ * be collapsed. With `linkRows`, names link to each organisation's page; an
+ * owner opens an organisation below its own read-only.
  */
 
 import { useMemo, useState, type ReactNode } from 'react';
@@ -64,12 +64,12 @@ export function buildOrgTree(rootId: string, orgs: OrgRow[]): TreeNode[] {
   return grow(rootId);
 }
 
-/** The "known as" label as a small badge; nothing when the org has none. */
-function KnownAsBadge({ label }: Readonly<{ label: string | null }>) {
-  if (!label) return null;
+/** The "known as" name as a small badge; nothing when the org has none. */
+function KnownAsBadge({ name }: Readonly<{ name: string | null }>) {
+  if (!name) return null;
   return (
     <span className="inline-flex items-center rounded-md bg-[var(--bd-tint-primary)] px-2 py-0.5 text-[12px] font-semibold text-primary-600">
-      {label}
+      {name}
     </span>
   );
 }
@@ -124,9 +124,9 @@ function Branch({
           </span>
         )}
         {name}
-        <KnownAsBadge label={org.known_as_label ?? org.known_as} />
-        {org.level ? (
-          <span className="text-[12px] text-ink-400">{t('orgs.level', { level: org.level })}</span>
+        <KnownAsBadge name={org.known_as_name ?? org.known_as} />
+        {org.depth ? (
+          <span className="text-[12px] text-ink-400">{t('orgs.depth', { depth: org.depth })}</span>
         ) : null}
         <ConsoleStatusPill status={org.status} />
         <span className="text-[12.5px] text-ink-500">
@@ -160,7 +160,7 @@ function Level({ nodes, linkRows }: Readonly<{ nodes: TreeNode[]; linkRows: bool
  *
  * @param rootId - The organisation the tree hangs from.
  * @param rootName - Its name.
- * @param rootKnownAs - Its "known as" label, if any.
+ * @param rootKnownAs - Its "known as" name, if any.
  * @param rootTag - Note beside the root's name; "This organisation" by default.
  * @param orgs - Its descendants.
  * @param linkRows - Whether names link to each organisation's page.
@@ -193,7 +193,7 @@ export function ChildOrgsTree({
           <I.briefcase size={15} />
         </span>
         <span className="font-semibold text-ink-900">{rootName}</span>
-        <KnownAsBadge label={rootKnownAs} />
+        <KnownAsBadge name={rootKnownAs} />
         <span className="text-[12px] text-ink-500">{rootTag ?? t('org.children_this')}</span>
         <span className="ml-auto text-[12px] text-ink-500">
           {t('org.children_below', { count: orgs.length })}

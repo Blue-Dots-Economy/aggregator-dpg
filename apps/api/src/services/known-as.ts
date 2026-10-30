@@ -1,66 +1,94 @@
 /**
- * "Known as" values and their hierarchy levels (`@aggregator-dpg/api`).
+ * "Known as" values and tree rules (`@aggregator-dpg/api`).
  *
- * Each value in the instance config carries a level: 1 sits directly under
- * the network, 2 under a level-1 org, and so on. An org's level is the level
- * of its `known_as` value; the network is level 0.
+ * The built-in system value `aggregator` is allowed at every depth and is the
+ * fallback for new orgs. Instance values may be limited to some depths.
  */
 
-import type { KnownAsConfig } from '@aggregator-dpg/network-config/interface';
+import {
+  SYSTEM_KNOWN_AS,
+  type KnownAsConfig,
+  type OrganisationConfig,
+} from '@aggregator-dpg/network-config/interface';
+import type { TreeRules } from './organisation-store/interface.js';
 
-/** The network facilitator's level. */
-export const NETWORK_LEVEL = 0;
+/** One "known as" value; `depths` is `null` when the value is allowed at any depth. */
+export interface KnownAsEntry {
+  key: string;
+  name: string;
+  depths: number[] | null;
+  /** True for the built-in `aggregator` value. */
+  system: boolean;
+}
 
 /**
- * The level of a value.
+ * Every "known as" value.
  *
  * @param cfg - The instance's `organisation.known_as` config.
- * @param key - A value key.
- * @returns The level, or `null` for a key that is not configured.
+ * @returns The system value first, then the instance values in config order.
  */
-export function levelOf(cfg: KnownAsConfig, key: string): number | null {
-  return cfg.values.find((v) => v.key === key)?.level ?? null;
+export function knownAsValues(cfg: KnownAsConfig): KnownAsEntry[] {
+  return [
+    { ...SYSTEM_KNOWN_AS, depths: null, system: true },
+    ...cfg.values.map((v) => ({
+      key: v.key,
+      name: v.name,
+      depths: v.depths ?? null,
+      system: false,
+    })),
+  ];
 }
 
 /**
- * The label of a value.
+ * The name of a value.
  *
  * @param cfg - The config.
  * @param key - A value key.
- * @returns The label, or `null` for a key that is not configured.
+ * @returns The name, or `null` for a key that is not configured.
  */
-export function labelOf(cfg: KnownAsConfig, key: string): string | null {
-  return cfg.values.find((v) => v.key === key)?.label ?? null;
+export function nameOf(cfg: KnownAsConfig, key: string): string | null {
+  if (key === SYSTEM_KNOWN_AS.key) return SYSTEM_KNOWN_AS.name;
+  return cfg.values.find((v) => v.key === key)?.name ?? null;
 }
 
 /**
- * The value a new org gets under a parent: the only value one level below
- * the parent, else the config default.
+ * Whether a value may be used at a depth.
  *
  * @param cfg - The config.
- * @param parentLevel - The parent's level; 0 for the network, `null` when unknown.
- * @returns The value key.
+ * @param key - A value key.
+ * @param depth - The org's depth; 1 is directly under the network.
+ * @returns True for the system value, and for an instance value with no `depths` or listing `depth`.
  */
-export function childKnownAs(cfg: KnownAsConfig, parentLevel: number | null): string {
-  if (parentLevel === null) return cfg.default;
-  const below = cfg.values.filter((v) => v.level === parentLevel + 1);
-  return below.length === 1 ? below[0]!.key : cfg.default;
+export function isAllowedAt(cfg: KnownAsConfig, key: string, depth: number): boolean {
+  if (key === SYSTEM_KNOWN_AS.key) return true;
+  const v = cfg.values.find((x) => x.key === key);
+  if (!v) return false;
+  return !v.depths || v.depths.includes(depth);
 }
 
 /**
- * The configured levels in order, each with its values.
+ * The value a new org gets at a depth.
  *
  * @param cfg - The config.
- * @returns Level 1 first; every level has at least one value.
+ * @param depth - The new org's depth.
+ * @returns The `suggest` key for that depth, else the system value.
  */
-export function levelsOf(
-  cfg: KnownAsConfig,
-): Array<{ level: number; values: Array<{ key: string; label: string }> }> {
-  const top = Math.max(...cfg.values.map((v) => v.level));
-  return Array.from({ length: top }, (_, i) => ({
-    level: i + 1,
-    values: cfg.values
-      .filter((v) => v.level === i + 1)
-      .map((v) => ({ key: v.key, label: v.label })),
-  }));
+export function suggestFor(cfg: KnownAsConfig, depth: number): string {
+  return cfg.suggest.find((s) => s.depth === depth)?.key ?? SYSTEM_KNOWN_AS.key;
+}
+
+/**
+ * The store's tree rules for the instance.
+ *
+ * @param org - The instance's `organisation` config.
+ * @returns Limits and "known as" checks; `maxChildren` is `null` when unset.
+ */
+export function treeRules(org: OrganisationConfig): TreeRules {
+  return {
+    maxDepth: org.hierarchy.max_depth,
+    maxChildren: org.hierarchy.max_children ?? null,
+    maxTotalOrgs: org.hierarchy.max_total_orgs,
+    knownAsAllowed: (key, depth) => isAllowedAt(org.known_as, key, depth),
+    suggestFor: (depth) => suggestFor(org.known_as, depth),
+  };
 }

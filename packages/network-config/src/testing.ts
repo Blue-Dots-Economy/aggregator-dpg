@@ -12,7 +12,7 @@ import { ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import {
-  DEFAULT_KNOWN_AS,
+  DEFAULT_ORGANISATION,
   NetworkConfigLoaderBase,
   type NetworkConfigError,
   type ResolvedDomain,
@@ -76,7 +76,7 @@ function buildConfig(
           signals_cta: true,
         },
       },
-      organisation: { known_as: DEFAULT_KNOWN_AS },
+      organisation: DEFAULT_ORGANISATION,
     },
     network: {
       id: fixture.networkId,

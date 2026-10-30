@@ -17,9 +17,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
 import { PostgresOrganisationStore } from '../postgres.js';
+import { permissiveTreeRules } from '../testing.js';
 import { _setDbClients } from '../../../db/client.js';
 import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
-import type { Organisation, CreateOrgInput } from '../interface.js';
+import type { Organisation, CreateOrgInput, TreeRules } from '../interface.js';
 
 // ─── Fake Drizzle chain ─────────────────────────────────────────────────────
 
@@ -139,6 +140,7 @@ function makeRow(overrides: Partial<Organisation> = {}): Organisation {
     legalName: null,
     gstNumber: null,
     knownAs: 'aggregator',
+    depth: 1,
     parentId: null,
     parentName: null,
     ...overrides,
@@ -169,7 +171,10 @@ describe('PostgresOrganisationStore.create', () => {
     _setDbClients(null, db as never);
     const store = new PostgresOrganisationStore();
 
-    const result = await store.create(makeInput({ ownerEmail: 'OWNER@TEST.LOCAL' }));
+    const result = await store.create(
+      makeInput({ ownerEmail: 'OWNER@TEST.LOCAL' }),
+      permissiveTreeRules(),
+    );
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -190,12 +195,31 @@ describe('PostgresOrganisationStore.create', () => {
     expect(orgValues).not.toHaveProperty('ownerKcSub');
   });
 
+  it('inserts depth as the parent depth plus one and reads depth back', async () => {
+    let captured: ChainCall[] = [];
+    const db = makeFakeDb((chain) => {
+      if (isOrgWrite(chain)) captured = chain;
+      // The parent lookup and the re-read both see an active depth-2 row.
+      return [makeRow({ depth: 2, status: 'active' })];
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresOrganisationStore();
+
+    const result = await store.create(makeInput({ parentId: 'p1' }), permissiveTreeRules());
+
+    expect(result.ok && result.value.depth).toBe(2);
+    expect(callArgs(captured, 'values')?.[0]).toMatchObject({
+      parentId: '00000000-0000-0000-0000-0000000000a1',
+      depth: 3,
+    });
+  });
+
   it('returns DB_UNAVAILABLE when insert returns no row', async () => {
     const db = makeFakeDb(() => []);
     _setDbClients(null, db as never);
     const store = new PostgresOrganisationStore();
 
-    const result = await store.create(makeInput());
+    const result = await store.create(makeInput(), permissiveTreeRules());
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DB_UNAVAILABLE');
@@ -211,7 +235,7 @@ describe('PostgresOrganisationStore.create', () => {
     _setDbClients(null, db as never);
     const store = new PostgresOrganisationStore();
 
-    const result = await store.create(makeInput());
+    const result = await store.create(makeInput(), permissiveTreeRules());
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DUPLICATE_NAME');
@@ -227,7 +251,7 @@ describe('PostgresOrganisationStore.create', () => {
     _setDbClients(null, db as never);
     const store = new PostgresOrganisationStore();
 
-    const result = await store.create(makeInput());
+    const result = await store.create(makeInput(), permissiveTreeRules());
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DUPLICATE_SLUG');
@@ -241,7 +265,7 @@ describe('PostgresOrganisationStore.create', () => {
       throw Object.assign(new Error('duplicate key'), { code: '23505', constraint });
     });
     _setDbClients(null, db as never);
-    const result = await new PostgresOrganisationStore().create(makeInput());
+    const result = await new PostgresOrganisationStore().create(makeInput(), permissiveTreeRules());
     expect(result.ok || result.error.code).toBe(code);
   });
 
@@ -257,7 +281,7 @@ describe('PostgresOrganisationStore.create', () => {
     _setDbClients(null, db as never);
     const store = new PostgresOrganisationStore();
 
-    const result = await store.create(makeInput());
+    const result = await store.create(makeInput(), permissiveTreeRules());
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DB_UNAVAILABLE');
@@ -281,7 +305,7 @@ describe('PostgresOrganisationStore.create', () => {
     _setDbClients(null, db as never);
     const store = new PostgresOrganisationStore();
 
-    const result = await store.create(makeInput());
+    const result = await store.create(makeInput(), permissiveTreeRules());
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DUPLICATE_NAME');
@@ -300,7 +324,7 @@ describe('PostgresOrganisationStore.create', () => {
     _setDbClients(null, db as never);
     const store = new PostgresOrganisationStore();
 
-    const result = await store.create(makeInput());
+    const result = await store.create(makeInput(), permissiveTreeRules());
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DUPLICATE_SLUG');
@@ -313,7 +337,7 @@ describe('PostgresOrganisationStore.create', () => {
     _setDbClients(null, db as never);
     const store = new PostgresOrganisationStore();
 
-    const result = await store.create(makeInput());
+    const result = await store.create(makeInput(), permissiveTreeRules());
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('DB_UNAVAILABLE');
@@ -644,6 +668,7 @@ describe('PostgresOrganisationStore — consent in the create transaction (0029)
           calls.push({ tx, id });
         },
       }),
+      permissiveTreeRules(),
     );
     expect(result.ok).toBe(true);
     expect(calls).toHaveLength(1);
@@ -659,6 +684,7 @@ describe('PostgresOrganisationStore — consent in the create transaction (0029)
           throw new Error('ledger down');
         },
       }),
+      permissiveTreeRules(),
     );
     expect(result).toEqual({
       ok: false,
@@ -697,21 +723,6 @@ describe('PostgresOrganisationStore.search — descendantsOf', () => {
 });
 
 describe('PostgresOrganisationStore — known_as and parents', () => {
-  it('update writes known_as and parent_id from the patch', async () => {
-    let captured: ChainCall[] = [];
-    const db = makeFakeDb((chain) => {
-      if (isOrgWrite(chain) || captured.length === 0) captured = chain;
-      return [makeRow({ knownAs: 'district', parentId: 'p1', parentName: 'Parent' })];
-    });
-    _setDbClients(null, db as never);
-    const r = await new PostgresOrganisationStore().update('org-1', {
-      knownAs: 'district',
-      parentId: 'p1',
-    });
-    expect(r.ok && [r.value.knownAs, r.value.parentId]).toEqual(['district', 'p1']);
-    expect(callArgs(captured, 'set')?.[0]).toMatchObject({ knownAs: 'district', parentId: 'p1' });
-  });
-
   it('search adds a known_as filter only when given', async () => {
     const wheres: unknown[] = [];
     const db = makeFakeDb((chain) => {
@@ -747,19 +758,6 @@ describe('PostgresOrganisationStore — known_as and parents', () => {
     expect(!r.ok && r.error.code).toBe('DB_UNAVAILABLE');
   });
 
-  it('hasChildren is true when a row has the org as parent', async () => {
-    _setDbClients(null, makeFakeDb(() => [{ id: 'c1' }]) as never);
-    expect(await new PostgresOrganisationStore().hasChildren('p')).toEqual({
-      ok: true,
-      value: true,
-    });
-    _setDbClients(null, makeFakeDb(() => []) as never);
-    expect(await new PostgresOrganisationStore().hasChildren('p')).toEqual({
-      ok: true,
-      value: false,
-    });
-  });
-
   it('countByKnownAs maps grouped rows to a count per key', async () => {
     const db = makeFakeDb(() => [
       { key: 'state', n: 3 },
@@ -770,16 +768,118 @@ describe('PostgresOrganisationStore — known_as and parents', () => {
     expect(r.ok && r.value).toEqual({ state: 3, district: 1 });
   });
 
-  it.each(['hasChildren', 'countByKnownAs'] as const)(
-    '%s returns DB_UNAVAILABLE when the driver throws',
-    async (op) => {
-      const db = makeFakeDb(() => {
-        throw new Error('boom');
-      });
-      _setDbClients(null, db as never);
-      const store = new PostgresOrganisationStore();
-      const r = op === 'hasChildren' ? await store.hasChildren('p') : await store.countByKnownAs();
-      expect(!r.ok && r.error.code).toBe('DB_UNAVAILABLE');
-    },
-  );
+  it('countByKnownAs returns DB_UNAVAILABLE when the driver throws', async () => {
+    const db = makeFakeDb(() => {
+      throw new Error('boom');
+    });
+    _setDbClients(null, db as never);
+    const r = await new PostgresOrganisationStore().countByKnownAs();
+    expect(!r.ok && r.error.code).toBe('DB_UNAVAILABLE');
+  });
+});
+
+describe('PostgresOrganisationStore — tree rules', () => {
+  const rules: TreeRules = {
+    maxDepth: 3,
+    maxChildren: null,
+    maxTotalOrgs: 50,
+    knownAsAllowed: () => true,
+    suggestFor: () => 'aggregator',
+  };
+
+  /** Wraps a fake so the statements run on the transaction are recorded in order. */
+  function recording(inner: unknown, statements: string[]): unknown {
+    const dialect = new PgDialect();
+    return new Proxy(inner as object, {
+      get(target, prop) {
+        const value = (target as Record<string | symbol, unknown>)[prop];
+        if (prop !== 'transaction') return value;
+        return (fn: (tx: unknown) => Promise<unknown>) =>
+          (value as (f: (tx: unknown) => Promise<unknown>) => Promise<unknown>)((tx) =>
+            fn(
+              new Proxy(tx as object, {
+                get(t, p) {
+                  const v = (t as Record<string | symbol, unknown>)[p];
+                  if (typeof p !== 'string') return v;
+                  return (...args: unknown[]) => {
+                    statements.push(p === 'execute' ? dialect.sqlToQuery(args[0] as SQL).sql : p);
+                    return (v as (...a: unknown[]) => unknown)(...args);
+                  };
+                },
+              }),
+            ),
+          );
+      },
+    });
+  }
+
+  it.each([
+    ['create', (s: PostgresOrganisationStore) => s.create(makeInput(), rules)],
+    ['revive', (s: PostgresOrganisationStore) => s.revive('o1', 'p1', rules)],
+    ['move', (s: PostgresOrganisationStore) => s.move('o1', { parentId: 'p1' }, rules)],
+    [
+      'update with known_as',
+      (s: PostgresOrganisationStore) => s.update('o1', { knownAs: 'state' }, rules),
+    ],
+  ] as const)('%s takes the tree lock as the first statement', async (_name, call) => {
+    const statements: string[] = [];
+    _setDbClients(
+      null,
+      recording(
+        makeFakeDb(() => []),
+        statements,
+      ) as never,
+    );
+    await call(new PostgresOrganisationStore());
+    expect(statements[0]).toContain("pg_advisory_xact_lock(hashtext('aggregator-dpg:org-tree'))");
+  });
+
+  it('move answers ORG_BUSY when the org row is locked (SQLSTATE 55P03)', async () => {
+    const db = makeFakeDb((chain) => {
+      if (chain.some((c) => c.method === 'for')) {
+        throw Object.assign(new Error('could not obtain lock'), { code: '55P03' });
+      }
+      return [];
+    });
+    _setDbClients(null, db as never);
+    const r = await new PostgresOrganisationStore().move('o1', { parentId: 'p1' }, rules);
+    expect(!r.ok && r.error.code).toBe('ORG_BUSY');
+  });
+
+  it('move locks the org row with NOWAIT and answers NOT_FOUND when it is missing', async () => {
+    let forArgs: unknown[] | undefined;
+    const db = makeFakeDb((chain) => {
+      forArgs ??= callArgs(chain, 'for');
+      return [];
+    });
+    _setDbClients(null, db as never);
+    const r = await new PostgresOrganisationStore().move('o1', { parentId: 'p1' }, rules);
+    expect(!r.ok && r.error.code).toBe('NOT_FOUND');
+    expect(forArgs).toEqual(['update', { noWait: true }]);
+  });
+
+  it('childCounts returns every id, 0 when it has no counted child', async () => {
+    _setDbClients(null, makeFakeDb(() => [{ parentId: 'a', n: '2' }]) as never);
+    const store = new PostgresOrganisationStore();
+    expect(await store.childCounts(['a', 'b'])).toEqual({ ok: true, value: { a: 2, b: 0 } });
+    expect(await store.childCounts([])).toEqual({ ok: true, value: {} });
+  });
+
+  it('countTotal returns the count', async () => {
+    _setDbClients(null, makeFakeDb(() => [{ n: 3 }]) as never);
+    expect(await new PostgresOrganisationStore().countTotal()).toEqual({ ok: true, value: 3 });
+  });
+
+  it.each([
+    ['childCounts', (s: PostgresOrganisationStore) => s.childCounts(['a'])],
+    ['countTotal', (s: PostgresOrganisationStore) => s.countTotal()],
+    ['parentOptions', (s: PostgresOrganisationStore) => s.parentOptions('a', rules)],
+  ] as const)('%s returns DB_UNAVAILABLE when the driver throws', async (_name, call) => {
+    const db = makeFakeDb(() => {
+      throw new Error('boom');
+    });
+    _setDbClients(null, db as never);
+    const r = await call(new PostgresOrganisationStore());
+    expect(!r.ok && r.error.code).toBe('DB_UNAVAILABLE');
+  });
 });

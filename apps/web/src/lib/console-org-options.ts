@@ -1,21 +1,48 @@
 /**
  * Organisation choices for console filters (`apps/web`): the organisations a
  * viewer can reach, in tree order, each labelled with its path and "known as"
- * value, e.g. "Karnataka › Mysuru (District)".
+ * value, e.g. "Karnataka › Mysuru (District)". Also the "known as" values
+ * allowed at a depth.
  *
  * @module apps/web/src/lib/console-org-options
  */
 
-import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import type {
+  OrgHierarchyResponse,
+  OrgSearchResponse,
+} from '@aggregator-dpg/shared-primitives/user-org';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
+
+/** A selectable "known as" value. */
+export interface KnownAsChoice {
+  key: string;
+  name: string;
+}
+
+/**
+ * The "known as" values allowed at a depth: the system value, values with no
+ * depth limit, and values that list the depth. Config order is kept.
+ *
+ * @param values - The configured values, from `GET /v1/org/hierarchy`.
+ * @param depth - The org's depth (1 for a top-level org).
+ * @returns The allowed values.
+ */
+export function knownAsChoicesAt(
+  values: OrgHierarchyResponse['known_as']['values'],
+  depth: number,
+): KnownAsChoice[] {
+  return values
+    .filter((v) => v.system || v.depths === null || v.depths.includes(depth))
+    .map((v) => ({ key: v.key, name: v.name }));
+}
 
 /** One choice in an organisation filter. */
 export interface OrgOption {
   id: string;
   /** The org's own name. */
   name: string;
-  /** Path from the topmost listed ancestor, with the "known as" label. */
+  /** Path from the topmost listed ancestor, with the "known as" name. */
   label: string;
 }
 
@@ -46,7 +73,7 @@ export function orgOptionsInTreeOrder(orgs: readonly OrgRow[]): OrgOption[] {
       if (seen.has(o.id)) continue;
       seen.add(o.id);
       const names = [...path, o.name];
-      const knownAs = o.known_as_label ?? o.known_as;
+      const knownAs = o.known_as_name ?? o.known_as;
       out.push({
         id: o.id,
         name: o.name,

@@ -114,22 +114,22 @@ const PARENTS = [
     id: 'p-root',
     name: 'Blue Dots',
     is_root: true,
-    known_as_label: null,
-    child_known_as_label: 'State',
+    known_as_name: null,
+    child_known_as_name: 'State',
   },
   {
     id: 'p-state',
     name: 'State Org',
     is_root: false,
-    known_as_label: 'State',
-    child_known_as_label: 'District',
+    known_as_name: 'State',
+    child_known_as_name: 'District',
   },
   {
     id: 'p-plain',
     name: 'Plain Org',
     is_root: false,
-    known_as_label: null,
-    child_known_as_label: null,
+    known_as_name: null,
+    child_known_as_name: null,
   },
 ];
 
@@ -147,9 +147,13 @@ const consentContentFixture = {
 };
 
 /** Renders the form; the parent list is pre-loaded unless `parents: null` (then it is fetched). */
-function renderForm(props: Record<string, unknown> = {}, parents: typeof PARENTS | null = PARENTS) {
+function renderForm(
+  props: Record<string, unknown> = {},
+  parents: typeof PARENTS | null = PARENTS,
+  accepting = true,
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  if (parents) client.setQueryData(['org-parents'], { parents });
+  if (parents) client.setQueryData(['org-parents'], { accepting, parents });
   return render(
     <QueryClientProvider client={client}>
       <NextIntlClientProvider locale="en" messages={messages}>
@@ -328,7 +332,7 @@ describe('<OrgRegisterForm />', () => {
   });
 
   describe('parent organisation', () => {
-    it('lists the root as top level and labels the others with their known-as label', () => {
+    it('lists the root as top level and names the others with their known-as name', () => {
       originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn() as unknown as typeof fetch;
       renderForm();
@@ -388,12 +392,102 @@ describe('<OrgRegisterForm />', () => {
         attempt += 1;
         return attempt === 1
           ? new Response(JSON.stringify({ error: { code: 'DB_UNAVAILABLE' } }), { status: 503 })
-          : new Response(JSON.stringify({ parents: PARENTS }), { status: 200 });
+          : new Response(JSON.stringify({ accepting: true, parents: PARENTS }), { status: 200 });
       }) as unknown as typeof fetch;
       renderForm({}, null);
       expect(await screen.findByText(messages.register.parent_selector_error)).toBeInTheDocument();
       fireEvent.click(screen.getByText(messages.register.org_selector_retry));
       expect(await screen.findByRole('option', { name: 'State Org (State)' })).toBeInTheDocument();
+    });
+
+    it('shows the picker and sends the parent when one org below the root is the only option', async () => {
+      originalFetch = globalThis.fetch;
+      const bodies: Record<string, unknown>[] = [];
+      globalThis.fetch = vi.fn(async (_input: unknown, init?: { body?: string }) => {
+        bodies.push(JSON.parse(init?.body ?? '{}') as Record<string, unknown>);
+        return new Response(JSON.stringify({ slug: 's' }), { status: 201 });
+      }) as unknown as typeof fetch;
+      renderForm({}, [PARENTS[1]!]);
+      expect(screen.getByRole('option', { name: 'State Org (State)' })).toBeInTheDocument();
+      await submitAndAcceptGate('p-state');
+      await waitFor(() => expect(bodies).toHaveLength(1));
+      expect(bodies[0]?.['parent_id']).toBe('p-state');
+    });
+
+    it('hides the picker when only the root is listed and sends no parent', async () => {
+      originalFetch = globalThis.fetch;
+      const bodies: Record<string, unknown>[] = [];
+      globalThis.fetch = vi.fn(async (_input: unknown, init?: { body?: string }) => {
+        bodies.push(JSON.parse(init?.body ?? '{}') as Record<string, unknown>);
+        return new Response(JSON.stringify({ slug: 's' }), { status: 201 });
+      }) as unknown as typeof fetch;
+      renderForm({}, [PARENTS[0]!]);
+      expect(screen.queryByTestId('parent-select')).toBeNull();
+      expect(screen.getByText('Your organisation will be known as State.')).toBeInTheDocument();
+      fireEvent.submit(screen.getByTestId('rjsf-shim'));
+      await screen.findByRole('dialog');
+      act(() => {
+        capturedGateProps?.onAccept();
+      });
+      await waitFor(() => expect(bodies).toHaveLength(1));
+      expect(bodies[0]).not.toHaveProperty('parent_id');
+    });
+  });
+
+  describe('registrations closed', () => {
+    it('shows the closed message and no submit button', () => {
+      originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn() as unknown as typeof fetch;
+      renderForm({}, PARENTS, false);
+      expect(screen.getByText(messages.register.closed_title)).toBeInTheDocument();
+      expect(screen.getByText(messages.register.closed_detail)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: messages.register.org_submit })).toBeNull();
+      expect(screen.queryByTestId('rjsf-shim')).toBeNull();
+    });
+  });
+
+  describe('hierarchy errors', () => {
+    it.each([
+      ['ORG_DEPTH_LIMIT', 409, undefined, messages.register.org_error_depth_limit],
+      ['ORG_CHILD_LIMIT', 409, { parent_id: 'p-state' }, messages.register.org_error_child_limit],
+      ['ORG_TOTAL_LIMIT', 409, undefined, messages.register.org_error_total_limit],
+      ['CONFLICT', 409, undefined, messages.register.org_error_conflict],
+      ['SCHEMA_VALIDATION', 400, { parent_id: 'invalid' }, messages.register.org_error_parent],
+    ])('shows a message for %s', async (code, status, fields, text) => {
+      originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ error: { code, title: 'Upstream title', detail: 'x', fields } }),
+            { status, headers: { 'content-type': 'application/json' } },
+          ),
+      ) as unknown as typeof fetch;
+      renderForm();
+      await submitAndAcceptGate('p-state');
+      expect(await screen.findByRole('alert')).toBeInTheDocument();
+      expect(screen.getByText(text)).toBeInTheDocument();
+      expect(screen.queryByText('Upstream title')).toBeNull();
+    });
+
+    it('keeps the API message for other schema errors', async () => {
+      originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: {
+                code: 'SCHEMA_VALIDATION',
+                title: 'Invalid request',
+                detail: 'd',
+                fields: { email: 'invalid' },
+              },
+            }),
+            { status: 400, headers: { 'content-type': 'application/json' } },
+          ),
+      ) as unknown as typeof fetch;
+      renderForm();
+      await submitAndAcceptGate('p-state');
+      expect(await screen.findByText('Invalid request')).toBeInTheDocument();
     });
   });
 });
