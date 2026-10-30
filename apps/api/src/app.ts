@@ -52,7 +52,6 @@ import { registerCampaignExportRoutes } from './routes/campaign-export.js';
 import { registerCampaignVoiceRoutes } from './routes/campaign-voice.js';
 import { registerCampaignEmailRoutes } from './routes/campaign-email.js';
 import { registerCampaignJobRoutes } from './routes/campaign-jobs.js';
-import { registerCampaignDumpRoutes } from './routes/campaign-dump.js';
 import { ERR } from './errors/codes.js';
 import { HttpError } from './errors/http-error.js';
 import { coerceToHttpError, toEnvelope, toLogPayload } from './errors/serialize.js';
@@ -172,8 +171,7 @@ export async function buildApp(): Promise<FastifyInstance> {
           },
           {
             name: 'campaign',
-            description:
-              'Campaign integrations — participant PII export (#579) and the non-PII dump download (#692).',
+            description: 'Campaign integrations — participant PII export (#579).',
           },
         ],
       },
@@ -234,7 +232,6 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerCampaignJobRoutes(app, 'voice');
   await registerCampaignEmailRoutes(app);
   await registerCampaignJobRoutes(app, 'email');
-  await registerCampaignDumpRoutes(app);
 
   app.setErrorHandler((rawErr, req, reply) => {
     // Turn Fastify validation errors into the standard error envelope.

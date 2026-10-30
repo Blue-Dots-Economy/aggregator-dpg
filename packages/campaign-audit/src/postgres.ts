@@ -14,7 +14,6 @@ import {
   CampaignAuditWriterBase,
   type RequestedAuditInput,
   type CompletedAuditInput,
-  type DumpAuditInput,
 } from './interface.js';
 
 /**
@@ -121,39 +120,7 @@ export class PostgresCampaignAuditWriter extends CampaignAuditWriterBase {
   }
 
   /**
-   * Inserts the single row for a synchronous, non-PII dump access.
-   *
-   * Has no `actorSignalstackOrgId` (a dump is whole-network). `piiFields` is an
-   * empty array to record that no PII field was released.
-   *
-   * @param input - Requester identity and outcome for the dump.
-   * @returns `ok(void)` once inserted; `err(BaseError)` if the insert fails.
-   */
-  override async recordDumpAccess(input: DumpAuditInput): Promise<Result<void, BaseError>> {
-    return this.insert({
-      correlationId: input.correlationId,
-      event: 'completed' as const,
-      channel: 'dump' as const,
-      actorUserId: input.actorUserId,
-      // No actorSignalstackOrgId: a dump is whole-network.
-      actorAzp: input.actorAzp ?? null,
-      // Empty, not null: records that no PII field was released.
-      piiFields: [],
-      outcome: input.outcome,
-      completedAt: input.completedAt,
-      destination: input.destination ?? null,
-      network: input.network ?? null,
-      instance: input.instance ?? null,
-      requestIp: input.requestIp ?? null,
-      endpoint: input.endpoint,
-      traceId: input.traceId ?? null,
-      errorCode: input.errorCode ?? null,
-      details: input.details ?? null,
-    });
-  }
-
-  /**
-   * Inserts one row. Shared by all three public methods.
+   * Inserts one row. Shared by both public methods.
    *
    * @param row - The `campaign_pii_audit` row to insert.
    * @returns `ok(void)` on success; `err(UpstreamError)` if the insert fails.

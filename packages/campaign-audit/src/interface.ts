@@ -12,8 +12,8 @@
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 
-/** The audited action: a campaign channel, or the dump. */
-export type AuditChannel = 'export' | 'email' | 'voice' | 'dump';
+/** The audited action. */
+export type AuditChannel = 'export' | 'email' | 'voice';
 
 /** Result of a completed action. Never set on a `requested` row. */
 export type AuditOutcome = 'succeeded' | 'partial' | 'failed';
@@ -27,7 +27,7 @@ export type AuditOutcome = 'succeeded' | 'partial' | 'failed';
 export interface RequestedAuditInput {
   /** = `campaign_job.id`. */
   correlationId: string;
-  channel: Exclude<AuditChannel, 'dump'>;
+  channel: AuditChannel;
   actorUserId: string;
   actorSignalstackOrgId: string;
   actorAzp?: string;
@@ -53,7 +53,7 @@ export interface RequestedAuditInput {
  */
 export interface CompletedAuditInput {
   correlationId: string;
-  channel: Exclude<AuditChannel, 'dump'>;
+  channel: AuditChannel;
   actorSignalstackOrgId: string;
   outcome: AuditOutcome;
   completedAt: Date;
@@ -66,32 +66,6 @@ export interface CompletedAuditInput {
   errorCode?: string;
   /** Export-link recipient. An operator address. */
   recipientRef?: string;
-}
-
-/**
- * The single row for a non-PII dump access.
- *
- * The dump is synchronous and has no org, items or purpose, so it writes one
- * row instead of a requested/completed pair. It has no `actorSignalstackOrgId`
- * because it is a whole-network access.
- */
-export interface DumpAuditInput {
-  /** Generated per request; there is no job id. */
-  correlationId: string;
-  actorUserId: string;
-  actorAzp?: string;
-  outcome: AuditOutcome;
-  completedAt: Date;
-  /** The bucket/prefix that was pre-signed. */
-  destination?: string;
-  network?: string;
-  instance?: string;
-  requestIp?: string;
-  endpoint: string;
-  traceId?: string;
-  errorCode?: string;
-  /** Non-PII extras, e.g. `{ files: 3, bytes: 1234 }`. */
-  details?: Record<string, unknown>;
 }
 
 /**
@@ -114,12 +88,4 @@ export abstract class CampaignAuditWriterBase {
    * @returns ok(void) on insert; err(BaseError) on validation or database failure.
    */
   abstract recordCompleted(input: CompletedAuditInput): Promise<Result<void, BaseError>>;
-
-  /**
-   * Appends the single row for a synchronous, non-PII dump access.
-   *
-   * @param input - Requester identity and outcome for the whole-network dump.
-   * @returns ok(void) on insert; err(BaseError) on validation or database failure.
-   */
-  abstract recordDumpAccess(input: DumpAuditInput): Promise<Result<void, BaseError>>;
 }

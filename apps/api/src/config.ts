@@ -12,7 +12,6 @@ import {
   campaignExportConfigFields,
   signalStackConfigFields,
 } from '@aggregator-dpg/shared-primitives/config';
-import { dumpFilesSchema } from './services/object-storage/dump-keys.js';
 
 const ConfigSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -170,16 +169,6 @@ const ConfigSchema = z.object({
   CAMPAIGN_VOICE_MAX_ACTIVE_PER_ORG: z.coerce.number().int().positive().default(3),
   /** BullMQ attempts for a voice campaign job (retry count on transient failure). */
   CAMPAIGN_VOICE_ATTEMPTS: z.coerce.number().int().positive().default(3),
-  /**
-   * Key prefix of the non-PII dump in `S3_BUCKET`. Signals writes
-   * `[<prefix>/]<network>/<instance_id>/<table>.ndjson.gz`. A wrong value returns 404.
-   */
-  CAMPAIGN_DUMP_PREFIX: z.string().default(''),
-  /** Signals instance whose dump this deployment serves. Unset makes the dump route return 503. */
-  CAMPAIGN_DUMP_INSTANCE_ID: z.string().optional(),
-  /** Lifetime of the pre-signed dump URLs; short, because the caller downloads at once. */
-  CAMPAIGN_DUMP_URL_TTL_SECONDS: z.coerce.number().int().positive().default(600),
-  CAMPAIGN_DUMP_FILES: dumpFilesSchema,
   // ─── Campaign email channel ─────────────────────────────────────────────
   /** Max `item_ids` (recipients) accepted per email request body (after de-dup). */
   CAMPAIGN_EMAIL_MAX_ITEMS: z.coerce.number().int().positive().default(200),
@@ -368,33 +357,6 @@ export function campaignManagerAllowedAzp(): string[] {
     .filter((s) => s.length > 0);
   // Never return an empty list: `[]` turns the azp check off.
   return parsed.length > 0 ? parsed : ['campaign-manager'];
-}
-
-/**
- * Keycloak `preferred_username` of the campaign-manager system caller on the non-PII dump route.
- *
- * The dump is whole-network with no org scope, so this identity is its only control.
- * Coordinators and the system caller share one `azp`, so the username tells
- * them apart. Keycloak names the service account `service-account-<client-id>`,
- * which no human can hold. Read from the environment at call time.
- *
- * @returns The expected username; the default when the env var is unset or blank.
- */
-export function campaignDumpServiceAccount(): string {
-  // An empty value would match a token with no username, so fall back to the default.
-  return process.env.CAMPAIGN_DUMP_SERVICE_ACCOUNT?.trim() || 'service-account-campaign-manager';
-}
-
-/**
- * The Signals instance whose non-PII dump this deployment serves.
- *
- * Read from the environment at call time.
- *
- * @returns The instance id, or `undefined` when unset or blank (the route then returns 503).
- */
-export function campaignDumpInstanceId(): string | undefined {
-  const raw = process.env.CAMPAIGN_DUMP_INSTANCE_ID?.trim();
-  return raw && raw.length > 0 ? raw : undefined;
 }
 
 /**

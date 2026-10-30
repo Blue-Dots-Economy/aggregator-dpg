@@ -91,13 +91,6 @@
     },
     {
       "method": "GET",
-      "path": "/v1/campaign/dump",
-      "access": {
-        "access": "service"
-      }
-    },
-    {
-      "method": "GET",
       "path": "/v1/campaign/email",
       "access": {
         "capability": "profiles.view"
