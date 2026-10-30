@@ -48,3 +48,14 @@ All tree writes (create, revive of a rejected org, move, `known_as` change) take
 ## Reads below an org
 
 An owner reads, view-only, every org and coordinator below the orgs it owns (`services/authz/view-scope.ts`). Writes keep the owned reach. Contacts below are masked, and those reads log `relation: 'below'`. RBAC roles held in an org do not apply below it.
+
+## Upgrading an existing instance
+
+No manual data step is needed. Migration 0032 runs at API boot and is safe while older pods still serve (it is in the boot-safe list in `migration-guards.ts`).
+
+- **Data.** `known_as` is added with the default `aggregator`, so every existing org is "Aggregator" without a table rewrite. `depth` is filled from the parent chain: every org directly under the root gets 1. The migration is idempotent. `scripts/sql/organisation-verify.sql` gate V9 checks the result.
+- **Config.** An instance config without `aggregator.organisation` keeps a flat tree: every org directly under the network, at most 50 orgs, and every org "Aggregator". Add the block only to use levels, more depth or a different total.
+- **Instances already over a limit.** Existing orgs are kept, with their coordinators, as they are. The API logs `orgTree.bootCheck` warnings with the counts. Self-registration of new orgs is closed (`accepting: false`, `409 ORG_TOTAL_LIMIT`), and so are revivals and moves that break a limit. Approving an org that is already pending is not limited. Coordinator registration into existing orgs is not affected. An instance with more than 50 orgs should set `max_total_orgs` before it upgrades.
+- **Rollout order.** Deploy the API before the web app. Older API pods insert orgs without `depth`; the `BEFORE INSERT` trigger fills it. Older web pods work with the new API: the new response fields are additive and `parent_id` on `POST /v1/orgs/create` is optional. The new web app needs `GET /v1/orgs/parents`, so against an older API the org registration form shows an error and a retry button.
+- **RBAC edge.** `policy/rbac/edge/routes.json` adds `GET /v1/org/hierarchy`, `GET /v1/org/parent/options/:id`, `PATCH /v1/org/parent/update/:id` and `GET /v1/orgs/parents`. Where the edge policy is enforced, ship the updated policy bundle with the release; until then the edge refuses these routes.
+- **Rollback.** The columns, trigger and CHECK stay. Older code ignores the columns, and the trigger fills `depth` on its inserts. Orgs placed under another org keep that parent.
