@@ -133,18 +133,94 @@ async function accountFor(email: string, orgId: string): Promise<AccountMatch> {
   return { kind: 'none' };
 }
 
+/** Batch-wide inputs shared by every recipient. */
+type BatchContext = Omit<MintBatchDeps, 'recipients'>;
+
+/** What happened to one recipient that reached the mailer. */
+type SendOutcome = 'sent' | 'resent' | 'store_error';
+
+/**
+ * Keeps an invite row for an address that already has another account and
+ * mails it a "you already have an account" note, so counts match a fresh
+ * address (no account oracle).
+ */
+async function inviteExistingAccount(ctx: BatchContext, email: string): Promise<SendOutcome> {
+  const expiresAt = new Date(Date.now() + ctx.ttlSec * 1000);
+  const kept = await resolveInviteJti(ctx.invites, ctx.orgId, email, expiresAt, ctx.createdBy);
+  if (!kept) return 'store_error';
+  const mail = renderInviteExistingAccount({
+    orgName: ctx.orgName,
+    signInUrl: `${config.PUBLIC_PORTAL_URL}/login`,
+  });
+  const send = await ctx.mailer.send({
+    to: email,
+    subject: mail.subject,
+    html: mail.html,
+    text: mail.text,
+  });
+  if (!send.ok) {
+    ctx.log.warn({
+      status: 'failure',
+      sub_operation: 'mailer.send.inviteExistingAccount',
+      code: send.error.code,
+    });
+  }
+  return kept.refreshed ? 'resent' : 'sent';
+}
+
+/** Mints or refreshes an invite for a new address and mails the registration link. */
+async function inviteNewAddress(
+  ctx: BatchContext,
+  email: string,
+  recipientName: string | undefined,
+): Promise<SendOutcome> {
+  const expiresAt = new Date(Date.now() + ctx.ttlSec * 1000);
+  const resolved = await resolveInviteJti(ctx.invites, ctx.orgId, email, expiresAt, ctx.createdBy);
+  if (!resolved) return 'store_error';
+  const { token } = await mintInviteToken({ jti: resolved.jti, org: ctx.orgId, email });
+  const mail = renderCoordinatorInvite({
+    orgName: ctx.orgName,
+    inviterEmail: ctx.inviterEmail,
+    inviteUrl: inviteUrl(token),
+    expiresOn: formatExpiryDate(expiresAt),
+    ...(recipientName ? { recipientName } : {}),
+  });
+  const send = await ctx.mailer.send({
+    to: email,
+    subject: mail.subject,
+    html: mail.html,
+    text: mail.text,
+  });
+  if (!send.ok) {
+    ctx.log.warn(
+      {
+        status: 'failure',
+        sub_operation: 'mailer.send.coordinatorInvite',
+        code: send.error.code,
+      },
+      'coordinator-invite email delivery failed (invite minted)',
+    );
+  }
+  return resolved.refreshed ? 'resent' : 'sent';
+}
+
+/** Adds one recipient's outcome to the batch summary. */
+function tally(summary: MintSummary, email: string, outcome: SendOutcome): void {
+  if (outcome === 'store_error') summary.invalid.push({ email, reason: 'store_error' });
+  else summary[outcome] += 1;
+}
+
 /**
  * Mints or refreshes and emails an invite per recipient. Invalid and duplicate
  * addresses are bucketed; existing accounts are handled as in the module doc.
- * A failed email is logged and still counted as sent.
+ * A failed email is logged and still counted as sent. Recipients are handled
+ * one at a time, in order.
  *
  * @param deps - Store, mailer, org, recipients, and token settings.
  * @returns Per-batch counts, the invalid list and own-org existing members.
  */
 export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary> {
-  // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
-  const { invites, mailer, orgId, orgName, inviterEmail, recipients, ttlSec, createdBy, log } =
-    deps;
+  const { recipients, ...ctx } = deps;
   const summary: MintSummary = { sent: 0, resent: 0, invalid: [], existing: [] };
   // De-duplicate within the batch.
   const seen = new Set<string>();
@@ -161,80 +237,16 @@ export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary>
     }
     seen.add(email);
 
-    const account = await accountFor(email, orgId); // NOSONAR typescript:S9382 — sequential by design
+    const account = await accountFor(email, ctx.orgId); // NOSONAR typescript:S9382 — sequential by design
     if (account.kind === 'error') {
       summary.invalid.push({ email: recipient.email, reason: 'store_error' });
-      continue;
-    }
-    if (account.kind === 'own_coordinator') {
+    } else if (account.kind === 'own_coordinator') {
       summary.existing.push({ email: recipient.email, status: account.status });
-      continue;
+    } else if (account.kind === 'other_account') {
+      tally(summary, recipient.email, await inviteExistingAccount(ctx, email)); // NOSONAR typescript:S9382 — sequential by design
+    } else {
+      tally(summary, recipient.email, await inviteNewAddress(ctx, email, recipient.name)); // NOSONAR typescript:S9382 — sequential by design
     }
-    if (account.kind === 'other_account') {
-      // Keep an invite row so counts match a fresh address (no account oracle).
-      const expiresAt = new Date(Date.now() + ttlSec * 1000);
-      const kept = await resolveInviteJti(invites, orgId, email, expiresAt, createdBy); // NOSONAR typescript:S9382 — sequential by design
-      if (!kept) {
-        summary.invalid.push({ email: recipient.email, reason: 'store_error' });
-        continue;
-      }
-      const mail = renderInviteExistingAccount({
-        orgName,
-        signInUrl: `${config.PUBLIC_PORTAL_URL}/login`,
-      });
-      const send = await mailer.send({
-        // NOSONAR typescript:S9382 — sequential by design
-        to: email,
-        subject: mail.subject,
-        html: mail.html,
-        text: mail.text,
-      });
-      if (!send.ok) {
-        log.warn({
-          status: 'failure',
-          sub_operation: 'mailer.send.inviteExistingAccount',
-          code: send.error.code,
-        });
-      }
-      if (kept.refreshed) summary.resent += 1;
-      else summary.sent += 1;
-      continue;
-    }
-
-    const expiresAt = new Date(Date.now() + ttlSec * 1000);
-    const resolved = await resolveInviteJti(invites, orgId, email, expiresAt, createdBy); // NOSONAR typescript:S9382 — sequential by design
-    if (!resolved) {
-      summary.invalid.push({ email: recipient.email, reason: 'store_error' });
-      continue;
-    }
-
-    const { token } = await mintInviteToken({ jti: resolved.jti, org: orgId, email }); // NOSONAR typescript:S9382 — sequential by design
-    const mail = renderCoordinatorInvite({
-      orgName,
-      inviterEmail,
-      inviteUrl: inviteUrl(token),
-      expiresOn: formatExpiryDate(expiresAt),
-      ...(recipient.name ? { recipientName: recipient.name } : {}),
-    });
-    const send = await mailer.send({
-      // NOSONAR typescript:S9382 — sequential by design
-      to: email,
-      subject: mail.subject,
-      html: mail.html,
-      text: mail.text,
-    });
-    if (!send.ok) {
-      log.warn(
-        {
-          status: 'failure',
-          sub_operation: 'mailer.send.coordinatorInvite',
-          code: send.error.code,
-        },
-        'coordinator-invite email delivery failed (invite minted)',
-      );
-    }
-    if (resolved.refreshed) summary.resent += 1;
-    else summary.sent += 1;
   }
   return summary;
 }

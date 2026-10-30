@@ -1,14 +1,9 @@
 /**
- * Unit tests for resolveMaxInvites and resolveHourlyInvites: the configured name, the legacy
+ * Unit tests for resolveMaxInvites: the configured name, the legacy
  * NEXT_PUBLIC_ name, and the default for unset or invalid values.
  */
 import { describe, it, expect } from 'vitest';
-import {
-  DEFAULT_HOURLY_INVITES,
-  DEFAULT_MAX_INVITES,
-  resolveHourlyInvites,
-  resolveMaxInvites,
-} from '@/lib/invite-limit';
+import { DEFAULT_MAX_INVITES, resolveMaxInvites } from '@/lib/invite-limit';
 
 describe('resolveMaxInvites', () => {
   it('reads INVITE_MAX_RECIPIENTS', () => {
@@ -29,22 +24,6 @@ describe('resolveMaxInvites', () => {
       expect(resolveMaxInvites({ INVITE_MAX_RECIPIENTS: v } as NodeJS.ProcessEnv)).toBe(
         DEFAULT_MAX_INVITES,
       );
-    }
-  });
-});
-
-describe('resolveHourlyInvites', () => {
-  it('reads INVITE_MINT_RATE_MAX_PER_WINDOW', () => {
-    expect(
-      resolveHourlyInvites({ INVITE_MINT_RATE_MAX_PER_WINDOW: '50' } as NodeJS.ProcessEnv),
-    ).toBe(50);
-  });
-
-  it('uses the default when unset, empty or invalid', () => {
-    for (const v of [undefined, '', '0', 'many']) {
-      expect(
-        resolveHourlyInvites({ INVITE_MINT_RATE_MAX_PER_WINDOW: v } as NodeJS.ProcessEnv),
-      ).toBe(DEFAULT_HOURLY_INVITES);
     }
   });
 });

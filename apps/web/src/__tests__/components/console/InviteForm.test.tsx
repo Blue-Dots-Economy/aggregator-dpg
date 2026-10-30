@@ -4,13 +4,14 @@
  * Covers: the single-org line and the multi-org select, turning typed and
  * pasted text into chips (dedupe, invalid marking, removal), optional names,
  * the one-line result with a reason per status, invalid addresses blocking the
- * send, the per-send cap, the per-org limit message, the help panel with its
+ * send, the per-send cap, the help panel with its
  * limits, a generic error, and switching the chosen organisation.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import hiMessages from '@/i18n/messages/hi.json';
 import { InviteForm, parseRecipients } from '@/components/console/InviteForm';
 
 const orgs = [
@@ -194,7 +195,7 @@ describe('<InviteForm />', () => {
   it('explains the steps and shows the configured limits beside the form', () => {
     render(
       <NextIntlClientProvider locale="en" messages={messages}>
-        <InviteForm orgs={orgs} maxRecipients={5} hourlyLimit={50} />
+        <InviteForm orgs={orgs} maxRecipients={5} />
       </NextIntlClientProvider>,
     );
     const help = screen.getByRole('complementary', { name: 'How it works' });
@@ -203,9 +204,7 @@ describe('<InviteForm />', () => {
     expect(help).toHaveTextContent(
       'Review them under Coordinators. Once approved, they can sign in.',
     );
-    expect(help).toHaveTextContent(
-      'Up to 5 emails per send, and 50 invites per organisation per hour.',
-    );
+    expect(help).toHaveTextContent('Up to 5 emails per send.');
   });
 
   it('links to the coordinators list only when the page passes a link', () => {
@@ -225,9 +224,30 @@ describe('<InviteForm />', () => {
 
   it('shows the default limits when the page passes none', () => {
     renderForm();
-    expect(
-      screen.getByText('Up to 10 emails per send, and 200 invites per organisation per hour.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Up to 10 emails per send.')).toBeInTheDocument();
+  });
+
+  it('shows the at-a-time note when the list is exactly full, without a skipped count', () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <InviteForm orgs={orgs} maxRecipients={2} />
+      </NextIntlClientProvider>,
+    );
+    typeAddresses('a@x.org b@x.org');
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'You can send 2 at a time. Send these first, then add more.',
+    );
+    expect(screen.queryByText(/skipped/)).not.toBeInTheDocument();
+  });
+
+  it('renders in Hindi when the Hindi catalogue is active', () => {
+    render(
+      <NextIntlClientProvider locale="hi" messages={hiMessages}>
+        <InviteForm orgs={[orgs[0]!]} />
+      </NextIntlClientProvider>,
+    );
+    expect(screen.getByRole('complementary', { name: 'यह कैसे काम करता है' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /आमंत्रण भेजें/ })).toBeInTheDocument();
   });
 
   it('stops at the configured cap and says how many addresses were skipped', () => {
@@ -239,7 +259,9 @@ describe('<InviteForm />', () => {
     );
     typeAddresses('a@x.org b@x.org c@x.org d@x.org');
     expect(screen.getByText('2 of 2')).toBeInTheDocument();
-    expect(screen.getByText('2 emails skipped. The limit is 2 per send.')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '2 emails skipped. You can send 2 at a time. Send these first, then add more.',
+    );
     expect(emailBox()).toBeDisabled();
     expect(emailBox()).toHaveAttribute('placeholder', 'Limit reached');
     expect(screen.queryByRole('button', { name: 'Remove c@x.org' })).not.toBeInTheDocument();
@@ -247,6 +269,7 @@ describe('<InviteForm />', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Remove b@x.org' })[0]!);
     expect(emailBox()).toBeEnabled();
     expect(screen.queryByText(/skipped/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/at a time/)).not.toBeInTheDocument();
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -261,17 +284,6 @@ describe('<InviteForm />', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(messages.console.invite.too_many);
     // The addresses stay so the user can split them.
     expect(screen.getByLabelText('Name for a@x.org')).toBeInTheDocument();
-  });
-
-  it('says when the organisation can invite again after the hourly limit', async () => {
-    global.fetch = respond(
-      { error: { code: 'RATE_LIMITED', fields: { retry_after_seconds: 125 } } },
-      429,
-    ) as never;
-    renderForm();
-    typeAddresses('a@x.org');
-    fireEvent.click(sendButton());
-    expect(await screen.findByRole('alert')).toHaveTextContent('Try again in 3 minutes');
   });
 
   it('shows the generic error for other failures', async () => {

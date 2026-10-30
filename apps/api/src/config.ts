@@ -206,10 +206,6 @@ const ConfigSchema = z.object({
     .positive()
     .default(90 * 24 * 60 * 60),
 
-  // ─── Rate limit (per-org invite mint) ───────────────────────────────────
-  // Caps invites per org per window, so a leaked grant cannot be used to send spam.
-  INVITE_MINT_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
-  INVITE_MINT_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(200),
   // Per-actor limit on console decisions and edits. Fails open.
   CONSOLE_WRITE_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   CONSOLE_WRITE_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(60),

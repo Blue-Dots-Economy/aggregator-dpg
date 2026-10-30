@@ -720,7 +720,6 @@ services:
       # would mask the legacy-name fallback below. See the root compose file.
       ENABLED_LANGUAGES: ${ENABLED_LANGUAGES:-}
       INVITE_MAX_RECIPIENTS: ${INVITE_MAX_RECIPIENTS:-}
-      INVITE_MINT_RATE_MAX_PER_WINDOW: ${INVITE_MINT_RATE_MAX_PER_WINDOW:-}
       # Transitional, for a `.env` still using the pre-rename names.
       NEXT_PUBLIC_ENABLED_LANGUAGES: ${NEXT_PUBLIC_ENABLED_LANGUAGES:-}
       NEXT_PUBLIC_INVITE_MAX_RECIPIENTS: ${NEXT_PUBLIC_INVITE_MAX_RECIPIENTS:-}

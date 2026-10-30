@@ -6,10 +6,16 @@
  * name for the email greeting. Invalid addresses block sending until they are
  * fixed or removed; reloading or closing the page with unsent emails asks
  * first. After sending, one line says how many invites went out and
- * why the rest did not. A side card explains the steps and the limits.
+ * why the rest did not. A side card explains the steps and the per-send limit.
  */
 
-import { useState, type ClipboardEvent, type KeyboardEvent, type SubmitEvent } from 'react';
+import {
+  useState,
+  type ClipboardEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  type SubmitEvent,
+} from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { Check, FileText, Mail, X } from 'lucide-react';
@@ -20,7 +26,7 @@ import { I } from '../../icons';
 import { cn } from '../../lib/cn';
 import { ConsoleSection } from './ConsoleUi';
 import { errorKey, sendConsole, type ConsoleError } from '../../lib/console-client';
-import { DEFAULT_HOURLY_INVITES, DEFAULT_MAX_INVITES } from '../../lib/invite-limit';
+import { DEFAULT_MAX_INVITES } from '../../lib/invite-limit';
 import { useLeaveWarning } from '../../hooks/useLeaveWarning';
 
 interface Recipient {
@@ -99,34 +105,43 @@ function notSentOf(res: UserInviteResponse): NotSent[] {
 }
 
 /**
- * The message key and values for a failed send. The per-send cap and the
- * per-org hourly cap are API settings, so neither number is hard-coded here.
+ * The message key for a failed send. The per-send cap is an API setting, so a
+ * cap lower than the form knew shows the API's own message.
  */
-function failureOf(r: { status: number; error: ConsoleError }): {
-  key: string;
-  values?: Record<string, number>;
-} {
-  if (r.status === 429) {
-    const seconds = Number(r.error.fields?.retry_after_seconds);
-    if (Number.isFinite(seconds) && seconds > 0) {
-      return { key: 'invite.rate_limited', values: { minutes: Math.ceil(seconds / 60) } };
-    }
-  }
-  if (r.status === 400 && r.error.fields?.field === 'recipients') return { key: 'invite.too_many' };
-  return { key: errorKey(r) };
+function failureKey(r: { status: number; error: ConsoleError }): string {
+  if (r.status === 400 && r.error.fields?.field === 'recipients') return 'invite.too_many';
+  return errorKey(r);
+}
+
+/** Renders a `<kbd>` chunk in rich message text. */
+function renderKbd(chunks: ReactNode) {
+  return (
+    <kbd className="whitespace-nowrap rounded-[5px] border border-b-2 border-(--bd-border) bg-(--bd-card) px-1.5 font-mono text-[11px] text-ink-700">
+      {chunks}
+    </kbd>
+  );
+}
+
+/** Renders a `<link>` chunk as a link to `href`, or as plain text without one. */
+function linkTo(href: string | null) {
+  return function renderLink(chunks: ReactNode) {
+    if (!href) return chunks;
+    return (
+      <Link href={href} className="font-semibold text-(--bd-primary-600) hover:underline">
+        {chunks}
+      </Link>
+    );
+  };
 }
 
 export function InviteForm({
   orgs,
   maxRecipients = DEFAULT_MAX_INVITES,
-  hourlyLimit = DEFAULT_HOURLY_INVITES,
   coordinatorsHref = null,
 }: Readonly<{
   orgs: Array<{ id: string; name: string }>;
   /** Per-send cap (`INVITE_MAX_RECIPIENTS`), read by the page on the server. */
   maxRecipients?: number;
-  /** Invites per organisation per hour (`INVITE_MINT_RATE_MAX_PER_WINDOW`), read by the page on the server. */
-  hourlyLimit?: number;
   /** Link to the coordinators list, or `null` when the actor cannot open it. */
   coordinatorsHref?: string | null;
 }>) {
@@ -142,7 +157,6 @@ export function InviteForm({
   const valid = recipients.filter((r) => r.valid);
   const invalidCount = recipients.length - valid.length;
   const full = recipients.length >= maxRecipients;
-  const singleOrg = orgs.length === 1 ? orgs[0] : null;
 
   useLeaveWarning(recipients.length > 0 || draft.trim() !== '');
 
@@ -214,17 +228,17 @@ export function InviteForm({
     } else {
       update(all, next.skipped);
       setResult(null);
-      const f = failureOf(r);
-      setError(t(f.key, f.values));
+      setError(t(failureKey(r)));
     }
   }
-
-  const reasonText = (reason: string) =>
-    t(`invite.reason.${KNOWN_REASONS.has(reason) ? reason : 'other'}`);
 
   let footNote: string | null = null;
   if (recipients.length === 0 && !draft.trim()) footNote = t('invite.note_empty');
   else if (invalidCount) footNote = t('invite.note_fix');
+
+  let sendLabel = t('invite.send');
+  if (busy) sendLabel = t('invite.sending');
+  else if (valid.length) sendLabel = t('invite.send_count', { count: valid.length });
 
   let placeholder = t('invite.placeholder');
   if (full) placeholder = t('invite.limit_reached');
@@ -234,92 +248,16 @@ export function InviteForm({
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
       <ConsoleSection flush className="min-w-0 overflow-visible">
         <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col text-[13.5px]" noValidate>
-          <header className="flex flex-wrap items-center gap-3 border-b border-(--bd-border-soft) px-[22px] py-4">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-(--bd-primary-50) text-(--bd-primary-600)">
-              <I.briefcase size={18} />
-            </span>
-            {singleOrg ? (
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="text-[12px] text-ink-500">{t('invite.inviting_to')}</span>
-                <span className="break-words text-[15px] font-bold text-ink-900">
-                  {singleOrg.name}
-                </span>
-              </span>
-            ) : (
-              <label className="flex min-w-0 flex-1 flex-col gap-1">
-                <span className="text-[12px] text-ink-500">{t('invite.org')}</span>
-                <select
-                  className="bd-input"
-                  value={orgId}
-                  onChange={(e) => setOrgId(e.target.value)}
-                >
-                  {orgs.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <span className="ml-auto rounded-full bg-(--bd-bg) px-2.5 py-1 text-[12px] font-semibold text-ink-700">
-              {t('invite.role')}
-            </span>
-          </header>
+          <OrgHeader orgs={orgs} orgId={orgId} onChange={setOrgId} />
 
           <div className="flex flex-1 flex-col gap-2.5 p-[22px]">
-            {result ? (
-              <output className="flex items-start gap-3 rounded-[12px] bg-emerald-50 px-4 py-3 text-ink-700">
-                <I.send size={16} className="mt-0.5 shrink-0 text-emerald-700" />
-                <span className="min-w-0 flex-1">
-                  <span className="block font-semibold text-emerald-800">
-                    {t('invite.sent', { count: result.sent })}
-                  </span>
-                  {result.notSent.length ? (
-                    <span className="block break-words text-[13px] text-ink-500">
-                      {t('invite.not_sent')}{' '}
-                      {result.notSent
-                        .map((n) => `${n.email} (${reasonText(n.reason)})`)
-                        .join(' · ')}
-                    </span>
-                  ) : null}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setResult(null)}
-                  className="-m-1 rounded-lg p-2 text-ink-500 hover:bg-black/5"
-                  aria-label={t('invite.dismiss')}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </output>
-            ) : null}
+            {result ? <ResultBanner result={result} onDismiss={() => setResult(null)} /> : null}
 
             <div className="flex items-baseline justify-between gap-3">
               <label htmlFor="invite-emails" className="text-[14px] font-bold text-ink-900">
                 {t('invite.recipients')}
               </label>
-              <span
-                className={cn(
-                  'flex items-center gap-2 text-[12.5px] font-semibold tabular-nums',
-                  full ? 'text-amber-700' : 'text-ink-500',
-                )}
-              >
-                {t('invite.count', { count: recipients.length, max: maxRecipients })}
-                <span
-                  aria-hidden
-                  className="h-[5px] w-20 overflow-hidden rounded-full bg-(--bd-bg)"
-                >
-                  <span
-                    className={cn(
-                      'block h-full rounded-full transition-[width]',
-                      full ? 'bg-amber-600' : 'bg-(--bd-primary)',
-                    )}
-                    style={{
-                      width: `${Math.min(100, (recipients.length / maxRecipients) * 100)}%`,
-                    }}
-                  />
-                </span>
-              </span>
+              <CountMeter count={recipients.length} max={maxRecipients} />
             </div>
 
             <div className="flex max-h-[180px] min-h-24 flex-wrap content-start items-center gap-2 overflow-auto rounded-[12px] border-[1.5px] border-(--bd-border) bg-(--bd-bg) p-3 transition-[border-color,box-shadow] focus-within:border-(--bd-primary) focus-within:bg-(--bd-card) focus-within:shadow-[0_0_0_4px_var(--bd-primary-50)]">
@@ -366,71 +304,16 @@ export function InviteForm({
             </div>
 
             <span id="invite-emails-hint" className="text-[12.5px] text-ink-500">
-              {t.rich('invite.recipients_hint', {
-                kbd: (chunks) => (
-                  <kbd className="whitespace-nowrap rounded-[5px] border border-b-2 border-(--bd-border) bg-(--bd-card) px-1.5 font-mono text-[11px] text-ink-700">
-                    {chunks}
-                  </kbd>
-                ),
-              })}
+              {t.rich('invite.recipients_hint', { kbd: renderKbd })}
             </span>
 
-            {skipped ? (
-              <span role="status" className="text-[12.5px] font-semibold text-amber-700">
-                {t('invite.skipped', { count: skipped, max: maxRecipients })}
-              </span>
-            ) : null}
+            {full ? <LimitNote skipped={skipped} max={maxRecipients} /> : null}
 
             {invalidCount ? (
-              <div className="flex items-start gap-2.5 rounded-[10px] bg-rose-50 px-3 py-2.5 text-[13px] text-rose-700">
-                <I.alert size={16} className="mt-0.5 shrink-0" />
-                <span>{t('invite.invalid_count', { count: invalidCount })}</span>
-                <button
-                  type="button"
-                  onClick={() => update(valid)}
-                  className="ml-auto whitespace-nowrap text-[12.5px] font-bold underline"
-                >
-                  {t('invite.remove_invalid')}
-                </button>
-              </div>
+              <InvalidBanner count={invalidCount} onRemove={() => update(valid)} />
             ) : null}
 
-            {valid.length ? (
-              <div className="mt-1.5 overflow-hidden rounded-[12px] border border-(--bd-border)">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-(--bd-border) bg-(--bd-bg) px-4 py-2.5">
-                  <span className="font-semibold text-ink-900">
-                    {t('invite.people', { count: valid.length })}
-                  </span>
-                  <span className="text-[12px] text-ink-500">{t('invite.names_hint')}</span>
-                </div>
-                <ul>
-                  {valid.map((r) => (
-                    <li
-                      key={r.email}
-                      className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 border-b border-(--bd-border-soft) px-4 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_14rem_auto]"
-                    >
-                      <span className="truncate text-ink-900">{r.email}</span>
-                      <input
-                        type="text"
-                        className="bd-input col-span-2 row-start-2 md:col-span-1 md:col-start-2 md:row-start-1"
-                        value={r.name}
-                        onChange={(e) => setName(r.email, e.target.value)}
-                        placeholder={t('invite.name_placeholder')}
-                        aria-label={t('invite.name_label', { email: r.email })}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => remove(r.email)}
-                        className="col-start-2 row-start-1 -mr-3 grid h-11 w-11 place-items-center rounded-lg text-ink-500 hover:bg-black/5 md:col-start-3"
-                        aria-label={t('invite.remove', { email: r.email })}
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+            {valid.length ? <NamesList people={valid} onName={setName} onRemove={remove} /> : null}
 
             {error ? (
               <p role="alert" className="text-rose-700">
@@ -459,79 +342,255 @@ export function InviteForm({
                 icon={<I.send size={15} />}
                 className="w-full justify-center sm:w-auto"
               >
-                {busy
-                  ? t('invite.sending')
-                  : valid.length
-                    ? t('invite.send_count', { count: valid.length })
-                    : t('invite.send')}
+                {sendLabel}
               </Button>
             </div>
           </footer>
         </form>
       </ConsoleSection>
 
-      <ConsoleSection flush>
-        <aside aria-labelledby="invite-help-heading">
-          <div className="p-5">
-            <h2
-              id="invite-help-heading"
-              className="mb-3.5 text-[13px] font-bold uppercase tracking-[0.08em] text-ink-500"
-            >
-              {t('invite.help.heading')}
-            </h2>
-            <ol className="flex flex-col">
-              {HELP_STEPS.map(({ key, Icon }, i) => (
-                <li
-                  key={key}
-                  className="relative grid grid-cols-[32px_minmax(0,1fr)] gap-3 pb-[18px] last:pb-0"
-                >
-                  {i < HELP_STEPS.length - 1 ? (
-                    <span
-                      aria-hidden
-                      className="absolute bottom-0.5 left-[15px] top-[34px] w-0.5 bg-(--bd-border)"
-                    />
-                  ) : null}
-                  <span
-                    className={cn(
-                      'grid h-8 w-8 place-items-center rounded-full',
-                      i === 0
-                        ? 'bg-(--bd-primary) text-white'
-                        : 'bg-(--bd-primary-50) text-(--bd-primary-600)',
-                    )}
-                  >
-                    <Icon className="h-[15px] w-[15px]" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block pt-[5px] text-[13.5px] font-bold text-ink-900">
-                      {t(`invite.help.${key}.title`)}
-                    </span>
-                    <span className="block text-[13px] text-ink-500">
-                      {key === 'approve'
-                        ? t.rich('invite.help.approve.body', {
-                            link: (chunks) =>
-                              coordinatorsHref ? (
-                                <Link
-                                  href={coordinatorsHref}
-                                  className="font-semibold text-(--bd-primary-600) hover:underline"
-                                >
-                                  {chunks}
-                                </Link>
-                              ) : (
-                                chunks
-                              ),
-                          })
-                        : t(`invite.help.${key}.body`)}
-                    </span>
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </div>
-          <p className="border-t border-(--bd-border-soft) px-5 py-3.5 text-[12px] text-ink-500">
-            {t('invite.help.limits', { max: maxRecipients, hourly: hourlyLimit })}
-          </p>
-        </aside>
-      </ConsoleSection>
+      <HelpCard maxRecipients={maxRecipients} coordinatorsHref={coordinatorsHref} />
     </div>
+  );
+}
+
+/** The card header: the organisation (or a picker when there are several) and the role. */
+function OrgHeader({
+  orgs,
+  orgId,
+  onChange,
+}: Readonly<{
+  orgs: Array<{ id: string; name: string }>;
+  orgId: string;
+  onChange: (id: string) => void;
+}>) {
+  const t = useTranslations('console');
+  const single = orgs.length === 1 ? orgs[0] : null;
+  return (
+    <header className="flex flex-wrap items-center gap-3 border-b border-(--bd-border-soft) px-[22px] py-4">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-(--bd-primary-50) text-(--bd-primary-600)">
+        <I.briefcase size={18} />
+      </span>
+      {single ? (
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="text-[12px] text-ink-500">{t('invite.inviting_to')}</span>
+          <span className="break-words text-[15px] font-bold text-ink-900">{single.name}</span>
+        </span>
+      ) : (
+        <label className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="text-[12px] text-ink-500">{t('invite.org')}</span>
+          <select className="bd-input" value={orgId} onChange={(e) => onChange(e.target.value)}>
+            {orgs.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <span className="ml-auto rounded-full bg-(--bd-bg) px-2.5 py-1 text-[12px] font-semibold text-ink-700">
+        {t('invite.role')}
+      </span>
+    </header>
+  );
+}
+
+/** The one-line result after a send: how many went out and why the rest did not. */
+function ResultBanner({
+  result,
+  onDismiss,
+}: Readonly<{ result: { sent: number; notSent: NotSent[] }; onDismiss: () => void }>) {
+  const t = useTranslations('console');
+  const reasonText = (reason: string) =>
+    t(`invite.reason.${KNOWN_REASONS.has(reason) ? reason : 'other'}`);
+  return (
+    <output className="flex items-start gap-3 rounded-[12px] bg-emerald-50 px-4 py-3 text-ink-700">
+      <I.send size={16} className="mt-0.5 shrink-0 text-emerald-700" />
+      <span className="min-w-0 flex-1">
+        <span className="block font-semibold text-emerald-800">
+          {t('invite.sent', { count: result.sent })}
+        </span>
+        {result.notSent.length ? (
+          <span className="block break-words text-[13px] text-ink-500">
+            {t('invite.not_sent')}{' '}
+            {result.notSent.map((n) => `${n.email} (${reasonText(n.reason)})`).join(' · ')}
+          </span>
+        ) : null}
+      </span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="-m-1 rounded-lg p-2 text-ink-500 hover:bg-black/5"
+        aria-label={t('invite.dismiss')}
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </output>
+  );
+}
+
+/** "N of max" with a small bar; amber once the list is full. */
+function CountMeter({ count, max }: Readonly<{ count: number; max: number }>) {
+  const t = useTranslations('console');
+  const full = count >= max;
+  return (
+    <span
+      className={cn(
+        'flex items-center gap-2 text-[12.5px] font-semibold tabular-nums',
+        full ? 'text-amber-700' : 'text-ink-500',
+      )}
+    >
+      {t('invite.count', { count, max })}
+      <span aria-hidden className="h-[5px] w-20 overflow-hidden rounded-full bg-(--bd-bg)">
+        <span
+          className={cn(
+            'block h-full rounded-full transition-[width]',
+            full ? 'bg-amber-600' : 'bg-(--bd-primary)',
+          )}
+          style={{ width: `${Math.min(100, (count / max) * 100)}%` }}
+        />
+      </span>
+    </span>
+  );
+}
+
+/** Says that only `max` can be sent at a time, and how many did not fit. */
+function LimitNote({ skipped, max }: Readonly<{ skipped: number; max: number }>) {
+  const t = useTranslations('console');
+  return (
+    <output className="flex items-start gap-2.5 rounded-[10px] bg-amber-50 px-3 py-2.5 text-[13px] text-amber-800">
+      <I.alert size={16} className="mt-0.5 shrink-0 text-amber-600" />
+      <span>
+        {skipped ? `${t('invite.skipped', { count: skipped })} ` : null}
+        {t('invite.limit_note', { max })}
+      </span>
+    </output>
+  );
+}
+
+/** The count of invalid emails with a button that removes them all. */
+function InvalidBanner({ count, onRemove }: Readonly<{ count: number; onRemove: () => void }>) {
+  const t = useTranslations('console');
+  return (
+    <div className="flex items-start gap-2.5 rounded-[10px] bg-rose-50 px-3 py-2.5 text-[13px] text-rose-700">
+      <I.alert size={16} className="mt-0.5 shrink-0" />
+      <span>{t('invite.invalid_count', { count })}</span>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="ml-auto whitespace-nowrap text-[12.5px] font-bold underline"
+      >
+        {t('invite.remove_invalid')}
+      </button>
+    </div>
+  );
+}
+
+/** One row per valid email with an optional name for the greeting. */
+function NamesList({
+  people,
+  onName,
+  onRemove,
+}: Readonly<{
+  people: readonly Recipient[];
+  onName: (email: string, name: string) => void;
+  onRemove: (email: string) => void;
+}>) {
+  const t = useTranslations('console');
+  return (
+    <div className="mt-1.5 overflow-hidden rounded-[12px] border border-(--bd-border)">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-(--bd-border) bg-(--bd-bg) px-4 py-2.5">
+        <span className="font-semibold text-ink-900">
+          {t('invite.people', { count: people.length })}
+        </span>
+        <span className="text-[12px] text-ink-500">{t('invite.names_hint')}</span>
+      </div>
+      <ul>
+        {people.map((r) => (
+          <li
+            key={r.email}
+            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 border-b border-(--bd-border-soft) px-4 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_14rem_auto]"
+          >
+            <span className="truncate text-ink-900">{r.email}</span>
+            <input
+              type="text"
+              className="bd-input col-span-2 row-start-2 md:col-span-1 md:col-start-2 md:row-start-1"
+              value={r.name}
+              onChange={(e) => onName(r.email, e.target.value)}
+              placeholder={t('invite.name_placeholder')}
+              aria-label={t('invite.name_label', { email: r.email })}
+            />
+            <button
+              type="button"
+              onClick={() => onRemove(r.email)}
+              className="col-start-2 row-start-1 -mr-3 grid h-11 w-11 place-items-center rounded-lg text-ink-500 hover:bg-black/5 md:col-start-3"
+              aria-label={t('invite.remove', { email: r.email })}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** The side card: the three steps, a link to Coordinators, and the per-send limit. */
+function HelpCard({
+  maxRecipients,
+  coordinatorsHref,
+}: Readonly<{ maxRecipients: number; coordinatorsHref: string | null }>) {
+  const t = useTranslations('console');
+  return (
+    <ConsoleSection flush>
+      <aside aria-labelledby="invite-help-heading">
+        <div className="p-5">
+          <h2
+            id="invite-help-heading"
+            className="mb-3.5 text-[13px] font-bold uppercase tracking-[0.08em] text-ink-500"
+          >
+            {t('invite.help.heading')}
+          </h2>
+          <ol className="flex flex-col">
+            {HELP_STEPS.map(({ key, Icon }, i) => (
+              <li
+                key={key}
+                className="relative grid grid-cols-[32px_minmax(0,1fr)] gap-3 pb-[18px] last:pb-0"
+              >
+                {i < HELP_STEPS.length - 1 ? (
+                  <span
+                    aria-hidden
+                    className="absolute bottom-0.5 left-[15px] top-[34px] w-0.5 bg-(--bd-border)"
+                  />
+                ) : null}
+                <span
+                  className={cn(
+                    'grid h-8 w-8 place-items-center rounded-full',
+                    i === 0
+                      ? 'bg-(--bd-primary) text-white'
+                      : 'bg-(--bd-primary-50) text-(--bd-primary-600)',
+                  )}
+                >
+                  <Icon className="h-[15px] w-[15px]" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block pt-[5px] text-[13.5px] font-bold text-ink-900">
+                    {t(`invite.help.${key}.title`)}
+                  </span>
+                  <span className="block text-[13px] text-ink-500">
+                    {key === 'approve'
+                      ? t.rich('invite.help.approve.body', { link: linkTo(coordinatorsHref) })
+                      : t(`invite.help.${key}.body`)}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+        <p className="border-t border-(--bd-border-soft) px-5 py-3.5 text-[12px] text-ink-500">
+          {t('invite.help.limits', { max: maxRecipients })}
+        </p>
+      </aside>
+    </ConsoleSection>
   );
 }

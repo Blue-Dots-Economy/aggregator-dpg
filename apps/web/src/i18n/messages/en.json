@@ -836,7 +836,6 @@
         "other": "not sent"
       },
       "too_many": "Too many emails in one send. Send fewer at a time.",
-      "rate_limited": "This organisation has sent too many invites recently. Try again in {minutes, plural, one {# minute} other {# minutes}}.",
       "dismiss": "Dismiss",
       "help": {
         "heading": "How it works",
@@ -852,18 +851,20 @@
           "title": "You approve",
           "body": "Review them under <link>Coordinators</link>. Once approved, they can sign in."
         },
-        "limits": "Up to {max} emails per send, and {hourly} invites per organisation per hour."
+        "limits": "Up to {max} emails per send."
       },
       "no_orgs": "None of your organisations accepts invites.",
       "role": "Role: Coordinator",
       "breadcrumb": "Breadcrumb",
       "breadcrumb_current": "Invite",
       "limit_reached": "Limit reached",
-      "skipped": "{count, plural, one {# email} other {# emails}} skipped. The limit is {max} per send.",
+      "skipped": "{count, plural, one {# email} other {# emails}} skipped.",
       "remove_invalid": "Remove them",
       "note_empty": "Add at least one email to continue.",
       "note_fix": "Fix the highlighted emails to continue.",
-      "sending": "Sending…"
+      "sending": "Sending…",
+      "limit_note": "You can send {max} at a time. Send these first, then add more.",
+      "breadcrumb_parent": "Coordinators"
     },
     "account": {
       "heading": "My account",

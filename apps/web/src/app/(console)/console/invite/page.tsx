@@ -13,7 +13,7 @@ import { ConsoleSection } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
 import { getConsoleActor } from '@/lib/console-actor';
 import { canInvite, canManageOrg, canViewCoordinators } from '@/lib/capabilities';
-import { resolveHourlyInvites, resolveMaxInvites } from '@/lib/invite-limit';
+import { resolveMaxInvites } from '@/lib/invite-limit';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
@@ -43,7 +43,7 @@ export default async function ConsoleInvitePage() {
                 href={coordinatorsHref}
                 className="font-medium text-primary-600 hover:underline"
               >
-                {t('nav.coordinators')}
+                {t('invite.breadcrumb_parent')}
               </Link>
             </li>
             <li aria-hidden>›</li>
@@ -61,7 +61,6 @@ export default async function ConsoleInvitePage() {
           <InviteForm
             orgs={orgs}
             maxRecipients={resolveMaxInvites()}
-            hourlyLimit={resolveHourlyInvites()}
             coordinatorsHref={coordinatorsHref}
           />
         )}
