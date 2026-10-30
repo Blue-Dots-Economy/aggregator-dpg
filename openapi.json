@@ -812,7 +812,7 @@
         "tags": [
           "aggregator-orgs"
         ],
-        "description": "Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link.",
+        "description": "Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link. A rejected org registering again is set back to pending under the parent in this request, with the same checks. 409 ORG_DEPTH_LIMIT or ORG_CHILD_LIMIT (with fields.parent_id) when the parent cannot take the org; 409 ORG_TOTAL_LIMIT when the instance is full.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1271,7 +1271,7 @@
         "tags": [
           "aggregator-orgs"
         ],
-        "description": "Returns the network root first, then active aggregator orgs other than the Default org, sorted by name, each with its \"known as\" label and the label an org registered under it would get.",
+        "description": "Returns the network root first, then active aggregator orgs other than the Default org, sorted by name, that can take a child now; each with its \"known as\" name and the name an org registered under it would get. `accepting` is false when the instance is full or no org can take a child.",
         "responses": {
           "200": {
             "description": "Default Response",
@@ -1280,6 +1280,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "accepting": {
+                      "type": "boolean"
+                    },
                     "parents": {
                       "type": "array",
                       "items": {
@@ -1294,11 +1297,11 @@
                           "is_root": {
                             "type": "boolean"
                           },
-                          "known_as_label": {
+                          "known_as_name": {
                             "type": "string",
                             "nullable": true
                           },
-                          "child_known_as_label": {
+                          "child_known_as_name": {
                             "type": "string",
                             "nullable": true
                           }
@@ -1307,14 +1310,15 @@
                           "id",
                           "name",
                           "is_root",
-                          "known_as_label",
-                          "child_known_as_label"
+                          "known_as_name",
+                          "child_known_as_name"
                         ],
                         "additionalProperties": false
                       }
                     }
                   },
                   "required": [
+                    "accepting",
                     "parents"
                   ],
                   "additionalProperties": false
@@ -5930,13 +5934,12 @@
                           "type": "string",
                           "nullable": true
                         },
-                        "known_as_label": {
+                        "known_as_name": {
                           "type": "string",
                           "nullable": true
                         },
-                        "level": {
-                          "type": "integer",
-                          "nullable": true
+                        "depth": {
+                          "type": "integer"
                         },
                         "parent_id": {
                           "type": "string",
@@ -5965,8 +5968,8 @@
                         "legal_name",
                         "gst_number",
                         "known_as",
-                        "known_as_label",
-                        "level",
+                        "known_as_name",
+                        "depth",
                         "parent_id",
                         "parent_name",
                         "created_at",
@@ -6012,6 +6015,9 @@
                     "coordinator_count": {
                       "type": "integer"
                     },
+                    "child_count": {
+                      "type": "integer"
+                    },
                     "pending_count": {
                       "type": "integer"
                     }
@@ -6020,6 +6026,7 @@
                     "org",
                     "owner",
                     "coordinator_count",
+                    "child_count",
                     "pending_count"
                   ],
                   "additionalProperties": false
@@ -6424,13 +6431,12 @@
                             "type": "string",
                             "nullable": true
                           },
-                          "known_as_label": {
+                          "known_as_name": {
                             "type": "string",
                             "nullable": true
                           },
-                          "level": {
-                            "type": "integer",
-                            "nullable": true
+                          "depth": {
+                            "type": "integer"
                           },
                           "parent_id": {
                             "type": "string",
@@ -6449,6 +6455,9 @@
                           "coordinator_count": {
                             "type": "integer"
                           },
+                          "child_count": {
+                            "type": "integer"
+                          },
                           "pending_count": {
                             "type": "integer"
                           }
@@ -6465,13 +6474,14 @@
                           "legal_name",
                           "gst_number",
                           "known_as",
-                          "known_as_label",
-                          "level",
+                          "known_as_name",
+                          "depth",
                           "parent_id",
                           "parent_name",
                           "created_at",
                           "updated_at",
                           "coordinator_count",
+                          "child_count",
                           "pending_count"
                         ],
                         "additionalProperties": false
@@ -6704,7 +6714,7 @@
         "tags": [
           "console"
         ],
-        "description": "url, locations, legal name and GST number: the owner or the network admin. The name, known_as and parent_id: the network admin only (the slug never changes). known_as must be a configured value; a value at level N needs a parent at level N-1 (the network for level 1), so a change of level must send parent_id. An org with child orgs cannot change known_as or parent (409). The Default org's details are not editable. Rendered for every coordinator of the org at once.",
+        "description": "url, locations, legal name and GST number: the owner or the network admin. The name and known_as: the network admin only (the slug never changes). known_as must be a configured value allowed at the org's depth (400 KNOWN_AS_DEPTH otherwise); it never changes the parent. The parent changes through PATCH /v1/org/parent/update/:id. The Default org's details are not editable. Rendered for every coordinator of the org at once.",
         "requestBody": {
           "required": true,
           "content": {
@@ -6811,10 +6821,6 @@
                     "type": "string",
                     "pattern": "^[a-z][a-z0-9_]*$",
                     "maxLength": 64
-                  },
-                  "parent_id": {
-                    "type": "string",
-                    "format": "uuid"
                   }
                 },
                 "additionalProperties": false
@@ -6958,13 +6964,12 @@
                       "type": "string",
                       "nullable": true
                     },
-                    "known_as_label": {
+                    "known_as_name": {
                       "type": "string",
                       "nullable": true
                     },
-                    "level": {
-                      "type": "integer",
-                      "nullable": true
+                    "depth": {
+                      "type": "integer"
                     },
                     "parent_id": {
                       "type": "string",
@@ -6993,8 +6998,8 @@
                     "legal_name",
                     "gst_number",
                     "known_as",
-                    "known_as_label",
-                    "level",
+                    "known_as_name",
+                    "depth",
                     "parent_id",
                     "parent_name",
                     "created_at",
@@ -7261,6 +7266,863 @@
             }
           },
           "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/org/parent/update/{id}": {
+      "patch": {
+        "summary": "Move an organisation under a new parent (network admin)",
+        "tags": [
+          "console"
+        ],
+        "description": "Moves the organisation and every organisation below it; their depths follow. The org must be pending or active, not the Default org. The parent must be the network or an active organisation, not the org or one below it, with room for another child, and the moved orgs must stay within max_depth. known_as, when sent, replaces the moved org's value. Every moved org's value must be allowed at its new depth (400 KNOWN_AS_DEPTH with fields.org_ids). The owner is told when the org moved.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "parent_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "known_as": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "parent_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "org_type": {
+                      "type": "string",
+                      "enum": [
+                        "network_facilitator",
+                        "aggregator"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "active",
+                        "inactive",
+                        "retired"
+                      ]
+                    },
+                    "is_default": {
+                      "type": "boolean"
+                    },
+                    "url": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "locations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "geo": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "Point",
+                                  "LineString",
+                                  "Polygon",
+                                  "MultiPoint",
+                                  "MultiLineString",
+                                  "MultiPolygon",
+                                  "GeometryCollection"
+                                ]
+                              },
+                              "coordinates": {
+                                "type": "array",
+                                "items": {}
+                              },
+                              "geometries": {
+                                "type": "array",
+                                "items": {}
+                              },
+                              "bbox": {
+                                "type": "array",
+                                "items": {
+                                  "type": "number"
+                                },
+                                "minItems": 4,
+                                "maxItems": 4
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "address": {
+                            "type": "object",
+                            "properties": {
+                              "streetAddress": {
+                                "type": "string"
+                              },
+                              "extendedAddress": {
+                                "type": "string"
+                              },
+                              "addressLocality": {
+                                "type": "string"
+                              },
+                              "addressRegion": {
+                                "type": "string"
+                              },
+                              "postalCode": {
+                                "type": "string"
+                              },
+                              "addressCountry": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "geo"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "legal_name": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "gst_number": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "known_as": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "known_as_name": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "depth": {
+                      "type": "integer"
+                    },
+                    "parent_id": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "parent_name": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "slug",
+                    "name",
+                    "org_type",
+                    "status",
+                    "is_default",
+                    "url",
+                    "locations",
+                    "legal_name",
+                    "gst_number",
+                    "known_as",
+                    "known_as_name",
+                    "depth",
+                    "parent_id",
+                    "parent_name",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/org/parent/options/{id}": {
+      "get": {
+        "summary": "Candidate parents for moving an organisation (network admin)",
+        "tags": [
+          "console"
+        ],
+        "description": "Every org that could be the new parent, the network first, each with the result a move there would give: ok, or the refusal code in reason (INVALID_PARENT, PARENT_CYCLE, CHILD_LIMIT, DEPTH_LIMIT, NOT_MOVABLE, or KNOWN_AS_DEPTH when an org below would sit at a depth its known_as does not allow). subtree_size counts the orgs that move.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "subtree_size": {
+                      "type": "integer"
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "depth": {
+                            "type": "integer"
+                          },
+                          "known_as_name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "ok": {
+                            "type": "boolean"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "depth",
+                          "known_as_name",
+                          "ok",
+                          "reason"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "subtree_size",
+                    "options"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -8200,11 +9062,11 @@
     },
     "/v1/org/hierarchy": {
       "get": {
-        "summary": "The configured organisation levels and their org counts (network admin)",
+        "summary": "Organisation tree limits and \"known as\" values (network admin)",
         "tags": [
           "console"
         ],
-        "description": "Read-only. Level 1 sits directly under the network. Each level lists its \"known as\" values from the instance config, with how many pending and active organisations carry each.",
+        "description": "Read-only. The tree limits from the instance config, how many pending and active organisations count toward max_total_orgs, and each \"known as\" value with the depths where it is allowed and how many pending and active organisations carry it. Depth 1 sits directly under the network.",
         "responses": {
           "200": {
             "description": "Default Response",
@@ -8229,49 +9091,100 @@
                       ],
                       "additionalProperties": false
                     },
-                    "levels": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "level": {
-                            "type": "integer"
-                          },
-                          "values": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "key": {
-                                  "type": "string"
-                                },
-                                "label": {
-                                  "type": "string"
-                                },
-                                "org_count": {
-                                  "type": "integer"
-                                }
+                    "limits": {
+                      "type": "object",
+                      "properties": {
+                        "max_depth": {
+                          "type": "integer"
+                        },
+                        "max_children": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "max_total_orgs": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "max_depth",
+                        "max_children",
+                        "max_total_orgs"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "total_orgs": {
+                      "type": "integer"
+                    },
+                    "known_as": {
+                      "type": "object",
+                      "properties": {
+                        "values": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "type": "string"
                               },
-                              "required": [
-                                "key",
-                                "label",
-                                "org_count"
-                              ],
-                              "additionalProperties": false
-                            }
+                              "name": {
+                                "type": "string"
+                              },
+                              "depths": {
+                                "type": "array",
+                                "items": {
+                                  "type": "integer"
+                                },
+                                "nullable": true
+                              },
+                              "system": {
+                                "type": "boolean"
+                              },
+                              "org_count": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "key",
+                              "name",
+                              "depths",
+                              "system",
+                              "org_count"
+                            ],
+                            "additionalProperties": false
                           }
                         },
-                        "required": [
-                          "level",
-                          "values"
-                        ],
-                        "additionalProperties": false
-                      }
+                        "suggest": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "depth": {
+                                "type": "integer"
+                              },
+                              "key": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "depth",
+                              "key"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "values",
+                        "suggest"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "network",
-                    "levels"
+                    "limits",
+                    "total_orgs",
+                    "known_as"
                   ],
                   "additionalProperties": false
                 }

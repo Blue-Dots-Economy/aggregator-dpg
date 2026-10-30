@@ -7,7 +7,8 @@
  * The network admin sees the whole network:
  * Shows the organisations awaiting approval (approved or rejected in place),
  * every organisation as a tree under the network (each name opens the
- * organisation's page), and, closed by default, the configured levels.
+ * organisation's page) with its "known as" name and depth, and, closed by
+ * default, the hierarchy settings.
  */
 
 import { redirect } from 'next/navigation';
@@ -18,7 +19,7 @@ import { consoleRead } from '@/lib/console-api.server';
 import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
 import { orgsBelow, topmostOwned } from '@/lib/console-org-options';
 import { OrgsTable } from '@/components/console/OrgsTable';
-import { OrgLevels } from '@/components/console/OrgLevels';
+import { HierarchySettings } from '@/components/console/HierarchySettings';
 import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
 import { ConsoleCollapsible, ConsoleSection } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
@@ -54,10 +55,13 @@ export default async function ConsoleOrgsPage() {
           />
         </ConsoleSection>
         <ConsoleCollapsible
-          title={t('orgs.levels')}
-          hint={t('orgs.levels_summary', { count: hierarchy.levels.length })}
+          title={t('orgs.hierarchy')}
+          hint={t('orgs.hierarchy_summary', {
+            total: hierarchy.total_orgs,
+            max: hierarchy.limits.max_total_orgs,
+          })}
         >
-          <OrgLevels hierarchy={hierarchy} />
+          <HierarchySettings hierarchy={hierarchy} />
         </ConsoleCollapsible>
       </div>
     </>
@@ -84,7 +88,7 @@ async function OwnerOrgs({ ownedIds }: Readonly<{ ownedIds: string[] }>) {
             <ChildOrgsTree
               rootId={root.id}
               rootName={root.name}
-              rootKnownAs={root.known_as_label ?? root.known_as}
+              rootKnownAs={root.known_as_name ?? root.known_as}
               rootTag={t('orgs.yours')}
               orgs={orgsBelow(root.id, orgs)}
               linkRows

@@ -42,10 +42,9 @@ export default async function ConsoleCoordinatorsPage({
   const params = await searchParams;
   const status = STATUSES.find((s) => s === params.status);
   const orgId = params.org_id && UUID_RE.test(params.org_id) ? params.org_id : undefined;
-  const [domains, orgs] = await Promise.all([networkDomains(), readReachableOrgs()]);
-  const serves = domains.find((d) => d.id === params.serves)?.id;
-  const [page, actor] = await Promise.all([
-    consoleRead<UserSearchResponse>('/v1/user/search', {
+  const searchAfterDomains = networkDomains().then(async (domains) => {
+    const serves = domains.find((d) => d.id === params.serves)?.id;
+    const page = await consoleRead<UserSearchResponse>('/v1/user/search', {
       filter: {
         ...(status ? { status } : {}),
         ...(orgId ? { org_id: orgId } : {}),
@@ -53,7 +52,12 @@ export default async function ConsoleCoordinatorsPage({
       },
       limit: 50,
       ...(params.cursor ? { cursor: params.cursor } : {}),
-    }),
+    });
+    return { domains, serves, page };
+  });
+  const [{ domains, serves, page }, orgs, actor] = await Promise.all([
+    searchAfterDomains,
+    readReachableOrgs(),
     getConsoleActor(),
   ]);
   const orgOptions = orgOptionsInTreeOrder(orgs);
@@ -220,7 +224,7 @@ function OrgCell({
   registeredAs: string;
 }>) {
   if (!org) return <span className="text-ink-700">{registeredName}</span>;
-  const knownAs = org.known_as_label ?? org.known_as;
+  const knownAs = org.known_as_name ?? org.known_as;
   return (
     <div className="flex flex-col gap-0.5">
       <div className="flex flex-wrap items-center gap-2">

@@ -20,6 +20,7 @@ import { PostgresConsentLedger } from '@aggregator-dpg/consent-ledger/postgres';
 import { getDb, getPool, closeDb, _setDbClients } from '../client.js';
 import { PostgresUserStore } from '../../services/user-store/postgres.js';
 import { PostgresOrganisationStore } from '../../services/organisation-store/postgres.js';
+import { permissiveTreeRules } from '../../services/organisation-store/testing.js';
 import type { RecordConsentHook } from '../../services/consent-ledger/hook.js';
 
 const realUrl = process.env.INTEGRATION_DATABASE_URL;
@@ -197,13 +198,16 @@ suite('consent in the create transaction (migration 0029) — integration', () =
   });
 
   it('commits the org consent row with the org, and rolls the org, owner and contact back on failure', async () => {
-    const ok = await orgStore.create({
-      slug: `ct-org-${randomUUID().slice(0, 8)}`,
-      displayName: `CT Org ${randomUUID().slice(0, 8)}`,
-      ownerEmail: email(),
-      ownerPhone: phone(),
-      recordConsent: writes('organisation'),
-    });
+    const ok = await orgStore.create(
+      {
+        slug: `ct-org-${randomUUID().slice(0, 8)}`,
+        displayName: `CT Org ${randomUUID().slice(0, 8)}`,
+        ownerEmail: email(),
+        ownerPhone: phone(),
+        recordConsent: writes('organisation'),
+      },
+      permissiveTreeRules(),
+    );
     expect(ok.ok).toBe(true);
     if (!ok.ok) return;
     const row = await pool.query(
@@ -219,13 +223,16 @@ suite('consent in the create transaction (migration 0029) — integration', () =
 
     const ownerEmail = email();
     const slug = `ct-org-${randomUUID().slice(0, 8)}`;
-    const failed = await orgStore.create({
-      slug,
-      displayName: `CT Org ${randomUUID().slice(0, 8)}`,
-      ownerEmail,
-      ownerPhone: phone(),
-      recordConsent: fails,
-    });
+    const failed = await orgStore.create(
+      {
+        slug,
+        displayName: `CT Org ${randomUUID().slice(0, 8)}`,
+        ownerEmail,
+        ownerPhone: phone(),
+        recordConsent: fails,
+      },
+      permissiveTreeRules(),
+    );
     expect(failed.ok).toBe(false);
     if (!failed.ok) expect(failed.error.code).toBe('CONSENT_WRITE_FAILED');
     expect(await count(`SELECT count(*) AS n FROM organisations WHERE slug = $1`, [slug])).toBe(0);

@@ -7,7 +7,12 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
-import { orgOptionsInTreeOrder, orgsBelow, topmostOwned } from '@/lib/console-org-options';
+import {
+  knownAsChoicesAt,
+  orgOptionsInTreeOrder,
+  orgsBelow,
+  topmostOwned,
+} from '@/lib/console-org-options';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
@@ -28,13 +33,14 @@ const row = (
   legal_name: null,
   gst_number: null,
   known_as: 'aggregator',
-  known_as_label: 'Aggregator',
-  level: 3,
+  known_as_name: 'Aggregator',
+  depth: 3,
   parent_id: parentId,
   parent_name: null,
   created_at: 't',
   updated_at: 't',
   coordinator_count: 0,
+  child_count: 0,
   pending_count: 0,
   ...over,
 });
@@ -42,10 +48,10 @@ const row = (
 describe('orgOptionsInTreeOrder', () => {
   it('orders parents before children and siblings by name, with path labels', () => {
     const options = orgOptionsInTreeOrder([
-      row('m', 'Mysuru', 'k', { known_as_label: 'District' }),
+      row('m', 'Mysuru', 'k', { known_as_name: 'District' }),
       row('z', 'zeta', 'root'),
-      row('k', 'Karnataka', 'root', { known_as_label: 'State' }),
-      row('b', 'Bengaluru', 'k', { known_as_label: 'District' }),
+      row('k', 'Karnataka', 'root', { known_as_name: 'State' }),
+      row('b', 'Bengaluru', 'k', { known_as_name: 'District' }),
     ]);
     expect(options.map((o) => o.label)).toEqual([
       'Karnataka (State)',
@@ -58,7 +64,7 @@ describe('orgOptionsInTreeOrder', () => {
 
   it('shows the raw key when the value is not configured', () => {
     const [o] = orgOptionsInTreeOrder([
-      row('a', 'Alpha', null, { known_as: 'old', known_as_label: null }),
+      row('a', 'Alpha', null, { known_as: 'old', known_as_name: null }),
     ]);
     expect(o?.label).toBe('Alpha (old)');
   });
@@ -94,5 +100,28 @@ describe('orgsBelow / topmostOwned', () => {
   it('keeps only owned orgs that sit under no other owned org', () => {
     expect(topmostOwned(['d', 's', 'y'], tree).map((o) => o.id)).toEqual(['y', 's']);
     expect(topmostOwned([], tree)).toEqual([]);
+  });
+});
+
+describe('knownAsChoicesAt', () => {
+  const values = [
+    { key: 'aggregator', name: 'Aggregator', depths: null, system: true, org_count: 3 },
+    { key: 'state', name: 'State', depths: [1], system: false, org_count: 1 },
+    { key: 'district', name: 'District', depths: [1, 2], system: false, org_count: 0 },
+    { key: 'partner', name: 'Partner', depths: null, system: false, org_count: 0 },
+  ];
+
+  it('keeps the system value, values for any depth, and values listing the depth', () => {
+    expect(knownAsChoicesAt(values, 2)).toEqual([
+      { key: 'aggregator', name: 'Aggregator' },
+      { key: 'district', name: 'District' },
+      { key: 'partner', name: 'Partner' },
+    ]);
+    expect(knownAsChoicesAt(values, 1).map((v) => v.key)).toEqual([
+      'aggregator',
+      'state',
+      'district',
+      'partner',
+    ]);
   });
 });

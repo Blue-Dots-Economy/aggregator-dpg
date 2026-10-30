@@ -128,13 +128,14 @@ const orgRow = (id: string, name: string, over: Partial<OrgRow> = {}): OrgRow =>
   legal_name: null,
   gst_number: null,
   known_as: 'district',
-  known_as_label: 'District',
-  level: 2,
+  known_as_name: 'District',
+  depth: 2,
   parent_id: null,
   parent_name: null,
   created_at: 't',
   updated_at: 't',
   coordinator_count: 0,
+  child_count: 0,
   pending_count: 0,
   ...over,
 });
@@ -164,7 +165,7 @@ describe('console coordinators page — filters', () => {
     vi.mocked(getConsoleActor).mockResolvedValue({ ok: true, me: me({}) });
     vi.mocked(consoleRead).mockResolvedValue(emptyPage);
     vi.mocked(readReachableOrgs).mockResolvedValue([
-      orgRow(ORG_K, 'Karnataka', { known_as: 'state', known_as_label: 'State', level: 1 }),
+      orgRow(ORG_K, 'Karnataka', { known_as: 'state', known_as_name: 'State', depth: 1 }),
       orgRow(ORG_M, 'Mysuru', { parent_id: ORG_K, parent_name: 'Karnataka' }),
     ]);
     vi.mocked(networkDomains).mockResolvedValue([{ id: 'seeker', label: 'Seeker' }]);
@@ -188,6 +189,17 @@ describe('console coordinators page — filters', () => {
       filter: { status: 'pending', org_id: ORG_M, serves: 'seeker' },
       limit: 50,
     });
+  });
+
+  it('starts the coordinator search without waiting for the organisation list', async () => {
+    let release: (orgs: OrgRow[]) => void = () => {};
+    vi.mocked(readReachableOrgs).mockReturnValue(new Promise((r) => (release = r)));
+    const pending = renderWith({});
+    await vi.waitFor(() =>
+      expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', { filter: {}, limit: 50 }),
+    );
+    release([]);
+    await pending;
   });
 
   it('drops a domain the network does not have', async () => {

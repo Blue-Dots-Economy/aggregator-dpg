@@ -20,6 +20,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { _setDbClients, closeDb, getPool } from '../../db/client.js';
 import { PostgresUserStore, buildCreateCoordinatorInput } from '../user-store/index.js';
 import { PostgresOrganisationStore } from '../organisation-store/index.js';
+import { permissiveTreeRules } from '../organisation-store/testing.js';
 import { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
 
 const adminUrl = process.env.INTEGRATION_DATABASE_URL;
@@ -40,13 +41,16 @@ suite('console store methods (Postgres)', () => {
   const ids = { orgA: '', orgB: '', orgP: '', c1: '', c2: '', c3: '' };
 
   async function org(slug: string, name: string, email: string, phone: string): Promise<string> {
-    const r = await orgs.create({
-      slug,
-      displayName: name,
-      ownerEmail: email,
-      ownerPhone: phone,
-      recordConsent: NO_CONSENT_WRITE,
-    });
+    const r = await orgs.create(
+      {
+        slug,
+        displayName: name,
+        ownerEmail: email,
+        ownerPhone: phone,
+        recordConsent: NO_CONSENT_WRITE,
+      },
+      permissiveTreeRules(),
+    );
     if (!r.ok) throw new Error(`org seed failed: ${r.error.code}`);
     return r.value.id;
   }

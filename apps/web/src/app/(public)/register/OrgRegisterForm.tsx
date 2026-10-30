@@ -23,6 +23,7 @@ import {
   stripFormChrome,
   submitRegistration,
   withOrgCoordinates,
+  type SubmitError,
 } from './registration-shared';
 import {
   RegistrationErrorBanner,
@@ -40,9 +41,36 @@ interface ParentOption {
   name: string;
   /** True for the network root (a top-level org). */
   is_root: boolean;
-  known_as_label: string | null;
+  known_as_name: string | null;
   /** What an organisation registered under this one is known as. */
-  child_known_as_label: string | null;
+  child_known_as_name: string | null;
+}
+
+/** `GET /api/orgs/parents`: whether registration is open, and the parents that can take a child now. */
+interface ParentsResponse {
+  accepting: boolean;
+  parents: ParentOption[];
+}
+
+/** Message keys for the API's tree refusals on `/v1/orgs/create`. */
+const TREE_ERRORS: Record<string, string> = {
+  ORG_DEPTH_LIMIT: 'org_error_depth_limit',
+  ORG_CHILD_LIMIT: 'org_error_child_limit',
+  ORG_TOTAL_LIMIT: 'org_error_total_limit',
+  CONFLICT: 'org_error_conflict',
+};
+
+/**
+ * Returns the message key for a tree refusal, or null for any other error.
+ *
+ * @param error - The failed submission.
+ * @returns A key under `register`, or null.
+ */
+function treeErrorKey(error: SubmitError): string | null {
+  if (error.code === 'SCHEMA_VALIDATION') {
+    return error.fields?.['parent_id'] === 'invalid' ? 'org_error_parent' : null;
+  }
+  return TREE_ERRORS[error.code] ?? null;
 }
 
 export interface OrgRegisterFormProps {
@@ -60,8 +88,11 @@ export interface OrgRegisterFormProps {
 /**
  * Renders the organisation registration form.
  *
- * Submits through the BFF to `/v1/orgs/create`, under the parent org picked
- * here (required). A new org stays `pending` until a network admin approves it.
+ * Submits through the BFF to `/v1/orgs/create`. The parent picker shows only
+ * when an org other than the network root can take a child; otherwise the org
+ * is registered under the root and no `parent_id` is sent. When registration
+ * is closed the form is replaced by a notice. A new org stays `pending` until
+ * a network admin approves it.
  *
  * @param props - The org JSON Schema + UI schema.
  * @returns The org registration content block (form, success, or error state).
@@ -76,18 +107,22 @@ export function OrgRegisterForm({
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   // Coordinate from the address widget; RJSF does not write it into `formData`.
   const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
-  // Selected parent org. Required; empty until picked.
+  // Selected parent org. Required when the picker shows; empty until picked.
   const [parentId, setParentId] = useState<string>('');
   const parentsQuery = useQuery({
     queryKey: ['org-parents'],
-    queryFn: () => jsonFetch<{ parents: ParentOption[] }>('/api/orgs/parents'),
+    queryFn: () => jsonFetch<ParentsResponse>('/api/orgs/parents'),
     staleTime: 30_000,
   });
   const parents = parentsQuery.data?.parents ?? [];
-  const childLabel = parents.find((p) => p.id === parentId)?.child_known_as_label ?? null;
-  const parentLabel = (p: ParentOption): string => {
+  // The picker shows when an org other than the root can take a child.
+  const showPicker = parents.some((p) => !p.is_root);
+  const chosen = showPicker ? parents.find((p) => p.id === parentId) : parents[0];
+  const childName = chosen?.child_known_as_name ?? null;
+  const parentReady = parentsQuery.data !== undefined && (!showPicker || parentId !== '');
+  const parentName = (p: ParentOption): string => {
     if (p.is_root) return t('parent_top_level', { name: p.name });
-    return p.known_as_label ? `${p.name} (${p.known_as_label})` : p.name;
+    return p.known_as_name ? `${p.name} (${p.known_as_name})` : p.name;
   };
   const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
   const { gateOpen, setGateOpen, pendingRef, handleSubmit } = useConsentGateSubmit(
@@ -101,7 +136,7 @@ export function OrgRegisterForm({
 
   /** Opens the consent gate, or reports the missing parent (Enter submits past a disabled button). */
   const submitWithParent = (e: IChangeEvent<Record<string, unknown>>): void => {
-    if (parentId === '') {
+    if (!parentReady) {
       setState({
         status: 'error',
         title: t('parent_selector_required'),
@@ -121,12 +156,17 @@ export function OrgRegisterForm({
     const body: Record<string, unknown> = {
       ...pendingRef.current,
       consent: stampConsent({ value: true }),
-      parent_id: parentId,
+      ...(showPicker ? { parent_id: parentId } : {}),
     };
     const payload = withOrgCoordinates(body, resolvedPlace);
     const result = await submitRegistration('/api/org/register', payload);
     if (!result.ok) {
-      setState({ status: 'error', ...result.error });
+      const key = treeErrorKey(result.error);
+      setState(
+        key
+          ? { status: 'error', ...result.error, title: t(key), detail: '' }
+          : { status: 'error', ...result.error },
+      );
       return;
     }
     // 201: new pending registration. 200 with status 'active': the org already
@@ -157,58 +197,58 @@ export function OrgRegisterForm({
     );
   }
 
+  if (parentsQuery.data?.accepting === false) {
+    return (
+      <div className="mt-7 rounded-xl border border-ink-100 bg-ink-50 px-4 py-3" role="status">
+        <div className="font-semibold text-ink-900">{t('closed_title')}</div>
+        <p className="mt-1 text-[13px] text-ink-600">{t('closed_detail')}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-7">
       {state.status === 'error' ? (
         <RegistrationErrorBanner title={state.title} detail={state.detail} errorRef={errorRef} />
       ) : null}
 
-      <div className="form-group mb-4">
-        <label className="bd-label" htmlFor="org-parent">
-          {t('parent_selector_label')}
-          <span className="text-rose-500"> *</span>
-        </label>
-        {parentsQuery.isError ? (
-          <div className="text-[13px] text-red-600 flex items-center gap-2">
-            {t('parent_selector_error')}
-            <button
-              type="button"
-              onClick={() => parentsQuery.refetch()}
-              className="text-primary-600 font-semibold hover:underline"
-            >
-              {t('org_selector_retry')}
-            </button>
-          </div>
-        ) : (
-          <Select
-            {...(parentId ? { value: parentId } : {})}
-            onValueChange={setParentId}
-            disabled={parentsQuery.isLoading}
+      {parentsQuery.isError ? (
+        <div className="form-group mb-4 text-[13px] text-red-600 flex items-center gap-2">
+          {t('parent_selector_error')}
+          <button
+            type="button"
+            onClick={() => parentsQuery.refetch()}
+            className="text-primary-600 font-semibold hover:underline"
           >
+            {t('org_selector_retry')}
+          </button>
+        </div>
+      ) : null}
+      {showPicker ? (
+        <div className="form-group mb-4">
+          <label className="bd-label" htmlFor="org-parent">
+            {t('parent_selector_label')}
+            <span className="text-rose-500"> *</span>
+          </label>
+          <Select {...(parentId ? { value: parentId } : {})} onValueChange={setParentId}>
             <SelectTrigger id="org-parent" aria-required>
-              <SelectValue
-                placeholder={
-                  parentsQuery.isLoading
-                    ? t('parent_selector_loading')
-                    : t('parent_selector_placeholder')
-                }
-              />
+              <SelectValue placeholder={t('parent_selector_placeholder')} />
             </SelectTrigger>
             <SelectContent>
               {parents.map((p) => (
                 <SelectItem key={p.id} value={p.id}>
-                  {parentLabel(p)}
+                  {parentName(p)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-        )}
-        {childLabel ? (
-          <p className="mt-1.5 text-[12.5px] text-ink-500">
-            {t('parent_child_hint', { label: childLabel })}
-          </p>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
+      {childName ? (
+        <p className="form-group mb-4 text-[12.5px] text-ink-500">
+          {t('parent_child_hint', { name: childName })}
+        </p>
+      ) : null}
 
       <RjsfThemedForm
         schema={formSchema}
@@ -227,7 +267,7 @@ export function OrgRegisterForm({
       >
         <RegistrationSubmitButton
           submitting={state.status === 'submitting'}
-          canSubmit={canSubmit && parentId !== ''}
+          canSubmit={canSubmit && parentReady}
           label={t('org_submit')}
           submittingLabel={t('submitting')}
         />

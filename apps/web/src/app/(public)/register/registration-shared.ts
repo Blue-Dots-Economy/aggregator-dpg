@@ -32,6 +32,7 @@ export interface ApiErrorEnvelope {
     title?: string;
     detail?: string;
     requestId?: string;
+    fields?: Record<string, unknown>;
   };
 }
 
@@ -134,19 +135,20 @@ export function humaniseValidationErrors(errs: AjvLikeError[], schema: RJSFSchem
  * @param body - Parsed response body (may not be an envelope).
  * @param fallbackStatus - HTTP status, used to synthesise a detail line.
  * @param fallbackReqId - Request id to attribute when the body omits one.
- * @returns Normalised `{ title, detail, code, requestId }`.
+ * @returns Normalised `{ title, detail, code, requestId }`, plus `fields` when the body has them.
  */
 export function parseError(
   body: unknown,
   fallbackStatus: number,
   fallbackReqId: string,
-): { title: string; detail: string; code: string; requestId: string } {
+): SubmitError {
   const env = body as ApiErrorEnvelope;
   return {
     title: env?.error?.title ?? 'Submission failed',
     detail: env?.error?.detail ?? `The server returned HTTP ${fallbackStatus}.`,
     code: env?.error?.code ?? 'UNKNOWN',
     requestId: env?.error?.requestId ?? fallbackReqId,
+    ...(env?.error?.fields ? { fields: env.error.fields } : {}),
   };
 }
 
@@ -165,10 +167,18 @@ export function stripFormChrome(schema: RJSFSchema): RJSFSchema {
   return clone;
 }
 
+/** A failed submission, ready to display. `fields` is the API's `error.fields`, when present. */
+export interface SubmitError {
+  title: string;
+  detail: string;
+  code: string;
+  requestId: string;
+  fields?: Record<string, unknown>;
+}
+
 /** Result of {@link submitRegistration}: parsed success body or display error. */
 export type SubmitResult =
-  | { ok: true; body: Record<string, unknown> }
-  | { ok: false; error: { title: string; detail: string; code: string; requestId: string } };
+  { ok: true; body: Record<string, unknown> } | { ok: false; error: SubmitError };
 
 /**
  * POSTs a registration payload to a BFF endpoint and normalises the outcome.

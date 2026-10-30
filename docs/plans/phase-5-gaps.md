@@ -12,13 +12,13 @@
 | #   | Gap                                                                                                                                                                                                                                        | Evidence                                                      | Severity |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- | -------- |
 | 1   | **Org Onboarder role grants nothing.** `POST /v1/org/decision/:id` requires `orgs.onboard` at the edge, then the handler calls `requireNetworkAdmin`, so a non-root holder gets 403. The console still offers the role in the owner panel. | `apps/api/src/routes/v1-org.ts:238`, `:254`, `:308`           | High     |
-| 2   | **`known_as` not implemented** (target model: "mechanism ships"). Plan: `org-known-as.md`.                                                                                                                                                 | No match in code, config or `openapi.json`                    | Medium   |
-| 3   | **`parent_id` not locked in the DB.** `organisations_lock` covers `org_type` and the aggregator slug only. No route moves an org today.                                                                                                    | `apps/api/drizzle/migrations/0028_organisations.sql:540-557`  | Medium   |
+| 2   | ~~`known_as` not implemented.~~ Done: per-org `known_as`, independent of depth (`docs/org-hierarchy.md`).                                                                                                                                  | —                                                             | —        |
+| 3   | **`parent_id` not locked in the DB.** `organisations_lock` covers `org_type` and the aggregator slug only. Moves go through the store under the tree lock (`PATCH /v1/org/parent/update/:id`); no trigger stops another writer.            | `0028_organisations.sql`                                      | Low      |
 | 4   | **Legacy API contract unguarded.** No `USER_ORG_API_ENABLED` flag, no `openapi-legacy-paths` snapshot test, no `deprecated` markers.                                                                                                       | No matches; routes register unconditionally                   | Medium   |
 | 5   | **Coordinator "My account" screen (W1) missing.** `/profile` still has the "Request an update" stub.                                                                                                                                       | `apps/web/src/app/(protected)/profile/ProfileFormView.tsx:18` | Medium   |
 | 6   | **Six permissions gate no route:** `orgs.block`, `profiles.verify`, `profiles.move`, `profiles.retire`, `agreement.manage`, `profiles.act_on_behalf`.                                                                                      | 0 references each in `apps/api/src/routes/*.ts`               | Medium   |
 | 7   | **`org/read` returns owner contact without a `contact.unmask` check or audit.** No exposure today (owners reach only their own orgs; Network Admin and Org Admin both hold `contact.unmask`), but it differs from the user routes.         | `v1-org.ts:134`; compare `v1-user.ts:168`                     | Low      |
-| 8   | **Org search filter has `status` and `name_prefix` only.** `known_as` covered by gap 2; `org_type` / `parent_id` are moot while every org sits under the root.                                                                             | `packages/shared-primitives/src/user-org/index.ts:200-212`    | Low      |
+| 8   | ~~Org search filter has `status` and `name_prefix` only.~~ Done: `known_as` and `descendants_of` filters.                                                                                                                                  | —                                                             | —        |
 | 9   | **`users.metadata` column not added**; user metadata update accepts `serves` only.                                                                                                                                                         | `packages/db-schema/src/schema.ts` (users)                    | Low      |
 | 10  | **No E2E for the console** (owner login, invite, accept).                                                                                                                                                                                  | `.claude/skills/aggregator-e2e/` has no `/console` steps      | Low      |
 
@@ -46,24 +46,17 @@
 
 ## 4. Org hierarchy (nesting)
 
-The database can hold a tree. Nothing above it creates, shows or uses one, so a State → District → Aggregator chain, where each org sits under the one above and its admins manage what is below, is not possible today.
+Built: parent at registration, stored `depth`, `max_depth` / `max_children` / `max_total_orgs`, a move route with cycle and limit checks, read-only view of the orgs below an owner's own, and the console tree, Move dialog and hierarchy settings. See `docs/org-hierarchy.md`.
 
-**What exists:** `organisations.parent_id` references the parent org. The only rule is `CHECK ((org_type = 'network_facilitator') = (parent_id IS NULL))` (`0028_organisations.sql:531`): the root has no parent, every other org has one. An aggregator org's parent may be another aggregator org.
+Still open:
 
-**What is missing:**
-
-| Layer       | Today                                                                                                                                                | Needed for a real tree                                                                      |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Create      | Every org gets the root as parent (`apps/api/src/services/organisation-store/postgres.ts:64-77`). No route takes a parent.                           | Create an org under a chosen parent (`POST /v1/org/create`, designed in Phase 5, deferred). |
-| Move        | No route. Nothing in the DB stops `parent_id` changing (gap 3).                                                                                      | A move route with cycle and depth checks; `parent_id` locked elsewhere.                     |
-| Reach       | An owner reaches only the orgs it owns directly; the network admin reaches all (`apps/api/src/services/authz/scope.ts`).                             | A State admin reaches every District and Aggregator below it (subtree walk).                |
-| Permissions | The root is assumed to be an org's only ancestor (`apps/api/src/services/authz/guard.ts:296`, `authz/roles.ts:110`).                                 | Ancestors are the real parent chain, so roles held at State apply below it.                 |
-| Approval    | The org review mail goes to the network admin; approve and reject are network-admin only (`v1-org.ts:254`), so Org Onboarder cannot approve (gap 1). | The parent org's admins approve their children.                                             |
-| Keycloak    | One flat `org-<slug>` group per org (`apps/api/src/routes/aggregator-orgs.ts:422`).                                                                  | Optionally sub-groups that mirror the tree (design choice).                                 |
-| Limits      | None.                                                                                                                                                | Maximum depth and children per org (`ORG_DEPTH_LIMIT`, `ORG_CHILD_LIMIT`, designed only).   |
-| Console UI  | Flat org list. The org page shows no parent or children. The coordinator registration org picker is a flat list.                                     | Parent and children on the org page, a tree view, "create child org", "move org".           |
-
-**Relation to `known_as`:** `known_as` is a label on one org. It can name an org "State" or "District" but does not place it above or below anything. With the current code, a State, a District and an Aggregator org are three siblings under the root; each owner manages only its own org, and only the network admin sees all three.
+| Layer       | Needed                                                                         |
+| ----------- | ------------------------------------------------------------------------------ |
+| Permissions | Ancestors are the real parent chain, so roles held at a parent apply below it. |
+| Approval    | The parent org's admins approve their children (gap 1).                        |
+| Create      | Org admins create child orgs from the console (`POST /v1/org/create`, W5).     |
+| DB lock     | A trigger that blocks `parent_id` changes outside the move path (gap 3).       |
+| Keycloak    | Optionally sub-groups that mirror the tree.                                    |
 
 ## 5. Not verifiable in this repo
 

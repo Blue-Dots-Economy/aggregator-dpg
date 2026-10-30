@@ -30,13 +30,14 @@ function row(id: string, name: string, parentId: string, overrides: Partial<OrgR
     legal_name: null,
     gst_number: null,
     known_as: 'aggregator',
-    known_as_label: 'Aggregator',
-    level: 1,
+    known_as_name: 'Aggregator',
+    depth: 1,
     parent_id: parentId,
     parent_name: null,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     coordinator_count: 0,
+    child_count: 0,
     pending_count: 0,
     ...overrides,
   };
@@ -44,18 +45,20 @@ function row(id: string, name: string, parentId: string, overrides: Partial<OrgR
 
 const districtB = row('d2', 'District B', STATE, {
   known_as: 'district',
-  known_as_label: 'District',
+  known_as_name: 'District',
 });
 const districtA = row('d1', 'District A', STATE, {
   known_as: 'district',
-  known_as_label: 'District',
+  known_as_name: 'District',
   coordinator_count: 4,
+  child_count: 0,
   pending_count: 2,
 });
 const agg = row('a1', 'Agg One', 'd1', {
   status: 'pending',
+  depth: 2,
   known_as: 'old_key',
-  known_as_label: null,
+  known_as_name: null,
 });
 
 function renderTree(orgs: OrgRow[], linkRows = false, more = false) {
@@ -106,17 +109,18 @@ describe('<ChildOrgsTree />', () => {
     expect(screen.getByText('3 organisations below')).toBeInTheDocument();
   });
 
-  it('renders each org nested under its parent with its label, status and counts', () => {
+  it('renders each org nested under its parent with its known-as name, depth, status and counts', () => {
     renderTree([districtA, districtB, agg]);
     const districtItem = screen.getByText('District A').closest('li') as HTMLElement;
     expect(within(districtItem).getByText('Agg One')).toBeInTheDocument();
     expect(within(districtItem).getAllByText('District')[0]).toBeInTheDocument();
     expect(within(districtItem).getByText(/4 coordinators/)).toBeInTheDocument();
     expect(within(districtItem).getByText('1 organisation below')).toBeInTheDocument();
-    expect(within(districtItem).getAllByText('Level 1')[0]).toBeInTheDocument();
+    expect(within(districtItem).getAllByText('Depth 1')[0]).toBeInTheDocument();
     // A key no longer configured shows the raw key.
     const aggItem = screen.getByText('Agg One').closest('li') as HTMLElement;
     expect(within(aggItem).getByText('old_key')).toBeInTheDocument();
+    expect(within(aggItem).getByText('Depth 2')).toBeInTheDocument();
     expect(within(aggItem).getByTestId('status-pill')).toHaveTextContent('Pending');
   });
 

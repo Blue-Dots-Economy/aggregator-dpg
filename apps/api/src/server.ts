@@ -21,6 +21,8 @@ import {
   type RootState,
 } from './services/organisation-root.js';
 import { getIdpAdmin } from './services/idp-admin/index.js';
+import { getOrganisationStore } from './services/organisation-store/index.js';
+import { warnOrgTreeOverLimits } from './services/org-tree-warnings.js';
 import { setApprovalBrand } from './views/approval-pages.js';
 import { initRbac, stopRbacRefresh } from './services/authz/index.js';
 import { startTokenRolesRepair, stopTokenRolesRepair } from './services/authz/token-roles-sweep.js';
@@ -88,6 +90,19 @@ async function main(): Promise<void> {
     rootState = await ensureRootOrganisation(
       rootConfigFrom(network, adminEmails, defaultOrgOwnerEmail()),
     );
+  }
+
+  // Warn about orgs outside the tree limits or "known as" config. Logs only.
+  try {
+    const cfg = await getNetworkConfig();
+    await warnOrgTreeOverLimits(getOrganisationStore(), cfg.aggregator.organisation, logger);
+  } catch (err) {
+    logger.error({
+      operation: 'orgTree.bootCheck',
+      status: 'failure',
+      error: err instanceof Error ? err.message : String(err),
+      error_type: err instanceof Error ? err.name : typeof err,
+    });
   }
 
   // RBAC edge: keep every user's token `roles` claim in step with the

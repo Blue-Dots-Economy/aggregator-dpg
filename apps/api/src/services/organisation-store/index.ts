@@ -28,6 +28,7 @@ export type {
   UpdateOrgPatch,
   OrgStoreError,
   OrgStoreResult,
+  TreeRules,
 } from './interface.js';
 export { InMemoryOrganisationStore } from './memory.js';
 export { PostgresOrganisationStore } from './postgres.js';

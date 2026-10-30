@@ -189,6 +189,13 @@
     },
     {
       "method": "GET",
+      "path": "/v1/org/parent/options/:id",
+      "access": {
+        "capability": "network.administer"
+      }
+    },
+    {
+      "method": "GET",
       "path": "/v1/org/read/:id",
       "access": {
         "anyCapability": [
@@ -292,6 +299,13 @@
           "org.manage",
           "orgs.onboard"
         ]
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/org/parent/update/:id",
+      "access": {
+        "capability": "network.administer"
       }
     },
     {

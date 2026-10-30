@@ -39,6 +39,13 @@ describe('organisations schema (migration 0028)', () => {
     expect(organisations.knownAs.default).toBe('aggregator');
   });
 
+  it('declares depth as a required smallint with no default (migration 0032)', () => {
+    expect(organisations.depth.name).toBe('depth');
+    expect(organisations.depth.notNull).toBe(true);
+    expect(organisations.depth.hasDefault).toBe(false);
+    expect(organisations.depth.getSQLType()).toBe('smallint');
+  });
+
   it('has the two org types', () => {
     expect(orgTypeEnum.enumValues).toEqual(['network_facilitator', 'aggregator']);
   });
