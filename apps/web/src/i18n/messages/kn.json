@@ -775,7 +775,6 @@
       "contact": "Contact",
       "status": "Status",
       "serves": "Domains",
-      "every_domain": "Every domain",
       "open": "Open",
       "coordinator": "Coordinator",
       "organisation": "Organisation",
@@ -791,18 +790,41 @@
       "registered_as": "Registered as {name}"
     },
     "coordinator": {
-      "approve": "Approve",
-      "reject": "Reject",
-      "reason": "Reason (optional, sent to the applicant)",
-      "decided": "Decision saved.",
-      "already": "Already decided elsewhere — now {status}.",
-      "domains": "Domains served",
-      "domains_hint": "Select none to serve every domain.",
-      "save_domains": "Save domains",
-      "saved": "Saved.",
-      "back": "Back to coordinators",
-      "details": "Contact details",
-      "decision": "Registration"
+      "approve": "ಅನುಮೋದಿಸಿ",
+      "reject": "ತಿರಸ್ಕರಿಸಿ",
+      "reason": "ಕಾರಣ (ಐಚ್ಛಿಕ, ಅರ್ಜಿದಾರರಿಗೆ ಕಳುಹಿಸಲಾಗುತ್ತದೆ)",
+      "already": "ಬೇರೆಡೆ ಈಗಾಗಲೇ ನಿರ್ಧರಿಸಲಾಗಿದೆ — ಈಗ {status}.",
+      "decided": "ನಿರ್ಧಾರ ಉಳಿಸಲಾಗಿದೆ.",
+      "domains": "ಸೇವೆ ನೀಡುವ ಡೊಮೇನ್‌ಗಳು",
+      "domains_sub": "ಈ ಸಂಯೋಜಕರು ಯಾವ ದಾಖಲೆಗಳೊಂದಿಗೆ ಕೆಲಸ ಮಾಡಬಹುದು.",
+      "domains_empty": "ಕನಿಷ್ಠ ಒಂದು ಡೊಮೇನ್ ಆರಿಸಿ.",
+      "unsaved": "ಉಳಿಸದ ಬದಲಾವಣೆಗಳು",
+      "discard": "ರದ್ದುಮಾಡಿ",
+      "save_domains": "ಡೊಮೇನ್‌ಗಳನ್ನು ಉಳಿಸಿ",
+      "domains_saved": "ಡೊಮೇನ್‌ಗಳನ್ನು ಉಳಿಸಲಾಗಿದೆ.",
+      "back": "ಸಂಯೋಜಕರಿಗೆ ಹಿಂತಿರುಗಿ",
+      "joined": "{date} ರಂದು ಸೇರಿದರು",
+      "copy_email": "ಇಮೇಲ್ ನಕಲಿಸಿ",
+      "copy_phone": "ಫೋನ್ ನಕಲಿಸಿ",
+      "copied": "ನಕಲಿಸಲಾಗಿದೆ",
+      "decision_title": "ನಿಮ್ಮ ಪರಿಶೀಲನೆಗಾಗಿ ಕಾಯುತ್ತಿದೆ",
+      "decision_body": "{name} ಅವರು {date} ರಂದು ನೋಂದಾಯಿಸಿದ್ದಾರೆ. ಸೈನ್ ಇನ್ ಮಾಡಲು ಅನುಮತಿಸಲು ಅನುಮೋದಿಸಿ, ಅಥವಾ ನೋಂದಣಿಯನ್ನು ತಿರಸ್ಕರಿಸಿ.",
+      "reject_confirm": "ನೋಂದಣಿ ತಿರಸ್ಕರಿಸಿ",
+      "cancel": "ರದ್ದುಮಾಡಿ",
+      "approved_note": "ಅನುಮೋದಿಸಲಾಗಿದೆ. ಅವರು ಈಗ ಸೈನ್ ಇನ್ ಮಾಡಬಹುದು.",
+      "rejected_note": "ನೋಂದಣಿ ತಿರಸ್ಕರಿಸಲಾಗಿದೆ.",
+      "registered": "{date} ರಂದು ನೋಂದಾಯಿಸಿದರು",
+      "error": {
+        "network": "ಸರ್ವರ್ ತಲುಪಲು ಆಗಲಿಲ್ಲ. ನಿಮ್ಮ ಇಂಟರ್ನೆಟ್ ಸಂಪರ್ಕ ಪರಿಶೀಲಿಸಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+        "signed_out": "ನೀವು ಸೈನ್ ಔಟ್ ಆಗಿದ್ದೀರಿ. ಮತ್ತೆ ಸೈನ್ ಇನ್ ಮಾಡಿ, ನಂತರ ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.",
+        "forbidden": "ಈ ಸಂಯೋಜಕರನ್ನು ನಿರ್ವಹಿಸಲು ನಿಮಗೆ ಅನುಮತಿ ಇಲ್ಲ.",
+        "not_found": "ಈ ಸಂಯೋಜಕರ ಖಾತೆ ಸಿಗಲಿಲ್ಲ. ಪುಟವನ್ನು ರಿಫ್ರೆಶ್ ಮಾಡಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+        "org_inactive": "ಈ ಸಂಸ್ಥೆ ಸಕ್ರಿಯವಾಗಿಲ್ಲ, ಆದ್ದರಿಂದ ಈಗ ಅದರ ನೋಂದಣಿಗಳ ಬಗ್ಗೆ ನಿರ್ಧರಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.",
+        "rate_limited": "ಕಡಿಮೆ ಸಮಯದಲ್ಲಿ ಹೆಚ್ಚು ಬದಲಾವಣೆಗಳು. ಒಂದು ನಿಮಿಷ ಕಾಯಿರಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+        "server": "ನಮ್ಮ ಕಡೆಯಿಂದ ಏನೋ ತಪ್ಪಾಗಿದೆ. ಕೆಲವು ನಿಮಿಷಗಳ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+        "generic": "ಅದು ಆಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
+      },
+      "save_domains_first": "ನಿರ್ಧರಿಸುವ ಮೊದಲು ಡೊಮೇನ್ ಬದಲಾವಣೆಗಳನ್ನು ಉಳಿಸಿ ಅಥವಾ ರದ್ದುಮಾಡಿ."
     },
     "invite": {
       "heading": "ಸಂಯೋಜಕರನ್ನು ಆಹ್ವಾನಿಸಿ",
@@ -911,16 +933,31 @@
       "known_as_invalid": "That \"known as\" value isn't configured."
     },
     "roles": {
-      "title": "Roles",
-      "base": "{role} (from membership)",
-      "until": "Until {date}",
-      "no_expiry": "No expiry",
-      "none": "Not assigned",
-      "assign": "Assign",
-      "assign_for": "Assign for {days} days",
-      "revoke": "Revoke",
-      "saved": "Saved.",
-      "hint": "Additional roles add to the base role in this organisation. Every change is recorded."
+      "title": "ಪಾತ್ರಗಳು",
+      "subtitle": "ಹೆಚ್ಚುವರಿ ಪಾತ್ರಗಳು ಈ ಸಂಸ್ಥೆಯ ಮೂಲ ಪಾತ್ರಕ್ಕೆ ಸೇರುತ್ತವೆ.",
+      "base_tag": "ಮೂಲ ಪಾತ್ರ",
+      "base_desc": "ಈ ಸಂಸ್ಥೆಯ ಸದಸ್ಯತ್ವದೊಂದಿಗೆ ಬರುತ್ತದೆ.",
+      "locked": "ತೆಗೆದುಹಾಕಲು ಸಾಧ್ಯವಿಲ್ಲ",
+      "assigned": "ನೀಡಲಾಗಿದೆ",
+      "personal_data": "ವೈಯಕ್ತಿಕ ಡೇಟಾ",
+      "until": "{date} ವರೆಗೆ",
+      "no_expiry": "ಅವಧಿ ಮುಕ್ತಾಯವಿಲ್ಲ",
+      "none": "ನೀಡಿಲ್ಲ",
+      "assign": "ನೀಡಿ",
+      "revoke": "ತೆಗೆದುಹಾಕಿ",
+      "duration": "{role} ಅವಧಿ",
+      "days": "{days, plural, one {# ದಿನ} other {# ದಿನಗಳು}}",
+      "confirm_pii_title": "{role} ನೀಡಬೇಕೆ?",
+      "confirm_pii_body": "{name} {days, plural, one {# ದಿನ} other {# ದಿನಗಳ}}ವರೆಗೆ ವೈಯಕ್ತಿಕ ಡೇಟಾ ನೋಡಬಹುದು. ಪ್ರವೇಶ ತಾನಾಗಿಯೇ ಕೊನೆಗೊಳ್ಳುತ್ತದೆ.",
+      "confirm_pii_body_no_expiry": "{name} ಈ ಪಾತ್ರವನ್ನು ತೆಗೆದುಹಾಕುವವರೆಗೆ ವೈಯಕ್ತಿಕ ಡೇಟಾ ನೋಡಬಹುದು.",
+      "confirm_pii_yes": "ಪ್ರವೇಶ ನೀಡಿ",
+      "confirm_remove_title": "{role} ತೆಗೆದುಹಾಕಬೇಕೆ?",
+      "confirm_remove_body": "ಈ ಪಾತ್ರ ತಕ್ಷಣ ತೆಗೆದುಹಾಕಲ್ಪಡುತ್ತದೆ.",
+      "cancel": "ರದ್ದುಮಾಡಿ",
+      "this_person": "ಈ ವ್ಯಕ್ತಿ",
+      "recorded": "ಪ್ರತಿ ಬದಲಾವಣೆಯನ್ನು ದಾಖಲಿಸಲಾಗುತ್ತದೆ.",
+      "assigned_note": "{role} ನೀಡಲಾಗಿದೆ.",
+      "removed_note": "{role} ತೆಗೆದುಹಾಕಲಾಗಿದೆ."
     },
     "roles_admin": {
       "title": "Roles",
@@ -990,6 +1027,49 @@
       "yes": "Yes",
       "no": "No",
       "granted_by_none": "No role grants it"
+    },
+    "org_home": {
+      "heading": "ನಿಮ್ಮ ಸಂಸ್ಥೆ",
+      "subtitle": "ನಿಮ್ಮ ಸಂಸ್ಥೆ ಮತ್ತು ಅದರ ಸಂಯೋಜಕರು, ಹೊಸದು ಮೊದಲು.",
+      "owner_note": "ನೀವು ಈ ಸಂಸ್ಥೆಯ ಮಾಲೀಕರು",
+      "invite": "ಸಂಯೋಜಕರನ್ನು ಆಹ್ವಾನಿಸಿ",
+      "tile": {
+        "all": {
+          "label": "ಸಂಯೋಜಕರು",
+          "sub": "ನಿಮ್ಮ ಸಂಸ್ಥೆಯಾದ್ಯಂತ"
+        },
+        "active": {
+          "label": "ಸಕ್ರಿಯ",
+          "sub": "ಸೈನ್ ಇನ್ ಮಾಡಬಹುದು"
+        },
+        "pending": {
+          "label": "ಪರಿಶೀಲನೆ ಬಾಕಿ",
+          "sub": "ನಿಮಗಾಗಿ ಕಾಯುತ್ತಿದೆ",
+          "none": "ಪರಿಶೀಲಿಸಲು ಏನೂ ಇಲ್ಲ"
+        },
+        "inactive": {
+          "label": "ತಿರಸ್ಕರಿಸಲಾಗಿದೆ",
+          "sub": "ಅನುಮೋದಿಸಲಾಗಿಲ್ಲ"
+        }
+      },
+      "tile_show": "ಪಟ್ಟಿ ನೋಡಿ",
+      "tile_showing": "ಕೆಳಗೆ ತೋರಿಸಲಾಗಿದೆ",
+      "list_heading": "ಸಂಯೋಜಕರು",
+      "search": "ಹೆಸರು ಅಥವಾ ಇಮೇಲ್ ಹುಡುಕಿ",
+      "filter_label": "ಸಂಯೋಜಕರನ್ನು ತೋರಿಸಿ",
+      "filter_all": "ಎಲ್ಲಾ",
+      "filter_pending": "ಬಾಕಿ",
+      "col_coordinator": "ಸಂಯೋಜಕ",
+      "col_organisation": "ಸಂಸ್ಥೆ",
+      "col_status": "ಸ್ಥಿತಿ",
+      "col_domains": "ಡೊಮೇನ್‌ಗಳು",
+      "col_action": "ಕ್ರಿಯೆ",
+      "view": "ನೋಡಿ",
+      "view_named": "{name} ನೋಡಿ",
+      "review": "ಪರಿಶೀಲಿಸಿ",
+      "empty": "ಯಾವುದೇ ಸಂಯೋಜಕರು ಹೊಂದಿಕೆಯಾಗುತ್ತಿಲ್ಲ.",
+      "empty_pending": "ಪರಿಶೀಲನೆಗಾಗಿ ಯಾವುದೇ ಸಂಯೋಜಕರು ಕಾಯುತ್ತಿಲ್ಲ.",
+      "partial": "ಹೊಸ {count} ತೋರಿಸಲಾಗುತ್ತಿದೆ. <link>ಎಲ್ಲಾ ಸಂಯೋಜಕರನ್ನು ನೋಡಿ</link>"
     }
   }
 }

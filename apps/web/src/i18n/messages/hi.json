@@ -775,7 +775,6 @@
       "contact": "Contact",
       "status": "Status",
       "serves": "Domains",
-      "every_domain": "Every domain",
       "open": "Open",
       "coordinator": "Coordinator",
       "organisation": "Organisation",
@@ -791,18 +790,41 @@
       "registered_as": "Registered as {name}"
     },
     "coordinator": {
-      "approve": "Approve",
-      "reject": "Reject",
-      "reason": "Reason (optional, sent to the applicant)",
-      "decided": "Decision saved.",
-      "already": "Already decided elsewhere — now {status}.",
-      "domains": "Domains served",
-      "domains_hint": "Select none to serve every domain.",
-      "save_domains": "Save domains",
-      "saved": "Saved.",
-      "back": "Back to coordinators",
-      "details": "Contact details",
-      "decision": "Registration"
+      "approve": "स्वीकृत करें",
+      "reject": "अस्वीकार करें",
+      "reason": "कारण (वैकल्पिक, आवेदक को भेजा जाएगा)",
+      "already": "कहीं और पहले ही निर्णय हो चुका है — अब {status}।",
+      "decided": "निर्णय सहेजा गया।",
+      "domains": "सेवा वाले डोमेन",
+      "domains_sub": "यह समन्वयक किन रिकॉर्ड पर काम कर सकता है।",
+      "domains_empty": "कम से कम एक डोमेन चुनें।",
+      "unsaved": "बदलाव सहेजे नहीं गए",
+      "discard": "रद्द करें",
+      "save_domains": "डोमेन सहेजें",
+      "domains_saved": "डोमेन सहेजे गए।",
+      "back": "समन्वयकों पर वापस",
+      "joined": "{date} को जुड़े",
+      "copy_email": "ईमेल कॉपी करें",
+      "copy_phone": "फ़ोन कॉपी करें",
+      "copied": "कॉपी हो गया",
+      "decision_title": "आपकी समीक्षा की प्रतीक्षा में",
+      "decision_body": "{name} ने {date} को पंजीकरण किया। साइन इन की अनुमति देने के लिए स्वीकृत करें, या पंजीकरण अस्वीकार करें।",
+      "reject_confirm": "पंजीकरण अस्वीकार करें",
+      "cancel": "रद्द करें",
+      "approved_note": "स्वीकृत। अब वे साइन इन कर सकते हैं।",
+      "rejected_note": "पंजीकरण अस्वीकार किया गया।",
+      "registered": "{date} को पंजीकृत",
+      "error": {
+        "network": "सर्वर से संपर्क नहीं हो सका। अपना इंटरनेट कनेक्शन जाँचें और फिर से प्रयास करें।",
+        "signed_out": "आप साइन आउट हो गए हैं। फिर से साइन इन करें, फिर दोबारा प्रयास करें।",
+        "forbidden": "आपको इस समन्वयक को प्रबंधित करने की अनुमति नहीं है।",
+        "not_found": "इस समन्वयक का खाता नहीं मिला। पेज रीफ़्रेश करें और फिर से प्रयास करें।",
+        "org_inactive": "यह संगठन सक्रिय नहीं है, इसलिए अभी इसके पंजीकरण पर निर्णय नहीं लिया जा सकता।",
+        "rate_limited": "कम समय में बहुत सारे बदलाव हुए। एक मिनट रुकें और फिर से प्रयास करें।",
+        "server": "हमारी ओर से कुछ गड़बड़ हुई। कुछ मिनट बाद फिर से प्रयास करें।",
+        "generic": "यह नहीं हो सका। कृपया फिर से प्रयास करें।"
+      },
+      "save_domains_first": "निर्णय लेने से पहले डोमेन बदलाव सहेजें या रद्द करें।"
     },
     "invite": {
       "heading": "समन्वयकों को आमंत्रित करें",
@@ -911,16 +933,31 @@
       "known_as_invalid": "That \"known as\" value isn't configured."
     },
     "roles": {
-      "title": "Roles",
-      "base": "{role} (from membership)",
-      "until": "Until {date}",
-      "no_expiry": "No expiry",
-      "none": "Not assigned",
-      "assign": "Assign",
-      "assign_for": "Assign for {days} days",
-      "revoke": "Revoke",
-      "saved": "Saved.",
-      "hint": "Additional roles add to the base role in this organisation. Every change is recorded."
+      "title": "भूमिकाएँ",
+      "subtitle": "अतिरिक्त भूमिकाएँ इस संगठन की मूल भूमिका में जुड़ती हैं।",
+      "base_tag": "मूल भूमिका",
+      "base_desc": "इस संगठन की सदस्यता के साथ मिलती है।",
+      "locked": "हटाई नहीं जा सकती",
+      "assigned": "दी गई",
+      "personal_data": "व्यक्तिगत डेटा",
+      "until": "{date} तक",
+      "no_expiry": "कोई समाप्ति नहीं",
+      "none": "नहीं दी गई",
+      "assign": "दें",
+      "revoke": "हटाएँ",
+      "duration": "{role} की अवधि",
+      "days": "{days, plural, one {# दिन} other {# दिन}}",
+      "confirm_pii_title": "{role} दें?",
+      "confirm_pii_body": "{name} {days, plural, one {# दिन} other {# दिनों}} तक व्यक्तिगत डेटा देख सकेंगे। पहुँच अपने आप समाप्त हो जाएगी।",
+      "confirm_pii_body_no_expiry": "{name} यह भूमिका हटाए जाने तक व्यक्तिगत डेटा देख सकेंगे।",
+      "confirm_pii_yes": "पहुँच दें",
+      "confirm_remove_title": "{role} हटाएँ?",
+      "confirm_remove_body": "यह भूमिका तुरंत हट जाएगी।",
+      "cancel": "रद्द करें",
+      "this_person": "यह व्यक्ति",
+      "recorded": "हर बदलाव दर्ज होता है।",
+      "assigned_note": "{role} दी गई।",
+      "removed_note": "{role} हटाई गई।"
     },
     "roles_admin": {
       "title": "Roles",
@@ -990,6 +1027,49 @@
       "yes": "Yes",
       "no": "No",
       "granted_by_none": "No role grants it"
+    },
+    "org_home": {
+      "heading": "आपका संगठन",
+      "subtitle": "आपका संगठन और उसके समन्वयक, नए पहले।",
+      "owner_note": "आप इस संगठन के स्वामी हैं",
+      "invite": "समन्वयकों को आमंत्रित करें",
+      "tile": {
+        "all": {
+          "label": "समन्वयक",
+          "sub": "आपके पूरे संगठन में"
+        },
+        "active": {
+          "label": "सक्रिय",
+          "sub": "साइन इन कर सकते हैं"
+        },
+        "pending": {
+          "label": "समीक्षा बाकी",
+          "sub": "आपकी प्रतीक्षा में",
+          "none": "समीक्षा के लिए कुछ नहीं"
+        },
+        "inactive": {
+          "label": "अस्वीकृत",
+          "sub": "स्वीकृत नहीं"
+        }
+      },
+      "tile_show": "सूची देखें",
+      "tile_showing": "नीचे दिखाया गया",
+      "list_heading": "समन्वयक",
+      "search": "नाम या ईमेल खोजें",
+      "filter_label": "समन्वयक दिखाएँ",
+      "filter_all": "सभी",
+      "filter_pending": "बाकी",
+      "col_coordinator": "समन्वयक",
+      "col_organisation": "संगठन",
+      "col_status": "स्थिति",
+      "col_domains": "डोमेन",
+      "col_action": "कार्रवाई",
+      "view": "देखें",
+      "view_named": "{name} देखें",
+      "review": "समीक्षा करें",
+      "empty": "कोई समन्वयक मेल नहीं खाता।",
+      "empty_pending": "कोई समन्वयक समीक्षा की प्रतीक्षा में नहीं है।",
+      "partial": "नवीनतम {count} दिखाए जा रहे हैं। <link>सभी समन्वयक देखें</link>"
     }
   }
 }

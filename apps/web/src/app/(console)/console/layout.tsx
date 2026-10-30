@@ -18,7 +18,7 @@ import { getConsoleActor } from '@/lib/console-actor';
 import { getTranslations } from 'next-intl/server';
 import { ConsoleSidebar } from '@/components/console/ConsoleSidebar';
 import { AuthProvider } from '@/lib/auth-context';
-import { can, canViewCoordinators } from '@/lib/capabilities';
+import { can, canViewCoordinators, CONSOLE_HOME_HREF, coordinatorsHref } from '@/lib/capabilities';
 
 export default async function ConsoleLayout({ children }: Readonly<{ children: ReactNode }>) {
   const session = await getSession();
@@ -54,15 +54,15 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
           the coordinator portal (#793). */}
       <div className="flex flex-col lg:flex-row min-h-dvh">
         <ConsoleSidebar
-          canManage={canViewCoordinators(me)}
+          canManage={canViewCoordinators(me) && coordinatorsHref(me) !== CONSOLE_HOME_HREF}
+          homeIsCoordinators={coordinatorsHref(me) === CONSOLE_HOME_HREF}
           canViewAccess={me.is_network_admin && can(me.capabilities, 'network.administer')}
           account={{
             title: name,
             subtitle: me.is_network_admin ? t('nav.network_admin') : t('nav.org_owner'),
             details: [
-              { label: t('account.name'), value: me.user.contact.name ?? '—' },
-              { label: t('account.email'), value: me.user.contact.email },
-              { label: t('account.phone'), value: me.user.contact.phone ?? '—' },
+              { label: t('account.email'), value: me.user.contact.email, icon: 'mail' },
+              { label: t('account.phone'), value: me.user.contact.phone ?? '—', icon: 'phone' },
             ],
           }}
         />

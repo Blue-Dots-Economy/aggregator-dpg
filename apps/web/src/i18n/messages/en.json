@@ -775,7 +775,6 @@
       "contact": "Contact",
       "status": "Status",
       "serves": "Domains",
-      "every_domain": "Every domain",
       "open": "Open",
       "coordinator": "Coordinator",
       "organisation": "Organisation",
@@ -794,15 +793,38 @@
       "approve": "Approve",
       "reject": "Reject",
       "reason": "Reason (optional, sent to the applicant)",
-      "decided": "Decision saved.",
       "already": "Already decided elsewhere — now {status}.",
+      "decided": "Decision saved.",
       "domains": "Domains served",
-      "domains_hint": "Select none to serve every domain.",
+      "domains_sub": "Which records this coordinator can work with.",
+      "domains_empty": "Pick at least one domain.",
+      "unsaved": "Unsaved changes",
+      "discard": "Discard",
       "save_domains": "Save domains",
-      "saved": "Saved.",
+      "domains_saved": "Domains saved.",
       "back": "Back to coordinators",
-      "details": "Contact details",
-      "decision": "Registration"
+      "joined": "Joined {date}",
+      "copy_email": "Copy email",
+      "copy_phone": "Copy phone",
+      "copied": "Copied",
+      "decision_title": "Waiting for your review",
+      "decision_body": "{name} registered on {date}. Approve to let them sign in, or reject the registration.",
+      "reject_confirm": "Reject registration",
+      "cancel": "Cancel",
+      "approved_note": "Approved. They can now sign in.",
+      "rejected_note": "Registration rejected.",
+      "registered": "Registered {date}",
+      "error": {
+        "network": "We couldn't reach the server. Check your internet connection and try again.",
+        "signed_out": "You've been signed out. Sign in again, then try once more.",
+        "forbidden": "You don't have permission to manage this coordinator.",
+        "not_found": "We couldn't find this coordinator's account. Refresh the page and try again.",
+        "org_inactive": "This organisation isn't active, so its registrations can't be decided right now.",
+        "rate_limited": "Too many changes in a short time. Wait a minute and try again.",
+        "server": "Something went wrong on our side. Try again in a few minutes.",
+        "generic": "That didn't work. Please try again."
+      },
+      "save_domains_first": "Save or discard your domain changes before deciding."
     },
     "invite": {
       "heading": "Invite coordinators",
@@ -912,15 +934,30 @@
     },
     "roles": {
       "title": "Roles",
-      "base": "{role} (from membership)",
+      "subtitle": "Additional roles add to the base role in this organisation.",
+      "base_tag": "Base role",
+      "base_desc": "Comes with membership of this organisation.",
+      "locked": "Can't be removed",
+      "assigned": "Assigned",
+      "personal_data": "Personal data",
       "until": "Until {date}",
       "no_expiry": "No expiry",
       "none": "Not assigned",
       "assign": "Assign",
-      "assign_for": "Assign for {days} days",
-      "revoke": "Revoke",
-      "saved": "Saved.",
-      "hint": "Additional roles add to the base role in this organisation. Every change is recorded."
+      "revoke": "Remove",
+      "duration": "Duration for {role}",
+      "days": "{days, plural, one {# day} other {# days}}",
+      "confirm_pii_title": "Give {role}?",
+      "confirm_pii_body": "{name} will see personal data for {days, plural, one {# day} other {# days}}. Access ends on its own.",
+      "confirm_pii_body_no_expiry": "{name} will see personal data until this role is removed.",
+      "confirm_pii_yes": "Give access",
+      "confirm_remove_title": "Remove {role}?",
+      "confirm_remove_body": "They lose this role straight away.",
+      "cancel": "Cancel",
+      "this_person": "This person",
+      "recorded": "Every change is recorded.",
+      "assigned_note": "{role} assigned.",
+      "removed_note": "{role} removed."
     },
     "roles_admin": {
       "title": "Roles",
@@ -990,6 +1027,49 @@
       "yes": "Yes",
       "no": "No",
       "granted_by_none": "No role grants it"
+    },
+    "org_home": {
+      "heading": "Your organisation",
+      "subtitle": "Your organisation and its coordinators, newest first.",
+      "owner_note": "You are the organisation owner",
+      "invite": "Invite coordinators",
+      "tile": {
+        "all": {
+          "label": "Coordinators",
+          "sub": "Across your organisation"
+        },
+        "active": {
+          "label": "Active",
+          "sub": "Can sign in"
+        },
+        "pending": {
+          "label": "Pending review",
+          "sub": "Waiting on you",
+          "none": "Nothing to review"
+        },
+        "inactive": {
+          "label": "Rejected",
+          "sub": "Not approved"
+        }
+      },
+      "tile_show": "View list",
+      "tile_showing": "Showing below",
+      "list_heading": "Coordinators",
+      "search": "Search name or email",
+      "filter_label": "Show coordinators",
+      "filter_all": "All",
+      "filter_pending": "Pending",
+      "col_coordinator": "Coordinator",
+      "col_organisation": "Organisation",
+      "col_status": "Status",
+      "col_domains": "Domains",
+      "col_action": "Action",
+      "view": "View",
+      "view_named": "View {name}",
+      "review": "Review",
+      "empty": "No coordinators match.",
+      "empty_pending": "No coordinators waiting for review.",
+      "partial": "Showing the newest {count}. <link>See all coordinators</link>"
     }
   }
 }

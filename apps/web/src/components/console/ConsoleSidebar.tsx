@@ -23,16 +23,21 @@ import { AppSidebar, type NavItem, type SidebarAccount } from '../shell/Sidebar'
  */
 export function ConsoleSidebar({
   canManage = true,
+  homeIsCoordinators = false,
   canViewAccess = false,
   account,
 }: {
   canManage?: boolean;
+  /** The home page lists the caller's coordinators, so its link is named for them. */
+  homeIsCoordinators?: boolean;
   canViewAccess?: boolean;
   account: SidebarAccount;
 }) {
   const t = useTranslations('console');
   const nav: NavItem[] = [
-    { to: '/console', label: t('nav.home'), icon: 'trending', exact: true },
+    homeIsCoordinators
+      ? { to: '/console', label: t('nav.coordinators'), icon: 'users', exact: true }
+      : { to: '/console', label: t('nav.home'), icon: 'trending', exact: true },
     { to: '/console/orgs', label: t('nav.organisations'), icon: 'briefcase' as const },
     ...(canManage
       ? [{ to: '/console/coordinators', label: t('nav.coordinators'), icon: 'users' as const }]

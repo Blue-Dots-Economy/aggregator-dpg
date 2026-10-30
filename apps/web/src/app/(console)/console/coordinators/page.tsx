@@ -181,10 +181,7 @@ export default async function ConsoleCoordinatorsPage({
                       <td>
                         <ConsoleStatusPill status={u.status} />
                       </td>
-                      <td className="bd-wrap">
-                        {servedLabels(u.serves, domains)?.join(', ') ??
-                          t('coordinators.every_domain')}
-                      </td>
+                      <td className="bd-wrap">{servedLabels(u.serves, domains).join(', ')}</td>
                       {showAccess ? (
                         <td>
                           <RoleBadges roles={u.roles ?? []} names={roleNames} />

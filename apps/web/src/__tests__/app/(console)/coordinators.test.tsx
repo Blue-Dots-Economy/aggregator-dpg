@@ -23,7 +23,7 @@ vi.mock('@/lib/console-api.server', () => ({
 }));
 vi.mock('@/lib/console-domains.server', () => ({
   networkDomains: vi.fn(async () => []),
-  servedLabels: vi.fn(() => null),
+  servedLabels: vi.fn(() => []),
 }));
 vi.mock('@/lib/console-hierarchy.server', () => ({ readReachableOrgs: vi.fn(async () => []) }));
 vi.mock('next-intl/server', () => ({

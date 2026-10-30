@@ -12,12 +12,15 @@ import { InviteForm } from '@/components/console/InviteForm';
 import { ConsoleSection } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
 import { getConsoleActor } from '@/lib/console-actor';
-import { canInvite, canManageOrg, canViewCoordinators } from '@/lib/capabilities';
+import {
+  canInvite,
+  canManageOrg,
+  canViewCoordinators,
+  coordinatorsHref as listHref,
+} from '@/lib/capabilities';
 import { resolveMaxInvites } from '@/lib/invite-limit';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-
-const COORDINATORS_HREF = '/console/coordinators';
 
 export default async function ConsoleInvitePage() {
   const t = await getTranslations('console');
@@ -32,7 +35,7 @@ export default async function ConsoleInvitePage() {
   const orgs = page.orgs
     .filter((o) => !o.is_default && (!actor.ok || canManageOrg(actor.me, o.id)))
     .map((o) => ({ id: o.id, name: o.name }));
-  const coordinatorsHref = actor.ok && canViewCoordinators(actor.me) ? COORDINATORS_HREF : null;
+  const coordinatorsHref = actor.ok && canViewCoordinators(actor.me) ? listHref(actor.me) : null;
   return (
     <>
       {coordinatorsHref ? (

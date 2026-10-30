@@ -68,6 +68,13 @@ describe('<ConsoleSidebar />', () => {
     expect(hrefs).toEqual(['/console', '/console/orgs']);
   });
 
+  it('names the home link Coordinators when the home page lists them', () => {
+    render(<ConsoleSidebar canManage={false} homeIsCoordinators account={account} />);
+    const links = within(aside()).getAllByRole('link');
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/console', '/console/orgs']);
+    expect(links[0]).toHaveAccessibleName('nav.coordinators');
+  });
+
   it('marks home active only on /console itself', () => {
     usePathname.mockReturnValue('/console/orgs/123');
     render(<ConsoleSidebar canViewAccess account={account} />);
@@ -86,7 +93,7 @@ describe('<ConsoleSidebar />', () => {
   it('shows the account card with the role, and sign-out, but no contact support', () => {
     render(<ConsoleSidebar account={account} />);
     expect(within(aside()).getByText('Asha Rao')).toBeInTheDocument();
-    expect(within(aside()).getByText('AS')).toBeInTheDocument();
+    expect(within(aside()).getByText('AR')).toBeInTheDocument();
     expect(within(aside()).getByText('nav.network_admin')).toBeInTheDocument();
     expect(within(aside()).getByRole('button', { name: 'sign_out' })).toBeInTheDocument();
     expect(within(aside()).queryByText('contact_support')).toBeNull();
