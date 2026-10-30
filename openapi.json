@@ -6466,7 +6466,6 @@
                   },
                   "url": {
                     "type": "string",
-                    "format": "uri",
                     "maxLength": 2048,
                     "nullable": true
                   },

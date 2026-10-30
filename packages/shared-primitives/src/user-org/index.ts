@@ -233,9 +233,11 @@ export type OrgSearchResponse = z.infer<typeof OrgSearchResponseSchema>;
 export const OrgMetadataUpdateRequestSchema = z
   .object({
     name: z.string().trim().min(2).max(200).optional(),
-    url: z.string().trim().url().max(2048).nullable().optional(),
+    /** `https://` only; the API checks the format (`org-details` `isValidWebsite`). */
+    url: z.string().trim().max(2048).nullable().optional(),
     locations: z.array(BecknLocationSchema).max(25).optional(),
     legal_name: z.string().trim().max(200).nullable().optional(),
+    /** A GSTIN; the API checks the format (`org-details` `isValidGstin`). */
     gst_number: z.string().trim().max(32).nullable().optional(),
     description: z.string().trim().max(1000).nullable().optional(),
     /** Network domain ids; `[]` clears the list. The API checks them against the network. */

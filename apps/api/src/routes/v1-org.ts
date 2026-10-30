@@ -25,6 +25,11 @@ import {
   OrgSearchResponseSchema,
   OwnerAccessResponseSchema,
 } from '@aggregator-dpg/shared-primitives/user-org';
+import {
+  isValidGstin,
+  isValidWebsite,
+  normaliseGstin,
+} from '@aggregator-dpg/shared-primitives/org-details';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { getUserStore } from '../services/user-store/index.js';
@@ -99,18 +104,42 @@ function requireOrgOwner(actor: Actor, org: Organisation): void {
   if (org.ownerUserId !== actor.userId) throw httpError('FORBIDDEN');
 }
 
+/** Label of each format-checked field, for the error `detail`. */
+const FIELD_LABELS: Record<string, string> = {
+  url: 'Website',
+  gst_number: 'GST number',
+  domains: 'Domains',
+};
+
 /**
- * Refuses domain ids the active network does not have, with 400 naming the field.
+ * Refuses an update whose website, GST number or domains are malformed, with
+ * one 400 naming every bad field (`fields.field_errors`: field → message).
+ * Only fields the body sends are checked, so a stored value is never re-checked.
  *
  * @throws {HttpError} SCHEMA_VALIDATION.
  */
-async function assertKnownDomains(domains: string[]): Promise<void> {
-  const networkCfg = await getNetworkConfig();
-  const unknown = domains.filter((d) => !networkCfg.domainIds.includes(d));
-  if (unknown.length > 0) {
+async function assertValidDetails(
+  body: z.infer<typeof OrgMetadataUpdateRequestSchema>,
+): Promise<void> {
+  const errors: Record<string, string> = {};
+  if (body.url && !isValidWebsite(body.url)) {
+    errors['url'] = 'Please enter a website starting with https://';
+  }
+  if (body.gst_number && !isValidGstin(body.gst_number)) {
+    errors['gst_number'] = 'Please enter a valid GSTIN.';
+  }
+  if (body.domains !== undefined) {
+    const networkCfg = await getNetworkConfig();
+    const unknown = body.domains.filter((d) => !networkCfg.domainIds.includes(d));
+    if (unknown.length > 0) {
+      errors['domains'] = `This network has no domain ${unknown.join(', ')}.`;
+    }
+  }
+  const fields = Object.keys(errors);
+  if (fields.length > 0) {
     throw httpError('SCHEMA_VALIDATION', {
-      detail: 'domains lists a domain this network does not have.',
-      fields: { field: 'domains', unknown },
+      detail: fields.map((f) => `${FIELD_LABELS[f]}: ${errors[f]}`).join('; '),
+      fields: { field_errors: errors },
     });
   }
 }
@@ -215,15 +244,18 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         throw httpError('CONFLICT', { detail: "This organisation's details are not editable." });
       }
       requireOrgOwner(actor, org);
-      if (body.domains !== undefined) await assertKnownDomains(body.domains);
+      await assertValidDetails(body);
       await guardWriteRate(actor, reply);
 
       const patch: UpdateOrgPatch = { updatedBy: actor.userId };
       if (body.name !== undefined) patch.displayName = body.name;
-      if (body.url !== undefined) patch.url = body.url;
+      // An empty website or GST number clears it.
+      if (body.url !== undefined) patch.url = body.url || null;
       if (body.locations !== undefined) patch.locations = body.locations;
       if (body.legal_name !== undefined) patch.legalName = body.legal_name;
-      if (body.gst_number !== undefined) patch.gstNumber = body.gst_number;
+      if (body.gst_number !== undefined) {
+        patch.gstNumber = body.gst_number ? normaliseGstin(body.gst_number) : null;
+      }
       // An empty description is stored as "none".
       if (body.description !== undefined) patch.description = body.description || null;
       if (body.domains !== undefined) patch.domains = body.domains;

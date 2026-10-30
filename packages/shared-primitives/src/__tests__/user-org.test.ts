@@ -184,7 +184,11 @@ describe('user-org wire schemas', () => {
     if (!empty.success) {
       expect(empty.error.issues[0].message).toMatch(/at least one field/);
     }
-    expect(OrgMetadataUpdateRequestSchema.safeParse({ url: 'not a url' }).success).toBe(false);
+    // The website format is the API's check (org-details); the schema bounds the length.
+    expect(OrgMetadataUpdateRequestSchema.safeParse({ url: 'not a url' }).success).toBe(true);
+    expect(
+      OrgMetadataUpdateRequestSchema.safeParse({ url: `https://${'a'.repeat(2041)}.org` }).success,
+    ).toBe(false);
     expect(OrgMetadataUpdateRequestSchema.safeParse({ name: 'x' }).success).toBe(false);
   });
 
