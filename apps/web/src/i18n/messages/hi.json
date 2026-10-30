@@ -663,7 +663,6 @@
     "home": {
       "heading": "Your organisations",
       "network_heading": "Network",
-      "pending_orgs": "Organisations waiting for review",
       "none_pending": "Nothing is waiting for review.",
       "coordinators": "{count} coordinators",
       "pending": "{count} pending",
@@ -673,7 +672,6 @@
       "subtitle_owner": "Your organisations and their coordinators.",
       "coordinators_label": "Coordinators",
       "pending_label": "Pending review",
-      "review": "Review",
       "below_heading": "Organisations below yours",
       "below_summary": "{orgs, plural, one {# organisation} other {# organisations}} with {coordinators, plural, one {# coordinator} other {# coordinators}} sit below yours. You can view them; their owners manage them.",
       "below_view": "View organisations"
@@ -758,12 +756,52 @@
       "depths": "{count, plural, one {depth} other {depths}} {list}",
       "system_value": "built in",
       "value_orgs": "{count, plural, =0 {No organisations} one {# organisation} other {# organisations}}",
-      "pending": "Awaiting approval ({count})",
       "network": "Network",
       "network_tag": "The network",
       "col_parent": "Parent organisation",
       "subtitle_owner": "Your organisations and every organisation below them. Those below are view-only.",
-      "yours": "Your organisation"
+      "yours": "Your organisation",
+      "tile": {
+        "all": {
+          "label": "संगठन",
+          "sub": "नेटवर्क में"
+        },
+        "active": {
+          "label": "सक्रिय",
+          "sub": "स्वीकृत और चालू"
+        },
+        "pending": {
+          "label": "समीक्षा बाकी",
+          "sub": "आपकी प्रतीक्षा में",
+          "none": "समीक्षा के लिए कुछ नहीं"
+        },
+        "inactive": {
+          "label": "अस्वीकृत",
+          "sub": "स्वीकृत नहीं"
+        }
+      },
+      "tile_show": "सूची देखें",
+      "tile_showing": "नीचे दिखाया गया",
+      "view_tree": "ट्री",
+      "view_list": "सूची",
+      "view_label": "इस रूप में दिखाएँ",
+      "search": "संगठन खोजें",
+      "filter_label": "संगठन दिखाएँ",
+      "filter_all": "सभी",
+      "filter_pending": "बाकी",
+      "col_children": "उप-संगठन",
+      "col_view": "कार्रवाई",
+      "view_named": "{name} देखें",
+      "review_heading": "आपकी समीक्षा की प्रतीक्षा में ({count})",
+      "error": {
+        "network": "सर्वर से संपर्क नहीं हो सका। अपना इंटरनेट कनेक्शन जाँचें और फिर से प्रयास करें।",
+        "signed_out": "आप साइन आउट हो गए हैं। फिर से साइन इन करें, फिर दोबारा प्रयास करें।",
+        "forbidden": "आपको इस संगठन पर निर्णय लेने की अनुमति नहीं है।",
+        "not_found": "यह संगठन नहीं मिला। पेज रीफ़्रेश करें और फिर से प्रयास करें।",
+        "rate_limited": "कम समय में बहुत सारे बदलाव हुए। एक मिनट रुकें और फिर से प्रयास करें।",
+        "server": "हमारी ओर से कुछ गड़बड़ हुई। कुछ मिनट बाद फिर से प्रयास करें।",
+        "generic": "यह नहीं हो सका। कृपया फिर से प्रयास करें।"
+      }
     },
     "coordinators": {
       "heading": "Coordinators",
@@ -1070,6 +1108,9 @@
       "empty": "कोई समन्वयक मेल नहीं खाता।",
       "empty_pending": "कोई समन्वयक समीक्षा की प्रतीक्षा में नहीं है।",
       "partial": "नवीनतम {count} दिखाए जा रहे हैं। <link>सभी समन्वयक देखें</link>"
+    },
+    "network_home": {
+      "owner_note": "आप नेटवर्क व्यवस्थापक हैं"
     }
   }
 }

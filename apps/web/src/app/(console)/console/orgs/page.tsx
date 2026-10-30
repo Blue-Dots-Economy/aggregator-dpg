@@ -4,11 +4,11 @@
  * An org owner sees its own organisations, each as a tree with every
  * organisation below it (read-only below its own); names open each page.
  *
- * The network admin sees the whole network:
- * Shows the organisations awaiting approval (approved or rejected in place),
- * every organisation as a tree under the network (each name opens the
- * organisation's page) with its "known as" name and depth, and, closed by
- * default, the hierarchy settings.
+ * The network admin sees the whole network: the organisations awaiting
+ * approval (approved or rejected in place), status tiles, every organisation
+ * as a tree under the network or as a searchable list (each name opens the
+ * organisation's page), and, closed by default, the hierarchy settings.
+ * `?view=list` and `?status=` open the list with a filter.
  */
 
 import { redirect } from 'next/navigation';
@@ -21,11 +21,18 @@ import { orgsBelow, topmostOwned } from '@/lib/console-org-options';
 import { OrgsTable } from '@/components/console/OrgsTable';
 import { HierarchySettings } from '@/components/console/HierarchySettings';
 import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
+import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
+import { ORG_FILTERS, type OrgFilter } from '@/components/console/OrgStatusTiles';
 import { ConsoleCollapsible, ConsoleSection } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
 
-export default async function ConsoleOrgsPage() {
+export default async function ConsoleOrgsPage({
+  searchParams,
+}: Readonly<{ searchParams: Promise<{ view?: string; status?: string }> }>) {
   const t = await getTranslations('console');
+  const params = await searchParams;
+  const initialFilter: OrgFilter = ORG_FILTERS.find((f) => f === params.status) ?? 'all';
+  const initialView = params.view === 'list' || params.status ? 'list' : 'tree';
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   if (!actor.me.is_network_admin) return <OwnerOrgs ownedIds={actor.me.orgs.map((o) => o.id)} />;
@@ -38,22 +45,19 @@ export default async function ConsoleOrgsPage() {
       <div className="flex flex-col gap-6">
         {pending.length > 0 ? (
           <div id="pending" className="scroll-mt-6">
-            <ConsoleSection title={t('orgs.pending', { count: pending.length })} flush>
+            <ConsoleSection title={t('orgs.review_heading', { count: pending.length })} flush>
               <OrgsTable orgs={pending} />
             </ConsoleSection>
           </div>
         ) : null}
-        <ConsoleSection title={t('orgs.network')}>
-          <ChildOrgsTree
-            rootId={hierarchy.network.id}
-            rootName={hierarchy.network.name}
-            rootKnownAs={null}
-            rootTag={t('orgs.network_tag')}
-            orgs={network.orgs}
-            linkRows
-            more={network.more}
-          />
-        </ConsoleSection>
+        <NetworkOrgsView
+          rootId={hierarchy.network.id}
+          rootName={hierarchy.network.name}
+          orgs={network.orgs}
+          more={network.more}
+          initialView={initialView}
+          initialFilter={initialFilter}
+        />
         <ConsoleCollapsible
           title={t('orgs.hierarchy')}
           hint={t('orgs.hierarchy_summary', {

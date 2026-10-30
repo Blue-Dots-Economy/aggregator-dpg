@@ -18,29 +18,22 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useFormatter, useTranslations } from 'next-intl';
-import { Check, CircleCheck, CircleX, Clock } from 'lucide-react';
+import { Check, CircleCheck, CircleX, Clock, Tag } from 'lucide-react';
 import type { DecisionResponse, User } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { I } from '../../icons';
 import { cn } from '../../lib/cn';
-import { getDomainIcon } from '../../lib/domain-icons';
 import { ConsoleStatusPill } from './ConsoleUi';
 import { DomainChips } from './DomainChips';
 import { sendConsole, type ConsoleError } from '../../lib/console-client';
+import { plainErrorKey } from '../../lib/console-errors';
 
-/**
- * The message key for a failed decision or domains save, worded for the
- * person managing the coordinator.
- */
+/** API error codes with their own message on this page. */
+const ACTION_ERROR_CODES = { TARGET_ORG_INACTIVE: 'org_inactive' } as const;
+
+/** The message key for a failed decision or domains save. */
 function actionErrorKey(r: { status: number; error: ConsoleError }): string {
-  if (r.status === 0) return 'coordinator.error.network';
-  if (r.status === 401) return 'coordinator.error.signed_out';
-  if (r.status === 403) return 'coordinator.error.forbidden';
-  if (r.status === 404) return 'coordinator.error.not_found';
-  if (r.error.code === 'TARGET_ORG_INACTIVE') return 'coordinator.error.org_inactive';
-  if (r.status === 429) return 'coordinator.error.rate_limited';
-  if (r.status >= 500) return 'coordinator.error.server';
-  return 'coordinator.error.generic';
+  return plainErrorKey(r, 'coordinator', ACTION_ERROR_CODES);
 }
 
 /** Whether two id lists hold the same ids, in any order. */
@@ -51,13 +44,10 @@ function sameIds(a: readonly string[], b: readonly string[]): boolean {
 export function CoordinatorActions({
   user,
   domains,
-  networkId = null,
   readOnly = false,
 }: Readonly<{
   user: User;
   domains: Array<{ id: string; label: string }>;
-  /** The network id, for network-specific domain icons. */
-  networkId?: string | null;
   /** Show status and domains only, with no decision or domain editing. */
   readOnly?: boolean;
 }>) {
@@ -164,10 +154,7 @@ export function CoordinatorActions({
           </header>
           <div className="flex flex-col gap-3.5 px-[22px] pt-4 pb-[22px] text-[13.5px]">
             {readOnly || status !== 'pending' ? (
-              <DomainChips
-                domains={domains.filter((d) => saved.includes(d.id))}
-                networkId={networkId}
-              />
+              <DomainChips domains={domains.filter((d) => saved.includes(d.id))} />
             ) : (
               <>
                 <div
@@ -177,7 +164,6 @@ export function CoordinatorActions({
                 >
                   {domains.map((d) => {
                     const on = chosen.includes(d.id);
-                    const Icon = getDomainIcon(d.id, networkId);
                     return (
                       <label
                         key={d.id}
@@ -202,7 +188,7 @@ export function CoordinatorActions({
                         >
                           {on ? <Check size={12} strokeWidth={3.2} /> : null}
                         </span>
-                        <Icon
+                        <Tag
                           size={17}
                           aria-hidden="true"
                           className="flex-none text-(--bd-primary-600)"

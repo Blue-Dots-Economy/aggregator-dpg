@@ -17,7 +17,8 @@ import type {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { ConsoleStatusPill, EmptyState } from './ConsoleUi';
-import { errorKey, sendConsole } from '../../lib/console-client';
+import { sendConsole } from '../../lib/console-client';
+import { plainErrorKey } from '../../lib/console-errors';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
@@ -47,7 +48,7 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
       if (status) setStatus(id, status);
       note(id, t('coordinator.already', { status: status ? t(`status.${status}`) : '' }));
     } else {
-      note(id, t(errorKey(r)));
+      note(id, t(plainErrorKey(r, 'orgs')));
     }
   }
 

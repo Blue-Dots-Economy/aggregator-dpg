@@ -663,7 +663,6 @@
     "home": {
       "heading": "Your organisations",
       "network_heading": "Network",
-      "pending_orgs": "Organisations waiting for review",
       "none_pending": "Nothing is waiting for review.",
       "coordinators": "{count} coordinators",
       "pending": "{count} pending",
@@ -673,7 +672,6 @@
       "subtitle_owner": "Your organisations and their coordinators.",
       "coordinators_label": "Coordinators",
       "pending_label": "Pending review",
-      "review": "Review",
       "below_heading": "Organisations below yours",
       "below_summary": "{orgs, plural, one {# organisation} other {# organisations}} with {coordinators, plural, one {# coordinator} other {# coordinators}} sit below yours. You can view them; their owners manage them.",
       "below_view": "View organisations"
@@ -758,12 +756,52 @@
       "depths": "{count, plural, one {depth} other {depths}} {list}",
       "system_value": "built in",
       "value_orgs": "{count, plural, =0 {No organisations} one {# organisation} other {# organisations}}",
-      "pending": "Awaiting approval ({count})",
       "network": "Network",
       "network_tag": "The network",
       "col_parent": "Parent organisation",
       "subtitle_owner": "Your organisations and every organisation below them. Those below are view-only.",
-      "yours": "Your organisation"
+      "yours": "Your organisation",
+      "tile": {
+        "all": {
+          "label": "ಸಂಸ್ಥೆಗಳು",
+          "sub": "ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ"
+        },
+        "active": {
+          "label": "ಸಕ್ರಿಯ",
+          "sub": "ಅನುಮೋದಿತ ಮತ್ತು ಚಾಲನೆಯಲ್ಲಿದೆ"
+        },
+        "pending": {
+          "label": "ಪರಿಶೀಲನೆ ಬಾಕಿ",
+          "sub": "ನಿಮಗಾಗಿ ಕಾಯುತ್ತಿದೆ",
+          "none": "ಪರಿಶೀಲಿಸಲು ಏನೂ ಇಲ್ಲ"
+        },
+        "inactive": {
+          "label": "ತಿರಸ್ಕರಿಸಲಾಗಿದೆ",
+          "sub": "ಅನುಮೋದಿಸಲಾಗಿಲ್ಲ"
+        }
+      },
+      "tile_show": "ಪಟ್ಟಿ ನೋಡಿ",
+      "tile_showing": "ಕೆಳಗೆ ತೋರಿಸಲಾಗಿದೆ",
+      "view_tree": "ಮರ",
+      "view_list": "ಪಟ್ಟಿ",
+      "view_label": "ಹೀಗೆ ತೋರಿಸಿ",
+      "search": "ಸಂಸ್ಥೆಗಳನ್ನು ಹುಡುಕಿ",
+      "filter_label": "ಸಂಸ್ಥೆಗಳನ್ನು ತೋರಿಸಿ",
+      "filter_all": "ಎಲ್ಲಾ",
+      "filter_pending": "ಬಾಕಿ",
+      "col_children": "ಉಪ-ಸಂಸ್ಥೆಗಳು",
+      "col_view": "ಕ್ರಿಯೆ",
+      "view_named": "{name} ನೋಡಿ",
+      "review_heading": "ನಿಮ್ಮ ಪರಿಶೀಲನೆಗಾಗಿ ಕಾಯುತ್ತಿದೆ ({count})",
+      "error": {
+        "network": "ಸರ್ವರ್ ತಲುಪಲು ಆಗಲಿಲ್ಲ. ನಿಮ್ಮ ಇಂಟರ್ನೆಟ್ ಸಂಪರ್ಕ ಪರಿಶೀಲಿಸಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+        "signed_out": "ನೀವು ಸೈನ್ ಔಟ್ ಆಗಿದ್ದೀರಿ. ಮತ್ತೆ ಸೈನ್ ಇನ್ ಮಾಡಿ, ನಂತರ ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.",
+        "forbidden": "ಈ ಸಂಸ್ಥೆಯ ಬಗ್ಗೆ ನಿರ್ಧರಿಸಲು ನಿಮಗೆ ಅನುಮತಿ ಇಲ್ಲ.",
+        "not_found": "ಈ ಸಂಸ್ಥೆ ಸಿಗಲಿಲ್ಲ. ಪುಟವನ್ನು ರಿಫ್ರೆಶ್ ಮಾಡಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+        "rate_limited": "ಕಡಿಮೆ ಸಮಯದಲ್ಲಿ ಹೆಚ್ಚು ಬದಲಾವಣೆಗಳು. ಒಂದು ನಿಮಿಷ ಕಾಯಿರಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+        "server": "ನಮ್ಮ ಕಡೆಯಿಂದ ಏನೋ ತಪ್ಪಾಗಿದೆ. ಕೆಲವು ನಿಮಿಷಗಳ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+        "generic": "ಅದು ಆಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
+      }
     },
     "coordinators": {
       "heading": "Coordinators",
@@ -1070,6 +1108,9 @@
       "empty": "ಯಾವುದೇ ಸಂಯೋಜಕರು ಹೊಂದಿಕೆಯಾಗುತ್ತಿಲ್ಲ.",
       "empty_pending": "ಪರಿಶೀಲನೆಗಾಗಿ ಯಾವುದೇ ಸಂಯೋಜಕರು ಕಾಯುತ್ತಿಲ್ಲ.",
       "partial": "ಹೊಸ {count} ತೋರಿಸಲಾಗುತ್ತಿದೆ. <link>ಎಲ್ಲಾ ಸಂಯೋಜಕರನ್ನು ನೋಡಿ</link>"
+    },
+    "network_home": {
+      "owner_note": "ನೀವು ನೆಟ್‌ವರ್ಕ್ ನಿರ್ವಾಹಕರು"
     }
   }
 }

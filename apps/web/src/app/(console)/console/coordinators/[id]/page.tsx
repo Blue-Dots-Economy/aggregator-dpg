@@ -20,7 +20,7 @@ import { RolesPanel } from '@/components/console/RolesPanel';
 import { Topbar } from '@/components/shell/Topbar';
 import { BackLink, ConsoleStatusPill } from '@/components/console/ConsoleUi';
 import { CopyButton } from '@/components/console/CopyButton';
-import { consoleNetwork } from '@/lib/console-domains.server';
+import { networkDomains } from '@/lib/console-domains.server';
 import { initialsOf } from '@/lib/initials';
 import { CoordinatorActions } from '@/components/console/CoordinatorActions';
 
@@ -33,9 +33,9 @@ export default async function ConsoleCoordinatorPage({
   const format = await getFormatter();
   const { id } = await params;
   const actor = await getConsoleActor();
-  const [user, network] = await Promise.all([
+  const [user, domains] = await Promise.all([
     consoleRead<User>(`/v1/user/read/${encodeURIComponent(id)}`),
-    consoleNetwork(),
+    networkDomains(),
   ]);
   const displayName = user.contact.name ?? user.contact.email;
   const canManage = actor.ok && !!user.org_id && canManageOrg(actor.me, user.org_id);
@@ -100,12 +100,7 @@ export default async function ConsoleCoordinatorPage({
         />
       </div>
       <div className="flex flex-col gap-6">
-        <CoordinatorActions
-          user={user}
-          domains={network.domains}
-          networkId={network.id}
-          readOnly={!canManage}
-        />
+        <CoordinatorActions user={user} domains={domains} readOnly={!canManage} />
         {userRoles && catalogue && user.org_id ? (
           <RolesPanel
             userId={user.id}

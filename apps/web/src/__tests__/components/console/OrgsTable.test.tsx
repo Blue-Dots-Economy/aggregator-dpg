@@ -139,10 +139,17 @@ describe('<OrgsTable />', () => {
     expect(screen.queryByRole('button', { name: messages.console.orgs.approve })).toBeNull();
   });
 
-  it('shows a generic error when a decision fails', async () => {
+  it('shows a plain message when a decision fails on the server', async () => {
     global.fetch = respond({ error: { code: 'BOOM' } }, 500) as never;
     renderTable([pendingOrg]);
     fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.approve }));
-    expect(await screen.findByText(messages.console.errors.generic)).toBeInTheDocument();
+    expect(await screen.findByText(messages.console.orgs.error.server)).toBeInTheDocument();
+  });
+
+  it('says when the organisation is gone', async () => {
+    global.fetch = respond({ error: { code: 'NOT_FOUND' } }, 404) as never;
+    renderTable([pendingOrg]);
+    fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.approve }));
+    expect(await screen.findByText(messages.console.orgs.error.not_found)).toBeInTheDocument();
   });
 });

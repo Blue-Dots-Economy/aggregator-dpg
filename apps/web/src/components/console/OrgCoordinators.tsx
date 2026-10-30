@@ -10,19 +10,11 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import {
-  ArrowRight,
-  Check,
-  Clock,
-  Eye,
-  UserCheck,
-  Users,
-  UserX,
-  type LucideIcon,
-} from 'lucide-react';
+import { Clock, Eye, UserCheck, Users, UserX, type LucideIcon } from 'lucide-react';
 import { I } from '../../icons';
 import { cn } from '../../lib/cn';
 import { initialsOf } from '../../lib/initials';
+import { CountTile, type TileTone } from './CountTile';
 import { DomainChips } from './DomainChips';
 import { ConsoleStatusPill, type ConsoleStatus } from './ConsoleUi';
 
@@ -46,35 +38,12 @@ type Filter = 'all' | 'active' | 'pending' | 'inactive';
 const FILTERS: readonly Filter[] = ['all', 'active', 'pending', 'inactive'];
 
 /** The icon and colours of each count tile. */
-const TILE: Record<Filter, { icon: LucideIcon; badge: string; count: string; selected: string }> = {
-  all: {
-    icon: Users,
-    badge: 'bg-(--bd-primary-50) text-(--bd-primary-600)',
-    count: 'text-ink-900',
-    selected:
-      'border-(--bd-primary) bg-(--bd-primary)/8 shadow-[0_0_0_3px_var(--bd-primary-50)] hover:border-(--bd-primary)',
-  },
-  active: {
-    icon: UserCheck,
-    badge: 'bg-emerald-50 text-emerald-600',
-    count: 'text-ink-900',
-    selected:
-      'border-emerald-500 bg-emerald-500/8 shadow-[0_0_0_3px_rgb(16_185_129/0.15)] hover:border-emerald-500',
-  },
-  pending: {
-    icon: Clock,
-    badge: 'bg-amber-50 text-amber-600',
-    count: 'text-amber-600',
-    selected:
-      'border-amber-500 bg-amber-500/8 shadow-[0_0_0_3px_rgb(245_158_11/0.15)] hover:border-amber-500',
-  },
-  inactive: {
-    icon: UserX,
-    badge: 'bg-rose-50 text-rose-600',
-    count: 'text-ink-900',
-    selected:
-      'border-rose-500 bg-rose-500/8 shadow-[0_0_0_3px_rgb(244_63_94/0.15)] hover:border-rose-500',
-  },
+/** The icon and colour of each count tile. */
+const TILE: Record<Filter, { icon: LucideIcon; tone: TileTone }> = {
+  all: { icon: Users, tone: 'primary' },
+  active: { icon: UserCheck, tone: 'green' },
+  pending: { icon: Clock, tone: 'amber' },
+  inactive: { icon: UserX, tone: 'rose' },
 };
 
 /** Whether a row matches the search text (already lower-cased). */
@@ -89,7 +58,6 @@ export function OrgCoordinators({
   pending,
   complete,
   allHref,
-  networkId = null,
 }: Readonly<{
   rows: OrgCoordinatorRow[];
   /** Every coordinator of the organisation, from the API. */
@@ -100,8 +68,6 @@ export function OrgCoordinators({
   complete: boolean;
   /** The full coordinators list for this organisation. */
   allHref: string;
-  /** The network id, for network-specific domain icons. */
-  networkId?: string | null;
 }>) {
   const t = useTranslations('console.org_home');
   const tStatus = useTranslations('console.status');
@@ -130,47 +96,19 @@ export function OrgCoordinators({
     <>
       <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
         {FILTERS.map((f) => (
-          <button
+          <CountTile
             key={f}
-            type="button"
-            aria-pressed={filter === f}
+            icon={TILE[f].icon}
+            tone={TILE[f].tone}
+            label={t(`tile.${f}.label`)}
+            count={countOf(f)}
+            sub={f === 'pending' && pending === 0 ? t('tile.pending.none') : t(`tile.${f}.sub`)}
+            muted={f === 'pending' && pending === 0}
+            selected={filter === f}
+            showLabel={t('tile_show')}
+            showingLabel={t('tile_showing')}
             onClick={() => setFilter(f)}
-            className={cn(
-              'group bd-card bd-shadow flex cursor-pointer items-start justify-between gap-3 px-[18px] py-4 text-left transition-[background-color,border-color,box-shadow,transform] duration-300 ease-out hover:-translate-y-px hover:border-(--bd-primary-100) hover:shadow-md focus-visible:outline-2 focus-visible:outline-(--bd-primary) active:scale-[0.98] motion-reduce:transition-none',
-              filter === f && TILE[f].selected,
-            )}
-          >
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="text-[13px] font-semibold text-ink-500">{t(`tile.${f}.label`)}</span>
-              <span
-                className={cn(
-                  'font-display text-[28px] font-extrabold leading-tight',
-                  f === 'pending' && pending === 0 ? 'text-ink-400' : TILE[f].count,
-                )}
-              >
-                {countOf(f)}
-              </span>
-              <span className="text-[12px] text-ink-400">
-                {f === 'pending' && pending === 0 ? t('tile.pending.none') : t(`tile.${f}.sub`)}
-              </span>
-              {filter === f ? (
-                <span className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-(--bd-primary-600)">
-                  <Check size={13} aria-hidden="true" />
-                  {t('tile_showing')}
-                </span>
-              ) : (
-                <span className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-(--bd-primary-600) opacity-80 group-hover:opacity-100">
-                  {t('tile_show')}
-                  <ArrowRight
-                    size={13}
-                    aria-hidden="true"
-                    className="transition-transform group-hover:translate-x-0.5"
-                  />
-                </span>
-              )}
-            </span>
-            <TileIcon filter={f} />
-          </button>
+          />
         ))}
       </div>
 
@@ -260,7 +198,7 @@ export function OrgCoordinators({
                       <ConsoleStatusPill status={r.status} />
                     </td>
                     <td className="hidden lg:table-cell">
-                      <DomainChips domains={r.domains} networkId={networkId} />
+                      <DomainChips domains={r.domains} />
                     </td>
                     <td className="whitespace-nowrap">
                       {r.status === 'pending' ? (
@@ -305,18 +243,5 @@ export function OrgCoordinators({
         )}
       </section>
     </>
-  );
-}
-
-/** The tinted icon badge of a count tile. */
-function TileIcon({ filter }: Readonly<{ filter: Filter }>) {
-  const { icon: Icon, badge } = TILE[filter];
-  return (
-    <span
-      aria-hidden="true"
-      className={cn('grid h-10 w-10 flex-none place-items-center rounded-[11px]', badge)}
-    >
-      <Icon size={20} strokeWidth={2} />
-    </span>
   );
 }

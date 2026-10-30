@@ -13,36 +13,7 @@ export interface ConsoleDomain {
 }
 
 interface ConfigPayload {
-  network?: { id?: string };
   domains?: ConsoleDomain[];
-}
-
-/** The network id and its domains. */
-export interface ConsoleNetwork {
-  /** The network id, e.g. `blue_dot`, or null when unknown. */
-  id: string | null;
-  domains: ConsoleDomain[];
-}
-
-/**
- * Reads the network id and domains (server-side; empty on any failure, so a
- * page still renders with domain ids).
- *
- * @returns The network id and its domains, in configuration order.
- */
-export async function consoleNetwork(): Promise<ConsoleNetwork> {
-  const base = process.env.API_BASE_URL ?? 'http://localhost:4000';
-  try {
-    const res = await fetch(`${base}/v1/aggregator-config`, { signal: AbortSignal.timeout(5000) });
-    if (!res.ok) return { id: null, domains: [] };
-    const cfg = (await res.json()) as ConfigPayload;
-    return {
-      id: cfg.network?.id ?? null,
-      domains: (cfg.domains ?? []).map((d) => ({ id: d.id, label: d.label })),
-    };
-  } catch {
-    return { id: null, domains: [] };
-  }
 }
 
 /**
@@ -52,7 +23,15 @@ export async function consoleNetwork(): Promise<ConsoleNetwork> {
  * @returns The domains, in configuration order.
  */
 export async function networkDomains(): Promise<ConsoleDomain[]> {
-  return (await consoleNetwork()).domains;
+  const base = process.env.API_BASE_URL ?? 'http://localhost:4000';
+  try {
+    const res = await fetch(`${base}/v1/aggregator-config`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return [];
+    const cfg = (await res.json()) as ConfigPayload;
+    return (cfg.domains ?? []).map((d) => ({ id: d.id, label: d.label }));
+  } catch {
+    return [];
+  }
 }
 
 /**

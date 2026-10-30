@@ -19,9 +19,12 @@ import type {
 
 vi.mock('@/lib/console-actor', () => ({ getConsoleActor: vi.fn() }));
 vi.mock('@/lib/console-api.server', () => ({ consoleRead: vi.fn() }));
-vi.mock('@/lib/console-hierarchy.server', () => ({ readReachableOrgs: vi.fn() }));
+vi.mock('@/lib/console-hierarchy.server', () => ({
+  readReachableOrgs: vi.fn(),
+  readNetworkOrgs: vi.fn(),
+}));
 vi.mock('@/lib/console-domains.server', () => ({
-  consoleNetwork: vi.fn(async () => ({ id: 'blue_dot', domains: [] })),
+  networkDomains: vi.fn(async () => []),
 }));
 vi.mock('next-intl/server', () => ({
   getTranslations: vi.fn(
@@ -36,7 +39,7 @@ vi.mock('@/components/shell/Topbar', () => ({
 import ConsoleHomePage from '@/app/(console)/console/page';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
-import { readReachableOrgs } from '@/lib/console-hierarchy.server';
+import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
 
 type Row = OrgSearchResponse['orgs'][number];
 
@@ -190,5 +193,53 @@ describe('console home — owner', () => {
     expect(
       screen.queryByRole('link', { name: /console\.org_home\.invite/ }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe('console home — network admin', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('shows the network, tiles that open the list, pending organisations and its own', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me(
+        [
+          meOrg('root', 'Blue Dots', { org_type: 'network_facilitator' }),
+          meOrg('def', 'Default', { is_default: true }),
+        ],
+        { is_network_admin: true, capabilities: ['network.administer'] },
+      ),
+    });
+    mockReads([row('def', 'Default', { is_default: true })]);
+    vi.mocked(readNetworkOrgs).mockResolvedValue({
+      orgs: [
+        row('a', 'Edge Org A'),
+        row('p', 'Pending Co', { status: 'pending' }),
+        row('def', 'Default', { is_default: true }),
+      ],
+      more: false,
+    });
+    await show();
+    expect(
+      screen.getByRole('heading', { name: 'console.home.network_heading: Blue Dots' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /^Organisations\s*3/ })).toHaveAttribute(
+      'href',
+      '/console/orgs?view=list',
+    );
+    expect(screen.getByRole('link', { name: /^Pending review\s*1/ })).toHaveAttribute(
+      'href',
+      '/console/orgs?status=pending',
+    );
+    expect(screen.getByRole('button', { name: messages.console.orgs.approve })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Pending Co' })).toHaveAttribute(
+      'href',
+      '/console/orgs/p',
+    );
+    expect(screen.getByRole('link', { name: /console\.nav\.access/ })).toHaveAttribute(
+      'href',
+      '/console/access/roles',
+    );
+    expect(readNetworkOrgs).toHaveBeenCalledWith('root');
   });
 });

@@ -663,7 +663,6 @@
     "home": {
       "heading": "Your organisations",
       "network_heading": "Network",
-      "pending_orgs": "Organisations waiting for review",
       "none_pending": "Nothing is waiting for review.",
       "coordinators": "{count} coordinators",
       "pending": "{count} pending",
@@ -673,7 +672,6 @@
       "subtitle_owner": "Your organisations and their coordinators.",
       "coordinators_label": "Coordinators",
       "pending_label": "Pending review",
-      "review": "Review",
       "below_heading": "Organisations below yours",
       "below_summary": "{orgs, plural, one {# organisation} other {# organisations}} with {coordinators, plural, one {# coordinator} other {# coordinators}} sit below yours. You can view them; their owners manage them.",
       "below_view": "View organisations"
@@ -758,12 +756,52 @@
       "depths": "{count, plural, one {depth} other {depths}} {list}",
       "system_value": "built in",
       "value_orgs": "{count, plural, =0 {No organisations} one {# organisation} other {# organisations}}",
-      "pending": "Awaiting approval ({count})",
       "network": "Network",
       "network_tag": "The network",
       "col_parent": "Parent organisation",
       "subtitle_owner": "Your organisations and every organisation below them. Those below are view-only.",
-      "yours": "Your organisation"
+      "yours": "Your organisation",
+      "tile": {
+        "all": {
+          "label": "Organisations",
+          "sub": "In the network"
+        },
+        "active": {
+          "label": "Active",
+          "sub": "Approved and running"
+        },
+        "pending": {
+          "label": "Pending review",
+          "sub": "Waiting on you",
+          "none": "Nothing to review"
+        },
+        "inactive": {
+          "label": "Rejected",
+          "sub": "Not approved"
+        }
+      },
+      "tile_show": "View list",
+      "tile_showing": "Showing below",
+      "view_tree": "Tree",
+      "view_list": "List",
+      "view_label": "Show as",
+      "search": "Search organisations",
+      "filter_label": "Show organisations",
+      "filter_all": "All",
+      "filter_pending": "Pending",
+      "col_children": "Child organisations",
+      "col_view": "Action",
+      "view_named": "View {name}",
+      "review_heading": "Waiting for your review ({count})",
+      "error": {
+        "network": "We couldn't reach the server. Check your internet connection and try again.",
+        "signed_out": "You've been signed out. Sign in again, then try once more.",
+        "forbidden": "You don't have permission to decide this organisation.",
+        "not_found": "We couldn't find this organisation. Refresh the page and try again.",
+        "rate_limited": "Too many changes in a short time. Wait a minute and try again.",
+        "server": "Something went wrong on our side. Try again in a few minutes.",
+        "generic": "That didn't work. Please try again."
+      }
     },
     "coordinators": {
       "heading": "Coordinators",
@@ -1070,6 +1108,9 @@
       "empty": "No coordinators match.",
       "empty_pending": "No coordinators waiting for review.",
       "partial": "Showing the newest {count}. <link>See all coordinators</link>"
+    },
+    "network_home": {
+      "owner_note": "You are the network admin"
     }
   }
 }
