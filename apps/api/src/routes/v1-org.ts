@@ -3,7 +3,7 @@
  *
  *   GET   /v1/org/read/:id              one org within reach, owner and counts
  *   POST  /v1/org/search                orgs within reach, by name, keyset paged
- *   PATCH /v1/org/metadata/update/:id   org details (name: network admin only)
+ *   PATCH /v1/org/metadata/update/:id   org details, name included (owner only)
  *   POST  /v1/org/decision/:id          approve / reject a pending org (network admin)
  *   POST  /v1/org/access/repair/:id     re-apply the owner's sign-in access (network admin)
  *
@@ -25,6 +25,11 @@ import {
   OrgSearchResponseSchema,
   OwnerAccessResponseSchema,
 } from '@aggregator-dpg/shared-primitives/user-org';
+import {
+  isValidGstin,
+  isValidWebsite,
+  normaliseGstin,
+} from '@aggregator-dpg/shared-primitives/org-details';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { getUserStore } from '../services/user-store/index.js';
@@ -36,12 +41,11 @@ import {
 import { isNetworkAdmin, requireActor, type Actor } from '../services/auth/actor/index.js';
 import { reachableOrgIds, reachesOrg } from '../services/authz/scope.js';
 import { decideOrg, grantOwnerAccess } from '../services/decisions/org.js';
+import { getNetworkConfig } from '../services/network-config.js';
 import {
   decodeOrgCursor,
   encodeOrgCursor,
   guardWriteRate,
-  listPhrase,
-  notifyOwnerOfAdminAction,
   ownerContact,
   toWireOrg,
 } from './console-shared.js';
@@ -90,14 +94,55 @@ function requireNetworkAdmin(actor: Actor): void {
   if (!isNetworkAdmin(actor)) throw httpError('FORBIDDEN');
 }
 
-/** Wire field label of each editable org detail, for logs and owner notices. */
+/**
+ * Refuses an edit by anyone but the org's owner, with 403. The network admin
+ * views other owners' orgs but does not change them.
+ *
+ * @throws {HttpError} FORBIDDEN.
+ */
+function requireOrgOwner(actor: Actor, org: Organisation): void {
+  if (org.ownerUserId !== actor.userId) throw httpError('FORBIDDEN');
+}
+
+/** Label of each format-checked field, for the error `detail`. */
 const FIELD_LABELS: Record<string, string> = {
-  name: 'the name',
-  url: 'the website',
-  locations: 'the locations',
-  legal_name: 'the legal name',
-  gst_number: 'the GST number',
+  url: 'Website',
+  gst_number: 'GST number',
+  domains: 'Domains',
 };
+
+/**
+ * Refuses an update whose website, GST number or domains are malformed, with
+ * one 400 naming every bad field (`fields.field_errors`: field → message).
+ * Only fields the body sends are checked, so a stored value is never re-checked.
+ *
+ * @throws {HttpError} SCHEMA_VALIDATION.
+ */
+async function assertValidDetails(
+  body: z.infer<typeof OrgMetadataUpdateRequestSchema>,
+): Promise<void> {
+  const errors: Record<string, string> = {};
+  if (body.url && !isValidWebsite(body.url)) {
+    errors['url'] = 'Please enter a website starting with https://';
+  }
+  if (body.gst_number && !isValidGstin(body.gst_number)) {
+    errors['gst_number'] = 'Please enter a valid GSTIN.';
+  }
+  if (body.domains !== undefined) {
+    const networkCfg = await getNetworkConfig();
+    const unknown = body.domains.filter((d) => !networkCfg.domainIds.includes(d));
+    if (unknown.length > 0) {
+      errors['domains'] = `This network has no domain ${unknown.join(', ')}.`;
+    }
+  }
+  const fields = Object.keys(errors);
+  if (fields.length > 0) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: fields.map((f) => `${FIELD_LABELS[f]}: ${errors[f]}`).join('; '),
+      fields: { field_errors: errors },
+    });
+  }
+}
 
 /**
  * Registers the `/v1/org/*` console routes.
@@ -184,7 +229,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: "Update an organisation's details",
         description:
-          "url, locations, legal name and GST number: the owner or the network admin. The name: the network admin only (the slug never changes). The Default org's details are not editable. Rendered for every coordinator of the org at once.",
+          "Every field, the name included, is the org's owner's only (the slug never changes). The network admin views other owners' orgs but does not edit them (403). The Default org's details are not editable. url, locations, legal name and GST number are rendered for every coordinator of the org; description and domains are shown in the console only.",
         params: IdParamsSchema,
         body: OrgMetadataUpdateRequestSchema,
         response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
@@ -198,15 +243,22 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       if (orgType !== 'aggregator' || org.isDefault) {
         throw httpError('CONFLICT', { detail: "This organisation's details are not editable." });
       }
-      if (body.name !== undefined && !isNetworkAdmin(actor)) throw httpError('FORBIDDEN');
+      requireOrgOwner(actor, org);
+      await assertValidDetails(body);
       await guardWriteRate(actor, reply);
 
       const patch: UpdateOrgPatch = { updatedBy: actor.userId };
       if (body.name !== undefined) patch.displayName = body.name;
-      if (body.url !== undefined) patch.url = body.url;
+      // An empty website or GST number clears it.
+      if (body.url !== undefined) patch.url = body.url || null;
       if (body.locations !== undefined) patch.locations = body.locations;
       if (body.legal_name !== undefined) patch.legalName = body.legal_name;
-      if (body.gst_number !== undefined) patch.gstNumber = body.gst_number;
+      if (body.gst_number !== undefined) {
+        patch.gstNumber = body.gst_number ? normaliseGstin(body.gst_number) : null;
+      }
+      // An empty description is stored as "none".
+      if (body.description !== undefined) patch.description = body.description || null;
+      if (body.domains !== undefined) patch.domains = body.domains;
 
       const updated = await getOrganisationStore().update(org.id, patch);
       if (!updated.ok) {
@@ -214,20 +266,13 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         if (updated.error.code === 'NOT_FOUND') throw httpError('NOT_FOUND');
         dbDown('orgStore.update', updated.error.message);
       }
-      const fields = Object.keys(body);
       req.log.info({
         operation: 'console.org.update',
         status: 'success',
         actor_id: actor.userId,
         target_id: org.id,
-        fields,
+        fields: Object.keys(body),
       });
-      await notifyOwnerOfAdminAction(
-        actor,
-        updated.value,
-        `updated ${listPhrase(fields.map((f) => FIELD_LABELS[f] ?? f))}`,
-        req.log,
-      );
       return reply.status(200).send(toWireOrg(updated.value));
     },
   );

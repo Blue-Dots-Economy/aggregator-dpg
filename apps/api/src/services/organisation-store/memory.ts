@@ -90,6 +90,8 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       locations: input.locations ?? [],
       legalName: null,
       gstNumber: null,
+      description: null,
+      domains: [],
     };
     this.byId.set(row.id, row);
     return { ok: true, value: row };
@@ -191,6 +193,8 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       locations: patch.locations ?? existing.locations,
       legalName: patch.legalName !== undefined ? patch.legalName : existing.legalName,
       gstNumber: patch.gstNumber !== undefined ? patch.gstNumber : existing.gstNumber,
+      description: patch.description !== undefined ? patch.description : existing.description,
+      domains: patch.domains ?? existing.domains,
       state: patch.state !== undefined ? patch.state : existing.state,
       // As in Postgres: a recorded login is only ever added, never cleared.
       ownerKcSub: patch.ownerKcSub ? patch.ownerKcSub : existing.ownerKcSub,

@@ -100,6 +100,8 @@ export function toWireOrg(
     locations: o.locations,
     legal_name: o.legalName,
     gst_number: o.gstNumber,
+    description: o.description,
+    domains: o.domains,
     created_at: o.createdAt.toISOString(),
     updated_at: o.updatedAt.toISOString(),
   };
@@ -240,15 +242,4 @@ export async function notifyOwnerOfAdminAction(
       code: sent.error.code,
     });
   }
-}
-
-/**
- * Joins field names into a phrase: `["url", "locations"]` → "url and locations".
- *
- * @param names - Field labels.
- * @returns The phrase.
- */
-export function listPhrase(names: string[]): string {
-  if (names.length <= 1) return names[0] ?? '';
-  return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 }

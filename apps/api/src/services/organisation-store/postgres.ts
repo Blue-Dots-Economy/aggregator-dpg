@@ -440,6 +440,8 @@ function toDomain(row: JoinedRow): Organisation {
     locations: (o.locations ?? []) as BecknLocation[],
     legalName: o.legalName,
     gstNumber: o.gstNumber,
+    description: o.description,
+    domains: o.domains ?? [],
   };
 }
 

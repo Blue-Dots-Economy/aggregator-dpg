@@ -61,6 +61,10 @@ export interface Organisation {
   locations: BecknLocation[];
   legalName: string | null;
   gstNumber: string | null;
+  /** The owner's description of the org. Informational only. */
+  description: string | null;
+  /** Network domain ids the org says it serves; `[]` = not stated. Grants nothing. */
+  domains: string[];
 }
 
 export interface CreateOrgInput {
@@ -98,6 +102,8 @@ export interface UpdateOrgPatch {
   locations?: BecknLocation[];
   legalName?: string | null;
   gstNumber?: string | null;
+  description?: string | null;
+  domains?: string[];
   /** Who made this write: an admin user id, `'self'` or `'admin'`. */
   updatedBy?: string;
 }

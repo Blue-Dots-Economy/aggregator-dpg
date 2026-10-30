@@ -1,9 +1,10 @@
 /**
  * Organisation detail page: owner, counts and the details form.
  *
- * The Default org and the root are read-only. Only the network admin can
- * rename an org, re-grant an active org's owner access, or assign roles to its
- * owner.
+ * The Default org and the root are read-only. Only the org's owner edits its
+ * details, the name included; the network admin sees them read-only. Only the
+ * network admin can re-grant an active org's owner access, or assign roles to
+ * its owner.
  */
 
 import Link from 'next/link';
@@ -28,6 +29,7 @@ import { OrgEditForm } from '@/components/console/OrgEditForm';
 import { RolesPanel } from '@/components/console/RolesPanel';
 import { OwnerAccessRepair } from '@/components/console/OwnerAccessRepair';
 import { can } from '@/lib/capabilities';
+import { networkDomains } from '@/lib/console-domains.server';
 
 export default async function ConsoleOrgPage({
   params,
@@ -49,6 +51,7 @@ export default async function ConsoleOrgPage({
         ])
       : [null, null];
   const editable = org.org_type === 'aggregator' && !org.is_default;
+  const domains = await networkDomains();
   const canRepair = actor.me.is_network_admin && editable && org.status === 'active';
   return (
     <>
@@ -99,7 +102,8 @@ export default async function ConsoleOrgPage({
         <OrgEditForm
           org={org}
           editable={editable}
-          canRename={actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer')}
+          canEdit={owner.id === actor.me.user.id}
+          domains={domains}
         />
         {ownerRoles && catalogue ? (
           <RolesPanel

@@ -375,6 +375,13 @@ export const organisations = pgTable(
       .default(sql`'[]'::jsonb`),
     legalName: text('legal_name'),
     gstNumber: text('gst_number'),
+    // Written by the org owner in the console. Informational only.
+    description: text('description'),
+    // Network domain ids the org says it serves; `{}` = not stated. Grants nothing.
+    domains: text('domains')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     // Schema-driven registration fields. Also holds `website`, `address` and
     // `coordinates`, which are copied into `url` and `locations`.
     profile: jsonb('profile')
