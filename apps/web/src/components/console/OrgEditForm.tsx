@@ -9,6 +9,7 @@
  */
 
 import { useState, type SubmitEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import type { Org } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
@@ -38,6 +39,7 @@ export function OrgEditForm({
   knownAsOptions?: readonly KnownAsChoice[];
 }>) {
   const t = useTranslations('console');
+  const router = useRouter();
   const [current, setCurrent] = useState(org);
   const [name, setName] = useState(org.name);
   const [url, setUrl] = useState(org.url ?? '');
@@ -48,6 +50,18 @@ export function OrgEditForm({
   const currentAllowed = knownAsOptions.some((o) => o.key === current.known_as);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // A newer org from the page (after a move or a refresh) replaces the form's copy.
+  const [seenUpdatedAt, setSeenUpdatedAt] = useState(org.updated_at);
+  if (org.updated_at !== seenUpdatedAt) {
+    setSeenUpdatedAt(org.updated_at);
+    setCurrent(org);
+    setName(org.name);
+    setUrl(org.url ?? '');
+    setLegalName(org.legal_name ?? '');
+    setGst(org.gst_number ?? '');
+    setKnownAs(org.known_as ?? '');
+  }
 
   async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -68,6 +82,7 @@ export function OrgEditForm({
       setCurrent(r.data);
       setKnownAs(r.data.known_as ?? '');
       setMessage(t('org.saved'));
+      router.refresh();
     } else {
       setMessage(t(errorKey(r)));
     }

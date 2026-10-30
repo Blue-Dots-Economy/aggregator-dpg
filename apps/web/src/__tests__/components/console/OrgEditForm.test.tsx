@@ -10,6 +10,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { Org } from '@aggregator-dpg/shared-primitives/user-org';
+
+const refresh = vi.fn();
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
+
 import { OrgEditForm } from '@/components/console/OrgEditForm';
 
 const baseOrg: Org = {
@@ -207,6 +211,47 @@ describe('<OrgEditForm />', () => {
         ),
       );
       expect(await screen.findByText(messages.console.org.saved)).toBeInTheDocument();
+    });
+
+    it('refreshes the page after a save so the rest of the page follows', async () => {
+      global.fetch = respond(
+        { ...baseOrg, known_as: 'district', known_as_name: 'District' },
+        200,
+      ) as never;
+      renderForm(baseOrg, true, true, KNOWN_AS);
+      fireEvent.change(screen.getByLabelText(messages.console.org.known_as), {
+        target: { value: 'district' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
+      await waitFor(() => expect(refresh).toHaveBeenCalled());
+    });
+
+    it('shows the newer values the page passes after a move', () => {
+      const { rerender } = renderForm(
+        { ...baseOrg, known_as: 'district', known_as_name: 'District', depth: 2 },
+        true,
+        true,
+        KNOWN_AS,
+      );
+      const moved: Org = {
+        ...baseOrg,
+        known_as: 'training_partner',
+        known_as_name: 'Training Partner',
+        depth: 3,
+        parent_id: 'p2',
+        updated_at: '2026-02-01T00:00:00Z',
+      };
+      const atDepth3 = [
+        { key: 'aggregator', name: 'Aggregator' },
+        { key: 'training_partner', name: 'Training Partner' },
+      ];
+      rerender(
+        <NextIntlClientProvider locale="en" messages={messages}>
+          <OrgEditForm org={moved} editable canRename knownAsOptions={atDepth3} />
+        </NextIntlClientProvider>,
+      );
+      expect(screen.getByLabelText(messages.console.org.known_as)).toHaveValue('training_partner');
+      expect(screen.queryByText(messages.console.org.known_as_not_allowed)).toBeNull();
     });
 
     it('shows a key no longer configured as the raw key with a note', () => {
