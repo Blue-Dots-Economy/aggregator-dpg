@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type JSX, type ReactNode } from 'react';
 import { RegisterPageShell } from '../RegisterPageShell';
+import { DEFAULT_MAX_INVITES } from '../../../../lib/invite-limit';
 
 export interface OwnerInviteViewProps {
   /** The owner grant token from the deep-link query string. */
@@ -35,9 +36,6 @@ interface InviteRow {
   name: string;
   email: string;
 }
-
-/** Default cap when the server passes none; matches the API default. */
-export const DEFAULT_MAX_INVITES = 10;
 
 let rowSeq = 0;
 /** Builds a fresh empty row with a stable id (avoids array-index keys). */

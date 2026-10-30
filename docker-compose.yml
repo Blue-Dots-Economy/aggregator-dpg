@@ -326,6 +326,9 @@ services:
       # Max invites an org owner can send per submission. Keep in step with the
       # api's INVITE_MINT_MAX_RECIPIENTS. Empty → the app's default of 10.
       INVITE_MAX_RECIPIENTS: ${INVITE_MAX_RECIPIENTS:-}
+      # Invites per organisation per hour, shown on the console invite page.
+      # Keep in step with the api's value. Empty → the app's default of 200.
+      INVITE_MINT_RATE_MAX_PER_WINDOW: ${INVITE_MINT_RATE_MAX_PER_WINDOW:-}
       # Registration-form address autocomplete + institute picker. All four are
       # runtime values read per request by the root layout, so a change needs a
       # container restart and never an image rebuild — same reason the two above

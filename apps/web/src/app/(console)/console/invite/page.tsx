@@ -12,8 +12,12 @@ import { InviteForm } from '@/components/console/InviteForm';
 import { ConsoleSection } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
 import { getConsoleActor } from '@/lib/console-actor';
-import { canInvite, canManageOrg } from '@/lib/capabilities';
+import { canInvite, canManageOrg, canViewCoordinators } from '@/lib/capabilities';
+import { resolveHourlyInvites, resolveMaxInvites } from '@/lib/invite-limit';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
+
+const COORDINATORS_HREF = '/console/coordinators';
 
 export default async function ConsoleInvitePage() {
   const t = await getTranslations('console');
@@ -28,8 +32,25 @@ export default async function ConsoleInvitePage() {
   const orgs = page.orgs
     .filter((o) => !o.is_default && (!actor.ok || canManageOrg(actor.me, o.id)))
     .map((o) => ({ id: o.id, name: o.name }));
+  const coordinatorsHref = actor.ok && canViewCoordinators(actor.me) ? COORDINATORS_HREF : null;
   return (
     <>
+      {coordinatorsHref ? (
+        <nav aria-label={t('invite.breadcrumb')} className="mb-3 text-[13px]">
+          <ol className="flex items-center gap-1.5 text-(--bd-fg-muted)">
+            <li>
+              <Link
+                href={coordinatorsHref}
+                className="font-medium text-primary-600 hover:underline"
+              >
+                {t('nav.coordinators')}
+              </Link>
+            </li>
+            <li aria-hidden>›</li>
+            <li aria-current="page">{t('invite.breadcrumb_current')}</li>
+          </ol>
+        </nav>
+      ) : null}
       <Topbar title={t('invite.heading')} subtitle={t('invite.subtitle')} />
       <div className="flex flex-col gap-6">
         {orgs.length === 0 ? (
@@ -37,7 +58,12 @@ export default async function ConsoleInvitePage() {
             <p className="text-[13.5px] text-ink-500">{t('invite.no_orgs')}</p>
           </ConsoleSection>
         ) : (
-          <InviteForm orgs={orgs} />
+          <InviteForm
+            orgs={orgs}
+            maxRecipients={resolveMaxInvites()}
+            hourlyLimit={resolveHourlyInvites()}
+            coordinatorsHref={coordinatorsHref}
+          />
         )}
       </div>
     </>

@@ -66,7 +66,7 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
             ],
           }}
         />
-        <main className="flex-1 min-w-0 overflow-x-hidden">
+        <main className="flex-1 min-w-0 overflow-x-clip">
           <div className="max-w-[1480px] mx-auto px-4 py-5 sm:px-6 lg:px-8 lg:py-7">{children}</div>
         </main>
       </div>

@@ -14,6 +14,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { MailerAdapter } from '@aggregator-dpg/mailer';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
+import { isEmailAddress } from '@aggregator-dpg/shared-primitives/phone';
 import { config } from '../../config.js';
 import { getUserStore } from '../user-store/index.js';
 import { getOrganisationStore } from '../organisation-store/index.js';
@@ -50,9 +51,6 @@ export interface MintBatchDeps {
   createdBy: string;
   log: FastifyBaseLogger;
 }
-
-// Simple email check to reject obvious garbage. Linear: no catastrophic backtracking.
-const EMAIL_RE = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
 
 /** Builds the coordinator registration URL carrying an invite token. */
 function inviteUrl(token: string): string {
@@ -153,7 +151,7 @@ export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary>
 
   for (const recipient of recipients) {
     const email = recipient.email.trim().toLowerCase();
-    if (!EMAIL_RE.test(email)) {
+    if (!isEmailAddress(email)) {
       summary.invalid.push({ email: recipient.email, reason: 'invalid_email' });
       continue;
     }

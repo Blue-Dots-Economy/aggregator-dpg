@@ -806,15 +806,64 @@
     },
     "invite": {
       "heading": "Invite coordinators",
+      "subtitle": "Add their email addresses. Each person gets a registration link, and joins once you approve them.",
       "org": "Organisation",
+      "inviting_to": "Inviting to",
       "recipients": "Email addresses",
-      "recipients_hint": "One address per line.",
+      "recipients_hint": "Paste a list, or type and press <kbd>Enter</kbd> or <kbd>,</kbd>",
+      "count": "{count} of {max}",
+      "placeholder": "asha@example.org, ravi@example.org",
+      "add_more": "Add more…",
+      "remove": "Remove {email}",
+      "people": "{count, plural, one {# person} other {# people}}",
+      "names_hint": "Names are optional. They are used in the email greeting.",
+      "name_label": "Name for {email}",
+      "name_placeholder": "Name (optional)",
+      "invalid_count": "{count, plural, one {# invalid email} other {# invalid emails}}. Fix or remove before sending.",
       "send": "Send invites",
-      "result": "Sent {sent}, resent {resent}.",
-      "invalid": "Not sent:",
-      "existing": "Already in this organisation:",
+      "send_count": "{count, plural, one {Send # invite} other {Send # invites}}",
+      "clear": "Clear all",
+      "sent": "{count, plural, =0 {No invites sent} one {# invite sent} other {# invites sent}}",
+      "not_sent": "Not sent:",
+      "reason": {
+        "active": "already active",
+        "pending": "waiting for your review",
+        "inactive": "previously rejected",
+        "retired": "deactivated",
+        "invalid_email": "not a valid email",
+        "duplicate_in_batch": "listed twice",
+        "store_error": "could not be sent, try again",
+        "other": "not sent"
+      },
+      "too_many": "Too many emails in one send. Send fewer at a time.",
+      "rate_limited": "This organisation has sent too many invites recently. Try again in {minutes, plural, one {# minute} other {# minutes}}.",
+      "dismiss": "Dismiss",
+      "help": {
+        "heading": "How it works",
+        "send": {
+          "title": "You send the invite",
+          "body": "Each person gets an email with their own registration link."
+        },
+        "register": {
+          "title": "They register",
+          "body": "They open the link and fill in the registration form."
+        },
+        "approve": {
+          "title": "You approve",
+          "body": "Review them under <link>Coordinators</link>. Once approved, they can sign in."
+        },
+        "limits": "Up to {max} emails per send, and {hourly} invites per organisation per hour."
+      },
       "no_orgs": "None of your organisations accepts invites.",
-      "subtitle": "Invite coordinators to one of your organisations by email."
+      "role": "Role: Coordinator",
+      "breadcrumb": "Breadcrumb",
+      "breadcrumb_current": "Invite",
+      "limit_reached": "Limit reached",
+      "skipped": "{count, plural, one {# email} other {# emails}} skipped. The limit is {max} per send.",
+      "remove_invalid": "Remove them",
+      "note_empty": "Add at least one email to continue.",
+      "note_fix": "Fix the highlighted emails to continue.",
+      "sending": "Sending…"
     },
     "account": {
       "heading": "My account",
