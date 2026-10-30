@@ -758,11 +758,11 @@
       "network_tag": "The network",
       "col_parent": "Parent organisation",
       "subtitle_owner": "Your organisations and every organisation below them. Those below are view-only.",
-      "yours": "Your organisation",
       "tile": {
         "all": {
           "label": "सभी संगठन",
-          "sub": "नेटवर्क में, डिफ़ॉल्ट शामिल नहीं"
+          "sub": "नेटवर्क में, डिफ़ॉल्ट शामिल नहीं",
+          "sub_owner": "आपकी और उनके नीचे की"
         },
         "active": {
           "label": "सक्रिय",
@@ -1088,7 +1088,6 @@
       "tile_filtering": "केवल ये दिखाई जा रही हैं"
     },
     "org_home": {
-      "heading": "आपका संगठन",
       "subtitle": "आपका संगठन और उसके समन्वयक, नए पहले।",
       "owner_note": "आप इस संगठन के स्वामी हैं",
       "invite": "समन्वयकों को आमंत्रित करें",

@@ -758,11 +758,11 @@
       "network_tag": "The network",
       "col_parent": "Parent organisation",
       "subtitle_owner": "Your organisations and every organisation below them. Those below are view-only.",
-      "yours": "Your organisation",
       "tile": {
         "all": {
           "label": "All organisations",
-          "sub": "In the network, Default not counted"
+          "sub": "In the network, Default not counted",
+          "sub_owner": "Yours and those below"
         },
         "active": {
           "label": "Active",
@@ -1088,7 +1088,6 @@
       "tile_filtering": "Showing only these"
     },
     "org_home": {
-      "heading": "Your organisation",
       "subtitle": "Your organisation and its coordinators, newest first.",
       "owner_note": "You are the organisation owner",
       "invite": "Invite coordinators",

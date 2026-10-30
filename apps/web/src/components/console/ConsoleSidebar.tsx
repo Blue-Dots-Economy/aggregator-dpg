@@ -35,10 +35,10 @@ export function ConsoleSidebar({
 }) {
   const t = useTranslations('console');
   const nav: NavItem[] = [
+    { to: '/console/orgs', label: t('nav.organisations'), icon: 'briefcase' as const },
     ...(homeIsCoordinators
       ? [{ to: '/console', label: t('nav.coordinators'), icon: 'users' as const, exact: true }]
       : []),
-    { to: '/console/orgs', label: t('nav.organisations'), icon: 'briefcase' as const },
     ...(canManage
       ? [{ to: '/console/coordinators', label: t('nav.coordinators'), icon: 'users' as const }]
       : []),

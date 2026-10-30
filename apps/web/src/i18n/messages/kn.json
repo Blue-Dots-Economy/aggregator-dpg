@@ -758,11 +758,11 @@
       "network_tag": "The network",
       "col_parent": "Parent organisation",
       "subtitle_owner": "Your organisations and every organisation below them. Those below are view-only.",
-      "yours": "Your organisation",
       "tile": {
         "all": {
           "label": "ಎಲ್ಲಾ ಸಂಸ್ಥೆಗಳು",
-          "sub": "ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ, ಡೀಫಾಲ್ಟ್ ಎಣಿಸಿಲ್ಲ"
+          "sub": "ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ, ಡೀಫಾಲ್ಟ್ ಎಣಿಸಿಲ್ಲ",
+          "sub_owner": "ನಿಮ್ಮದು ಮತ್ತು ಅದರ ಕೆಳಗಿನವು"
         },
         "active": {
           "label": "ಸಕ್ರಿಯ",
@@ -1088,7 +1088,6 @@
       "tile_filtering": "ಇವನ್ನು ಮಾತ್ರ ತೋರಿಸಲಾಗುತ್ತಿದೆ"
     },
     "org_home": {
-      "heading": "ನಿಮ್ಮ ಸಂಸ್ಥೆ",
       "subtitle": "ನಿಮ್ಮ ಸಂಸ್ಥೆ ಮತ್ತು ಅದರ ಸಂಯೋಜಕರು, ಹೊಸದು ಮೊದಲು.",
       "owner_note": "ನೀವು ಈ ಸಂಸ್ಥೆಯ ಮಾಲೀಕರು",
       "invite": "ಸಂಯೋಜಕರನ್ನು ಆಹ್ವಾನಿಸಿ",
