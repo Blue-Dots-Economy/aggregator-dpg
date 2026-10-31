@@ -31,7 +31,8 @@ import { splitName } from '../services/name.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import { checkOrgInviteResendRate } from '../services/org-invite-resend-rate.js';
 import { slugFromName } from '../services/slug.js';
-import { orgLocationsFrom, orgUrlFrom } from '../services/org-location.js';
+import { orgLocationsFrom } from '../services/org-location.js';
+import { validateOrgRegistration } from '../services/org-schema-validator.js';
 
 /** Attempts at a fresh random-suffixed slug when one collides. */
 const ORG_SLUG_RETRIES = 3;
@@ -45,50 +46,48 @@ import { stampConsent } from '../services/registration-consent.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
 import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
 
-const OrgCreateBodySchema = z.object({
-  display_name: z.string().min(1).max(200),
-  state: z.string().max(200).optional(),
-  owner: z.object({
-    name: z.string().min(1).max(200),
-    email: z.string().email(),
-    phone: z.string().min(1),
-  }),
-  consent: z.object({
-    value: z.literal(true),
-    given_at: z.string(),
-    valid_till: z.string(),
-  }),
-  // Schema-driven fields, present only where the network's org-registration
-  // schema declares them. Stored in `profile`, not in columns.
-  website: z.string().url().max(2048).optional(),
-  aggregator_type: z.array(z.enum(['seeker', 'provider', 'service_provider'])).optional(),
-  // Not an enum: each network's schema defines its own values.
-  organisation_type: z.string().max(100).optional(),
-  organisation_sub_type_educational: z.string().max(100).optional(),
-  organisation_sub_type_non_educational: z.string().max(100).optional(),
-  management_type: z.enum(['private', 'government', 'ngo', 'other']).optional(),
-  /**
-   * The org's address, as picked from the autocomplete.
-   *
-   * Every part is declared so older clients' bodies are not stripped by `z.object`.
-   */
-  address: z
-    .object({
-      streetAddress: z.string().max(500).optional(),
-      addressLocality: z.string().max(200).optional(),
-      addressDistrict: z.string().max(200).optional(),
-      addressRegion: z.string().max(200).optional(),
-      postalCode: z.string().max(20).optional(),
-      addressCountry: z.string().max(100).optional(),
-    })
-    .optional(),
-  /**
-   * `[longitude, latitude]` for the picked address, GeoJSON order.
-   *
-   * Absent when the user typed an address without picking a suggestion.
-   */
-  coordinates: z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]).optional(),
-});
+/**
+ * The fixed parts of an org-registration body. Every other key is a field of
+ * the deployment's org-registration schema: it passes through here and is
+ * checked by {@link validateOrgRegistration}, so a schema field needs no code.
+ */
+const OrgCreateBodySchema = z
+  .object({
+    display_name: z.string().min(1).max(200),
+    state: z.string().max(200).optional(),
+    owner: z.object({
+      name: z.string().min(1).max(200),
+      email: z.string().email(),
+      phone: z.string().min(1),
+    }),
+    consent: z.object({
+      value: z.literal(true),
+      given_at: z.string(),
+      valid_till: z.string(),
+    }),
+    /**
+     * The org's address, as picked from the autocomplete.
+     *
+     * Every part is declared so older clients' bodies are not stripped by `z.object`.
+     */
+    address: z
+      .object({
+        streetAddress: z.string().max(500).optional(),
+        addressLocality: z.string().max(200).optional(),
+        addressDistrict: z.string().max(200).optional(),
+        addressRegion: z.string().max(200).optional(),
+        postalCode: z.string().max(20).optional(),
+        addressCountry: z.string().max(100).optional(),
+      })
+      .optional(),
+    /**
+     * `[longitude, latitude]` for the picked address, GeoJSON order.
+     *
+     * Absent when the user typed an address without picking a suggestion.
+     */
+    coordinates: z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]).optional(),
+  })
+  .passthrough();
 
 /**
  * Body keys stored elsewhere, so never copied into `profile`.
@@ -103,19 +102,24 @@ const ORG_COLUMN_BACKED_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Collects the schema-driven fields of an org-registration body into the `profile` payload.
+ * Builds the `profile` payload: the schema-validated fields, plus the picked
+ * coordinates, minus the keys stored elsewhere.
  *
- * A new schema field needs only an entry on {@link OrgCreateBodySchema}.
- *
- * @param body - Validated org-registration body.
+ * @param schemaValues - Values {@link validateOrgRegistration} accepted.
+ * @param coordinates - The picked address coordinates, when any.
  * @returns The `profile` payload; `{}` when the deployment declares no extra fields.
  */
-function buildOrgProfile(body: z.infer<typeof OrgCreateBodySchema>): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(body).filter(
+function buildOrgProfile(
+  schemaValues: Record<string, unknown>,
+  coordinates: readonly [number, number] | undefined,
+): Record<string, unknown> {
+  const profile = Object.fromEntries(
+    Object.entries(schemaValues).filter(
       ([key, value]) => !ORG_COLUMN_BACKED_KEYS.has(key) && value !== undefined,
     ),
   );
+  if (coordinates) profile['coordinates'] = coordinates;
+  return profile;
 }
 
 const OrgCreatedResponseSchema = z
@@ -166,6 +170,17 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
       await recordRouteCaller(req, callerFromAny(auth.context));
 
       const body = req.body as z.infer<typeof OrgCreateBodySchema>;
+
+      // The deployment's org-registration schema decides the other fields.
+      const schemaCheck = await validateOrgRegistration(body);
+      if (!schemaCheck.ok) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: Object.entries(schemaCheck.errors)
+            .map(([field, message]) => `${field}: ${message}`)
+            .join('; '),
+          fields: { field_errors: schemaCheck.errors },
+        });
+      }
 
       const phoneResult = normalisePhone(body.owner.phone);
       if (!phoneResult.ok) {
@@ -370,10 +385,9 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           ownerEmail: ownerEmail,
           ownerPhone: phoneE164,
           ownerName: body.owner.name,
-          // The same values are also kept in `profile` and `state`.
-          url: orgUrlFrom(body.website),
+          // The address is also kept in `profile` and `state`.
           locations: orgLocationsFrom(body.address, body.state, body.coordinates),
-          profile: buildOrgProfile(body),
+          profile: buildOrgProfile(schemaCheck.values, body.coordinates),
           // The schema file that resolved; NULL means unknown.
           profileRef: orgProfileRef,
           recordConsent,

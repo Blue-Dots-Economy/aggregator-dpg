@@ -25,11 +25,6 @@ import {
   OrgSearchResponseSchema,
   OwnerAccessResponseSchema,
 } from '@aggregator-dpg/shared-primitives/user-org';
-import {
-  isValidGstin,
-  isValidWebsite,
-  normaliseGstin,
-} from '@aggregator-dpg/shared-primitives/org-details';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { getUserStore } from '../services/user-store/index.js';
@@ -41,7 +36,7 @@ import {
 import { isNetworkAdmin, requireActor, type Actor } from '../services/auth/actor/index.js';
 import { reachableOrgIds, reachesOrg } from '../services/authz/scope.js';
 import { decideOrg, grantOwnerAccess } from '../services/decisions/org.js';
-import { getNetworkConfig } from '../services/network-config.js';
+import { validateOrgUpdate } from '../services/org-schema-validator.js';
 import {
   decodeOrgCursor,
   encodeOrgCursor,
@@ -102,46 +97,6 @@ function requireNetworkAdmin(actor: Actor): void {
  */
 function requireOrgOwner(actor: Actor, org: Organisation): void {
   if (org.ownerUserId !== actor.userId) throw httpError('FORBIDDEN');
-}
-
-/** Label of each format-checked field, for the error `detail`. */
-const FIELD_LABELS: Record<string, string> = {
-  url: 'Website',
-  gst_number: 'GST number',
-  domains: 'Domains',
-};
-
-/**
- * Refuses an update whose website, GST number or domains are malformed, with
- * one 400 naming every bad field (`fields.field_errors`: field → message).
- * Only fields the body sends are checked, so a stored value is never re-checked.
- *
- * @throws {HttpError} SCHEMA_VALIDATION.
- */
-async function assertValidDetails(
-  body: z.infer<typeof OrgMetadataUpdateRequestSchema>,
-): Promise<void> {
-  const errors: Record<string, string> = {};
-  if (body.url && !isValidWebsite(body.url)) {
-    errors['url'] = 'Please enter a website starting with https://';
-  }
-  if (body.gst_number && !isValidGstin(body.gst_number)) {
-    errors['gst_number'] = 'Please enter a valid GSTIN.';
-  }
-  if (body.domains !== undefined) {
-    const networkCfg = await getNetworkConfig();
-    const unknown = body.domains.filter((d) => !networkCfg.domainIds.includes(d));
-    if (unknown.length > 0) {
-      errors['domains'] = `This network has no domain ${unknown.join(', ')}.`;
-    }
-  }
-  const fields = Object.keys(errors);
-  if (fields.length > 0) {
-    throw httpError('SCHEMA_VALIDATION', {
-      detail: fields.map((f) => `${FIELD_LABELS[f]}: ${errors[f]}`).join('; '),
-      fields: { field_errors: errors },
-    });
-  }
 }
 
 /**
@@ -229,7 +184,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: "Update an organisation's details",
         description:
-          "Every field, the name included, is the org's owner's only (the slug never changes). The network admin views other owners' orgs but does not edit them (403). The Default org's details are not editable. url, locations, legal name and GST number are rendered for every coordinator of the org; description and domains are shown in the console only.",
+          "Every field, the name included, is the org's owner's only (the slug never changes). The network admin views other owners' orgs but does not edit them (403). The Default org's details are not editable. `profile` changes fields of the deployment's org-registration schema (e.g. website, GST number, domains): only fields marked x-updatable, checked against that schema; null removes a field. A bad field answers 400 with fields.field_errors and saves nothing. Locations, legal name, website and GST number are rendered for every coordinator of the org; description is shown in the console only.",
         params: IdParamsSchema,
         body: OrgMetadataUpdateRequestSchema,
         response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
@@ -244,21 +199,29 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         throw httpError('CONFLICT', { detail: "This organisation's details are not editable." });
       }
       requireOrgOwner(actor, org);
-      await assertValidDetails(body);
+      // Schema fields: only those marked x-updatable, checked against the schema.
+      let profileMerge: Record<string, unknown> | undefined;
+      if (body.profile !== undefined) {
+        const checked = await validateOrgUpdate(body.profile);
+        if (!checked.ok) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: Object.entries(checked.errors)
+              .map(([field, message]) => `${field}: ${message}`)
+              .join('; '),
+            fields: { field_errors: checked.errors },
+          });
+        }
+        profileMerge = checked.values;
+      }
       await guardWriteRate(actor, reply);
 
       const patch: UpdateOrgPatch = { updatedBy: actor.userId };
       if (body.name !== undefined) patch.displayName = body.name;
-      // An empty website or GST number clears it.
-      if (body.url !== undefined) patch.url = body.url || null;
       if (body.locations !== undefined) patch.locations = body.locations;
       if (body.legal_name !== undefined) patch.legalName = body.legal_name;
-      if (body.gst_number !== undefined) {
-        patch.gstNumber = body.gst_number ? normaliseGstin(body.gst_number) : null;
-      }
       // An empty description is stored as "none".
       if (body.description !== undefined) patch.description = body.description || null;
-      if (body.domains !== undefined) patch.domains = body.domains;
+      if (profileMerge) patch.profileMerge = profileMerge;
 
       const updated = await getOrganisationStore().update(org.id, patch);
       if (!updated.ok) {

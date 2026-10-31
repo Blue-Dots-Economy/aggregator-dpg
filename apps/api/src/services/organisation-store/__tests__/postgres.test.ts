@@ -131,12 +131,9 @@ function makeRow(overrides: Partial<Organisation> = {}): Organisation {
     updatedBy: null,
     rejectedAt: null,
     isDefault: false,
-    url: null,
     locations: [],
     legalName: null,
-    gstNumber: null,
     description: null,
-    domains: [],
     ...overrides,
   };
 }

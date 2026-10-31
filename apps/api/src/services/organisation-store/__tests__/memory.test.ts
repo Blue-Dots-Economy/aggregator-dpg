@@ -293,7 +293,7 @@ describe('organisations scoping (0028)', () => {
     expect(d.ok && d.value).not.toBeNull();
   });
 
-  it('carries url / locations from create', async () => {
+  it('carries locations and profile from create', async () => {
     const store = new OrganisationStoreFake();
     const loc = [{ geo: { type: 'Point' as const, coordinates: [1, 2] }, address: {} }];
     const r = await store.create({
@@ -301,10 +301,10 @@ describe('organisations scoping (0028)', () => {
       slug: 's-1',
       displayName: 'S',
       ownerEmail: 's@x.org',
-      url: 'https://s.example',
       locations: loc,
+      profile: { website: 'https://s.example' },
     });
-    expect(r.ok && r.value.url).toBe('https://s.example');
+    expect(r.ok && r.value.profile).toEqual({ website: 'https://s.example' });
     expect(r.ok && r.value.locations).toEqual(loc);
     expect(r.ok && r.value.isDefault).toBe(false);
   });
@@ -444,16 +444,27 @@ describe('InMemoryOrganisationStore — listPending, search, delete and details'
     const a = await mk(store, 'det', 'det@x.org', '+919000000043');
     if (!a.ok) throw new Error('seed');
     const u = await store.update(a.value.id, {
-      url: 'https://det.example',
       legalName: 'Det Ltd',
-      gstNumber: 'GST123',
+      description: 'About Det.',
       state: 'KA',
       locations: [{ geo: { type: 'Point', coordinates: [1, 2] }, address: {} }],
     });
-    expect(u.ok && u.value.url).toBe('https://det.example');
     expect(u.ok && u.value.legalName).toBe('Det Ltd');
-    expect(u.ok && u.value.gstNumber).toBe('GST123');
+    expect(u.ok && u.value.description).toBe('About Det.');
     expect(u.ok && u.value.state).toBe('KA');
+  });
+
+  it('update merges profile keys: sets, removes on null, keeps the rest', async () => {
+    const store = new InMemoryOrganisationStore();
+    const a = await mk(store, 'prof', 'prof@x.org', '+919000000044');
+    if (!a.ok) throw new Error('seed');
+    await store.update(a.value.id, {
+      profileMerge: { website: 'https://p.example', gst_number: '27AAPFU0939F1ZV' },
+    });
+    const u = await store.update(a.value.id, {
+      profileMerge: { website: null, domains: ['seeker'] },
+    });
+    expect(u.ok && u.value.profile).toEqual({ gst_number: '27AAPFU0939F1ZV', domains: ['seeker'] });
   });
 
   it('deleteIfPending deletes a stale pending org, aborts on a false hook, skips a decided org', async () => {

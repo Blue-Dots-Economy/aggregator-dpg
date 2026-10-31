@@ -149,9 +149,9 @@ describe('user-org wire schemas', () => {
       url: null,
       locations: [location],
       legal_name: null,
-      gst_number: null,
       description: null,
-      domains: [],
+      profile: { website: 'https://x.test', domains: ['seeker'] },
+      profile_ref: 'org-registration.v1',
       created_at: 't',
       updated_at: 't',
     };
@@ -176,23 +176,16 @@ describe('user-org wire schemas', () => {
 
   it('org metadata update requires at least one field (the refine branch)', () => {
     expect(OrgMetadataUpdateRequestSchema.parse({ name: 'New Name' })).toBeTruthy();
-    expect(
-      OrgMetadataUpdateRequestSchema.parse({ url: 'https://x.test', legal_name: null }),
-    ).toBeTruthy();
+    expect(OrgMetadataUpdateRequestSchema.parse({ legal_name: null })).toBeTruthy();
     const empty = OrgMetadataUpdateRequestSchema.safeParse({});
     expect(empty.success).toBe(false);
     if (!empty.success) {
       expect(empty.error.issues[0].message).toMatch(/at least one field/);
     }
-    // The website format is the API's check (org-details); the schema bounds the length.
-    expect(OrgMetadataUpdateRequestSchema.safeParse({ url: 'not a url' }).success).toBe(true);
-    expect(
-      OrgMetadataUpdateRequestSchema.safeParse({ url: `https://${'a'.repeat(2041)}.org` }).success,
-    ).toBe(false);
     expect(OrgMetadataUpdateRequestSchema.safeParse({ name: 'x' }).success).toBe(false);
   });
 
-  it('org metadata update: description and domains', () => {
+  it('org metadata update: description and profile', () => {
     expect(OrgMetadataUpdateRequestSchema.parse({ description: '  About us  ' }).description).toBe(
       'About us',
     );
@@ -200,12 +193,17 @@ describe('user-org wire schemas', () => {
     expect(
       OrgMetadataUpdateRequestSchema.safeParse({ description: 'x'.repeat(1001) }).success,
     ).toBe(false);
-    expect(OrgMetadataUpdateRequestSchema.parse({ domains: [] }).domains).toEqual([]);
-    expect(OrgMetadataUpdateRequestSchema.parse({ domains: ['seeker', 'provider'] })).toBeTruthy();
+    // Schema fields pass through; the API checks them against the org schema.
     expect(
-      OrgMetadataUpdateRequestSchema.safeParse({ domains: ['seeker', 'seeker'] }).success,
-    ).toBe(false);
-    expect(OrgMetadataUpdateRequestSchema.safeParse({ domains: [''] }).success).toBe(false);
+      OrgMetadataUpdateRequestSchema.parse({
+        profile: { website: 'https://x.test', gst_number: null },
+      }).profile,
+    ).toEqual({ website: 'https://x.test', gst_number: null });
+    expect(OrgMetadataUpdateRequestSchema.safeParse({ profile: {} }).success).toBe(false);
+    // The fields that moved into the schema are no longer top-level keys.
+    for (const key of ['url', 'gst_number', 'domains']) {
+      expect(OrgMetadataUpdateRequestSchema.safeParse({ [key]: 'x' }).success).toBe(false);
+    }
   });
 
   it('parses the org decision and owner-access responses', () => {

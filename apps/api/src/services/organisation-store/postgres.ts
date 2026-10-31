@@ -78,7 +78,6 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
             state: input.state ?? null,
             orgOwner: ownerUserId,
             kcGroupId: input.kcGroupId ?? null,
-            url: input.url ?? null,
             locations: input.locations ?? [],
             profile: input.profile ?? {},
             profileRef: input.profileRef ?? null,
@@ -194,8 +193,12 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
 
   async update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<Organisation>> {
     // The owner's IdP login lives on the owner's account, not the org row.
-    const { ownerKcSub, displayName, ...rest } = patch;
-    const columns = displayName === undefined ? rest : { ...rest, name: displayName };
+    const { ownerKcSub, displayName, profileMerge, ...rest } = patch;
+    const columns: Record<string, unknown> =
+      displayName === undefined ? { ...rest } : { ...rest, name: displayName };
+    if (profileMerge && Object.keys(profileMerge).length > 0) {
+      columns['profile'] = mergedProfileSql(profileMerge);
+    }
     try {
       const updated = await getDb().transaction(async (tx) => {
         const rows = await tx
@@ -436,13 +439,32 @@ function toDomain(row: JoinedRow): Organisation {
     updatedBy: o.updatedBy,
     rejectedAt: o.rejectedAt,
     isDefault: o.orgType === 'aggregator' && o.slug === DEFAULT_ORG_SLUG,
-    url: o.url,
     locations: (o.locations ?? []) as BecknLocation[],
     legalName: o.legalName,
-    gstNumber: o.gstNumber,
     description: o.description,
-    domains: o.domains ?? [],
   };
+}
+
+/**
+ * SQL that merges `merge` into the stored `profile` in one statement, so a
+ * concurrent edit of other keys is not lost: non-null values replace, `null`
+ * removes the key, other keys are kept.
+ *
+ * @param merge - Keys to set or remove.
+ * @returns The `profile` value for an UPDATE's SET.
+ */
+function mergedProfileSql(merge: Record<string, unknown>): SQL {
+  const set: Record<string, unknown> = {};
+  const remove: string[] = [];
+  for (const [key, value] of Object.entries(merge)) {
+    if (value === null) remove.push(key);
+    else set[key] = value;
+  }
+  // One `- key` per removed key: a JS array parameter is not a Postgres array.
+  return remove.reduce<SQL>(
+    (expr, key) => sql`(${expr} - ${key}::text)`,
+    sql`(${organisations.profile} || ${JSON.stringify(set)}::jsonb)`,
+  );
 }
 
 /**

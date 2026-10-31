@@ -57,14 +57,10 @@ export interface Organisation {
   /** Whether this is the fixed Default org (slug {@link DEFAULT_ORG_SLUG}). */
   isDefault: boolean;
   /** Org details, shown for every coordinator of the org. */
-  url: string | null;
   locations: BecknLocation[];
   legalName: string | null;
-  gstNumber: string | null;
   /** The owner's description of the org. Informational only. */
   description: string | null;
-  /** Network domain ids the org says it serves; `[]` = not stated. Grants nothing. */
-  domains: string[];
 }
 
 export interface CreateOrgInput {
@@ -79,8 +75,7 @@ export interface CreateOrgInput {
   kcGroupId?: string | null;
   profile?: Record<string, unknown>;
   profileRef?: string | null;
-  /** Org details from the registration form's website and address. */
-  url?: string | null;
+  /** Org locations from the registration form's address. */
   locations?: BecknLocation[];
   /**
    * Writes the org's consent ledger row inside the create transaction.
@@ -98,12 +93,14 @@ export interface UpdateOrgPatch {
   /** Write-once rejection time; set to `null` to revive after cooling. */
   rejectedAt?: Date | null;
   /** Org details, edited from the console. */
-  url?: string | null;
   locations?: BecknLocation[];
   legalName?: string | null;
-  gstNumber?: string | null;
   description?: string | null;
-  domains?: string[];
+  /**
+   * Keys to merge into `profile`: each value replaces the stored one, `null`
+   * removes the key, keys not named are kept.
+   */
+  profileMerge?: Record<string, unknown>;
   /** Who made this write: an admin user id, `'self'` or `'admin'`. */
   updatedBy?: string;
 }

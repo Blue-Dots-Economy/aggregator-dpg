@@ -1,52 +1,10 @@
 /**
  * Unit tests for the organisation detail format rules
- * (`@aggregator-dpg/shared-primitives/org-details`): the https-only website
- * rule and the GSTIN format and check character.
+ * (`@aggregator-dpg/shared-primitives/org-details`): the GSTIN format and
+ * check character.
  */
 import { describe, expect, it } from 'vitest';
-import { isValidGstin, isValidWebsite, normaliseGstin } from '../org-details/index.js';
-
-describe('isValidWebsite', () => {
-  it.each([
-    'https://example.org',
-    'https://www.example.org/about?x=1',
-    'https://example.org/#team',
-    'https://sub.example.co.in',
-    'https://my-org.example.org',
-    'HTTPS://example.org',
-    'https://example.org:8443',
-    '  https://example.org  ',
-  ])('accepts %s', (value) => {
-    expect(isValidWebsite(value)).toBe(true);
-  });
-
-  it.each([
-    ['a bare domain', 'example.org'],
-    ['a www domain without a scheme', 'www.example.org'],
-    ['http', 'http://example.org'],
-    ['another scheme', 'ftp://example.org'],
-    ['a host with no dot', 'https://localhost'],
-    ['an IP address', 'https://192.168.1.10'],
-    ['a numeric top-level domain', 'https://example.123'],
-    ['a one-letter top-level domain', 'https://example.o'],
-    ['no host', 'https://'],
-    ['a label starting with a hyphen', 'https://-bad.example.org'],
-    ['credentials', 'https://user:pass@example.org'],
-    ['inner whitespace', 'https://exa mple.org'],
-    ['scheme without slashes', 'https:example.org'],
-    ['free text', 'not a url'],
-    ['empty', ''],
-  ])('refuses %s', (_label, value) => {
-    expect(isValidWebsite(value)).toBe(false);
-  });
-
-  it('stays fast on a long hostile input', () => {
-    const value = `https://${'a-'.repeat(5000)}!`;
-    const started = Date.now();
-    expect(isValidWebsite(value)).toBe(false);
-    expect(Date.now() - started).toBeLessThan(200);
-  });
-});
+import { isValidGstin, normaliseGstin } from '../org-details/index.js';
 
 describe('isValidGstin', () => {
   const VALID = ['27AAPFU0939F1ZV', '29AAGCB7383J1Z4', '29ABCDE1234F1ZW'];

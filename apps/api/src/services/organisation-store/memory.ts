@@ -86,12 +86,9 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       updatedBy: 'self',
       rejectedAt: null,
       isDefault: false,
-      url: input.url ?? null,
       locations: input.locations ?? [],
       legalName: null,
-      gstNumber: null,
       description: null,
-      domains: [],
     };
     this.byId.set(row.id, row);
     return { ok: true, value: row };
@@ -189,12 +186,12 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     const next: Organisation = {
       ...existing,
       displayName: patch.displayName ?? existing.displayName,
-      url: patch.url !== undefined ? patch.url : existing.url,
       locations: patch.locations ?? existing.locations,
       legalName: patch.legalName !== undefined ? patch.legalName : existing.legalName,
-      gstNumber: patch.gstNumber !== undefined ? patch.gstNumber : existing.gstNumber,
       description: patch.description !== undefined ? patch.description : existing.description,
-      domains: patch.domains ?? existing.domains,
+      profile: patch.profileMerge
+        ? mergeProfile(existing.profile, patch.profileMerge)
+        : existing.profile,
       state: patch.state !== undefined ? patch.state : existing.state,
       // As in Postgres: a recorded login is only ever added, never cleared.
       ownerKcSub: patch.ownerKcSub ? patch.ownerKcSub : existing.ownerKcSub,
@@ -315,4 +312,23 @@ function byName(a: Organisation, b: Organisation): number {
   if (an !== bn) return an < bn ? -1 : 1;
   if (a.id < b.id) return -1;
   return a.id > b.id ? 1 : 0;
+}
+
+/**
+ * Merges `merge` into `profile`: non-null values replace, `null` removes the key.
+ *
+ * @param profile - The stored profile.
+ * @param merge - Keys to set or remove.
+ * @returns A new profile object.
+ */
+function mergeProfile(
+  profile: Record<string, unknown>,
+  merge: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...profile };
+  for (const [key, value] of Object.entries(merge)) {
+    if (value === null) delete next[key];
+    else next[key] = value;
+  }
+  return next;
 }

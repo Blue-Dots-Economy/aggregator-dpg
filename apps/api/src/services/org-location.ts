@@ -1,9 +1,9 @@
 /**
  * Org-detail mapping for org registration (`@aggregator-dpg/api`).
  *
- * The org form's `website`, `address` (and legacy `state`) and picked
- * `coordinates` become the org's `url` and one Beckn location, matching
- * migration 0028. `addressDistrict` has no Beckn key; it stays in `profile`.
+ * The org form's `address` (and legacy `state`) and picked `coordinates`
+ * become one Beckn location, matching migration 0028. `addressDistrict` has
+ * no Beckn key; it stays in `profile`.
  */
 
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
@@ -21,16 +21,6 @@ export interface OrgFormAddress {
 /** A trimmed, non-empty string, or `undefined`. */
 function nz(v: string | null | undefined): string | undefined {
   return typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
-}
-
-/**
- * The org's `url` from its form's website.
- *
- * @param website - Submitted website, if any.
- * @returns The url, or `null`.
- */
-export function orgUrlFrom(website: string | null | undefined): string | null {
-  return nz(website) ?? null;
 }
 
 /**

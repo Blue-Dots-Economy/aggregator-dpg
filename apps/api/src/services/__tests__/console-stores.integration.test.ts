@@ -205,11 +205,18 @@ suite('console store methods (Postgres)', () => {
 
     it('records the editor and refuses a duplicate name', async () => {
       const edited = await orgs.update(ids.orgA, {
-        url: 'https://a.example',
+        profileMerge: { website: 'https://a.example', gst_number: '27AAPFU0939F1ZV' },
         updatedBy: 'admin-x',
       });
       expect(edited.ok && edited.value.updatedBy).toBe('admin-x');
-      expect(edited.ok && edited.value.url).toBe('https://a.example');
+      expect(edited.ok && edited.value.profile['website']).toBe('https://a.example');
+      // A merge keeps the other keys; null removes one.
+      const removed = await orgs.update(ids.orgA, {
+        profileMerge: { website: null },
+        updatedBy: 'admin-x',
+      });
+      expect(removed.ok && removed.value.profile['website']).toBeUndefined();
+      expect(removed.ok && removed.value.profile['gst_number']).toBe('27AAPFU0939F1ZV');
       const dup = await orgs.update(ids.orgA, { displayName: 'beta', updatedBy: 'admin-x' });
       expect(!dup.ok && dup.error.code).toBe('DUPLICATE_NAME');
     });

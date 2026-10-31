@@ -178,13 +178,16 @@ export const OrgSchema = z.object({
   org_type: OrgTypeSchema,
   status: UserOrgStatusSchema,
   is_default: z.boolean(),
-  url: z.string().nullable(),
   locations: z.array(BecknLocationSchema),
   legal_name: z.string().nullable(),
-  gst_number: z.string().nullable(),
   description: z.string().nullable(),
-  /** Network domain ids the org says it serves; `[]` = not stated. */
-  domains: z.array(z.string()),
+  /**
+   * Values of the deployment's org-registration schema fields (website, GST
+   * number, domains, …), keyed by field name.
+   */
+  profile: z.record(z.string(), z.unknown()),
+  /** The schema file that produced `profile`, e.g. `blue_dot/up-gzb/org-registration.v1`. */
+  profile_ref: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -227,24 +230,21 @@ export const OrgSearchResponseSchema = z.object({
 export type OrgSearchResponse = z.infer<typeof OrgSearchResponseSchema>;
 
 /**
- * `PATCH /v1/org/metadata/update/:id`. `name` is the network admin's only; every
- * other field is the org owner's only.
+ * `PATCH /v1/org/metadata/update/:id`, the org owner's only.
+ *
+ * `profile` holds schema fields to change: each value replaces the stored one,
+ * `null` removes it. The API checks them against the deployment's
+ * org-registration schema; only fields marked `x-updatable` are accepted.
  */
 export const OrgMetadataUpdateRequestSchema = z
   .object({
     name: z.string().trim().min(2).max(200).optional(),
-    /** `https://` only; the API checks the format (`org-details` `isValidWebsite`). */
-    url: z.string().trim().max(2048).nullable().optional(),
     locations: z.array(BecknLocationSchema).max(25).optional(),
     legal_name: z.string().trim().max(200).nullable().optional(),
-    /** A GSTIN; the API checks the format (`org-details` `isValidGstin`). */
-    gst_number: z.string().trim().max(32).nullable().optional(),
     description: z.string().trim().max(1000).nullable().optional(),
-    /** Network domain ids; `[]` clears the list. The API checks them against the network. */
-    domains: z
-      .array(z.string().min(1))
-      .max(50)
-      .refine((d) => new Set(d).size === d.length, { message: 'domains must be unique' })
+    profile: z
+      .record(z.string(), z.unknown())
+      .refine((p) => Object.keys(p).length > 0, { message: 'profile must name a field' })
       .optional(),
   })
   .strict()

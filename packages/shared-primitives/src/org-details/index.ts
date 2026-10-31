@@ -1,49 +1,13 @@
 /**
- * Format rules for an organisation's details, shared by the API (which
- * enforces them) and the console form (which checks before sending).
+ * GSTIN rules for an organisation's details, shared by the API (which
+ * enforces them for a schema field marked `x-check: "gstin"`) and the web
+ * forms (which check before sending). The GSTIN shape is also in the schema;
+ * the check character cannot be expressed there.
  *
  * Dependency-free so the web app can import it into the client bundle.
  *
  * @module @aggregator-dpg/shared-primitives/org-details
  */
-
-/** One DNS label: letters and digits, with inner hyphens. */
-const HOST_LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
-
-/** A top-level domain: letters only, at least two. */
-const TOP_LEVEL_LABEL = /^[a-z]{2,}$/;
-
-/** Required start of a website, compared case-insensitively. */
-const HTTPS_PREFIX = 'https://';
-
-/**
- * Whether `value` is an `https://` website with a real host name.
- *
- * Refuses a bare domain (`example.org`), `http://`, a host with no dot
- * (`https://localhost`), an IP address, credentials in the address, and any
- * whitespace inside it. Parsed with `URL` rather than one large regex, which
- * would backtrack slowly on long input.
- *
- * @param value - The website as typed; surrounding whitespace is ignored.
- * @returns True when the website is acceptable.
- */
-export function isValidWebsite(value: string): boolean {
-  const raw = value.trim();
-  if (!raw.toLowerCase().startsWith(HTTPS_PREFIX) || /\s/.test(raw)) return false;
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '') {
-    return false;
-  }
-  const labels = parsed.hostname.split('.');
-  if (labels.length < 2) return false;
-  const topLevel = labels.at(-1) ?? '';
-  return TOP_LEVEL_LABEL.test(topLevel) && labels.every((label) => HOST_LABEL.test(label));
-}
 
 /** Alphabet of a GSTIN's characters, in check-character order. */
 const GSTIN_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
