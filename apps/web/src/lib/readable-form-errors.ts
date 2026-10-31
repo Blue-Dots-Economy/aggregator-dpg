@@ -18,7 +18,7 @@ import {
  * reads "Please enter a valid web address." and a failed pattern never shows
  * its regex. The banner text (`stack`) is prefixed with the field's title, e.g.
  * `Website: Please enter a valid web address.` — the same sentence the API
- * returns when the server catches it (#903 / #904).
+ * returns when the server catches it.
  *
  * @param errors - RJSF's errors for the current form data.
  * @param schema - The schema the form validated against (titles, URL marker).

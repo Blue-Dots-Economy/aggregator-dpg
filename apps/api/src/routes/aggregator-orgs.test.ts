@@ -886,6 +886,40 @@ describe('aggregator-orgs routes', () => {
     ]);
   });
 
+  it("keeps the form's full address in profile, district included", async () => {
+    const address = {
+      streetAddress: '1 Main Rd',
+      addressLocality: 'Bengaluru',
+      addressDistrict: 'Bengaluru Urban',
+      addressRegion: 'Karnataka',
+      postalCode: '560001',
+      addressCountry: 'IN',
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, address, coordinates: [77.59, 12.97] },
+    });
+    expect(res.statusCode).toBe(201);
+    const created = await orgStore.findById((res.json() as { org_id: string }).org_id);
+    const profile = created.ok ? created.value?.profile : undefined;
+    expect(profile?.['address']).toEqual(address);
+    expect(profile?.['coordinates']).toEqual([77.59, 12.97]);
+  });
+
+  it('stores no address in profile when the form sends none', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(201);
+    const created = await orgStore.findById((res.json() as { org_id: string }).org_id);
+    expect(created.ok && created.value?.profile).not.toHaveProperty('address');
+  });
+
   it('retries a colliding random slug instead of failing (review A11)', async () => {
     let calls = 0;
     const realCreate = orgStore.create.bind(orgStore);

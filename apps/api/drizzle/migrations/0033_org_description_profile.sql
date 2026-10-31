@@ -2,9 +2,10 @@
 -- * `description`: free text the org owner writes about the organisation.
 -- * Website and GST number are schema-driven organisation fields from now on:
 --   their values live in `profile` (`website`, `gst_number`) like every other
---   field of the org-registration schema. Each org's existing `url` /
---   `gst_number` column value is copied into `profile` when `profile` has no
---   such key yet. The columns stay, unused by the app, for one release.
+--   field of the org-registration schema. Each org's `url` column value
+--   replaces `profile.website` (an empty `url` removes it); the `gst_number`
+--   column value is copied when `profile` has no such key yet. The columns
+--   stay, unused by the app, for one release.
 -- Additive and idempotent; applied at boot after the user & org release train.
 -- Counts only in messages — never row data.
 
@@ -34,9 +35,16 @@ END $$;
 ALTER TABLE organisations ADD COLUMN IF NOT EXISTS description text;
 
 -- `updated_at` is not bumped: this is a copy, not an edit.
+-- The `url` column holds the current website: console edits wrote only the
+-- column, so a `profile.website` written at registration can be out of date.
 UPDATE organisations
    SET profile = profile || jsonb_build_object('website', url)
- WHERE url IS NOT NULL AND btrim(url) <> '' AND NOT (profile ? 'website');
+ WHERE url IS NOT NULL AND btrim(url) <> ''
+   AND profile ->> 'website' IS DISTINCT FROM url;
+
+UPDATE organisations
+   SET profile = profile - 'website'
+ WHERE (url IS NULL OR btrim(url) = '') AND profile ? 'website';
 
 UPDATE organisations
    SET profile = profile || jsonb_build_object('gst_number', gst_number)

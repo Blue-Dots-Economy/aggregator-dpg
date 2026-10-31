@@ -112,15 +112,19 @@ const ORG_COLUMN_BACKED_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Builds the `profile` payload: the schema-validated fields, plus the picked
- * coordinates, minus the keys stored elsewhere.
+ * Builds the `profile` payload: the schema-validated fields, plus the address
+ * block and the picked coordinates, minus the keys stored elsewhere.
+ *
+ * The full address is kept because `locations` has no place for the district.
  *
  * @param schemaValues - Values {@link validateOrgRegistration} accepted.
+ * @param address - The form's address block, when any.
  * @param coordinates - The picked address coordinates, when any.
  * @returns The `profile` payload; `{}` when the deployment declares no extra fields.
  */
 function buildOrgProfile(
   schemaValues: Record<string, unknown>,
+  address: z.infer<typeof OrgCreateBodySchema>['address'],
   coordinates: readonly [number, number] | undefined,
 ): Record<string, unknown> {
   const profile = Object.fromEntries(
@@ -128,6 +132,7 @@ function buildOrgProfile(
       ([key, value]) => !ORG_COLUMN_BACKED_KEYS.has(key) && value !== undefined,
     ),
   );
+  if (address) profile['address'] = address;
   if (coordinates) profile['coordinates'] = coordinates;
   return profile;
 }
@@ -426,7 +431,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
             ownerName: body.owner.name,
             // The address is also kept in `profile` and `state`.
             locations: orgLocationsFrom(body.address, body.state, body.coordinates),
-            profile: buildOrgProfile(schemaCheck.values, body.coordinates),
+            profile: buildOrgProfile(schemaCheck.values, body.address, body.coordinates),
             // The schema file that resolved; NULL means unknown.
             profileRef: orgProfileRef,
             ...(body.parent_id ? { parentId: body.parent_id } : {}),
