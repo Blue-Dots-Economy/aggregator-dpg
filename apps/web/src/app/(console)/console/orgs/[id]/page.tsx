@@ -1,9 +1,10 @@
 /**
  * Organisation detail page: owner, place in the tree, counts and the details form.
  *
- * The Default org and the root are read-only. Only the network admin can
- * rename an org, re-grant an active org's owner access, assign roles to its
- * owner, change its "known as" value, or move it under another parent. An
+ * The Default org and the root are read-only. Only the org's owner edits its
+ * details, the name included; the network admin sees them read-only. Only the
+ * network admin can change an org's "known as" value, re-grant an active org's
+ * owner access, assign roles to its owner, or move it under another parent. An
  * owner also views, read-only, the organisations below its own. The
  * organisations below an aggregator org are listed read-only.
  */
@@ -34,6 +35,7 @@ import { RolesPanel } from '@/components/console/RolesPanel';
 import { OwnerAccessRepair } from '@/components/console/OwnerAccessRepair';
 import { can } from '@/lib/capabilities';
 import { knownAsChoicesAt } from '@/lib/console-org-options';
+import { loadOrgSchema } from '@/lib/org-schema.server';
 
 /** How many organisations below this one the page lists. */
 const CHILD_LIMIT = 100;
@@ -62,6 +64,7 @@ export default async function ConsoleOrgPage({
   const own = actor.me.is_network_admin || actor.me.orgs.some((o) => o.id === org.id);
   const editable = org.org_type === 'aggregator' && !org.is_default && own;
   const canRename = actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer');
+  const orgSchema = await loadOrgSchema();
   const canRepair = actor.me.is_network_admin && editable && org.status === 'active';
   const children =
     org.org_type === 'aggregator' && !org.is_default
@@ -220,8 +223,10 @@ export default async function ConsoleOrgPage({
         <OrgEditForm
           org={org}
           editable={editable}
-          canRename={canRename}
+          canEdit={owner.id === actor.me.user.id}
+          canSetKnownAs={canRename}
           knownAsOptions={knownAsOptions}
+          orgSchema={orgSchema}
         />
         {children ? (
           <div id="children" className="scroll-mt-6">

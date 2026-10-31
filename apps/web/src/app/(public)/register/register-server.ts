@@ -6,9 +6,6 @@
  */
 
 import 'server-only';
-import { readFile } from 'node:fs/promises';
-import type { RJSFSchema } from '@rjsf/utils';
-import { resolveAggregatorSchemaPath } from '../../../lib/aggregator-schema.server';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { logger } from '../../../lib/logger';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
@@ -75,26 +72,10 @@ export async function loadConsentContent(): Promise<{
 }
 
 /**
- * Loads the org-registration JSON Schema + UI schema.
+ * Loads the org-registration JSON Schema + UI schema, with the network's
+ * domains filled in.
  *
  * @returns The parsed org schema pair, or `null` if the files are absent or
- *   unreadable.
+ *   unreadable (the owner route then returns 404).
  */
-export async function loadOrgSchema(): Promise<{
-  schema: RJSFSchema;
-  uiSchema: Record<string, unknown>;
-} | null> {
-  try {
-    const [rawSchema, rawUi] = await Promise.all([
-      readFile(resolveAggregatorSchemaPath('org-registration.v1.json'), 'utf8'),
-      readFile(resolveAggregatorSchemaPath('org-registration.v1.ui.json'), 'utf8'),
-    ]);
-    return {
-      schema: JSON.parse(rawSchema) as RJSFSchema,
-      uiSchema: JSON.parse(rawUi) as Record<string, unknown>,
-    };
-  } catch {
-    // Missing org schema: the owner route returns 404.
-    return null;
-  }
-}
+export { loadOrgSchema } from '../../../lib/org-schema.server';
