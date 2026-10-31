@@ -1,9 +1,22 @@
 {
   "ui:layout": "stack",
-  "ui:order": ["display_name", "address", "owner", "consent"],
+  "ui:order": ["display_name", "website", "gst_number", "domains", "address", "owner", "consent"],
   "display_name": {
     "ui:placeholder": "e.g. Enable India",
     "ui:autofocus": true
+  },
+  "website": {
+    "ui:placeholder": "https://yourorg.org",
+    "ui:options": {
+      "inputType": "url"
+    }
+  },
+  "gst_number": {
+    "ui:placeholder": "e.g. 29ABCDE1234F1ZW"
+  },
+  "domains": {
+    "ui:widget": "checkboxes",
+    "ui:placeholder": "Select domains"
   },
   "owner": {
     "ui:layout": "grid",
