@@ -184,10 +184,8 @@ export const OrgSchema = z.object({
   org_type: OrgTypeSchema,
   status: UserOrgStatusSchema,
   is_default: z.boolean(),
-  url: z.string().nullable(),
   locations: z.array(BecknLocationSchema),
   legal_name: z.string().nullable(),
-  gst_number: z.string().nullable(),
   /** Key of the org's "known as" value; null for the network facilitator. */
   known_as: z.string().nullable(),
   /** Configured name for `known_as`; null for the root or a key no longer configured. */
@@ -198,6 +196,14 @@ export const OrgSchema = z.object({
   parent_id: z.string().nullable(),
   /** The parent org's name; null for the network facilitator. */
   parent_name: z.string().nullable(),
+  description: z.string().nullable(),
+  /**
+   * Values of the deployment's org-registration schema fields (website, GST
+   * number, domains, …), keyed by field name.
+   */
+  profile: z.record(z.string(), z.unknown()),
+  /** The schema file that produced `profile`, e.g. `blue_dot/up-gzb/org-registration.v1`. */
+  profile_ref: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -246,16 +252,26 @@ export const OrgSearchResponseSchema = z.object({
 });
 export type OrgSearchResponse = z.infer<typeof OrgSearchResponseSchema>;
 
-/** `PATCH /v1/org/metadata/update/:id`. `name` is the network admin's only. */
+/**
+ * `PATCH /v1/org/metadata/update/:id`. `known_as` is the network admin's only;
+ * every other field is the org owner's only.
+ *
+ * `profile` holds schema fields to change: each value replaces the stored one,
+ * `null` removes it. The API checks them against the deployment's
+ * org-registration schema; only fields marked `x-updatable` are accepted.
+ */
 export const OrgMetadataUpdateRequestSchema = z
   .object({
     name: z.string().trim().min(2).max(200).optional(),
-    url: z.string().trim().url().max(2048).nullable().optional(),
     locations: z.array(BecknLocationSchema).max(25).optional(),
     legal_name: z.string().trim().max(200).nullable().optional(),
-    gst_number: z.string().trim().max(32).nullable().optional(),
     /** Must be allowed at the org's depth. Network admin only. */
     known_as: KnownAsKeySchema.optional(),
+    description: z.string().trim().max(1000).nullable().optional(),
+    profile: z
+      .record(z.string(), z.unknown())
+      .refine((p) => Object.keys(p).length > 0, { message: 'profile must name a field' })
+      .optional(),
   })
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: 'at least one field is required' });

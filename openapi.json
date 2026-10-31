@@ -880,43 +880,6 @@
                     ],
                     "additionalProperties": false
                   },
-                  "website": {
-                    "type": "string",
-                    "format": "uri",
-                    "maxLength": 2048
-                  },
-                  "aggregator_type": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "enum": [
-                        "seeker",
-                        "provider",
-                        "service_provider"
-                      ]
-                    }
-                  },
-                  "organisation_type": {
-                    "type": "string",
-                    "maxLength": 100
-                  },
-                  "organisation_sub_type_educational": {
-                    "type": "string",
-                    "maxLength": 100
-                  },
-                  "organisation_sub_type_non_educational": {
-                    "type": "string",
-                    "maxLength": 100
-                  },
-                  "management_type": {
-                    "type": "string",
-                    "enum": [
-                      "private",
-                      "government",
-                      "ngo",
-                      "other"
-                    ]
-                  },
                   "address": {
                     "type": "object",
                     "properties": {
@@ -970,7 +933,7 @@
                   "owner",
                   "consent"
                 ],
-                "additionalProperties": false
+                "additionalProperties": true
               }
             }
           }
@@ -5794,10 +5757,6 @@
                         "is_default": {
                           "type": "boolean"
                         },
-                        "url": {
-                          "type": "string",
-                          "nullable": true
-                        },
                         "locations": {
                           "type": "array",
                           "items": {
@@ -5875,10 +5834,6 @@
                           "type": "string",
                           "nullable": true
                         },
-                        "gst_number": {
-                          "type": "string",
-                          "nullable": true
-                        },
                         "known_as": {
                           "type": "string",
                           "nullable": true
@@ -5898,6 +5853,18 @@
                           "type": "string",
                           "nullable": true
                         },
+                        "description": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "profile": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "profile_ref": {
+                          "type": "string",
+                          "nullable": true
+                        },
                         "created_at": {
                           "type": "string"
                         },
@@ -5912,15 +5879,16 @@
                         "org_type",
                         "status",
                         "is_default",
-                        "url",
                         "locations",
                         "legal_name",
-                        "gst_number",
                         "known_as",
                         "known_as_name",
                         "depth",
                         "parent_id",
                         "parent_name",
+                        "description",
+                        "profile",
+                        "profile_ref",
                         "created_at",
                         "updated_at"
                       ],
@@ -6291,10 +6259,6 @@
                           "is_default": {
                             "type": "boolean"
                           },
-                          "url": {
-                            "type": "string",
-                            "nullable": true
-                          },
                           "locations": {
                             "type": "array",
                             "items": {
@@ -6372,10 +6336,6 @@
                             "type": "string",
                             "nullable": true
                           },
-                          "gst_number": {
-                            "type": "string",
-                            "nullable": true
-                          },
                           "known_as": {
                             "type": "string",
                             "nullable": true
@@ -6392,6 +6352,18 @@
                             "nullable": true
                           },
                           "parent_name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "description": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "profile": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "profile_ref": {
                             "type": "string",
                             "nullable": true
                           },
@@ -6418,15 +6390,16 @@
                           "org_type",
                           "status",
                           "is_default",
-                          "url",
                           "locations",
                           "legal_name",
-                          "gst_number",
                           "known_as",
                           "known_as_name",
                           "depth",
                           "parent_id",
                           "parent_name",
+                          "description",
+                          "profile",
+                          "profile_ref",
                           "created_at",
                           "updated_at",
                           "coordinator_count",
@@ -6663,7 +6636,7 @@
         "tags": [
           "console"
         ],
-        "description": "url, locations, legal name and GST number: the owner or the network admin. The name and known_as: the network admin only (the slug never changes). known_as must be a configured value allowed at the org's depth (400 KNOWN_AS_DEPTH otherwise); it never changes the parent. The parent changes through PATCH /v1/org/parent/update/:id. The Default org's details are not editable. Rendered for every coordinator of the org at once.",
+        "description": "Every field but known_as, the name included, is the org's owner's only (the slug never changes); the network admin views other owners' orgs but does not edit them (403). known_as is the network admin's only: a configured value allowed at the org's depth (400 KNOWN_AS_DEPTH otherwise); it never changes the parent, which changes through PATCH /v1/org/parent/update/:id. The owner is emailed when the network admin changes it. The Default org's details are not editable. `profile` changes fields of the deployment's org-registration schema (e.g. website, GST number, domains): only fields marked x-updatable, checked against that schema; null removes a field. A bad field answers 400 with fields.field_errors and saves nothing. Locations, legal name, website and GST number are rendered for every coordinator of the org; description is shown in the console only.",
         "requestBody": {
           "required": true,
           "content": {
@@ -6675,12 +6648,6 @@
                     "type": "string",
                     "minLength": 2,
                     "maxLength": 200
-                  },
-                  "url": {
-                    "type": "string",
-                    "format": "uri",
-                    "maxLength": 2048,
-                    "nullable": true
                   },
                   "locations": {
                     "type": "array",
@@ -6761,15 +6728,19 @@
                     "maxLength": 200,
                     "nullable": true
                   },
-                  "gst_number": {
-                    "type": "string",
-                    "maxLength": 32,
-                    "nullable": true
-                  },
                   "known_as": {
                     "type": "string",
                     "pattern": "^[a-z][a-z0-9_]*$",
                     "maxLength": 64
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "nullable": true
+                  },
+                  "profile": {
+                    "type": "object",
+                    "additionalProperties": {}
                   }
                 },
                 "additionalProperties": false
@@ -6823,10 +6794,6 @@
                     },
                     "is_default": {
                       "type": "boolean"
-                    },
-                    "url": {
-                      "type": "string",
-                      "nullable": true
                     },
                     "locations": {
                       "type": "array",
@@ -6905,10 +6872,6 @@
                       "type": "string",
                       "nullable": true
                     },
-                    "gst_number": {
-                      "type": "string",
-                      "nullable": true
-                    },
                     "known_as": {
                       "type": "string",
                       "nullable": true
@@ -6928,6 +6891,18 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "profile": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "profile_ref": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "created_at": {
                       "type": "string"
                     },
@@ -6942,15 +6917,16 @@
                     "org_type",
                     "status",
                     "is_default",
-                    "url",
                     "locations",
                     "legal_name",
-                    "gst_number",
                     "known_as",
                     "known_as_name",
                     "depth",
                     "parent_id",
                     "parent_name",
+                    "description",
+                    "profile",
+                    "profile_ref",
                     "created_at",
                     "updated_at"
                   ],
@@ -7398,10 +7374,6 @@
                     "is_default": {
                       "type": "boolean"
                     },
-                    "url": {
-                      "type": "string",
-                      "nullable": true
-                    },
                     "locations": {
                       "type": "array",
                       "items": {
@@ -7479,10 +7451,6 @@
                       "type": "string",
                       "nullable": true
                     },
-                    "gst_number": {
-                      "type": "string",
-                      "nullable": true
-                    },
                     "known_as": {
                       "type": "string",
                       "nullable": true
@@ -7502,6 +7470,18 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "profile": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "profile_ref": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "created_at": {
                       "type": "string"
                     },
@@ -7516,15 +7496,16 @@
                     "org_type",
                     "status",
                     "is_default",
-                    "url",
                     "locations",
                     "legal_name",
-                    "gst_number",
                     "known_as",
                     "known_as_name",
                     "depth",
                     "parent_id",
                     "parent_name",
+                    "description",
+                    "profile",
+                    "profile_ref",
                     "created_at",
                     "updated_at"
                   ],

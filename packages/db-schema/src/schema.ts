@@ -366,7 +366,8 @@ export const organisations = pgTable(
       .notNull()
       .references((): AnyPgColumn => users.id, { onDelete: 'restrict' }),
     kcGroupId: text('kc_group_id'),
-    // Org details, shown for every coordinator of the org.
+    // Org details, shown for every coordinator of the org. `url` and
+    // `gst_number` are no longer written: their values live in `profile`.
     url: text('url'),
     locations: jsonb('locations')
       .$type<BecknLocation[]>()
@@ -378,8 +379,11 @@ export const organisations = pgTable(
     knownAs: text('known_as').notNull().default('aggregator'),
     /** Depth in the tree: root 0, top-level 1. Set by the store (migration 0032). */
     depth: smallint('depth').notNull(),
-    // Schema-driven registration fields. Also holds `website`, `address` and
-    // `coordinates`, which are copied into `url` and `locations`.
+    // Written by the org owner in the console. Informational only.
+    description: text('description'),
+    // Fields of the org-registration schema (website, GST number, domains and
+    // any a deployment adds). Also holds `address` and `coordinates`, which are
+    // copied into `locations`.
     profile: jsonb('profile')
       .$type<Record<string, unknown>>()
       .notNull()

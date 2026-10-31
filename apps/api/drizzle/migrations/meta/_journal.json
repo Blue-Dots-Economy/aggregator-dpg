@@ -232,6 +232,13 @@
       "when": 1791700000000,
       "tag": "0032_org_known_as",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791800000000,
+      "tag": "0033_org_description_profile",
+      "breakpoints": true
     }
   ]
 }

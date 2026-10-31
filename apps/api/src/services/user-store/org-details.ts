@@ -9,7 +9,10 @@
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import type { LegacyOrgDetails } from './interface.js';
 
-/** The org's own detail values, as stored on `organisations`. */
+/**
+ * The org's own detail values: `url` and `gstNumber` are the `website` and
+ * `gst_number` keys of `organisations.profile`; the others are columns.
+ */
 export interface OrgDetailColumns {
   url: string | null;
   locations: BecknLocation[];
