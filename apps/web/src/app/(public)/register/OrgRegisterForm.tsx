@@ -231,7 +231,7 @@ export function OrgRegisterForm({
             <span className="text-rose-500"> *</span>
           </label>
           <Select {...(parentId ? { value: parentId } : {})} onValueChange={setParentId}>
-            <SelectTrigger id="org-parent" aria-required>
+            <SelectTrigger id="org-parent" aria-required aria-describedby="org-parent-hint">
               <SelectValue placeholder={t('parent_selector_placeholder')} />
             </SelectTrigger>
             <SelectContent>
@@ -242,6 +242,9 @@ export function OrgRegisterForm({
               ))}
             </SelectContent>
           </Select>
+          <p id="org-parent-hint" className="mt-1.5 text-[12.5px] text-ink-500">
+            {t('parent_selector_hint')}
+          </p>
         </div>
       ) : null}
       {childName ? (

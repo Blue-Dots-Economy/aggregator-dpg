@@ -61,6 +61,7 @@
     "org_submit": "संगठन जमा करें",
     "parent_selector_label": "मूल संगठन",
     "parent_selector_placeholder": "वह संगठन चुनें जिसके अंतर्गत आपका संगठन है",
+    "parent_selector_hint": "जो संगठन भरे हुए हैं, वे सूची में नहीं हैं।",
     "parent_selector_error": "संगठन लोड नहीं हो सके।",
     "parent_selector_required": "मूल संगठन चुनें।",
     "parent_child_hint": "आपका संगठन {name} के रूप में जाना जाएगा।",

@@ -365,6 +365,13 @@ describe('<OrgRegisterForm />', () => {
       expect(screen.queryByText(/will be known as/)).toBeNull();
     });
 
+    it('says under the picker that full organisations are not listed', () => {
+      originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn() as unknown as typeof fetch;
+      renderForm({}, [PARENTS[1]!]);
+      expect(screen.getByText(messages.register.parent_selector_hint)).toBeInTheDocument();
+    });
+
     it('keeps submit disabled until a parent is picked', () => {
       originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn() as unknown as typeof fetch;
@@ -423,6 +430,7 @@ describe('<OrgRegisterForm />', () => {
       }) as unknown as typeof fetch;
       renderForm({}, [PARENTS[0]!]);
       expect(screen.queryByTestId('parent-select')).toBeNull();
+      expect(screen.queryByText(messages.register.parent_selector_hint)).toBeNull();
       expect(screen.getByText('Your organisation will be known as State.')).toBeInTheDocument();
       fireEvent.submit(screen.getByTestId('rjsf-shim'));
       await screen.findByRole('dialog');

@@ -61,6 +61,7 @@
     "org_submit": "Submit organisation",
     "parent_selector_label": "Parent organisation",
     "parent_selector_placeholder": "Select the organisation yours belongs under",
+    "parent_selector_hint": "Organisations that are full are not listed.",
     "parent_selector_error": "Couldn't load organisations.",
     "parent_selector_required": "Select a parent organisation.",
     "parent_child_hint": "Your organisation will be known as {name}.",
