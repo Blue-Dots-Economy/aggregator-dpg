@@ -61,6 +61,7 @@
     "org_submit": "ಸಂಸ್ಥೆಯನ್ನು ಸಲ್ಲಿಸಿ",
     "parent_selector_label": "ಮೂಲ ಸಂಸ್ಥೆ",
     "parent_selector_placeholder": "ನಿಮ್ಮ ಸಂಸ್ಥೆ ಯಾವ ಸಂಸ್ಥೆಯ ಅಡಿಯಲ್ಲಿದೆ ಎಂಬುದನ್ನು ಆಯ್ಕೆಮಾಡಿ",
+    "parent_selector_hint": "ಭರ್ತಿಯಾಗಿರುವ ಸಂಸ್ಥೆಗಳನ್ನು ಪಟ್ಟಿಯಲ್ಲಿ ತೋರಿಸಿಲ್ಲ.",
     "parent_selector_error": "ಸಂಸ್ಥೆಗಳನ್ನು ಲೋಡ್ ಮಾಡಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.",
     "parent_selector_required": "ಮೂಲ ಸಂಸ್ಥೆಯನ್ನು ಆಯ್ಕೆಮಾಡಿ.",
     "parent_child_hint": "ನಿಮ್ಮ ಸಂಸ್ಥೆಯನ್ನು {name} ಎಂದು ಕರೆಯಲಾಗುತ್ತದೆ.",
