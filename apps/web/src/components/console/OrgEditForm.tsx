@@ -1,128 +1,114 @@
 'use client';
 
 /**
- * Organisation details form. Every field, the name included, is editable by
- * the org's owner only; anyone else (the network admin) sees the details
- * read-only. The Default org is read-only. Locations are shown but not edited
- * here.
+ * Organisation details form. Two parts:
+ *
+ * - Fixed fields: name, legal name and description (inputs), locations (shown).
+ * - Schema fields: whatever the deployment's org-registration schema lists
+ *   (e.g. website, GST number, domains), drawn by RJSF. Fields marked
+ *   `x-updatable` are editable; the others are shown read-only.
+ *
+ * Only the org's owner edits; anyone else (the network admin) sees every
+ * detail read-only. The Default org and the root are read-only.
  */
 
-import { useState, type ReactNode, type SubmitEvent } from 'react';
+import { useMemo, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
 import { useTranslations } from 'next-intl';
+import type Form from '@rjsf/core';
+import type { ErrorSchema, RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { Org } from '@aggregator-dpg/shared-primitives/user-org';
-import { isValidGstin, isValidWebsite } from '@aggregator-dpg/shared-primitives/org-details';
 import { Button } from '../ui/Button';
 import { I } from '../../icons';
 import { ConsoleSection, DetailList } from './ConsoleUi';
 import { Input } from '../ui/Input';
 import { Label } from '../ui/Label';
-import { MultiSelect } from '../ui/MultiSelect';
+import { RjsfThemedForm } from '../forms/RjsfThemed';
 import { errorKey, sendConsole } from '../../lib/console-client';
+import { consoleOrgSchema, gstinCustomValidate, orgFieldText } from '../../lib/org-schema';
+import { readableFormErrors } from '../../lib/readable-form-errors';
 
 /** Longest description the API accepts. */
 const DESCRIPTION_MAX = 1000;
 
+type JsonRecord = Record<string, unknown>;
+
 /** Trimmed value, or null when blank (clears the field). */
 const orNull = (v: string) => (v.trim() ? v.trim() : null);
 
-/** Fields whose errors the form shows under the input. */
-type CheckedField = 'url' | 'gst_number' | 'domains';
+/** Whether a schema value is empty (cleared). */
+const isEmpty = (v: unknown) =>
+  v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 
-/** Classes that mark an input whose value was refused. */
-const INVALID_INPUT = 'border-rose-400 ring-4 ring-rose-100';
+/** Whether two schema values are the same (order of a list counts). */
+const sameValue = (a: unknown, b: unknown) =>
+  (isEmpty(a) && isEmpty(b)) || JSON.stringify(a) === JSON.stringify(b);
 
-/** Whether two id lists hold the same ids, in any order. */
-const sameIds = (a: readonly string[], b: readonly string[]) =>
-  a.length === b.length && a.every((x) => b.includes(x));
+/** The values of `fields` in `profile`. */
+function pick(profile: JsonRecord, fields: readonly string[]): JsonRecord {
+  return Object.fromEntries(fields.filter((f) => f in profile).map((f) => [f, profile[f]]));
+}
 
 export function OrgEditForm({
   org,
   editable,
   canEdit,
-  domains,
+  orgSchema,
 }: Readonly<{
   org: Org;
   /** False for the Default org and the root. */
   editable: boolean;
   /** The signed-in user owns this org. */
   canEdit: boolean;
-  /** The network's domains, in configuration order. */
-  domains: Array<{ id: string; label: string }>;
+  /** The deployment's org-registration schema (network domains applied); `null` if unavailable. */
+  orgSchema: { schema: RJSFSchema; uiSchema: JsonRecord } | null;
 }>) {
   const t = useTranslations('console');
+  const editing = editable && canEdit;
+  const view = useMemo(
+    () => (orgSchema ? consoleOrgSchema(orgSchema.schema, orgSchema.uiSchema, editing) : null),
+    [orgSchema, editing],
+  );
+  const fields = useMemo(() => Object.keys((view?.schema.properties ?? {}) as JsonRecord), [view]);
+  const customValidate = useMemo(
+    () => (view ? gstinCustomValidate(view.schema) : undefined),
+    [view],
+  );
+
   const [current, setCurrent] = useState(org);
   const [name, setName] = useState(org.name);
-  const [url, setUrl] = useState(org.url ?? '');
   const [legalName, setLegalName] = useState(org.legal_name ?? '');
-  const [gst, setGst] = useState(org.gst_number ?? '');
   const [description, setDescription] = useState(org.description ?? '');
-  const [orgDomains, setOrgDomains] = useState<string[]>(org.domains);
+  const [profileData, setProfileData] = useState<JsonRecord>(() => pick(org.profile, fields));
+  const [extraErrors, setExtraErrors] = useState<ErrorSchema | undefined>(undefined);
   const [message, setMessage] = useState<string | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<CheckedField, string>>>({});
   const [busy, setBusy] = useState(false);
+  const schemaForm = useRef<Form<JsonRecord>>(null);
 
-  /** Translated message for a refused field; the server's text for any other. */
-  function fieldMessage(field: string, serverMessage: string): string {
-    if (field === 'url') return t('org.invalid_url');
-    if (field === 'gst_number') return t('org.invalid_gst');
-    return serverMessage;
-  }
-
-  /** Drops a field's error once its value is edited. */
-  function clearError(field: CheckedField) {
-    setFieldErrors((errors) => {
-      if (!errors[field]) return errors;
-      const next = { ...errors };
-      delete next[field];
-      return next;
-    });
-  }
-
-  /** Error state of one input: its message, and the props that mark it. */
-  function errorOf(field: CheckedField) {
-    const text = fieldErrors[field];
-    return {
-      text,
-      inputProps: text
-        ? {
-            'aria-invalid': true,
-            'aria-describedby': `org-${field}-error`,
-            className: INVALID_INPUT,
-          }
-        : {},
-      node: text ? (
-        <span id={`org-${field}-error`} className="text-[12px] text-rose-600">
-          {text}
-        </span>
-      ) : null,
-    };
+  /** The schema fields the owner changed: new value, or `null` to clear. */
+  function profileChanges(): JsonRecord {
+    const changes: JsonRecord = {};
+    for (const field of view?.updatable ?? []) {
+      const next = profileData[field];
+      if (sameValue(next, current.profile[field])) continue;
+      changes[field] = isEmpty(next) ? null : next;
+    }
+    return changes;
   }
 
   async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
-    const patch: Record<string, unknown> = {};
-    if (name.trim() !== current.name) patch['name'] = name.trim();
-    if (orNull(url) !== current.url) patch['url'] = orNull(url);
-    if (orNull(legalName) !== current.legal_name) patch['legal_name'] = orNull(legalName);
-    if (orNull(gst) !== current.gst_number) patch['gst_number'] = orNull(gst);
-    if (orNull(description) !== current.description) patch['description'] = orNull(description);
-    if (!sameIds(orgDomains, current.domains)) {
-      // Sent in configuration order, so the stored list reads the same everywhere.
-      patch['domains'] = domains.map((d) => d.id).filter((id) => orgDomains.includes(id));
-    }
-    // Only values being sent are checked, as the API does; a stored value is left alone.
-    const errors: Partial<Record<CheckedField, string>> = {};
-    if (typeof patch['url'] === 'string' && !isValidWebsite(patch['url'])) {
-      errors.url = t('org.invalid_url');
-    }
-    if (typeof patch['gst_number'] === 'string' && !isValidGstin(patch['gst_number'])) {
-      errors.gst_number = t('org.invalid_gst');
-    }
-    setFieldErrors(errors);
-    if (Object.keys(errors).length > 0) {
+    setExtraErrors(undefined);
+    // The schema section checks itself (patterns, choices, GSTIN check character).
+    if (view && view.updatable.length > 0 && schemaForm.current?.validateForm() === false) {
       setMessage(t('org.fix_fields'));
       return;
     }
+    const patch: JsonRecord = {};
+    if (name.trim() !== current.name) patch['name'] = name.trim();
+    if (orNull(legalName) !== current.legal_name) patch['legal_name'] = orNull(legalName);
+    if (orNull(description) !== current.description) patch['description'] = orNull(description);
+    const changes = profileChanges();
+    if (Object.keys(changes).length > 0) patch['profile'] = changes;
     if (Object.keys(patch).length === 0) {
       setMessage(t('org.saved'));
       return;
@@ -132,22 +118,19 @@ export function OrgEditForm({
     setBusy(false);
     if (r.ok) {
       setCurrent(r.data);
-      setOrgDomains(r.data.domains);
-      // The API stores the GST number upper-cased.
-      setGst(r.data.gst_number ?? '');
+      // The API tidies values (e.g. a GSTIN is stored upper-cased).
+      setProfileData(pick(r.data.profile, fields));
       setMessage(t('org.saved'));
       return;
     }
     const serverErrors = r.error.fields?.['field_errors'];
     if (r.status === 400 && serverErrors && typeof serverErrors === 'object') {
-      const mapped: Partial<Record<CheckedField, string>> = {};
-      for (const [field, text] of Object.entries(serverErrors as Record<string, unknown>)) {
-        if (field === 'url' || field === 'gst_number' || field === 'domains') {
-          mapped[field] = fieldMessage(field, String(text));
-        }
+      const mapped: JsonRecord = {};
+      for (const [field, text] of Object.entries(serverErrors as JsonRecord)) {
+        if (fields.includes(field)) mapped[field] = { __errors: [String(text)] };
       }
       if (Object.keys(mapped).length > 0) {
-        setFieldErrors(mapped);
+        setExtraErrors(mapped as ErrorSchema);
         setMessage(t('org.fix_fields'));
         return;
       }
@@ -163,14 +146,20 @@ export function OrgEditForm({
     )
     .filter(Boolean);
 
-  if (!editable || !canEdit) {
+  if (!editing) {
     // Read-only (the Default org, the root, or not the owner): plain text, not disabled inputs.
-    const domainLabels = current.domains.map((id) => domains.find((d) => d.id === id)?.label ?? id);
+    const props = (view?.schema.properties ?? {}) as Record<string, JsonRecord>;
+    const ui = view?.uiSchema ?? {};
+    const schemaItems = fields.map((field) => ({
+      label: String(props[field]?.['title'] ?? field),
+      value:
+        orgFieldText(props[field] ?? {}, (ui[field] ?? {}) as JsonRecord, current.profile[field]) ??
+        '—',
+    }));
     const items: Array<{ label: string; value: ReactNode }> = [
       { label: t('org.name'), value: current.name },
-      { label: t('org.url'), value: current.url ?? '—' },
       { label: t('org.legal_name'), value: current.legal_name ?? '—' },
-      { label: t('org.gst_number'), value: current.gst_number ?? '—' },
+      ...schemaItems,
       {
         label: t('org.description'),
         value: current.description ? (
@@ -178,10 +167,6 @@ export function OrgEditForm({
         ) : (
           t('org.no_description')
         ),
-      },
-      {
-        label: t('org.domains'),
-        value: domainLabels.length ? domainLabels.join(', ') : t('org.no_domains'),
       },
       {
         label: t('org.locations'),
@@ -198,10 +183,6 @@ export function OrgEditForm({
     );
   }
 
-  const urlError = errorOf('url');
-  const gstError = errorOf('gst_number');
-  const domainsError = errorOf('domains');
-
   return (
     <ConsoleSection title={t('org.details')}>
       <form noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
@@ -211,22 +192,6 @@ export function OrgEditForm({
             <Input id="org-name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="org-url">{t('org.url')}</Label>
-            <Input
-              id="org-url"
-              inputMode="url"
-              autoComplete="url"
-              placeholder={t('org.url_placeholder')}
-              value={url}
-              onChange={(e) => {
-                setUrl(e.target.value);
-                clearError('url');
-              }}
-              {...urlError.inputProps}
-            />
-            {urlError.node}
-          </div>
-          <div className="flex flex-col gap-1.5">
             <Label htmlFor="org-legal">{t('org.legal_name')}</Label>
             <Input
               id="org-legal"
@@ -234,55 +199,44 @@ export function OrgEditForm({
               onChange={(e) => setLegalName(e.target.value)}
             />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="org-gst">{t('org.gst_number')}</Label>
-            <Input
-              id="org-gst"
-              autoCapitalize="characters"
-              maxLength={15}
-              placeholder={t('org.gst_placeholder')}
-              value={gst}
-              onChange={(e) => {
-                setGst(e.target.value);
-                clearError('gst_number');
-              }}
-              {...gstError.inputProps}
-            />
-            {gstError.node}
-          </div>
-          {domains.length > 0 ? (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="org-domains">{t('org.domains')}</Label>
-              <MultiSelect
-                id="org-domains"
-                options={domains.map((d) => ({ value: d.id, label: d.label }))}
-                value={orgDomains}
-                onChange={(next) => {
-                  setOrgDomains(next);
-                  clearError('domains');
-                }}
-                placeholder={t('org.domains_placeholder')}
-                {...(domainsError.text ? { className: INVALID_INPUT } : {})}
-              />
-              {domainsError.node}
-            </div>
-          ) : null}
-          <div className="flex flex-col gap-1.5 sm:col-span-2">
-            <Label htmlFor="org-description">{t('org.description')}</Label>
-            <textarea
-              id="org-description"
-              className="bd-input min-h-[110px] resize-y"
-              maxLength={DESCRIPTION_MAX}
-              placeholder={t('org.description_placeholder')}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-            <div className="flex justify-between gap-3 text-[12px] text-ink-500">
-              <span>{t('org.description_hint')}</span>
-              <span aria-live="polite">
-                {description.length}/{DESCRIPTION_MAX}
-              </span>
-            </div>
+        </div>
+        {view && fields.length > 0 ? (
+          <RjsfThemedForm<JsonRecord>
+            ref={schemaForm}
+            tagName="div"
+            schema={view.schema}
+            uiSchema={
+              {
+                ...view.uiSchema,
+                'ui:layout': 'grid',
+                'ui:submitButtonOptions': { norender: true },
+              } as unknown as UiSchema<JsonRecord>
+            }
+            formData={profileData}
+            onChange={(ev) => {
+              setProfileData((ev.formData ?? {}) as JsonRecord);
+              setExtraErrors(undefined);
+            }}
+            transformErrors={(errors) => readableFormErrors(errors, view.schema)}
+            {...(customValidate ? { customValidate } : {})}
+            {...(extraErrors ? { extraErrors } : {})}
+          />
+        ) : null}
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="org-description">{t('org.description')}</Label>
+          <textarea
+            id="org-description"
+            className="bd-input min-h-[110px] resize-y"
+            maxLength={DESCRIPTION_MAX}
+            placeholder={t('org.description_placeholder')}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+          <div className="flex justify-between gap-3 text-[12px] text-ink-500">
+            <span>{t('org.description_hint')}</span>
+            <span aria-live="polite">
+              {description.length}/{DESCRIPTION_MAX}
+            </span>
           </div>
         </div>
         <div className="flex flex-col gap-1.5 text-[13.5px]">

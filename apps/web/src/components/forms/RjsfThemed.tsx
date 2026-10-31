@@ -20,7 +20,15 @@ import type {
   GenericObjectType,
 } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactElement } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactElement,
+  type Ref,
+} from 'react';
 import { useTranslations } from 'next-intl';
 import { X } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
@@ -581,6 +589,8 @@ export interface RjsfThemedFormProps<T extends GenericObjectType = GenericObject
   'validator' | 'widgets' | 'templates'
 > {
   className?: string;
+  /** The RJSF form instance, e.g. to call `validateForm()` from outside it. */
+  ref?: Ref<Form<T>>;
   /**
    * Called when the validity of the visible form changes.
    *

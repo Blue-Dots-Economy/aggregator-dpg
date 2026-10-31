@@ -29,7 +29,7 @@ import { OrgEditForm } from '@/components/console/OrgEditForm';
 import { RolesPanel } from '@/components/console/RolesPanel';
 import { OwnerAccessRepair } from '@/components/console/OwnerAccessRepair';
 import { can } from '@/lib/capabilities';
-import { networkDomains } from '@/lib/console-domains.server';
+import { loadOrgSchema } from '@/lib/org-schema.server';
 
 export default async function ConsoleOrgPage({
   params,
@@ -51,7 +51,7 @@ export default async function ConsoleOrgPage({
         ])
       : [null, null];
   const editable = org.org_type === 'aggregator' && !org.is_default;
-  const domains = await networkDomains();
+  const orgSchema = await loadOrgSchema();
   const canRepair = actor.me.is_network_admin && editable && org.status === 'active';
   return (
     <>
@@ -103,7 +103,7 @@ export default async function ConsoleOrgPage({
           org={org}
           editable={editable}
           canEdit={owner.id === actor.me.user.id}
-          domains={domains}
+          orgSchema={orgSchema}
         />
         {ownerRoles && catalogue ? (
           <RolesPanel

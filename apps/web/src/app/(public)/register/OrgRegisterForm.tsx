@@ -23,6 +23,8 @@ import {
   useRegistrationFormState,
 } from './registration-ui';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
+import { gstinCustomValidate } from '../../../lib/org-schema';
+import { readableFormErrors } from '../../../lib/readable-form-errors';
 
 export interface OrgRegisterFormProps {
   /** Org-registration JSON Schema loaded by the server component. */
@@ -51,7 +53,7 @@ export function OrgRegisterForm({
   consentContent,
 }: OrgRegisterFormProps): JSX.Element {
   const t = useTranslations('register');
-  const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
+  const { state, setState, setCanSubmit, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   // Coordinate from the address widget; RJSF does not write it into `formData`.
   const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
@@ -62,6 +64,7 @@ export function OrgRegisterForm({
   );
 
   const formSchema = useMemo(() => stripConsentBlock(stripFormChrome(schema)), [schema]);
+  const customValidate = useMemo(() => gstinCustomValidate(formSchema), [formSchema]);
 
   const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
 
@@ -127,10 +130,14 @@ export function OrgRegisterForm({
           onLocationResolved: setResolvedPlace,
           validationErrorTitle: t('validation_error_title'),
         })}
+        customValidate={customValidate}
+        transformErrors={(errors) => readableFormErrors(errors, formSchema)}
       >
+        {/* Never disabled by a bad field: a click runs the form's checks and
+            shows each field's message, so the owner sees what to fix. */}
         <RegistrationSubmitButton
           submitting={state.status === 'submitting'}
-          canSubmit={canSubmit}
+          canSubmit
           label={t('org_submit')}
           submittingLabel={t('submitting')}
         />
