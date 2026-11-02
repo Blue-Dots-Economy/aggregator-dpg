@@ -438,7 +438,7 @@ describe('runCampaignJob completed audit (#617)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.correlationId).toBe('job-1');
     expect(rows[0]!.outcome).toBe('succeeded');
-    expect(rows[0]!.actorOrgId).toBe('org-1');
+    expect(rows[0]!.actorSignalstackOrgId).toBe('org-1');
   });
 
   it('populates the outcome counts, recipientRef and destination on the export success row (#617 follow-up)', async () => {
@@ -639,7 +639,6 @@ describe('runCampaignJob completed audit (#617)', () => {
       recordRequested: async () => ok(undefined),
       recordCompleted: async () =>
         err(new UpstreamError('insert failed', { code: 'CAMPAIGN_AUDIT_INSERT_FAILED' })),
-      recordDumpAccess: async () => ok(undefined),
     } as CampaignAuditWriterBase;
     const h = harness(job(), {}, {}, undefined, audit);
     h.deps.log.error = (o) => errors.push(o);

@@ -12,6 +12,11 @@ export {
   type OwnerGrantRefreshedVars,
 } from './owner-grant-refreshed.js';
 export {
+  renderInviteExistingAccount,
+  type InviteExistingAccountVars,
+} from './invite-existing-account.js';
+export { renderOrgAdminAction, type OrgAdminActionVars } from './org-admin-action.js';
+export {
   renderSupportRequest,
   generateSupportReference,
   type SupportRequestVars,

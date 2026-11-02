@@ -1,18 +1,17 @@
 /**
  * One-off backfill of org-owner names onto the `contact` table.
  *
- * Belongs to `@aggregator-dpg/api` (the `contact` table, migrations 0025/0026).
- * Before migration 0025 an org owner's name was never stored in the database —
- * it only reached Keycloak as first/last name — so contacts backfilled from
- * `aggregator_orgs` have `name IS NULL`. This reads the name back from Keycloak
- * via `aggregator_orgs.owner_kc_sub` and records it where the contact still has
- * none (an existing name always wins). Idempotent; safe to re-run.
+ * Belongs to `@aggregator-dpg/api`. Some org-owner contacts have no name in
+ * the database; the name exists only in Keycloak. This reads it from Keycloak
+ * through the owner's IdP login and stores it where the contact has none. An
+ * existing name always wins. Safe to re-run.
  *
  * Runner: `apps/api/scripts/backfill-owner-contact-names.ts`.
  */
 
-import { and, eq, isNotNull, isNull } from 'drizzle-orm';
-import { aggregatorOrgs, contact } from '../db/schema.js';
+import { and, eq, isNull } from 'drizzle-orm';
+import { organisations, contact, userIdentities, users } from '../db/schema.js';
+import { IDP_PROVIDER } from './idp-admin/provider.js';
 import { getDb } from '../db/client.js';
 import { logger } from '../logger.js';
 import type { IdpAdminAdapter, IdpUser, IdpResult } from './idp-admin/interface.js';
@@ -24,7 +23,7 @@ export interface OwnerNameCandidate {
   ownerKcSub: string;
 }
 
-/** Persistence seam — lets the backfill run against a fake in tests. */
+/** Dependencies of the backfill; tests pass fakes. */
 export interface OwnerNameBackfillDeps {
   idp: IdpAdminAdapter;
   listCandidates: () => Promise<OwnerNameCandidate[]>;
@@ -34,7 +33,7 @@ export interface OwnerNameBackfillDeps {
   retryDelayMs?: number;
 }
 
-/** Outcome counts — never names or emails. */
+/** Outcome counts; never names or emails. */
 export interface OwnerNameBackfillReport {
   candidates: number;
   updated: number;
@@ -70,8 +69,7 @@ export async function backfillOwnerContactNames(
   report.candidates = candidates.length;
 
   for (const c of candidates) {
-    // Sequential on purpose: one Keycloak lookup (plus its retry) at a time
-    // keeps the load on the shared realm predictable for this one-off run.
+    // One Keycloak lookup at a time keeps load on the shared realm low.
     const outcome = await backfillOne(deps, c, opts.dryRun); // NOSONAR typescript:S9382
     if (outcome !== 'skipped') report[outcome]++;
   }
@@ -152,7 +150,7 @@ async function backfillOne(
   return written ? 'updated' : 'skipped';
 }
 
-/** First + last name joined, or `null` when Keycloak holds neither. */
+/** Joins first and last name, or returns `null` when Keycloak holds neither. */
 function displayName(u: IdpUser): string | null {
   const name = [u.firstName, u.lastName]
     .map((p) => p?.trim())
@@ -161,7 +159,7 @@ function displayName(u: IdpUser): string | null {
   return name === '' ? null : name;
 }
 
-/** `findById` with one retry (after `delayMs`) on a transient Keycloak failure. */
+/** Calls `findById`, retrying once after `delayMs` on a transient Keycloak failure. */
 async function findWithRetry(
   idp: IdpAdminAdapter,
   sub: string,
@@ -174,21 +172,26 @@ async function findWithRetry(
 }
 
 /**
- * Candidate orgs from the live database: linked to a contact that has no name,
- * and carrying a Keycloak owner to read the name from.
+ * Lists orgs whose owner contact has no name but has a Keycloak login.
  *
  * @returns The candidates (possibly empty).
  */
 export async function listOwnerNameCandidatesFromDb(): Promise<OwnerNameCandidate[]> {
   const rows = await getDb()
     .select({
-      orgId: aggregatorOrgs.id,
-      contactId: aggregatorOrgs.contactId,
-      ownerKcSub: aggregatorOrgs.ownerKcSub,
+      orgId: organisations.id,
+      contactId: users.contactId,
+      ownerKcSub: userIdentities.subject,
     })
-    .from(aggregatorOrgs)
-    .innerJoin(contact, eq(contact.id, aggregatorOrgs.contactId))
-    .where(and(isNull(contact.name), isNotNull(aggregatorOrgs.ownerKcSub)));
+    .from(organisations)
+    .innerJoin(users, eq(users.id, organisations.orgOwner))
+    .innerJoin(contact, eq(contact.id, users.contactId))
+    .innerJoin(
+      userIdentities,
+      and(eq(userIdentities.userId, users.id), eq(userIdentities.provider, IDP_PROVIDER)),
+    )
+    // Aggregator orgs only; the root has no Keycloak owner to read from.
+    .where(and(isNull(contact.name), eq(organisations.orgType, 'aggregator')));
   return rows.flatMap((r) =>
     r.ownerKcSub ? [{ orgId: r.orgId, contactId: r.contactId, ownerKcSub: r.ownerKcSub }] : [],
   );

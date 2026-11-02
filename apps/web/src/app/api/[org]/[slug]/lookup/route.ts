@@ -3,15 +3,9 @@
  *
  *   GET /api/[org]/[slug]/lookup?email|phone_number+network+domain
  *
- * Same anonymous trust model as the public submit route — the `(org, slug)`
- * pair on the public registration link is the only access credential. No
- * service token is attached; the upstream endpoint is itself anonymous.
- *
- * The route forwards the query string verbatim to
- * `/public/v1/aggregators/:orgSlug/lookup` and proxies the upstream
- * status/body back to the browser unchanged. The form uses the response
- * to branch between "open the form fresh" / "resume lifecycle" / "owned
- * elsewhere" UI states.
+ * Anonymous, like the submit route: no token is attached. Forwards the query
+ * string to `/public/v1/aggregators/:orgSlug/lookup` and returns the upstream
+ * status and body unchanged.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -48,12 +42,11 @@ interface RouteParams {
 }
 
 /**
- * Proxies the lookup query to the aggregator API. Slug is part of the
- * route shape so the BFF surface mirrors the submit route, but the
- * upstream endpoint is keyed only on `orgSlug` — the slug is intentionally
- * ignored when constructing the upstream URL.
+ * Proxies the lookup query to the aggregator API.
  *
- * @param req - The incoming request; the search params are forwarded verbatim.
+ * The upstream endpoint is keyed only on `org`; `slug` is ignored.
+ *
+ * @param req - The incoming request; the search params are forwarded as-is.
  * @param params - Path params; `org` becomes the upstream `:orgSlug`.
  * @returns Upstream response proxied with original status and body.
  */
@@ -64,9 +57,7 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Ne
   const base = process.env.API_BASE_URL ?? 'http://localhost:4000';
   const search = new URL(req.url).searchParams.toString();
 
-  // Forward the originating client IP and user-agent so the API rate
-  // limiter buckets per real caller, not per BFF instance. Mirrors the
-  // submit route's forwarding contract.
+  // Forward the client IP and user-agent so the API rate-limits per caller.
   const incomingXff = req.headers.get('x-forwarded-for');
   const clientIp =
     (incomingXff?.split(',')[0]?.trim() ?? '') || ((req as { ip?: string }).ip ?? '');

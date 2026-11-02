@@ -1,10 +1,9 @@
 /**
- * Postgres adapter for the registration-invites store (#700).
+ * Postgres registration-invites store (`@aggregator-dpg/api`).
  *
- * Wraps Drizzle queries against `registration_invites`. Driver-specific errors
- * are mapped to abstract `InviteStoreError` codes — callers reason in domain
- * terms. The partial-unique index on (parent_org_id, email) WHERE
- * status='pending' surfaces as `DUPLICATE_PENDING`.
+ * Queries `registration_invites` and maps driver errors to `InviteStoreError`
+ * codes. The unique index on pending (org_id, email) surfaces as
+ * `DUPLICATE_PENDING`.
  */
 
 import { and, eq } from 'drizzle-orm';
@@ -24,7 +23,7 @@ function toDomain(row: RegistrationInviteRow): RegistrationInvite {
   return {
     jti: row.jti,
     role: row.role,
-    parentOrgId: row.parentOrgId,
+    parentOrgId: row.orgId,
     email: row.email,
     status: row.status,
     expiresAt: row.expiresAt,
@@ -41,7 +40,7 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
       const rows = await getDb()
         .insert(registrationInvites)
         .values({
-          parentOrgId: input.parentOrgId,
+          orgId: input.parentOrgId,
           email: input.email,
           expiresAt: input.expiresAt,
           createdBy: input.createdBy,
@@ -85,7 +84,7 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
         .from(registrationInvites)
         .where(
           and(
-            eq(registrationInvites.parentOrgId, parentOrgId),
+            eq(registrationInvites.orgId, parentOrgId),
             eq(registrationInvites.email, email),
             eq(registrationInvites.status, 'pending'),
           ),
@@ -137,8 +136,9 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
   }
 
   /**
-   * Shared CAS `pending → next` used by consume/revoke. Returns the row on a
-   * winning swap, `null` when the invite was not pending.
+   * Atomically moves a pending invite to `next`; used by consume and revoke.
+   *
+   * Returns `null` when the invite was not pending.
    */
   private async casTerminal(
     op: string,

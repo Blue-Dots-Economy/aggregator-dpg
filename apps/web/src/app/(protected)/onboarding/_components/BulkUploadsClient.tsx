@@ -15,9 +15,9 @@ export interface BulkUploadsClientProps {
 }
 
 /**
- * Client body of the bulk-uploads page. The attestation statement is loaded
- * server-side (page.tsx) and threaded into {@link CSVUpload} as a prop — no
- * API round-trip, matching the registration consent flow.
+ * Client body of the bulk-uploads page.
+ *
+ * Passes the server-loaded attestation text to {@link CSVUpload}.
  */
 export function BulkUploadsClient({ attestation }: BulkUploadsClientProps): JSX.Element {
   const t = useTranslations('onboarding');

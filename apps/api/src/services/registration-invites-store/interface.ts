@@ -1,13 +1,9 @@
 /**
- * Registration-invites store contract (#700).
+ * Registration-invites store contract (`@aggregator-dpg/api`).
  *
- * Persistence port for the `registration_invites` table — the row that backs
- * single-use, revocation, and leak attribution for email-bound coordinator
- * invites. The invite JWT's `sub` is a row's `jti`.
- *
- * Follows the repo base-class store pattern (`registration-links-store`):
- * abstract base, `StoreResult<T>`, driver errors normalised to `StoreError`
- * codes so callers never see raw pg fields.
+ * Stores the `registration_invites` table, which makes email-bound
+ * coordinator invites single-use, revocable and traceable. The invite JWT's
+ * `sub` is a row's `jti`. Driver errors are mapped to `InviteStoreError` codes.
  */
 
 export type RegistrationInviteStatus = 'pending' | 'consumed' | 'revoked' | 'expired';
@@ -49,25 +45,26 @@ export type InviteStoreResult<T> = { ok: true; value: T } | { ok: false; error: 
 
 export abstract class RegistrationInvitesStoreBase {
   /**
-   * Insert a new pending invite. Returns `DUPLICATE_PENDING` when a live
-   * invite for the same (org, email) already exists (partial-unique index) so
-   * the caller can fall back to {@link refresh} and report "already invited".
+   * Inserts a new pending invite.
+   *
+   * Returns `DUPLICATE_PENDING` when a live invite for the same org and email
+   * exists; the caller can then use {@link refresh}.
    */
   abstract create(input: CreateInviteInput): Promise<InviteStoreResult<RegistrationInvite>>;
 
-  /** Load an invite by its `jti` (the token `sub`). */
+  /** Loads an invite by its `jti` (the token `sub`). */
   abstract findByJti(jti: string): Promise<InviteStoreResult<RegistrationInvite | null>>;
 
-  /** Find the live (pending) invite for an (org, email), if any. */
+  /** Finds the pending invite for an org and email, if any. */
   abstract findPendingByOrgAndEmail(
     parentOrgId: string,
     email: string,
   ): Promise<InviteStoreResult<RegistrationInvite | null>>;
 
   /**
-   * Refresh a pending invite's expiry + minting subject (a re-invite of an
-   * already-invited address). Only touches a still-`pending` row; returns
-   * `NOT_FOUND` otherwise.
+   * Updates a pending invite's expiry and creator, for a re-invite.
+   *
+   * Returns `NOT_FOUND` when the row is not `pending`.
    */
   abstract refresh(
     jti: string,
@@ -75,23 +72,23 @@ export abstract class RegistrationInvitesStoreBase {
   ): Promise<InviteStoreResult<RegistrationInvite>>;
 
   /**
-   * Atomically claim an invite: CAS `pending → consumed`, stamping
-   * `consumed_at`. Returns the row on success, or `null` when the invite was
-   * not pending (already consumed/revoked/expired, or a lost double-submit
-   * race) — the caller renders already-registered rather than double-creating.
+   * Atomically claims an invite (`pending` to `consumed`), setting `consumed_at`.
+   *
+   * Returns `null` when the invite was not pending, including a lost race.
    */
   abstract consume(jti: string): Promise<InviteStoreResult<RegistrationInvite | null>>;
 
   /**
-   * Revoke a pending invite (CAS `pending → revoked`). Returns `null` when the
-   * invite was not pending. Idempotent from the caller's view.
+   * Atomically revokes a pending invite (`pending` to `revoked`).
+   *
+   * Returns `null` when the invite was not pending.
    */
   abstract revoke(jti: string): Promise<InviteStoreResult<RegistrationInvite | null>>;
   /**
-   * Compensating CAS `consumed → pending`, undoing a claim whose registration
-   * never completed (#718 review). Scoped to `consumed` so a revoked or expired
-   * invite can never be resurrected, and returns `null` when the row was not
-   * consumed — the caller treats that as "nothing to give back".
+   * Undoes a claim whose registration did not complete (`consumed` to `pending`).
+   *
+   * Never revives a revoked or expired invite. Returns `null` when the row was
+   * not consumed.
    */
   abstract release(jti: string): Promise<InviteStoreResult<RegistrationInvite | null>>;
 }

@@ -33,8 +33,7 @@ export default function OnboardingPage() {
           </button>
         }
       />
-      {/* Onboarding summary + joins-by-entry-mode at the top of the page,
-          above the per-flow cards. */}
+      {/* Onboarding summary and joins by entry mode. */}
       <OnboardingMetrics />
       <BulkUploadCard />
       <RegistrationLinkCard />
@@ -43,8 +42,9 @@ export default function OnboardingPage() {
 }
 
 /**
- * Summary card for the bulk upload sub-flow. Counts come from the recent
- * uploads list (same hook the detail page uses). Click → /onboarding/bulk-uploads.
+ * Summary card for bulk uploads, linking to /onboarding/bulk-uploads.
+ *
+ * Counts come from the recent uploads list.
  */
 function BulkUploadCard() {
   const t = useTranslations('onboarding');
@@ -93,17 +93,16 @@ function BulkUploadCard() {
 }
 
 /**
- * Summary card for the registration link sub-flow. Counts come from the
- * existing links list (scoped to the aggregator's type). Click →
- * /onboarding/links.
+ * Summary card for registration links, linking to /onboarding/links.
+ *
+ * Counts come from the links list for the aggregator's type.
  */
 function RegistrationLinkCard() {
   const t = useTranslations('onboarding');
   const router = useRouter();
   const rawProfile = useProfileRaw();
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Default to the network's first declared domain (networks.json order)
-  // until the profile's scoped type loads.
+  // Use the network's first domain until the profile's type loads.
   const aggregatorType: string = rawProfile.data?.type ?? cfg.domains[0]?.id ?? '';
   const links = useRegistrationLinks(aggregatorType);
   const metrics = useMemo(() => {

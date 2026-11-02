@@ -75,19 +75,35 @@ describe('PublicRegistrationPage (server component)', () => {
   });
 
   it('calls notFound() on a 404 resolve response', async () => {
-    // notFound() is invoked inside the resolve try/catch here, so with a
-    // plain-throw mock (unlike Next's real digest-marked control-flow
-    // error) it lands in the catch and renders the network-error shell —
-    // notFound() having been called either way is the behaviour under test.
+    // notFound() signals Next by throwing, so it must propagate rather than be
+    // caught and rendered as a page. The try now wraps only the fetch, so the
+    // mock's throw escapes exactly as the real control-flow error would and the
+    // route answers 404 instead of 200.
     globalThis.fetch = vi.fn(
       async () => new Response('not found', { status: 404 }),
     ) as unknown as typeof fetch;
 
-    const el = await PublicRegistrationPage({
-      params: Promise.resolve({ org: 'acme', slug: 'nope' }),
-    });
+    await expect(
+      PublicRegistrationPage({
+        params: Promise.resolve({ org: 'acme', slug: 'nope' }),
+      }),
+    ).rejects.toThrow('NEXT_NOT_FOUND');
     expect(notFound).toHaveBeenCalled();
+  });
+
+  it('renders an ErrorShell when the resolve response body is malformed', async () => {
+    // 200 with a body that is not JSON. Parsing is guarded separately from the
+    // fetch so a bad payload still shows the service page instead of throwing
+    // past the route.
+    globalThis.fetch = vi.fn(
+      async () => new Response('<html>not json</html>', { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    const el = await PublicRegistrationPage({
+      params: Promise.resolve({ org: 'acme', slug: 'winter25' }),
+    });
     expect(el.props.title).toBe('Cannot reach registration service');
+    expect(notFound).not.toHaveBeenCalled();
   });
 
   it('renders an ErrorShell for a non-ok, non-404 upstream response', async () => {

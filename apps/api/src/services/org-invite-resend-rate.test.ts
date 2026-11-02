@@ -25,7 +25,17 @@ function makeRedis(execResult: unknown) {
   const expire = vi.fn().mockReturnThis();
   const exec = vi.fn().mockResolvedValue(execResult);
   const multi = vi.fn(() => ({ incrby, expire, exec }));
-  return { multi, incrby, expire, exec, decrby: vi.fn(), on: vi.fn(), quit: vi.fn() };
+  // `status` mirrors ioredis: consume() waits for a connecting socket.
+  return {
+    multi,
+    incrby,
+    expire,
+    exec,
+    decrby: vi.fn(),
+    on: vi.fn(),
+    quit: vi.fn(),
+    status: 'ready',
+  };
 }
 
 describe('checkOrgInviteResendRate', () => {

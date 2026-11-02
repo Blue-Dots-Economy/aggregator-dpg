@@ -689,4 +689,52 @@ describe('KeycloakIdpAdmin', () => {
       expect(admin).toBeInstanceOf(KeycloakIdpAdmin);
     });
   });
+
+  describe('findGroupByName / removeUserFromGroup (0028 root mirror)', () => {
+    it('returns the exact-name group with its attributes', async () => {
+      fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(
+        jsonResponse([
+          { id: 'g-other', name: 'org-network-2', attributes: {} },
+          { id: 'g-1', name: 'org-network', attributes: { org_id: ['org-1'] } },
+        ]),
+      );
+      const admin = makeAdmin(fetchMock as unknown as typeof fetch);
+      const r = await admin.findGroupByName('org-network');
+      expect(r).toEqual({ ok: true, value: { id: 'g-1', attributes: { org_id: ['org-1'] } } });
+      const url = String(fetchMock.mock.calls[1]?.[0]);
+      expect(url).toContain('search=org-network');
+      expect(url).toContain('exact=true');
+    });
+
+    it('returns null when no group has that exact name', async () => {
+      fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(jsonResponse([]));
+      const admin = makeAdmin(fetchMock as unknown as typeof fetch);
+      expect(await admin.findGroupByName('org-x')).toEqual({ ok: true, value: null });
+    });
+
+    it('maps a failed lookup to IDP_UNAVAILABLE', async () => {
+      fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(emptyResponse(500));
+      const admin = makeAdmin(fetchMock as unknown as typeof fetch);
+      const r = await admin.findGroupByName('org-x');
+      expect(r.ok || r.error.code).toBe('IDP_UNAVAILABLE');
+    });
+
+    it('removes a membership, treating an already-gone one as success', async () => {
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse())
+        .mockResolvedValueOnce(emptyResponse(204))
+        .mockResolvedValueOnce(emptyResponse(404));
+      const admin = makeAdmin(fetchMock as unknown as typeof fetch);
+      expect((await admin.removeUserFromGroup('u-1', 'g-1')).ok).toBe(true);
+      expect((await admin.removeUserFromGroup('u-1', 'g-1')).ok).toBe(true);
+      expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: 'DELETE' });
+    });
+
+    it('maps another removal failure to IDP_UNAVAILABLE', async () => {
+      fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(emptyResponse(500));
+      const admin = makeAdmin(fetchMock as unknown as typeof fetch);
+      const r = await admin.removeUserFromGroup('u-1', 'g-1');
+      expect(r.ok || r.error.code).toBe('IDP_UNAVAILABLE');
+    });
+  });
 });

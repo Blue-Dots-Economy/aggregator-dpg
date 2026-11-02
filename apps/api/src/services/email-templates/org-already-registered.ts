@@ -2,16 +2,13 @@
  * Organisation-already-registered email — sent when someone submits the org
  * registration form for an organisation that is already approved and live.
  *
- * Belongs to `@aggregator-dpg/api`. Distinct from `owner-grant-refreshed` on
- * purpose: that one answers "my link expired", this one answers "I tried to
- * register again". The recipient just filled in the registration form, so the
- * mail has to acknowledge that attempt — otherwise it reads as unprompted, or
- * as phishing. No sign-in CTA (the owner has no account); the coordinator
- * invite link is the whole point of the message.
+ * Belongs to `@aggregator-dpg/api`. Unlike `owner-grant-refreshed` ("my link
+ * expired"), this acknowledges a repeat registration attempt. It carries the
+ * coordinator invite link and no sign-in button.
  *
- * Always addressed to the owner email ON FILE, never the address that was
- * submitted — the org form is anonymous, so mailing the submitted address
- * would hand a stranger the org's invite credential.
+ * Always sent to the owner email on file, never the submitted address: the
+ * form is anonymous, so mailing the submitted address would leak the invite
+ * credential.
  *
  * Copy lives under `org_already_registered.*`.
  */

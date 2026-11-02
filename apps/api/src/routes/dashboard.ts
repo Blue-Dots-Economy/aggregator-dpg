@@ -1,52 +1,42 @@
 /**
- * Dashboard endpoints.
+ * Dashboard endpoints of the aggregator API (`@aggregator-dpg/api`).
  *
- *   GET /v1/dashboard?domain=seeker&page&limit&status
- *     Proxies signalstack's pre-computed aggregator dashboard payload
- *     (rollup + paginated participants + cursor + metadata) for the
- *     calling aggregator's signalstack org. `domain` defaults to `seeker`;
- *     `provider` is accepted for forward-compat but signalstack's
- *     dashboard endpoint is seeker-only today and the writer drops the
- *     field on the upstream call until that lands.
+ *   GET /v1/dashboard?domain&page&limit&status
+ *     Proxies signalstack's dashboard payload (rollup, paginated participants,
+ *     cursor, metadata) for the caller's signalstack org.
  *
- * Authorisation: Bearer access token with the custom `aggregator_id` claim.
+ * Authorisation: Bearer access token with the `aggregator_id` claim.
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { errorResponses } from '../errors/openapi.js';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
 import { buildDecryptedProfilesCsv } from '@aggregator-dpg/profile-csv';
 import { httpError } from '../errors/http-error.js';
+import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 
 /**
- * Lifecycle statuses the aggregator dashboard surfaces. Signals filters the
- * rollup + items to this set (paused + retired are excluded). Broaden here if
- * a deployment should show more buckets.
+ * Lifecycle statuses the dashboard shows. Paused and retired are excluded.
  */
 const DASHBOARD_LIFECYCLE = ['draft', 'live'] as const;
 
 /**
  * Max `item_ids` accepted by the decrypted-profile export in one call.
  *
- * This is a PII decrypt path, and the array was previously unbounded — one
- * request could ask signalstack to decrypt arbitrarily many profiles. 1000 is
- * comfortably wider than any window the dashboard renders, so the bound is
- * invisible to a real export while capping the blast radius of a crafted one.
+ * Caps how many profiles one request can decrypt. Larger than any dashboard page.
  */
 const EXPORT_MAX_ITEM_IDS = 1000;
 
 /**
- * Dashboard query schema. `status` is a pass-through with a light shape
- * check — signalstack owns the canonical set (`new`, `at_risk`,
- * `accepted`, `rejected`, …) and our API does not pin an enum that would
- * drift on every signalstack release. `domain` defaults to seeker so
- * existing seeker-only consumers keep working; provider support flips on
- * once signalstack's dashboard endpoint accepts a domain filter.
+ * Dashboard query schema.
+ *
+ * `status` is only shape-checked; signalstack owns the set of valid values.
+ * `domain` defaults to the first configured domain.
  */
 const DashboardQuerySchema = z.object({
   domain: z.string().min(1).optional(),
@@ -60,11 +50,8 @@ const DashboardQuerySchema = z.object({
     .regex(/^[a-z0-9_]+$/i, 'status must be alphanumeric + underscore')
     .optional(),
   /**
-   * Optional lifecycle narrowing for the participant list. When set, only that
-   * lifecycle is fetched (and paginated) upstream; absent ⇒ the default
-   * draft+live set ({@link DASHBOARD_LIFECYCLE}). Server-side so a rare draft
-   * surfaces in a domain dominated by live profiles — client-side filtering a
-   * single page cannot. `paused`/`retired` remain non-selectable here.
+   * Narrows the participant list to one lifecycle, filtered and paginated upstream.
+   * When absent, {@link DASHBOARD_LIFECYCLE} is used.
    */
   lifecycle: z.enum(['draft', 'live']).optional(),
   /** Bypass signalstack's TTL cache when true. Forwarded verbatim. */
@@ -72,10 +59,8 @@ const DashboardQuerySchema = z.object({
 });
 
 /**
- * Export query schema. Strict subset of {@link DashboardQuerySchema} —
- * signalstack's `/dashboard/export` endpoint accepts only `status` as a
- * filter today. `domain` is validated against the resolved network
- * config in the handler.
+ * Export query schema. A subset of {@link DashboardQuerySchema}; only `status` filters.
+ * The handler checks `domain` against the network config.
  */
 const DashboardExportQuerySchema = z.object({
   domain: z.string().min(1).optional(),
@@ -98,6 +83,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
   app.get(
     '/v1/dashboard',
     {
+      config: { rbac: { capability: 'profiles.view' } },
       schema: {
         tags: ['dashboard'],
         summary: 'Aggregator dashboard rollup + items',
@@ -145,10 +131,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         limit,
         ...(status ? { status } : {}),
         domain,
-        // Aggregator dashboard shows only draft + live profiles; paused +
-        // retired are excluded server-side by signalstack (#lifecycle-filter).
-        // A caller-supplied `?lifecycle=` narrows to that single lifecycle
-        // (server-side pagination over the filtered set); absent ⇒ draft+live.
+        // Draft + live by default; `?lifecycle=` narrows to one.
         lifecycle: lifecycle ? [lifecycle] : DASHBOARD_LIFECYCLE,
         refresh,
       });
@@ -166,11 +149,8 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         });
       }
 
-      // Signalstack now returns every served domain in one payload under
-      // `by_domain[<id>]`. Log the requested domain's slice for parity
-      // with the previous single-domain log shape; the response itself
-      // is forwarded verbatim so the web app can render seeker + provider
-      // tabs from a single fetch.
+      // The payload holds every domain under `by_domain`; log the requested
+      // domain's slice and forward the payload unchanged.
       const slice = result.value.by_domain[domain];
       log.info({
         status: 'success',
@@ -191,6 +171,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
   app.get(
     '/v1/dashboard/export',
     {
+      config: { rbac: { capability: 'profiles.export' } },
       schema: {
         tags: ['dashboard'],
         summary: 'CSV export of dashboard items',
@@ -274,6 +255,7 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
   app.post(
     '/v1/dashboard/export/profiles',
     {
+      config: { rbac: { capability: 'profiles.view_pii' } },
       schema: {
         tags: ['dashboard'],
         summary: 'CSV export of DECRYPTED profile data for selected items',
@@ -313,11 +295,8 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
 
       const actingOrgId = await resolveActingOrgId(auth, log);
 
-      // Deduplicate before forwarding. Signals dedupes its own `requested` set,
-      // so duplicates never changed the CSV — but they did consume the
-      // EXPORT_MAX_ITEM_IDS budget, which made the bound far weaker than it
-      // looks (1000 copies of one id passed validation). Order is preserved so
-      // the CSV row order still follows the request.
+      // Deduplicate so repeated ids do not count against EXPORT_MAX_ITEM_IDS.
+      // Order is preserved, so CSV rows follow the request.
       const requestedIds = [...new Set(item_ids)];
 
       const result = await ss.fetchDecryptedProfiles({
@@ -342,17 +321,9 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
       const csv = buildDecryptedProfilesCsv(rows);
       const filename = `profiles-${domain}-${new Date().toISOString().slice(0, 10)}.csv`;
 
-      // Ownership is enforced by Signals, which scopes the decrypt to
-      // `onboardedByOrgId = actingOrgId` AND the acting org's configured
-      // domains, returning every id that fails either test in `skipped` with no
-      // distinction (so the response cannot confirm an id exists elsewhere).
-      //
-      // A non-empty `skipped` therefore means this caller asked for at least one
-      // id it does not own. On a PII decrypt path that is worth surfacing rather
-      // than burying in a success field: the legitimate UI only ever submits ids
-      // it just listed for this aggregator, so a non-zero count is either a
-      // client bug or someone probing ids. Counts only — never the ids, and
-      // never `item_state`.
+      // Signals decrypts only ids this org onboarded in its domains; the rest
+      // come back in `skipped`. The UI only sends ids it listed, so a non-zero
+      // count means a client bug or probing. Log counts only, never ids or item_state.
       const skippedCount = result.value.skipped.length;
       if (skippedCount > 0) {
         log.warn({
@@ -376,11 +347,8 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
         bytes: csv.length,
       });
 
-      // Withheld rows are dropped from the CSV, not rejected — a 403/404 keyed
-      // to ids that exist elsewhere would leak their existence. Report the
-      // COUNT so the drop is visible instead of silent; the count alone
-      // identifies nothing. Relayed to the browser by the BFF profiles route
-      // and surfaced as `skippedCount` on the web service's export result.
+      // Withheld rows are dropped, not rejected, so the response does not reveal
+      // ids that exist elsewhere. The count header makes the drop visible.
       return reply
         .header('Content-Type', 'text/csv; charset=utf-8')
         .header('X-Export-Skipped-Count', String(skippedCount))
@@ -391,30 +359,29 @@ export async function registerDashboardRoutes(app: FastifyInstance): Promise<voi
 }
 
 /**
- * Resolves the aggregator's signalstack organisation id for routes that
- * proxy reads against signalstack. Prefers the access-token claim
- * (`requireApproved` triggers the login-time backfill and mutates
- * `context.signalstackOrgId` in place when the claim is absent) and
- * falls back to the Postgres mirror so a token-refresh delay between
- * approval and first dashboard hit does not strand the user.
+ * Resolves the caller's signalstack organisation id.
  *
- * Throws DB_UNAVAILABLE if the store read fails, and
- * SIGNALSTACK_ORG_NOT_REGISTERED when neither source carries a value —
- * which means the aggregator has not yet completed the signalstack
- * handshake (login backfill must run once before reads work).
+ * Uses the access-token claim, else the stored user row (covers a token issued
+ * before approval).
+ *
+ * @param auth - The approved caller.
+ * @param log - Request logger.
+ * @returns The signalstack org id.
+ * @throws DB_UNAVAILABLE if the store read fails.
+ * @throws SIGNALSTACK_ORG_NOT_REGISTERED if neither source has a value.
  */
 async function resolveActingOrgId(auth: AuthContext, log: FastifyRequest['log']): Promise<string> {
   let actingOrgId: string | null = auth.signalstackOrgId ?? null;
   if (!actingOrgId) {
-    const row = await getAggregatorStore().findById(auth.aggregatorId);
+    const row = await getUserStore().findById(auth.aggregatorId);
     if (!row.ok) {
       log.error({
         status: 'failure',
-        sub: 'aggregatorStore.findById',
+        sub: 'userStore.findById',
         code: row.error.code,
       });
       throw httpError('DB_UNAVAILABLE', {
-        fields: { sub_operation: 'aggregatorStore.findById' },
+        fields: { sub_operation: 'userStore.findById' },
       });
     }
     actingOrgId = row.value?.signalstackOrgId ?? null;
@@ -429,14 +396,17 @@ async function resolveActingOrgId(auth: AuthContext, log: FastifyRequest['log'])
 }
 
 /**
- * Approval-gated auth helper for routes that consume signalstack on the
- * caller's behalf. Promotes a missing `aggregator_id` claim to 403 (FORBIDDEN)
- * and a non-approved decision to 403 (NOT_APPROVED) so the caller can
- * distinguish "no claim wired" from "still pending approval".
+ * Authenticates an approved coordinator and checks route access.
+ *
+ * A missing `aggregator_id` claim is 403 FORBIDDEN; a coordinator not yet
+ * approved is 403 NOT_APPROVED.
  */
 async function requireApprovedAuth(req: FastifyRequest): Promise<AuthContext> {
   const result = await requireApproved(req);
-  if (result.ok) return result.context;
+  if (result.ok) {
+    await recordRouteCaller(req, callerFromAuth(result.context));
+    return result.context;
+  }
   if (result.error.code === 'MISSING_AGGREGATOR_ID') {
     throw httpError('FORBIDDEN', {
       detail: result.error.message,

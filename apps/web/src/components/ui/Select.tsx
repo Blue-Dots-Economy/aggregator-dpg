@@ -1,11 +1,8 @@
 'use client';
 
 /**
- * shadcn/ui Select — Radix primitive with Tailwind styling matching
- * the rest of the app (`bd-input` look, brand-coloured focus ring).
- *
- * Single-select dropdown. For array-of-enum fields, use
- * `<MultiSelect>` instead (sibling file).
+ * Single-select dropdown built on Radix Select, styled to match `bd-input`.
+ * For array-of-enum fields, use `<MultiSelect>`.
  */
 
 import * as React from 'react';

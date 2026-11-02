@@ -1,10 +1,9 @@
 /**
- * Campaign job store contract (#579).
+ * Campaign job store contract.
  *
- * Persistence port for the durable campaign async-job model: a `campaign_job`
- * row plus one `campaign_job_item` row per target item. Every campaign channel
- * (export/email/voice) shares this store. Job roll-up status is DERIVED from
- * item counts — never a stored counter — so it can't drift from the item rows.
+ * Persistence port for campaign async jobs: a `campaign_job` row plus one
+ * `campaign_job_item` row per target item. Every campaign channel shares this
+ * store. Job roll-up status is derived from item counts, not stored counters.
  *
  * Consumers import only this module (`./interface`) and `./testing`; the API
  * routes resolve a concrete impl via `./index`, the worker via its own client.
@@ -34,8 +33,8 @@ export const SUCCESS_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
 ];
 
 /**
- * Item statuses that are neither success nor failure — the item was
- * deliberately not acted on. Skips never make a job `partial`.
+ * Item statuses that are neither success nor failure: the item was not acted
+ * on. Skips never make a job `partial`.
  */
 export const SKIPPED_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
   'skipped_not_owned',
@@ -46,14 +45,9 @@ export const SKIPPED_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
 /**
  * Statuses a channel handler must never act on again when a job retries.
  *
- * NOT the same as "success": `resolved` is deliberately absent. Per the batch
- * spec the guard is on `submitted`/`sent` — the states that mean an external
- * side-effect already happened. `resolved` only means the item's data was
- * fetched, which is an intermediate step for the multi-write channels (email
- * resolves then sends; voice resolves then submits). Treating it as terminal
- * would make the second write a no-op and every email job would report
- * "completed, 0 sent". Export writes `resolved` last, and re-resolving on a
- * retry is harmless — the spec calls export retry an idempotent rebuild.
+ * `resolved` is not included: it is an intermediate step for email and voice
+ * (resolve, then send or submit). `submitted` and `sent` mean an external
+ * side effect already happened. Re-resolving an export item on retry is harmless.
  */
 export const TERMINAL_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
   'submitted',
@@ -63,9 +57,8 @@ export const TERMINAL_ITEM_STATUSES: readonly CampaignJobItemStatus[] = [
 ];
 
 /**
- * The retry guard rendered for a SQL `NOT IN (...)` predicate, so the Postgres
- * stores can't drift from {@link TERMINAL_ITEM_STATUSES}. Values are a fixed
- * enum, never user input.
+ * Renders {@link TERMINAL_ITEM_STATUSES} for a SQL `NOT IN (...)` predicate.
+ * Values are a fixed enum, never user input.
  *
  * @returns e.g. `'submitted','sent','skipped_not_owned',…`
  */
@@ -123,7 +116,7 @@ export interface JobRecord {
   signalstackOrgId: string;
 }
 
-/** Derived item-status tally for a job. `total` is the sum of the four buckets. */
+/** Derived item-status tally for a job. `total` is the sum of all status counts. */
 export interface JobStatusCounts {
   total: number;
   pending: number;
@@ -144,8 +137,7 @@ export interface JobItemView {
   providerRef: string | null;
   /**
    * The provider batch this item was submitted under (voice: the Raya batch
-   * id). Provider-generic field name — persisted in the `raya_batch_id`
-   * column (a storage detail; the column keeps its original name).
+   * id). Stored in the `raya_batch_id` column.
    */
   providerBatchRef: string | null;
   /** Why the item was skipped, when `status` is one of the skip terminals. */
@@ -200,23 +192,18 @@ export type StoreError =
 export type StoreResult<T> = { ok: true; value: T } | { ok: false; error: StoreError };
 
 /**
- * Rolls up the terminal job status from item counts. Pure — shared by every
- * store impl so the derivation lives in exactly one place.
+ * Rolls up the job status from item counts. Shared by every store.
  *
  * @param counts - The job's item-status tally.
- * @returns `processing` while any item is still pending; otherwise `succeeded`
- *   (no failures), `failed` (no successes), or `partially_failed` (a mix). An
- *   itemless job is treated as `succeeded`.
+ * @returns `processing` while any item is pending; otherwise `completed` (no
+ *   failures, or no items), `failed` (no successes), or `partial` (a mix).
  */
 export function deriveJobStatus(counts: JobStatusCounts): CampaignJobStatus {
   if (counts.pending > 0) return 'processing';
   if (counts.total === 0) return 'completed';
   const succeeded = counts.resolved + counts.submitted + counts.sent;
-  // Skips (not owned / no contact / duplicate) are deliberate no-ops, not
-  // failures, so they never make a job `partial`. A job whose items were ALL
-  // skipped is therefore `completed`, not `failed`: the handler ran correctly
-  // and simply found nothing to act on. The caller distinguishes the two from
-  // `counts` (e.g. resolved: 0, skipped_not_owned: 4), not from the status.
+  // Skips are not failures. A job with every item skipped is `completed`;
+  // callers tell it apart by `counts`.
   if (counts.failed === 0) return 'completed';
   if (succeeded === 0) return 'failed';
   return 'partial';
@@ -224,15 +211,12 @@ export function deriveJobStatus(counts: JobStatusCounts): CampaignJobStatus {
 
 export abstract class CampaignJobStoreBase {
   /**
-   * Creates a job and its item rows in one transaction. Idempotent on
-   * `idempotencyKey`: a replayed key returns the original job with
-   * `created:false` (and enqueues nothing new — the caller checks the flag).
+   * Creates a job and its item rows in one transaction.
    *
-   * Dedup-on-create: an item whose `action` is non-null and which is already
-   * active (`pending`/`resolved`/`submitted`) for the same `(itemId, action)`
-   * pair in ANY job is inserted as `duplicate_active` instead of `pending`, so
-   * a channel handler can never act on the same item twice concurrently.
-   * Items with a null `action` (export) are never deduplicated.
+   * Idempotent on `idempotencyKey`: a replay returns the original job with
+   * `created: false`. An item with a non-null `action` that is already active
+   * for the same `(itemId, action)` in any job is inserted as
+   * `duplicate_active`. Items with a null `action` (export) are never deduplicated.
    */
   abstract createJob(
     input: CreateJobInput,
@@ -241,9 +225,7 @@ export abstract class CampaignJobStoreBase {
   /**
    * Count a tenant's active (queued|processing) jobs — for the per-org cap.
    *
-   * @param channel - Restrict the count to one channel. The cap is per-channel
-   *   (`CAMPAIGN_<CHANNEL>_MAX_ACTIVE_PER_ORG`), so an export must not be
-   *   throttled by in-flight email jobs. Omit to count every channel.
+   * @param channel - Count only this channel (the cap is per channel). Omit to count all.
    */
   abstract countActiveJobs(
     signalstackOrgId: string,

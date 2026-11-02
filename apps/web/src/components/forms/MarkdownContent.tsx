@@ -24,10 +24,8 @@ export interface MarkdownContentProps {
  * @returns A div containing the rendered Markdown.
  */
 export function MarkdownContent({ content }: MarkdownContentProps): JSX.Element {
-  // The web app does not ship @tailwindcss/typography, and Tailwind's preflight
-  // strips default heading/list styling — so every element is styled explicitly
-  // via arbitrary variants (descendant selectors so nested inline elements are
-  // covered too). Mirrors the Signals-DPG consent Markdown renderer.
+  // No @tailwindcss/typography here and preflight strips default styles, so each
+  // element is styled with descendant variants. Matches the Signals-DPG renderer.
   return (
     <div
       className="text-[14px] leading-relaxed text-ink-700 space-y-3

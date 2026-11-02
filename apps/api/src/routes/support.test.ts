@@ -2,9 +2,7 @@
 // `config` (config.ts parses env once, at first import). The unset-flag
 // scenarios live in the sibling `support.disabled.test.ts` file instead of
 // toggling this env var mid-file, since the parsed `config` singleton can't
-// be swapped once app.js has been imported. Mirrors the
-// `aggregator-org-approvals.test.ts` / `.org.test.ts` split for
-// ORG_HIERARCHY_ENABLED.
+// be swapped once app.js has been imported.
 //
 // Multiple TO addresses + a CC address exercise the comma-separated
 // normalisation in `supportEmail()` / `supportCc()` (both read live env).

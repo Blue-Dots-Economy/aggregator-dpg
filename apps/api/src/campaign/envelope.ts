@@ -1,18 +1,13 @@
 /**
- * Shared campaign request envelope (#579, API-contract normalization).
- *
- * Every campaign channel (export/email/voice) accepts the same request shape:
+ * Request envelope shared by the api app's campaign channels (export, email, voice).
  *
  *   { "item_ids": string[], "metadata": [{ "key", "value" }], "content": {} }
  *
- * `item_ids` are the target Signals items. `metadata` is a free-form list of
- * `{key,value}` pairs stored verbatim on the job (no fixed allow-list — every
- * pair sent is persisted). `content` is the per-channel payload (empty `{}` for
- * export; the email/voice PRs give it a channel-specific shape).
+ * `item_ids` are the target Signals items. `metadata` pairs are stored as sent.
+ * `content` is the per-channel payload (`{}` for export).
  *
- * This module owns only the transport-shape validation. The per-request item
- * cap (`CAMPAIGN_<CHANNEL>_MAX_ITEMS`) is enforced in the route so it can return the
- * dedicated `CAMPAIGN_TOO_MANY_ITEMS` error instead of a generic 400.
+ * The per-request item cap is checked in the route so it can return
+ * `CAMPAIGN_TOO_MANY_ITEMS`.
  *
  * @module @aggregator-dpg/api
  */
@@ -27,10 +22,8 @@ export const campaignMetadataPairSchema = z
   .strict();
 
 /**
- * The shared campaign request envelope. `item_ids` is validated as a non-empty
- * array of uuids here; the upper bound is applied in the route (dedicated
- * error). `metadata` and `content` default to empty so a minimal request is
- * just `{ "item_ids": [...] }`.
+ * The shared campaign request envelope. `item_ids` must be a non-empty uuid array;
+ * `metadata` and `content` default to empty.
  */
 export const campaignEnvelopeSchema = z
   .object({
@@ -62,8 +55,7 @@ export function dedupeItemIds(ids: string[]): string[] {
 }
 
 /**
- * Reads a metadata pair's value by key (first match), or undefined. Used by the
- * export path to surface a `purpose` pair in the notification email.
+ * Reads a metadata pair's value by key (first match), or undefined.
  *
  * @param metadata - The job's metadata pairs.
  * @param key - The key to look up.

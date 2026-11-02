@@ -1,30 +1,27 @@
 /**
- * Postgres schema definitions for the Aggregator API.
+ * Drizzle table definitions for the aggregator database, in the db-schema package.
  *
- * Tables:
+ * Main tables:
  *   - `contact`: one row per person (name, email, phone), keyed by the
- *     deterministic `contactId()` hash of `lower(email):phone`. Every row that
- *     belongs to a person references it by FK `contact_id` (migration 0025).
- *   - `aggregators`: registration-essential identity of a coordinator. Holds
- *     id, slug, actor_type, name (the ORGANISATION name the coordinator
- *     registered under) / type, url, `contact_id` → `contact` (+ `contact_extra`
- *     for the optional Beckn contact keys), Beckn `locations`, `consent`,
- *     lifecycle `status`, and audit fields. `org_slug` is derived from `name`
- *     at INSERT and is immutable (trigger lives in the migration).
- *   - `bulk_uploads`: parent record per CSV upload. Tracks lifecycle
- *     (pending → uploaded → file_validating → row_processing → completed/failed)
- *     plus counters (passed/failed/skipped). Per-row state lives transiently
- *     in Redis during the run and `errors.csv` on S3 after.
+ *     `contactId()` hash of `lower(email):phone`. Other rows reference it by
+ *     `contact_id`.
+ *   - `users`: one row per account. A `coordinator` row holds a coordinator's
+ *     registration, its Signals org, the domains it serves, its org and its
+ *     status. An `admin` row is an org owner's identity only. Consent lives
+ *     only in `consent_record`.
+ *   - `organisations`: the network-facilitator root, the Default org and every
+ *     aggregator org.
+ *   - `bulk_uploads`: one row per CSV upload, with its status. Counters and
+ *     per-row state are in Redis during the run; afterwards counters are in
+ *     `onboarding` and row errors in `errors.csv` on S3.
  *
- * Keycloak holds its own copy of a user's email / phone / name (login
- * identifiers) plus `decision_made` (approval state). The `contact` table is
- * the application's copy; the two are not yet re-synced after registration
- * (a later phase adds a single sync point).
+ * Keycloak keeps its own copy of a user's email, phone and name, plus
+ * `decision_made`. The `contact` table is the application's copy. The two
+ * are not synced after registration.
  *
- * CHECK constraints (shape guards on jsonb, conditional integrity on
- * actor_type ↔ type, the `contact` id/email/phone format checks), the
- * `contact` sync + GC triggers, and the immutability trigger on `org_slug` are
- * declared in the migrations, not here.
+ * CHECK constraints, the `contact` cleanup trigger, the slug immutability
+ * triggers and the `consent_record` append-only trigger are defined in the
+ * migrations, not here.
  */
 
 import { sql } from 'drizzle-orm';
@@ -35,34 +32,48 @@ import {
   timestamp,
   jsonb,
   integer,
+  smallint,
+  boolean,
   pgEnum,
   uniqueIndex,
   index,
+  primaryKey,
+  unique,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
-import type {
+import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
+
+export type {
   BecknContact,
   BecknLocation,
   ConsentRecord,
 } from '@aggregator-dpg/shared-primitives/aggregator';
 
-export type { BecknContact, BecknLocation, ConsentRecord };
+/**
+ * A coordinator's own org-detail values that differ from its org's.
+ *
+ * A key is present only where the values differ. `null` or `[]` records an
+ * empty own value.
+ */
+export interface LegacyOrgDetails {
+  url?: string | null;
+  locations?: BecknLocation[];
+  company?: string | null;
+  gstNumber?: string | null;
+}
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
-export const aggregatorActorTypeEnum = pgEnum('aggregator_actor_type', [
-  'aggregator',
-  'seeker',
-  'provider',
-]);
+/**
+ * Account role. `coordinator` is a coordinator account; `admin` is an org owner's identity.
+ */
+export const userTypeEnum = pgEnum('user_type', ['admin', 'coordinator']);
 
-// `participant_type` + `aggregator_type` Postgres enums were dropped in
-// migration 0011 — the aggregator is generic across signalstack networks
-// (blue_dot has seeker/provider, yellow_dot has learner/tutor, …) so the
-// closed enum no longer fits. Columns that used these enums are now plain
-// `text`; validation against the live network's `domainIds` happens at
-// the application layer.
+// Domain ids (participant types) are plain `text`, not an enum. The
+// application validates them against the network's `domainIds`.
 
-export const aggregatorStatusEnum = pgEnum('aggregator_status', [
+/** Registration status of a coordinator or an org. */
+export const registrationStatusEnum = pgEnum('registration_status', [
   'pending',
   'active',
   'inactive',
@@ -95,11 +106,10 @@ export const linkSubmissionOutcomeEnum = pgEnum('link_submission_outcome', [
 export const onboardingSourceEnum = pgEnum('onboarding_source', ['bulk', 'link']);
 
 /**
- * Lifecycle of a targeted coordinator invite (#700). `pending` is the only
- * live state; `consumed` (registered), `revoked` (owner/org cancelled), and
- * `expired` are terminal. The partial-unique index on
- * `registration_invites` keys off `status = 'pending'` so exactly one live
- * invite exists per (org, email).
+ * Status of a coordinator invite.
+ *
+ * `pending` is the only live state. `consumed`, `revoked` and `expired` are
+ * final. At most one pending invite exists per (org, email).
  */
 export const registrationInviteStatusEnum = pgEnum('registration_invite_status', [
   'pending',
@@ -108,18 +118,17 @@ export const registrationInviteStatusEnum = pgEnum('registration_invite_status',
   'expired',
 ]);
 
-// ─── Campaign async-job engine (#579) ────────────────────────────────────────
-// Durable job model shared by every campaign channel (export/email/voice). A
-// request becomes one `campaign_job` row plus one `campaign_job_item` row per
-// target item; the worker writes per-item terminal statuses and the job status
-// is always DERIVED from item counts (never a stored counter — see
-// `campaign-job-store`), so it can't drift.
+// ─── Campaign async jobs ─────────────────────────────────────────────────────
+// Job model shared by every campaign channel. A request becomes one
+// `campaign_job` row plus one `campaign_job_item` row per target item. The
+// worker writes each item's final status. The job status is derived from item
+// counts, not stored as a counter.
 
 /**
- * Roll-up status of a whole campaign job, derived from its item statuses.
- * Names follow the async batch-processing design: a job is `queued` until the
- * worker picks it up, then `processing`, then one of the three terminals —
- * `completed` (no failures), `partial` (a mix), `failed` (nothing succeeded).
+ * Overall status of a campaign job, derived from its item statuses.
+ *
+ * `queued` until the worker picks it up, then `processing`, then one of:
+ * `completed` (no failures), `partial` (some failures), `failed` (nothing succeeded).
  */
 export const campaignJobStatusEnum = pgEnum('campaign_job_status', [
   'queued',
@@ -130,17 +139,15 @@ export const campaignJobStatusEnum = pgEnum('campaign_job_status', [
 ]);
 
 /**
- * Status of a single job item — the durable row-model shared by every channel.
+ * Status of a single campaign job item.
  *
- * Non-terminal: `pending`.
- * Success terminals: `resolved` (data fetched/produced — export), `submitted`
- * (side-effect dispatched, outcome pending reconciliation — voice), `sent`
- * (delivery confirmed — email).
- * Skip terminals (not failures — they do not make a job `partial`):
- * `skipped_not_owned` (the org does not own the item), `skipped_no_contact`
- * (no address/number to reach), `duplicate_active` (the same (item, action) is
- * already in flight elsewhere).
- * Error terminal: `failed`.
+ * Open: `pending`.
+ * Success: `resolved` (export data fetched), `submitted` (voice call sent,
+ * outcome not yet known), `sent` (email delivered).
+ * Skipped, not counted as failures: `skipped_not_owned` (org does not own the
+ * item), `skipped_no_contact` (no address or number), `duplicate_active`
+ * (same item and action already in progress).
+ * Error: `failed`.
  */
 export const campaignJobItemStatusEnum = pgEnum('campaign_job_item_status', [
   'pending',
@@ -157,16 +164,16 @@ export const campaignJobItemStatusEnum = pgEnum('campaign_job_item_status', [
 export const campaignChannelEnum = pgEnum('campaign_channel', ['export', 'email', 'voice']);
 
 /**
- * Which phase of a campaign's life this audit row records. NOT the outcome —
- * see `campaignAuditOutcomeEnum`. A campaign produces two rows (`requested`,
- * then `completed`) sharing a correlation id; a dump produces one `completed`.
+ * Which phase of a campaign this audit row records; the result is in `campaignAuditOutcomeEnum`.
+ *
+ * A campaign writes `requested` then `completed` with the same correlation
+ * id.
  */
 export const campaignAuditEventEnum = pgEnum('campaign_audit_event', ['requested', 'completed']);
 
 /**
- * The audited action. Wider than `campaignChannelEnum` because the non-PII dump
- * is audited too — it releases the whole-network snapshot, and is the only
- * action with no org scoping at all.
+ * The audited action. `dump` is no longer written (the dump route is gone) but
+ * stays so existing audit rows remain valid.
  */
 export const campaignAuditChannelEnum = pgEnum('campaign_audit_channel', [
   'export',
@@ -175,7 +182,7 @@ export const campaignAuditChannelEnum = pgEnum('campaign_audit_channel', [
   'dump',
 ]);
 
-/** Result of a completed action. NULL on `requested` rows — nothing has happened yet. */
+/** Result of a completed action. NULL on `requested` rows. */
 export const campaignAuditOutcomeEnum = pgEnum('campaign_audit_outcome', [
   'succeeded',
   'partial',
@@ -183,12 +190,11 @@ export const campaignAuditOutcomeEnum = pgEnum('campaign_audit_outcome', [
 ]);
 
 // ─── contact ─────────────────────────────────────────────────────────────────
-// One row per person — the single home for a name / email / phone that used to
-// live in `aggregators.contact` and `aggregator_orgs.owner_*` (migration 0025).
-// `id` = sha256 hex of `lower(email):phone` (`contactId()` in
-// `@aggregator-dpg/shared-primitives/contact`, `contact_id_of()` in SQL), so it
-// is PII-derived: never log it. Every FK to it is named `contact_id` and is
-// `ON UPDATE CASCADE`, because changing a person's email or phone re-keys the row.
+// One row per person: name, email and phone.
+// `id` is the sha256 hex of `lower(email):phone` (`contactId()` in
+// `@aggregator-dpg/shared-primitives/contact`, `contact_id_of()` in SQL). It is
+// derived from PII, so never log it. Every FK to it is `contact_id` with
+// `ON UPDATE CASCADE`, because changing the email or phone changes the id.
 
 export const contact = pgTable(
   'contact',
@@ -198,7 +204,7 @@ export const contact = pgTable(
     email: text('email').notNull(),
     /** Canonical `normalisePhone` form, or NULL. Unique across every role. */
     phone: text('phone'),
-    /** NULL when never captured (e.g. an org owner registered before 0025). */
+    /** NULL when never captured. */
     name: text('name'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -211,199 +217,233 @@ export const contact = pgTable(
   ],
 );
 
-// ─── aggregators ─────────────────────────────────────────────────────────────
+// ─── users ───────────────────────────────────────────────────────────────────
+// One row per account. A `coordinator` row holds the coordinator's
+// registration and its own Signals org (`signalstack_org_*`). An `admin` row
+// (an org owner) is identity only; its coordinator-only columns are NULL
+// (`users_role_shape_chk`).
+//
+// The TypeScript types below describe coordinator rows. Admin rows are written
+// only by `db/account-writes.ts` and read through narrow column selects.
+//
+// Migrations are hand-written SQL in apps/api/drizzle/migrations. Do not run
+// `drizzle-kit generate` on this file: coordinator-only columns are typed
+// `.notNull()` here but are nullable in the database.
 
-export const aggregators = pgTable(
-  'aggregators',
+export const users = pgTable(
+  'users',
   {
     // Identity
     id: uuid('id').primaryKey().defaultRandom(),
-    orgSlug: text('org_slug').notNull().unique(),
-    actorType: aggregatorActorTypeEnum('actor_type').notNull(),
-    name: text('name').notNull(),
-    // `type` is NULL when actor_type='aggregator' (enforced by CHECK).
-    // Stored as text since 0011 — the network config decides which
-    // domain ids are valid for the active deployment.
-    type: text('type'),
-    url: text('url'),
+    /** Account role. */
+    userType: userTypeEnum('user_type').notNull(),
+    /** The coordinator's Signals org slug, also the `[org]` segment of public links. Immutable. */
+    signalstackOrgSlug: text('signalstack_org_slug')
+      .notNull()
+      .unique('users_signalstack_org_slug_unique'),
+    /** The coordinator's Signals org name. */
+    signalstackOrgName: text('signalstack_org_name').notNull(),
+    // Domain ids the coordinator serves, e.g. `{seeker}`. Empty means every
+    // domain. `'{}'` for admin accounts.
+    serves: text('serves')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
 
-    // The person behind this coordinator (migration 0025; NOT NULL since 0026).
+    // The person behind this account.
     contactId: text('contact_id')
       .notNull()
       .references((): typeof contact.id => contact.id, {
         onDelete: 'restrict',
         onUpdate: 'cascade',
       }),
-    // Optional Beckn contact keys (alternatePhone, company, gstNumber) — part
-    // of the API's `contact` object but not identity, so not on `contact`.
-    contactExtra: jsonb('contact_extra')
-      .$type<Partial<Pick<BecknContact, 'alternatePhone' | 'company' | 'gstNumber'>>>()
-      .notNull()
-      .default(sql`'{}'::jsonb`),
+    // Optional Beckn contact `alternatePhone`. Not an identity field, so not on `contact`.
+    alternatePhone: text('alternate_phone'),
 
-    // The legacy Beckn `contact` jsonb and its generated `contact_phone` /
-    // `contact_email` columns were dropped by migration 0026.
+    // The coordinator's own `url` and `locations` where they differ from its
+    // org's. Shown when the org's field is empty.
+    legacyOrgDetails: jsonb('legacy_org_details').$type<LegacyOrgDetails>(),
 
-    // Beckn Location[] — optional list of geographic locations.
-    locations: jsonb('locations')
-      .$type<BecknLocation[]>()
-      .notNull()
-      .default(sql`'[]'::jsonb`),
-
-    // Onboarding consent (snapshot at signup; aggregator must accept T&C
-    // before the row is created). Refreshable via PATCH.
-    consent: jsonb('consent').$type<ConsentRecord>().notNull(),
-
-    // Schema-driven registration payload (0018). Holds ONLY fields that have
-    // no column of their own — the typed columns above stay authoritative for
-    // everything they already carry, so there is never a second home for the
-    // same value. A new field on the registration schema lands here, which is
-    // what keeps a schema revision from needing a migration.
+    // Schema-driven registration fields that have no column of their own. A
+    // value never lives both here and in a typed column. New schema fields
+    // land here, so they need no migration.
     profile: jsonb('profile')
       .$type<Record<string, unknown>>()
       .notNull()
       .default(sql`'{}'::jsonb`),
-    // Which schema variant produced `profile`, e.g. `blue_dot/up-gzb/registration.v1`.
-    // The schemas vary per use case, so a row that does not name its own
-    // contract cannot be interpreted later. NULL on rows created before 0018.
+    // The schema that produced `profile`, e.g. `blue_dot/up-gzb/registration.v1`.
+    // Needed to read `profile` later. NULL on older rows.
     profileRef: text('profile_ref'),
 
     // Lifecycle
-    status: aggregatorStatusEnum('status').notNull().default('pending'),
+    status: registrationStatusEnum('status').notNull().default('pending'),
     createdBy: text('created_by').notNull(),
     updatedBy: text('updated_by').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 
-    // Signalstack organisation id returned by POST /admin/aggregator/upsert.
-    // Mirrors the `signalstack_org_id` Keycloak user attribute so the worker
-    // process (no KC admin client) and the anonymous public-link submission
-    // path can resolve the per-call `x-acting-org-id` header without an
-    // extra KC round-trip. NULL until the admin-approval flow (or the
-    // login-time backfill) records it.
+    // Signals org id returned by POST /admin/aggregator/upsert. Copy of the
+    // `signalstack_org_id` Keycloak attribute, so the worker and public-link
+    // path can set `x-acting-org-id` without calling Keycloak. NULL until
+    // approval or login records it.
     signalstackOrgId: text('signalstack_org_id'),
 
-    // Parent org for the org→coordinator hierarchy (spec §5.2). The SINGLE
-    // authority for the link (no KC group membership for coordinators in v1).
-    // NULL = flat coordinator (flag off) or legacy orphan. Only populated when
-    // ORG_HIERARCHY_ENABLED=true. FK → aggregator_orgs.id.
-    parentOrgId: uuid('parent_org_id').references(
-      (): typeof aggregatorOrgs.id => aggregatorOrgs.id,
-    ),
+    // The coordinator's org. Coordinators with no other org belong to the
+    // Default org. NULL for admin accounts; their orgs are found by
+    // `organisations.org_owner`.
+    orgId: uuid('org_id')
+      .notNull()
+      .references((): AnyPgColumn => organisations.id, { onDelete: 'restrict' }),
 
-    // The email a coordinator was INVITED at (#701), when they registered via an
-    // invite. May differ from `contact_email` (they can register with their own
-    // address) — kept for provenance so the approving owner can see who was
-    // originally targeted. NULL for non-invite / flat registrations.
-    inviteEmail: text('invite_email'),
+    // The invite the coordinator registered with. The invited address may
+    // differ from the contact email. An invited address with no matching
+    // invite row is kept in `profile.legacy_invite_email`.
+    inviteId: uuid('invite_id').references((): AnyPgColumn => registrationInvites.jti, {
+      onDelete: 'set null',
+    }),
 
-    // Write-once timestamp of rejection (#726). Set exactly once when a
-    // pending registration is rejected (status → inactive); never mutated
-    // after. Powers the re-registration cooling window without depending on the
-    // mutable `updated_at`. NULL until/unless rejected.
+    // Set once when a pending registration is rejected, never changed after.
+    // Used for the re-registration waiting period. NULL unless rejected.
     rejectedAt: timestamp('rejected_at', { withTimezone: true }),
   },
-  (table) => ({
-    // Phone/email uniqueness now lives on `contact` (contact_email_unique,
-    // contact_phone_unique) — one person per email and per phone across roles.
-    // Approval queue + tenant-classification filters.
-    statusIdx: index('aggregators_status_idx').on(table.status),
-    actorTypeIdx: index('aggregators_actor_type_idx').on(table.actorType),
-    // One coordinator row per person (replaces the legacy per-row email/phone
-    // unique indexes once they are dropped).
-    contactIdUnique: uniqueIndex('aggregators_contact_id_unique').on(table.contactId),
-  }),
+  (table) => [
+    // Email and phone uniqueness is enforced on `contact`.
+    // Approval queue filter.
+    index('users_status_idx').on(table.status),
+    // One account per person per role.
+    uniqueIndex('users_contact_type_unique').on(table.contactId, table.userType),
+    index('users_org_idx').on(table.orgId),
+    index('users_invite_idx')
+      .on(table.inviteId)
+      .where(sql`invite_id IS NOT NULL`),
+  ],
 );
 
-// ─── aggregator_orgs ─────────────────────────────────────────────────────────
-// Thin system-of-record for a parent org (spec §5.1). The KC group is a
-// future-authz mirror; status lives here so the approval single-use guard is
-// an atomic compare-and-set (spec A3). Reuses `aggregator_status` enum
-// (pending | active | inactive == rejected | retired).
+// ─── user_identities ─────────────────────────────────────────────────────────
+// Login identities per account: one per provider per account, and one account
+// per external login. `provider` is currently 'keycloak'.
 
-export const aggregatorOrgs = pgTable(
-  'aggregator_orgs',
+export const userIdentities = pgTable(
+  'user_identities',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    subject: text('subject').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ name: 'user_identities_pkey', columns: [table.userId, table.provider] }),
+    unique('user_identities_provider_subject_unique').on(table.provider, table.subject),
+  ],
+);
+
+// ─── organisations ───────────────────────────────────────────────────────────
+// Exactly one `network_facilitator` org (the root, `parent_id` NULL). Every
+// other org is an `aggregator` under it, including the Default org
+// (`slug = 'default'`). Status `inactive` means rejected.
+
+export const orgTypeEnum = pgEnum('org_type', ['network_facilitator', 'aggregator']);
+
+export const organisations = pgTable(
+  'organisations',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /** Immutable for aggregator orgs (it names the Keycloak group); the NF slug follows config. */
     slug: text('slug').notNull(),
-    displayName: text('display_name').notNull(),
+    name: text('name').notNull(),
+    /** Immutable (`organisations_lock`). */
+    orgType: orgTypeEnum('org_type').notNull(),
+    /** NULL only for the network facilitator. */
+    parentId: uuid('parent_id').references((): AnyPgColumn => organisations.id, {
+      onDelete: 'restrict',
+    }),
+    // Same value as in `locations`, kept as plain text.
     state: text('state'),
-    // The org owner's contact (migration 0025; NOT NULL since 0026).
-    contactId: text('contact_id')
+    // The owner's `admin` account in `users`, shared by every org it owns.
+    orgOwner: uuid('org_owner')
       .notNull()
-      .references(() => contact.id, {
-        onDelete: 'restrict',
-        onUpdate: 'cascade',
-      }),
-    // The legacy owner_email / owner_phone columns were dropped by 0026.
-    ownerKcSub: text('owner_kc_sub'),
+      .references((): AnyPgColumn => users.id, { onDelete: 'restrict' }),
     kcGroupId: text('kc_group_id'),
-    // Schema-driven registration payload (0018) — see the note on
-    // `aggregators.profile`. `state` above stays authoritative for the state
-    // name; the rest of the address and every field added by the Aug 2026
-    // schema review live here.
+    // Org details, shown for every coordinator of the org. `url` and
+    // `gst_number` are no longer written: their values live in `profile`.
+    url: text('url'),
+    locations: jsonb('locations')
+      .$type<BecknLocation[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    legalName: text('legal_name'),
+    gstNumber: text('gst_number'),
+    /** Key of the org's "known as" value, from the instance config list. Validated by the API. */
+    knownAs: text('known_as').notNull().default('aggregator'),
+    /** Depth in the tree: root 0, top-level 1. Set by the store (migration 0032). */
+    depth: smallint('depth').notNull(),
+    // Written by the org owner in the console. Informational only.
+    description: text('description'),
+    // Fields of the org-registration schema (website, GST number, domains and
+    // any a deployment adds). Also holds `address` and `coordinates`, which are
+    // copied into `locations`.
     profile: jsonb('profile')
       .$type<Record<string, unknown>>()
       .notNull()
       .default(sql`'{}'::jsonb`),
     /** Which schema variant produced `profile`, e.g. `blue_dot/org-registration.v1`. */
     profileRef: text('profile_ref'),
-    status: aggregatorStatusEnum('status').notNull().default('pending'),
+    status: registrationStatusEnum('status').notNull().default('pending'),
+    createdBy: text('created_by'),
+    updatedBy: text('updated_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-    // Write-once rejection timestamp (#726) — see the aggregators note above.
+    // Set once on rejection, like `users.rejected_at`.
     rejectedAt: timestamp('rejected_at', { withTimezone: true }),
   },
-  (table) => ({
-    // Active-org dropdown + owner lookup are plain SQL (spec A2/A5).
-    statusIdx: index('aggregator_orgs_status_idx').on(table.status),
-    contactIdIdx: index('aggregator_orgs_contact_id_idx').on(table.contactId),
-    // Slug uniqueness only over non-terminal rows: a rejected/retired org
-    // never blocks a later slug (spec A9). Partial unique index.
-    slugActiveUnique: uniqueIndex('aggregator_orgs_slug_active_unique')
+  (table) => [
+    index('organisations_status_idx').on(table.status),
+    index('organisations_org_owner_idx').on(table.orgOwner),
+    index('organisations_parent_status_idx').on(table.parentId, table.status),
+    // Slug is unique among pending and active orgs. Generated slugs have a random suffix.
+    uniqueIndex('organisations_slug_live_unique')
       .on(table.slug)
       .where(sql`status IN ('pending','active')`),
-    // Org display name is unique (case-insensitive) over non-terminal rows —
-    // same partial-unique semantics as the slug, so a rejected/retired org
-    // never blocks reusing its name.
-    displayNameActiveUnique: uniqueIndex('aggregator_orgs_display_name_active_unique')
-      .on(sql`lower(${table.displayName})`)
-      .where(sql`status IN ('pending','active')`),
-  }),
+    // Aggregator org names are unique (case-insensitive) among pending and active orgs.
+    uniqueIndex('organisations_name_live_unique')
+      .on(sql`lower(${table.name})`)
+      .where(sql`org_type = 'aggregator' AND status IN ('pending','active')`),
+    uniqueIndex('organisations_single_nf')
+      .on(table.orgType)
+      .where(sql`org_type = 'network_facilitator'`),
+  ],
 );
 
-// ─── registration_invites (#700) ─────────────────────────────────────────────
-// Targeted coordinator invites. A row is required (unlike approval tokens,
-// which get single-use for free by re-checking Keycloak `enabled`) because an
-// invitee has no Keycloak user yet — the row is what buys single-use,
-// revocation, and leak attribution. The invite JWT's `sub` is this row's `jti`.
+// ─── registration_invites ────────────────────────────────────────────────────
+// Coordinator invites. The row makes an invite single-use, revocable and
+// traceable, since the invitee has no Keycloak user yet. The invite JWT's
+// `sub` is this row's `jti`.
 
 export const registrationInvites = pgTable(
   'registration_invites',
   {
     jti: uuid('jti').primaryKey().defaultRandom(),
-    /** Only `coordinator` in this phase; column keeps the door open for others. */
+    /** Currently always `coordinator`. */
     role: text('role').notNull().default('coordinator'),
-    parentOrgId: uuid('parent_org_id')
+    orgId: uuid('org_id')
       .notNull()
-      .references(() => aggregatorOrgs.id, { onDelete: 'cascade' }),
-    /** Normalised (lowercased, trimmed) — enforced against the submitted email. */
+      .references(() => organisations.id, { onDelete: 'cascade' }),
+    /** Lowercased and trimmed. Must match the submitted email. */
     email: text('email').notNull(),
     status: registrationInviteStatusEnum('status').notNull().default('pending'),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-    /** The minting owner/admin subject — audit + leak attribution (§7). */
+    /** Subject of the owner or admin who created the invite. Used for audit. */
     createdBy: text('created_by').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     consumedAt: timestamp('consumed_at', { withTimezone: true }),
   },
-  // Array form (not the deprecated object-return extraConfig).
   (table) => [
-    index('registration_invites_parent_org_idx').on(table.parentOrgId),
-    // One live invite per (org, email): a re-invite refreshes rather than
-    // duplicates. Partial unique over pending rows only, so a consumed/revoked/
-    // expired invite never blocks re-inviting the same address.
+    index('registration_invites_org_idx').on(table.orgId),
+    // One pending invite per (org, email). Finished invites do not block a new one.
     uniqueIndex('registration_invites_pending_unique')
-      .on(table.parentOrgId, table.email)
+      .on(table.orgId, table.email)
       .where(sql`status = 'pending'`),
   ],
 );
@@ -417,16 +457,19 @@ export const bulkUploads = pgTable(
   'bulk_uploads',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('aggregator_id')
+    userId: uuid('user_id')
       .notNull()
-      .references(() => aggregators.id, { onDelete: 'cascade' }),
-    // Stored as text since 0011 — accepts any domain id declared by the
-    // active signalstack network. Application layer validates against
-    // `getNetworkConfig().domainIds`.
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // The user's org at insert time. Set by the `*_set_org_id` BEFORE INSERT
+    // trigger; inserts never pass it.
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organisations.id, { onDelete: 'restrict' })
+      .$defaultFn(() => sql`NULL`),
+    // A domain id of the active network. The application validates it.
     participantType: text('participant_type').notNull(),
     s3Key: text('s3_key').notNull(),
-    // ETag captured by HEAD when the browser confirms upload (POST /:id/start).
-    // NULL while status='pending'.
+    // ETag read on upload confirmation (POST /:id/start). NULL while pending.
     s3Etag: text('s3_etag'),
     status: bulkUploadStatusEnum('status').notNull().default('pending'),
     statusReason: text('status_reason'),
@@ -439,18 +482,12 @@ export const bulkUploads = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
-  (table) => ({
-    // Watchdog scan: status + last_progress_at to detect stalled jobs.
-    statusProgressIdx: index('bulk_uploads_status_progress_idx').on(
-      table.status,
-      table.lastProgressAt,
-    ),
-    // Per-aggregator concurrent cap + tenant isolation queries.
-    aggregatorStatusIdx: index('bulk_uploads_aggregator_status_idx').on(
-      table.aggregatorId,
-      table.status,
-    ),
-  }),
+  (table) => [
+    // Watchdog scan for stalled uploads.
+    index('bulk_uploads_status_progress_idx').on(table.status, table.lastProgressAt),
+    // Per-user concurrency cap and tenant queries.
+    index('bulk_uploads_user_status_idx').on(table.userId, table.status),
+  ],
 );
 
 // ─── registration_links ──────────────────────────────────────────────────────
@@ -459,16 +496,20 @@ export const registrationLinks = pgTable(
   'registration_links',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('aggregator_id')
+    userId: uuid('user_id')
       .notNull()
-      .references(() => aggregators.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // The user's org at insert time. Set by the `*_set_org_id` BEFORE INSERT
+    // trigger; inserts never pass it.
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organisations.id, { onDelete: 'restrict' })
+      .$defaultFn(() => sql`NULL`),
     slug: text('slug').notNull(),
     domain: text('domain').notNull(),
     context: jsonb('context').$type<Record<string, unknown>>().notNull().default({}),
     registrationMode: text('registration_mode').notNull().default('form'),
-    // Legacy (#650): QR is now generated client-side; this is never written
-    // going forward. Retained one release for legacy reads — do NOT reintroduce
-    // a write. Drop in a follow-up migration.
+    // Not written. QR codes are generated client-side. Kept for reading old rows.
     qrObjectKey: text('qr_object_key'),
     status: registrationLinkStatusEnum('status').notNull().default('draft'),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
@@ -476,18 +517,11 @@ export const registrationLinks = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => ({
-    // Per-aggregator slug uniqueness — two aggregators may pick the same
-    // human-readable slug since the public URL is `/<org_slug>/<slug>`.
-    aggregatorSlugUnique: uniqueIndex('registration_links_aggregator_slug_unique').on(
-      table.aggregatorId,
-      table.slug,
-    ),
-    aggregatorStatusIdx: index('registration_links_aggregator_status_idx').on(
-      table.aggregatorId,
-      table.status,
-    ),
-  }),
+  (table) => [
+    // Slug is unique per user; the public URL is `/<org_slug>/<slug>`.
+    uniqueIndex('registration_links_user_slug_unique').on(table.userId, table.slug),
+    index('registration_links_user_status_idx').on(table.userId, table.status),
+  ],
 );
 
 // ─── link_submissions ────────────────────────────────────────────────────────
@@ -499,9 +533,15 @@ export const linkSubmissions = pgTable(
     linkId: uuid('link_id')
       .notNull()
       .references(() => registrationLinks.id, { onDelete: 'cascade' }),
-    aggregatorId: uuid('aggregator_id')
+    userId: uuid('user_id')
       .notNull()
-      .references(() => aggregators.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // The user's org at insert time. Set by the `*_set_org_id` BEFORE INSERT
+    // trigger; inserts never pass it.
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organisations.id, { onDelete: 'restrict' })
+      .$defaultFn(() => sql`NULL`),
     metadataSnapshot: jsonb('metadata_snapshot')
       .$type<Record<string, unknown>>()
       .notNull()
@@ -511,45 +551,40 @@ export const linkSubmissions = pgTable(
     rolledUpAt: timestamp('rolled_up_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => ({
-    // Metrics Aggregator pickup: NULLS FIRST surfaces unrolled rows first.
-    rollupPickupIdx: index('link_submissions_rollup_pickup_idx').on(
-      table.rolledUpAt,
-      table.createdAt,
-    ),
-    linkIdx: index('link_submissions_link_idx').on(table.linkId),
-    aggregatorCreatedIdx: index('link_submissions_aggregator_created_idx').on(
-      table.aggregatorId,
-      table.createdAt,
-    ),
-  }),
+  (table) => [
+    // Rollup pickup of rows not yet rolled up.
+    index('link_submissions_rollup_pickup_idx').on(table.rolledUpAt, table.createdAt),
+    index('link_submissions_link_idx').on(table.linkId),
+    index('link_submissions_user_created_idx').on(table.userId, table.createdAt),
+  ],
 );
 
-// ─── aggregator_consent_record ───────────────────────────────────────────────
-// Append-only ledger of registration consent acceptances, keyed by a
-// subject_type + subject_id so one table serves both org and coordinator
-// registration flows. One row per acceptance; both document versions stored
-// in-row (terms_version + privacy_version) so re-consent or version audits
-// only need this table. No FK on subject_id — polymorphic at app level.
+// ─── consent_record ──────────────────────────────────────────────────────────
+// Append-only ledger of consent acceptances, and the only store of consent.
+// One row per acceptance, with both document versions. `subject_type` +
+// `subject_id` is the permanent audit key. `user_id` / `org_id` become NULL
+// when the subject is deleted; the row stays. The `consent_record_append_only`
+// trigger blocks every DELETE and any other UPDATE.
 
-export const aggregatorConsentRecord = pgTable(
-  'aggregator_consent_record',
+export const consentRecord = pgTable(
+  'consent_record',
   {
     /** Surrogate primary key; generated randomly by Postgres. */
     id: uuid('id').primaryKey().defaultRandom(),
 
-    /**
-     * Discriminator for the subject: `'org'` = `aggregator_orgs.id`;
-     * `'aggregator'` = `aggregators.id` (coordinator/aggregator flow).
-     */
+    /** Discriminator for the subject: `'user'` = `users.id`; `'organisation'` = `organisations.id`. */
     subjectType: text('subject_type').notNull(),
 
-    /**
-     * The id of the subject row that accepted the terms.
-     * No cross-table FK (polymorphic); app-layer integrity is sufficient
-     * because the route already owns the subject row at write time.
-     */
+    /** The id of the subject that accepted the terms (kept after the subject is deleted). */
     subjectId: uuid('subject_id').notNull(),
+
+    /** The consenting user while it exists (`subject_type = 'user'`). */
+    userId: uuid('user_id').references((): AnyPgColumn => users.id, { onDelete: 'set null' }),
+
+    /** The consenting organisation while it exists (`subject_type = 'organisation'`). */
+    orgId: uuid('org_id').references((): AnyPgColumn => organisations.id, {
+      onDelete: 'set null',
+    }),
 
     /** Version of the Terms of Service document accepted (= config `current_version`). */
     termsVersion: integer('terms_version').notNull(),
@@ -564,23 +599,30 @@ export const aggregatorConsentRecord = pgTable(
     brand: text('brand'),
 
     /**
-     * How consent was captured — `'registration'` in v1 (future: `'re-consent'`).
+     * How consent was captured.
+     *
+     * `'registration'`, `'registration-backfill'`, or `` `bulk_upload:<id>:v<n>` ``.
      */
     source: text('source').notNull(),
 
-    /** Server-stamped moment the registrant checked the consent checkbox. */
+    /** Server-stamped moment the registrant accepted. */
     acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull(),
+
+    /** Until when the registration consent is valid; NULL when not recorded. */
+    validTill: timestamp('valid_till', { withTimezone: true }),
 
     /** Row-creation timestamp; set automatically by Postgres on INSERT. */
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => ({
-    // Ledger lookup: all consent records for a given subject (org or aggregator).
-    subjectIdx: index('aggregator_consent_record_subject_idx').on(
-      table.subjectType,
-      table.subjectId,
-    ),
-  }),
+  (table) => [
+    index('consent_record_subject_idx').on(table.subjectType, table.subjectId),
+    index('consent_record_user_idx')
+      .on(table.userId, table.acceptedAt.desc())
+      .where(sql`user_id IS NOT NULL`),
+    index('consent_record_org_idx')
+      .on(table.orgId)
+      .where(sql`org_id IS NOT NULL`),
+  ],
 );
 
 // ─── onboarding (unified metrics rollup) ─────────────────────────────────────
@@ -589,10 +631,16 @@ export const onboarding = pgTable(
   'onboarding',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('aggregator_id')
+    userId: uuid('user_id')
       .notNull()
-      .references(() => aggregators.id, { onDelete: 'cascade' }),
-    orgSlug: text('org_slug').notNull(),
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // The user's org at insert time. Set by the `*_set_org_id` BEFORE INSERT
+    // trigger; inserts never pass it.
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organisations.id, { onDelete: 'restrict' })
+      .$defaultFn(() => sql`NULL`),
+    signalstackOrgSlug: text('signalstack_org_slug').notNull(),
     source: onboardingSourceEnum('source').notNull(),
     // For source='bulk': bulk_uploads.id. For source='link': NULL.
     batchId: uuid('batch_id'),
@@ -606,32 +654,26 @@ export const onboarding = pgTable(
     skipped: integer('skipped').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => ({
-    // Bulk: one row per upload (batch_id is the upload id).
-    // Partial UNIQUE so the constraint applies only when source='bulk'.
-    bulkBatchUnique: uniqueIndex('onboarding_bulk_batch_unique')
+  (table) => [
+    // Bulk: one row per upload.
+    uniqueIndex('onboarding_bulk_batch_unique')
       .on(table.batchId)
       .where(sql`${table.source} = 'bulk'`),
-    // Link: one row per (aggregator, link, period). UPSERT target for
-    // Metrics Aggregator hour-bucket rollups.
-    linkRollupUnique: uniqueIndex('onboarding_link_rollup_unique')
-      .on(table.aggregatorId, table.linkId, table.periodStart)
+    // Link: one row per (user, link, period). Upsert target for hourly rollups.
+    uniqueIndex('onboarding_link_rollup_unique')
+      .on(table.userId, table.linkId, table.periodStart)
       .where(sql`${table.source} = 'link'`),
-    aggregatorSourceIdx: index('onboarding_aggregator_source_idx').on(
-      table.aggregatorId,
-      table.source,
-      table.periodStart,
-    ),
-    batchIdx: index('onboarding_batch_idx').on(table.batchId),
-  }),
+    index('onboarding_user_source_idx').on(table.userId, table.source, table.periodStart),
+    index('onboarding_batch_idx').on(table.batchId),
+  ],
 );
 
 // ─── campaign_job / campaign_job_item ────────────────────────────────────────
 
 /**
- * A single free-form campaign metadata pair. The request envelope's `metadata`
- * list is stored verbatim on the job — there is no fixed allow-list; every pair
- * a caller sends is persisted as-is (e.g. `{key:'purpose', value:'audit'}`).
+ * One free-form campaign metadata pair, e.g. `{key:'purpose', value:'audit'}`.
+ *
+ * The request's `metadata` list is stored on the job unchanged.
  */
 export interface CampaignMetadataPair {
   key: string;
@@ -642,18 +684,22 @@ export const campaignJob = pgTable(
   'campaign_job',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    aggregatorId: uuid('aggregator_id')
+    userId: uuid('user_id')
       .notNull()
-      .references(() => aggregators.id, { onDelete: 'cascade' }),
-    // Signalstack org id (the token's `signalstack_org_id` claim) — the tenant
-    // scope every read/list/cap query filters on.
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // The user's org at insert time. Set by the `*_set_org_id` BEFORE INSERT
+    // trigger; inserts never pass it.
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organisations.id, { onDelete: 'restrict' })
+      .$defaultFn(() => sql`NULL`),
+    // The token's `signalstack_org_id` claim. Every read, list and cap query filters on it.
     signalstackOrgId: text('signalstack_org_id').notNull(),
     channel: campaignChannelEnum('channel').notNull(),
     status: campaignJobStatusEnum('status').notNull().default('queued'),
-    // Request idempotency: a repeated `Idempotency-Key` returns the original
-    // job instead of creating a second one. NULL when the caller omits it.
+    // A repeated `Idempotency-Key` returns the original job. NULL when not sent.
     idempotencyKey: text('idempotency_key'),
-    // The request envelope's `metadata` list, stored verbatim.
+    // The request's `metadata` list, unchanged.
     metadata: jsonb('metadata')
       .$type<CampaignMetadataPair[]>()
       .notNull()
@@ -663,37 +709,32 @@ export const campaignJob = pgTable(
       .$type<Record<string, unknown>>()
       .notNull()
       .default(sql`'{}'::jsonb`),
-    // The requesting user (token email) — recipient/attribution, never trusted
-    // from the client for authz.
+    // The requesting user's token email. Not used for authorisation.
     requestedBy: text('requested_by').notNull(),
     // Inbound `x-request-id`, forwarded downstream for tracing.
     requestId: text('request_id'),
     errorReason: text('error_reason'),
-    // Heartbeat written each processing chunk; the watchdog fails jobs whose
-    // `last_progress_at` goes stale.
+    // Updated after each processing chunk. The watchdog fails jobs where it is stale.
     lastProgressAt: timestamp('last_progress_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     // Stamped when the job reaches a terminal status.
     completedAt: timestamp('completed_at', { withTimezone: true }),
     /**
-     * Stamped once the channel's user-visible notification has been sent (the
-     * export's pre-signed download email). A job retry must not re-send it:
-     * the recipient would get a second working link to the same PII.
+     * Set once the job's notification, such as the export download email, is sent.
+     *
+     * A retry must not send it again, or the recipient gets a second link to the same PII.
      */
     notifiedAt: timestamp('notified_at', { withTimezone: true }),
-    // voice: raw create+start provider responses, captured for the campaign manager
+    // Voice only: raw provider responses from create and start.
     providerResponse: jsonb('provider_response'),
   },
   (table) => [
-    // Request idempotency — PER TENANT. A global unique key would let one org's
-    // key collide with another's: the insert would be swallowed by
-    // onConflictDoNothing, the caller would get the other org's job id back,
-    // and their export would silently never run.
+    // Idempotency key is unique per org, so keys from different orgs cannot collide.
     uniqueIndex('campaign_job_idempotency_key_unique')
       .on(table.signalstackOrgId, table.idempotencyKey)
       .where(sql`idempotency_key IS NOT NULL`),
-    // Tenant list (newest-first) + per-org active-job cap.
+    // Per-org listing (newest first) and active-job cap.
     index('campaign_job_org_status_idx').on(table.signalstackOrgId, table.status, table.createdAt),
     // Watchdog scan for stalled processing jobs.
     index('campaign_job_status_progress_idx').on(table.status, table.lastProgressAt),
@@ -707,18 +748,15 @@ export const campaignJobItem = pgTable(
     jobId: uuid('job_id')
       .notNull()
       .references(() => campaignJob.id, { onDelete: 'cascade' }),
-    // Mirrors the parent job's channel so item-level queries (and the
-    // cross-job dedup sweep) don't need a join. Set once at insert.
+    // Copy of the job's channel, so item queries need no join. Set at insert.
     channel: campaignChannelEnum('channel').notNull(),
     itemId: uuid('item_id').notNull(),
-    // The channel action being applied to the item (email/voice); NULL for
-    // export (there is no per-item action), which turns OFF the active-dedup
-    // constraint below for exports.
+    // The action applied to the item (email, voice). NULL for export, which
+    // excludes exports from the active dedup index below.
     action: text('action'),
     status: campaignJobItemStatusEnum('status').notNull().default('pending'),
-    // Provider linkage — the external id this item produced, so an async
-    // outcome can be reconciled back to the row (voice: Raya call id +
-    // batch id + last polled status; email: message id).
+    // Provider ids used to match a later outcome to this row (voice: Raya call
+    // id, batch id and last polled status; email: message id).
     providerRef: text('provider_ref'),
     rayaBatchId: text('raya_batch_id'),
     lastProviderStatus: text('last_provider_status'),
@@ -732,13 +770,12 @@ export const campaignJobItem = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
   (table) => [
-    // Derived-count + item-listing lookups.
+    // Status counts and item listing.
     index('campaign_job_item_job_status_idx').on(table.jobId, table.status),
-    // One row per item per job — makes the insert idempotent under retry.
+    // One row per item per job, so a retried insert is a no-op.
     uniqueIndex('campaign_job_item_job_item_unique').on(table.jobId, table.itemId),
-    // Item-level active dedup: the same (item, action) can't be in flight twice
-    // across jobs. Only in-flight/succeeded rows count, and only when an action
-    // is present — so exports (action IS NULL) are never deduplicated.
+    // The same (item, action) cannot be `pending`, `resolved` or `submitted` in
+    // two jobs at once. Rows with no action (exports) are not deduplicated.
     uniqueIndex('campaign_job_item_active_dedup')
       .on(table.itemId, table.action)
       .where(sql`status IN ('pending','resolved','submitted') AND action IS NOT NULL`),
@@ -746,42 +783,36 @@ export const campaignJobItem = pgTable(
 );
 
 /**
- * Append-only audit of every campaign action that RELEASES DATA (#617).
+ * Append-only audit of every campaign action that releases data.
  *
- * Deliberately separate from `campaign_job` / `campaign_job_item`: those are
- * mutable, derive counts and are subject to cleanup; this is immutable and
- * outlives them, including the exported S3 object which auto-deletes. Joined by
- * `correlation_id = campaign_job.id`.
+ * Kept separate from `campaign_job` and `campaign_job_item`, which can change
+ * and be cleaned up. Joined by `correlation_id = campaign_job.id`.
  *
- * NEVER stores a participant PII value — field NAMES and counts only. The only
- * identities here are operators (the coordinator, the export-link recipient).
- *
- * Status/list GET routes are NOT audited: the rule is data release, not API
- * traffic. Clients poll every 5-10s, which would bury the real events.
+ * Never store a participant PII value here; only field names and counts. The
+ * only identities stored are operators. Status and list GET routes are not
+ * audited.
  */
 export const campaignPiiAudit = pgTable(
   'campaign_pii_audit',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    // = campaign_job.id. For a dump there is no job, so a uuid is generated per
-    // request; the column stays NOT NULL and still groups the row.
+    // The `campaign_job.id`.
     correlationId: uuid('correlation_id').notNull(),
     event: campaignAuditEventEnum('event').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 
     // ── Who ────────────────────────────────────────────────────────────────
     actorUserId: text('actor_user_id'),
-    // NULL for a dump, and that null is MEANINGFUL: it is the signature of a
-    // whole-network access by the system account, which has no org.
-    actorOrgId: text('actor_org_id'),
+    // NULL only on historical `dump` rows.
+    actorSignalstackOrgId: text('actor_signalstack_org_id'),
     actorAzp: text('actor_azp'),
-    // Export-link recipient — an operator address, never a participant's.
+    // Export-link recipient. An operator address, never a participant's.
     recipientRef: text('recipient_ref'),
 
     // ── What ───────────────────────────────────────────────────────────────
     channel: campaignAuditChannelEnum('channel').notNull(),
-    // PII field NAMES, never values. Empty array on a dump asserts positively
-    // that no PII field was released ("none, and we checked" vs null's "unknown").
+    // PII field names, never values. An empty array means no PII field was
+    // released; NULL means unknown.
     piiFields: text('pii_fields').array(),
     itemCount: integer('item_count'),
 
@@ -797,7 +828,7 @@ export const campaignPiiAudit = pgTable(
 
     // ── Why ────────────────────────────────────────────────────────────────
     purpose: text('purpose'),
-    // Consent storage/gating is specced separately; present but unused.
+    // Not used yet.
     consentRef: text('consent_ref'),
 
     // ── How ────────────────────────────────────────────────────────────────
@@ -813,12 +844,11 @@ export const campaignPiiAudit = pgTable(
     failedCount: integer('failed_count'),
     sentCount: integer('sent_count'),
 
-    // Non-PII extras. A dump carries { files, bytes } here rather than adding
-    // dump-only columns.
+    // Non-PII extras.
     details: jsonb('details').$type<Record<string, unknown>>(),
   },
   (table) => [
-    index('campaign_pii_audit_org_created_idx').on(table.actorOrgId, table.createdAt),
+    index('campaign_pii_audit_org_created_idx').on(table.actorSignalstackOrgId, table.createdAt),
     index('campaign_pii_audit_correlation_idx').on(table.correlationId),
     index('campaign_pii_audit_channel_created_idx').on(table.channel, table.createdAt),
   ],
@@ -828,10 +858,10 @@ export const campaignPiiAudit = pgTable(
 
 export type ContactRow = typeof contact.$inferSelect;
 export type NewContactRow = typeof contact.$inferInsert;
-export type AggregatorRow = typeof aggregators.$inferSelect;
-export type NewAggregatorRow = typeof aggregators.$inferInsert;
-export type AggregatorOrgRow = typeof aggregatorOrgs.$inferSelect;
-export type NewAggregatorOrgRow = typeof aggregatorOrgs.$inferInsert;
+export type UserRow = typeof users.$inferSelect;
+export type NewUserRow = typeof users.$inferInsert;
+export type OrganisationRow = typeof organisations.$inferSelect;
+export type NewOrganisationRow = typeof organisations.$inferInsert;
 export type BulkUploadRow = typeof bulkUploads.$inferSelect;
 export type NewBulkUploadRow = typeof bulkUploads.$inferInsert;
 export type RegistrationLinkRow = typeof registrationLinks.$inferSelect;
@@ -846,12 +876,103 @@ export type CampaignJobItem = typeof campaignJobItem.$inferSelect;
 export type NewCampaignJobItem = typeof campaignJobItem.$inferInsert;
 
 /**
- * Inferred select type for a single `aggregator_consent_record` row.
- *
- * Used by the consent-ledger service and any query helper that reads
- * from the table — import from `@aggregator-dpg/db-schema`.
+ * Inferred select type for a `consent_record` row.
  */
-export type AggregatorConsentRecord = typeof aggregatorConsentRecord.$inferSelect;
+export type ConsentRecordRow = typeof consentRecord.$inferSelect;
 
-/** Inferred insert type for `aggregator_consent_record` (all required fields; `id` and `created_at` have DB defaults). */
-export type NewAggregatorConsentRecord = typeof aggregatorConsentRecord.$inferInsert;
+/** Inferred insert type for `consent_record`. `id` and `created_at` have DB defaults. */
+export type NewConsentRecordRow = typeof consentRecord.$inferInsert;
+
+// ─── RBAC ────────────────────────────────────────────────────────────────────
+// Permissions are grouped into roles. `user_role` holds the extra roles a user
+// has in an org; base roles follow membership and are not stored. `iam_audit`
+// is append-only (trigger).
+
+export const permission = pgTable('permission', {
+  key: text('key').primaryKey(),
+  resource: text('resource').notNull(),
+  action: text('action').notNull(),
+  description: text('description').notNull(),
+  sensitive: boolean('sensitive').notNull().default(false),
+  deprecated: boolean('deprecated').notNull().default(false),
+});
+
+export const role = pgTable(
+  'role',
+  {
+    key: text('key').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    isBuiltin: boolean('is_builtin').notNull().default(false),
+    accountType: userTypeEnum('account_type').notNull(),
+    baseFor: text('base_for'),
+    assignableOrgTypes: orgTypeEnum('assignable_org_types').array().notNull(),
+    assignedBy: text('assigned_by').references(() => permission.key, { onDelete: 'restrict' }),
+    maxDays: integer('max_days'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('role_base_for_unique')
+      .on(table.baseFor)
+      .where(sql`base_for IS NOT NULL`),
+  ],
+);
+
+export const rolePermission = pgTable(
+  'role_permission',
+  {
+    roleKey: text('role_key')
+      .notNull()
+      .references(() => role.key, { onDelete: 'cascade', onUpdate: 'cascade' }),
+    permissionKey: text('permission_key')
+      .notNull()
+      .references(() => permission.key, { onDelete: 'restrict' }),
+  },
+  (table) => [primaryKey({ columns: [table.roleKey, table.permissionKey] })],
+);
+
+export const userRole = pgTable(
+  'user_role',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    roleKey: text('role_key')
+      .notNull()
+      .references(() => role.key, { onDelete: 'restrict', onUpdate: 'cascade' }),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organisations.id, { onDelete: 'cascade' }),
+    grantedBy: uuid('granted_by').references(() => users.id, { onDelete: 'set null' }),
+    grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    revokedBy: uuid('revoked_by').references(() => users.id, { onDelete: 'set null' }),
+  },
+  (table) => [
+    uniqueIndex('user_role_live_unique')
+      .on(table.userId, table.roleKey, table.orgId)
+      .where(sql`revoked_at IS NULL`),
+    index('user_role_user_idx').on(table.userId),
+    index('user_role_org_idx').on(table.orgId),
+  ],
+);
+
+export const iamAudit = pgTable(
+  'iam_audit',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+    event: text('event').notNull(),
+    actorUserId: uuid('actor_user_id'),
+    targetUserId: uuid('target_user_id'),
+    targetOrgId: uuid('target_org_id'),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+  },
+  (table) => [index('iam_audit_at_idx').on(table.at)],
+);
+
+export type UserRoleRow = typeof userRole.$inferSelect;
+export type IamAuditRow = typeof iamAudit.$inferSelect;

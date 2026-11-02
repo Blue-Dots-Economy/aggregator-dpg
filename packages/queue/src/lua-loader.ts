@@ -1,14 +1,11 @@
 /**
- * Lua script loader + EVALSHA executor.
+ * Lua script loader and EVALSHA executor (`@aggregator-dpg/queue`).
  *
- * Reads a `.lua` file once at module init and exposes a bound execute
- * function that uses EVALSHA for the fast path, falling back to EVAL on
- * NOSCRIPT (Redis flushed its script cache).
+ * Reads a `.lua` file once at module init. Runs it with EVALSHA, falling back
+ * to EVAL on NOSCRIPT (Redis flushed its script cache).
  *
- * The digest EVALSHA keys on is SHA1 — that is fixed by the Redis protocol
- * and cannot be swapped for a stronger hash. So this module never computes
- * it locally: it asks Redis for the digest with `SCRIPT LOAD` (once per
- * client, cached) and treats the reply as an opaque handle.
+ * The digest comes from Redis via `SCRIPT LOAD` (cached per client) and is
+ * treated as an opaque handle; this module does not compute SHA1 itself.
  */
 
 import { readFileSync } from 'node:fs';
@@ -30,11 +27,16 @@ function loadScript(relPath: string): LuaScript {
 const bulkRowCommitScript = loadScript('./lua/bulk_row_commit.lua');
 
 /**
- * Per-client cache of the digest Redis returned for the script. Keyed by the
- * client because a digest is only valid against the server that cached it;
- * weak so a discarded client does not pin the entry.
+ * Per-client cache of the script digest. A digest is only valid on the server
+ * that cached it.
  */
 const digestByClient = new WeakMap<Redis, Promise<string>>();
+
+/**
+ * Raised when `SCRIPT LOAD` returns something that is not a digest. Unlike a
+ * failed `SCRIPT` command, this is fatal and does not fall back to EVAL.
+ */
+class ScriptLoadReplyError extends Error {}
 
 /**
  * Registers the script with Redis and returns the digest EVALSHA needs.
@@ -42,17 +44,8 @@ const digestByClient = new WeakMap<Redis, Promise<string>>();
  * @param redis - ioredis client.
  * @param script - The loaded Lua source.
  * @returns The server-assigned script digest.
- * @throws {Error} If Redis replies with something other than a digest string.
+ * @throws {ScriptLoadReplyError} If Redis replies with something other than a digest string.
  */
-/**
- * Raised when `SCRIPT LOAD` succeeds at the protocol level but hands back
- * something that is not a digest. Distinguished from a failed/blocked `SCRIPT`
- * command because the two want opposite handling: an unavailable command is
- * recoverable (fall back to EVAL), a malformed reply means we are not talking to
- * the Redis we think we are and must not be papered over.
- */
-class ScriptLoadReplyError extends Error {}
-
 async function scriptDigest(redis: Redis, script: LuaScript): Promise<string> {
   const cached = digestByClient.get(redis);
   if (cached) return cached;
@@ -67,7 +60,7 @@ async function scriptDigest(redis: Redis, script: LuaScript): Promise<string> {
       return reply;
     })
     .catch((err: unknown) => {
-      // Do not cache a failed load — the next call should retry.
+      // Do not cache a failed load; the next call retries.
       digestByClient.delete(redis);
       throw err;
     });
@@ -90,15 +83,16 @@ export interface BulkRowCommitResult {
 }
 
 /**
- * Runs the `bulk_row_commit.lua` script against Redis. Single round-trip
- * once the script digest has been cached for this client.
+ * Runs the `bulk_row_commit.lua` script against Redis. One round-trip once
+ * the digest is cached for this client.
  *
  * @param redis - ioredis client.
  * @param uploadId - bulk_uploads.id; used as the key namespace `bu:{id}:`.
  * @param rowIndex - row position in the original CSV (0-indexed after header).
  * @param outcome - 'passed' | 'failed' | 'skipped'.
  * @param errorPayloadJson - JSON-serialised error details when outcome != passed; empty string otherwise.
- * @param ttlSeconds - TTL (re)applied to every bu:{id} key so participant PII self-expires if the upload is abandoned/stuck; pass 0 to skip.
+ * @param ttlSeconds - TTL set on every bu:{id} key so PII expires if the upload stalls; 0 to skip.
+ * @returns The commit counters and flags.
  */
 export async function runBulkRowCommit(
   redis: Redis,
@@ -118,18 +112,11 @@ export async function runBulkRowCommit(
   ];
   const args = [String(rowIndex), outcome, errorPayloadJson, String(ttlSeconds)];
 
-  // SCRIPT LOAD is a network round-trip that can fail independently of the
-  // script: `SCRIPT` renamed or ACL-blocked on the server, or a timeout on that
-  // one call. EVAL needs no digest, so a failed load must degrade to it rather
-  // than fail the row commit — before this loader asked Redis for the digest it
-  // computed the SHA1 locally, so this path could not fail at all, and losing
-  // that would strand bulk uploads on any Redis with SCRIPT restricted.
-  // `scriptDigest` does not cache a rejection, so each call retries the LOAD;
-  // that costs one wasted round-trip per row while SCRIPT is unavailable, which
-  // is the right trade against silently pinning the client to EVAL forever.
+  // SCRIPT LOAD can fail on its own (SCRIPT renamed or ACL-blocked, timeout).
+  // Fall back to EVAL so the row commit still succeeds. A failed load is not
+  // cached, so each call retries it.
   const digest = await scriptDigest(redis, bulkRowCommitScript).catch((err: unknown) => {
-    // A malformed reply stays fatal (see ScriptLoadReplyError); only an
-    // unavailable/failed SCRIPT command degrades to EVAL.
+    // A malformed reply is fatal; only a failed SCRIPT command falls back to EVAL.
     if (err instanceof ScriptLoadReplyError) throw err;
     return null;
   });
@@ -140,7 +127,7 @@ export async function runBulkRowCommit(
       ? await redis.evalsha(digest, keys.length, ...keys, ...args)
       : await redis.eval(bulkRowCommitScript.source, keys.length, ...keys, ...args);
   } catch (err) {
-    // NOSCRIPT — script not in Redis cache (e.g. server restart). Reload + retry.
+    // NOSCRIPT: Redis lost its script cache. Drop the digest and use EVAL.
     const message = (err as Error).message ?? '';
     if (message.includes('NOSCRIPT')) {
       digestByClient.delete(redis);

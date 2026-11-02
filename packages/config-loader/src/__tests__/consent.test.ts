@@ -219,7 +219,7 @@ describe('loadConsentConfig', () => {
     const config = await loadConsentConfig('orange_dot', 'onetac', tmpDir);
     // Brand org terms content should win
     expect(config.audiences.org.documents.terms.versions[0].content).toBe('## OneTAC Terms v1');
-    // Aggregator docs unchanged — came from network file
+    // Coordinator docs unchanged — came from network file
     expect(config.audiences.aggregator.documents.terms.versions[0].content).toBe(`## Terms v1`);
   });
 

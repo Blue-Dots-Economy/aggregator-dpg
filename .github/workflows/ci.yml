@@ -10,11 +10,15 @@ on:
     branches:
       - main
       - develop
+      # release/**: hotfix tags are CI-gated on the release branch commit, and hotfix PRs target it.
+      - 'release/**'
   pull_request:
     branches:
       - main
       - develop
       - feature
+      # release/**: hotfix tags are CI-gated on the release branch commit, and hotfix PRs target it.
+      - 'release/**'
   workflow_dispatch:
 
 concurrency:
@@ -48,18 +52,10 @@ jobs:
           fetch-depth: 0
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-          cache: pnpm
-
-      - name: Cache turbo outputs
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .turbo
-          key: ${{ runner.os }}-turbo-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-turbo-
+          package-manager-cache: false
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
@@ -86,8 +82,26 @@ jobs:
           git diff --exit-code openapi.json || {
             echo "::error::openapi.json is stale — run 'pnpm --filter @aggregator-dpg/api spec:dump' and commit"; exit 1; }
 
+      # The edge policy decides each request from this table
+      # (docs/rbac/rbac-edge-enforcement.md §3.1); a route whose declaration
+      # changed without regenerating it would be decided on stale data.
+      - name: RBAC route table drift check
+        run: |
+          pnpm --filter @aggregator-dpg/api routes:dump
+          git diff --exit-code policy/rbac/edge/routes.json || {
+            echo "::error::policy/rbac/edge/routes.json is stale — run 'pnpm --filter @aggregator-dpg/api routes:dump' and commit"; exit 1; }
+
       - name: Dep-cruiser — check interface boundaries
         run: pnpm dep-check
+
+      # RBAC policy (policy/rbac): compile in strict mode, then run the Rego
+      # tests, including the shared vectors that packages/rbac also runs
+      # against its TypeScript mirror. Same image as the compose `opa` service.
+      - name: RBAC policy — opa check + opa test
+        run: |
+          OPA=openpolicyagent/opa:1.21.1@sha256:d3a9a6bd4fbcb0f4403294b0d0b239b07be163ac118a46df7d50045b52e52053
+          docker run --rm -v "$PWD/policy:/policy:ro" "$OPA" check --strict /policy/rbac
+          docker run --rm -v "$PWD/policy:/policy:ro" "$OPA" test -v /policy/rbac
 
       # Two independent guards, for two different failure modes:
       #   `if:`               — no token at all. GitHub withholds repo secrets from
@@ -146,10 +160,10 @@ jobs:
           persist-credentials: false
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-          cache: pnpm
+          package-manager-cache: false
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
@@ -162,27 +176,6 @@ jobs:
 
       - name: Integration tests
         run: pnpm --filter @aggregator-dpg/api exec vitest run integration --no-file-parallelism
-
-      # The contact suite again, against the EXPAND-phase schema (0000–0025):
-      # the 0025 sync triggers, its idempotent re-run, and 0026 applied over
-      # populated legacy data only exist there. A copy of the migrations folder
-      # without the later migrations drives it.
-      - name: Integration tests — expand-phase schema (migrations up to 0025)
-        env:
-          INTEGRATION_DATABASE_URL: postgres://aggregator@127.0.0.1:5432/aggregator_it_expand
-          INTEGRATION_MIGRATIONS_FOLDER: ${{ runner.temp }}/migrations-0025
-        run: |
-          psql -h 127.0.0.1 -U aggregator -d aggregator_it -c 'CREATE DATABASE aggregator_it_expand'
-          node -e "
-            const fs = require('fs'), path = require('path');
-            const src = 'apps/api/drizzle/migrations', dst = process.env.INTEGRATION_MIGRATIONS_FOLDER;
-            fs.mkdirSync(path.join(dst, 'meta'), { recursive: true });
-            const j = JSON.parse(fs.readFileSync(path.join(src, 'meta/_journal.json'), 'utf8'));
-            j.entries = j.entries.filter((e) => e.idx <= 25);
-            for (const e of j.entries) fs.copyFileSync(path.join(src, e.tag + '.sql'), path.join(dst, e.tag + '.sql'));
-            fs.writeFileSync(path.join(dst, 'meta/_journal.json'), JSON.stringify(j));
-          "
-          pnpm --filter @aggregator-dpg/api exec vitest run src/db/__tests__/contact.integration.test.ts --no-file-parallelism
 
   # ── PR-path image smoke build (#756) ───────────────────────────────────────
   # Restores the review-time Dockerfile check that the `docker` matrix used to

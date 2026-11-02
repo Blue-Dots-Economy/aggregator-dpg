@@ -1,51 +1,47 @@
 /**
- * Aggregator registration endpoints.
+ * Coordinator registration endpoints in `@aggregator-dpg/api`.
  *
  * Public submission flow:
- *   1. Validate body against `RegistrationPayloadSchema` (Zod) AND
- *      `registration.v1.json` (Ajv). The JSON Schema is the authoritative
- *      contract that drives the UI form; Zod gives type-safe parsing.
+ *   1. Validate the body with Zod and with `registration.v1.json` (Ajv). The
+ *      JSON Schema is the form contract.
  *   2. Normalise `contact.phone` to E.164.
- *   3. Pre-check email + phone uniqueness in BOTH the DB and Keycloak. The
- *      DB has its own UNIQUE indexes (`contact_phone`, `contact_email`),
- *      but checking up-front avoids inserting an orphan aggregator row
- *      that then has to be rolled back.
- *   4. Generate `org_slug = slugFromName(body.name)` with retry on the
- *      (statistically tiny) suffix collision.
- *   5. INSERT `aggregators` (status='pending', actor_type='aggregator',
- *      type=null). Schema-declared fields with no column of their own go
- *      into the `profile` jsonb, tagged by `profile_ref`.
- *   6. Create the Keycloak user with attributes
- *      { aggregator_id, aggregator_type, phoneNumber, decision_made: 'pending' }.
- *      Email is a built-in field. The user is created disabled — login is
- *      blocked until the admin approval flow flips `decision_made → approved`
- *      and enables the KC user. `aggregator_type` (seeker | provider) is
- *      published as a JWT claim and drives the single-type enforcement on
- *      bulk uploads and public registration links.
- *   7. Mint approve / reject JWTs and email the configured admins.
+ *   3. Check email and phone uniqueness in the database and Keycloak.
+ *   4. Generate `org_slug` from the name, retrying on a collision.
+ *   5. Insert the coordinator (`pending`) and its consent row in one
+ *      transaction. Extra schema fields go into `profile`.
+ *   6. Create a disabled Keycloak user with `aggregator_id`,
+ *      `aggregator_type`, `phoneNumber` and `decision_made: 'pending'`.
+ *      Approval enables it.
+ *   7. Email the review link to the org owner (see `resolveOwnerRouting`).
  *
- * Failures throw `httpError(<CODE>)`. A consent-ledger or KC failure after the
- * DB write rolls back the aggregator row (FK cascades its children).
+ * A consent-ledger failure rolls the insert back. A Keycloak failure after the
+ * commit deletes the coordinator row; its consent row stays, unlinked.
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { RegistrationPayloadSchema } from '@aggregator-dpg/shared-primitives/aggregator';
-import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
+import type { BecknContact, BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getRegistrationValidator } from '../services/registration-validator.js';
-import { getAggregatorStore } from '../services/aggregator-store/index.js';
-import type { Aggregator } from '../services/aggregator-store/interface.js';
-import { getAggregatorOrgStore } from '../services/aggregator-org-store/index.js';
+import { getUserStore } from '../services/user-store/index.js';
+import { stampConsent } from '../services/registration-consent.js';
+import type {
+  Coordinator,
+  LegacyOrgDetails,
+  RecordConsentHook,
+} from '../services/user-store/interface.js';
+import { getOrganisationStore } from '../services/organisation-store/index.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { verifyInviteToken } from '../services/invite-token.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { sendAdminReviewEmail } from '../services/registration-notify.js';
-import { orgHierarchyEnabled } from '../config.js';
+import { defaultOrgOwnerEmail } from '../config.js';
 import { coolingRetryAfter } from '../services/registration-cooling.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
+import { getNetworkConfig } from '../services/network-config.js';
 import { resolveProfileRef } from '../services/schema-ref.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
@@ -55,27 +51,19 @@ import { KC_ATTR } from '../services/idp-admin/index.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import type { ErrorCode } from '../errors/codes.js';
+import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
 
 const SLUG_RETRIES = 3;
 
-// The coordinator submit accepts an optional `org_id` when the org hierarchy
-// is enabled. `RegistrationPayloadSchema` is strict (rejects unknown keys), so
-// the route body schema must explicitly permit it; the handler validates its
-// presence/shape against the flag + the org store.
+// Adds `org_id` and `invite` to the strict payload schema.
 const CoordinatorRegistrationBodySchema = RegistrationPayloadSchema.extend({
   org_id: z.string().optional(),
-  // Coordinator invite token (#700). When present it supersedes `org_id`: the
-  // org is taken from the token claim and the invite is consumed on submit.
+  // Invite token. When present it replaces `org_id` and is consumed on submit.
   invite: z.string().optional(),
 });
 
 /**
- * Body keys that already own a typed column on `aggregators`, and so must never
- * be copied into `profile`.
- *
- * `org_id` is excluded too — it is stored as `parent_org_id`, not payload data.
- * Keeping one authoritative home per field is what stops the jsonb payload and
- * the columns drifting apart.
+ * Body keys stored elsewhere, so never copied into `profile`.
  */
 const AGGREGATOR_COLUMN_BACKED_KEYS: ReadonlySet<string> = new Set([
   'name',
@@ -89,13 +77,9 @@ const AGGREGATOR_COLUMN_BACKED_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Collects the schema-driven fields of a registration body into the `profile`
- * payload.
+ * Collects the schema-driven fields of a registration body into the `profile` payload.
  *
- * Safe to build generically: the same body is validated against
- * `registration.v1.json` with `additionalProperties: false`, so the schema —
- * not this function — bounds which keys can appear. Adding a field to that
- * schema therefore needs no storage change.
+ * The JSON Schema (`additionalProperties: false`) bounds which keys can appear.
  *
  * @param body - Validated coordinator-registration body.
  * @returns The `profile` payload; `{}` when the deployment declares no extra fields.
@@ -121,6 +105,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
   app.post(
     '/v1/aggregator-registrations/create',
     {
+      config: { rbac: { access: 'service' } },
       schema: {
         tags: ['aggregator-registrations'],
         summary: 'Submit a new aggregator registration',
@@ -137,23 +122,15 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
       const log = req.log.child({ operation: 'aggregator-registration.create' });
       const start = Date.now();
 
-      // Invite claimed by THIS request (#700). The pending→consumed CAS runs
-      // BEFORE anything is created, so the invite — not a best-effort check — is
-      // the volume bound on a forwarded link. `inviteCommitted` flips only once
-      // the registration has fully provisioned; any other exit (throw, or a
-      // reclaim that creates nothing) gives the invite back via the compensating
-      // `release()` in the `finally` below, so H4 still holds: an ordinary user
-      // error such as a duplicate phone never burns a one-time link.
+      // Invite claimed by this request, before anything is created. Unless the
+      // registration completes, the `finally` below gives it back.
       let inviteJti: string | null = null;
       let inviteCommitted = false;
       try {
-        // Re-send the review link for an existing recoverable record without
-        // touching its fields. Shared by the still-pending reclaim path and the
-        // rejected-then-cooling-elapsed revive path (#726): both re-use the SAME
-        // row and re-mint the link to the reviewer using STORED values — the
-        // anonymous submit carries no proof of identity, so honouring the
-        // resubmitted name/phone would let a stranger hijack the record.
-        const reclaimReview = async (row: Aggregator): Promise<FastifyReply> => {
+        // Re-sends the review link for an existing pending or revived record
+        // using stored values. The anonymous submit never changes the record: it
+        // carries no proof of identity, so a stranger must not overwrite it.
+        const reclaimReview = async (row: Coordinator): Promise<FastifyReply> => {
           await sendAdminReviewEmail(
             {
               aggregatorId: row.id,
@@ -174,7 +151,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             },
             'registration re-submitted — review link re-sent (no field change)',
           );
-          // v1 records consent only on fresh registration, not on reclaim (deliberate).
+          // Consent is recorded only on a fresh registration, not here.
           return reply.status(200).send({
             aggregator_id: row.id,
             org_slug: row.orgSlug,
@@ -183,12 +160,8 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           });
         };
 
-        // Every backend API requires a Bearer token. Registration is reached
-        // anonymously by the user, so the BFF attaches a Keycloak service-
-        // account token (client_credentials grant on the `aggregator-bff`
-        // confidential client). `authenticateAny` only checks the JWT
-        // signature + issuer/exp; it does not require an `aggregator_id`
-        // claim because the caller is a service principal, not a user.
+        // The BFF calls this with a service-account token, so no
+        // `aggregator_id` claim is required.
         const auth = await authenticateAny(req);
         if (!auth.ok) {
           throw httpError('UNAUTHORIZED', {
@@ -196,23 +169,27 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             fields: { reason: auth.error.code },
           });
         }
+        await recordRouteCaller(req, callerFromAny(auth.context));
 
-        // `schema.body` already validated against `RegistrationPayloadSchema`
-        // (the zod validator compiler replaces `req.body` with the parse
-        // output), so the typed body can be consumed directly here.
+        // Already validated and parsed by the route schema.
         const body = req.body as z.infer<typeof RegistrationPayloadSchema>;
 
-        // `org_id` is an org-hierarchy field outside the form's JSON Schema
-        // contract; strip it before Ajv so the schema in `config/` stays the
-        // single authority for the form shape.
+        // `type` must be one of the network's domain ids.
+        const networkCfg = await getNetworkConfig();
+        if (!networkCfg.domainIds.includes(body.type)) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: `unknown type '${body.type}' — valid: ${networkCfg.domainIds.join(', ')}`,
+            fields: { type: 'invalid' },
+          });
+        }
+
+        // `org_id` and `invite` are not form fields; strip them before Ajv.
         const {
           org_id: _orgIdField,
           invite: _inviteField,
           ...formBody
         } = req.body as Record<string, unknown>;
 
-        // JSON Schema is the authoritative contract — keeps the form rules in
-        // `config/` rather than code.
         const validate = await getRegistrationValidator();
         if (!validate(formBody)) {
           throw httpError('SCHEMA_VALIDATION', {
@@ -224,37 +201,30 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         if (!phoneResult.ok) {
           throw httpError('INVALID_PHONE', {
             detail: phoneResult.error.message,
-            // Key it `phone` (not `input`) so the logger's `*.phone` redact path
-            // masks the raw number if this error is ever logged.
+            // Keyed `phone` so the logger redacts it.
             fields: { phone: body.contact.phone },
           });
         }
         const phoneE164 = phoneResult.value;
-        // Persist the normalised E.164 representation so DB queries + Keycloak
-        // attribute reads agree on a single canonical form.
+        // Store the E.164 phone. Zod has already lowercased the email.
         const contact: BecknContact = {
           ...body.contact,
-          // Zod has already lowercased the email via the transform — keep it.
           phone: phoneE164,
         };
 
-        const aggregatorStore = getAggregatorStore();
+        const userStore = getUserStore();
         const idp = getIdpAdmin();
 
-        // Server-stamp the consent timestamp so the recorded value reflects
-        // when the API actually accepted the registration, not whatever the
-        // client clock reported. `valid_till` stays caller-supplied but is
-        // clamped to a hard ceiling so a misbehaving form can not store a
-        // 1000-year consent window. Computed early so it is in scope for both
-        // the reclaim path and the new-registration path below.
+        // Stamp consent with the server time. `valid_till` is clamped to a maximum.
         const serverConsent = stampConsent(body.consent);
+        if (!serverConsent) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: 'consent.valid_till must be in the future.',
+            fields: { 'consent.valid_till': 'invalid' },
+          });
+        }
 
-        // Rate limit per (ip, email) (spec A6). This bounds submission volume on
-        // an endpoint that provisions a Keycloak user and sends mail, so it has
-        // to apply in BOTH modes — it used to sit inside the org-hierarchy
-        // branch below, which left the flat deployment shape unlimited.
-        // Deliberately fail-open (see `submit-rate.ts`): this is a public
-        // pre-login path, and a downed Redis must not block registration.
+        // Rate limit per (ip, email). Fails open so a Redis outage does not block registration.
         const rl = await checkSubmitRate(`${req.ip}|${contact.email}`);
         if (!rl.allowed) {
           void reply.header('Retry-After', String(rl.retryAfterSeconds));
@@ -264,22 +234,18 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           });
         }
 
-        // Org-hierarchy gate (spec §6.2). When enabled, a coordinator must select
-        // an *active* org; the link lives in `aggregators.parent_org_id`.
-        let parentOrgId: string | null = null;
-        // Email the invite was addressed to (#701). A coordinator MAY register with
-        // a different email than they were invited at; we keep the invited address
-        // for provenance so the approving owner can see who was originally targeted.
+        // The coordinator's org; must be active.
+        let parentOrgId: string;
+        let orgIsDefault = false;
+        // The invited email. The coordinator may register with another one;
+        // this is kept so the approving owner can see it.
         let inviteEmailClaim: string | null = null;
-        if (orgHierarchyEnabled()) {
-          const orgStore = getAggregatorOrgStore();
+        {
+          const orgStore = getOrganisationStore();
           const reqInvite = (req.body as { invite?: string }).invite;
 
-          // Invite-bound path (#700): when the submission carries an invite token
-          // it supersedes the org selector. The org comes from the CLAIM, the
-          // recipient email is enforced, and the invite is claimed (CAS) before
-          // anything is created. The token is a bearer credential — every check
-          // below re-validates against the DB and never trusts a hidden field.
+          // Invite path: the org comes from the token claim, re-checked against
+          // the database, and the invite is claimed before anything is created.
           if (reqInvite) {
             const verified = await verifyInviteToken(reqInvite);
             if (!verified.ok) {
@@ -287,13 +253,9 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
                 verified.error.code === 'EXPIRED' ? 'INVITE_EXPIRED' : 'INVITE_INVALID',
               );
             }
-            // The coordinator may register with a different email than the invite
-            // was sent to (#701) — the invited address is kept as provenance and
-            // surfaced to the approving owner, not enforced. The invite itself is
-            // still the gate (valid + pending + org active + single-use).
+            // The invited email is recorded, not enforced.
             inviteEmailClaim = verified.email.trim().toLowerCase();
             const inviteStore = getRegistrationInvitesStore();
-            // Re-validate the org from the CLAIM independently (§4.4.4).
             const org = await orgStore.findById(verified.org);
             if (!org.ok) {
               throw httpError('DB_UNAVAILABLE', {
@@ -301,23 +263,16 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
                 fields: { sub_operation: 'orgStore.findById' },
               });
             }
-            if (org.value?.status !== 'active') {
+            // The Default org takes no invites.
+            if (org.value?.status !== 'active' || org.value.isDefault) {
               throw httpError('TARGET_ORG_INACTIVE');
             }
             const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
             if (ownerMatch.ok && ownerMatch.value) {
               throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
             }
-            // Claim the invite HERE, before anything is created (§4.4.6). A
-            // read-only pre-check cannot bound volume: between the read and a
-            // deferred CAS this handler creates the aggregator, records consent
-            // and calls Keycloak over the network, so N concurrent submits on one
-            // forwarded link each passed the read and each created a registration.
-            // The unique email/phone constraints only collide when the racers
-            // share both, and #701 deliberately leaves the invited email
-            // non-enforcing — so the attacker picks distinct ones. Losing this CAS
-            // is authoritative, not a warning. Stamp `parent_org_id` from the
-            // CLAIM so the approval binding can't mismatch.
+            // Claim the invite now, before anything is created, so concurrent
+            // submits on one link create at most one registration.
             const claimed = await inviteStore.consume(verified.jti);
             if (!claimed.ok) {
               throw httpError('DB_UNAVAILABLE', {
@@ -331,11 +286,12 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             inviteJti = verified.jti;
             parentOrgId = verified.org;
           } else {
-            // Interim selector path: coordinator picks an active org (spec §6.2).
+            // Selector path: the coordinator picks an active org. `org_id` is required.
             const reqOrgId = (req.body as { org_id?: string }).org_id;
             if (!reqOrgId) {
               throw httpError('SCHEMA_VALIDATION', {
-                detail: 'org_id is required when the organisation hierarchy is enabled.',
+                detail: 'org_id is required.',
+                fields: { field: 'org_id' },
               });
             }
             const org = await orgStore.findById(reqOrgId);
@@ -345,45 +301,73 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
                 fields: { sub_operation: 'orgStore.findById' },
               });
             }
-            // Covers bootstrap (no active org) and an org that went inactive/rejected.
             if (org.value?.status !== 'active') {
               throw httpError('TARGET_ORG_INACTIVE');
             }
-            // Owner-also-coordinator (spec A4): a distinct, machine-readable error.
+            // An org owner cannot also register as a coordinator.
             const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
             if (ownerMatch.ok && ownerMatch.value) {
               throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
             }
-            parentOrgId = reqOrgId;
+            // The Default org is selectable only while it is the only active org.
+            if (org.value.isDefault) {
+              const active = await orgStore.listActive();
+              if (!active.ok) {
+                throw httpError('DB_UNAVAILABLE', {
+                  cause: new Error(active.error.message),
+                  fields: { sub_operation: 'orgStore.listActive' },
+                });
+              }
+              if (active.value.some((o) => !o.isDefault)) {
+                throw httpError('TARGET_ORG_INACTIVE');
+              }
+            }
+            parentOrgId = org.value.id;
+            orgIsDefault = org.value.isDefault;
           }
         }
 
-        // Pre-check email + phone uniqueness in both stores. The DB
-        // generated-column UNIQUEs (contact_phone / contact_email) and Keycloak
-        // attribute lookups together give us a deterministic 409 instead of a
-        // race between `aggregators` and Keycloak.
-        const dbEmail = await aggregatorStore.findByContactEmail(contact.email);
+        // A Default-org coordinator names its own organisation, never "Default".
+        if (orgIsDefault && body.name.trim().toLowerCase() === 'default') {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: 'The organisation name cannot be "Default".',
+            fields: { field: 'name' },
+          });
+        }
+
+        // `url` and `locations` belong to a real org, so sending them is refused.
+        // A Default-org coordinator keeps its own as `legacy_org_details`.
+        const submittedLocations = (body.locations ?? []).filter(hasLocationContent);
+        const ownOrgDetails: LegacyOrgDetails = {
+          ...(body.url?.trim() ? { url: body.url.trim() } : {}),
+          ...(submittedLocations.length > 0 ? { locations: submittedLocations } : {}),
+        };
+        if (!orgIsDefault && Object.keys(ownOrgDetails).length > 0) {
+          throw httpError('ORG_DETAILS_READ_ONLY', {
+            fields: { fields: Object.keys(ownOrgDetails) },
+          });
+        }
+
+        // Check email and phone uniqueness in the database and Keycloak.
+        const dbEmail = await userStore.findByContactEmail(contact.email);
         if (!dbEmail.ok) {
           throw httpError('DB_UNAVAILABLE', {
             cause: new Error(dbEmail.error.message),
-            fields: { sub_operation: 'aggregatorStore.findByContactEmail' },
+            fields: { sub_operation: 'userStore.findByContactEmail' },
           });
         }
         if (dbEmail.value !== null) {
           const existing = dbEmail.value;
           if (existing.status === 'inactive') {
-            // Rejected record (#726): block re-registration until the cooling
-            // window elapses, measured from the write-once `rejected_at`. Once it
-            // lapses, revive the SAME row to pending (clearing `rejected_at`) and
-            // re-send the review link — the disabled KC user is left intact for
-            // the approval step, so nothing is deleted or re-created.
+            // Rejected: refuse until the cooling window from `rejected_at` ends,
+            // then revive the same row to pending and re-send the review link.
             const retryAfter = coolingRetryAfter(existing.rejectedAt, existing.updatedAt);
             if (retryAfter) {
               throw httpError('REGISTRATION_COOLING', {
                 fields: { email: contact.email, retry_after: retryAfter },
               });
             }
-            const revived = await aggregatorStore.update(existing.id, {
+            const revived = await userStore.update(existing.id, {
               status: 'pending',
               rejectedAt: null,
               updatedBy: 'self',
@@ -391,40 +375,37 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             if (!revived.ok) {
               throw httpError('DB_UNAVAILABLE', {
                 cause: new Error(revived.error.message),
-                fields: { sub_operation: 'aggregatorStore.reviveRejected' },
+                fields: { sub_operation: 'userStore.reviveRejected' },
               });
             }
             return reclaimReview(existing);
           }
           if (existing.status !== 'pending') {
-            // active / retired — a live account owns this email.
+            // Active or retired: the email is taken.
             throw httpError('USER_EXISTS', { fields: { email: contact.email } });
           }
-          // Still pending → re-send the review link, no field change.
+          // Pending: re-send the review link.
           return reclaimReview(existing);
         }
 
-        const dbPhone = await aggregatorStore.findByContactPhone(phoneE164);
+        const dbPhone = await userStore.findByContactPhone(phoneE164);
         if (!dbPhone.ok) {
           throw httpError('DB_UNAVAILABLE', {
             cause: new Error(dbPhone.error.message),
-            fields: { sub_operation: 'aggregatorStore.findByContactPhone' },
+            fields: { sub_operation: 'userStore.findByContactPhone' },
           });
         }
         if (dbPhone.value !== null) {
           const existingPhone = dbPhone.value;
           if (existingPhone.status === 'inactive') {
-            // Same cooling window (#726) on the phone identity — reached only when
-            // the email didn't match any row but a rejected record owns this
-            // number. Within the window → 409; elapsed → revive that row and
-            // re-send its review link (reuse, no delete).
+            // Same cooling window for a rejected record that owns this phone.
             const retryAfter = coolingRetryAfter(existingPhone.rejectedAt, existingPhone.updatedAt);
             if (retryAfter) {
               throw httpError('REGISTRATION_COOLING', {
                 fields: { phone: phoneE164, retry_after: retryAfter },
               });
             }
-            const revived = await aggregatorStore.update(existingPhone.id, {
+            const revived = await userStore.update(existingPhone.id, {
               status: 'pending',
               rejectedAt: null,
               updatedBy: 'self',
@@ -432,7 +413,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             if (!revived.ok) {
               throw httpError('DB_UNAVAILABLE', {
                 cause: new Error(revived.error.message),
-                fields: { sub_operation: 'aggregatorStore.reviveRejected' },
+                fields: { sub_operation: 'userStore.reviveRejected' },
               });
             }
             return reclaimReview(existingPhone);
@@ -451,12 +432,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           throw httpError('USER_EXISTS', { fields: { email: contact.email } });
         }
 
-        // Phone is the OTP-login identity for the portal — Keycloak's OTP
-        // authenticator looks users up by the `phoneNumber` attribute. If two
-        // users share the same number, the authenticator picks the first
-        // match deterministically, which can route a login attempt to a
-        // disabled (pending or rejected) account and surface "account
-        // disabled". Enforce phone uniqueness here so that never happens.
+        // The phone is the OTP login key, so it must be unique in Keycloak too.
         const kcPhone = await idp.findByAttribute(KC_ATTR.PHONE_NUMBER, phoneE164);
         if (!kcPhone.ok) {
           throw httpError('IDP_UNAVAILABLE', {
@@ -468,48 +444,41 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
         }
 
-        const aggregator = await createAggregatorWithSlug(aggregatorStore, body.name, {
-          type: body.type,
-          url: body.url ?? null,
-          contact,
-          locations: body.locations,
+        // Consent is written in the same transaction as the coordinator row,
+        // before any Keycloak call. No coordinator exists without a consent record.
+        const recordConsent = await aggregatorConsentWriter({
           consent: serverConsent,
-          parentOrgId,
-          inviteEmail: inviteEmailClaim,
+          log,
+        });
+
+        const aggregator = await createAggregatorWithSlug(userStore, body.name, {
+          type: body.type,
+          contact,
+          consent: serverConsent,
+          recordConsent,
+          orgId: parentOrgId,
+          legacyOrgDetails:
+            orgIsDefault && Object.keys(ownOrgDetails).length > 0 ? ownOrgDetails : null,
+          inviteId: inviteJti,
           profile: buildAggregatorProfile(body as unknown as Record<string, unknown>),
           profileRef: resolveProfileRef('registration.v1.json'),
         });
         if (!aggregator.ok) {
           const code = mapStoreCreateError(aggregator.error.code);
-          throw httpError(code, { cause: new Error(aggregator.error.message) });
+          throw httpError(code, {
+            cause: new Error(aggregator.error.message),
+            ...(code === 'CONSENT_WRITE_FAILED'
+              ? { fields: { sub_operation: 'recordAggregatorConsent', rolled_back: true } }
+              : {}),
+          });
         }
         const { id: aggregatorId, orgSlug } = aggregator.value;
 
-        // Record registration consent BEFORE provisioning the profile + Keycloak
-        // user, so a consent-write failure rolls back cleanly (just the aggregator
-        // row, no external side effects). Fail-closed: never leave an aggregator
-        // without a consent record. Network/brand come from resolveActiveNetwork()
-        // so the recorded version matches what the web layer displayed.
-        const { network: activeNetwork, brand: activeBrand } = resolveActiveNetwork();
-        const consentRecorded = await recordAggregatorConsent({
-          aggregatorId,
-          network: activeNetwork,
-          brand: activeBrand,
-          log,
-        });
-        if (!consentRecorded) {
-          await aggregatorStore.deleteById(aggregatorId);
-          throw httpError('CONSENT_WRITE_FAILED', {
-            fields: { sub_operation: 'recordAggregatorConsent', rolled_back: true },
-          });
-        }
-
-        // Keycloak carries four attributes:
-        //   - aggregator_id    reverse pointer to Postgres
-        //   - aggregator_type  participant focus, used by single-type enforcement
-        //   - phoneNumber      OTP login authenticator
+        // Keycloak attributes:
+        //   - aggregator_id    the coordinator's row id
+        //   - aggregator_type  participant focus
+        //   - phoneNumber      OTP login key
         //   - decision_made    login gate
-        // Slug, association, and decision metadata live in Postgres.
         const kcAttributes: Record<string, string> = {
           [KC_ATTR.AGGREGATOR_ID]: aggregatorId,
           [KC_ATTR.AGGREGATOR_TYPE]: body.type,
@@ -517,9 +486,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           [KC_ATTR.DECISION_MADE]: 'pending',
         };
 
-        // Split the Beckn `contact.name` into first / last for Keycloak. The
-        // signup form already collects the full name, so we don't ask for it
-        // again via an UPDATE_PROFILE required action on first login.
+        // Split the name into first and last for Keycloak.
         const { firstName, lastName } = splitName(contact.name);
         const kcResult = await idp.createUser({
           email: contact.email,
@@ -531,7 +498,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           attributes: kcAttributes,
         });
         if (!kcResult.ok) {
-          await aggregatorStore.deleteById(aggregatorId);
+          await userStore.deleteById(aggregatorId);
           if (kcResult.error.code === 'USER_EXISTS') {
             throw httpError('USER_EXISTS', {
               cause: kcResult.error,
@@ -544,8 +511,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           });
         }
 
-        // Registration is fully provisioned, so the claim taken above stands: stop
-        // the `finally` from handing the invite back (#700).
+        // Fully provisioned: keep the invite consumed.
         inviteCommitted = true;
 
         await sendAdminReviewEmail(
@@ -578,12 +544,8 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           message: 'Registration submitted. You will receive credentials by email after approval.',
         });
       } finally {
-        // Compensating release (#718 review). Reached on every exit that did not
-        // create a registration — a thrown error, or a reclaim that only re-sends
-        // the review link — so the coordinator keeps their one-time link. Scoped
-        // CAS `consumed → pending`: it can only give back the claim THIS request
-        // took. Only a mid-request process death leaves an invite consumed with
-        // no registration, which the owner resolves by re-minting.
+        // Give the invite back on any exit that did not create a registration.
+        // Only releases the claim this request took.
         if (inviteJti && !inviteCommitted) {
           const released = await getRegistrationInvitesStore().release(inviteJti);
           if (!released.ok || released.value === null) {
@@ -599,34 +561,26 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
 }
 
 /**
- * Loads the consent config for the given network/brand and records an
- * aggregator registration-consent row in the append-only ledger.
+ * Builds the consent-ledger write that `store.create` runs inside its transaction.
  *
- * Fail-closed: returns `false` if the consent config cannot be read or the
- * ledger write fails, so the caller can roll the registration back rather than
- * leave an aggregator with no consent record. Failures are logged at `error`
- * with the network + both versions so a missed write is reconstructable.
+ * The consent config is read now, before the transaction. A failed ledger
+ * write throws, so the store rolls back and answers `CONSENT_WRITE_FAILED`.
  *
- * @param aggregatorId - The newly-created `aggregators.id`.
- * @param network - Signal Stack network identifier (e.g. `blue_dot`).
- * @param brand - Optional per-brand variant; undefined for the network default.
+ * @param consent - The server-stamped registration consent (`valid_till` is stored).
  * @param log - Request-scoped child logger.
- * @returns `true` when the consent row was written, `false` otherwise.
+ * @returns The hook to pass as `recordConsent`.
+ * @throws {HttpError} CONSENT_WRITE_FAILED when the consent config cannot be read.
  */
-async function recordAggregatorConsent({
-  aggregatorId,
-  network,
-  brand,
+async function aggregatorConsentWriter({
+  consent,
   log,
 }: {
-  aggregatorId: string;
-  network: string;
-  brand: string | undefined;
+  consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
   log: ReturnType<FastifyRequest['log']['child']>;
-}): Promise<boolean> {
+}): Promise<RecordConsentHook> {
+  const { network, brand } = resolveActiveNetwork();
   let termsVersion: number;
   let privacyVersion: number;
-
   try {
     const consentCfg = await loadConsentConfig(network, brand);
     termsVersion = consentCfg.audiences.aggregator.documents.terms.current_version;
@@ -637,65 +591,69 @@ async function recordAggregatorConsent({
         operation: 'consentLedger.recordAggregatorConsent',
         status: 'failure',
         error: e instanceof Error ? e.message : String(e),
-        aggregator_id: aggregatorId,
         network,
         brand: brand ?? null,
       },
-      'consent config load failed — registration rolled back',
+      'consent config load failed — registration refused',
     );
-    return false;
+    throw httpError('CONSENT_WRITE_FAILED', {
+      fields: { sub_operation: 'loadConsentConfig', rolled_back: true },
+    });
   }
 
-  const result = await getConsentLedger().recordRegistrationConsent({
-    subjectType: 'aggregator',
-    subjectId: aggregatorId,
-    network,
-    brand: brand ?? null,
-    termsVersion,
-    privacyVersion,
-  });
-
-  if (!result.success) {
-    log.error(
-      {
-        operation: 'consentLedger.recordAggregatorConsent',
-        status: 'failure',
-        error: result.error.message,
-        error_type: result.error.name,
-        aggregator_id: aggregatorId,
+  return async (executor, aggregatorId) => {
+    const result = await getConsentLedger()
+      .withExecutor(executor)
+      .recordRegistrationConsent({
+        subjectType: 'user',
+        subjectId: aggregatorId,
         network,
         brand: brand ?? null,
-        terms_version: termsVersion,
-        privacy_version: privacyVersion,
-      },
-      'consent ledger write failed — registration rolled back',
-    );
-    return false;
-  }
-
-  return true;
+        termsVersion,
+        privacyVersion,
+        validTill: new Date(consent.valid_till),
+      });
+    if (!result.success) {
+      log.error(
+        {
+          operation: 'consentLedger.recordAggregatorConsent',
+          status: 'failure',
+          error: result.error.message,
+          error_type: result.error.name,
+          aggregator_id: aggregatorId,
+          network,
+          brand: brand ?? null,
+          terms_version: termsVersion,
+          privacy_version: privacyVersion,
+        },
+        'consent ledger write failed — registration rolled back',
+      );
+      // Throwing inside the store's transaction rolls the registration back.
+      throw result.error;
+    }
+  };
 }
 
 /**
- * Insert an aggregator with up to {@link SLUG_RETRIES} attempts. The
- * 4-hex-char random suffix on `slugFromName` makes collisions astronomically
- * unlikely, but retrying on `DUPLICATE_SLUG` makes the path robust against
- * the (also vanishingly rare) random-suffix collision.
+ * Inserts a coordinator, retrying up to {@link SLUG_RETRIES} times on a slug collision.
  */
 async function createAggregatorWithSlug(
-  store: ReturnType<typeof getAggregatorStore>,
+  store: ReturnType<typeof getUserStore>,
   name: string,
   extras: {
     type: ReturnType<typeof RegistrationPayloadSchema.parse>['type'];
-    url: string | null;
     contact: BecknContact;
-    locations: ReturnType<typeof RegistrationPayloadSchema.parse>['locations'];
     consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
-    parentOrgId: string | null;
-    /** Invited email (#701) — provenance when registered via an invite. */
-    inviteEmail: string | null;
+    /** Writes the consent ledger row inside the create transaction. */
+    recordConsent: RecordConsentHook;
+    /** The coordinator's org (`users.org_id`). */
+    orgId: string;
+    /** The coordinator's own org details (Default-org registrations only). */
+    legacyOrgDetails: LegacyOrgDetails | null;
+    /** The consumed invite's `jti`, when registered via one. */
+    inviteId: string | null;
     profile: Record<string, unknown>;
-    /** `null` when no registration schema resolved — variant unknown. */
+    /** `null` when no registration schema resolved. */
     profileRef: string | null;
   },
 ): ReturnType<typeof store.create> {
@@ -704,17 +662,16 @@ async function createAggregatorWithSlug(
     const orgSlug = slugFromName(name);
     last = await store.create({
       orgSlug,
-      actorType: 'aggregator',
       name,
       type: extras.type,
-      url: extras.url,
       contact: extras.contact,
-      locations: extras.locations,
       consent: extras.consent,
+      recordConsent: extras.recordConsent,
       createdBy: 'self',
       updatedBy: 'self',
-      parentOrgId: extras.parentOrgId,
-      inviteEmail: extras.inviteEmail,
+      orgId: extras.orgId,
+      legacyOrgDetails: extras.legacyOrgDetails,
+      inviteId: extras.inviteId,
       profile: extras.profile,
       profileRef: extras.profileRef,
     });
@@ -729,39 +686,6 @@ async function createAggregatorWithSlug(
   );
 }
 
-/**
- * Maximum consent validity window. Hard ceiling so a buggy or hostile
- * client cannot persist a consent record that is effectively permanent.
- * Five years lines up with typical regulatory retention envelopes; tune
- * via config if a deployment needs something different.
- */
-const MAX_CONSENT_VALIDITY_MS = 5 * 365 * 24 * 60 * 60 * 1000;
-
-/**
- * Server-stamp `given_at` to the current instant and clamp `valid_till` to
- * at most {@link MAX_CONSENT_VALIDITY_MS} after that instant. The client is
- * allowed to ask for a shorter window but never a longer one.
- *
- * @param incoming - Consent block as it arrived from the registration form.
- * @returns Consent record with server-authoritative timestamps.
- */
-function stampConsent(
-  incoming: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'],
-): ReturnType<typeof RegistrationPayloadSchema.parse>['consent'] {
-  const now = new Date();
-  const maxValidTill = new Date(now.getTime() + MAX_CONSENT_VALIDITY_MS);
-  const requestedValidTill = new Date(incoming.valid_till);
-  const validTill =
-    Number.isFinite(requestedValidTill.getTime()) && requestedValidTill < maxValidTill
-      ? requestedValidTill
-      : maxValidTill;
-  return {
-    ...incoming,
-    given_at: now.toISOString(),
-    valid_till: validTill.toISOString(),
-  };
-}
-
 function mapStoreCreateError(
   code:
     | 'NOT_FOUND'
@@ -770,13 +694,16 @@ function mapStoreCreateError(
     | 'DUPLICATE_EMAIL'
     | 'DUPLICATE'
     | 'CHECK_VIOLATION'
+    | 'CONSENT_WRITE_FAILED'
     | 'DB_UNAVAILABLE',
 ): ErrorCode {
   switch (code) {
     case 'DUPLICATE_SLUG':
       return 'DUPLICATE_SLUG';
-    // An unrecognised unique violation is a real conflict, but not one this
-    // layer can name — don't dress it up as a taken slug (#718 review).
+    // The ledger write failed inside the create transaction: nothing exists.
+    case 'CONSENT_WRITE_FAILED':
+      return 'CONSENT_WRITE_FAILED';
+    // An unknown unique violation is a generic conflict.
     case 'DUPLICATE':
       return 'CONFLICT';
     case 'DUPLICATE_PHONE':
@@ -791,20 +718,36 @@ function mapStoreCreateError(
 }
 
 /**
-/**
- * Resolves the approval-email routing for a coordinator. When the coordinator
- * belongs to an org, the approve/reject tokens carry the `org` claim and the
- * review email routes to the org owner (spec §6.2 / §9); otherwise (flat flow)
- * it returns empty extras so the email goes to the network-admin list.
+ * Resolves the org claim and recipient for a coordinator's review email.
  *
- * @param parentOrgId - The coordinator's parent org id, or null for flat.
+ * The email goes to the org owner. For the Default org it goes to
+ * `DEFAULT_ORG_OWNER_EMAIL`, else to the network admins (no `recipientEmail`).
+ *
+ * @param parentOrgId - The coordinator's org id, or `null`.
  * @returns `{ org?, recipientEmail? }` extras for `sendAdminReviewEmail`.
  */
 async function resolveOwnerRouting(
   parentOrgId: string | null,
 ): Promise<{ org?: string; recipientEmail?: string }> {
   if (!parentOrgId) return {};
-  const org = await getAggregatorOrgStore().findById(parentOrgId);
+  const org = await getOrganisationStore().findById(parentOrgId);
+  if (org.ok && org.value?.isDefault) {
+    const owner = defaultOrgOwnerEmail();
+    return { org: parentOrgId, ...(owner ? { recipientEmail: owner } : {}) };
+  }
   const ownerEmail = org.ok && org.value ? org.value.ownerEmail : undefined;
   return { org: parentOrgId, ...(ownerEmail ? { recipientEmail: ownerEmail } : {}) };
+}
+
+/**
+ * Reports whether a submitted location has a street, locality, or coordinates other than `[0,0]`.
+ *
+ * @param loc - One submitted location.
+ * @returns `true` when it is worth keeping.
+ */
+function hasLocationContent(loc: BecknLocation): boolean {
+  const a = loc.address;
+  if (a?.streetAddress?.trim() || a?.addressLocality?.trim()) return true;
+  const c = (loc.geo as { coordinates?: unknown }).coordinates;
+  return Array.isArray(c) && c.length === 2 && (c[0] !== 0 || c[1] !== 0);
 }

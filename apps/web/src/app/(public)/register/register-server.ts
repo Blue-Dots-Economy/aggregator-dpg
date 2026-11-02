@@ -1,38 +1,34 @@
 /**
- * Server-only helpers shared by the public registration routes — the
- * coordinator page (`/register`) and the owner deep link (`/register/owner`,
- * #619). Extracted so both routes resolve the org-hierarchy flag, the org
- * schema, and the versioned consent content the same way.
+ * Server-only helpers shared by `/register` and `/register/owner` for loading
+ * the org schema and consent content.
  *
  * @module apps/web/src/app/(public)/register/register-server
  */
 
 import 'server-only';
-import { readFile } from 'node:fs/promises';
-import type { RJSFSchema } from '@rjsf/utils';
-import { resolveAggregatorSchemaPath } from '../../../lib/aggregator-schema.server';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { logger } from '../../../lib/logger';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
 
+let legacyFlagWarned = false;
+
 /**
- * Whether the org → coordinator hierarchy is enabled for this instance. Reads
- * the same `ORG_HIERARCHY_ENABLED` env var the API reads; both registration
- * routes are `force-dynamic`, so this is evaluated per request.
- *
- * @returns True when the flag is set to `'true'`.
+ * Logs once per process when `ORG_HIERARCHY_ENABLED` is set. The variable has no effect.
  */
-export function isOrgHierarchyEnabled(): boolean {
-  return (process.env.ORG_HIERARCHY_ENABLED ?? '').trim() === 'true';
+export function warnIfLegacyHierarchyFlag(): void {
+  if (legacyFlagWarned || process.env.ORG_HIERARCHY_ENABLED === undefined) return;
+  legacyFlagWarned = true;
+  logger.warn(
+    { operation: 'config.orgHierarchy', status: 'skipped' },
+    'ORG_HIERARCHY_ENABLED is ignored — organisations are always on; remove it from the environment',
+  );
 }
 
 /**
- * Loads the versioned consent document content for both `aggregator` and `org`
- * audiences from the network/brand config tree.
+ * Loads the current consent documents for the `aggregator` and `org` audiences.
  *
- * @returns An object with `aggregator` and `org` {@link ConsentDocContent}, or
- *   `null` if the config file is absent or invalid (callers pass `null` to the
- *   forms — they degrade to plain text labels).
+ * @returns `aggregator` and `org` {@link ConsentDocContent}, or `null` if the
+ *   config is missing or invalid.
  */
 export async function loadConsentContent(): Promise<{
   aggregator: ConsentDocContent;
@@ -76,26 +72,10 @@ export async function loadConsentContent(): Promise<{
 }
 
 /**
- * Loads the org-registration JSON Schema + UI schema.
+ * Loads the org-registration JSON Schema + UI schema, with the network's
+ * domains filled in.
  *
  * @returns The parsed org schema pair, or `null` if the files are absent or
- *   unreadable.
+ *   unreadable (the owner route then returns 404).
  */
-export async function loadOrgSchema(): Promise<{
-  schema: RJSFSchema;
-  uiSchema: Record<string, unknown>;
-} | null> {
-  try {
-    const [rawSchema, rawUi] = await Promise.all([
-      readFile(resolveAggregatorSchemaPath('org-registration.v1.json'), 'utf8'),
-      readFile(resolveAggregatorSchemaPath('org-registration.v1.ui.json'), 'utf8'),
-    ]);
-    return {
-      schema: JSON.parse(rawSchema) as RJSFSchema,
-      uiSchema: JSON.parse(rawUi) as Record<string, unknown>,
-    };
-  } catch {
-    // Best-effort: absent org schema → owner route 404s / coordinator-only.
-    return null;
-  }
-}
+export { loadOrgSchema } from '../../../lib/org-schema.server';

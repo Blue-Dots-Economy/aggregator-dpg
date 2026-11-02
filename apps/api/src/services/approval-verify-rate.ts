@@ -1,13 +1,10 @@
 /**
- * Injectable rate-limit check for the aggregator approval-token verify surface.
+ * Rate-limit check for the approval-token verify routes, in the aggregator API
+ * (`@aggregator-dpg/api`).
  *
- * Mirrors `support-rate.ts`: wraps the Redis fixed-window limiter so route tests
- * can vary the outcome without Redis. Unlike the support/public-submit limiters
- * this one is **fail-closed** (`failClosed: true`) — it guards the token-forgery
- * surface (read/decision/renew), so a downed Redis must NOT silently remove the
- * throttle. Keyed per client IP.
- *
- * Belongs to `@aggregator-dpg/api`.
+ * Wraps the Redis fixed-window limiter, keyed per client IP, and is injectable
+ * for tests. Fail-closed: if Redis is down, requests are refused, because
+ * these routes guard token verification.
  */
 
 import { consume } from './rate-limiter/index.js';

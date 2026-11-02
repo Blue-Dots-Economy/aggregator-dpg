@@ -1,11 +1,9 @@
 /**
- * Campaign email templating — placeholder utilities (aggregator-dpg#578).
+ * Placeholder helpers for campaign email templates.
  *
- * Pure, dependency-free helpers shared by the API (which validates the template
- * at submit time) and the worker (which substitutes per-recipient values). The
- * Markdown render + sanitise lives in the sibling `./render` subpath so callers
- * that only validate never load the Markdown dependencies. Belongs to
- * `@aggregator-dpg/campaign-template`.
+ * The API uses them to validate a template at submit time. The worker uses
+ * them to substitute per-recipient values. Markdown rendering is in the
+ * `./render` subpath. Belongs to `@aggregator-dpg/campaign-template`.
  */
 
 /** The fixed set of supported `{{token}}` placeholders (v1). */
@@ -25,8 +23,7 @@ export type ContactField = 'name' | 'email' | 'phone';
 /** Per-recipient placeholder values; a missing value renders as an empty string. */
 export type PlaceholderValues = Partial<Record<Placeholder, string | null>>;
 
-// Matches `{{token}}` with optional surrounding whitespace; token is ASCII
-// letters/underscore. Global so `matchAll`/`replace` cover every occurrence.
+// Matches `{{token}}` with optional whitespace. Token is ASCII letters or underscore.
 const TOKEN_RE = /\{\{\s*([a-zA-Z_]+)\s*\}\}/g;
 
 /**
@@ -46,8 +43,9 @@ export function extractPlaceholders(...texts: string[]): string[] {
 }
 
 /**
- * Returns the referenced tokens that are NOT in the supported set. The API
- * rejects a request (400) when this is non-empty, so a typo never ships.
+ * Returns the referenced tokens that are not in the supported set.
+ *
+ * The API rejects a request with 400 when this is non-empty.
  *
  * @param texts - Subject and/or body strings to scan.
  * @returns The unsupported token names (empty when everything is valid).
@@ -58,9 +56,10 @@ export function unknownPlaceholders(...texts: string[]): string[] {
 }
 
 /**
- * Maps the placeholders actually used to the contact fields needed to resolve
- * them, so the worker decrypts the minimum. `name`/`first_name`/`last_name` all
- * need `name`; `email`/`phone` map to themselves.
+ * Maps the placeholders used to the contact fields needed to resolve them.
+ *
+ * The worker decrypts only these fields. `name`, `first_name` and `last_name`
+ * need `name`. `email` and `phone` map to themselves.
  *
  * @param texts - Subject and/or body strings to scan.
  * @returns The distinct contact fields the placeholders require (may be empty).
@@ -101,23 +100,20 @@ export function placeholderValues(contact: {
 /**
  * Removes ASCII control characters from a participant-derived value.
  *
- * The subject line is inserted into a mail header, where a stray CR/LF would be
- * a header-injection surface; the mail library sanitises too, but a value that
- * can never legitimately contain a control character should not carry one this
- * far. Applied to every placeholder value, so the body is covered as well.
+ * Prevents header injection through CR/LF in the subject line. Applied to every
+ * placeholder value.
  *
  * @param value - The raw stored value.
  * @returns The value with control characters removed.
  */
 function stripControlChars(value: string): string {
-   
   return value.replace(/[\u0000-\u001f\u007f]/g, '');
 }
 
 /**
- * Substitutes supported `{{token}}` placeholders in a string. Unknown tokens
- * are left verbatim (the API rejects them before this runs); a missing value
- * renders as an empty string.
+ * Substitutes supported `{{token}}` placeholders in a string.
+ *
+ * Unknown tokens are left as they are. A missing value renders as an empty string.
  *
  * @param text - The template string.
  * @param values - Per-recipient placeholder values.

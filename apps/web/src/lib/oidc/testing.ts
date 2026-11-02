@@ -1,8 +1,7 @@
 /**
  * In-memory OIDC adapter fake for tests.
  *
- * Skips real network calls and returns canned token sets so route handlers
- * and integration tests can exercise the BFF without booting Keycloak.
+ * Returns seeded token sets with no network calls, so tests run without Keycloak.
  */
 
 import {
@@ -16,9 +15,8 @@ import {
 } from './interface';
 
 /**
- * Origin the fake mints its authorization/logout URLs under. Nothing is
- * dialled — `kc.fake` does not resolve — but the scheme stays `https` so the
- * repo contains no cleartext URL literals.
+ * Origin for the fake's authorization and logout URLs. Never called; `https`
+ * avoids cleartext URL literals.
  */
 const FAKE_ISSUER = 'https://kc.fake';
 

@@ -1,15 +1,11 @@
 /**
  * Minimal Java-properties-style parser for the externalised email copy.
  *
- * Belongs to `@aggregator-dpg/api`. Deliberately tiny, mirroring the
- * Signals-DPG implementation this model is ported from: `key=value` per line,
- * `#`/`!` comments, split at the FIRST `=`, no escape sequences and no line
- * continuation. Values are single-line HTML fragments and may themselves
- * contain further `=` characters (a query string in a link, for example),
- * which is why only the first separator counts.
+ * Belongs to `@aggregator-dpg/api`. Matches the Signals-DPG parser: `key=value`
+ * per line, `#`/`!` comments, split at the first `=`, no escapes and no line
+ * continuation. Values may contain further `=` characters.
  *
- * Malformed lines are collected rather than dropped silently — a copy file
- * with a typo should tell someone, not quietly render a blank email.
+ * Malformed lines are collected and reported, not dropped silently.
  *
  * @module @aggregator-dpg/api
  */

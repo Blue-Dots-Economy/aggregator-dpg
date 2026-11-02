@@ -1,5 +1,5 @@
 /**
- * Unit tests for the Link Metrics Aggregator rollup job.
+ * Unit tests for the Link Metrics Coordinator rollup job.
  *
  * `rollupLinkMetrics` reads unrolled `link_submissions` rows, aggregates them
  * into hourly (aggregator, link, hour) buckets, UPSERTs each bucket into
@@ -91,14 +91,14 @@ vi.mock('../db.js', () => ({
     linkSubmissions: {
       id: 'id',
       linkId: 'linkId',
-      aggregatorId: 'aggregatorId',
+      userId: 'userId',
       outcome: 'outcome',
       createdAt: 'createdAt',
       rolledUpAt: 'rolledUpAt',
     },
-    aggregators: { id: 'id', orgSlug: 'orgSlug' },
+    users: { id: 'id', signalstackOrgSlug: 'signalstackOrgSlug' },
     onboarding: {
-      aggregatorId: 'aggregatorId',
+      userId: 'userId',
       linkId: 'linkId',
       periodStart: 'periodStart',
       total: 'total',
@@ -190,8 +190,8 @@ describe('rollupLinkMetrics — normal execution', () => {
     );
     expect(link1Hour10).toMatchObject({
       source: 'link',
-      aggregatorId: 'agg-1',
-      orgSlug: 'org-1',
+      userId: 'agg-1',
+      signalstackOrgSlug: 'org-1',
       total: 2,
       passed: 1,
       failed: 1,

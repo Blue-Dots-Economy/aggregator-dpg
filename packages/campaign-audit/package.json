@@ -30,14 +30,14 @@
   "dependencies": {
     "@aggregator-dpg/db-schema": "workspace:*",
     "@aggregator-dpg/shared-primitives": "workspace:*",
-    "drizzle-orm": "^0.45.3",
+    "drizzle-orm": "^0.45.4",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
     "@types/node": "^26.6.3",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^4.1.12",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }

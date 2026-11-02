@@ -10,15 +10,12 @@ import { useEnabledLocales } from '../../i18n/EnabledLocalesProvider';
 import { setLocale } from '../../i18n/locale-cookie';
 
 /**
- * Dropdown that switches the UI language. Options come from the runtime
- * `ENABLED_LANGUAGES` list published by `EnabledLocalesProvider`; selecting one
- * persists the choice to the NEXT_LOCALE cookie and refreshes the route so
- * server components re-render in the new language. Hidden when fewer than two
- * languages are enabled.
+ * Dropdown that switches the UI language. Options come from
+ * `EnabledLocalesProvider`; choosing one sets the NEXT_LOCALE cookie and
+ * refreshes the route. Hidden when fewer than two languages are enabled.
  *
- * Takes the list from context rather than reading the environment itself: this
- * is a client component, so a `process.env` read here would be inlined at build
- * time and the language set could not be changed without rebuilding the image.
+ * Reads the list from context, not `process.env`, because client components
+ * have env values inlined at build time.
  */
 export function LanguageSwitcher() {
   const locale = useLocale();

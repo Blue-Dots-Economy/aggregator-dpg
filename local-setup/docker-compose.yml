@@ -49,7 +49,8 @@ name: aggregator-dpg
 #
 # ── Host ports ──────────────────────────────────────────────────────────────
 #   Aggregator portal (web)  http://localhost:3100
-#   Aggregator API           http://localhost:4000        /health/live
+#   Aggregator API           http://localhost:4000        /health/live  (through aggregator-envoy, the edge)
+#   Edge (Envoy) admin       http://127.0.0.1:9901        /ready
 #   Signals API              http://localhost:2742        (Swagger at /reference)
 #   Signals UI               http://localhost:5173        (must be 5173 — see note)
 #   Keycloak admin           http://localhost:8080/admin  (admin / KC_ADMIN_PASSWORD)
@@ -162,8 +163,8 @@ services:
 
   # S3-compatible object storage for aggregator bulk uploads + QR PNGs.
   minio:
-    # minio/minio and minio/mc are gone from Docker Hub; this image ships both binaries.
-    image: cgr.dev/chainguard/minio:latest
+    # minio/minio is no longer public on Docker Hub or quay.io; DHI publishes it.
+    image: dhi.io/minio:latest
     container_name: sd-minio
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
@@ -177,7 +178,8 @@ services:
     volumes:
       - sd-minio-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "mc alias set local http://localhost:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\" >/dev/null && mc ready local"]
+      # No curl or grep in the DHI image: ask /minio/health/live over bash's /dev/tcp.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /minio/health/live HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && read -r l <&3 && [[ $$l == *' 200'* ]]"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -185,7 +187,8 @@ services:
 
   # Creates the aggregator upload bucket once MinIO is healthy. Idempotent.
   minio-init:
-    image: cgr.dev/chainguard/minio:latest
+    # minio/mc is no longer public; Chainguard's -dev variant has mc and a shell.
+    image: cgr.dev/chainguard/minio-client:latest-dev
     container_name: sd-minio-init
     depends_on:
       minio:
@@ -194,6 +197,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
       S3_BUCKET: ${S3_BUCKET:-aggregator-bulk-uploads}
+      MC_CONFIG_DIR: /tmp/.mc
     entrypoint:
       - sh
       - -c
@@ -516,11 +520,8 @@ services:
     image: ${AGGREGATOR_API_IMAGE:-ghcr.io/blue-dots-economy/aggregator-dpg/api:main}
     container_name: sd-aggregator-api
     restart: unless-stopped
-    ports:
-      # Published to the host so email links built from PUBLIC_API_URL
-      # (http://localhost:4000 — e.g. the registration approve/reject pages,
-      # which the API renders as HTML) open from the browser.
-      - "4000:4000"
+    # Not published: every request reaches the API through aggregator-envoy,
+    # which owns host port 4000 (docs/rbac/rbac-edge-enforcement.md §7.1).
     environment:
       NODE_ENV: production
       PORT: "4000"
@@ -529,6 +530,10 @@ services:
       CORS_ORIGINS: http://localhost:3100
       DATABASE_URL: postgres://${POSTGRES_USER:-dpg}:${POSTGRES_PASSWORD}@postgres:5432/${AGGREGATOR_DB:-aggregator}
       RUN_MIGRATIONS_ON_BOOT: "true"
+      # Dev / e2e only: lets a local database WITH data apply the user & org
+      # instance upgrade at boot (apps/api/src/db/migration-guards.ts). Never set
+      # in a deployment; existing instances use the instance-upgrade tool.
+      ALLOW_TRAIN_ON_BOOT: ${ALLOW_TRAIN_ON_BOOT:-false}
       REDIS_URL: redis://aggregator-redis:6379
       # Keycloak (root path, localhost mode)
       KEYCLOAK_URL: http://keycloak:8080
@@ -552,9 +557,7 @@ services:
       # Approval flow — where new-aggregator approval emails go.
       APPROVAL_TOKEN_SECRET: ${APPROVAL_TOKEN_SECRET:?APPROVAL_TOKEN_SECRET must be set in .env (>=32 chars)}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-admin@bluedots.local}
-      # Org → coordinator hierarchy. On by default locally (code default is
-      # off); must match aggregator-web's value.
-      ORG_HIERARCHY_ENABLED: ${ORG_HIERARCHY_ENABLED:-true}
+      DEFAULT_ORG_OWNER_EMAIL: ${DEFAULT_ORG_OWNER_EMAIL:-}
       PUBLIC_API_URL: http://localhost:4000
       PUBLIC_PORTAL_URL: http://localhost:3100
       PUBLIC_LINK_BASE_URL: http://localhost:3100
@@ -593,6 +596,15 @@ services:
       SIGNALSTACK_AUTH_MODE: ${SIGNALSTACK_AUTH_MODE:-bearer}
       SIGNALSTACK_CLIENT_ID: ${SIGNALSTACK_CLIENT_ID:-aggregator-dpg}
       SIGNALSTACK_CLIENT_SECRET: ${SIGNALSTACK_CLIENT_SECRET:-aggregator-dpg-signals-local-dev-secret}
+      # RBAC, one switch for the API and its edge (docs/rbac/rbac-edge-enforcement.md).
+      # The API publishes the role catalogue to the `opa` service and keeps the
+      # token `roles` claim in step; aggregator-envoy asks OPA about every
+      # request. `enforce`: the edge refuses a missing route permission before
+      # the API, and the API's per-organisation checks refuse. `log`: nothing is
+      # refused, would-denies are recorded. `off`: no RBAC (then remove
+      # aggregator-envoy, which refuses protected routes without a catalogue).
+      RBAC_MODE: ${RBAC_MODE:-enforce}
+      OPA_URL: http://opa:8181
     volumes:
       - ../config:/app/config:ro
     healthcheck:
@@ -617,7 +629,77 @@ services:
       # API can create users — otherwise aggregator_id attributes are dropped.
       keycloak-init:
         condition: service_completed_successfully
+      # So the first requests are not denied because OPA is still starting.
+      opa:
+        condition: service_healthy
       schema-server:
+        condition: service_healthy
+
+  # OPA (RBAC decisions) for aggregator-api, from ../policy/rbac. Deployments
+  # run it as a sidecar in the api pod (bluedots-automation).
+  opa:
+    # The opa-envoy-plugin build of the same OPA version: besides the REST API
+    # on 8181 (the api's decisions and catalogue push) it answers Envoy's
+    # ext_authz check on 9191 (infra/opa/edge-config.yaml). The static variant
+    # is the multi-arch one.
+    image: openpolicyagent/opa:1.21.1-envoy-1-static@sha256:c1f40d815a15c4ca0ccbdf300e0a3515fccf1d30fbd92e69917ab96bad83811d
+    container_name: sd-aggregator-opa
+    restart: unless-stopped
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=error", "--config-file=/config/edge-config.yaml", "--ignore=*_test.rego", "--ignore=vectors.json", "/policy"]
+    ports:
+      - "127.0.0.1:8181:8181"
+    volumes:
+      - ../policy/rbac:/policy:ro
+      - ../infra/opa:/config:ro
+    healthcheck:
+      test: ["CMD", "/opa", "eval", "--fail", "--data", "/policy", "--ignore", "*_test.rego", "--ignore", "vectors.json", "data.rbac.not_through_root"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # Edge in front of aggregator-api (docs/rbac/rbac-edge-enforcement.md): verifies
+  # the Keycloak token, asks OPA whether the caller holds the route's permission,
+  # and forwards only allowed requests. Owns host port 4000, so email links built
+  # from PUBLIC_API_URL (http://localhost:4000, e.g. the approve/reject pages the
+  # API renders) still open from the browser, now through the edge.
+  aggregator-envoy:
+    image: envoyproxy/envoy:v1.34.1@sha256:007da57c2c328a90bd4e6d99b70bd899132f1b4a9426ccafe25437cf84a60c14
+    container_name: sd-aggregator-envoy
+    restart: unless-stopped
+    # infra/envoy/render.sh fills in envoy.yaml's placeholders from the
+    # environment below, then starts Envoy. The access log is flushed every second (stdout is buffered
+    # otherwise), so each edge decision shows next to the API's log line.
+    environment:
+      ADMIN_ADDRESS: 0.0.0.0
+      LISTEN_PORT: "4000"
+      API_HOST: aggregator-api
+      API_PORT: "4000"
+      OPA_HOST: opa
+      KEYCLOAK_HOST: keycloak
+      KEYCLOAK_PORT: "8080"
+      JWT_ISSUER: http://keycloak:8080/realms/bluedots
+      JWKS_URI: http://keycloak:8080/realms/bluedots/protocol/openid-connect/certs
+    command: ["sh", "/etc/envoy/render.sh", "--log-level", "warn", "--file-flush-interval-msec", "1000"]
+    ports:
+      - "4000:4000"
+      - "127.0.0.1:9901:9901"
+    volumes:
+      - ../infra/envoy/envoy.yaml:/etc/envoy/envoy.template.yaml:ro
+      - ../infra/envoy/render.sh:/etc/envoy/render.sh:ro
+    healthcheck:
+      # HTTP/1.1 with a Host header: Envoy's admin port refuses HTTP/1.0 (426).
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9901 && printf 'GET /ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q LIVE <&3"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    depends_on:
+      aggregator-api:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
 
   aggregator-web:
@@ -632,7 +714,7 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
-      API_BASE_URL: http://aggregator-api:4000
+      API_BASE_URL: http://aggregator-envoy:4000
       # Switchable UI languages — resolved server-side per request, so a restart
       # is enough to change them (no image rebuild). No literal defaults: they
       # would mask the legacy-name fallback below. See the root compose file.
@@ -656,8 +738,6 @@ services:
       SESSION_COOKIE_NAME: sid
       SESSION_TTL_SECONDS: "43200"
       SESSION_KEY: ${SESSION_KEY:?SESSION_KEY must be set in .env (>=32 chars)}
-      # Gates the org-registration tab; must match aggregator-api's value.
-      ORG_HIERARCHY_ENABLED: ${ORG_HIERARCHY_ENABLED:-true}
       # Portal is served over plain HTTP locally -> cookies must NOT be Secure.
       COOKIE_SECURE: "false"
       PUBLIC_PORTAL_URL: http://localhost:3100
@@ -669,7 +749,7 @@ services:
     volumes:
       - ../config:/app/config:ro
     depends_on:
-      aggregator-api:
+      aggregator-envoy:
         condition: service_healthy
       keycloak:
         condition: service_healthy

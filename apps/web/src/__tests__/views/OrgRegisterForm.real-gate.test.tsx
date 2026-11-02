@@ -13,6 +13,7 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import messages from '@/i18n/messages/en.json';
 
@@ -94,10 +95,25 @@ function stubScrollerToMaxAndScroll() {
 }
 
 function renderForm() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(['org-parents'], {
+    accepting: true,
+    parents: [
+      {
+        id: 'p-root',
+        name: 'Blue Dots',
+        is_root: true,
+        known_as_name: null,
+        child_known_as_name: 'Aggregator',
+      },
+    ],
+  });
   return render(
-    <NextIntlClientProvider locale="en" messages={messages}>
-      <OrgRegisterForm schema={orgSchema} uiSchema={{}} consentContent={consentContentFixture} />
-    </NextIntlClientProvider>,
+    <QueryClientProvider client={client}>
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <OrgRegisterForm schema={orgSchema} uiSchema={{}} consentContent={consentContentFixture} />
+      </NextIntlClientProvider>
+    </QueryClientProvider>,
   );
 }
 

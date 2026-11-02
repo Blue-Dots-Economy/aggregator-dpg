@@ -1,8 +1,5 @@
 /**
- * Voice campaign content schema and utilities.
- *
- * Defines the shape of voice request content, including agent configuration,
- * provider settings, and Raya start options for async execution.
+ * Voice campaign content schema for the api app: agent, provider and Raya start options.
  *
  * @module @aggregator-dpg/api
  */
@@ -11,9 +8,8 @@ import { z } from 'zod';
 /**
  * Schema for the voice campaign request content.
  *
- * Accepts an agent ID, action type (dispatch only in v1), optional Raya provider,
- * batch name, variables, and Raya start-options passthrough fields.
- * Rejects unknown top-level keys via `.strict()`.
+ * Accepts an agent id, action (`dispatch` only), optional provider, batch name,
+ * variables, and Raya start options. Rejects unknown keys.
  */
 export const voiceContentSchema = z
   .object({
@@ -43,10 +39,7 @@ const START_KEYS = [
 ] as const;
 
 /**
- * Extracts Raya start options from voice content, returning only supplied keys.
- *
- * The returned object contains only the passthrough keys that are present in
- * the input, with their values unchanged. No defaults are injected.
+ * Extracts the Raya start options that were supplied, unchanged and without defaults.
  *
  * @param c - The parsed voice content.
  * @returns Record with only the supplied passthrough keys.

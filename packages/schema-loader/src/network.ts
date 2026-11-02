@@ -2,11 +2,8 @@
  * Hybrid SchemaLoader that resolves participant schemas from the in-memory
  * network config and defers everything else to {@link FileSchemaLoader}.
  *
- * Shared by the API and worker processes, which previously carried
- * byte-identical copies of this class. The network-config accessor differs per
- * process (each app owns its own singleton), so it is injected rather than
- * imported — that also keeps this package free of a dependency on
- * `@aggregator-dpg/network-config`.
+ * Used by the API and the worker. Each app injects its own network-config
+ * accessor, so this package does not depend on `@aggregator-dpg/network-config`.
  *
  * @module @aggregator-dpg/schema-loader
  */
@@ -66,8 +63,7 @@ export class NetworkSchemaLoader extends SchemaLoaderBase {
    * Resolves a schema document for the given reference.
    *
    * @param ref - Schema id + version to resolve.
-   * @returns The schema document, or `SchemaNotFoundError` when the referenced
-   *   participant domain is absent from the network config.
+   * @returns The schema document, or `SchemaNotFoundError` when the domain is not configured.
    */
   async getSchema(ref: SchemaRef): Promise<Result<JsonSchema, BaseError>> {
     const domain = participantDomain(ref);
@@ -83,8 +79,7 @@ export class NetworkSchemaLoader extends SchemaLoaderBase {
    * Resolves and compiles a validator for the given reference.
    *
    * @param ref - Schema id + version to resolve.
-   * @returns The compiled validator, or `SchemaNotFoundError` /
-   *   `SchemaCompileError` on failure.
+   * @returns The compiled validator, or `SchemaNotFoundError` / `SchemaCompileError`.
    */
   async getValidator(ref: SchemaRef): Promise<Result<ValidateFunction, BaseError>> {
     const domain = participantDomain(ref);
@@ -107,9 +102,8 @@ export class NetworkSchemaLoader extends SchemaLoaderBase {
 }
 
 /**
- * Returns the participant domain id when `ref.id` looks like
- * `participant-{domain}` (only `v1` versions are supported today —
- * network.json keys item_schemas by item_type, not version).
+ * Returns the participant domain id when `ref.id` is `participant-{domain}`.
+ * The version is ignored: network.json keys item schemas by item type only.
  *
  * @param ref - The schema reference under consideration.
  * @returns The domain id, or `null` for any other shape so the caller delegates.

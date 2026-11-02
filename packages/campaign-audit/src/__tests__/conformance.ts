@@ -13,7 +13,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { CampaignAuditWriterBase } from '../interface.js';
-import { buildRequestedAudit, buildCompletedAudit, buildDumpAudit } from '../testing/index.js';
+import { buildRequestedAudit, buildCompletedAudit } from '../testing/index.js';
 
 /**
  * Runs the shared conformance suite against a writer produced by `makeWriter`.
@@ -38,12 +38,6 @@ export function runAuditWriterConformance(makeWriter: () => CampaignAuditWriterB
       expect((await w.recordCompleted(buildCompletedAudit({ correlationId: id }))).success).toBe(
         true,
       );
-    });
-
-    it('accepts a dump row with no org', async () => {
-      const w = makeWriter();
-      const r = await w.recordDumpAccess(buildDumpAudit());
-      expect(r.success).toBe(true);
     });
 
     it('exposes no mutation surface', () => {

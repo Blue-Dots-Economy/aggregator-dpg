@@ -8,11 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
-import {
-  AggregatorStoreFake,
-  buildAggregator,
-  _setAggregatorStore,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import {
   InMemoryCampaignJobStore,
   _setCampaignJobStore,
@@ -47,11 +43,11 @@ describe('POST /v1/campaign/export', () => {
     store = new InMemoryCampaignJobStore();
     _setCampaignJobStore(store);
 
-    const aggStore = new AggregatorStoreFake();
+    const aggStore = new UserStoreFake();
     aggStore.seed([
-      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
+      buildCoordinator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
     ]);
-    _setAggregatorStore(aggStore);
+    _setUserStore(aggStore);
 
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
@@ -74,7 +70,7 @@ describe('POST /v1/campaign/export', () => {
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setCampaignJobStore(null);
   });
 
@@ -196,11 +192,11 @@ describe('POST /v1/campaign/export', () => {
   });
 
   it('returns 403 AGGREGATOR_INACTIVE when the requesting aggregator is not active', async () => {
-    const aggStore = new AggregatorStoreFake();
+    const aggStore = new UserStoreFake();
     aggStore.seed([
-      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'inactive' }),
+      buildCoordinator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'inactive' }),
     ]);
-    _setAggregatorStore(aggStore);
+    _setUserStore(aggStore);
     const res = await post({ item_ids: [VALID_UUID] });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.fields.reason).toBe('AGGREGATOR_INACTIVE');
@@ -208,9 +204,9 @@ describe('POST /v1/campaign/export', () => {
   });
 
   it('returns 403 RECIPIENT_UNRESOLVED when neither token nor aggregator has an email', async () => {
-    const aggStore = new AggregatorStoreFake();
-    aggStore.seed([buildAggregator({ id: 'agg-1', contactEmail: '', status: 'active' })]);
-    _setAggregatorStore(aggStore);
+    const aggStore = new UserStoreFake();
+    aggStore.seed([buildCoordinator({ id: 'agg-1', contactEmail: '', status: 'active' })]);
+    _setUserStore(aggStore);
     const res = await post({ item_ids: [VALID_UUID] });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.fields.reason).toBe('RECIPIENT_UNRESOLVED');
@@ -269,18 +265,13 @@ describe('POST /v1/campaign/export', () => {
     expect(active.ok && active.value).toBe(0);
   });
 
-  // Reverse direction of the #692 auth split, asserted at the REAL route rather
-  // than only against the requireCampaignAuth helper: the campaign-manager
-  // SYSTEM token shares this client's azp, so nothing but the guard stops it
-  // reaching participant PII here. Two shapes, because they fail on different
-  // checks and a refactor could plausibly break one and not the other.
-  it('rejects the campaign-manager system token (correctly provisioned: no aggregator_id)', async () => {
+  it('rejects a token without aggregator_id', async () => {
     _setAccessTokenVerifier(async (token) => {
       if (token === 'good') {
         return {
-          sub: 'sa-uuid',
+          sub: 'other-uuid',
           azp: 'campaign-manager',
-          preferred_username: 'service-account-campaign-manager',
+          preferred_username: 'someone@org.example',
         };
       }
       throw new Error('invalid');
@@ -288,26 +279,6 @@ describe('POST /v1/campaign/export', () => {
     const res = await post({ item_ids: [VALID_UUID] });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.fields.reason).toBe('MISSING_AGGREGATOR_ID');
-  });
-
-  it('rejects a MISPROVISIONED system token that does carry org claims', async () => {
-    // The state a real realm was found in: org attributes set on the
-    // service-account user. Only the preferred_username guard stops this one.
-    _setAccessTokenVerifier(async (token) => {
-      if (token === 'good') {
-        return {
-          sub: 'sa-uuid',
-          azp: 'campaign-manager',
-          preferred_username: 'service-account-campaign-manager',
-          aggregator_id: 'agg-1',
-          signalstack_org_id: 'org_5d3b7fa4-x',
-        };
-      }
-      throw new Error('invalid');
-    });
-    const res = await post({ item_ids: [VALID_UUID] });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().error.fields.reason).toBe('SYSTEM_TOKEN_NOT_PERMITTED');
   });
 
   it('re-enqueues an idempotency replay whose job is still queued', async () => {

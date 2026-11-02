@@ -3,37 +3,35 @@ import { redirect } from 'next/navigation';
 import { getSession } from '../../../lib/server-session';
 import { RegisterView } from './RegisterView';
 import { loadRegistrationSchema } from '../../../lib/aggregator-schema.server';
-import { isOrgHierarchyEnabled, loadConsentContent } from './register-server';
+import { loadConsentContent, warnIfLegacyHierarchyFlag } from './register-server';
 
 export const metadata: Metadata = {
-  title: 'Register as Aggregator',
+  // Matches the heading the page renders, which comes from the registration
+  // schema's own title (#873 renamed it to Coordinator Registration).
+  title: 'Coordinator Registration',
 };
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Public aggregator (coordinator) registration page. Loads the coordinator JSON
- * Schema + UI schema from `config/schemas/aggregator/` on the server and renders
- * the single coordinator flow.
+ * Public coordinator registration page.
  *
- * Owner (organisation) registration is no longer a tab here — as of #619 it is
- * served only via the `/register/owner` deep link. The `orgHierarchyEnabled`
- * flag is still forwarded so the coordinator form can show its parent-org
- * selector when the hierarchy is on.
+ * Loads the coordinator schema and UI schema on the server. Owner registration
+ * is served only at `/register/owner`. The coordinator form always shows its
+ * organisation selector.
  */
 export default async function RegisterPage() {
   const session = await getSession();
   if (session) redirect('/dashboard');
+  warnIfLegacyHierarchyFlag();
 
   const { schema, uiSchema } = await loadRegistrationSchema();
-  const orgHierarchyEnabled = isOrgHierarchyEnabled();
   const consentContent = await loadConsentContent();
 
   return (
     <RegisterView
       schema={schema}
       uiSchema={uiSchema}
-      orgHierarchyEnabled={orgHierarchyEnabled}
       aggregatorConsentContent={consentContent?.aggregator ?? null}
     />
   );

@@ -8,11 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../../services/auth/access-token.js';
-import {
-  AggregatorStoreFake,
-  buildAggregator,
-  _setAggregatorStore,
-} from '../../services/aggregator-store/index.js';
+import { UserStoreFake, buildCoordinator, _setUserStore } from '../../services/user-store/index.js';
 import {
   InMemoryCampaignJobStore,
   _setCampaignJobStore,
@@ -47,11 +43,11 @@ describe('campaign submit — requested audit row (#617)', () => {
 
     _setCampaignJobStore(new InMemoryCampaignJobStore());
 
-    const aggStore = new AggregatorStoreFake();
+    const aggStore = new UserStoreFake();
     aggStore.seed([
-      buildAggregator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
+      buildCoordinator({ id: 'agg-1', contactEmail: 'aggregator@org.example', status: 'active' }),
     ]);
-    _setAggregatorStore(aggStore);
+    _setUserStore(aggStore);
 
     auditFake = new CampaignAuditWriterFake();
     _setCampaignAuditWriter(auditFake);
@@ -77,7 +73,7 @@ describe('campaign submit — requested audit row (#617)', () => {
   afterEach(async () => {
     await app?.close();
     _setAccessTokenVerifier(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setCampaignJobStore(null);
     _setCampaignAuditWriter(null);
   });
@@ -101,7 +97,7 @@ describe('campaign submit — requested audit row (#617)', () => {
     const rows = auditFake.rows.filter((r) => r.kind === 'requested');
     expect(rows).toHaveLength(1);
     expect(rows[0]!.correlationId).toBe(res.json().job_id);
-    expect(rows[0]!.actorOrgId).toBe('org_5d3b7fa4-x');
+    expect(rows[0]!.actorSignalstackOrgId).toBe('org_5d3b7fa4-x');
     expect(rows[0]!.purpose).toBe('audit');
     expect(rows[0]!.piiFields).toEqual(['name', 'email', 'phone']);
     expect('outcome' in rows[0]!).toBe(false);

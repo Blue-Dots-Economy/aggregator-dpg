@@ -1,11 +1,9 @@
 /**
  * Testing fake for SignalStackWriterBase.
  *
- * Consumers in other packages (apps/api, apps/worker, services/*) import
- * this fake from `@aggregator-dpg/signalstack-writer/testing` rather than
- * reaching into `./memory`. Adds a `seed()` helper for arrange-act-assert
- * tests so cases that need a pre-existing signalstack user / profile don't
- * have to make extra `onboard()` calls.
+ * Part of the signalstack-writer package. Other packages import this fake
+ * from `@aggregator-dpg/signalstack-writer/testing`, not from `./memory`.
+ * `seed()` inserts existing users and profiles without calling `onboard()`.
  */
 
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
@@ -25,16 +23,16 @@ import type {
 export { InMemorySignalStackWriter };
 
 /**
- * In-memory fake for {@link SignalStackTokenProviderBase}. Returns a fixed
- * token by default; `failNext()` forces the next `getToken()` call to error
- * so callers (e.g. `HttpSignalStackWriter`) can be tested against a token
- * grant failure without a real Keycloak.
+ * In-memory fake for {@link SignalStackTokenProviderBase}.
+ *
+ * Returns a fixed token by default. `failNext()` makes the next `getToken()`
+ * call fail.
  */
 export class SignalStackTokenProviderFake extends SignalStackTokenProviderBase {
   private token: string;
   private failNextError: BaseError | null = null;
   callCount = 0;
-  /** How many times {@link invalidate} was called (401-refresh assertions). */
+  /** How many times {@link invalidate} was called. */
   invalidateCount = 0;
 
   constructor(token = 'fake-signalstack-token') {
@@ -42,12 +40,12 @@ export class SignalStackTokenProviderFake extends SignalStackTokenProviderBase {
     this.token = token;
   }
 
-  /** Test helper — change the token returned by subsequent calls. */
+  /** Sets the token returned by later calls. */
   setToken(token: string): void {
     this.token = token;
   }
 
-  /** Test helper — force the next `getToken()` call to fail with this error. */
+  /** Makes the next `getToken()` call fail with this error. */
   failNext(
     error: BaseError = new UpstreamError('token grant failed', { code: 'SIGNALSTACK_AUTH_FAILED' }),
   ): void {
@@ -64,11 +62,7 @@ export class SignalStackTokenProviderFake extends SignalStackTokenProviderBase {
     return ok(this.token);
   }
 
-  /**
-   * Records that the caller asked for a re-mint. The fake holds no cache, so
-   * there is nothing to clear; `invalidateCount` lets a test assert that the
-   * 401 path actually forced a refresh.
-   */
+  /** Increments `invalidateCount`. The fake has no cache to clear. */
   override invalidate(): void {
     this.invalidateCount += 1;
   }
@@ -93,20 +87,15 @@ export interface SignalStackProfileSeed {
   item_longitude?: number | null;
   created_at?: string;
   updated_at?: string;
-  /**
-   * Signalstack organisation id the row is scoped under. Optional in
-   * seeds — defaults to an empty string so tests that don't care about
-   * onboard-channel attribution stay terse.
-   */
+  /** Signalstack organisation id the row belongs to; defaults to empty string. */
   acting_org_id?: string;
   /** Channel attribution; defaults to `'bulk'`. */
   channel?: 'bulk' | 'link';
   /** Source workflow id; defaults to empty string. */
   source_id?: string;
   /**
-   * Canonical contact block a decrypt `contact` projection resolves for this
-   * row (name/email/phone with provenance). Optional — unseeded fields resolve
-   * to `{ value: null, source: null }`.
+   * Contact block returned when decrypt requests `contact`. Unseeded fields
+   * resolve to `{ value: null, source: null }`.
    */
   contact?: Partial<Record<SignalStackContactCanonical, SignalStackContactValue>>;
 }
@@ -114,10 +103,8 @@ export interface SignalStackProfileSeed {
 /**
  * Pre-built signalstack aggregator row for `seed()`.
  *
- * Passing `org_id` lets a test pin the value the aggregator-approval flow
- * will read back; leaving it unset triggers the fake's `seed-org-N`
- * counter, which is sufficient for tests that only care that *some* id was
- * resolved.
+ * Set `org_id` to fix the returned id; otherwise the fake assigns
+ * `seed-org-N`.
  */
 export interface SignalStackAggregatorSeed {
   org_id?: string;
@@ -128,10 +115,8 @@ export interface SignalStackAggregatorSeed {
 }
 
 /**
- * Pre-built dashboard payload keyed by `acting_org_id`. Tests use this
- * to pin the rollup the writer's {@link InMemorySignalStackWriter.fetchDashboard}
- * returns for a given aggregator org. Without a pinned response the
- * fake synthesises a deterministic empty rollup.
+ * Dashboard payload that {@link InMemorySignalStackWriter.fetchDashboard}
+ * returns for `acting_org_id`. Without one, the fake returns an empty rollup.
  */
 export interface SignalStackDashboardSeed {
   acting_org_id: string;
@@ -139,12 +124,8 @@ export interface SignalStackDashboardSeed {
 }
 
 /**
- * Pre-built CSV export payload keyed by `acting_org_id`. Tests pin the
- * exact CSV string the writer's
- * {@link InMemorySignalStackWriter.exportDashboardCsv} returns for a
- * given aggregator org. Without a pinned response the fake returns a
- * header-only CSV so callers can still assert content-type and
- * filename without bespoke setup.
+ * CSV that {@link InMemorySignalStackWriter.exportDashboardCsv} returns for
+ * `acting_org_id`. Without one, the export returns `SIGNALSTACK_BAD_RESPONSE`.
  */
 export interface SignalStackDashboardExportSeed {
   acting_org_id: string;
@@ -155,13 +136,10 @@ const ISO_FIXED = '2026-01-01T00:00:00.000Z';
 
 export class SignalStackWriterFake extends InMemorySignalStackWriter {
   /**
-   * Inserts the given users + profiles directly into the underlying store,
-   * bypassing the `onboard()` method. Useful when a test needs an existing
-   * signalstack user (e.g., to exercise the userExisted branch) or profile
-   * (to exercise update / ownership-mismatch branches).
+   * Inserts users, profiles, aggregators, and dashboard payloads directly
+   * into the store, without calling `onboard()`.
    *
-   * Re-seeding the same user.id or profile.item_id overwrites the previous
-   * row.
+   * Seeding the same id again overwrites the previous row.
    */
   seed(seeds: {
     users?: SignalStackUserSeed[];
@@ -231,10 +209,7 @@ export class SignalStackWriterFake extends InMemorySignalStackWriter {
 }
 
 /**
- * Constructs a fully-populated `SignalStackOnboardParticipantInput` with
- * deterministic defaults. Tests override the fields they care about via
- * the `overrides` argument; everything else is pre-filled with safe
- * dev-time values so each test stays terse.
+ * Builds a complete `SignalStackOnboardParticipantInput` with fixed defaults.
  *
  * Defaults:
  *   - `actingOrgId: 'org-1'`
@@ -243,12 +218,10 @@ export class SignalStackWriterFake extends InMemorySignalStackWriter {
  *   - `terms_accepted: true`, `privacy_accepted: true`
  *   - `channel: 'link'`, `source_id: 'link-1'`
  *   - `network: 'blue_dot'`, `domain: 'seeker'`, `item_type: 'profile_1.0'`
- *   - `profile: {}` — empty item_state
+ *   - `profile: {}`
  *
- * @param overrides - Partial override map; any field set here replaces
- *   the default in the returned input.
- * @returns A complete `SignalStackOnboardParticipantInput` ready to pass
- *   to a writer's `onboard()` method.
+ * @param overrides - Fields that replace the defaults.
+ * @returns A complete `SignalStackOnboardParticipantInput`.
  */
 export function buildOnboardInput(
   overrides: Partial<SignalStackOnboardParticipantInput> = {},
@@ -270,12 +243,10 @@ export function buildOnboardInput(
 }
 
 /**
- * Builds a decrypted profile row for tests of consumers that shape CSV/JSON
- * from {@link SignalStackDecryptedProfiles}.
+ * Builds a decrypted profile row (see {@link SignalStackDecryptedProfiles}).
  *
- * @param overrides - Partial override map; any field set here replaces the
- *   default in the returned row.
- * @returns A complete `SignalStackDecryptedProfileRow` ready for assertions.
+ * @param overrides - Fields that replace the defaults.
+ * @returns A complete `SignalStackDecryptedProfileRow`.
  */
 export function buildDecryptedProfileRow(
   overrides: Partial<SignalStackDecryptedProfileRow> = {},

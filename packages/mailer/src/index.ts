@@ -1,5 +1,5 @@
 /**
- * Mailer factory. Picks an implementation via `MAIL_PROVIDER` env:
+ * Mailer factory (`@aggregator-dpg/mailer`). Picks an implementation via `MAIL_PROVIDER`:
  *   - `smtp` (default) → SmtpMailer
  *   - `ses`            → SesMailer
  *

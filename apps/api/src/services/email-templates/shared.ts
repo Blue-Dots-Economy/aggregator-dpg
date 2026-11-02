@@ -11,10 +11,8 @@ const BRAND_BORDER = '#e8eaf1';
 const BRAND_BG = '#f7f8fb';
 
 /**
- * Network-driven brand surface for outbound emails. Sourced from
- * `getNetworkConfig().aggregator.brand` at server boot via
- * `setEmailBrand` — keeps each template synchronous + free of an
- * upstream config lookup.
+ * Brand values for outbound emails. Set from
+ * `getNetworkConfig().aggregator.brand` at server boot via `setEmailBrand`.
  */
 export interface EmailBrand {
   short_name: string;
@@ -97,26 +95,19 @@ export function renderShell(opts: ShellOptions): string {
 </html>`;
 }
 
-/**
- * Renders a primary CTA button.
- */
 /** Schemes a CTA may link to. Anything else is a phishing vector in email. */
 const SAFE_HREF_SCHEMES: ReadonlySet<string> = new Set(['http:', 'https:']);
 
 /**
  * Validates and escapes a CTA destination for use in an `href` attribute.
  *
- * The button helpers are the ONE place a URL reaches HTML without passing
- * through `substitute`, so the token type declared in the registry does not
- * apply to it — which is exactly why the check belongs here rather than at
- * each call site. Without it, an href sourced from a form field or a database
- * column would give attribute breakout plus `javascript:` in an email.
+ * The button helpers are the only place a URL reaches HTML without passing
+ * through `substitute`, so the check lives here. It blocks attribute breakout
+ * and `javascript:` links.
  *
  * @param href - Destination URL.
  * @returns The URL, escaped for attribute context.
  * @throws {Error} If the URL is unparseable or its scheme is not http(s).
- *   Every current href is code-built from config, so a failure here is a
- *   programming error and should be loud rather than silently unlinked.
  */
 function safeHref(href: string): string {
   let scheme: string;
@@ -132,6 +123,14 @@ function safeHref(href: string): string {
   return escapeHtml(href);
 }
 
+/**
+ * Renders an inline CTA button.
+ *
+ * @param label - Button text.
+ * @param href - Target URL; must be http(s).
+ * @param color - `primary` uses the brand colour, `danger` red.
+ * @returns HTML for the button.
+ */
 export function ctaButton(
   label: string,
   href: string,
@@ -143,8 +142,7 @@ export function ctaButton(
 
 /**
  * Status pill shown above an email heading (e.g. "Action required"). Uses a
- * table cell rather than a styled span: Outlook drops padding on inline
- * elements, which would collapse the pill into plain text.
+ * table cell because Outlook drops padding on inline elements.
  *
  * @param label - Short pill text; upper-cased for emphasis by the caller's CSS.
  * @param tone - `info` for neutral notices, `action` for anything needing a reply.
@@ -162,8 +160,7 @@ export function pill(label: string, tone: 'info' | 'action' = 'info'): string {
 }
 
 /**
- * Full-width CTA. The inline-block `ctaButton` shrink-wraps its label, which
- * reads as an afterthought when it is the one action the mail exists for.
+ * Full-width CTA button, for the main action of an email.
  *
  * @param label - Button text.
  * @param href - Target URL; already signed/encoded by the caller.
@@ -195,10 +192,7 @@ export function escapeHtml(s: string): string {
 }
 
 // ── Block helpers ───────────────────────────────────────────────────────────
-// Externalised copy (see `messages.ts`) must not carry inline CSS: an operator
-// editing a properties file should be writing a sentence, not a style
-// attribute. These helpers own the styling so the copy files stay readable,
-// and they are the only place a body block's look is defined.
+// These helpers own all body-block styling, so the copy files carry no inline CSS.
 
 /** Standard body paragraph. `html` must already be escaped or code-generated. */
 export function para(html: string): string {

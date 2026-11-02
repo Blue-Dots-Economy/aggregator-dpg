@@ -1,11 +1,10 @@
 /**
- * Central error code catalogue.
+ * Error code catalogue for the api app.
  *
- * Every domain-specific failure has one entry here. Routes throw
- * `httpError(ERR.<KEY>)` and the global error handler renders the canonical
- * envelope. Adding a new error = adding a row here.
+ * Each failure has one entry. Routes throw `httpError(ERR.<KEY>)` and the
+ * global error handler renders the envelope.
  *
- * Layered fields per code:
+ * Fields per code:
  *   - `code`     machine identifier surfaced in API response and logs
  *   - `status`   HTTP status the handler returns
  *   - `title`    short human-readable headline shown in the UI
@@ -116,27 +115,6 @@ export const ERR = {
     detail: 'That campaign job does not belong to your organisation.',
     hint: 'getJob/getJobItems is tenant-scoped by signalstack_org_id. Per the contract spec §5 an unknown or other-org job id is a 403, not a 404.',
   },
-  DUMP_NOT_AVAILABLE: {
-    code: 'DUMP_NOT_AVAILABLE',
-    status: 404,
-    title: 'Dump not available',
-    detail: 'The non-PII dump has not been published yet. Please retry later.',
-    hint: 'None of the expected objects is present under the configured key root. Either the signals-s3-export cron has not run in this environment yet, or CAMPAIGN_DUMP_PREFIX / CAMPAIGN_DUMP_INSTANCE_ID / CAMPAIGN_DUMP_FILES does not match what it writes. See response.error.fields.missing for the absent keys.',
-  },
-  DUMP_NOT_CONFIGURED: {
-    code: 'DUMP_NOT_CONFIGURED',
-    status: 503,
-    title: 'Dump download not configured',
-    detail: 'The non-PII dump download is not configured on this deployment.',
-    hint: 'CAMPAIGN_DUMP_INSTANCE_ID is unset, so the key root cannot be resolved. Set it to the Signals instance this deployment serves (e.g. blue_dot_up).',
-  },
-  DUMP_STORAGE_UNAVAILABLE: {
-    code: 'DUMP_STORAGE_UNAVAILABLE',
-    status: 503,
-    title: 'Storage unavailable',
-    detail: 'The dump could not be read from storage. Please retry shortly.',
-    hint: "An S3 HEAD or presign call failed on a transport error (not a missing object — those return 404 DUMP_NOT_AVAILABLE). Check S3_ENDPOINT / S3_PUBLIC_ENDPOINT, credentials, and bucket reachability. Two causes are NOT transient, so retrying will not clear them; the log line names which via `likely_cause`. S3_ACCESS_DENIED: the role lacks s3:ListBucket on the bucket, so a HEAD on a MISSING key returns 403 instead of 404 and an ordinary 'not published yet' cold start looks like an outage — infra/env.template requires that grant. S3_CREDENTIALS: presigning is local crypto, so a signDownloadUrl failure means missing or malformed credentials, not an S3 outage.",
-  },
   CONSENT_REQUIRED: {
     code: 'CONSENT_REQUIRED',
     status: 400,
@@ -182,6 +160,20 @@ export const ERR = {
     detail:
       'Your aggregator account has not been approved yet. An admin must approve the registration before this action is available.',
     hint: 'JWT `decision_made` claim is missing, "pending", or "rejected". See requireApproved().',
+  },
+  USER_NOT_PROVISIONED: {
+    code: 'USER_NOT_PROVISIONED',
+    status: 403,
+    title: 'Account not set up',
+    detail: 'Your sign-in is not linked to an account here yet. Contact the network administrator.',
+    hint: 'No aggregator_id claim and no user_identities row for (IDP_PROVIDER, sub). The boot reconcile (root / Default owners) or org create links admins; nothing links by email.',
+  },
+  NOT_ORG_ADMIN: {
+    code: 'NOT_ORG_ADMIN',
+    status: 403,
+    title: 'No active organisation',
+    detail: 'Your account does not manage an active organisation.',
+    hint: 'Admin account resolved by subject but owns no active org (pending, rejected or released). See services/auth/actor.',
   },
   AGGREGATOR_TYPE_MISMATCH: {
     code: 'AGGREGATOR_TYPE_MISMATCH',
@@ -277,9 +269,7 @@ export const ERR = {
     detail: 'Failed to send your message. Please try again later.',
     hint: 'The mail transport rejected or failed the send.',
   },
-  // One code per rejection reason rather than a single generic 400, so the form
-  // can tell the submitter what to change (#551). The handler overrides `detail`
-  // with the specific limit or filename.
+  // One code per reason so the form can say what to change. The handler sets `detail` to the limit or filename.
   ATTACHMENT_COUNT_EXCEEDED: {
     code: 'ATTACHMENT_COUNT_EXCEEDED',
     status: 400,
@@ -372,6 +362,14 @@ export const ERR = {
     hint: 'Decision row exists. Single-use token replayed.',
   },
 
+  ALREADY_DECIDED: {
+    code: 'ALREADY_DECIDED',
+    status: 409,
+    title: 'Already decided',
+    detail: 'This registration has already been approved or rejected.',
+    hint: 'Decision compare-and-set lost (decided by an emailed link or another console session). `fields` carries status, decided_at, decided_by.',
+  },
+
   // ── Generic resource ────────────────────────────────────────────────────
   NOT_FOUND: {
     code: 'NOT_FOUND',
@@ -393,7 +391,7 @@ export const ERR = {
     title: 'Already an organisation owner',
     detail:
       'This email or phone already belongs to an organisation owner. Request coordinator access from your organisation instead of registering again.',
-    hint: 'Coordinator submit matched an aggregator_orgs.owner_email (spec A4). Owner→coordinator graduation is deferred.',
+    hint: "Coordinator submit matched an org owner's email (the owner's admin account contact; spec A4). Owner→coordinator graduation is deferred.",
   },
   ORG_SLUG_TAKEN: {
     code: 'ORG_SLUG_TAKEN',
@@ -401,7 +399,7 @@ export const ERR = {
     title: 'Organisation name unavailable',
     detail:
       'An organisation with a matching name is already registered or pending. Try a different name.',
-    hint: 'aggregator_orgs partial-unique slug collision over non-terminal rows (spec A9).',
+    hint: 'organisations partial-unique slug collision over non-terminal rows (spec A9).',
   },
   ORG_NAME_TAKEN: {
     code: 'ORG_NAME_TAKEN',
@@ -409,7 +407,43 @@ export const ERR = {
     title: 'Organisation name unavailable',
     detail:
       'An organisation with this name is already registered or pending. Please choose a different name.',
-    hint: 'aggregator_orgs partial-unique display_name (case-insensitive) collision over non-terminal rows.',
+    hint: 'organisations partial-unique name (case-insensitive) collision over non-terminal aggregator orgs.',
+  },
+  ORG_DEPTH_LIMIT: {
+    code: 'ORG_DEPTH_LIMIT',
+    status: 409,
+    title: 'Too many levels',
+    detail: 'The organisation cannot be placed this deep. Choose a parent higher in the tree.',
+    hint: 'Store DEPTH_LIMIT: parent depth + 1 (+ subtree height on a move) exceeds organisation.hierarchy.max_depth.',
+  },
+  ORG_CHILD_LIMIT: {
+    code: 'ORG_CHILD_LIMIT',
+    status: 409,
+    title: 'Parent organisation is full',
+    detail:
+      'The selected parent organisation cannot take more organisations. Choose another parent.',
+    hint: 'Store CHILD_LIMIT: pending + active children of the parent (Default excluded) reached organisation.hierarchy.max_children.',
+  },
+  ORG_TOTAL_LIMIT: {
+    code: 'ORG_TOTAL_LIMIT',
+    status: 409,
+    title: 'Registration closed',
+    detail: 'This network is not accepting new organisations right now.',
+    hint: 'Store TOTAL_LIMIT: pending + active aggregator orgs (root and Default excluded) reached organisation.hierarchy.max_total_orgs.',
+  },
+  ORG_PARENT_CYCLE: {
+    code: 'ORG_PARENT_CYCLE',
+    status: 400,
+    title: 'Invalid parent',
+    detail: 'An organisation cannot be moved under itself or an organisation below it.',
+    hint: 'Store PARENT_CYCLE: the requested parent is the org or one of its descendants.',
+  },
+  KNOWN_AS_DEPTH: {
+    code: 'KNOWN_AS_DEPTH',
+    status: 400,
+    title: 'Name not allowed at this depth',
+    detail: 'The "known as" name is not allowed at the organisation\'s depth.',
+    hint: 'Store KNOWN_AS_DEPTH: knownAsAllowed(key, depth) is false. `fields.org_ids` lists the orgs.',
   },
   REGISTRATION_COOLING: {
     code: 'REGISTRATION_COOLING',
@@ -428,7 +462,16 @@ export const ERR = {
     hint: 'Coordinator submit/approval against an org whose status != active (spec §6.2 re-validate).',
   },
 
-  // ── Coordinator invites (#700) ────────────────────────────────────────────
+  ORG_DETAILS_READ_ONLY: {
+    code: 'ORG_DETAILS_READ_ONLY',
+    status: 409,
+    title: 'Organisation details are read-only here',
+    detail:
+      "url, locations, company and GST number belong to the coordinator's organisation and cannot be changed from the coordinator profile.",
+    hint: 'Profile PATCH carried an org-detail field (migration 0028); the org owner edits them. `fields.fields` lists the offending keys.',
+  },
+
+  // ── Coordinator invites ──────────────────────────────────────────────────
   INVITE_INVALID: {
     code: 'INVITE_INVALID',
     status: 400,
@@ -520,6 +563,62 @@ export const ERR = {
     title: 'Invalid configuration',
     detail: 'The combination of fields supplied is not allowed by the API.',
     hint: 'A field combination violates a business invariant (e.g. profile fields on an account_only link). Inspect detail for the specific rule.',
+  },
+  RBAC_NOT_ENABLED: {
+    code: 'RBAC_NOT_ENABLED',
+    status: 503,
+    title: 'Access control is off',
+    detail: 'Access control is not enabled on this instance, so roles cannot be changed.',
+    hint: 'RBAC_MODE=off: the role catalogue is not loaded. Set RBAC_MODE=log or enforce (docs/rbac/).',
+  },
+  ROLE_UNKNOWN: {
+    code: 'ROLE_UNKNOWN',
+    status: 400,
+    title: 'Unknown role',
+    detail: 'That role does not exist on this instance.',
+    hint: 'role_key is not a key of the role table (built-in roles are seeded by migration 0031).',
+  },
+  ROLE_EXISTS: {
+    code: 'ROLE_EXISTS',
+    status: 409,
+    title: 'Role already exists',
+    detail: 'A role with that key already exists.',
+    hint: 'Role keys are unique across built-in and custom roles.',
+  },
+  ROLE_BUILTIN: {
+    code: 'ROLE_BUILTIN',
+    status: 409,
+    title: 'Built-in role',
+    detail: 'Built-in roles cannot be changed or deleted here.',
+    hint: 'Built-in roles are seeded by migration 0031 and changed by a new migration; create a custom role instead.',
+  },
+  ROLE_IN_USE: {
+    code: 'ROLE_IN_USE',
+    status: 409,
+    title: 'Role in use',
+    detail: 'This role is assigned to someone, so it cannot be deleted.',
+    hint: 'Revoke its live assignments first.',
+  },
+  ROLE_LIMIT_REACHED: {
+    code: 'ROLE_LIMIT_REACHED',
+    status: 409,
+    title: 'Too many custom roles',
+    detail: 'This instance already has the most custom roles allowed.',
+    hint: 'MAX_CUSTOM_ROLES (50); delete an unused custom role first.',
+  },
+  ROLE_INVALID: {
+    code: 'ROLE_INVALID',
+    status: 400,
+    title: 'Invalid role',
+    detail: 'The role breaks a role rule.',
+    hint: 'See fields.issues; rules: docs/rbac/rbac-permissions-and-roles.md §4.',
+  },
+  ROLE_ASSIGNMENT_NOT_ALLOWED: {
+    code: 'ROLE_ASSIGNMENT_NOT_ALLOWED',
+    status: 409,
+    title: 'Role cannot be assigned',
+    detail: 'This role cannot be given to this user in this organisation.',
+    hint: 'A role rule refused it; see fields.reason (base_role, not_member, self, account_type, org_type, days_exceed_max). Rules: docs/rbac/rbac-permissions-and-roles.md §4.',
   },
 } as const satisfies Record<string, ErrorCatalogueEntry>;
 

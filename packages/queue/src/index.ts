@@ -1,16 +1,14 @@
 /**
- * Queue surface for the bulk-upload + onboarding pipeline.
+ * Queue surface for the bulk-upload and campaign pipelines (`@aggregator-dpg/queue`).
  *
  * Exposes:
- *   - QueueName constants (one per queue defined in the implementation
- *     design § BullMQ Queues).
+ *   - QueueName constants, one per queue.
  *   - Job payload type definitions, shared between enqueuer (API) and
  *     consumer (worker).
  *   - Connection factory that returns an ioredis client from REDIS_URL.
  *
- * BullMQ is intentionally not abstracted further — both API and worker
- * import this package and construct their own `Queue` / `Worker` instances
- * directly using these names + types.
+ * BullMQ is not wrapped: the API and worker build their own `Queue` / `Worker`
+ * instances from these names and types.
  */
 
 import { Redis } from 'ioredis';
@@ -29,10 +27,8 @@ export const QueueName = {
   /** Hourly watchdog + retention sweep. */
   CronWatchdog: 'cron-watchdog',
   /**
-   * Unified campaign async-job pipeline (aggregator-dpg#579). One job per
-   * `campaign_job` row; the worker's `campaign` role loads the job + its items,
-   * runs the per-channel handler (export/email/voice), and writes item + job
-   * status back.
+   * Campaign async jobs. One job per `campaign_job` row; the worker's
+   * `campaign` role runs the channel handler and writes status back.
    */
   CampaignProcess: 'campaign-process',
 } as const;
@@ -78,10 +74,8 @@ export interface CronWatchdogJob {
 }
 
 /**
- * Unified campaign-process job (aggregator-dpg#579). Carries only the durable
- * `campaign_job` id — the worker loads the job, its items, channel, metadata,
- * and content from Postgres. All request detail lives in the row, so the queue
- * payload stays minimal and a replayed/retried job re-reads the source of truth.
+ * Campaign-process job. Carries only the `campaign_job` id; the worker loads
+ * everything else from Postgres, so a retried job reads current data.
  */
 export interface CampaignProcessJob {
   /** `campaign_job.id` — the durable job to process. */
@@ -94,31 +88,27 @@ export interface RedisConnectionOptions {
   /** redis://host:port[/db] — full URL form. Defaults to REDIS_URL env. */
   url?: string;
   /**
-   * Per-request retry cap. Defaults to `null` (required for BullMQ queue
-   * connections). Non-queue callers (e.g. the API rate limiter) should set a
-   * finite value so a Redis outage fails fast instead of queueing forever.
+   * Per-request retry cap. Defaults to `null`, which BullMQ requires. Non-queue
+   * callers should set a finite value to fail fast when Redis is down.
    */
   maxRetriesPerRequest?: number | null;
   /**
-   * Per-command timeout in ms. Unset for queue connections (BullMQ manages
-   * its own). Set by callers that must bound a single command so a downed
-   * Redis surfaces an error promptly rather than hanging the request.
+   * Per-command timeout in ms. Leave unset for queue connections. Set it to
+   * bound a single command when Redis is down.
    */
   commandTimeout?: number;
   /**
-   * When `false`, commands issued while disconnected reject immediately
-   * instead of buffering. Non-queue callers that fail open on Redis errors
-   * should disable it so an outage never blocks the request path.
+   * When `false`, commands sent while disconnected reject instead of
+   * buffering. Fail-open callers should set it to `false`.
    */
   enableOfflineQueue?: boolean;
 }
 
 /**
- * Returns an ioredis instance. Defaults are configured for BullMQ (per its
- * docs, `maxRetriesPerRequest` MUST be `null` for queue connections); pass
- * overrides for non-queue callers that need fail-fast semantics.
+ * Returns an ioredis instance. Defaults suit BullMQ (`maxRetriesPerRequest`
+ * must be `null`); non-queue callers can override them to fail fast.
  *
- * Caller owns the lifetime — call `.disconnect()` on shutdown.
+ * The caller must call `.disconnect()` on shutdown.
  */
 export function createRedisConnection(opts: RedisConnectionOptions = {}): Redis {
   const url = opts.url ?? process.env.REDIS_URL ?? 'redis://localhost:6379';
@@ -142,10 +132,9 @@ export const DEFAULT_JOB_OPTS = {
 } as const;
 
 /**
- * Job options for the unified `campaign-process` queue. Same retry posture as
- * {@link DEFAULT_JOB_OPTS} (3× exponential); the API may override `attempts`
- * from `CAMPAIGN_EXPORT_ATTEMPTS` at enqueue time. Kept as a plain object (not
- * `as const`) so callers can spread an `attempts` override.
+ * Job options for the `campaign-process` queue. Same retries as
+ * {@link DEFAULT_JOB_OPTS}; the API may override `attempts` from
+ * `CAMPAIGN_EXPORT_ATTEMPTS`. Not `as const`, so callers can override it.
  */
 export const CAMPAIGN_PROCESS_JOB_OPTS = {
   attempts: 3,
@@ -157,11 +146,8 @@ export const CAMPAIGN_PROCESS_JOB_OPTS = {
 // ─── Bulk-upload Redis key namespace ─────────────────────────────────────────
 
 /**
- * Every per-upload Redis key under the `bu:{uploadId}:*` namespace used by the
- * bulk pipeline. Some of these hold participant PII (`:lines` = raw CSV rows,
- * `:errors` = per-row error detail incl. the raw row), so this is the single
- * list to DEL on cleanup / terminal states — keeping the File Processor,
- * Finaliser, and watchdog from drifting apart.
+ * Every per-upload Redis key under `bu:{uploadId}:*`. `:lines` and `:errors`
+ * hold participant PII. Delete all of them on cleanup and terminal states.
  *
  * @param uploadId - bulk_uploads.id.
  * @returns The six fully-qualified Redis keys for this upload.

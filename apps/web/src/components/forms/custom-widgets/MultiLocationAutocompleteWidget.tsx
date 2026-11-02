@@ -1,15 +1,11 @@
 'use client';
 
 /**
- * Address autocomplete for an ARRAY `location`-marked schema field — one row per
- * place, each its own combobox.
+ * Address autocomplete for an array `location`-marked schema field, one row per place.
  *
- * Used by up-gzb's `service_provider` profile (`serviceAreas`). Ported from
- * Signals-DPG
- * `apps/ui/src/components/forms/custom-widgets/multi-location-autocomplete-widget.tsx`,
- * with the same two departures as the single-value widget: the form context is
- * read off `registry.formContext` (RJSF v6 dropped the prop — signals-dpg#506),
- * and error rendering is left to `FieldTemplate`.
+ * Used by up-gzb's `service_provider` profile (`serviceAreas`). Matches the
+ * Signals-DPG widget, except the form context is read from
+ * `registry.formContext` and errors are rendered by `FieldTemplate`.
  *
  * @module apps/web/components/forms/custom-widgets/MultiLocationAutocompleteWidget
  */
@@ -51,8 +47,7 @@ interface RowSearchState {
 }
 
 /**
- * Per-row debounce/abort/blur handles. Held in a ref rather than state: they
- * change on every keystroke and none of them affect rendering.
+ * Per-row debounce, abort, and blur handles. Kept in a ref since they do not affect rendering.
  */
 interface RowRefs {
   debounce: number | undefined;
@@ -66,7 +61,7 @@ function makeRow(name = ''): LocationRow {
   return { id: `r${rowIdCounter}`, name, coord: null };
 }
 
-/** Rows for an incoming value — always at least one, so there is something to type into. */
+/** Builds rows for a value; always returns at least one row. */
 function rowsFromValue(value: string[]): LocationRow[] {
   return value.length === 0 ? [makeRow()] : value.map((name) => makeRow(name));
 }
@@ -87,9 +82,7 @@ interface RowComboboxProps {
 /**
  * One row's text input and its suggestion list.
  *
- * A separate component because `useSuggestionKeyboard` holds the active-option
- * state and a hook cannot be called inside `rows.map()`. That is also the right
- * shape: each row's highlight is independent of its siblings'.
+ * A separate component so each row has its own `useSuggestionKeyboard` state.
  */
 function RowCombobox({
   id,
@@ -152,8 +145,7 @@ function RowCombobox({
                   ? 'bg-(--bd-primary-50) text-(--bd-primary-600)'
                   : 'hover:bg-(--bd-primary-50)',
               )}
-              // onMouseDown so selection fires before the input's blur;
-              // preventDefault keeps focus from flicking away.
+              // onMouseDown runs before the input's blur; preventDefault keeps focus.
               onMouseDown={(e) => {
                 e.preventDefault();
                 onChoose(s);
@@ -196,8 +188,7 @@ export function MultiLocationAutocompleteWidget({
   const maxItems = typeof schema.maxItems === 'number' ? schema.maxItems : undefined;
 
   const [rows, setRows] = React.useState<LocationRow[]>(() => rowsFromValue(incoming));
-  // Kept apart from `rows` so editing one row's search doesn't churn the others.
-  // Length is always held in sync with `rows`.
+  // Search state per row, kept separate from `rows` but always the same length.
   const [searches, setSearches] = React.useState<RowSearchState[]>(() =>
     rows.map(() => ({ suggestions: [], open: false })),
   );
@@ -221,9 +212,7 @@ export function MultiLocationAutocompleteWidget({
   }
   ensureRefs(rows.length);
 
-  // Resync when RJSF pushes a new value externally (prefill / reset), but only
-  // when the incoming list actually differs — otherwise an in-progress edit
-  // would be clobbered on every render.
+  // Resync from outside values only when the list differs, so edits are kept.
   React.useEffect(() => {
     setRows((prev) => {
       const prevNames = prev.map((r) => r.name).filter(Boolean);
@@ -248,7 +237,7 @@ export function MultiLocationAutocompleteWidget({
           })),
         ];
       }
-      // Shrank — cancel the removed trailing rows' pending work.
+      // Fewer rows: cancel pending work for the removed ones.
       for (let i = rows.length; i < prev.length; i += 1) {
         const ref = refsArray.current[i];
         if (ref) {
@@ -275,9 +264,7 @@ export function MultiLocationAutocompleteWidget({
 
   function emitChanges(nextRows: LocationRow[]) {
     const names = nextRows.map((r) => r.name).filter(Boolean);
-    // `undefined` rather than `[]` when every row is blank, so a required array
-    // field stays invalid — the same reason the single-value widget clears to
-    // `undefined`.
+    // `undefined`, not `[]`, so a required field with all rows blank fails validation.
     onChange(names.length > 0 ? names : undefined);
     if (isPrimary) {
       ctx.onLocationsResolved?.(
@@ -320,7 +307,7 @@ export function MultiLocationAutocompleteWidget({
   }
 
   function handleInput(index: number, next: string) {
-    // The typed text is unresolved, so the row's coordinate goes with it.
+    // Typed text is not a resolved place, so clear the coordinate.
     updateRow(index, { name: next, coord: null });
     runSearch(index, next);
   }

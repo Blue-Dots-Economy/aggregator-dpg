@@ -1,9 +1,7 @@
 /**
  * Key-less geocoding fallback, used when no Google Maps key is configured.
  *
- * Ported from Signals-DPG `apps/ui/src/lib/geo/photon.ts`, with two small
- * adaptations: an `exactOptionalPropertyTypes` fix at the fetch call, and
- * optional chaining in place of two `a && a.b` guards (Sonar S6582).
+ * Matches Signals-DPG `apps/ui/src/lib/geo/photon.ts`, with minor type fixes.
  *
  * @module apps/web/lib/geo/photon
  */
@@ -12,16 +10,10 @@ import type { GeoComponents, GeoProvider, GeoSuggestion } from './types';
 const DEFAULT_PHOTON_URL = 'https://photon.komoot.io';
 
 /**
- * Deadline for a single geocoder call.
+ * Timeout for a single geocoder call.
  *
- * `.claude/rules/error-handling.md` requires an explicit timeout on every
- * external call. The caller's `signal` is a *cancellation* channel — it aborts
- * when the next keystroke supersedes this query — not a deadline, so a public
- * endpoint that accepts the connection and then stalls would leave the request
- * hanging and the dropdown empty with no explanation.
- *
- * 4s: long enough for a cold lookup over a slow mobile link, short enough that
- * a stalled request gives up before the person has retyped the line.
+ * The caller's `signal` only cancels on the next keystroke, so a separate
+ * deadline stops a stalled request from hanging.
  */
 const REQUEST_TIMEOUT_MS = 4_000;
 
@@ -43,12 +35,10 @@ interface PhotonFeature {
 /**
  * Combines the caller's cancellation signal with a request deadline.
  *
- * Built by hand rather than with `AbortSignal.any`, which is too recent to
- * assume across the browsers this portal targets.
+ * Does not use `AbortSignal.any`, which some target browsers lack.
  *
  * @param signal - The caller's cancel signal, if any.
- * @returns The combined signal, and `clear` — call it once the request settles
- *   so a finished request does not stay armed and abort 4s later.
+ * @returns The combined signal, and `clear` to call once the request settles.
  */
 function withDeadline(signal?: AbortSignal): { signal: AbortSignal; clear: () => void } {
   const controller = new AbortController();
@@ -64,14 +54,13 @@ function withDeadline(signal?: AbortSignal): { signal: AbortSignal; clear: () =>
   return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
-/** Feature types too coarse to stand in for an address (signals-dpg#788). */
+/** Feature types too coarse to use as an address. */
 const COARSE_TYPES = new Set(['country', 'state']);
 
 /**
  * Whether a feature is inside `country` and finer than state level.
  *
- * A backstop, not a nicety: an older Photon server ignores the `countrycode`
- * request param and answers worldwide.
+ * Needed because older Photon servers ignore the `countrycode` param.
  *
  * @param f - A Photon feature.
  * @param country - Upper-case ISO 3166-1 alpha-2 code.
@@ -82,7 +71,12 @@ function isInCountry(f: PhotonFeature, country: string): boolean {
   return p.countrycode?.toUpperCase() === country && !(p.type && COARSE_TYPES.has(p.type));
 }
 
-/** Pure: maps a Photon FeatureCollection JSON into suggestions. Exported for testing. */
+/**
+ * Maps a Photon FeatureCollection JSON into suggestions. Exported for testing.
+ *
+ * @param json - The Photon response body.
+ * @returns The suggestions.
+ */
 export function parsePhotonFeatures(json: unknown): GeoSuggestion[] {
   const features = (json as { features?: PhotonFeature[] })?.features ?? [];
   const out: GeoSuggestion[] = [];
@@ -110,10 +104,9 @@ export function parsePhotonFeatures(json: unknown): GeoSuggestion[] {
 /**
  * Photon autocomplete provider.
  *
- * `country` (upper-case ISO 3166-1 alpha-2, e.g. `IN`) restricts suggestions to
- * that country (signals-dpg#788): sent as Photon's `countrycode` param and
- * re-checked on every feature, since an older Photon server answers worldwide
- * regardless. Country- and state-level features are dropped too.
+ * `country` (e.g. `IN`) restricts suggestions to that country. It is sent as
+ * `countrycode` and re-checked on each feature. Country- and state-level
+ * features are dropped.
  *
  * @param baseUrl - Photon host. Defaults to the public one.
  * @param country - Optional country restriction.

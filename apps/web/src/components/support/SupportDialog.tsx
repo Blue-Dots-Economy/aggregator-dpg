@@ -2,16 +2,11 @@
 /**
  * Contact-support modal.
  *
- * Collects a complaint / support request: Name, Email, Phone (all prefilled
- * from the session where available and editable), a Type selector, a Details
- * textarea, and a required consent checkbox. Submit is blocked until Details
- * is non-empty, at least one contact channel is filled, and consent is
- * checked. POSTs to the BFF `POST /api/support` (which forwards to the
- * aggregator API's `POST /v1/support` and emails the configured support
- * address). Shows an inline success / unavailable (SUPPORT_EMAIL not
- * configured, 503) / error status rather than a toast — matches the rest of
- * the portal's inline-notice pattern (see `ConsentModal`). Dismissible via
- * the close button, overlay, or ESC.
+ * Collects a support request: Name, Email, Phone (prefilled from the session
+ * and editable), Type, Details, and a required consent checkbox. Submit needs
+ * Details, at least one contact channel, and consent. Posts to
+ * `POST /api/support`. Shows success, unavailable (503), or error inline.
+ * Closes on the close button, overlay click, or ESC.
  *
  * @module apps/web/src/components/support/SupportDialog
  */
@@ -35,7 +30,7 @@ import {
 export interface SupportDialogProps {
   /** Whether the dialog is currently visible. */
   open: boolean;
-  /** Callback fired when the dialog should be closed (sets open to false). */
+  /** Called when the dialog should close. */
   onOpenChange: (open: boolean) => void;
 }
 
@@ -52,7 +47,7 @@ type SupportType = 'complaint' | 'support_request';
 
 /**
  * Reads the API's `{ error: { code, detail } }` envelope from a failed
- * response, tolerating a non-JSON body (a proxy error page, say).
+ * response. Handles a non-JSON body.
  *
  * @param res - The failed response.
  * @returns The error code and detail, or null when unreadable.
@@ -76,9 +71,8 @@ interface SubmitOutcome {
 }
 
 /**
- * Maps a submit response to what the dialog shows. Extracted from the submit
- * handler so the status ladder reads as a list and each failure keeps its own
- * specific message instead of collapsing into the generic error line.
+ * Maps a submit response to what the dialog shows. Each failure keeps its own
+ * message.
  *
  * @param res - The response from `POST /api/support`.
  * @param t - The `support` namespace translator.
@@ -94,15 +88,13 @@ async function resolveSubmitOutcome(
   if (res.status === 503) return { status: 'unavailable' };
   if (res.status === 429) return { status: 'rate_limited' };
   if (res.status === 413) {
-    // The body limit, not the attachment check — a payload this far over the cap
-    // never reaches the handler's specific codes.
+    // Request body over the size limit; the handler never saw it.
     return {
       status: 'idle',
       attachmentError: t('attachment_too_large', { size: formatBytes(config.maxTotalBytes) }),
     };
   }
-  // A server-side attachment rejection names the offending file, so it is more
-  // useful than the generic failure line.
+  // A server-side attachment rejection names the file, so show it.
   const error = await readErrorCode(res);
   if (error?.code?.startsWith('ATTACHMENT_')) {
     return { status: 'attachment_rejected', serverDetail: error.detail ?? null };
@@ -112,8 +104,7 @@ async function resolveSubmitOutcome(
 
 /**
  * Translates a client-side attachment rejection into the inline message shown
- * under the picker. Split out so each reason reads as its own line rather than a
- * nested conditional.
+ * under the picker.
  *
  * @param rejection - The failed selection result.
  * @param t - The `support` namespace translator.
@@ -135,8 +126,7 @@ function rejectionMessage(
 /**
  * Displays a modal contact-support form and relays submissions to the BFF.
  *
- * Returns null when `open` is false so the form state does not linger
- * between openings.
+ * Returns null when `open` is false, so form state resets between openings.
  *
  * @param props - Open state and change handler.
  * @returns The modal overlay element, or null when closed.
@@ -154,17 +144,15 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
   const [attachments, setAttachments] = useState<File[]>([]);
   /** Client-side attachment rejection, shown inline like the other notices. */
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  /** Server-side attachment rejection message — it names the offending file. */
+  /** Server-side attachment rejection message; it names the file. */
   const [serverDetail, setServerDetail] = useState<string | null>(null);
   const [config, setConfig] = useState<SupportConfig>(SUPPORT_CONFIG_FALLBACK);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // Portal target only exists on the client; gate render until mounted so
-  // the server pass (and first client paint) doesn't touch `document`.
+  // Render the portal only after mount, since `document` is client-only.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  // Reset form state each time the dialog opens so re-opening starts fresh,
-  // reseeding the prefill fields from the current session user.
+  // Reset the form and prefill from the session user each time it opens.
   useEffect(() => {
     if (open) {
       setName(user?.name ?? '');
@@ -180,9 +168,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
     }
   }, [open, user]);
 
-  // Attachment limits come from the API, so the form validates against the same
-  // numbers it enforces and an operator can raise them without a web rebuild.
-  // A failed fetch leaves the defaults in place rather than blocking the form.
+  // Attachment limits come from the API. If the fetch fails, defaults stay.
   useEffect(() => {
     if (!open) return;
     let active = true;
@@ -197,7 +183,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
     };
   }, [open]);
 
-  // Dismiss on ESC, mirroring ConsentModal.
+  // Dismiss on ESC.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -216,8 +202,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
 
   const onFilesSelected = (e: ChangeEvent<HTMLInputElement>) => {
     const incoming = Array.from(e.target.files ?? []);
-    // Clear either way, so re-picking the same file still fires onChange and a
-    // rejected pick doesn't linger in the control.
+    // Clear the input so picking the same file again fires onChange.
     e.target.value = '';
     if (incoming.length === 0) return;
 
@@ -244,8 +229,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
     setStatus('sending');
     setServerDetail(null);
     try {
-      // Encoded inside the sending state: a multi-MB file takes long enough
-      // that the button must already be disabled.
+      // Encoding counts as sending, so the button is disabled during it.
       const encoded = attachments.length ? await encodeAttachments(attachments) : undefined;
       const res = await fetch('/api/support', {
         method: 'POST',
@@ -270,7 +254,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
   };
 
   const inputClass =
-    // 16px below `sm` so iOS Safari does not zoom the page when a field is focused.
+    // 16px below `sm` so iOS Safari does not zoom on focus.
     'w-full rounded-[10px] border border-(--bd-border) px-3 py-2 text-[16px] sm:text-[14px] bg-transparent';
 
   return createPortal(
@@ -280,7 +264,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
       aria-modal="true"
       aria-label={t('title')}
     >
-      {/* Invisible backdrop button captures click-outside-to-close (mirrors ConsentModal). */}
+      {/* Invisible backdrop button: click outside to close. */}
       <button
         type="button"
         aria-label={t('cancel')}

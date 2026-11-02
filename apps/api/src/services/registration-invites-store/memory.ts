@@ -1,10 +1,9 @@
 /**
- * In-memory registration-invites store (#700).
+ * In-memory registration-invites store for unit tests (`@aggregator-dpg/api`).
  *
- * Faithful reproduction of the Postgres semantics — partial-unique pending
- * constraint, CAS consume/revoke, refresh-only-when-pending — for unit tests
- * that exercise the real result-wrapping without a database. Internal impl;
- * external consumers use `RegistrationInvitesStoreFake` from `./testing`.
+ * Behaves like the Postgres store: one pending invite per org and email,
+ * atomic consume and revoke, refresh only while pending. Other modules use
+ * `RegistrationInvitesStoreFake` from `./testing`.
  */
 
 import {

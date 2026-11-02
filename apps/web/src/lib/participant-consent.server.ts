@@ -1,19 +1,12 @@
 /**
- * Server-side loader for the PARTICIPANT consent copy (Terms / Privacy) shown
- * on the public registration form.
+ * Server-side loader for the participant consent text (Terms / Privacy) on the
+ * public registration form.
  *
- * The authoritative source is the aggregator API's `GET /v1/participant-consent`,
- * which serves the participant `consent.json` the network-config loader fetches
- * from `aggregator.network.consent_source` — the same cache-backed HTTPS pull as
- * `network.json` (env override `AGGREGATOR_PARTICIPANT_CONSENT_SOURCE`). When that endpoint
- * yields no document (no `consent_source` configured, or its fetch failed with
- * no cached copy) this loader falls back to the on-disk copy at
- * `config/<network>[/<brand>]/schemas/participant/consent.json`.
+ * Reads `GET /v1/participant-consent` first. When that has no document, falls
+ * back to `config/<network>[/<brand>]/schemas/participant/consent.json`.
  *
- * This is best-effort — a consent-copy problem must never take down the public
- * page, so every path returns null rather than throwing. It is scoped to the
- * registration LINK only; the aggregator's OWN operator consent
- * (`schemas/aggregator/`) is loaded separately and unaffected.
+ * Returns null instead of throwing, so consent problems never break the public
+ * page. Operator consent (`schemas/aggregator/`) is loaded elsewhere.
  *
  * @module apps/web/src/lib/participant-consent.server
  */
@@ -48,7 +41,7 @@ interface ConsentDoc {
   versions: ConsentVersion[];
 }
 
-/** Profile-creation consent document — a short `statement`, not title+content. */
+/** Profile-creation consent document, with a short `statement`. */
 interface StatementDoc {
   current_version: number;
   versions: { version: number; statement: string; effective_from?: string }[];
@@ -61,8 +54,8 @@ interface ParticipantConsentFile {
 
 /**
  * Resolves `schemas/participant/consent.json` under the active network/brand.
- * `CONFIG_ROOT` (Kubernetes mount) wins; otherwise falls back to the first
- * cwd-relative candidate that exists (dev vs Docker cwd).
+ *
+ * Tries the configured schema root first, then cwd-relative paths.
  *
  * @returns Absolute path to the participant consent file, or null if none found.
  */
@@ -91,9 +84,9 @@ function toCurrent(doc: ConsentDoc, supportEmail: string): ConsentDocContent['te
 }
 
 /**
- * Shapes a parsed participant consent file into the view DTO, rendering the
- * `__SUPPORT_EMAIL__` token throughout. Returns null when the required Terms
- * or Privacy documents are missing so callers can fall back.
+ * Shapes a parsed consent file into the view DTO and fills in `__SUPPORT_EMAIL__`.
+ *
+ * Returns null when Terms or Privacy is missing.
  */
 function shapeParticipantConsent(
   parsed: ParticipantConsentFile,
@@ -111,8 +104,7 @@ function shapeParticipantConsent(
       ? {
           profileCreation: {
             version: pcVersion.version,
-            // Guard like `toCurrent` — an on-disk copy is not schema-validated,
-            // so a version missing `statement` must not throw and 500 the page.
+            // The on-disk copy is not validated; `statement` may be missing.
             statement: (pcVersion.statement ?? '').replaceAll('__SUPPORT_EMAIL__', supportEmail),
           },
         }
@@ -121,9 +113,9 @@ function shapeParticipantConsent(
 }
 
 /**
- * Fetches the resolved participant consent document from the aggregator API.
- * Best-effort — returns null on timeout / non-2xx / malformed body / absent
- * document so the caller falls back to the on-disk copy.
+ * Fetches the participant consent document from the aggregator API.
+ *
+ * Returns null on any failure or when there is no document.
  */
 async function loadFromApi(): Promise<ParticipantConsentFile | null> {
   const apiBase = process.env.API_BASE_URL ?? 'http://localhost:4000';
@@ -156,8 +148,7 @@ async function loadFromApi(): Promise<ParticipantConsentFile | null> {
 }
 
 /**
- * Reads the participant consent document from the on-disk copy. Returns null
- * when the file is missing or malformed — never throws.
+ * Reads the on-disk participant consent document, or null when missing or malformed.
  */
 async function loadFromDisk(): Promise<ParticipantConsentFile | null> {
   const file = resolveParticipantConsentPath();
@@ -170,24 +161,22 @@ async function loadFromDisk(): Promise<ParticipantConsentFile | null> {
 }
 
 /**
- * Loads the participant Terms + Privacy copy at their current versions for the
- * public registration form's consent modal. Prefers the API-served document
- * (fetched by the network-config loader from `consent_source`), falling back to
- * the on-disk copy. Returns null (form falls back to a plain checkbox label)
- * when no source yields usable content — never throws, so a consent-copy problem
- * can't take down the public page.
+ * Loads the current participant Terms and Privacy text for the registration
+ * consent modal.
+ *
+ * Prefers the API, then the on-disk copy. Returns null when neither is usable;
+ * the form then shows a plain checkbox label. Never throws.
  *
  * @returns The versioned Terms/Privacy (+ profile-creation) content, or null.
  */
 export async function loadParticipantConsent(): Promise<ParticipantConsent | null> {
   const supportEmail = process.env.CONSENT_SUPPORT_EMAIL?.trim() || DEFAULT_SUPPORT_EMAIL;
-  // Belt-and-braces: shaping an unvalidated on-disk document must never throw
-  // out of this server-component caller and 500 the public page.
+  // Shaping an unvalidated document must never throw to the page.
   try {
     const fromApi = await loadFromApi();
     const shapedApi = fromApi ? shapeParticipantConsent(fromApi, supportEmail) : null;
     if (shapedApi) return shapedApi;
-    // API had no usable document — fall back to the on-disk copy.
+    // Fall back to the on-disk copy.
     const fromDisk = await loadFromDisk();
     return fromDisk ? shapeParticipantConsent(fromDisk, supportEmail) : null;
   } catch {

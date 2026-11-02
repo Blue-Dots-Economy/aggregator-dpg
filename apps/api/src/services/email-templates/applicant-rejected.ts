@@ -3,10 +3,8 @@
  * if supplied by the admin.
  *
  * Belongs to `@aggregator-dpg/api`. Copy lives under `applicant_rejected.*`.
- * The greeting is two copy keys chosen by a `oneOf` on the layout rather than
- * a conditional here: the org flow has no owner-name column, so that path
- * greets without a name instead of addressing a person by their
- * organisation's name.
+ * The layout picks one of two greetings: with a name, or without one (the org
+ * flow has no owner name).
  */
 
 import { renderCase, type RenderedEmail } from './render-case.js';
@@ -16,9 +14,7 @@ import { renderCase, type RenderedEmail } from './render-case.js';
  */
 export interface ApplicantRejectedVars {
   /**
-   * Personal name of the applicant contact. Optional because the org flow has
-   * no owner-name column — the name given at org registration is only used to
-   * build the Keycloak user.
+   * Personal name of the applicant contact. Optional: the org flow has no owner name.
    */
   contactName?: string | undefined;
   association: string;

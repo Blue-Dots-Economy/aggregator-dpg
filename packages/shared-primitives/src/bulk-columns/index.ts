@@ -1,43 +1,24 @@
 /**
- * Well-known bulk-CSV columns that are NOT item-schema properties (#807).
+ * Well-known bulk-CSV columns that are not item-schema properties.
  *
- * The header validator allows only properties of the item schema, and every
- * column is spread verbatim into `item_state`. Anything outside that set fails
- * the whole file. These columns are allowlisted on top, extracted from the row
- * payload BEFORE Ajv runs, and routed to their real destination instead.
- *
- * Extraction has to happen before Ajv because these are not schema properties:
- * a schema with `additionalProperties: false` would otherwise reject every row
- * carrying them, and any that survived would reach Signals as junk
- * `item_state` fields. Extracting once, early, also keeps them out of
- * `item_state` without a second strip step.
- *
- * They are never added to `required` — omitting them is the whole point, since
- * every CSV written before this existed must keep working unchanged.
+ * These columns are allowed in the header on top of the item schema. They are
+ * removed from the row payload before Ajv runs and sent to their own
+ * destination, so they never reach `item_state`. They are always optional.
  */
 
 /**
  * `lat|lng`, pipe-separated.
  *
- * Pipe rather than comma because a comma inside an unquoted CSV cell shifts
- * every subsequent column — a silent mis-import rather than an error. Pipe is
- * also what the network binding already uses for array cells
- * (`csv_array_delimiter: '|'` in every shipped config), so operators have met
- * the convention.
+ * A pipe is used because a comma in an unquoted CSV cell shifts later columns.
+ * It matches the `csv_array_delimiter` used for array cells.
  */
 export const GEO_LOCATION_COLUMN = 'geo_location';
 
 /**
  * Operator-facing metadata for a well-known column.
  *
- * These columns carry no JSON Schema, so every schema-driven generator —
- * label, description, allowed-values, example — has nothing to work from and
- * falls back to the raw field name and "Free text". That leaves the one column
- * in the template with a non-obvious format as the only one with no
- * explanation, which defeats the point of putting it in the template at all.
- *
- * Declared here rather than in either template so the CSV and XLSX generators
- * cannot describe the same column differently.
+ * These columns have no JSON Schema, so this supplies the label, description
+ * and example for the CSV and XLSX templates.
  */
 export interface WellKnownColumnMeta {
   /** Human label, standing in for a schema `title`. */
@@ -51,9 +32,7 @@ export interface WellKnownColumnMeta {
 export const WELL_KNOWN_COLUMN_META: Readonly<Record<string, WellKnownColumnMeta>> = {
   [GEO_LOCATION_COLUMN]: {
     title: 'Location coordinates',
-    // Spells out the separator because a comma is the natural thing to type
-    // and is exactly what the pipe was chosen to avoid: a comma inside an
-    // unquoted cell shifts every later column instead of erroring.
+    // Names the separator because users tend to type a comma.
     description:
       'Optional. Latitude and longitude separated by a pipe — for example 12.9352|77.6245. ' +
       'Use a pipe, not a comma. Leave blank to have the address looked up instead.',
@@ -76,24 +55,24 @@ export interface ParsedGeoLocation {
 }
 
 export type GeoLocationParse =
-  /** Column absent or blank — the caller falls back to geocoding the address. */
+  /** Column absent or blank. The caller geocodes the address instead. */
   | { status: 'absent' }
   | { status: 'ok'; value: ParsedGeoLocation }
   /**
-   * Present but unusable. The row still passes and the address is geocoded as
-   * before; `reason` is reported to the operator. It deliberately never
-   * contains the raw cell — a participant's coordinates are PII.
+   * Present but unusable. The row still passes and the address is geocoded.
+   * `reason` never contains the raw cell, because coordinates are PII.
    */
   | { status: 'invalid'; reason: string };
 
 /**
  * Parses a `geo_location` cell into a point.
  *
- * Unusable input is NOT a row failure. Coordinates are an optimisation — they
- * let Signals skip geocoding — so a malformed cell costs a geocoder call, not
- * correctness, and failing the row would push the operator into a re-upload.
- * That matters because Signals' `onboard` always inserts: a re-upload of a
- * corrected file duplicates every row that already succeeded.
+ * Unusable input does not fail the row; the address is geocoded instead.
+ * Failing it would force a re-upload, and Signals `onboard` duplicates rows
+ * that already succeeded.
+ *
+ * @param raw - The cell value.
+ * @returns The parsed point, `absent`, or `invalid` with a reason.
  */
 export function parseGeoLocation(raw: unknown): GeoLocationParse {
   if (typeof raw !== 'string') return { status: 'absent' };
@@ -110,10 +89,7 @@ export function parseGeoLocation(raw: unknown): GeoLocationParse {
 
   const latRaw = parts[0]?.trim() ?? '';
   const lngRaw = parts[1]?.trim() ?? '';
-  // Empty segments are rejected BEFORE `Number()`, which maps '' to 0 rather
-  // than NaN. Without this, `12.9352|` parses as a valid point at longitude 0
-  // — a location in the Gulf of Guinea silently stored as the participant's.
-  // A half-filled cell must fall back to geocoding, not invent a coordinate.
+  // Check before `Number()`, which turns '' into 0.
   if (latRaw === '' || lngRaw === '') {
     return { status: 'invalid', reason: 'latitude and longitude must both be present' };
   }
@@ -135,14 +111,12 @@ export function parseGeoLocation(raw: unknown): GeoLocationParse {
 /**
  * True when the item schema itself declares `name` as a property.
  *
- * Extraction is otherwise unconditional, which would silently rob a schema
- * that legitimately owns one of these names: the value is deleted before Ajv
- * runs, so a `required` property would fail every row with a message naming a
- * column the operator can plainly see in their file. No shipped schema
- * collides today — this keeps it impossible rather than merely unlikely.
+ * When the schema owns the name, the column is treated as a normal schema
+ * property and is not extracted.
  *
- * The schema wins. A network that declares `geo_location` as a real property
- * gets the property, not the well-known column.
+ * @param schema - The item schema.
+ * @param name - The column name.
+ * @returns Whether the schema declares `name` in `properties`.
  */
 export function schemaOwnsColumn(
   schema: Record<string, unknown> | null | undefined,

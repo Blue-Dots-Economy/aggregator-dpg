@@ -1,11 +1,8 @@
 /**
- * Worker schema loader singleton.
+ * Schema loader singleton for the worker app.
  *
- * The hybrid resolution itself (participant ids from network-config, all other
- * ids from disk under `config/<network>/schemas/`) lives in
- * `@aggregator-dpg/schema-loader/network` and is shared with the API. This
- * module only binds it to the worker process's config and network-config
- * singleton, and owns the instance.
+ * Wraps `@aggregator-dpg/schema-loader/network` with the worker's config and
+ * network config.
  */
 
 import { NetworkSchemaLoader } from '@aggregator-dpg/schema-loader/network';

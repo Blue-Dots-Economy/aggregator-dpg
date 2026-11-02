@@ -1,9 +1,7 @@
 /**
  * Externalised email copy: loading, layering, and lookup.
  *
- * Belongs to `@aggregator-dpg/api`. Ported from the Signals-DPG model
- * (`apps/api/src/notifications/email/`) so the two services layer copy the
- * same way rather than inventing parallel designs.
+ * Belongs to `@aggregator-dpg/api`. Uses the same layering model as Signals-DPG.
  *
  * Per-key precedence, lowest first:
  *
@@ -12,19 +10,14 @@
  *   3. `config/<network>/<brand>/emails/messages.properties`
  *   4. `EMAIL_MESSAGES_PATH` — per-instance escape hatch, wins over all
  *
- * Every layer lives in `config/`, none in the source tree: email copy is
- * deployment content, the same as the consent documents and the form schemas
- * beside it, so changing a sentence is a config edit rather than a release.
+ * Every layer lives in `config/`, so changing copy is a config edit, not a release.
  *
- * Layers 2-4 are PARTIAL: a file lists only the keys it changes and everything
- * else falls through. Layer 1 must be COMPLETE, which
- * {@link assertMessagesComplete} enforces at boot.
+ * Layers 2-4 are partial: a file lists only the keys it changes. Layer 1 must
+ * be complete; {@link assertMessagesComplete} checks this at boot.
  *
- * Lookup is SYNCHRONOUS by design. The templates are sync functions called
- * from request handlers, and making them async would ripple through every call
- * site for no benefit. The default layer is read once, lazily, with
- * `readFileSync`; the override layers are merged in at boot by
- * {@link loadEmailMessageOverrides}, the same shape as `setEmailBrand`.
+ * Lookup is synchronous. The default layer is read once, lazily, with
+ * `readFileSync`; {@link loadEmailMessageOverrides} merges the override layers
+ * at boot.
  *
  * @module @aggregator-dpg/api
  */
@@ -58,9 +51,7 @@ let messages: Map<string, string> | null = null;
  *
  * @param env - Env-var bag; defaults to `process.env`.
  * @returns Parsed default entries.
- * @throws {Error} If the file is missing. It is checked into `config/`, so
- *   absence means a broken image or a wrong `CONFIG_ROOT` — failing here beats
- *   sending blank emails.
+ * @throws {Error} If the file is missing (broken image or wrong `CONFIG_ROOT`).
  */
 function loadDefaults(env: NodeJS.ProcessEnv = process.env): Map<string, string> {
   const file = defaultsPath(env);
@@ -75,7 +66,7 @@ function loadDefaults(env: NodeJS.ProcessEnv = process.env): Map<string, string>
   }
   const parsed = parseProperties(text);
   if (parsed.malformedLines.length > 0) {
-    // The default layer is ours to keep valid, so this is an error not a warn.
+    // The default layer must be valid, so this is an error, not a warning.
     logger.error({
       operation: 'emailMessages.loadDefaults',
       status: 'failure',
@@ -100,9 +91,7 @@ function index(): Map<string, string> {
  * Looks up one copy fragment.
  *
  * @param key - Fully-qualified key, e.g. `applicant_approved.subject`.
- * @returns The fragment, or the key itself when absent — a visibly wrong
- *   string beats an empty paragraph, and {@link assertMessagesComplete}
- *   should already have caught it at boot.
+ * @returns The fragment, or the key itself when absent.
  */
 export function getMessage(key: string): string {
   return index().get(key) ?? key;
@@ -117,8 +106,7 @@ export function getMessage(key: string): string {
 export function emailMessageOverridePaths(env: NodeJS.ProcessEnv = process.env): string[] {
   const root = resolveConfigRoot(env);
   const { network, brand } = resolveActiveNetwork(env);
-  // Built from the config ROOT, not `resolveConfigDir` — that already descends
-  // into the network, so joining it again doubles the segment.
+  // Use the config root, not `resolveConfigDir`, which already includes the network segment.
   const paths = [path.join(root, network, MESSAGES_FILE)];
   if (brand) paths.push(path.join(root, network, brand, MESSAGES_FILE));
   const instance = env.EMAIL_MESSAGES_PATH?.trim();
@@ -129,18 +117,13 @@ export function emailMessageOverridePaths(env: NodeJS.ProcessEnv = process.env):
 /**
  * Reads one override layer, distinguishing "absent" from "broken".
  *
- * A missing layer is the common case and silent. Anything else (EACCES,
- * EISDIR, …) is a misconfiguration, and staying quiet about it would
- * contradict this module's own rule that a typo must not masquerade as a
- * landed edit: an unknown KEY already warns, so an unreadable FILE cannot be
- * quieter.
+ * A missing layer is silent. Any other read error (EACCES, EISDIR, …) is
+ * reported as a misconfiguration.
  *
  * @param file - Absolute path to the layer.
  * @param isInstanceOverride - Whether this is `EMAIL_MESSAGES_PATH`.
  * @returns File contents, or `null` when the layer is absent or skippable.
- * @throws {Error} If `EMAIL_MESSAGES_PATH` exists but cannot be read — an
- *   operator set that path deliberately, so a broken one is a boot failure
- *   rather than a warning nobody reads.
+ * @throws {Error} If `EMAIL_MESSAGES_PATH` exists but cannot be read.
  */
 async function readOverrideLayer(
   file: string,
@@ -168,10 +151,9 @@ async function readOverrideLayer(
 /**
  * Merges the override layers over the bundled defaults.
  *
- * Called once from the server boot path. A missing override file is normal —
- * most deployments ship none — and is skipped silently. A file that exists but
- * cannot be read or parsed is logged and skipped: copy overrides must never
- * stop the API from starting.
+ * Called once at server boot. A missing override file is skipped silently. A
+ * file that cannot be read or parsed is logged and skipped; copy overrides
+ * never stop the API from starting.
  *
  * @param env - Env-var bag; defaults to `process.env`.
  * @returns Number of keys overridden, for the boot log.
@@ -197,9 +179,7 @@ export async function loadEmailMessageOverrides(
       });
     }
     for (const [key, value] of parsed.entries) {
-      // An override key that no case declares is almost certainly a typo, and
-      // silently accepting it would leave the operator believing their edit
-      // landed.
+      // An override key no case declares is likely a typo; warn about it.
       if (!merged.has(key)) {
         logger.warn({
           operation: 'emailMessages.loadOverrides',
@@ -232,10 +212,7 @@ export function assertMessagesComplete(): void {
     throw new Error(`email copy is missing ${missing.length} key(s): ${missing.join(', ')}`);
   }
 
-  // Keys alone are not enough. An override layer may keep a key but drop a
-  // `{{token}}` out of it — the CTA button survives (its href comes from the
-  // layout, not the copy), yet body text that carried the link loses it with
-  // no signal. Walking the registry is nearly free once the keys are known.
+  // Also check that override copy keeps every `{{token}}` the default uses.
   const undeclared: string[] = [];
   for (const caseId of EMAIL_CASE_IDS) {
     const declared = new Set(Object.keys(caseTokenTypes(caseId)));

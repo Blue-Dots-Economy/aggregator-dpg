@@ -3,6 +3,7 @@
   "ui:order": [
     "display_name",
     "website",
+    "gst_number",
     "aggregator_type",
     "organisation_type",
     "address",
@@ -56,6 +57,9 @@
     "ui:options": {
       "inputType": "url"
     }
+  },
+  "gst_number": {
+    "ui:placeholder": "e.g. 29ABCDE1234F1ZW"
   },
   "aggregator_type": {
     "ui:widget": "checkboxes",

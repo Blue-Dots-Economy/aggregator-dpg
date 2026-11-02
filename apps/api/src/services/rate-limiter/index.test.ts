@@ -19,15 +19,35 @@ vi.mock('@aggregator-dpg/queue', () => ({
   createRedisConnection: mockCreateRedisConnection,
 }));
 
-function makeRedis(execResult: unknown) {
+function makeRedis(execResult: unknown, status: 'ready' | 'connecting' = 'ready') {
   const incrby = vi.fn().mockReturnThis();
   const expire = vi.fn().mockReturnThis();
-  const exec = vi.fn().mockResolvedValue(execResult);
+  // Mirrors ioredis with `enableOfflineQueue: false`: a command issued before
+  // the socket is ready throws rather than being buffered.
+  const exec = vi.fn(async () => {
+    if (redis.status !== 'ready') {
+      throw new Error("Stream isn't writeable and enableOfflineQueue options is false");
+    }
+    return execResult;
+  });
   const multi = vi.fn(() => ({ incrby, expire, exec }));
   const decrby = vi.fn().mockResolvedValue(0);
   const on = vi.fn();
+  const listeners = new Map<string, () => void>();
+  const once = vi.fn((event: string, fn: () => void) => {
+    listeners.set(event, fn);
+  });
+  const off = vi.fn((event: string) => {
+    listeners.delete(event);
+  });
   const quit = vi.fn().mockResolvedValue(undefined);
-  return { multi, incrby, expire, exec, decrby, on, quit };
+  /** Fires the pending `ready` listener, as ioredis would once connected. */
+  const becomeReady = (): void => {
+    redis.status = 'ready';
+    listeners.get('ready')?.();
+  };
+  const redis = { multi, incrby, expire, exec, decrby, on, once, off, quit, status, becomeReady };
+  return redis;
 }
 
 describe('rate-limiter consume', () => {
@@ -204,6 +224,28 @@ describe('rate-limiter consume', () => {
   it('closeRateLimiter is a no-op when no connection was ever built', async () => {
     const { closeRateLimiter } = await import('./index.js');
     await expect(closeRateLimiter()).resolves.toBeUndefined();
+  });
+
+  it('waits for a connecting socket instead of denying the first call', async () => {
+    // Reproduces the boot race: the connection is still coming up when the
+    // first request arrives. `failClosed` makes a spurious deny visible.
+    const redis = makeRedis([[null, 1]], 'connecting');
+    mockCreateRedisConnection.mockReturnValue(redis);
+    const { consume } = await import('./index.js');
+
+    const pending = consume({
+      namespace: 'invite-mint',
+      key: 'org1',
+      windowSeconds: 60,
+      max: 5,
+      failClosed: true,
+    });
+    redis.becomeReady();
+
+    const result = await pending;
+    expect(result.allowed).toBe(true);
+    expect(result.count).toBe(1);
+    expect(redis.exec).toHaveBeenCalledTimes(1);
   });
 
   it('builds the dedicated fail-fast connection options (not the BullMQ profile)', async () => {

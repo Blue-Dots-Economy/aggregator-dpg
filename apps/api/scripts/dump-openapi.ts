@@ -1,33 +1,17 @@
 /**
- * Dumps the code-generated OpenAPI spec to the repo root ./openapi.json
- * (committed; CI drift-checks it). Sets the docs-enabling env BEFORE the
- * config module loads — swagger only registers when apiReferenceEnabled.
+ * Writes the OpenAPI spec to the repo root `openapi.json` (api app script; CI checks it for drift).
+ * Sets the docs env before the config module loads, because swagger only registers when enabled.
  */
 import { writeFile } from 'node:fs/promises';
 
 process.env.API_REFERENCE_ENABLED = 'true';
 process.env.API_REFERENCE_FORCE = 'true';
-// The org + coordinator-invite routes register only behind this flag, so a dump
-// taken without it silently omits `/v1/orgs*`, `/admin/v1/orgs/*` and
-// `/admin/v1/invites`. CI drift-checks the committed spec, so they then stay out
-// of the published API reference permanently. The spec describes what the API
-// CAN serve, not what one deployment happens to switch on.
-process.env.ORG_HIERARCHY_ENABLED = 'true';
-// `DATABASE_URL` has no source default — it carries credentials, so the config
-// schema requires it rather than falling back to a literal (secrets:S6698).
-// This script only builds the Fastify app to serialise its route metadata and
-// never opens a connection (`pg.Pool` is lazy), so a credential-free
-// placeholder satisfies startup validation. `??=` so an already-exported value
-// wins: the spec output does not depend on this URL either way.
+// Include the custom-role authoring routes so the spec lists every route the API can expose.
+process.env.RBAC_CUSTOM_ROLES_ENABLED = 'true';
+// Config requires DATABASE_URL. The script never connects (`pg.Pool` is lazy), so a placeholder is enough.
 process.env.DATABASE_URL ??= 'postgres://localhost:5432/aggregator_spec_dump';
-// Reuses the repo's existing public-origin env (decision during Task 4 review:
-// no separate PUBLIC_API_BASE_URL — one source of truth).
-// Generic host by design: deployments are per instance, so the published
-// spec advertises a substitute-your-host URL, not one pilot's domain.
-// Hard-set (not `??=`): the committed spec must be deterministic regardless
-// of whatever PUBLIC_API_URL happens to be exported in the invoking shell/CI
-// environment. To change the published URL, edit this line and regenerate
-// (`pnpm --filter @aggregator-dpg/api spec:dump`), then commit openapi.json.
+// Generic host, always overwritten so the committed spec is the same on every machine.
+// To change it, edit this line, run `spec:dump`, and commit openapi.json.
 process.env.PUBLIC_API_URL = 'https://aggregator.example.com';
 
 const { buildApp } = await import('../src/app.js');

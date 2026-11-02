@@ -103,13 +103,13 @@ describe('LoginPage (server component)', () => {
     expect(el.props.error).toBe('session_expired');
   });
 
-  it('maps the "org_no_portal" logout-reason cookie through unchanged', async () => {
+  it('maps the "console_no_org" logout-reason cookie through unchanged', async () => {
     getSession.mockResolvedValue(null);
-    cookies.mockResolvedValue(makeCookieJar({ bd_logout_reason: 'org_no_portal' }));
+    cookies.mockResolvedValue(makeCookieJar({ bd_logout_reason: 'console_no_org' }));
 
     const el = await LoginPage({ searchParams: Promise.resolve({}) });
 
-    expect(el.props.error).toBe('org_no_portal');
+    expect(el.props.error).toBe('console_no_org');
   });
 
   it('falls back to the raw query-string error when no reason cookie is set', async () => {

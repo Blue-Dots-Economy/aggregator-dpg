@@ -1,11 +1,8 @@
 /**
  * Hex-colour helpers shared by the brand theming code.
  *
- * `theme-provider.tsx` (which derives the CSS custom properties from the
- * configured brand palette) and `components/login/BrandPanel.tsx` (which
- * darkens and brightens the same palette for the hero gradient and particle
- * canvas) both need to parse and blend `#rrggbb` values, and previously
- * carried byte-identical copies of `parseHex` and `mix`.
+ * Used by `theme-provider.tsx` and `components/login/BrandPanel.tsx` to parse
+ * and blend `#rrggbb` brand colours.
  *
  * @module apps/web/src/lib/hex-color
  */
@@ -33,16 +30,12 @@ export function parseHex(value: string): Rgb | null {
 /**
  * Mixes two hex colours, `weight` of the way from `a` toward `b`.
  *
- * `weight=0` returns `a` and `weight=1` returns `b`; values outside that range
- * are clamped. Used to darken the brand primary into the deep hero gradient and
- * to brighten it into the high-contrast particle colours.
+ * `weight=0` returns `a` and `weight=1` returns `b`.
  *
  * @param a - The base colour, `#rrggbb` with or without the `#`.
  * @param b - The colour to mix toward, in the same form.
  * @param weight - How far to travel from `a` to `b`, clamped to 0..1.
- * @returns The blended `#rrggbb` colour, or `a` unchanged if either input is
- *   malformed — callers pass deploy-time brand config, which should degrade
- *   rather than throw.
+ * @returns The blended `#rrggbb` colour, or `a` unchanged if either input is malformed.
  */
 export function mix(a: string, b: string, weight: number): string {
   const A = parseHex(a);

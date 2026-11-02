@@ -2,7 +2,7 @@
  * Server-component test: `(public)/register/invite/page.tsx` (#701).
  *
  * Covers the owner invite-management deep-link gating: session → dashboard;
- * flag off → notFound; missing grant → notFound; happy path passes the grant
+ * missing grant → notFound; happy path passes the grant
  * to OwnerInviteView. The grant is NOT verified here (the mint POST is the gate).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -16,11 +16,8 @@ const { redirect, notFound } = vi.hoisted(() => ({
     throw new Error('NOT_FOUND');
   }),
 }));
-const { isOrgHierarchyEnabled } = vi.hoisted(() => ({ isOrgHierarchyEnabled: vi.fn() }));
-
 vi.mock('@/lib/server-session', () => ({ getSession }));
 vi.mock('next/navigation', () => ({ redirect, notFound }));
-vi.mock('@/app/(public)/register/register-server', () => ({ isOrgHierarchyEnabled }));
 
 import OwnerInvitePage from '@/app/(public)/register/invite/page';
 
@@ -28,7 +25,6 @@ beforeEach(() => {
   getSession.mockReset().mockResolvedValue(null);
   redirect.mockClear();
   notFound.mockClear();
-  isOrgHierarchyEnabled.mockReset().mockReturnValue(true);
 });
 
 function run(grant?: string) {
@@ -48,12 +44,6 @@ describe('OwnerInvitePage (server component)', () => {
     getSession.mockResolvedValue({ sub: 'u1' });
     expect(await runAndCatch('g')).toBe('REDIRECT');
     expect(redirect).toHaveBeenCalledWith('/dashboard');
-  });
-
-  it('404s when the org hierarchy flag is off', async () => {
-    isOrgHierarchyEnabled.mockReturnValue(false);
-    expect(await runAndCatch('g')).toBe('NOT_FOUND');
-    expect(notFound).toHaveBeenCalled();
   });
 
   it('404s when no grant is present', async () => {

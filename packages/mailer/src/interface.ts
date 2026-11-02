@@ -1,12 +1,11 @@
 /**
- * Mailer contract.
+ * Mailer contract (`@aggregator-dpg/mailer`).
  *
- * Concrete adapters implement the same surface so deployments can choose
- * between vendor-neutral SMTP (MailHog dev, customer SMTP, Postmark, etc.)
- * and AWS SES without touching application code.
+ * SMTP and AWS SES adapters implement the same surface, so a deployment can
+ * pick either without code changes.
  */
 
-/** One file to attach to a message (#551). */
+/** One file to attach to a message. */
 export interface SendAttachment {
   /** Filename shown to the recipient. Must already be sanitised. */
   filename: string;
@@ -27,11 +26,7 @@ export interface SendInput {
   replyTo?: string;
   /** CC recipients. Optional. */
   cc?: string | string[];
-  /**
-   * Files to attach. Optional. Note the transports reach these differently:
-   * SMTP hands them to nodemailer directly, while SES has to switch from its
-   * simple-content API to raw MIME (see `ses.ts`).
-   */
+  /** Files to attach. Optional. SES sends these as raw MIME. */
   attachments?: SendAttachment[];
 }
 

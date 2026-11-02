@@ -4,7 +4,7 @@ Guidance specific to working inside `apps/web`. Read the root `CLAUDE.md` first 
 
 ## Two auth helpers, disjoint usage today — nothing in code stops you picking the wrong one
 
-- **Anonymous**: `getServiceAccessToken()` (`lib/service-token.ts`) does a Keycloak `client_credentials` grant, cached in-process until ~30s before expiry. It's wrapped by `proxyServiceRequest()` (`lib/bff-service-proxy.ts`) and used by exactly 3 routes today: `api/aggregator/register`, `api/org/register`, `api/orgs` — genuinely pre-session (registration/listing) endpoints.
+- **Anonymous**: `getServiceAccessToken()` (`lib/service-token.ts`) does a Keycloak `client_credentials` grant, cached in-process until ~30s before expiry. It's wrapped by `proxyServiceRequest()` (`lib/bff-service-proxy.ts`) and used by exactly 4 routes today: `api/aggregator/register`, `api/org/register`, `api/orgs`, `api/orgs/parents` — genuinely pre-session (registration/listing) endpoints.
 - **Authenticated**: `callApi()` (`lib/upstream-client.ts`) reads the Redis session, transparently refreshes the access token 60s before expiry (killing the session on refresh failure), and attaches the caller's own Bearer token. Used by all other API routes plus the protected layout.
 
 **This split is convention-enforced only.** A new authenticated data route wired to `proxyServiceRequest`/`getServiceAccessToken` instead of `callApi` would authorize with the aggregator-wide service-account token rather than the caller's own — the concrete cross-aggregator data-leak shape to watch for. When adding a route: if it needs to know _which_ aggregator/coordinator is calling, it must use `callApi`; only genuinely pre-session registration/lookup endpoints should use the service-token path.
@@ -13,7 +13,16 @@ Guidance specific to working inside `apps/web`. Read the root `CLAUDE.md` first 
 
 `SessionStoreBase` (abstract class) has `RedisSessionStore` (prod) + `MemorySessionStore` (test), both taking a `ttlSec` — **`SESSION_TTL_SECONDS` env var, defaulting to 12h** (`lib/session/index.ts:24`), sliding (refreshed on every `get`). `SessionData` holds `sub/email/phone/name` + `accessToken/refreshToken/idToken` + their expiries + `createdAt/lastSeenAt`. `server-session.ts` wraps `getSession()` in React's `cache()` so one Redis hit is shared per request tree.
 
-**`auth-context` is populated server-side, not by a client fetch.** `(protected)/layout.tsx` calls `getSession()` + `tokenAggregatorId()` (rejects org-owner tokens — this portal is coordinator-only) + `fetchSupportEnabled()` (`GET /v1/support/config` via `callApi`, fails safe to `false`), then passes both as props into `<AuthProvider initialUser supportEnabled>`. If you're debugging why the UI shows stale auth/support state, look at the layout's server render, not a client-side refetch — there isn't one.
+**`auth-context` is populated server-side, not by a client fetch.** `(protected)/layout.tsx` calls `getSession()` + `tokenAggregatorId()` (a token without `aggregator_id` is not a coordinator: an org owner is redirected to `/console`) + `fetchSupportEnabled()` (`GET /v1/support/config` via `callApi`, fails safe to `false`), then passes both as props into `<AuthProvider initialUser supportEnabled>`. If you're debugging why the UI shows stale auth/support state, look at the layout's server render, not a client-side refetch — there isn't one.
+
+## The organisation console (`(console)/console`, Phase 5)
+
+Org owners and the network admin sign in to the same app and land on `/console` (the callback routes an `org_owner` token there; a coordinator never lands on it). Things that are easy to get wrong:
+
+- **The actor comes from `GET /v1/user/read/me`, not the token.** `lib/console-actor.ts` reads it with the user's token via `callApi` and caches it in the session for ~60 s (`SessionData.consoleActor`); the console layout signs out on `USER_NOT_PROVISIONED` / `NOT_ORG_ADMIN` and sends coordinators to `/dashboard`. The coordinator portal still routes on the `aggregator_id` claim.
+- **Screens are server components** reading through `lib/console-api.server.ts`; only mutations go through the BFF, under `app/api/console/*`, all via `lib/console-proxy.ts`: JSON body required (415), **same-origin check** (`lib/same-origin.ts`: `Origin` must equal `PUBLIC_PORTAL_URL`'s origin, else `Sec-Fetch-Site: same-origin`; neither → 403), non-UUID id → 404, then `callApi`. Add any new console mutation the same way; nothing mutates on `GET`. One read goes through the BFF too: `GET /api/console/org/parent/options/:id` (UUID check, then `callApi`), which the org page's Move dialog reads when it opens.
+- **Out of reach is a 404 upstream**; pages render `notFound()` for it. A `409 ALREADY_DECIDED` updates the row in place.
+- **hi / kn console copy is English** for now (the catalogue test requires the keys), except the invite page (`console.invite.*`), the owner's organisation home (`console.org_home.*`), the coordinator page (`console.coordinator.*`, `console.roles.*`) and the network admin's tiles, list and messages (`console.orgs.tile*`, `view_*`, `error.*`), which are translated.
 
 ## `aggregator-schema.server.ts` is the single source for both editable and read-only rendering
 
@@ -62,7 +71,7 @@ Vitest + jsdom + `@testing-library/react` for components (`src/__tests__/compone
 The pattern to follow instead: resolve the value in a **server** component and pass it down.
 
 - Needed by a subtree of client components → resolve once in `app/layout.tsx` and publish via a context provider. `EnabledLocalesProvider` (`src/i18n/EnabledLocalesProvider.tsx`) does this for `ENABLED_LANGUAGES`, since `LanguageSwitcher` renders in four places, three of them inside client components. Its `useEnabledLocales` returns `['en']` (English only) when no provider is above it, which makes the switcher hide itself — chosen over defaulting to every supported locale (that would offer a language the deployment disabled) and over throwing (a blank page for a non-fatal problem).
-- Needed by one client component → read it in that route's `page.tsx` and pass a prop, as `register/invite/page.tsx` does for `INVITE_MAX_RECIPIENTS` (and `register/page.tsx` already did for `ORG_HIERARCHY_ENABLED`).
+- Needed by one client component → read it in that route's `page.tsx` and pass a prop, as `register/invite/page.tsx` does for `INVITE_MAX_RECIPIENTS` (and `register/page.tsx` did for the former `ORG_HIERARCHY_ENABLED`, removed in migration 0028).
 
 `FormRuntimeConfigProvider` (`lib/FormRuntimeConfigProvider.tsx`) is the second provider-shaped case: `getFormRuntimeConfig()` (`lib/form-runtime-config.ts`) reads `GOOGLE_MAPS_API_KEY`, `PHOTON_URL`, `GEO_COUNTRY`, `COLLEGE_DATASET` and `REFERENCE_BASE_URL` in a **server** component, and the form widgets take the resolved object from context. `getFormRuntimeConfig()` is server-only in effect — the module itself is `next/*`-free so it stays unit-testable, but calling it from a client component reads an empty `process.env`. Note it treats a **blank** value as absent, because Helm renders an unset value as `""` rather than omitting the variable.
 

@@ -2,8 +2,7 @@
  * BFF proxy for a single registration link.
  *   PATCH /api/links/:id → API PATCH /v1/links/:id
  *
- * Only drafts are editable upstream; the API surfaces a 409 for live or
- * retired rows and we pass that through verbatim.
+ * Only drafts are editable; the API's 409 for other rows is passed through.
  */
 
 import { type NextRequest, NextResponse } from 'next/server';

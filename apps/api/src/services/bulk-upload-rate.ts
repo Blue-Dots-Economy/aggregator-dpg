@@ -1,35 +1,22 @@
 /**
  * Injectable rate-limit checks for the bulk-upload surface.
  *
- * Mirrors `support-rate.ts`: wraps the Redis fixed-window limiter so route tests
- * can vary the outcome without Redis (the real limiter fails open, so an
- * un-overridden test would always see "allowed" and the 429 path would be
- * untestable).
+ * Wraps the Redis fixed-window limiter so route tests can set the outcome
+ * without Redis. The real limiter fails open.
  *
- * Two buckets rather than one. They guard different costs: an upload accepts a
- * multi-MB file and persists it, while a template request builds a four-tab
- * xlsx workbook per call. Sharing a bucket would either throttle template
- * downloads to upload frequency or let template traffic exhaust the upload
- * allowance.
+ * Uploads and template builds use separate buckets because they have
+ * different costs.
  *
  * Belongs to `@aggregator-dpg/api`.
  */
 
 import { consume } from './rate-limiter/index.js';
 
-/**
- * Uploads allowed per coordinator per window. Matched to `support-rate.ts`,
- * which guards the other multi-MB upload path in this service.
- */
+/** Uploads allowed per coordinator per window. */
 export const BULK_UPLOAD_RATE_WINDOW_SECONDS = 3600;
 export const BULK_UPLOAD_RATE_MAX_PER_WINDOW = 5;
 
-/**
- * Template builds allowed per coordinator per window. More permissive than the
- * upload bucket — fetching a template is a normal precursor to filling one in,
- * and a coordinator may legitimately pull both participant types in both
- * formats — but still bounded, because each call renders a workbook.
- */
+/** Template builds allowed per coordinator per window. Each call renders a workbook. */
 export const BULK_TEMPLATE_RATE_WINDOW_SECONDS = 3600;
 export const BULK_TEMPLATE_RATE_MAX_PER_WINDOW = 30;
 

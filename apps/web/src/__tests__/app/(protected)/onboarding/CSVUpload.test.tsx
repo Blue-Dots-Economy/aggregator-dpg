@@ -53,6 +53,11 @@ vi.mock('@/hooks/useAggregatorConfig', () => ({
   DEFAULT_AGGREGATOR_CONFIG: { domains: [{ id: 'seeker', plural_label: 'Seekers' }] },
 }));
 
+const { canMock } = vi.hoisted(() => ({ canMock: vi.fn((_c: string) => true) }));
+vi.mock('@/lib/auth-context', () => ({
+  useCan: () => canMock,
+}));
+
 const { errorsCsvUrl } = vi.hoisted(() => ({ errorsCsvUrl: vi.fn() }));
 vi.mock('@/services/onboarding.service', () => ({
   onboardingService: { errorsCsvUrl: (...args: unknown[]) => errorsCsvUrl(...args) },
@@ -424,6 +429,21 @@ describe('<RecentUploadsBody />', () => {
       ),
     );
     openSpy.mockRestore();
+  });
+
+  it('hides the errors CSV from a caller without profiles.view_pii', () => {
+    canMock.mockImplementation((c: string) => c !== 'profiles.view_pii');
+    useRecentBulkUploads.mockReturnValue({
+      data: {
+        items: [baseUpload({ status: 'completed', failed: 3, errors_csv_s3_key: 'k1' })],
+      },
+      isLoading: false,
+      error: null,
+    });
+    renderRecent();
+    expect(screen.queryByText('errors.csv')).not.toBeInTheDocument();
+    expect(screen.queryByText(/all rows passed/i)).not.toBeInTheDocument();
+    canMock.mockImplementation(() => true);
   });
 
   it('logs a warning and resets the downloading state when the errors-CSV fetch fails', async () => {

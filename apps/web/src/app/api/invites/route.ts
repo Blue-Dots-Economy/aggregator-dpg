@@ -1,10 +1,9 @@
 /**
- * BFF proxy for the owner invite-mint endpoint (#701).
+ * BFF proxy for the owner invite-mint endpoint.
  *
- * Anonymous browser (the org owner has no session — their Keycloak user is
- * disabled). Forwards `POST /admin/v1/invites` with a service-account token;
- * the owner GRANT token in the body is the real authorisation. Upstream body
- * (summary or canonical error envelope) is passed through verbatim.
+ * The caller has no session. Forwards `POST /admin/v1/invites` with a
+ * service-account token; the owner GRANT token in the body authorises the
+ * call. The upstream body is returned as-is.
  *
  * POST /api/invites
  */

@@ -121,3 +121,23 @@ aggregator:
   # ── Admin email recipients (registration approval notifications) ───────────
   admin_emails:
     - admin@bbmp.gov.in
+
+  # ── Organisation tree and "known as" values ───────────────────────────────
+  # Omit the block for a flat tree: every organisation sits directly under the
+  # network, at most 50 organisations, and every organisation is "Aggregator".
+  organisation:
+    hierarchy:
+      max_depth: 3 # Default 1 (flat). Deepest allowed aggregator org.
+      max_children: 50 # Direct children of any org, the network included. Omit for no limit.
+      max_total_orgs: 50 # Aggregator orgs in the instance (root and Default org not counted).
+    known_as:
+      # `aggregator` / "Aggregator" is built in and must not be listed here.
+      # `depths` lists where a value is allowed; omit it for any depth.
+      values:
+        - { key: state, name: State, depths: [1] }
+        - { key: district, name: District, depths: [1, 2] } # a Union Territory can be top-level
+        - { key: training_partner, name: Training Partner } # any depth
+      # The value a new organisation gets at each depth; `aggregator` where none is given.
+      suggest: # depth 3: aggregator
+        - { depth: 1, key: state }
+        - { depth: 2, key: district }

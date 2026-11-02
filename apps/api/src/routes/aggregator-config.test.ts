@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
+import { config } from '../config.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import type { ResolvedNetworkConfig } from '@aggregator-dpg/network-config/interface';
@@ -192,6 +193,26 @@ describe('GET /v1/aggregator-config', () => {
     expect(body.brand.accent_color).toBe('#445566');
     expect(body.brand.favicon_url).toBe('https://example.invalid/favicon.ico');
     expect(body.brand.typography?.primaryFont).toBe('Inter');
+  });
+
+  it('always exposes features.custom_roles, false by default (opt-in)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    const body = res.json() as { features: { custom_roles: boolean } };
+    expect(body.features).toEqual({ custom_roles: false });
+  });
+
+  it('reports features.custom_roles=true when the flag is on', async () => {
+    const prev = config.RBAC_CUSTOM_ROLES_ENABLED;
+    config.RBAC_CUSTOM_ROLES_ENABLED = true;
+    const withFlag = await buildApp();
+    try {
+      const res = await withFlag.inject({ method: 'GET', url: '/v1/aggregator-config' });
+      const body = res.json() as { features: { custom_roles: boolean } };
+      expect(body.features.custom_roles).toBe(true);
+    } finally {
+      await withFlag.close();
+      config.RBAC_CUSTOM_ROLES_ENABLED = prev;
+    }
   });
 
   it('exposes signals_ui_urls (empty when the env var is unset)', async () => {

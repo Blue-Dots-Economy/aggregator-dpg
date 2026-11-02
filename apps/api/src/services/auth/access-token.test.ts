@@ -5,11 +5,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyRequest } from 'fastify';
 import { requireApproved, _setAccessTokenVerifier, _resetJwks } from './access-token.js';
-import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../aggregator-store/index.js';
+import { getIdentityStore } from '../identity-store/index.js';
+import type { IdentityStoreFake } from '../identity-store/testing.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../user-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../idp-admin/index.js';
 import { _setSignalStackWriter } from '../signalstack.js';
 import { _setNetworkConfig } from '../network-config.js';
@@ -29,7 +27,7 @@ function makeReq(claims: Record<string, unknown>): FastifyRequest {
 }
 
 describe('requireApproved + signalstack backfill', () => {
-  let store: AggregatorStoreFake;
+  let store: UserStoreFake;
   let idp: IdpAdminFake;
   let writer: SignalStackWriterFake;
   let kcUserId: string;
@@ -42,16 +40,16 @@ describe('requireApproved + signalstack backfill', () => {
     process.env.SIGNALSTACK_ADMIN_KEY = 'stub-key';
     process.env.SIGNALSTACK_ACTING_ORG_ID = 'org_platform';
 
-    store = new AggregatorStoreFake();
+    store = new UserStoreFake();
     store.seed([
-      buildAggregator({
+      buildCoordinator({
         id: aggregatorId,
         orgSlug: 'trrain-abcd',
         name: 'TRRAIN',
         status: 'active',
       }),
     ]);
-    _setAggregatorStore(store);
+    _setUserStore(store);
 
     idp = new IdpAdminFake();
     const created = await idp.createUser({
@@ -76,7 +74,7 @@ describe('requireApproved + signalstack backfill', () => {
   });
 
   afterEach(() => {
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setIdpAdmin(null);
     _setSignalStackWriter(null);
     _setAccessTokenVerifier(null);
@@ -121,6 +119,11 @@ describe('requireApproved + signalstack backfill', () => {
 
     const result = await requireApproved(req);
     expect(result.ok).toBe(true);
+    // 0027: the first approved request records the coordinator's IdP login.
+    const identities = getIdentityStore() as IdentityStoreFake;
+    expect(identities.all()).toEqual([
+      { userId: aggregatorId, provider: 'keycloak', subject: kcUserId },
+    ]);
 
     const aggregators = writer.listAggregators();
     expect(aggregators).toHaveLength(1);

@@ -3,8 +3,8 @@
  * them at the portal sign-in page. Uses OTP login, so no password is included.
  *
  * Belongs to `@aggregator-dpg/api`. Copy lives in the properties layers under
- * `applicant_approved.*` and the body layout on the case registry entry; this
- * module exists only to give the case a typed signature.
+ * `applicant_approved.*` and the layout on the case registry entry; this
+ * module gives the case a typed signature.
  */
 
 import { renderCase, type RenderedEmail } from './render-case.js';

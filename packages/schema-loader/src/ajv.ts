@@ -1,10 +1,8 @@
 /**
  * Shared Ajv 2020-12 wiring for the schema loaders in this package.
  *
- * Internal module — not published as a subpath export. Both
- * {@link FileSchemaLoader} and {@link NetworkSchemaLoader} need an identically
- * configured compiler, and each previously carried its own copy of this
- * CommonJS-interop boilerplate.
+ * Internal module, not a subpath export. Gives {@link FileSchemaLoader} and
+ * {@link NetworkSchemaLoader} the same compiler setup.
  *
  * @module @aggregator-dpg/schema-loader
  */
@@ -28,15 +26,13 @@ export type AjvLike = {
 type AjvCtorType = new (opts?: AjvOptions) => AjvLike;
 type AddFormatsFn = (ajv: AjvLike, opts?: unknown) => AjvLike;
 
-// Use the 2020-12 Ajv build because schemas declare draft 2020-12. Both
-// packages ship CommonJS, hence the createRequire + `.default` interop dance.
+// Ajv 2020-12 build, since schemas declare draft 2020-12. Both packages are CJS.
 const AjvCtor: AjvCtorType = require('ajv/dist/2020').default ?? require('ajv/dist/2020');
 const addFormats: AddFormatsFn = require('ajv-formats').default ?? require('ajv-formats');
 
 /**
- * Builds an Ajv instance configured the way every loader in this package
- * expects: all errors reported, non-strict schema parsing, and array-aware
- * type coercion (form payloads arrive as strings).
+ * Builds an Ajv instance: all errors reported, non-strict parsing, and
+ * array-aware type coercion (form payloads arrive as strings).
  *
  * @returns A ready-to-use Ajv instance with `ajv-formats` registered.
  */

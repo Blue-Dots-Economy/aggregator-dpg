@@ -5,11 +5,7 @@ import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-tok
 import { _setSignalStackWriter } from '../services/signalstack.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
-import {
-  AggregatorStoreFake,
-  _setAggregatorStore,
-  buildAggregator,
-} from '../services/aggregator-store/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
 import { err } from '@aggregator-dpg/shared-primitives/result';
@@ -56,7 +52,7 @@ function makeRollup(
 describe('GET /v1/dashboard', () => {
   let app: FastifyInstance;
   let writer: SignalStackWriterFake;
-  let aggregatorStore: AggregatorStoreFake;
+  let userStore: UserStoreFake;
   let idp: IdpAdminFake;
 
   beforeEach(async () => {
@@ -81,16 +77,16 @@ describe('GET /v1/dashboard', () => {
     });
     _setIdpAdmin(idp);
 
-    aggregatorStore = new AggregatorStoreFake();
-    aggregatorStore.seed([
-      buildAggregator({
+    userStore = new UserStoreFake();
+    userStore.seed([
+      buildCoordinator({
         id: AGG_A,
         orgSlug: 'agg-a',
         name: 'Agg A',
         status: 'active',
         signalstackOrgId: ORG_A,
       }),
-      buildAggregator({
+      buildCoordinator({
         id: AGG_B,
         orgSlug: 'agg-b',
         name: 'Agg B',
@@ -99,7 +95,7 @@ describe('GET /v1/dashboard', () => {
         signalstackOrgId: null,
       }),
     ]);
-    _setAggregatorStore(aggregatorStore);
+    _setUserStore(userStore);
 
     writer = new SignalStackWriterFake();
     writer.seed({
@@ -182,7 +178,7 @@ describe('GET /v1/dashboard', () => {
   afterAll(async () => {
     await app?.close();
     _setSignalStackWriter(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setIdpAdmin(null);
     _setAccessTokenVerifier(null);
     _setNetworkConfig(null);
@@ -445,7 +441,7 @@ describe('GET /v1/dashboard', () => {
   });
 
   it('503 DB_UNAVAILABLE when resolving the acting org id via the DB fallback fails', async () => {
-    aggregatorStore.findById = async () => ({
+    userStore.findById = async () => ({
       ok: false,
       error: { code: 'DB_UNAVAILABLE', message: 'db down' },
     });
@@ -504,7 +500,7 @@ describe('GET /v1/dashboard', () => {
 describe('POST /v1/dashboard/export/profiles', () => {
   let app: FastifyInstance;
   let writer: SignalStackWriterFake;
-  let aggregatorStore: AggregatorStoreFake;
+  let userStore: UserStoreFake;
   let idp: IdpAdminFake;
 
   beforeEach(async () => {
@@ -524,9 +520,9 @@ describe('POST /v1/dashboard/export/profiles', () => {
     });
     _setIdpAdmin(idp);
 
-    aggregatorStore = new AggregatorStoreFake();
-    aggregatorStore.seed([
-      buildAggregator({
+    userStore = new UserStoreFake();
+    userStore.seed([
+      buildCoordinator({
         id: AGG_A,
         orgSlug: 'agg-a',
         name: 'Agg A',
@@ -534,7 +530,7 @@ describe('POST /v1/dashboard/export/profiles', () => {
         signalstackOrgId: ORG_A,
       }),
     ]);
-    _setAggregatorStore(aggregatorStore);
+    _setUserStore(userStore);
 
     writer = new SignalStackWriterFake();
     _setSignalStackWriter(writer);
@@ -566,7 +562,7 @@ describe('POST /v1/dashboard/export/profiles', () => {
   afterAll(async () => {
     await app?.close();
     _setSignalStackWriter(null);
-    _setAggregatorStore(null);
+    _setUserStore(null);
     _setIdpAdmin(null);
     _setAccessTokenVerifier(null);
     _setNetworkConfig(null);

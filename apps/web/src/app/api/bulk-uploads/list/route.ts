@@ -2,8 +2,7 @@
  * BFF proxy: list bulk uploads (paginated).
  *   GET /api/bulk-uploads/list?limit=&offset=
  *
- * Sits at /list rather than the bare /api/bulk-uploads so it does not
- * collide with the create route on the same path.
+ * Lives at /list so it does not collide with the create route.
  */
 
 import { type NextRequest, type NextResponse } from 'next/server';
