@@ -502,7 +502,7 @@ importers:
         specifier: ^18.1.1
         version: 18.1.2
       sanitize-html:
-        specifier: ^2.18.0
+        specifier: ^2.18.1
         version: 2.18.1
       zod:
         specifier: ^3.24.0
