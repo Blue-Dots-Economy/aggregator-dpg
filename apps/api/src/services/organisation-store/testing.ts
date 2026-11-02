@@ -68,14 +68,13 @@ export function buildOrganisation(overrides: Partial<Organisation> = {}): Organi
     updatedBy: null,
     rejectedAt: null,
     isDefault: false,
-    url: null,
     locations: [],
     legalName: null,
-    gstNumber: null,
     knownAs: SYSTEM_KNOWN_AS.key,
     depth: 1,
     parentId: null,
     parentName: null,
+    description: null,
     ...overrides,
   };
 }

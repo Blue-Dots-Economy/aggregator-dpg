@@ -1,6 +1,6 @@
 // Org registration + dropdown routes (always registered since 0028).
 
-import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import {
@@ -26,6 +26,7 @@ import { _setOrgInviteResendRateChecker } from '../services/org-invite-resend-ra
 import type * as ConfigLoaderFs from '@aggregator-dpg/config-loader/fs';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import { _setNetworkConfig } from '../services/network-config.js';
+import { _resetOrgSchemaValidator } from '../services/org-schema-validator.js';
 
 const { loadConsentConfigMock } = vi.hoisted(() => ({ loadConsentConfigMock: vi.fn() }));
 vi.mock('@aggregator-dpg/config-loader/fs', async (importOriginal) => {
@@ -85,6 +86,12 @@ describe('aggregator-orgs routes', () => {
     });
 
     app = await buildApp();
+  });
+
+  // A test may switch the deployment's network/brand; always switch it back.
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    _resetOrgSchemaValidator();
   });
 
   afterAll(async () => {
@@ -226,6 +233,10 @@ describe('aggregator-orgs routes', () => {
   // A zod enum here pinned one network's list and rejected every other
   // network's valid form with a 400, so the value must round-trip as given.
   it('accepts a network-specific organisation_type and stores the schema-driven fields', async () => {
+    // A brand schema that declares `organisation_type` (purple_dot / alimco).
+    vi.stubEnv('AGGREGATOR_NETWORK', 'purple_dot');
+    vi.stubEnv('AGGREGATOR_BRAND', 'alimco');
+    _resetOrgSchemaValidator();
     const res = await app.inject({
       method: 'POST',
       url: '/v1/orgs/create',
@@ -245,6 +256,57 @@ describe('aggregator-orgs routes', () => {
     expect(profile?.['organisation_type']).toBe('ngo');
     expect(profile?.['aggregator_type']).toEqual(['seeker']);
     expect(profile?.['website']).toBe('https://enable.org');
+  });
+
+  it('stores the default schema fields in profile, GSTIN upper-cased', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...orgBody,
+        website: 'https://enable.org',
+        gst_number: '29abcde1234f1zw',
+        domains: ['seeker'],
+        // Not in the default schema: dropped, not stored.
+        organisation_type: 'ngo',
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const stored = await orgStore.findById((res.json() as { org_id: string }).org_id);
+    const profile = stored.ok ? stored.value?.profile : undefined;
+    expect(profile).toMatchObject({
+      website: 'https://enable.org',
+      gst_number: '29ABCDE1234F1ZW',
+      domains: ['seeker'],
+    });
+    expect(profile?.['organisation_type']).toBeUndefined();
+  });
+
+  it('refuses a bad schema field with field_errors, creating nothing', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...orgBody,
+        website: 'http://enable.org',
+        gst_number: '29ABCDE1234F1Z5',
+        domains: ['astronaut'],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    const error = (res.json() as { error: { code: string; fields: { field_errors: object } } })
+      .error;
+    expect(error.code).toBe('SCHEMA_VALIDATION');
+    expect(Object.keys(error.fields.field_errors).sort()).toEqual([
+      'domains',
+      'gst_number',
+      'website',
+    ]);
+    expect((error.fields.field_errors as Record<string, string>)['website']).toBe(
+      'Please enter a website starting with https://',
+    );
   });
 
   it('records org consent in the ledger on successful registration', async () => {
@@ -810,7 +872,8 @@ describe('aggregator-orgs routes', () => {
     });
     expect(res.statusCode).toBe(201);
     const created = await orgStore.findById((res.json() as { org_id: string }).org_id);
-    expect(created.ok && created.value?.url).toBe('https://enable.example');
+    // The website is a schema field: it lives in `profile`, not a column.
+    expect(created.ok && created.value?.profile['website']).toBe('https://enable.example');
     expect(created.ok && created.value?.locations).toEqual([
       {
         geo: { type: 'Point', coordinates: [77.59, 12.97] },
@@ -821,6 +884,40 @@ describe('aggregator-orgs routes', () => {
         },
       },
     ]);
+  });
+
+  it("keeps the form's full address in profile, district included", async () => {
+    const address = {
+      streetAddress: '1 Main Rd',
+      addressLocality: 'Bengaluru',
+      addressDistrict: 'Bengaluru Urban',
+      addressRegion: 'Karnataka',
+      postalCode: '560001',
+      addressCountry: 'IN',
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, address, coordinates: [77.59, 12.97] },
+    });
+    expect(res.statusCode).toBe(201);
+    const created = await orgStore.findById((res.json() as { org_id: string }).org_id);
+    const profile = created.ok ? created.value?.profile : undefined;
+    expect(profile?.['address']).toEqual(address);
+    expect(profile?.['coordinates']).toEqual([77.59, 12.97]);
+  });
+
+  it('stores no address in profile when the form sends none', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: orgBody,
+    });
+    expect(res.statusCode).toBe(201);
+    const created = await orgStore.findById((res.json() as { org_id: string }).org_id);
+    expect(created.ok && created.value?.profile).not.toHaveProperty('address');
   });
 
   it('retries a colliding random slug instead of failing (review A11)', async () => {

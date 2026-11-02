@@ -1,13 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { orgLocationsFrom, orgUrlFrom } from '../org-location.js';
-
-describe('orgUrlFrom', () => {
-  it('returns the trimmed website, or null when blank or absent', () => {
-    expect(orgUrlFrom(' https://a.example ')).toBe('https://a.example');
-    expect(orgUrlFrom('   ')).toBeNull();
-    expect(orgUrlFrom(undefined)).toBeNull();
-  });
-});
+import { orgLocationsFrom } from '../org-location.js';
 
 describe('orgLocationsFrom', () => {
   it('builds one Beckn location from the address, state and picked point', () => {

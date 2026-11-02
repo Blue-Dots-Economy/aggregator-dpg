@@ -1,24 +1,42 @@
 'use client';
 
 /**
- * Organisation details form. Website, legal name, and GST are editable by the
- * owner and the network admin; the name and the "known as" value by the
- * network admin only. The "known as" choices are the values allowed at the
- * org's depth; changing the value never moves the org. The Default org is
- * read-only. Locations are shown but not edited here.
+ * Organisation details form. Two parts:
+ *
+ * - Fixed fields: name, legal name and description (inputs), the "known as"
+ *   value, and locations (shown).
+ * - Schema fields: whatever the deployment's org-registration schema lists
+ *   (e.g. website, GST number, domains), drawn by RJSF. Fields marked
+ *   `x-updatable` are editable; the others are shown read-only.
+ *
+ * Only the org's owner edits the details, the name included. The "known as"
+ * value is the network admin's only; its choices are the values allowed at
+ * the org's depth, and changing it never moves the org. The network admin
+ * sees every other detail read-only. The Default org, the root and an org
+ * below the viewer's own are read-only.
  */
 
-import { useState, type SubmitEvent } from 'react';
+import { useMemo, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import type Form from '@rjsf/core';
+import type { ErrorSchema, RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { Org } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { I } from '../../icons';
 import { ConsoleSection, DetailList } from './ConsoleUi';
 import { Input } from '../ui/Input';
 import { Label } from '../ui/Label';
+import { RjsfThemedForm } from '../forms/RjsfThemed';
 import { errorKey, sendConsole } from '../../lib/console-client';
 import type { KnownAsChoice } from '../../lib/console-org-options';
+import { consoleOrgSchema, gstinCustomValidate, orgFieldText } from '../../lib/org-schema';
+import { readableFormErrors } from '../../lib/readable-form-errors';
+
+/** Longest description the API accepts. */
+const DESCRIPTION_MAX = 1000;
+
+type JsonRecord = Record<string, unknown>;
 
 /** Trimmed value, or null when blank (clears the field). */
 const orNull = (v: string) => (v.trim() ? v.trim() : null);
@@ -26,50 +44,122 @@ const orNull = (v: string) => (v.trim() ? v.trim() : null);
 /** The "known as" name, or the key when it is not configured. */
 const knownAsText = (o: Org) => o.known_as_name ?? o.known_as ?? '—';
 
+/** Whether a schema value is empty (cleared). */
+const isEmpty = (v: unknown) =>
+  v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+
+/** Whether two schema values are the same (order of a list counts). */
+const sameValue = (a: unknown, b: unknown) =>
+  (isEmpty(a) && isEmpty(b)) || JSON.stringify(a) === JSON.stringify(b);
+
+/** The values of `fields` in `profile`. */
+function pick(profile: JsonRecord, fields: readonly string[]): JsonRecord {
+  return Object.fromEntries(fields.filter((f) => f in profile).map((f) => [f, profile[f]]));
+}
+
 export function OrgEditForm({
   org,
   editable,
-  canRename,
+  canEdit,
+  canSetKnownAs,
   knownAsOptions = [],
+  orgSchema,
 }: Readonly<{
   org: Org;
+  /** False for the Default org, the root and an org below the viewer's own. */
   editable: boolean;
-  canRename: boolean;
+  /** The signed-in user owns this org: every detail but "known as". */
+  canEdit: boolean;
+  /** The network admin: the "known as" value only. */
+  canSetKnownAs: boolean;
   /** The values allowed at the org's depth; empty shows the current value as text. */
   knownAsOptions?: readonly KnownAsChoice[];
+  /** The deployment's org-registration schema (network domains applied); `null` if unavailable. */
+  orgSchema: { schema: RJSFSchema; uiSchema: JsonRecord } | null;
 }>) {
   const t = useTranslations('console');
   const router = useRouter();
+  const editing = editable && canEdit;
+  const canChooseKnownAs = editable && canSetKnownAs && knownAsOptions.length > 0;
+  const view = useMemo(
+    () => (orgSchema ? consoleOrgSchema(orgSchema.schema, orgSchema.uiSchema, editing) : null),
+    [orgSchema, editing],
+  );
+  const fields = useMemo(() => Object.keys((view?.schema.properties ?? {}) as JsonRecord), [view]);
+  const customValidate = useMemo(
+    () => (view ? gstinCustomValidate(view.schema) : undefined),
+    [view],
+  );
+
   const [current, setCurrent] = useState(org);
   const [name, setName] = useState(org.name);
-  const [url, setUrl] = useState(org.url ?? '');
   const [legalName, setLegalName] = useState(org.legal_name ?? '');
-  const [gst, setGst] = useState(org.gst_number ?? '');
+  const [description, setDescription] = useState(org.description ?? '');
   const [knownAs, setKnownAs] = useState(org.known_as ?? '');
-  const canChooseKnownAs = canRename && knownAsOptions.length > 0;
-  const currentAllowed = knownAsOptions.some((o) => o.key === current.known_as);
+  const [profileData, setProfileData] = useState<JsonRecord>(() => pick(org.profile, fields));
+  const [extraErrors, setExtraErrors] = useState<ErrorSchema | undefined>(undefined);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const schemaForm = useRef<Form<JsonRecord>>(null);
+  const currentAllowed = knownAsOptions.some((o) => o.key === current.known_as);
+
+  /** Takes a newer org (after a save, a move or a refresh) as the form's values. */
+  function adopt(next: Org) {
+    setCurrent(next);
+    setName(next.name);
+    setLegalName(next.legal_name ?? '');
+    setDescription(next.description ?? '');
+    setKnownAs(next.known_as ?? '');
+    // The API tidies values (e.g. a GSTIN is stored upper-cased).
+    setProfileData(pick(next.profile, fields));
+  }
 
   // A newer org from the page (after a move or a refresh) replaces the form's copy.
   const [seenUpdatedAt, setSeenUpdatedAt] = useState(org.updated_at);
   if (org.updated_at !== seenUpdatedAt) {
     setSeenUpdatedAt(org.updated_at);
-    setCurrent(org);
-    setName(org.name);
-    setUrl(org.url ?? '');
-    setLegalName(org.legal_name ?? '');
-    setGst(org.gst_number ?? '');
-    setKnownAs(org.known_as ?? '');
+    adopt(org);
+  }
+
+  /** The schema fields the owner changed: new value, or `null` to clear. */
+  function profileChanges(): JsonRecord {
+    const changes: JsonRecord = {};
+    for (const field of view?.updatable ?? []) {
+      const next = profileData[field];
+      if (sameValue(next, current.profile[field])) continue;
+      changes[field] = isEmpty(next) ? null : next;
+    }
+    return changes;
+  }
+
+  /** Whether a schema check fails on one of `changed` (top-level field names). */
+  function blocksSave(changed: readonly string[]): boolean {
+    const form = schemaForm.current;
+    if (!form || changed.length === 0) return false;
+    const { errors } = form.validate(profileData);
+    // `property` is ".website" or ".domains.0"; the field is its first segment.
+    return errors.some((err) => changed.includes((err.property ?? '').split(/[.[]/)[1] ?? ''));
   }
 
   async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
-    const patch: Record<string, unknown> = {};
-    if (canRename && name.trim() !== current.name) patch['name'] = name.trim();
-    if (orNull(url) !== current.url) patch['url'] = orNull(url);
-    if (orNull(legalName) !== current.legal_name) patch['legal_name'] = orNull(legalName);
-    if (orNull(gst) !== current.gst_number) patch['gst_number'] = orNull(gst);
+    setExtraErrors(undefined);
+    // The schema section checks itself (patterns, choices, GSTIN check character).
+    // Only a changed field blocks the save: a value stored before a rule existed
+    // must not stop the owner saving something else.
+    if (editing && view && view.updatable.length > 0 && blocksSave(Object.keys(profileChanges()))) {
+      schemaForm.current?.validateForm();
+      setMessage(t('org.fix_fields'));
+      return;
+    }
+    const patch: JsonRecord = {};
+    if (editing) {
+      if (name.trim() !== current.name) patch['name'] = name.trim();
+      if (orNull(legalName) !== current.legal_name) patch['legal_name'] = orNull(legalName);
+      if (orNull(description) !== current.description) patch['description'] = orNull(description);
+      const changes = profileChanges();
+      if (Object.keys(changes).length > 0) patch['profile'] = changes;
+    }
     if (canChooseKnownAs && knownAs !== current.known_as) patch['known_as'] = knownAs;
     if (Object.keys(patch).length === 0) {
       setMessage(t('org.saved'));
@@ -79,13 +169,25 @@ export function OrgEditForm({
     const r = await sendConsole<Org>(`/api/console/org/metadata/${org.id}`, 'PATCH', patch);
     setBusy(false);
     if (r.ok) {
-      setCurrent(r.data);
-      setKnownAs(r.data.known_as ?? '');
+      // The page's copy catches up through the refresh below.
+      adopt(r.data);
       setMessage(t('org.saved'));
       router.refresh();
-    } else {
-      setMessage(t(errorKey(r)));
+      return;
     }
+    const serverErrors = r.error.fields?.['field_errors'];
+    if (r.status === 400 && serverErrors && typeof serverErrors === 'object') {
+      const mapped: JsonRecord = {};
+      for (const [field, text] of Object.entries(serverErrors as JsonRecord)) {
+        if (fields.includes(field)) mapped[field] = { __errors: [String(text)] };
+      }
+      if (Object.keys(mapped).length > 0) {
+        setExtraErrors(mapped as ErrorSchema);
+        setMessage(t('org.fix_fields'));
+        return;
+      }
+    }
+    setMessage(t(errorKey(r)));
   }
 
   const addresses = current.locations
@@ -96,88 +198,113 @@ export function OrgEditForm({
     )
     .filter(Boolean);
 
-  if (!editable) {
-    // Read-only (the Default org, the root, an org below the viewer's own):
-    // plain text, not disabled inputs.
+  const status = (
+    <div className="flex items-center gap-3">
+      <Button type="submit" disabled={busy}>
+        {t('org.save')}
+      </Button>
+      {message ? <output className="text-[13px] text-ink-600">{message}</output> : null}
+    </div>
+  );
+
+  /** The "known as" choice, for whoever may set it. */
+  const knownAsSelect = (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor="org-known-as">{t('org.known_as')}</Label>
+      <select
+        id="org-known-as"
+        className="bd-input"
+        value={knownAs}
+        onChange={(e) => {
+          setKnownAs(e.target.value);
+          setMessage(null);
+        }}
+      >
+        {currentAllowed ? null : (
+          <option value={current.known_as ?? ''}>{knownAsText(current)}</option>
+        )}
+        {knownAsOptions.map((o) => (
+          <option key={o.key} value={o.key}>
+            {o.name}
+          </option>
+        ))}
+      </select>
+      {currentAllowed ? null : (
+        <span className="text-[12px] text-ink-500">{t('org.known_as_not_allowed')}</span>
+      )}
+    </div>
+  );
+
+  if (!editing) {
+    // Read-only details (the Default org, the root, an org below the viewer's
+    // own, or not the owner): plain text, not disabled inputs.
+    const props = (view?.schema.properties ?? {}) as Record<string, JsonRecord>;
+    const ui = view?.uiSchema ?? {};
+    const schemaItems = fields.map((field) => ({
+      label: String(props[field]?.['title'] ?? field),
+      value:
+        orgFieldText(props[field] ?? {}, (ui[field] ?? {}) as JsonRecord, current.profile[field]) ??
+        '—',
+    }));
+    const items: Array<{ label: string; value: ReactNode }> = [
+      { label: t('org.name'), value: current.name },
+      ...(current.known_as === null || canChooseKnownAs
+        ? []
+        : [{ label: t('org.known_as'), value: knownAsText(current) }]),
+      { label: t('org.legal_name'), value: current.legal_name ?? '—' },
+      ...schemaItems,
+      {
+        label: t('org.description'),
+        value: current.description ? (
+          <span className="whitespace-pre-line">{current.description}</span>
+        ) : (
+          t('org.no_description')
+        ),
+      },
+      {
+        label: t('org.locations'),
+        value: addresses.length ? addresses.join('; ') : t('org.no_locations'),
+      },
+    ];
+    let note: string | null = null;
+    if (current.is_default) note = t('org.read_only');
+    else if (editable) note = t('org.details_owner_only');
     return (
       <ConsoleSection title={t('org.details')}>
-        {current.is_default ? (
-          <p className="text-[13px] text-ink-500 mb-4">{t('org.read_only')}</p>
+        {note ? <p className="text-[13px] text-ink-500 mb-4">{note}</p> : null}
+        {canChooseKnownAs ? (
+          // The network admin sets only the "known as" value.
+          <form
+            noValidate
+            onSubmit={(e) => void onSubmit(e)}
+            className="flex flex-col gap-4 mb-6 sm:max-w-[50%]"
+          >
+            {knownAsSelect}
+            {status}
+          </form>
         ) : null}
-        <DetailList
-          items={[
-            { label: t('org.name'), value: current.name },
-            ...(current.known_as === null
-              ? []
-              : [{ label: t('org.known_as'), value: knownAsText(current) }]),
-            { label: t('org.url'), value: current.url ?? '—' },
-            { label: t('org.legal_name'), value: current.legal_name ?? '—' },
-            { label: t('org.gst_number'), value: current.gst_number ?? '—' },
-            {
-              label: t('org.locations'),
-              value: addresses.length ? addresses.join('; ') : t('org.no_locations'),
-            },
-          ]}
-        />
+        <DetailList items={items} />
       </ConsoleSection>
     );
   }
 
   return (
     <ConsoleSection title={t('org.details')}>
-      <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
+      <form noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="org-name">{t('org.name')}</Label>
-            <Input
-              id="org-name"
-              value={name}
-              disabled={!canRename}
-              onChange={(e) => setName(e.target.value)}
-            />
-            {!canRename ? (
-              <span className="text-[12px] text-ink-500">{t('org.name_admin_only')}</span>
-            ) : null}
+            <Input id="org-name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="org-known-as">{t('org.known_as')}</Label>
-            {canChooseKnownAs ? (
-              <>
-                <select
-                  id="org-known-as"
-                  className="bd-input"
-                  value={knownAs}
-                  onChange={(e) => {
-                    setKnownAs(e.target.value);
-                    setMessage(null);
-                  }}
-                >
-                  {currentAllowed ? null : (
-                    <option value={current.known_as ?? ''}>{knownAsText(current)}</option>
-                  )}
-                  {knownAsOptions.map((o) => (
-                    <option key={o.key} value={o.key}>
-                      {o.name}
-                    </option>
-                  ))}
-                </select>
-                {currentAllowed ? null : (
-                  <span className="text-[12px] text-ink-500">{t('org.known_as_not_allowed')}</span>
-                )}
-              </>
-            ) : (
-              <>
-                <Input id="org-known-as" value={knownAsText(current)} disabled readOnly />
-                {canRename ? null : (
-                  <span className="text-[12px] text-ink-500">{t('org.known_as_admin_only')}</span>
-                )}
-              </>
-            )}
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="org-url">{t('org.url')}</Label>
-            <Input id="org-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} />
-          </div>
+          {canChooseKnownAs ? (
+            knownAsSelect
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="org-known-as">{t('org.known_as')}</Label>
+              <Input id="org-known-as" value={knownAsText(current)} disabled readOnly />
+              <span className="text-[12px] text-ink-500">{t('org.known_as_admin_only')}</span>
+            </div>
+          )}
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="org-legal">{t('org.legal_name')}</Label>
             <Input
@@ -186,9 +313,44 @@ export function OrgEditForm({
               onChange={(e) => setLegalName(e.target.value)}
             />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="org-gst">{t('org.gst_number')}</Label>
-            <Input id="org-gst" value={gst} onChange={(e) => setGst(e.target.value)} />
+        </div>
+        {view && fields.length > 0 ? (
+          <RjsfThemedForm<JsonRecord>
+            ref={schemaForm}
+            tagName="div"
+            schema={view.schema}
+            uiSchema={
+              {
+                ...view.uiSchema,
+                'ui:layout': 'grid',
+                'ui:submitButtonOptions': { norender: true },
+              } as unknown as UiSchema<JsonRecord>
+            }
+            formData={profileData}
+            onChange={(ev) => {
+              setProfileData((ev.formData ?? {}) as JsonRecord);
+              setExtraErrors(undefined);
+            }}
+            transformErrors={(errors) => readableFormErrors(errors, view.schema)}
+            {...(customValidate ? { customValidate } : {})}
+            {...(extraErrors ? { extraErrors } : {})}
+          />
+        ) : null}
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="org-description">{t('org.description')}</Label>
+          <textarea
+            id="org-description"
+            className="bd-input min-h-[110px] resize-y"
+            maxLength={DESCRIPTION_MAX}
+            placeholder={t('org.description_placeholder')}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+          <div className="flex justify-between gap-3 text-[12px] text-ink-500">
+            <span>{t('org.description_hint')}</span>
+            <span aria-live="polite">
+              {description.length}/{DESCRIPTION_MAX}
+            </span>
           </div>
         </div>
         <div className="flex flex-col gap-1.5 text-[13.5px]">
@@ -206,12 +368,7 @@ export function OrgEditForm({
             <span className="text-ink-500">{t('org.no_locations')}</span>
           )}
         </div>
-        <div className="flex items-center gap-3">
-          <Button type="submit" disabled={busy}>
-            {t('org.save')}
-          </Button>
-          {message ? <output className="text-[13px] text-ink-600">{message}</output> : null}
-        </div>
+        {status}
       </form>
     </ConsoleSection>
   );

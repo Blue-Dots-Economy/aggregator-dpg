@@ -591,7 +591,7 @@ describe('console routes /v1/user, /v1/org', () => {
       it('lets an owner read the orgs below its own, but not edit them', async () => {
         expect(ids(await post('/v1/org/search', 'a', {}))).toEqual([ORG_A, ORG_B, ORG_P].sort());
         expect((await get(`/v1/org/read/${ORG_B}`, 'a')).statusCode).toBe(200);
-        const edit = await patch(`/v1/org/metadata/update/${ORG_B}`, 'a', { url: null });
+        const edit = await patch(`/v1/org/metadata/update/${ORG_B}`, 'a', { legal_name: null });
         expect(edit.statusCode).toBe(404);
       });
 
@@ -603,48 +603,235 @@ describe('console routes /v1/user, /v1/org', () => {
   });
 
   describe('PATCH /v1/org/metadata/update/:id', () => {
-    it('lets the owner edit details', async () => {
+    /** The org's stored profile, read straight from the store. */
+    async function storedProfile(): Promise<Record<string, unknown>> {
+      const found = await orgs.findById(ORG_A);
+      if (!found.ok || !found.value) throw new Error('org missing');
+      return found.value.profile;
+    }
+
+    it('lets the owner edit the fixed fields', async () => {
       const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
-        url: 'https://alpha.example.org',
         legal_name: 'Alpha Pvt Ltd',
+        description: '  Skilled trade jobs for rural seekers.  ',
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({
-        url: 'https://alpha.example.org',
         legal_name: 'Alpha Pvt Ltd',
+        description: 'Skilled trade jobs for rural seekers.',
       });
     });
 
-    it('refuses the name to an owner (403)', async () => {
-      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { name: 'Alpha 2' });
-      expect(res.statusCode).toBe(403);
+    it('lets the owner rename, keeping the slug', async () => {
+      const before = await orgs.findById(ORG_A);
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { name: 'Alpha Two' });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { name: string; slug: string };
+      expect(body.name).toBe('Alpha Two');
+      expect(body.slug).toBe(before.ok ? before.value?.slug : undefined);
     });
 
-    it('lets the network admin rename, and tells the owner (C13)', async () => {
+    it('refuses the network admin a rename of another owner’s org (403), with no email', async () => {
       const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'na', { name: 'Alpha Two' });
-      expect(res.statusCode).toBe(200);
-      expect((res.json() as { name: string }).name).toBe('Alpha Two');
-      const notice = mailer.outbox.find((m) => m.to === 'a@a.org');
-      expect(notice?.html).toContain('updated the name');
-      expect(notice?.html).not.toContain('Alpha Two</strong> as');
+      expect(res.statusCode).toBe(403);
+      const after = await orgs.findById(ORG_A);
+      expect(after.ok ? after.value?.displayName : undefined).not.toBe('Alpha Two');
+      expect(mailer.outbox.find((m) => m.to === 'a@a.org')).toBeUndefined();
     });
 
     it('answers ORG_NAME_TAKEN for a duplicate name', async () => {
-      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'na', { name: 'beta' });
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { name: 'beta' });
       expect(res.statusCode).toBe(409);
       expect((res.json() as { error: { code: string } }).error.code).toBe('ORG_NAME_TAKEN');
     });
 
     it('never edits the Default org', async () => {
       const res = await patch(`/v1/org/metadata/update/${DEFAULT}`, 'na', {
-        url: 'https://x.example.org',
+        profile: { website: 'https://x.example.org' },
       });
       expect(res.statusCode).toBe(409);
     });
 
-    it('refuses an empty body', async () => {
-      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {});
+    it('refuses an empty body and an empty profile', async () => {
+      expect((await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {})).statusCode).toBe(400);
+      expect(
+        (await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { profile: {} })).statusCode,
+      ).toBe(400);
+    });
+
+    it('stores an empty description as none', async () => {
+      await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { description: 'x' });
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { description: '   ' });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ description: null });
+    });
+
+    it('sets the schema fields in profile and reads them back', async () => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        profile: {
+          website: 'https://alpha.example.org',
+          gst_number: ' 29abcde1234f1zw ',
+          domains: ['seeker'],
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { profile: unknown }).profile).toMatchObject({
+        website: 'https://alpha.example.org',
+        gst_number: '29ABCDE1234F1ZW',
+        domains: ['seeker'],
+      });
+      const read = (await get(`/v1/org/read/${ORG_A}`, 'a')).json() as {
+        org: { profile: Record<string, unknown>; profile_ref: string | null };
+      };
+      expect(read.org.profile['gst_number']).toBe('29ABCDE1234F1ZW');
+    });
+
+    it('merges profile: keeps keys not sent, removes a key sent as null', async () => {
+      await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        profile: { website: 'https://alpha.example.org', gst_number: '27AAPFU0939F1ZV' },
+      });
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        profile: { website: null, domains: ['provider'] },
+      });
+      expect(res.statusCode).toBe(200);
+      const profile = await storedProfile();
+      expect(profile['website']).toBeUndefined();
+      expect(profile['gst_number']).toBe('27AAPFU0939F1ZV');
+      expect(profile['domains']).toEqual(['provider']);
+    });
+
+    it.each(['https://example.org', 'https://www.example.org/about?x=1'])(
+      'accepts the website %s',
+      async (website) => {
+        const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { profile: { website } });
+        expect(res.statusCode).toBe(200);
+        expect((await storedProfile())['website']).toBe(website);
+      },
+    );
+
+    it.each([
+      'example.org',
+      'www.example.org',
+      'http://example.org',
+      'https://localhost',
+      'not a url',
+    ])('refuses the website %s with the schema message, saving nothing', async (website) => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', { profile: { website } });
       expect(res.statusCode).toBe(400);
+      const error = (res.json() as { error: { code: string; fields: unknown } }).error;
+      expect(error.code).toBe('SCHEMA_VALIDATION');
+      expect(error.fields).toEqual({
+        field_errors: { website: 'Please enter a website starting with https://' },
+      });
+      expect((await storedProfile())['website']).toBeUndefined();
+    });
+
+    it.each([
+      ['a wrong check character', '29ABCDE1234F1Z5'],
+      ['14 characters', '29ABCDE1234F1Z'],
+      ['free text', 'hello'],
+    ])('refuses a GSTIN with %s, saving nothing', async (_label, gst) => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        profile: { gst_number: gst },
+      });
+      expect(res.statusCode).toBe(400);
+      const error = (res.json() as { error: { fields: unknown } }).error;
+      expect(error.fields).toEqual({ field_errors: { gst_number: 'Please enter a valid GSTIN.' } });
+      expect((await storedProfile())['gst_number']).toBeUndefined();
+    });
+
+    it('refuses a domain the network does not have, and duplicate domains', async () => {
+      const unknown = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        profile: { domains: ['seeker', 'astronaut'] },
+      });
+      expect(unknown.statusCode).toBe(400);
+      expect(
+        Object.keys(
+          (unknown.json() as { error: { fields: { field_errors: object } } }).error.fields
+            .field_errors,
+        ),
+      ).toEqual(['domains']);
+      const dup = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        profile: { domains: ['seeker', 'seeker'] },
+      });
+      expect(dup.statusCode).toBe(400);
+    });
+
+    it('refuses a field the schema does not mark editable', async () => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        profile: { organisation_type: 'ngo' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error: { fields: unknown } }).error.fields).toEqual({
+        field_errors: { organisation_type: 'is not an editable field' },
+      });
+    });
+
+    it('names every bad field in one 400 and saves none of the body', async () => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        name: 'Not Saved',
+        profile: { website: 'http://example.org', gst_number: 'hello', domains: ['astronaut'] },
+      });
+      expect(res.statusCode).toBe(400);
+      const error = (res.json() as { error: { fields: { field_errors: object } } }).error;
+      expect(Object.keys(error.fields.field_errors).sort()).toEqual([
+        'domains',
+        'gst_number',
+        'website',
+      ]);
+      const after = await orgs.findById(ORG_A);
+      expect(after.ok && after.value?.displayName).not.toBe('Not Saved');
+    });
+
+    it('does not re-check a stored value when another field changes', async () => {
+      await orgs.update(ORG_A, { profileMerge: { website: 'http://legacy.example.org' } });
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        profile: { gst_number: '27AAPFU0939F1ZV' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect((await storedProfile())['website']).toBe('http://legacy.example.org');
+    });
+
+    it('refuses an over-long description (400)', async () => {
+      const long = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        description: 'x'.repeat(1001),
+      });
+      expect(long.statusCode).toBe(400);
+    });
+
+    it.each([
+      ['name', { name: 'Alpha Two' }],
+      ['locations', { locations: [] }],
+      ['legal name', { legal_name: 'Alpha Pvt Ltd' }],
+      ['description', { description: 'x' }],
+      ['a schema field', { profile: { website: 'https://x.example.org' } }],
+    ])("refuses the network admin's edit of another owner's %s (403)", async (_label, body) => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'na', body);
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('lets the owner change fixed and schema fields in one save', async () => {
+      const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
+        name: 'Alpha Two',
+        legal_name: 'Alpha Pvt Ltd',
+        description: 'About Alpha.',
+        profile: {
+          website: 'https://alpha.example.org',
+          gst_number: '27AAPFU0939F1ZV',
+          domains: ['provider', 'seeker'],
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        name: 'Alpha Two',
+        legal_name: 'Alpha Pvt Ltd',
+        description: 'About Alpha.',
+        profile: {
+          website: 'https://alpha.example.org',
+          gst_number: '27AAPFU0939F1ZV',
+          domains: ['provider', 'seeker'],
+        },
+      });
     });
 
     describe('known_as', () => {
@@ -681,16 +868,17 @@ describe('console routes /v1/user, /v1/org', () => {
         expect(stored.ok && stored.value?.knownAs).toBe('aggregator');
       });
 
-      it('saves no other field when known_as is not allowed at the org depth', async () => {
+      it('refuses a network-admin rename sent with known_as (403), saving nothing', async () => {
         const before = await orgs.findById(ORG_A);
         const res = await update('na', { name: 'Alpha Renamed', known_as: 'district' });
-        expect(res.statusCode).toBe(400);
-        expect(errorOf(res)).toMatchObject({
-          code: 'KNOWN_AS_DEPTH',
-          fields: { org_ids: [ORG_A] },
-        });
+        expect(res.statusCode).toBe(403);
         const after = await orgs.findById(ORG_A);
         expect(after.ok && after.value).toEqual(before.ok && before.value);
+      });
+
+      it("refuses known_as from the owner (403): it is the network admin's only", async () => {
+        const res = await update('a', { known_as: 'district' });
+        expect(res.statusCode).toBe(403);
       });
 
       it('refuses a known_as that is not configured (400)', async () => {
@@ -1013,7 +1201,7 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('cannot edit an org below (404)', async () => {
-      const res = await patch(`/v1/org/metadata/update/${ORG_B}`, 'a', { url: null });
+      const res = await patch(`/v1/org/metadata/update/${ORG_B}`, 'a', { legal_name: null });
       expect(res.statusCode).toBe(404);
     });
 
@@ -1438,19 +1626,18 @@ describe('console routes /v1/user, /v1/org', () => {
   });
 
   describe('v1-org: metadata update edges', () => {
-    it('updates locations and GST number', async () => {
+    it('updates locations', async () => {
       const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
         locations: [{ geo: { type: 'Point', coordinates: [77.59, 12.97] } }],
-        gst_number: '27AAAAA0000A1Z5',
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({ gst_number: '27AAAAA0000A1Z5' });
+      expect((res.json() as { locations: unknown[] }).locations).toHaveLength(1);
     });
 
     it('404 when the org update reports the row is gone', async () => {
       orgs.update = async () => storeErr('NOT_FOUND');
       const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
-        url: 'https://x.example.org',
+        legal_name: 'X Ltd',
       });
       expect(res.statusCode).toBe(404);
     });
@@ -1458,7 +1645,7 @@ describe('console routes /v1/user, /v1/org', () => {
     it('503 when the org update store fails', async () => {
       orgs.update = async () => storeErr('DB_UNAVAILABLE');
       const res = await patch(`/v1/org/metadata/update/${ORG_A}`, 'a', {
-        url: 'https://x.example.org',
+        legal_name: 'X Ltd',
       });
       expect(res.statusCode).toBe(503);
     });

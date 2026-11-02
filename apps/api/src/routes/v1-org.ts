@@ -3,7 +3,7 @@
  *
  *   GET   /v1/org/read/:id              one org within reach, owner and counts
  *   POST  /v1/org/search                orgs within reach (or below one), by name, keyset paged
- *   PATCH /v1/org/metadata/update/:id   org details (name and known_as: network admin only)
+ *   PATCH /v1/org/metadata/update/:id   org details (owner only; known_as: network admin only)
  *   PATCH /v1/org/parent/update/:id     move an org and the orgs below it (network admin)
  *   GET   /v1/org/parent/options/:id    candidate parents for a move (network admin)
  *   POST  /v1/org/decision/:id          approve / reject a pending org (network admin)
@@ -48,6 +48,7 @@ import { isNetworkAdmin, requireActor, type Actor } from '../services/auth/actor
 import { reachesOrg } from '../services/authz/scope.js';
 import { isOnlyViewed, viewableOrgIds } from '../services/authz/view-scope.js';
 import { decideOrg, grantOwnerAccess } from '../services/decisions/org.js';
+import { validateOrgUpdate } from '../services/org-schema-validator.js';
 import {
   decodeOrgCursor,
   encodeOrgCursor,
@@ -119,15 +120,28 @@ function requireNetworkAdmin(actor: Actor): void {
   if (!isNetworkAdmin(actor)) throw httpError('FORBIDDEN');
 }
 
-/** Wire field label of each editable org detail, for logs and owner notices. */
+/** Wire field label of each org detail, for logs and owner notices. */
 const FIELD_LABELS: Record<string, string> = {
   name: 'the name',
-  url: 'the website',
   locations: 'the locations',
   legal_name: 'the legal name',
-  gst_number: 'the GST number',
+  description: 'the description',
+  profile: 'the organisation details',
   known_as: 'the "known as" name',
 };
+
+/**
+ * Refuses an edit the actor may not make, with 403: `known_as` is the network
+ * admin's only; every other field is the org owner's only. The network admin
+ * views other owners' details but does not change them.
+ *
+ * @throws {HttpError} FORBIDDEN.
+ */
+function requireEditRights(actor: Actor, org: Organisation, fields: string[]): void {
+  if (fields.includes('known_as') && !isNetworkAdmin(actor)) throw httpError('FORBIDDEN');
+  const ownerFields = fields.some((f) => f !== 'known_as');
+  if (ownerFields && org.ownerUserId !== actor.userId) throw httpError('FORBIDDEN');
+}
 
 /** The instance's "known as" list, from the network config. */
 async function knownAsConfig(): Promise<KnownAsConfig> {
@@ -313,7 +327,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: "Update an organisation's details",
         description:
-          "url, locations, legal name and GST number: the owner or the network admin. The name and known_as: the network admin only (the slug never changes). known_as must be a configured value allowed at the org's depth (400 KNOWN_AS_DEPTH otherwise); it never changes the parent. The parent changes through PATCH /v1/org/parent/update/:id. The Default org's details are not editable. Rendered for every coordinator of the org at once.",
+          "Every field but known_as, the name included, is the org's owner's only (the slug never changes); the network admin views other owners' orgs but does not edit them (403). known_as is the network admin's only: a configured value allowed at the org's depth (400 KNOWN_AS_DEPTH otherwise); it never changes the parent, which changes through PATCH /v1/org/parent/update/:id. The owner is emailed when the network admin changes it. The Default org's details are not editable. `profile` changes fields of the deployment's org-registration schema (e.g. website, GST number, domains): only fields marked x-updatable, checked against that schema; null removes a field. A bad field answers 400 with fields.field_errors and saves nothing. Locations, legal name, website and GST number are rendered for every coordinator of the org; description is shown in the console only.",
         params: IdParamsSchema,
         body: OrgMetadataUpdateRequestSchema,
         response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
@@ -327,19 +341,33 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       if (orgType !== 'aggregator' || org.isDefault) {
         throw httpError('CONFLICT', { detail: "This organisation's details are not editable." });
       }
-      const adminOnly = [body.name, body.known_as].some((v) => v !== undefined);
-      if (adminOnly && !isNetworkAdmin(actor)) throw httpError('FORBIDDEN');
+      requireEditRights(actor, org, Object.keys(body));
       const orgCfg = await organisationConfig();
       requireConfiguredKnownAs(orgCfg.known_as, body.known_as);
+      // Schema fields: only those marked x-updatable, checked against the schema.
+      let profileMerge: Record<string, unknown> | undefined;
+      if (body.profile !== undefined) {
+        const checked = await validateOrgUpdate(body.profile);
+        if (!checked.ok) {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: Object.entries(checked.errors)
+              .map(([field, message]) => `${field}: ${message}`)
+              .join('; '),
+            fields: { field_errors: checked.errors },
+          });
+        }
+        profileMerge = checked.values;
+      }
       await guardWriteRate(actor, reply);
 
       const patch: UpdateOrgPatch = { updatedBy: actor.userId };
       if (body.name !== undefined) patch.displayName = body.name;
-      if (body.url !== undefined) patch.url = body.url;
       if (body.locations !== undefined) patch.locations = body.locations;
       if (body.legal_name !== undefined) patch.legalName = body.legal_name;
-      if (body.gst_number !== undefined) patch.gstNumber = body.gst_number;
       if (body.known_as !== undefined) patch.knownAs = body.known_as;
+      // An empty description is stored as "none".
+      if (body.description !== undefined) patch.description = body.description || null;
+      if (profileMerge) patch.profileMerge = profileMerge;
 
       const updated = await getOrganisationStore().update(org.id, patch, treeRules(orgCfg));
       if (!updated.ok) {
@@ -354,6 +382,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         target_id: org.id,
         fields,
       });
+      // Only `known_as` can come from a network admin acting on another owner's org.
       await notifyOwnerOfAdminAction(
         actor,
         updated.value,

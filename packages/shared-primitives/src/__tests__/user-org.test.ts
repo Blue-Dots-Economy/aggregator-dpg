@@ -152,12 +152,14 @@ describe('user-org wire schemas', () => {
       url: null,
       locations: [location],
       legal_name: null,
-      gst_number: null,
       known_as: 'aggregator',
       known_as_name: 'Aggregator',
       depth: 1,
       parent_id: 'root',
       parent_name: 'Network',
+      description: null,
+      profile: { website: 'https://x.test', domains: ['seeker'] },
+      profile_ref: 'org-registration.v1',
       created_at: 't',
       updated_at: 't',
     };
@@ -261,15 +263,12 @@ describe('user-org wire schemas', () => {
 
   it('org metadata update requires at least one field (the refine branch)', () => {
     expect(OrgMetadataUpdateRequestSchema.parse({ name: 'New Name' })).toBeTruthy();
-    expect(
-      OrgMetadataUpdateRequestSchema.parse({ url: 'https://x.test', legal_name: null }),
-    ).toBeTruthy();
+    expect(OrgMetadataUpdateRequestSchema.parse({ legal_name: null })).toBeTruthy();
     const empty = OrgMetadataUpdateRequestSchema.safeParse({});
     expect(empty.success).toBe(false);
     if (!empty.success) {
       expect(empty.error.issues[0].message).toMatch(/at least one field/);
     }
-    expect(OrgMetadataUpdateRequestSchema.safeParse({ url: 'not a url' }).success).toBe(false);
     expect(OrgMetadataUpdateRequestSchema.safeParse({ name: 'x' }).success).toBe(false);
   });
 
@@ -303,6 +302,27 @@ describe('user-org wire schemas', () => {
     expect(
       OrgHierarchyResponseSchema.safeParse({ network: body.network, levels: [] }).success,
     ).toBe(false);
+  });
+
+  it('org metadata update: description and profile', () => {
+    expect(OrgMetadataUpdateRequestSchema.parse({ description: '  About us  ' }).description).toBe(
+      'About us',
+    );
+    expect(OrgMetadataUpdateRequestSchema.parse({ description: null }).description).toBeNull();
+    expect(
+      OrgMetadataUpdateRequestSchema.safeParse({ description: 'x'.repeat(1001) }).success,
+    ).toBe(false);
+    // Schema fields pass through; the API checks them against the org schema.
+    expect(
+      OrgMetadataUpdateRequestSchema.parse({
+        profile: { website: 'https://x.test', gst_number: null },
+      }).profile,
+    ).toEqual({ website: 'https://x.test', gst_number: null });
+    expect(OrgMetadataUpdateRequestSchema.safeParse({ profile: {} }).success).toBe(false);
+    // The fields that moved into the schema are no longer top-level keys.
+    for (const key of ['url', 'gst_number', 'domains']) {
+      expect(OrgMetadataUpdateRequestSchema.safeParse({ [key]: 'x' }).success).toBe(false);
+    }
   });
 
   it('parses the org decision and owner-access responses', () => {

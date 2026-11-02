@@ -57,10 +57,8 @@ export interface Organisation {
   /** Whether this is the fixed Default org (slug {@link DEFAULT_ORG_SLUG}). */
   isDefault: boolean;
   /** Org details, shown for every coordinator of the org. */
-  url: string | null;
   locations: BecknLocation[];
   legalName: string | null;
-  gstNumber: string | null;
   /** Key of the org's "known as" value, from the instance config list. */
   knownAs: string;
   /** Depth in the tree: 0 for the root, 1 for a top-level org. Set by the store on create and move. */
@@ -69,6 +67,8 @@ export interface Organisation {
   parentId: string | null;
   /** The parent org's name; `null` for the root. */
   parentName: string | null;
+  /** The owner's description of the org. Informational only. */
+  description: string | null;
 }
 
 /**
@@ -102,8 +102,7 @@ export interface CreateOrgInput {
   kcGroupId?: string | null;
   profile?: Record<string, unknown>;
   profileRef?: string | null;
-  /** Org details from the registration form's website and address. */
-  url?: string | null;
+  /** Org locations from the registration form's address. */
   locations?: BecknLocation[];
   /**
    * Parent org id; the root when omitted. Must be the root or an active,
@@ -126,12 +125,16 @@ export interface UpdateOrgPatch {
   /** Write-once rejection time; set to `null` to revive after cooling. */
   rejectedAt?: Date | null;
   /** Org details, edited from the console. */
-  url?: string | null;
   locations?: BecknLocation[];
   legalName?: string | null;
-  gstNumber?: string | null;
   /** "Known as" key; checked against the org's stored depth under the tree lock. */
   knownAs?: string;
+  description?: string | null;
+  /**
+   * Keys to merge into `profile`: each value replaces the stored one, `null`
+   * removes the key, keys not named are kept.
+   */
+  profileMerge?: Record<string, unknown>;
   /** Who made this write: an admin user id, `'self'` or `'admin'`. */
   updatedBy?: string;
 }

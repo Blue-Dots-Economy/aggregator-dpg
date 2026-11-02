@@ -453,10 +453,11 @@ export class PostgresUserStore extends UserStoreBase {
         c: contact,
         o: {
           slug: organisations.slug,
-          url: organisations.url,
+          // Website and GST number are schema fields, stored in `profile`.
+          url: sql<string | null>`${organisations.profile} ->> 'website'`,
           locations: organisations.locations,
           legalName: organisations.legalName,
-          gstNumber: organisations.gstNumber,
+          gstNumber: sql<string | null>`${organisations.profile} ->> 'gst_number'`,
         },
         // Newest registration consent (epoch ms; the API composes ISO strings).
         consent: sql<{ at: number; till: number | null } | null>`(

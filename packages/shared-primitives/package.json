@@ -40,6 +40,10 @@
       "import": "./dist/url/index.js",
       "types": "./dist/url/index.d.ts"
     },
+    "./org-details": {
+      "import": "./dist/org-details/index.js",
+      "types": "./dist/org-details/index.d.ts"
+    },
     "./contact": {
       "import": "./dist/contact/index.js",
       "types": "./dist/contact/index.d.ts"
