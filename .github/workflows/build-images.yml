@@ -50,7 +50,8 @@ jobs:
   # correct if the job names or the job graph inside CI ever change.
   #
   # Cheap by design: no re-run of the suite, just an API call. A release tag is
-  # cut from develop or main, where CI has already run on that exact commit.
+  # cut from develop, main or release/<sprint>, where CI has already run on that
+  # exact commit.
   verify-ci:
     name: Verify CI passed for this commit
     runs-on: ubuntu-latest
@@ -82,7 +83,7 @@ jobs:
           # cut from a commit CI never saw (a feature branch, a local commit),
           # not a tag cut from a red one. A check for "not failed" would pass it.
           if [ -z "${runs}" ]; then
-            echo "::error title=No CI run for this commit::ci.yml has never run for ${SHA}, so there is nothing to verify. Cut the release tag from a commit on develop or main that CI has already tested."
+            echo "::error title=No CI run for this commit::ci.yml has never run for ${SHA}, so there is nothing to verify. Cut the release tag from a commit on develop, main or release/<sprint> that CI has already tested."
             exit 1
           fi
 
