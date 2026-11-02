@@ -132,16 +132,23 @@ export function OrgEditForm({
     return changes;
   }
 
+  /** Whether a schema check fails on one of `changed` (top-level field names). */
+  function blocksSave(changed: readonly string[]): boolean {
+    const form = schemaForm.current;
+    if (!form || changed.length === 0) return false;
+    const { errors } = form.validate(profileData);
+    // `property` is ".website" or ".domains.0"; the field is its first segment.
+    return errors.some((err) => changed.includes((err.property ?? '').split(/[.[]/)[1] ?? ''));
+  }
+
   async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     setExtraErrors(undefined);
     // The schema section checks itself (patterns, choices, GSTIN check character).
-    if (
-      editing &&
-      view &&
-      view.updatable.length > 0 &&
-      schemaForm.current?.validateForm() === false
-    ) {
+    // Only a changed field blocks the save: a value stored before a rule existed
+    // must not stop the owner saving something else.
+    if (editing && view && view.updatable.length > 0 && blocksSave(Object.keys(profileChanges()))) {
+      schemaForm.current?.validateForm();
       setMessage(t('org.fix_fields'));
       return;
     }

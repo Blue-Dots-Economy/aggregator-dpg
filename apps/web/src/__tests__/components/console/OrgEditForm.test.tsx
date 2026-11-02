@@ -200,6 +200,35 @@ describe('<OrgEditForm />', () => {
       },
     );
 
+    it('saves another change when stored values do not meet the field rules', async () => {
+      // Values saved before the rules existed: an http website, a bad check character.
+      const legacy = {
+        ...baseOrg,
+        profile: { website: 'http://old.example.org', gst_number: '29ABCDE1234F1ZX' },
+      };
+      global.fetch = respond({ ...legacy, description: 'We train people.' }, 200) as never;
+      renderForm(legacy, OWNER);
+      fireEvent.change(screen.getByLabelText(messages.console.org.description), {
+        target: { value: 'We train people.' },
+      });
+      save();
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+      expect(sentBody()).toEqual({ description: 'We train people.' });
+    });
+
+    it('still refuses a stored website the owner changes to another bad value', async () => {
+      global.fetch = vi.fn() as never;
+      renderForm({ ...baseOrg, profile: { website: 'http://old.example.org' } }, OWNER);
+      fireEvent.change(screen.getByLabelText(/Website/), {
+        target: { value: 'http://other.example.org' },
+      });
+      save();
+      expect(
+        await screen.findByText('Please enter a website starting with https://'),
+      ).toBeInTheDocument();
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
     it('refuses a GSTIN with a wrong check character before sending', async () => {
       global.fetch = respond({}, 200) as never;
       renderForm(baseOrg, OWNER);
