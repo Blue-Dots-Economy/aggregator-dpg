@@ -63,8 +63,8 @@ describe('<HierarchySettings />', () => {
   it('shows how much of the organisation limit is used', () => {
     renderIt();
     const bar = screen.getByRole('progressbar', { name: messages.console.orgs.total_orgs });
-    expect(bar).toHaveAttribute('aria-valuenow', '7');
-    expect(bar).toHaveAttribute('aria-valuemax', '50');
+    expect(bar).toHaveAttribute('value', '7');
+    expect(bar).toHaveAttribute('max', '50');
   });
 
   it('offers no edit actions', () => {

@@ -146,7 +146,7 @@ describe('console home — owner', () => {
     });
     mockReads([row('org-1', 'Edge Org A')]);
     await show();
-    expect(screen.getByRole('heading', { name: 'console.org_home.heading' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'console.nav.coordinators' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /console\.org_home\.invite/ })).toHaveAttribute(
       'href',
       '/console/invite',

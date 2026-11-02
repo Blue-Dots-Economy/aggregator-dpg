@@ -105,6 +105,18 @@ describe('applicant-rejected template', () => {
     expect(out.html).not.toContain('Reason:');
   });
 
+  it('names a coordinator application plainly, with no reply-to-this-email line', () => {
+    const out = renderApplicantRejected({
+      contactName: 'Asha',
+      association: 'TRRAIN',
+      entityLabel: 'coordinator',
+    });
+    expect(out.subject).toContain('coordinator application');
+    expect(out.text).toContain('coordinator application for TRRAIN');
+    expect(out.text).not.toContain('onboard');
+    expect(out.text).not.toContain('reply to this email');
+  });
+
   it('renders with a reason', () => {
     const out = renderApplicantRejected({
       contactName: 'Asha',

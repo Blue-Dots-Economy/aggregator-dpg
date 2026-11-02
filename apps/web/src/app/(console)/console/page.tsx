@@ -71,7 +71,7 @@ async function renderOrgHome(org: OrgRow, below: OrgRow[], showInvite: boolean) 
   }));
   return (
     <>
-      <Topbar title={t('org_home.heading')} subtitle={t('org_home.subtitle')} />
+      <Topbar title={t('nav.coordinators')} subtitle={t('org_home.subtitle')} />
       <div className="flex flex-col gap-4">
         <div className="bd-card bd-shadow flex flex-wrap items-center gap-3.5 px-5 py-4">
           <span className="grid h-10 w-10 flex-none place-items-center rounded-[11px] bg-(--bd-primary-50) text-(--bd-primary)">

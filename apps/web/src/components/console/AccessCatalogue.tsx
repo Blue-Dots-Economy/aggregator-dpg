@@ -743,7 +743,7 @@ function MatrixView({
 
 /** A permission area as a heading: `profiles` becomes "Profiles". */
 function areaLabel(area: string): string {
-  return area.charAt(0).toUpperCase() + area.slice(1).replace(/_/g, ' ');
+  return area.charAt(0).toUpperCase() + area.slice(1).replaceAll('_', ' ');
 }
 
 /** A plain empty or no-match message. */

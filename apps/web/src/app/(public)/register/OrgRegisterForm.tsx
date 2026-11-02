@@ -103,7 +103,7 @@ export function OrgRegisterForm({
   consentContent,
 }: OrgRegisterFormProps): JSX.Element {
   const t = useTranslations('register');
-  const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
+  const { state, setState, setCanSubmit, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   // Coordinate from the address widget; RJSF does not write it into `formData`.
   const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
@@ -263,11 +263,16 @@ export function OrgRegisterForm({
           consentContent,
           onLocationResolved: setResolvedPlace,
           validationErrorTitle: t('validation_error_title'),
+          personName: {
+            path: 'owner.name',
+            message: (symbols) => t('name_symbols', { symbols }),
+          },
         })}
       >
         <RegistrationSubmitButton
           submitting={state.status === 'submitting'}
-          canSubmit={canSubmit && parentReady}
+          // Never disabled for an invalid field: a click shows what to fix.
+          canSubmit={parentsQuery.data !== undefined}
           label={t('org_submit')}
           submittingLabel={t('submitting')}
         />

@@ -1,10 +1,12 @@
 'use client';
 
 /**
- * The network admin's organisations: a summary of the network with how many
- * organisations it may hold and status filters, then every organisation as a
- * tree under the network or as a flat list. Search and the status filter
- * apply to both views and run in the browser over the loaded organisations.
+ * The console organisations view: status filters, then the organisations as a
+ * tree or as a flat list. For the network admin it adds a summary of the
+ * network with how many organisations it may hold, and the network at the top
+ * of the tree; an owner's tree starts at the organisations it owns. Search and
+ * the status filter apply to both views and run in the browser over the
+ * loaded organisations.
  */
 
 import Link from 'next/link';
@@ -29,14 +31,12 @@ import { orgsInTreeOrder } from '../../lib/console-org-options';
 import { ORG_FILTERS, countOrgs, matchesFilter, type OrgFilter } from '../../lib/org-filters';
 import { ConsoleStatusPill } from './ConsoleUi';
 import { CountTile, type TileTone } from './CountTile';
+import { UsageBar } from './UsageBar';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
 /** How the organisations are shown. */
 export type OrgsView = 'tree' | 'list';
-
-/** Usage at or above this share of the maximum shows in amber. */
-const NEAR_LIMIT = 0.8;
 
 const FILTER_TILE: Record<OrgFilter, { icon: LucideIcon; tone: TileTone }> = {
   all: { icon: Building2, tone: 'primary' },
@@ -56,22 +56,23 @@ function matchesQuery(org: OrgRow, query: string): boolean {
 }
 
 export function NetworkOrgsView({
-  rootName,
+  network,
   orgs,
   more,
-  totalOrgs,
-  maxOrgs,
   initialView = 'tree',
   initialFilter = 'all',
 }: Readonly<{
-  rootName: string;
+  /** The network, for the network admin; omitted for an owner. */
+  network?: {
+    name: string;
+    /** Organisations counted against the limit, from the hierarchy settings. */
+    totalOrgs: number;
+    /** The most organisations the network may hold. */
+    maxOrgs: number;
+  };
   orgs: OrgRow[];
   /** More organisations exist than were loaded. */
   more: boolean;
-  /** Organisations counted against the limit, from the hierarchy settings. */
-  totalOrgs: number;
-  /** The most organisations the network may hold. */
-  maxOrgs: number;
   initialView?: OrgsView;
   initialFilter?: OrgFilter;
 }>) {
@@ -89,45 +90,44 @@ export function NetworkOrgsView({
     view === 'tree'
       ? orgsInTreeOrder(orgs).filter((e) => keep(e.org))
       : orgs.filter(keep).map((org) => ({ org, level: 0, last: false, continues: [] }));
-  const used = maxOrgs > 0 ? Math.min(totalOrgs / maxOrgs, 1) : 0;
   const filterLabel = (f: OrgFilter) => t(`orgs.tile.${f}.label`);
+  /** The line under a tile's count; an owner's total covers its own organisations, not the network. */
+  const tileSub = (f: OrgFilter, n: number) => {
+    if (f === 'pending' && n === 0) return t('orgs.tile.pending.none');
+    if (f === 'all' && !network) return t('orgs.tile.all.sub_owner');
+    return t(`orgs.tile.${f}.sub`);
+  };
 
   return (
     <>
-      <section className="bd-card bd-shadow overflow-hidden">
-        <div className="flex flex-wrap items-center gap-3.5 px-[22px] py-5">
-          <span className="grid h-10 w-10 flex-none place-items-center rounded-[11px] bg-(--bd-primary-50) text-(--bd-primary-600)">
-            <Globe size={20} aria-hidden="true" />
-          </span>
-          <div className="min-w-0">
-            <div className="truncate font-display text-[17px] font-extrabold text-ink-900">
-              {rootName}
+      {network ? (
+        <section className="bd-card bd-shadow overflow-hidden">
+          <div className="flex flex-wrap items-center gap-3.5 px-[22px] py-5">
+            <span className="grid h-10 w-10 flex-none place-items-center rounded-[11px] bg-(--bd-primary-50) text-(--bd-primary-600)">
+              <Globe size={20} aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <div className="truncate font-display text-[17px] font-extrabold text-ink-900">
+                {network.name}
+              </div>
+              <div className="text-[12.5px] text-ink-500">{t('orgs.network_note')}</div>
             </div>
-            <div className="text-[12.5px] text-ink-500">{t('orgs.network_note')}</div>
-          </div>
-          <div className="flex w-full min-w-[180px] flex-col gap-1.5 sm:ml-auto sm:w-auto">
-            <div className="flex justify-between gap-4 text-[12.5px] text-ink-500">
-              <span>{t('orgs.capacity')}</span>
-              <span>
-                <b className="text-ink-900">{totalOrgs}</b> / {maxOrgs}
-              </span>
-            </div>
-            <div
-              role="progressbar"
-              aria-label={t('orgs.capacity')}
-              aria-valuemin={0}
-              aria-valuemax={maxOrgs}
-              aria-valuenow={totalOrgs}
-              className="h-1.5 overflow-hidden rounded-full bg-(--bd-border-soft)"
-            >
-              <div
-                className={used >= NEAR_LIMIT ? 'h-full bg-amber-500' : 'h-full bg-(--bd-primary)'}
-                style={{ width: `${used * 100}%` }}
+            <div className="flex w-full min-w-[180px] flex-col gap-1.5 sm:ml-auto sm:w-auto">
+              <div className="flex justify-between gap-4 text-[12.5px] text-ink-500">
+                <span>{t('orgs.capacity')}</span>
+                <span>
+                  <b className="text-ink-900">{network.totalOrgs}</b> / {network.maxOrgs}
+                </span>
+              </div>
+              <UsageBar
+                label={t('orgs.capacity')}
+                value={network.totalOrgs}
+                max={network.maxOrgs}
               />
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
         {ORG_FILTERS.map((f) => {
@@ -140,9 +140,7 @@ export function NetworkOrgsView({
               tone={tone}
               label={filterLabel(f)}
               count={more ? `${n}+` : String(n)}
-              sub={
-                f === 'pending' && n === 0 ? t('orgs.tile.pending.none') : t(`orgs.tile.${f}.sub`)
-              }
+              sub={tileSub(f, n)}
               muted={f === 'pending' && n === 0}
               selected={filter === f}
               showLabel={t('org_home.tile_show')}
@@ -156,7 +154,7 @@ export function NetworkOrgsView({
       <section className="bd-card bd-shadow overflow-hidden">
         <header className="flex flex-wrap items-center gap-3 border-b border-(--bd-border-soft) px-[18px] py-3.5">
           <h2 className="flex items-center gap-2 font-display text-[15px] font-bold text-ink-900">
-            {t('orgs.network')}
+            {network ? t('orgs.network') : t('orgs.heading')}
             <span className="rounded-full bg-(--bd-border-soft) px-2 text-[12px] font-bold text-ink-500">
               {rows.filter((r) => !r.org.is_default).length}
             </span>
@@ -186,10 +184,9 @@ export function NetworkOrgsView({
                 className="min-w-0 flex-1 bg-transparent text-[13.5px] text-ink-900 outline-none"
               />
             </label>
-            <div
-              role="group"
+            <fieldset
               aria-label={t('orgs.view_label')}
-              className="flex gap-0.5 rounded-[10px] bg-(--bd-border-soft) p-[3px]"
+              className="m-0 flex min-w-0 gap-0.5 rounded-[10px] border-0 bg-(--bd-border-soft) p-[3px]"
             >
               {(
                 [
@@ -211,7 +208,7 @@ export function NetworkOrgsView({
                   {label}
                 </button>
               ))}
-            </div>
+            </fieldset>
           </div>
         </header>
 
@@ -231,7 +228,7 @@ export function NetworkOrgsView({
         </div>
 
         <div className="max-h-[min(640px,70vh)] overflow-auto overscroll-contain">
-          {view === 'tree' ? <RootRow name={rootName} orgs={orgs} /> : null}
+          {network && view === 'tree' ? <RootRow name={network.name} orgs={orgs} /> : null}
           {rows.length === 0 ? (
             <p className="px-[18px] py-10 text-center text-ink-500">
               {filter === 'pending' && !q ? t('orgs.empty_pending') : t('orgs.empty')}
@@ -241,7 +238,7 @@ export function NetworkOrgsView({
               <OrgRowLink
                 key={org.id}
                 org={org}
-                level={view === 'tree' ? level + 1 : 0}
+                level={view === 'tree' ? level + (network ? 1 : 0) : 0}
                 guide={lines ? { last, continues } : null}
               />
             ))
@@ -299,16 +296,17 @@ function TreeGuide({
   const lineClass = 'pointer-events-none absolute w-0 border-l-[1.5px] border-(--bd-border)';
   return (
     <>
-      {continues.map((on, i) =>
-        on ? (
+      {continues
+        .map((on, depth) => ({ on, depth }))
+        .filter((line) => line.on)
+        .map((line) => (
           <span
-            key={i}
+            key={`line-${line.depth}`}
             aria-hidden="true"
             className={`${lineClass} inset-y-0`}
-            style={{ left: `${LINE_X + i * STEP}px` }}
+            style={{ left: `${LINE_X + line.depth * STEP}px` }}
           />
-        ) : null,
-      )}
+        ))}
       <span
         aria-hidden="true"
         className={`${lineClass} top-0 ${last ? 'h-1/2' : 'bottom-0'}`}

@@ -8,9 +8,7 @@
 import type { ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import type { OrgHierarchyResponse } from '@aggregator-dpg/shared-primitives/user-org';
-
-/** Usage at or above this share of the maximum shows in amber. */
-const NEAR_LIMIT = 0.8;
+import { UsageBar } from './UsageBar';
 
 /**
  * Renders the hierarchy settings.
@@ -20,7 +18,6 @@ const NEAR_LIMIT = 0.8;
 export function HierarchySettings({ hierarchy }: Readonly<{ hierarchy: OrgHierarchyResponse }>) {
   const t = useTranslations('console');
   const { limits } = hierarchy;
-  const used = limits.max_total_orgs > 0 ? hierarchy.total_orgs / limits.max_total_orgs : 0;
   return (
     <div className="flex flex-col gap-5">
       <p className="text-[13px] text-ink-500">{t('orgs.hierarchy_hint')}</p>
@@ -41,19 +38,12 @@ export function HierarchySettings({ hierarchy }: Readonly<{ hierarchy: OrgHierar
           value={t('orgs.n_of_max', { count: hierarchy.total_orgs, max: limits.max_total_orgs })}
           sub={t('orgs.total_orgs_sub')}
         >
-          <div
-            role="progressbar"
-            aria-label={t('orgs.total_orgs')}
-            aria-valuemin={0}
-            aria-valuemax={limits.max_total_orgs}
-            aria-valuenow={hierarchy.total_orgs}
-            className="mt-1 h-1.5 overflow-hidden rounded-full bg-(--bd-border-soft)"
-          >
-            <div
-              className={used >= NEAR_LIMIT ? 'h-full bg-amber-500' : 'h-full bg-(--bd-primary)'}
-              style={{ width: `${Math.min(used, 1) * 100}%` }}
-            />
-          </div>
+          <UsageBar
+            label={t('orgs.total_orgs')}
+            value={hierarchy.total_orgs}
+            max={limits.max_total_orgs}
+            className="mt-1"
+          />
         </LimitCard>
       </div>
 

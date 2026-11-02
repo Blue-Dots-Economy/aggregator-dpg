@@ -40,17 +40,20 @@ const REASONS: Record<string, string> = {
  * @param orgId - The organisation to move.
  * @param orgName - Its name, for the dialog title.
  * @param knownAs - Its current "known as" key.
+ * @param parentId - Its current parent, marked in the list.
  * @param knownAsValues - The configured values, from `GET /v1/org/hierarchy`.
  */
 export function OrgMoveDialog({
   orgId,
   orgName,
   knownAs,
+  parentId,
   knownAsValues,
 }: Readonly<{
   orgId: string;
   orgName: string;
   knownAs: string | null;
+  parentId: string | null;
   knownAsValues: OrgHierarchyResponse['known_as']['values'];
 }>) {
   const t = useTranslations('console');
@@ -69,6 +72,7 @@ export function OrgMoveDialog({
           orgId={orgId}
           orgName={orgName}
           knownAs={knownAs}
+          currentParentId={parentId}
           knownAsValues={knownAsValues}
           onClose={() => setOpen(false)}
         />
@@ -82,12 +86,14 @@ function MoveDialog({
   orgId,
   orgName,
   knownAs,
+  currentParentId,
   knownAsValues,
   onClose,
 }: Readonly<{
   orgId: string;
   orgName: string;
   knownAs: string | null;
+  currentParentId: string | null;
   knownAsValues: OrgHierarchyResponse['known_as']['values'];
   onClose: () => void;
 }>) {
@@ -139,7 +145,8 @@ function MoveDialog({
   const ready = parent !== undefined && (!needKnownAs || newKnownAs !== '');
 
   const optionText = (o: ParentOption) => {
-    const name = o.known_as_name ? `${o.name} (${o.known_as_name})` : o.name;
+    const label = o.known_as_name ? `${o.name} (${o.known_as_name})` : o.name;
+    const name = o.id === currentParentId ? `${label} — ${t('org.move_current')}` : label;
     if (o.ok) return name;
     return `${name} — ${t(REASONS[o.reason ?? ''] ?? 'org.move_reason_other')}`;
   };

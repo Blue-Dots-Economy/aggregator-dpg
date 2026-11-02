@@ -21,7 +21,6 @@ import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.serv
 import { orgsBelow, topmostOwned } from '@/lib/console-org-options';
 import { OrgsTable } from '@/components/console/OrgsTable';
 import { HierarchySettings } from '@/components/console/HierarchySettings';
-import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
 import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
 import { ORG_FILTERS, type OrgFilter } from '@/lib/org-filters';
 import { ConsoleCollapsible, ConsoleSection } from '@/components/console/ConsoleUi';
@@ -36,7 +35,15 @@ export default async function ConsoleOrgsPage({
   const initialView = params.view === 'list' || params.status ? 'list' : 'tree';
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
-  if (!actor.me.is_network_admin) return <OwnerOrgs ownedIds={actor.me.orgs.map((o) => o.id)} />;
+  if (!actor.me.is_network_admin) {
+    return (
+      <OwnerOrgs
+        ownedIds={actor.me.orgs.map((o) => o.id)}
+        initialView={initialView}
+        initialFilter={initialFilter}
+      />
+    );
+  }
   const hierarchy = await consoleRead<OrgHierarchyResponse>('/v1/org/hierarchy');
   const network = await readNetworkOrgs(hierarchy.network.id);
   const pending = network.orgs.filter((o) => o.status === 'pending');
@@ -52,11 +59,13 @@ export default async function ConsoleOrgsPage({
           </div>
         ) : null}
         <NetworkOrgsView
-          rootName={hierarchy.network.name}
+          network={{
+            name: hierarchy.network.name,
+            totalOrgs: hierarchy.total_orgs,
+            maxOrgs: hierarchy.limits.max_total_orgs,
+          }}
           orgs={network.orgs}
           more={network.more}
-          totalOrgs={hierarchy.total_orgs}
-          maxOrgs={hierarchy.limits.max_total_orgs}
           initialView={initialView}
           initialFilter={initialFilter}
         />
@@ -77,33 +86,33 @@ export default async function ConsoleOrgsPage({
 }
 
 /**
- * An owner's view: one tree per topmost owned organisation, with everything
- * below it.
+ * An owner's view: the organisations it owns and everything below them, as
+ * a tree or a list.
  *
  * @param ownedIds - The organisations the owner owns.
+ * @param initialView - The view to open with.
+ * @param initialFilter - The status filter to open with.
  */
-async function OwnerOrgs({ ownedIds }: Readonly<{ ownedIds: string[] }>) {
+async function OwnerOrgs({
+  ownedIds,
+  initialView,
+  initialFilter,
+}: Readonly<{ ownedIds: string[]; initialView: 'tree' | 'list'; initialFilter: OrgFilter }>) {
   const t = await getTranslations('console');
   const orgs = await readReachableOrgs();
   const roots = topmostOwned(ownedIds, orgs);
   if (roots.length === 0) redirect('/console');
+  const shown = [...roots, ...roots.flatMap((r) => orgsBelow(r.id, orgs))];
   return (
     <>
       <Topbar title={t('orgs.heading')} subtitle={t('orgs.subtitle_owner')} />
       <div className="flex flex-col gap-6">
-        {roots.map((root) => (
-          <ConsoleSection key={root.id} title={root.name}>
-            <ChildOrgsTree
-              rootId={root.id}
-              rootName={root.name}
-              rootKnownAs={root.known_as_name ?? root.known_as}
-              rootTag={t('orgs.yours')}
-              orgs={orgsBelow(root.id, orgs)}
-              linkRows
-              more={false}
-            />
-          </ConsoleSection>
-        ))}
+        <NetworkOrgsView
+          orgs={shown}
+          more={false}
+          initialView={initialView}
+          initialFilter={initialFilter}
+        />
       </div>
     </>
   );

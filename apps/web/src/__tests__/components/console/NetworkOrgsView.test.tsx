@@ -47,11 +47,9 @@ function renderView(props: Partial<Parameters<typeof NetworkOrgsView>[0]> = {}) 
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
       <NetworkOrgsView
-        rootName="Blue Dots"
+        network={{ name: 'Blue Dots', totalOrgs: 4, maxOrgs: 50 }}
         orgs={orgs}
         more={false}
-        totalOrgs={4}
-        maxOrgs={50}
         {...props}
       />
     </NextIntlClientProvider>,
@@ -91,12 +89,22 @@ describe('NetworkOrgsView', () => {
     expect(orgLinks().some((a) => a.textContent?.includes('Default'))).toBe(false);
   });
 
+  it("starts an owner's tree at its own organisation, without the network", () => {
+    renderView({ network: undefined, orgs: orgs.slice(0, 2) });
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(screen.queryByText('Blue Dots')).toBeNull();
+    expect(orgLinks().map((a) => a.textContent)).toEqual([
+      expect.stringContaining('Edge Org A'),
+      expect.stringContaining('Edge Org B'),
+    ]);
+  });
+
   it('shows the network with its organisation limit', () => {
     renderView();
     expect(screen.getAllByText('Blue Dots').length).toBeGreaterThan(0);
     const bar = screen.getByRole('progressbar', { name: messages.console.orgs.capacity });
-    expect(bar).toHaveAttribute('aria-valuenow', '4');
-    expect(bar).toHaveAttribute('aria-valuemax', '50');
+    expect(bar).toHaveAttribute('value', '4');
+    expect(bar).toHaveAttribute('max', '50');
   });
 
   it('starts as a tree under the network, with each organisation opening its page', () => {

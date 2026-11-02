@@ -232,10 +232,10 @@ function SidebarPanel({
 
         <div className="p-3 shrink-0 relative" ref={accountRef}>
           {account.details && account.details.length > 0 && detailsOpen && (
-            <div
-              role="dialog"
+            <dialog
+              open
               aria-label={account.title}
-              className="absolute bottom-full left-3 right-3 mb-2 overflow-hidden rounded-[14px] border border-(--bd-border) bg-(--bd-card) shadow-xl"
+              className="absolute bottom-full left-3 right-3 mb-2 w-auto overflow-hidden rounded-[14px] border border-(--bd-border) bg-(--bd-card) p-0 text-inherit shadow-xl"
             >
               <div className="flex items-center gap-3 border-b border-(--bd-border-soft) bg-linear-to-br from-(--bd-tint-primary) to-(--bd-card) px-4 py-3.5">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-(--bd-brand) font-display text-[13px] font-bold text-white">
@@ -272,7 +272,7 @@ function SidebarPanel({
                   );
                 })}
               </dl>
-            </div>
+            </dialog>
           )}
           <div className="rounded-[12px] bg-linear-to-br from-(--bd-tint-primary) to-(--bd-card) border border-(--bd-border) p-3 flex items-center gap-2.5">
             {account.details && account.details.length > 0 ? (

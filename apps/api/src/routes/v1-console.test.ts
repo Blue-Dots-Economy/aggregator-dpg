@@ -750,7 +750,7 @@ describe('console routes /v1/user, /v1/org', () => {
         depth: 2,
       });
       const notice = mailer.outbox.find((m) => m.to === 'a@a.org');
-      expect(notice?.html).toContain('moved the organisation under Beta');
+      expect(notice?.html).toContain('moved it under Beta');
     });
 
     it('sets a new known_as with the move', async () => {

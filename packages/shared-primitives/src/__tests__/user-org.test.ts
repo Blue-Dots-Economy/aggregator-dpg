@@ -273,6 +273,22 @@ describe('user-org wire schemas', () => {
     expect(OrgMetadataUpdateRequestSchema.safeParse({ name: 'x' }).success).toBe(false);
   });
 
+  it('org website takes only http and https addresses', () => {
+    expect(OrgMetadataUpdateRequestSchema.safeParse({ url: 'http://x.test' }).success).toBe(true);
+    expect(OrgMetadataUpdateRequestSchema.safeParse({ url: 'HTTPS://x.test/a' }).success).toBe(
+      true,
+    );
+    for (const url of [
+      'javascript:alert(1)',
+      'data:text/html,hi',
+      'ftp://x.test',
+      'mailto:a@x.test',
+    ]) {
+      expect(OrgMetadataUpdateRequestSchema.safeParse({ url }).success).toBe(false);
+    }
+    expect(OrgMetadataUpdateRequestSchema.safeParse({ url: null }).success).toBe(true);
+  });
+
   it('org metadata update accepts a known_as key and refuses a parent id', () => {
     expect(OrgMetadataUpdateRequestSchema.parse({ known_as: 'district' })).toEqual({
       known_as: 'district',

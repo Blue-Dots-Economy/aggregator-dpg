@@ -323,6 +323,7 @@ async function reject(
   const mail = renderApplicantRejected({
     contactName: applicantName(aggregator, kcUser),
     association: aggregator.name,
+    entityLabel: 'coordinator',
     ...(input.reason ? { reason: input.reason } : {}),
   });
   const sent = await getMailer().send({

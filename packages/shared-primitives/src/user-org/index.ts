@@ -247,10 +247,22 @@ export const OrgSearchResponseSchema = z.object({
 export type OrgSearchResponse = z.infer<typeof OrgSearchResponseSchema>;
 
 /** `PATCH /v1/org/metadata/update/:id`. `name` is the network admin's only. */
+/**
+ * An organisation's website: a web address with an http or https scheme.
+ * Other schemes (such as `javascript:`) are refused, since the value is shown
+ * to people and passed to other systems.
+ */
+const OrgWebsiteSchema = z
+  .string()
+  .trim()
+  .url()
+  .max(2048)
+  .refine((u) => /^https?:\/\//i.test(u), { message: 'Must start with http:// or https://' });
+
 export const OrgMetadataUpdateRequestSchema = z
   .object({
     name: z.string().trim().min(2).max(200).optional(),
-    url: z.string().trim().url().max(2048).nullable().optional(),
+    url: OrgWebsiteSchema.nullable().optional(),
     locations: z.array(BecknLocationSchema).max(25).optional(),
     legal_name: z.string().trim().max(200).nullable().optional(),
     gst_number: z.string().trim().max(32).nullable().optional(),
