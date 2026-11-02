@@ -26,6 +26,19 @@ const orNull = (v: string) => (v.trim() ? v.trim() : null);
 /** The "known as" name, or the key when it is not configured. */
 const knownAsText = (o: Org) => o.known_as_name ?? o.known_as ?? '—';
 
+/**
+ * Whether a website is a full http or https address with a host. The form
+ * checks it itself (the browser's own check shows no message the page controls).
+ */
+function isWebAddress(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return (u.protocol === 'http:' || u.protocol === 'https:') && u.hostname !== '';
+  } catch {
+    return false;
+  }
+}
+
 export function OrgEditForm({
   org,
   editable,
@@ -65,6 +78,11 @@ export function OrgEditForm({
 
   async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
+    // The API takes only web addresses; say so here instead of a general error.
+    if (url.trim() && !isWebAddress(url.trim())) {
+      setMessage(t('org.url_invalid'));
+      return;
+    }
     const patch: Record<string, unknown> = {};
     if (canRename && name.trim() !== current.name) patch['name'] = name.trim();
     if (orNull(url) !== current.url) patch['url'] = orNull(url);
@@ -125,7 +143,7 @@ export function OrgEditForm({
 
   return (
     <ConsoleSection title={t('org.details')}>
-      <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
+      <form noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="org-name">{t('org.name')}</Label>

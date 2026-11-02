@@ -107,7 +107,7 @@ describe('aggregator-orgs routes', () => {
   };
 
   describe('one person per email/phone across coordinators and org owners (contact, 0025)', () => {
-    it('409 OWNER_ALREADY_REGISTERED before any write when a coordinator holds the owner email', async () => {
+    it('409 USER_EXISTS before any write when a coordinator holds the owner email', async () => {
       userStore.seed([
         buildCoordinator({
           contact: { name: 'Ravi', email: 'ravi@enable.org', phone: '+919999900000' },
@@ -120,9 +120,7 @@ describe('aggregator-orgs routes', () => {
         payload: orgBody,
       });
       expect(res.statusCode).toBe(409);
-      expect((res.json() as { error: { code: string } }).error.code).toBe(
-        'OWNER_ALREADY_REGISTERED',
-      );
+      expect((res.json() as { error: { code: string } }).error.code).toBe('USER_EXISTS');
       // Nothing half-provisioned: no org row, no KC group, no KC user.
       const orgs = await orgStore.listPending();
       expect(orgs.ok && orgs.value).toEqual([]);
@@ -1248,7 +1246,7 @@ describe('aggregator-orgs routes', () => {
   });
 
   it.each([
-    ['DUPLICATE_EMAIL', 'OWNER_ALREADY_REGISTERED'],
+    ['DUPLICATE_EMAIL', 'USER_EXISTS'],
     ['DUPLICATE_PHONE', 'PHONE_EXISTS'],
   ] as const)(
     'maps a %s store error (a race past the pre-check) to %s (409)',
@@ -1389,7 +1387,7 @@ describe('aggregator-orgs routes', () => {
     expect(found.ok && found.value).toBeNull();
   });
 
-  it('409 OWNER_ALREADY_REGISTERED (half-created org + group deleted) when the KC owner user already exists', async () => {
+  it('409 USER_EXISTS (half-created org + group deleted) when the KC owner user already exists', async () => {
     await idp.createUser({ email: 'dup-owner@enable.org' });
     const res = await app.inject({
       method: 'POST',
@@ -1398,12 +1396,32 @@ describe('aggregator-orgs routes', () => {
       payload: { ...orgBody, owner: { ...orgBody.owner, email: 'dup-owner@enable.org' } },
     });
     expect(res.statusCode).toBe(409);
-    expect((res.json() as { error: { code: string } }).error.code).toBe('OWNER_ALREADY_REGISTERED');
+    expect((res.json() as { error: { code: string } }).error.code).toBe('USER_EXISTS');
     const found = await orgStore.findByOwnerEmail('dup-owner@enable.org');
     // Deleted, not parked inactive: a row that never got a Keycloak owner
     // would keep the owner's contact and block a retry with PHONE_EXISTS.
     expect(found.ok && found.value).toBeNull();
     expect(idp.getGroup('grp-1')).toBeUndefined();
+  });
+
+  it('400 NAME_INVALID_CHARACTERS (half-created org deleted) when the IdP refuses the owner name', async () => {
+    idp.createUser = async () => ({
+      ok: false,
+      error: { code: 'INVALID_NAME', message: 'name has a refused character' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...orgBody,
+        owner: { ...orgBody.owner, name: 'Ravi (Ops)', email: 'bad-name@enable.org' },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('NAME_INVALID_CHARACTERS');
+    const found = await orgStore.findByOwnerEmail('bad-name@enable.org');
+    expect(found.ok && found.value).toBeNull();
   });
 
   it('503 IDP_UNAVAILABLE (half-created org + group deleted) when KC owner user creation fails for another reason', async () => {

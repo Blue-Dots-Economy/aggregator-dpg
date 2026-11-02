@@ -2,7 +2,8 @@
 
 /**
  * The network admin's organisation list. Each name opens the organisation, and
- * a pending org is approved or rejected in place; the page then refreshes so
+ * a pending org is approved, or rejected after a second step with an optional
+ * reason that is emailed to the owner, in place; the page then refreshes so
  * the hierarchy settings and the tree follow. A 409 ALREADY_DECIDED response updates the
  * row in place. Owner access is repaired on the organisation's page.
  */
@@ -28,6 +29,9 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
   const [rows, setRows] = useState(orgs);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  /** The org whose reject step is open, and the reason typed so far. */
+  const [rejecting, setRejecting] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
 
   const note = (id: string, text: string) => setNotes((n) => ({ ...n, [id]: text }));
   const setStatus = (id: string, status: OrgRow['status']) =>
@@ -35,10 +39,15 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
 
   async function decide(id: string, decision: 'approve' | 'reject') {
     setBusy(id);
-    const r = await sendConsole<OrgDecisionResponse>(`/api/console/org/decision/${id}`, 'POST', {
-      decision,
-    });
+    const text = reason.trim();
+    const r = await sendConsole<OrgDecisionResponse>(
+      `/api/console/org/decision/${id}`,
+      'POST',
+      decision === 'reject' && text ? { decision, reason: text } : { decision },
+    );
     setBusy(null);
+    setRejecting(null);
+    setReason('');
     if (r.ok) {
       setStatus(id, r.data.status);
       note(id, t('coordinator.decided'));
@@ -97,7 +106,38 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
               </td>
               {showActions ? (
                 <td>
-                  {o.status === 'pending' ? (
+                  {o.status === 'pending' && rejecting === o.id ? (
+                    <div className="flex min-w-[260px] flex-col gap-2">
+                      <label className="flex flex-col gap-1.5 whitespace-normal">
+                        <span className="bd-label">{t('coordinator.reason')}</span>
+                        <textarea
+                          className="bd-input min-h-[70px]"
+                          maxLength={500}
+                          value={reason}
+                          onChange={(e) => setReason(e.target.value)}
+                        />
+                      </label>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          kind="ghost"
+                          disabled={busy === o.id}
+                          onClick={() => {
+                            setRejecting(null);
+                            setReason('');
+                          }}
+                        >
+                          {t('coordinator.cancel')}
+                        </Button>
+                        <Button
+                          kind="danger"
+                          disabled={busy === o.id}
+                          onClick={() => void decide(o.id, 'reject')}
+                        >
+                          {t('orgs.reject_confirm')}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : o.status === 'pending' ? (
                     <div className="flex gap-2 justify-end">
                       <Button disabled={busy === o.id} onClick={() => void decide(o.id, 'approve')}>
                         {t('orgs.approve')}
@@ -105,7 +145,10 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
                       <Button
                         kind="danger"
                         disabled={busy === o.id}
-                        onClick={() => void decide(o.id, 'reject')}
+                        onClick={() => {
+                          setReason('');
+                          setRejecting(o.id);
+                        }}
                       >
                         {t('orgs.reject')}
                       </Button>

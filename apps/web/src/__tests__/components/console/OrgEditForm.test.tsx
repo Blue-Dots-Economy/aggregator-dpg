@@ -170,6 +170,17 @@ describe('<OrgEditForm />', () => {
     );
   });
 
+  it('refuses a website that is not an http or https address, without sending it', () => {
+    global.fetch = vi.fn() as never;
+    renderForm(baseOrg, true, true);
+    for (const value of ['javascript:alert(1)', 'example.org', 'not a url', 'https://']) {
+      fireEvent.change(screen.getByLabelText(messages.console.org.url), { target: { value } });
+      fireEvent.click(screen.getByRole('button', { name: messages.console.org.save }));
+      expect(screen.getByText(messages.console.org.url_invalid)).toBeInTheDocument();
+    }
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   it('includes a renamed name in the patch when the admin can rename', async () => {
     global.fetch = respond({ ...baseOrg, name: 'Acme Renamed' }, 200) as never;
     renderForm(baseOrg, true, true);

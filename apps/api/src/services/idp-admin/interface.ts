@@ -40,7 +40,9 @@ export type IdpError =
   | { code: 'USER_EXISTS'; message: string }
   | { code: 'USER_NOT_FOUND'; message: string }
   | { code: 'IDP_UNAVAILABLE'; message: string }
-  | { code: 'BAD_REQUEST'; message: string };
+  | { code: 'BAD_REQUEST'; message: string }
+  /** The IdP refused a character in the person's name. */
+  | { code: 'INVALID_NAME'; message: string };
 
 /**
  * Abstract IdP admin port. Concrete impls extend this base.

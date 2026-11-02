@@ -12,7 +12,7 @@ interface TopbarProps {
   leading?: ReactNode;
 }
 
-export function Topbar({ title, subtitle, right, leading }: TopbarProps) {
+export function Topbar({ title, subtitle, right, leading }: Readonly<TopbarProps>) {
   return (
     // Below `sm` the title and actions stack and the actions wrap.
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6 mb-6">

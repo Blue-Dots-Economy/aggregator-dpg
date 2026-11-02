@@ -62,7 +62,13 @@ function renderIt() {
   render(
     <StrictMode>
       <NextIntlClientProvider locale="en" messages={messages}>
-        <OrgMoveDialog orgId={ORG} orgName="Mysuru" knownAs="district" knownAsValues={VALUES} />
+        <OrgMoveDialog
+          orgId={ORG}
+          orgName="Mysuru"
+          knownAs="district"
+          parentId="s1"
+          knownAsValues={VALUES}
+        />
       </NextIntlClientProvider>
     </StrictMode>,
   );
@@ -134,7 +140,12 @@ describe('<OrgMoveDialog />', () => {
         name: `State Three (State) — ${messages.console.org.move_reason_known_as_depth}`,
       }),
     ).toBeDisabled();
-    expect(screen.getByRole('option', { name: 'State One (State)' })).not.toBeDisabled();
+    // The current parent is marked, and stays selectable for a change of "known as".
+    expect(
+      screen.getByRole('option', {
+        name: `State One (State) — ${messages.console.org.move_current}`,
+      }),
+    ).not.toBeDisabled();
     expect(screen.getByText('3 organisations will move.')).toBeInTheDocument();
     expect(submit()).toBeDisabled();
   });

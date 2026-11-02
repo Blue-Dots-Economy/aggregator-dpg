@@ -26,13 +26,13 @@ export function ConsoleSidebar({
   homeIsCoordinators = false,
   canViewAccess = false,
   account,
-}: {
+}: Readonly<{
   canManage?: boolean;
   /** The home page lists the caller's coordinators, so its link is named for them. */
   homeIsCoordinators?: boolean;
   canViewAccess?: boolean;
   account: SidebarAccount;
-}) {
+}>) {
   const t = useTranslations('console');
   const nav: NavItem[] = [
     { to: '/console/orgs', label: t('nav.organisations'), icon: 'briefcase' as const },

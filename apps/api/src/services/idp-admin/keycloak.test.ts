@@ -151,6 +151,21 @@ describe('KeycloakIdpAdmin', () => {
       if (!r.ok) expect(r.error.code).toBe('USER_EXISTS');
     });
 
+    it('returns INVALID_NAME when Keycloak refuses a character in the name', async () => {
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse())
+        .mockResolvedValueOnce(
+          textResponse(
+            '{"field":"lastName","errorMessage":"error-person-name-invalid-character","params":["lastName"]}',
+            400,
+          ),
+        );
+      const admin = makeAdmin(fetchMock as unknown as typeof fetch);
+      const r = await admin.createUser({ email: 'a@x.test', lastName: '(Ops)' });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.code).toBe('INVALID_NAME');
+    });
+
     it('returns BAD_REQUEST with truncated body text on an unexpected status', async () => {
       fetchMock
         .mockResolvedValueOnce(tokenResponse())

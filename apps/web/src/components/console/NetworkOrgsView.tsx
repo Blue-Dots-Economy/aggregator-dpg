@@ -31,14 +31,12 @@ import { orgsInTreeOrder } from '../../lib/console-org-options';
 import { ORG_FILTERS, countOrgs, matchesFilter, type OrgFilter } from '../../lib/org-filters';
 import { ConsoleStatusPill } from './ConsoleUi';
 import { CountTile, type TileTone } from './CountTile';
+import { UsageBar } from './UsageBar';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
 /** How the organisations are shown. */
 export type OrgsView = 'tree' | 'list';
-
-/** Usage at or above this share of the maximum shows in amber. */
-const NEAR_LIMIT = 0.8;
 
 const FILTER_TILE: Record<OrgFilter, { icon: LucideIcon; tone: TileTone }> = {
   all: { icon: Building2, tone: 'primary' },
@@ -50,11 +48,6 @@ const FILTER_TILE: Record<OrgFilter, { icon: LucideIcon; tone: TileTone }> = {
 /** Columns shared by the header and every row. */
 const COLS =
   'grid grid-cols-[minmax(0,1fr)_auto_72px] items-center gap-3.5 lg:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.9fr)_90px]';
-
-/** The share of the network's organisation limit in use, from 0 to 1. */
-function usedShare(network: Readonly<{ totalOrgs: number; maxOrgs: number }>): number {
-  return network.maxOrgs > 0 ? Math.min(network.totalOrgs / network.maxOrgs, 1) : 0;
-}
 
 /** Whether an organisation's name or "known as" contains the search text (lower-cased). */
 function matchesQuery(org: OrgRow, query: string): boolean {
@@ -126,23 +119,11 @@ export function NetworkOrgsView({
                   <b className="text-ink-900">{network.totalOrgs}</b> / {network.maxOrgs}
                 </span>
               </div>
-              <div
-                role="progressbar"
-                aria-label={t('orgs.capacity')}
-                aria-valuemin={0}
-                aria-valuemax={network.maxOrgs}
-                aria-valuenow={network.totalOrgs}
-                className="h-1.5 overflow-hidden rounded-full bg-(--bd-border-soft)"
-              >
-                <div
-                  className={
-                    usedShare(network) >= NEAR_LIMIT
-                      ? 'h-full bg-amber-500'
-                      : 'h-full bg-(--bd-primary)'
-                  }
-                  style={{ width: `${usedShare(network) * 100}%` }}
-                />
-              </div>
+              <UsageBar
+                label={t('orgs.capacity')}
+                value={network.totalOrgs}
+                max={network.maxOrgs}
+              />
             </div>
           </div>
         </section>
@@ -203,10 +184,9 @@ export function NetworkOrgsView({
                 className="min-w-0 flex-1 bg-transparent text-[13.5px] text-ink-900 outline-none"
               />
             </label>
-            <div
-              role="group"
+            <fieldset
               aria-label={t('orgs.view_label')}
-              className="flex gap-0.5 rounded-[10px] bg-(--bd-border-soft) p-[3px]"
+              className="m-0 flex min-w-0 gap-0.5 rounded-[10px] border-0 bg-(--bd-border-soft) p-[3px]"
             >
               {(
                 [
@@ -228,7 +208,7 @@ export function NetworkOrgsView({
                   {label}
                 </button>
               ))}
-            </div>
+            </fieldset>
           </div>
         </header>
 
@@ -316,16 +296,17 @@ function TreeGuide({
   const lineClass = 'pointer-events-none absolute w-0 border-l-[1.5px] border-(--bd-border)';
   return (
     <>
-      {continues.map((on, i) =>
-        on ? (
+      {continues
+        .map((on, depth) => ({ on, depth }))
+        .filter((line) => line.on)
+        .map((line) => (
           <span
-            key={i}
+            key={`line-${line.depth}`}
             aria-hidden="true"
             className={`${lineClass} inset-y-0`}
-            style={{ left: `${LINE_X + i * STEP}px` }}
+            style={{ left: `${LINE_X + line.depth * STEP}px` }}
           />
-        ) : null,
-      )}
+        ))}
       <span
         aria-hidden="true"
         className={`${lineClass} top-0 ${last ? 'h-1/2' : 'bottom-0'}`}

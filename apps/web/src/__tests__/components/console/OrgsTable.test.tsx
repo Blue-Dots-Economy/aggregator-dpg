@@ -120,6 +120,35 @@ describe('<OrgsTable />', () => {
     expect(refresh).toHaveBeenCalled();
   });
 
+  it('asks before rejecting and sends the reason to the owner', async () => {
+    global.fetch = respond({ id: pendingOrg.id, status: 'inactive', notified: true }, 200) as never;
+    renderTable([pendingOrg]);
+    fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.reject }));
+    expect(global.fetch).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(messages.console.coordinator.reason), {
+      target: { value: '  Add your website.  ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.reject_confirm }));
+    await waitFor(() =>
+      expect(screen.getByText(messages.console.status.inactive)).toBeInTheDocument(),
+    );
+    expect(global.fetch).toHaveBeenCalledWith(
+      `/api/console/org/decision/${pendingOrg.id}`,
+      expect.objectContaining({
+        body: JSON.stringify({ decision: 'reject', reason: 'Add your website.' }),
+      }),
+    );
+  });
+
+  it('cancels a reject without deciding', () => {
+    global.fetch = vi.fn() as never;
+    renderTable([pendingOrg]);
+    fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.reject }));
+    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.cancel }));
+    expect(screen.getByRole('button', { name: messages.console.orgs.approve })).toBeInTheDocument();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   it('shows the parent organisation', () => {
     renderTable([pendingOrg]);
     expect(screen.getByText(messages.console.orgs.col_parent)).toBeInTheDocument();
@@ -133,6 +162,7 @@ describe('<OrgsTable />', () => {
     ) as never;
     renderTable([pendingOrg]);
     fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.reject }));
+    fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.reject_confirm }));
     await waitFor(() =>
       expect(screen.getByText(messages.console.status.inactive)).toBeInTheDocument(),
     );

@@ -103,8 +103,8 @@ describe('NetworkOrgsView', () => {
     renderView();
     expect(screen.getAllByText('Blue Dots').length).toBeGreaterThan(0);
     const bar = screen.getByRole('progressbar', { name: messages.console.orgs.capacity });
-    expect(bar).toHaveAttribute('aria-valuenow', '4');
-    expect(bar).toHaveAttribute('aria-valuemax', '50');
+    expect(bar).toHaveAttribute('value', '4');
+    expect(bar).toHaveAttribute('max', '50');
   });
 
   it('starts as a tree under the network, with each organisation opening its page', () => {

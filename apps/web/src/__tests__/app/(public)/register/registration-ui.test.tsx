@@ -3,9 +3,11 @@
  * `useRegistrationFormState`, `RegistrationSubmitButton`,
  * `RegistrationErrorBanner`, and `RegistrationSuccessPanel`.
  */
-import { describe, it, expect } from 'vitest';
-import { render, screen, renderHook, act } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, renderHook, act, fireEvent } from '@testing-library/react';
+import { RjsfThemedForm } from '@/components/forms/RjsfThemed';
 import {
+  sharedRegistrationFormProps,
   useRegistrationFormState,
   RegistrationSubmitButton,
   RegistrationErrorBanner,
@@ -138,5 +140,55 @@ describe('RegistrationSuccessPanel', () => {
       'href',
       '/login',
     );
+  });
+});
+
+describe('person name check', () => {
+  const schema = {
+    type: 'object',
+    properties: {
+      owner: {
+        type: 'object',
+        title: 'Organisation Owner',
+        properties: { name: { type: 'string', title: 'Owner Name' } },
+      },
+    },
+  } as const;
+
+  function renderWithName(name: string) {
+    const onSubmit = vi.fn();
+    const setState = vi.fn();
+    const props = sharedRegistrationFormProps({
+      formData: { owner: { name } },
+      setFormData: () => {},
+      setCanSubmit: () => {},
+      setState,
+      handleSubmit: onSubmit,
+      formSchema: schema as never,
+      onLocationResolved: () => {},
+      validationErrorTitle: 'Please fix the highlighted fields',
+      personName: { path: 'owner.name', message: (s) => `Remove: ${s}` },
+    });
+    render(
+      <RjsfThemedForm schema={schema as never} {...props}>
+        <button type="submit">Submit</button>
+      </RjsfThemedForm>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    return { onSubmit, setState };
+  }
+
+  it('shows the refused symbols on the name field and does not submit', () => {
+    const { onSubmit, setState } = renderWithName('Ravi Kumar (Ops)');
+    expect(screen.getByText('Remove: ( )')).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(setState).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'error', detail: expect.stringContaining('Remove: ( )') }),
+    );
+  });
+
+  it('submits an ordinary name', () => {
+    const { onSubmit } = renderWithName("Ravi D'Souza");
+    expect(onSubmit).toHaveBeenCalled();
   });
 });

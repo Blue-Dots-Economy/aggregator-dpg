@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
+import type { IChangeEvent } from '@rjsf/core';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
@@ -114,7 +115,7 @@ export function CoordinatorRegisterForm({
   // Invite mode: org is fixed by the invite, so no selector / no org list.
   const inviteMode = Boolean(inviteToken);
 
-  const { state, setState, canSubmit, setCanSubmit, errorRef } = useRegistrationFormState();
+  const { state, setState, setCanSubmit, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
     // `[0,0]` means "not resolved yet" (`geo` is required). The real coordinate
     // is added at submit.
@@ -181,6 +182,21 @@ export function CoordinatorRegisterForm({
       name: { ...((uiSchema['name'] as Record<string, unknown>) ?? {}), 'ui:widget': 'hidden' },
     };
   }, [uiSchema, inheritsFromOrg]);
+
+  /** Opens the consent gate, or says that an organisation must be chosen first. */
+  const submitWithOrg = (e: IChangeEvent<Record<string, unknown>>): void => {
+    if (!inviteMode && !orgId) {
+      setState({
+        status: 'error',
+        title: t('org_selector_required'),
+        detail: '',
+        code: 'CLIENT_VALIDATION',
+        requestId: '',
+      });
+      return;
+    }
+    handleSubmit(e);
+  };
 
   /** Runs after the gate is accepted: stamps consent and posts. */
   const submitWithConsent = async (): Promise<void> => {
@@ -291,16 +307,21 @@ export function CoordinatorRegisterForm({
           setFormData,
           setCanSubmit,
           setState,
-          handleSubmit,
+          handleSubmit: submitWithOrg,
           formSchema,
           consentContent,
           onLocationResolved: setResolvedPlace,
           validationErrorTitle: t('validation_error_title'),
+          personName: {
+            path: 'contact.name',
+            message: (symbols) => t('name_symbols', { symbols }),
+          },
         })}
       >
         <RegistrationSubmitButton
           submitting={state.status === 'submitting'}
-          canSubmit={canSubmit && (inviteMode || Boolean(orgId))}
+          // Never disabled for an invalid field: a click shows what to fix.
+          canSubmit
           label={t('submit')}
           submittingLabel={t('submitting')}
         />

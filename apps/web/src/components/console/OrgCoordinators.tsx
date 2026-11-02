@@ -8,7 +8,7 @@
  */
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { Clock, Eye, UserCheck, Users, UserX, type LucideIcon } from 'lucide-react';
 import { I } from '../../icons';
@@ -49,6 +49,22 @@ const TILE: Record<Filter, { icon: LucideIcon; tone: TileTone }> = {
 function TileIcon({ f }: Readonly<{ f: Filter }>) {
   const Icon = TILE[f].icon;
   return <Icon size={20} strokeWidth={2} />;
+}
+
+/**
+ * Renders the link part of a rich message (`<link>…</link>`) as a link to `href`.
+ *
+ * @param href - Where the link goes.
+ * @returns The chunk renderer for `t.rich`.
+ */
+function richLink(href: string) {
+  return function RichLink(chunks: ReactNode) {
+    return (
+      <Link href={href} className="font-semibold text-(--bd-primary-600) hover:underline">
+        {chunks}
+      </Link>
+    );
+  };
 }
 
 /** Whether a row matches the search text (already lower-cased). */
@@ -137,10 +153,9 @@ export function OrgCoordinators({
                 className="min-w-0 flex-1 bg-transparent text-[13.5px] text-ink-900 outline-none"
               />
             </label>
-            <div
-              role="group"
+            <fieldset
               aria-label={t('filter_label')}
-              className="flex gap-0.5 overflow-x-auto rounded-[10px] bg-(--bd-border-soft) p-[3px]"
+              className="m-0 min-w-0 border-0 flex gap-0.5 overflow-x-auto rounded-[10px] bg-(--bd-border-soft) p-[3px]"
             >
               {FILTERS.map((f) => (
                 <button
@@ -156,7 +171,7 @@ export function OrgCoordinators({
                   {label(f)}
                 </button>
               ))}
-            </div>
+            </fieldset>
           </div>
         </header>
 
@@ -235,14 +250,7 @@ export function OrgCoordinators({
           <p className="border-t border-(--bd-border-soft) px-[18px] py-3 text-[12.5px] text-ink-500">
             {t.rich('partial', {
               count: rows.length,
-              link: (chunks) => (
-                <Link
-                  href={allHref}
-                  className="font-semibold text-(--bd-primary-600) hover:underline"
-                >
-                  {chunks}
-                </Link>
-              ),
+              link: richLink(allHref),
             })}
           </p>
         )}

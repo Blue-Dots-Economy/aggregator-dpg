@@ -11,7 +11,10 @@ import Link from 'next/link';
 import { useEffect, useRef, useState, type RefObject, type JSX } from 'react';
 import { useTranslations } from 'next-intl';
 import type { IChangeEvent } from '@rjsf/core';
-import type { RJSFSchema } from '@rjsf/utils';
+import type { FormValidation, RJSFSchema } from '@rjsf/utils';
+import { refusedNameCharacters } from '@aggregator-dpg/shared-primitives/person-name';
+import type { RJSFValidationError } from '@rjsf/utils';
+import { readableFormErrors } from '../../[org]/[slug]/PublicRegistrationView';
 import { I } from '../../../icons';
 import type { ConsentDoc } from '../../../components/consent/consent-docs';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
@@ -115,6 +118,34 @@ export interface SharedFormWiring {
   onLocationResolved: (place: ResolvedPlace | null) => void;
   /** Localised heading for the client-side validation banner. */
   validationErrorTitle: string;
+  /**
+   * The person's name field (a dotted path such as `owner.name`) and the
+   * message for symbols the sign-in system refuses, given those symbols.
+   */
+  personName?: { path: string; message: (symbols: string) => string } | undefined;
+}
+
+/**
+ * Adds an error to the person's name field when it holds a symbol the sign-in
+ * system refuses, so the form shows it on that field instead of failing later.
+ */
+function personNameValidator(
+  personName: NonNullable<SharedFormWiring['personName']>,
+): (data: Record<string, unknown> | undefined, errors: FormValidation) => FormValidation {
+  return (data, errors) => {
+    const keys = personName.path.split('.');
+    let value: unknown = data;
+    let field: unknown = errors;
+    for (const k of keys) {
+      value = (value as Record<string, unknown> | undefined)?.[k];
+      field = (field as Record<string, unknown> | undefined)?.[k];
+    }
+    const symbols = typeof value === 'string' ? refusedNameCharacters(value) : [];
+    if (symbols.length > 0 && field && typeof (field as FormValidation).addError === 'function') {
+      (field as FormValidation).addError(personName.message(symbols.join(' ')));
+    }
+    return errors;
+  };
 }
 
 /**
@@ -132,6 +163,11 @@ export function sharedRegistrationFormProps(wiring: SharedFormWiring): {
   onValidityChange: (valid: boolean) => void;
   onSubmit: (e: IChangeEvent<Record<string, unknown>>) => void;
   onError: (errs: AjvLikeError[]) => void;
+  transformErrors: (errs: RJSFValidationError[]) => RJSFValidationError[];
+  customValidate?: (
+    data: Record<string, unknown> | undefined,
+    errors: FormValidation,
+  ) => FormValidation;
   showErrorList: false;
   focusOnFirstError: true;
   noHtml5Validate: true;
@@ -156,6 +192,9 @@ export function sharedRegistrationFormProps(wiring: SharedFormWiring): {
         requestId: JSON.stringify(errs, null, 2),
       });
     },
+    ...(wiring.personName ? { customValidate: personNameValidator(wiring.personName) } : {}),
+    // Shared field-error wording: a bad web address reads as a sentence, never a regex.
+    transformErrors: (errs) => readableFormErrors(errs, wiring.formSchema),
     showErrorList: false,
     focusOnFirstError: true,
     noHtml5Validate: true,
