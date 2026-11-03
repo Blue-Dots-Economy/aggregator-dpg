@@ -758,7 +758,7 @@
       "col_actions": "Actions",
       "depth": "Depth {depth}",
       "hierarchy": "Hierarchy settings",
-      "hierarchy_hint": "ಇವುಗಳನ್ನು ನೆಟ್‌ವರ್ಕ್ ಸ್ಥಾಪಿಸುವಾಗ ನಿಗದಿಪಡಿಸಲಾಗುತ್ತದೆ ಮತ್ತು ಇಲ್ಲಿ ಬದಲಾಯಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.",
+      "hierarchy_hint": "ಮಿತಿಗಳನ್ನು ನೆಟ್‌ವರ್ಕ್ ಸ್ಥಾಪಿಸುವಾಗ ನಿಗದಿಪಡಿಸಲಾಗುತ್ತದೆ ಮತ್ತು ಇಲ್ಲಿ ಬದಲಾಯಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.",
       "max_depth": "Maximum depth",
       "max_children": "Child organisations per organisation",
       "no_limit": "No limit",

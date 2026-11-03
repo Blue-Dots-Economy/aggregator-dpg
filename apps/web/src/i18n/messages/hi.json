@@ -758,7 +758,7 @@
       "col_actions": "Actions",
       "depth": "Depth {depth}",
       "hierarchy": "Hierarchy settings",
-      "hierarchy_hint": "ये नेटवर्क सेटअप के समय तय होते हैं और यहाँ बदले नहीं जा सकते।",
+      "hierarchy_hint": "सीमाएँ नेटवर्क सेटअप के समय तय होती हैं और यहाँ बदली नहीं जा सकतीं।",
       "max_depth": "Maximum depth",
       "max_children": "Child organisations per organisation",
       "no_limit": "No limit",
