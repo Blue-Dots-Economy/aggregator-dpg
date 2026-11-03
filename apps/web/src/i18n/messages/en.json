@@ -49,7 +49,6 @@
     "submitting": "Submitting…",
     "validation_error_title": "Please fix the highlighted fields",
     "page_title": "[[User]] Registration",
-    "owner_page_title": "Register as aggregator owner",
     "org_page_title": "[[Org]] Registration",
     "owner_invite": {
       "page_title": "Invite [[users]]",
