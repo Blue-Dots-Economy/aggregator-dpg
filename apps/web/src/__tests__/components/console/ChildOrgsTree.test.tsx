@@ -31,6 +31,7 @@ function row(id: string, name: string, parentId: string, overrides: Partial<OrgR
     gst_number: null,
     known_as: 'aggregator',
     known_as_name: 'Aggregator',
+    child_known_as: [],
     depth: 1,
     parent_id: parentId,
     parent_name: null,

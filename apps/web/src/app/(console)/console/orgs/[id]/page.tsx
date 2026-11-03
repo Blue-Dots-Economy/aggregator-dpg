@@ -2,11 +2,13 @@
  * Organisation detail page: owner, place in the tree, counts and the details form.
  *
  * The Default org and the root are read-only. Only the org's owner edits its
- * details, the name included; the network admin sees them read-only. Only the
- * network admin can change an org's "known as" value, re-grant an active org's
- * owner access, assign roles to its owner, or move it under another parent. An
- * owner also views, read-only, the organisations below its own. The
- * organisations below an aggregator org are listed read-only.
+ * details, the name included; the network admin sees them read-only. The owner
+ * of the parent org sets the org's "known as" value; the org's owner defines
+ * the values for the organisations under it. Only the network admin can
+ * re-grant an active org's owner access, assign roles to its owner, or move it
+ * under another parent. An owner also views, read-only, the organisations
+ * below its own. The organisations below an aggregator org are listed
+ * read-only.
  */
 
 import Link from 'next/link';
@@ -29,12 +31,13 @@ import { CopyButton } from '@/components/console/CopyButton';
 import { initialsOf } from '@/lib/initials';
 import { I } from '@/icons';
 import { OrgEditForm } from '@/components/console/OrgEditForm';
+import { KnownAsPicker } from '@/components/console/KnownAsPicker';
+import { ChildKnownAsEditor } from '@/components/console/ChildKnownAsEditor';
 import { OrgMoveDialog } from '@/components/console/OrgMoveDialog';
 import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
 import { RolesPanel } from '@/components/console/RolesPanel';
 import { OwnerAccessRepair } from '@/components/console/OwnerAccessRepair';
 import { can } from '@/lib/capabilities';
-import { knownAsChoicesAt } from '@/lib/console-org-options';
 import { loadOrgSchema } from '@/lib/org-schema.server';
 
 /** How many organisations below this one the page lists. */
@@ -73,10 +76,13 @@ export default async function ConsoleOrgPage({
           limit: CHILD_LIMIT,
         })
       : null;
-  // Limits and "known as" values; only the network admin can read them.
+  // Tree limits; only the network admin can read them.
   const hierarchy = canRename ? await consoleRead<OrgHierarchyResponse>('/v1/org/hierarchy') : null;
-  const knownAsOptions =
-    hierarchy && editable ? knownAsChoicesAt(hierarchy.known_as.values, org.depth) : [];
+  const isOwner = owner.id === actor.me.user.id;
+  const aggregatorOrg = org.org_type === 'aggregator' && !org.is_default;
+  // Null when the viewer does not own the parent.
+  const knownAsOptions = aggregatorOrg ? data.known_as_options : null;
+  const canEditChildKnownAs = aggregatorOrg && isOwner && data.can_have_children;
   // The Default org and the root never move; only pending and active orgs can.
   const canMove =
     hierarchy !== null && editable && (org.status === 'pending' || org.status === 'active');
@@ -139,14 +145,7 @@ export default async function ConsoleOrgPage({
       <div className="flex flex-col gap-6">
         {org.org_type === 'aggregator' ? (
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {canMove && hierarchy ? (
-              <OrgMoveDialog
-                orgId={org.id}
-                orgName={org.name}
-                knownAs={org.known_as}
-                knownAsValues={hierarchy.known_as.values}
-              />
-            ) : null}
+            {canMove && hierarchy ? <OrgMoveDialog orgId={org.id} orgName={org.name} /> : null}
             <Link className={buttonClass('soft')} href={`/console/coordinators?org_id=${org.id}`}>
               <I.users size={15} />
               {t('org.view_coordinators')}
@@ -220,14 +219,17 @@ export default async function ConsoleOrgPage({
             sub={t('org.tile.level_sub')}
           />
         </div>
-        <OrgEditForm
-          org={org}
-          editable={editable}
-          canEdit={owner.id === actor.me.user.id}
-          canSetKnownAs={canRename}
-          knownAsOptions={knownAsOptions}
-          orgSchema={orgSchema}
-        />
+        {knownAsOptions ? (
+          <ConsoleSection title={t('org.known_as_pick_title')}>
+            <KnownAsPicker org={org} options={knownAsOptions} />
+          </ConsoleSection>
+        ) : null}
+        <OrgEditForm org={org} editable={editable} canEdit={isOwner} orgSchema={orgSchema} />
+        {canEditChildKnownAs ? (
+          <ConsoleSection title={t('org.child_known_as_title')}>
+            <ChildKnownAsEditor orgId={org.id} values={org.child_known_as} />
+          </ConsoleSection>
+        ) : null}
         {children ? (
           <div id="children" className="scroll-mt-6">
             <ConsoleSection title={t('org.children')}>

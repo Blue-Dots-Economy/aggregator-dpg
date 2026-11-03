@@ -2,8 +2,8 @@
  * Unit tests for OrgMoveDialog: moving an organisation under a new parent.
  *
  * Covers: loading the candidate parents, a refused candidate shown disabled
- * with its reason, the number of organisations that move, a move that keeps
- * the "known as" value, a move that needs a new value, and an error.
+ * with its reason, the number of organisations that move, the "known as"
+ * hint, a move that sends only the parent, and an error.
  */
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import { StrictMode } from 'react';
@@ -17,12 +17,6 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
 import { OrgMoveDialog } from '@/components/console/OrgMoveDialog';
 
 const ORG = '00000000-0000-4000-8000-0000000000d1';
-
-const VALUES = [
-  { key: 'aggregator', name: 'Aggregator', depths: null, system: true, org_count: 2 },
-  { key: 'state', name: 'State', depths: [1], system: false, org_count: 1 },
-  { key: 'district', name: 'District', depths: [2], system: false, org_count: 1 },
-];
 
 const OPTIONS = {
   subtree_size: 3,
@@ -43,7 +37,7 @@ const OPTIONS = {
       depth: 1,
       known_as_name: 'State',
       ok: false,
-      reason: 'KNOWN_AS_DEPTH',
+      reason: 'SOMETHING_NEW',
     },
   ],
 };
@@ -62,7 +56,7 @@ function renderIt() {
   render(
     <StrictMode>
       <NextIntlClientProvider locale="en" messages={messages}>
-        <OrgMoveDialog orgId={ORG} orgName="Mysuru" knownAs="district" knownAsValues={VALUES} />
+        <OrgMoveDialog orgId={ORG} orgName="Mysuru" />
       </NextIntlClientProvider>
     </StrictMode>,
   );
@@ -131,44 +125,24 @@ describe('<OrgMoveDialog />', () => {
     expect(refused).toBeDisabled();
     expect(
       screen.getByRole('option', {
-        name: `State Three (State) — ${messages.console.org.move_reason_known_as_depth}`,
+        name: `State Three (State) — ${messages.console.org.move_reason_other}`,
       }),
     ).toBeDisabled();
     expect(screen.getByRole('option', { name: 'State One (State)' })).not.toBeDisabled();
     expect(screen.getByText('3 organisations will move.')).toBeInTheDocument();
+    expect(screen.getByText(messages.console.org.move_hint_known_as)).toBeInTheDocument();
     expect(submit()).toBeDisabled();
   });
 
-  it('moves under a parent where the value is allowed, sending only the parent', async () => {
+  it('moves under the chosen parent, sending only the parent', async () => {
     global.fetch = fetchWith(json({ id: ORG })) as never;
     renderIt();
     fireEvent.change(await parentSelect(), { target: { value: 's1' } });
-    expect(screen.queryByLabelText(messages.console.org.move_known_as)).toBeNull();
     fireEvent.click(submit());
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(global.fetch).toHaveBeenCalledWith(
       `/api/console/org/parent/${ORG}`,
       expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ parent_id: 's1' }) }),
-    );
-  });
-
-  it('asks for a new value when the current one is not allowed at the new depth', async () => {
-    global.fetch = fetchWith(json({ id: ORG })) as never;
-    renderIt();
-    fireEvent.change(await parentSelect(), { target: { value: 'root' } });
-    const knownAs = screen.getByLabelText(messages.console.org.move_known_as);
-    expect(screen.getByRole('option', { name: 'State' })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'District' })).toBeNull();
-    expect(submit()).toBeDisabled();
-    fireEvent.change(knownAs, { target: { value: 'state' } });
-    fireEvent.click(submit());
-    await waitFor(() =>
-      expect(global.fetch).toHaveBeenCalledWith(
-        `/api/console/org/parent/${ORG}`,
-        expect.objectContaining({
-          body: JSON.stringify({ parent_id: 'root', known_as: 'state' }),
-        }),
-      ),
     );
   });
 

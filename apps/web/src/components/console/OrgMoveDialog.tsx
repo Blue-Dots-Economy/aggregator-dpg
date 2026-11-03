@@ -5,23 +5,19 @@
  * organisation, with every organisation below it, under a new parent.
  *
  * The dialog reads the candidate parents when it opens. A candidate the move
- * would fail for is disabled and shows the reason. When the org's "known as"
- * value is not allowed at the new depth, the dialog asks for a new value and
- * sends it with the move.
+ * would fail for is disabled and shows the reason. The moved org keeps its
+ * "known as" value when the new parent's list has it; otherwise the API gives
+ * it the new parent's default.
  */
 
 import { useEffect, useRef, useState, type SubmitEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { FolderInput } from 'lucide-react';
-import type {
-  OrgHierarchyResponse,
-  OrgParentOptionsResponse,
-} from '@aggregator-dpg/shared-primitives/user-org';
+import type { OrgParentOptionsResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { Label } from '../ui/Label';
 import { errorKey, sendConsole, type ConsoleError } from '../../lib/console-client';
-import { knownAsChoicesAt } from '../../lib/console-org-options';
 
 type ParentOption = OrgParentOptionsResponse['options'][number];
 
@@ -31,7 +27,6 @@ const REASONS: Record<string, string> = {
   PARENT_CYCLE: 'org.move_reason_cycle',
   CHILD_LIMIT: 'org.move_reason_full',
   DEPTH_LIMIT: 'org.move_reason_depth',
-  KNOWN_AS_DEPTH: 'org.move_reason_known_as_depth',
 };
 
 /**
@@ -39,19 +34,13 @@ const REASONS: Record<string, string> = {
  *
  * @param orgId - The organisation to move.
  * @param orgName - Its name, for the dialog title.
- * @param knownAs - Its current "known as" key.
- * @param knownAsValues - The configured values, from `GET /v1/org/hierarchy`.
  */
 export function OrgMoveDialog({
   orgId,
   orgName,
-  knownAs,
-  knownAsValues,
 }: Readonly<{
   orgId: string;
   orgName: string;
-  knownAs: string | null;
-  knownAsValues: OrgHierarchyResponse['known_as']['values'];
 }>) {
   const t = useTranslations('console');
   const [open, setOpen] = useState(false);
@@ -64,31 +53,19 @@ export function OrgMoveDialog({
       >
         {t('org.move')}
       </Button>
-      {open ? (
-        <MoveDialog
-          orgId={orgId}
-          orgName={orgName}
-          knownAs={knownAs}
-          knownAsValues={knownAsValues}
-          onClose={() => setOpen(false)}
-        />
-      ) : null}
+      {open ? <MoveDialog orgId={orgId} orgName={orgName} onClose={() => setOpen(false)} /> : null}
     </>
   );
 }
 
-/** The open dialog: candidate parents, an optional new value, and the submit. */
+/** The open dialog: candidate parents and the submit. */
 function MoveDialog({
   orgId,
   orgName,
-  knownAs,
-  knownAsValues,
   onClose,
 }: Readonly<{
   orgId: string;
   orgName: string;
-  knownAs: string | null;
-  knownAsValues: OrgHierarchyResponse['known_as']['values'];
   onClose: () => void;
 }>) {
   const t = useTranslations('console');
@@ -96,7 +73,6 @@ function MoveDialog({
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [data, setData] = useState<OrgParentOptionsResponse | null>(null);
   const [parentId, setParentId] = useState('');
-  const [newKnownAs, setNewKnownAs] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -134,9 +110,7 @@ function MoveDialog({
   }, [orgId, t]);
 
   const parent = data?.options.find((o) => o.id === parentId);
-  const allowed = parent ? knownAsChoicesAt(knownAsValues, parent.depth + 1) : [];
-  const needKnownAs = parent !== undefined && !allowed.some((v) => v.key === knownAs);
-  const ready = parent !== undefined && (!needKnownAs || newKnownAs !== '');
+  const ready = parent !== undefined;
 
   const optionText = (o: ParentOption) => {
     const name = o.known_as_name ? `${o.name} (${o.known_as_name})` : o.name;
@@ -150,7 +124,6 @@ function MoveDialog({
     setBusy(true);
     const r = await sendConsole(`/api/console/org/parent/${orgId}`, 'PATCH', {
       parent_id: parentId,
-      ...(needKnownAs ? { known_as: newKnownAs } : {}),
     });
     setBusy(false);
     if (r.ok) {
@@ -186,7 +159,6 @@ function MoveDialog({
                 aria-required
                 onChange={(e) => {
                   setParentId(e.target.value);
-                  setNewKnownAs('');
                   setMessage(null);
                 }}
               >
@@ -198,26 +170,7 @@ function MoveDialog({
                 ))}
               </select>
             </div>
-            {needKnownAs ? (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="move-known-as">{t('org.move_known_as')}</Label>
-                <select
-                  id="move-known-as"
-                  className="bd-input"
-                  value={newKnownAs}
-                  aria-required
-                  onChange={(e) => setNewKnownAs(e.target.value)}
-                >
-                  <option value="">{t('org.move_known_as_placeholder')}</option>
-                  {allowed.map((v) => (
-                    <option key={v.key} value={v.key}>
-                      {v.name}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-[12px] text-ink-500">{t('org.move_known_as_hint')}</span>
-              </div>
-            ) : null}
+            <p className="text-[12px] text-ink-500">{t('org.move_hint_known_as')}</p>
             <p className="text-[13px] text-ink-600">
               {t('org.move_count', { count: data.subtree_size })}
             </p>

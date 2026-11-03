@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { sendConsole, errorKey } from '@/lib/console-client';
+import { sendConsole, errorKey, setOrgKnownAs, setOrgChildKnownAs } from '@/lib/console-client';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -49,6 +49,37 @@ describe('sendConsole (console-client)', () => {
   });
 });
 
+describe('known_as calls (console-client)', () => {
+  const ID = '00000000-0000-4000-8000-0000000000e1';
+  beforeEach(() => {
+    global.fetch = vi.fn();
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('setOrgKnownAs sends the key to the known-as route', async () => {
+    vi.mocked(global.fetch).mockResolvedValue(json({ id: ID }));
+    const res = await setOrgKnownAs(ID, 'district');
+    expect(res.ok).toBe(true);
+    expect(global.fetch).toHaveBeenCalledWith(
+      `/api/console/org/known-as/${ID}`,
+      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ known_as: 'district' }) }),
+    );
+  });
+
+  it('setOrgChildKnownAs sends the list to the child-known-as route', async () => {
+    vi.mocked(global.fetch).mockResolvedValue(json({ id: ID }));
+    const values = [
+      { key: 'district', name: 'District' },
+      { name: 'Block', default: true as const },
+    ];
+    await setOrgChildKnownAs(ID, values);
+    expect(global.fetch).toHaveBeenCalledWith(
+      `/api/console/org/child-known-as/${ID}`,
+      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ values }) }),
+    );
+  });
+});
+
 describe('errorKey (console-client)', () => {
   it('maps 429 to rate_limited', () => {
     expect(errorKey({ status: 429, error: {} })).toBe('errors.rate_limited');
@@ -64,7 +95,6 @@ describe('errorKey (console-client)', () => {
     ['ORG_CHILD_LIMIT', 409, 'errors.child_limit'],
     ['ORG_TOTAL_LIMIT', 409, 'errors.total_limit'],
     ['ORG_PARENT_CYCLE', 400, 'errors.parent_cycle'],
-    ['KNOWN_AS_DEPTH', 400, 'errors.known_as_depth'],
   ])('maps %s', (code, status, key) => {
     expect(errorKey({ status, error: { code } })).toBe(key);
   });

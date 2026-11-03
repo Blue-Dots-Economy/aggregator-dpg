@@ -25,6 +25,7 @@ const org = (id: string, name: string, over: Partial<Row> = {}): Row => ({
   gst_number: null,
   known_as: null,
   known_as_name: null,
+  child_known_as: [],
   depth: 1,
   parent_id: 'root',
   parent_name: 'Blue Dots',

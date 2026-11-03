@@ -129,6 +129,7 @@ const orgRow = (id: string, name: string, over: Partial<OrgRow> = {}): OrgRow =>
   gst_number: null,
   known_as: 'district',
   known_as_name: 'District',
+  child_known_as: [],
   depth: 2,
   parent_id: null,
   parent_name: null,

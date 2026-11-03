@@ -13,7 +13,6 @@
 
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import { Lock } from 'lucide-react';
 import type { OrgHierarchyResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
@@ -60,15 +59,7 @@ export default async function ConsoleOrgsPage({
           initialView={initialView}
           initialFilter={initialFilter}
         />
-        <ConsoleCollapsible
-          title={t('orgs.hierarchy')}
-          hint={
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-(--bd-border-soft) px-2.5 py-0.5 text-[12px] font-semibold text-ink-500">
-              <Lock size={12} aria-hidden="true" />
-              {t('orgs.read_only')}
-            </span>
-          }
-        >
+        <ConsoleCollapsible title={t('orgs.hierarchy')}>
           <HierarchySettings hierarchy={hierarchy} />
         </ConsoleCollapsible>
       </div>

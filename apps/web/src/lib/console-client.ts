@@ -7,6 +7,12 @@
  * @module apps/web/src/lib/console-client
  */
 
+import type {
+  Org,
+  OrgChildKnownAsUpdateRequest,
+  OrgKnownAsUpdateRequest,
+} from '@aggregator-dpg/shared-primitives/user-org';
+
 /** The API's error envelope, as far as the console reads it. */
 export interface ConsoleError {
   code?: string;
@@ -47,6 +53,34 @@ export async function sendConsole<T>(
 }
 
 /**
+ * Sets an organisation's "known as" value (owner of its parent).
+ *
+ * @param orgId - The organisation.
+ * @param knownAs - A key from the org's `known_as_options`.
+ * @returns The outcome, with the updated org on success.
+ */
+export function setOrgKnownAs(orgId: string, knownAs: string): Promise<ConsoleSendResult<Org>> {
+  const body: OrgKnownAsUpdateRequest = { known_as: knownAs };
+  return sendConsole<Org>(`/api/console/org/known-as/${orgId}`, 'PATCH', body);
+}
+
+/**
+ * Replaces the "known as" values an organisation defines for its direct
+ * children (its owner, or the network admin for the root).
+ *
+ * @param orgId - The organisation that defines the list.
+ * @param values - The full list; saved entries keep their key, new ones omit it.
+ * @returns The outcome, with the updated org (keys filled) on success.
+ */
+export function setOrgChildKnownAs(
+  orgId: string,
+  values: OrgChildKnownAsUpdateRequest['values'],
+): Promise<ConsoleSendResult<Org>> {
+  const body: OrgChildKnownAsUpdateRequest = { values };
+  return sendConsole<Org>(`/api/console/org/child-known-as/${orgId}`, 'PATCH', body);
+}
+
+/**
  * Returns the console message key for a failed call.
  *
  * @param r - A failed result.
@@ -70,7 +104,6 @@ export function errorKey(r: { status: number; error: ConsoleError }): string {
     ORG_CHILD_LIMIT: 'errors.child_limit',
     ORG_TOTAL_LIMIT: 'errors.total_limit',
     ORG_PARENT_CYCLE: 'errors.parent_cycle',
-    KNOWN_AS_DEPTH: 'errors.known_as_depth',
   };
   if (r.error.code && treeErrors[r.error.code]) return treeErrors[r.error.code]!;
   const fields = r.error.fields ?? {};

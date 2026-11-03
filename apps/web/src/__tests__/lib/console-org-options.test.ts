@@ -7,12 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
-import {
-  knownAsChoicesAt,
-  orgOptionsInTreeOrder,
-  orgsBelow,
-  topmostOwned,
-} from '@/lib/console-org-options';
+import { orgOptionsInTreeOrder, orgsBelow, topmostOwned } from '@/lib/console-org-options';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
@@ -34,6 +29,7 @@ const row = (
   gst_number: null,
   known_as: 'aggregator',
   known_as_name: 'Aggregator',
+  child_known_as: [],
   depth: 3,
   parent_id: parentId,
   parent_name: null,
@@ -100,28 +96,5 @@ describe('orgsBelow / topmostOwned', () => {
   it('keeps only owned orgs that sit under no other owned org', () => {
     expect(topmostOwned(['d', 's', 'y'], tree).map((o) => o.id)).toEqual(['y', 's']);
     expect(topmostOwned([], tree)).toEqual([]);
-  });
-});
-
-describe('knownAsChoicesAt', () => {
-  const values = [
-    { key: 'aggregator', name: 'Aggregator', depths: null, system: true, org_count: 3 },
-    { key: 'state', name: 'State', depths: [1], system: false, org_count: 1 },
-    { key: 'district', name: 'District', depths: [1, 2], system: false, org_count: 0 },
-    { key: 'partner', name: 'Partner', depths: null, system: false, org_count: 0 },
-  ];
-
-  it('keeps the system value, values for any depth, and values listing the depth', () => {
-    expect(knownAsChoicesAt(values, 2)).toEqual([
-      { key: 'aggregator', name: 'Aggregator' },
-      { key: 'district', name: 'District' },
-      { key: 'partner', name: 'Partner' },
-    ]);
-    expect(knownAsChoicesAt(values, 1).map((v) => v.key)).toEqual([
-      'aggregator',
-      'state',
-      'district',
-      'partner',
-    ]);
   });
 });
