@@ -286,7 +286,23 @@ names on any deployment; behaviour is unaffected.
    still carry `s3Key`. The new worker accepts both names for one release;
    the old name is dropped in a later release, once no old jobs remain.
    Deploy the worker before or together with the api.
-3. **API fields**: the api returns both the old and the new field for one
+3. **API fields**: where they are and who reads them today:
+
+   | Endpoint | Field | Read by |
+   |---|---|---|
+   | `POST /v1/bulk-uploads` (create) | `s3_key` (path of the uploaded CSV) | Nobody: typed in `apps/web/src/services/onboarding.service.ts` but never used |
+   | `GET /v1/bulk-uploads`, `GET /v1/bulk-uploads/:id` | `errors_csv_s3_key` (path of the errors CSV, or null) | The web upload screen: shows the "download errors" button only when it is set (`CSVUpload.tsx:380`) |
+   | `GET /v1/bulk-uploads/:id/errors.csv` | `s3_key` (path of the errors CSV) | Nobody: typed in the web app but never used |
+
+   The web BFF routes (`apps/web/src/app/api/bulk-uploads/**`) pass the API
+   responses through unchanged. Outside this repo, `bluedots-e2e` has
+   generated client types (no test uses the fields) and `bluedots-docs`
+   publishes a copy of `openapi.json`. The API is also reachable directly
+   through the Kong ingress (`v1/bulk-uploads` rate-limit group in
+   `bluedots-automation`), so an unknown caller with a coordinator token
+   cannot be ruled out.
+
+   Rename steps: the api returns both the old and the new field for one
    release (old marked deprecated in `openapi.json`); the web app moves to
    the new field (it decides whether to show the errors-download button from
    `errors_csv_s3_key`, `CSVUpload.tsx:380`); the old fields are removed in a
