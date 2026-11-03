@@ -56,7 +56,8 @@ database) and are out of scope.
 **Non-goals**
 - Shipping any provider other than S3.
 - Changing how any feature behaves for users, including the browser
-  uploading straight to storage.
+  uploading straight to storage. The only user-visible difference is the
+  reworded upload error text (section 7.1).
 - Changing deployment config (helm, docker-compose, `.env.example` values)
   beyond what is listed in section 6.
 
@@ -106,7 +107,7 @@ the provider knows nothing about bulk uploads or campaigns.
 
 | Operation | Purpose | Used by |
 |---|---|---|
-| Create upload URL (key, content type, expiry) → URL, expiry time | Lets a browser upload one object directly. The content type is enforced by the signature. | bulk upload create |
+| Create upload URL (key, content type, expiry) → URL, expiry time, headers the browser must send | Lets a browser upload one object directly. The content type is enforced by the signature. The headers carry what the provider requires on the PUT (S3: `Content-Type`; Azure: also `x-ms-blob-type: BlockBlob`). | bulk upload create |
 | Create download URL (key, expiry, download filename, content type) → URL, expiry time | Lets a browser or email recipient download one object, served as an attachment with the given filename. | errors CSV, campaign export |
 | Stat (key) → `{ size, fingerprint }` or "not found" | Confirms an upload landed, checks its size, captures a content fingerprint. "Not found" is a success value; failures are error results. | bulk upload `/start` |
 | Open read stream (key) → Node `Readable` | Streams an object without loading it into memory. The caller owns the stream. | bulk file process |
@@ -174,7 +175,11 @@ Notes on the contract:
   `campaign-exports/<orgId>/<jobId>.csv`.
 - **TTLs and limits** stay in each app's config: `BULK_UPLOAD_URL_TTL_SECONDS`,
   `BULK_UPLOAD_MAX_BYTES` (api) and `EXPORT_URL_TTL_SECONDS` (worker).
-- **Response shapes** of the bulk-upload API are unchanged.
+- **Response shapes** of the bulk-upload API are unchanged except for one
+  added field on the create response, `upload_headers` (an object of header
+  name → value the browser must send on the PUT). For S3 it holds only
+  `Content-Type`, which equals the existing `content_type` field, so S3
+  behaviour is identical. The existing fields stay.
 
 ### 4.5 How a new provider is written
 
@@ -209,98 +214,91 @@ deliberately not designed here.
 | `packages/object-storage` (new) | Interface, S3 provider, factory, test fake, unit tests |
 | `apps/api` | `routes/bulk-uploads.ts` calls the interface; `services/object-storage/` removed; `config.ts` spreads the shared storage fields instead of its own `S3_*`; AWS S3 deps removed from `package.json` |
 | `apps/worker` | `jobs/bulk-file-process.ts`, `jobs/bulk-finalise.ts`, `jobs/campaign-process.ts`, `services/campaign-process` call the interface; `src/object-storage.ts` removed; `config.ts` spreads the shared storage fields; AWS S3 deps removed from `package.json` |
-| `apps/web` | None |
+| `apps/web` | The browser PUT sends the headers from `upload_headers` (falling back to `content_type` when the field is absent, so web and api deploy in either order); the upload error text is reworded (section 7.1). No visible change otherwise. |
 | Tests | Tests that mock the two old storage modules switch to the package's fake; existing route and job tests keep their assertions |
 | Config / docs | `STORAGE_PROVIDER` added to `.env.example`, `apps/api/.env.example`, `apps/worker/.env.example`, and the env docs; helm and docker-compose need no change because the default is `s3` |
-| Database | None (unless the naming decision in section 7 chooses to rename) |
+| Database | None (unless the decision in section 7.2 chooses to rename the columns) |
 
 ## 6. Deploying it
 
-With names kept as they are (section 7, option 1):
+With the contract names kept (section 7.2 "Keep"):
 - **No database migration.**
 - **No env or helm change.** `STORAGE_PROVIDER` is unset everywhere and
   defaults to `s3`.
-- **No ordering constraint** between api and worker; both talk to the same
+- **No ordering constraint** between api, worker and web (the web falls
+  back when `upload_headers` is absent); api and worker talk to the same
   bucket with the same keys as before.
 - Rollback is a plain image rollback.
 
-## 7. Open decision — keep the S3 names or rename them
+## 7. The "S3" names outside the S3 provider
 
-After this change the word "S3" still appears in names outside the S3
-provider. The stored values (`bulk-uploads/...`) are already
-provider-neutral; only the names say S3. **Reviewers: please choose one
-option.**
+After the interface is in, the word "S3" still appears in names outside the
+S3 provider. The stored values (`bulk-uploads/...`) are already
+provider-neutral; only the names say S3. They fall into two groups.
 
-Where the names are:
+`S3_*` env vars are not renamed in either group: they configure the S3
+provider specifically, and keep their names.
 
-| Layer | Names today | Where |
+### 7.1 Renamed in this change (no migration, no compatibility step)
+
+These are internal or plain text. Renaming them changes no stored data and no
+contract, so they are part of this change:
+
+| What | Today | After |
 |---|---|---|
-| Database columns | `bulk_uploads.s3_key` (NOT NULL), `bulk_uploads.s3_etag`, `bulk_uploads.errors_csv_s3_key` | `packages/db-schema/src/schema.ts` |
-| Code | `s3Key`, `s3Etag`, `errorsCsvS3Key` | bulk-uploads store (`interface.ts`, `postgres.ts`), `routes/bulk-uploads.ts`, worker jobs |
-| Queue job payload | `s3Key` | `packages/queue/src/index.ts` (bulk file job) |
-| API responses | `s3_key`, `errors_csv_s3_key` | `routes/bulk-uploads.ts`, `openapi.json`; read by `apps/web/src/services/onboarding.service.ts` and `CSVUpload.tsx` |
-| Env vars | `S3_*` | both apps, `.env.example` files, docker-compose, `bluedots-automation` helm |
-| Text a coordinator can see | The upload error `S3 PUT failed (<status>): <body>` | `apps/web/src/services/onboarding.service.ts:263`, shown in the upload screen by `CSVUpload.tsx` |
-| API docs | "pre-signed S3 GET URL" and similar wording in route descriptions | `routes/bulk-uploads.ts`, `openapi.json` |
-| Docs and logs | `s3_key` log fields, `s3_object_missing` reason, `sub: 's3.put'`, `docs/onboarding-*.md` | api routes, worker jobs |
+| Upload error a coordinator can see | `S3 PUT failed (<status>): <body>` (`apps/web/src/services/onboarding.service.ts:263`, shown by `CSVUpload.tsx`) | Storage-neutral wording, e.g. `File upload failed (<status>)` |
+| API route descriptions | "pre-signed S3 GET URL" and similar (`routes/bulk-uploads.ts`, regenerated into `openapi.json`) | "pre-signed download URL" and similar. Descriptions only; field names unchanged. |
+| Log fields and reasons | `s3_key`, `s3_object_missing`, `sub: 's3.put'` | `storage_key`, `storage_object_missing`, `storage.put` |
+| Code names | `s3Key`, `s3Etag`, `errorsCsvS3Key` in the bulk-uploads store, route and worker jobs | `storageKey`, `contentFingerprint`, `errorsCsvStorageKey`. The Drizzle fields keep mapping to the existing column names (e.g. `storageKey: text('s3_key')`), so the database is untouched. |
+| Dead code | `findByAggregatorAndEtag` and the `DUPLICATE_ETAG` error, unused since migration 0012 dropped the unique index they relied on (only a test stub calls the finder) | Deleted |
+| Docs | `docs/onboarding-design.md`, `docs/onboarding-implementation.md` | Neutral wording |
 
-### Option 1 — keep the names
+Before release, check that no log-based alert or dashboard filters on the
+old log field names.
 
-Everything goes through the interface; the existing names are only labels.
-A column called `s3_key` holds a storage key whatever the provider is, and
-the S3 provider keeps reading `S3_*` settings, which is correct because they
-are S3 settings.
+### 7.2 Open decision — the three contract names
 
-- Cost: none beyond section 5.
-- Migration: none. Deploy as in section 6.
-- Effect: on a non-S3 deployment "s3" still shows in column names, API
-  field names, API docs, logs, and the upload error text a coordinator can
-  see. None of these change behaviour.
+These three names are contracts with stored data or with callers, so
+renaming them needs a migration or a compatibility step. **Reviewers: please
+choose keep or rename for each row (they are independent).**
 
-### Option 2 — rename to neutral names
+| Name | What it is | Rename means |
+|---|---|---|
+| Database columns `bulk_uploads.s3_key` (NOT NULL), `s3_etag`, `errors_csv_s3_key` | Where each uploaded CSV and its errors CSV live in storage, and the upload's fingerprint. The files themselves are in storage; these columns hold only their location. | A migration (see below) |
+| Queue job field `s3Key` (`packages/queue/src/index.ts`, bulk file job) | Tells the worker which object to read | Worker accepts both names for one release |
+| API response fields `s3_key`, `errors_csv_s3_key` (`routes/bulk-uploads.ts`, `openapi.json`) | Returned to the web app and any other caller | Both names returned for one release |
 
-Suggested names: `storage_key`, `content_fingerprint`, `errors_csv_storage_key`
-(and the matching `storageKey`, `contentFingerprint`, `errorsCsvStorageKey` in
-code). `S3_*` env vars are **not** renamed under either option: they configure
-the S3 provider specifically.
+**Keep**: no work, no migration. "s3" stays visible in these column and field
+names on any deployment; behaviour is unaffected.
 
-Extra work (about one more day):
+**Rename** (about one more day for all three):
 
-1. **Database**: a Drizzle migration renaming the three columns. Postgres
+1. **Database**: a Drizzle migration renaming the three columns to
+   `storage_key`, `content_fingerprint`, `errors_csv_storage_key`. Postgres
    renames are metadata-only (instant, no table rewrite), but code still
-   running against the old names fails while the rename is live.
-2. **Code**: rename across the store, route, worker jobs and tests.
-   `findByAggregatorAndEtag` and the `DUPLICATE_ETAG` error are dead since
-   migration 0012 dropped the unique index they relied on (only a test stub
-   calls the finder); they would be deleted rather than renamed.
-3. **Queue payload**: the bulk file job carries `s3Key`. Jobs already queued
-   in Redis when the new worker starts still carry the old field, so the new
-   worker must accept both `s3Key` and the new name for one release, then the
-   old name is dropped in a later release.
-4. **API responses**: `s3_key` and `errors_csv_s3_key` are part of the public
-   contract in `openapi.json`. To avoid breaking any caller, the api returns
-   both the old and the new field for one release (old marked deprecated),
-   the web app moves to the new field, and the old field is removed later.
-5. **Docs, logs, API descriptions and the upload error text** updated to neutral wording.
-
-Deploy order for option 2:
-- **Before or with the new api**: run the column-rename migration. With
-  today's single api replica, the old pod errors on bulk-upload requests for
-  the seconds between the migration and the new pod becoming ready. To avoid
-  even that window, split it: release A adds the new columns and writes both
-  (or adds a view/generated column), release B switches reads and drops the
-  old columns.
-- **Worker**: deploy the new worker with the dual-read of the queue payload
-  before or together with the api; drop the old payload field one release
-  later, once the queue holds no old jobs.
-- **Web and api** ship together; the old API fields are removed one release
-  after that.
+   running against the old names fails while the rename is live. With
+   today's single api replica, the old pod errors on bulk-upload requests for
+   the seconds between the migration and the new pod becoming ready. To avoid
+   even that window, split it into two releases: release A adds the new
+   columns and writes both, release B switches reads and drops the old
+   columns.
+2. **Queue field**: jobs already waiting in Redis when the new worker starts
+   still carry `s3Key`. The new worker accepts both names for one release;
+   the old name is dropped in a later release, once no old jobs remain.
+   Deploy the worker before or together with the api.
+3. **API fields**: the api returns both the old and the new field for one
+   release (old marked deprecated in `openapi.json`); the web app moves to
+   the new field (it decides whether to show the errors-download button from
+   `errors_csv_s3_key`, `CSVUpload.tsx:380`); the old fields are removed in a
+   later release. Web and api can then deploy in any order.
 
 ## 8. Testing expectations
 
 - Unit tests for the S3 provider (request shapes, not-found handling, ETag
   quote stripping, public vs internal endpoint for signed URLs, credentials
   vs default chain) and for the factory (default `s3`, unknown value fails).
+- The create route returns `upload_headers`, and the web upload sends those
+  headers (and falls back to `content_type` without them).
 - Existing bulk-upload route tests, worker job tests and campaign export
   tests pass unchanged in what they assert.
 - A local run against MinIO of the three flows in section 2 still works end
