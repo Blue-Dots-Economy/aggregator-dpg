@@ -6,10 +6,14 @@
  * kind of excess, with counts only, so an operator can see it. More orgs than
  * `max_total_orgs` is logged as an error, because it closes self-registration
  * of new orgs. It never stops boot.
+ *
+ * It also counts orgs whose `known_as` key is neither in their parent's list
+ * nor `aggregator`. Such keys read as "Aggregator" until someone sets them.
  */
 
 import type { OrganisationConfig } from '@aggregator-dpg/network-config/interface';
-import { isAllowedAt } from './known-as.js';
+import type { ChildKnownAs } from '@aggregator-dpg/shared-primitives/user-org';
+import { knownAsKeyValid } from './known-as.js';
 import type {
   Organisation,
   OrganisationStoreBase,
@@ -47,7 +51,7 @@ async function countedOrgs(store: OrganisationStoreBase): Promise<Organisation[]
  *
  * Kinds: orgs deeper than `max_depth`; orgs (the root included) with more
  * children than `max_children`; more orgs than `max_total_orgs`; orgs whose
- * `known_as` key is not configured or not allowed at their depth. Counts
+ * `known_as` key is neither in the parent's list nor `aggregator`. Counts
  * pending and active orgs only, the Default org excluded. A total over the
  * limit, and a failure of the check, are logged as errors; a failure ends the
  * check and never throws.
@@ -91,7 +95,7 @@ export async function warnOrgTreeOverLimits(
       warn('total', { total_orgs: orgs.length, max_total_orgs, registration: 'closed' });
     }
 
-    const stale = orgs.filter((o) => !isAllowedAt(cfg.known_as, o.knownAs, o.depth)).length;
+    const stale = await countStaleKnownAs(store, orgs);
     if (stale > 0) warn('known_as', { org_count: stale });
   } catch (e) {
     log.error({
@@ -100,4 +104,34 @@ export async function warnOrgTreeOverLimits(
       error: e instanceof Error ? e.message : String(e),
     });
   }
+}
+
+/**
+ * Counts orgs whose `known_as` key is neither in the parent's list nor `aggregator`.
+ *
+ * Parents outside `orgs` (the root, an inactive org) are read one by one.
+ *
+ * @param store - The organisation store.
+ * @param orgs - The orgs to check, the Default org excluded.
+ * @returns The count.
+ * @throws {Error} When a store read fails.
+ */
+async function countStaleKnownAs(
+  store: OrganisationStoreBase,
+  orgs: Organisation[],
+): Promise<number> {
+  const lists = new Map<string, ChildKnownAs>(orgs.map((o) => [o.id, o.childKnownAs]));
+  const root = valueOf(await store.findRoot());
+  if (root) lists.set(root.id, root.childKnownAs);
+  let stale = 0;
+  for (const o of orgs) {
+    if (o.parentId === null) continue;
+    let list = lists.get(o.parentId);
+    if (list === undefined) {
+      list = valueOf(await store.findById(o.parentId))?.childKnownAs ?? [];
+      lists.set(o.parentId, list);
+    }
+    if (!knownAsKeyValid(list, o.knownAs)) stale += 1;
+  }
+  return stale;
 }

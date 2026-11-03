@@ -3,12 +3,14 @@
  *
  *   GET   /v1/org/read/:id              one org within reach, owner and counts
  *   POST  /v1/org/search                orgs within reach (or below one), by name, keyset paged
- *   PATCH /v1/org/metadata/update/:id   org details (owner only; known_as: network admin only)
+ *   PATCH /v1/org/metadata/update/:id   org details (owner only)
+ *   PATCH /v1/org/known-as/update/:id   an org's "known as" value (the parent's owner)
+ *   PATCH /v1/org/child-known-as/update/:id  the "known as" values an org defines for its children (owner)
  *   PATCH /v1/org/parent/update/:id     move an org and the orgs below it (network admin)
  *   GET   /v1/org/parent/options/:id    candidate parents for a move (network admin)
  *   POST  /v1/org/decision/:id          approve / reject a pending org (network admin)
  *   POST  /v1/org/access/repair/:id     re-apply the owner's sign-in access (network admin)
- *   GET   /v1/org/hierarchy             tree limits and "known as" values with org counts (network admin)
+ *   GET   /v1/org/hierarchy             the network, its "known as" values and the tree limits (network admin)
  *
  * Every handler calls `requireActor` first (admins only). A target out of
  * reach answers 404; a route the actor's kind cannot use answers 403. The
@@ -20,8 +22,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   DecisionRequestSchema,
+  OrgChildKnownAsUpdateRequestSchema,
   OrgDecisionResponseSchema,
   OrgHierarchyResponseSchema,
+  OrgKnownAsUpdateRequestSchema,
   OrgMetadataUpdateRequestSchema,
   OrgParentOptionsResponseSchema,
   OrgParentUpdateRequestSchema,
@@ -30,21 +34,28 @@ import {
   OrgSearchRequestSchema,
   OrgSearchResponseSchema,
   OwnerAccessResponseSchema,
+  type ChildKnownAs,
+  type KnownAsEntry,
   type OrgHierarchyResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { getUserStore } from '../services/user-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
-import type { KnownAsConfig, OrganisationConfig } from '@aggregator-dpg/network-config/interface';
-import { knownAsValues, nameOf, treeRules } from '../services/known-as.js';
+import type { OrganisationConfig } from '@aggregator-dpg/network-config/interface';
+import { fillKnownAsKeys, knownAsChoices, treeRules } from '../services/known-as.js';
 import {
   getOrganisationStore,
   type Organisation,
   type OrgStoreError,
   type UpdateOrgPatch,
 } from '../services/organisation-store/index.js';
-import { isNetworkAdmin, requireActor, type Actor } from '../services/auth/actor/index.js';
+import {
+  isNetworkAdmin,
+  ownedOrgIds,
+  requireActor,
+  type Actor,
+} from '../services/auth/actor/index.js';
 import { reachesOrg } from '../services/authz/scope.js';
 import { isOnlyViewed, viewableOrgIds } from '../services/authz/view-scope.js';
 import { decideOrg, grantOwnerAccess } from '../services/decisions/org.js';
@@ -53,8 +64,8 @@ import {
   decodeOrgCursor,
   encodeOrgCursor,
   guardWriteRate,
-  listPhrase,
   notifyOwnerOfAdminAction,
+  notifyOwnerOfParentAction,
   ownerContact,
   throwTreeRefusal,
   toWireOrg,
@@ -120,32 +131,14 @@ function requireNetworkAdmin(actor: Actor): void {
   if (!isNetworkAdmin(actor)) throw httpError('FORBIDDEN');
 }
 
-/** Wire field label of each org detail, for logs and owner notices. */
-const FIELD_LABELS: Record<string, string> = {
-  name: 'the name',
-  locations: 'the locations',
-  legal_name: 'the legal name',
-  description: 'the description',
-  profile: 'the organisation details',
-  known_as: 'the "known as" name',
-};
-
 /**
- * Refuses an edit the actor may not make, with 403: `known_as` is the network
- * admin's only; every other field is the org owner's only. The network admin
+ * Refuses an edit by anyone but the org's owner, with 403. The network admin
  * views other owners' details but does not change them.
  *
  * @throws {HttpError} FORBIDDEN.
  */
-function requireEditRights(actor: Actor, org: Organisation, fields: string[]): void {
-  if (fields.includes('known_as') && !isNetworkAdmin(actor)) throw httpError('FORBIDDEN');
-  const ownerFields = fields.some((f) => f !== 'known_as');
-  if (ownerFields && org.ownerUserId !== actor.userId) throw httpError('FORBIDDEN');
-}
-
-/** The instance's "known as" list, from the network config. */
-async function knownAsConfig(): Promise<KnownAsConfig> {
-  return (await getNetworkConfig()).aggregator.organisation.known_as;
+function requireOwner(actor: Actor, org: Organisation): void {
+  if (org.ownerUserId !== actor.userId) throw httpError('FORBIDDEN');
 }
 
 /** The instance's organisation settings, from the network config. */
@@ -154,21 +147,47 @@ async function organisationConfig(): Promise<OrganisationConfig> {
 }
 
 /**
- * Refuses a `known_as` key that is not configured, with 400 naming the field.
+ * Whether the actor may set the org's `known_as`: the parent is an active org
+ * the actor owns, or the parent is the root and the actor is the network admin.
+ * Never for the root or the Default org.
  *
- * @param cfg - The instance's "known as" config.
- * @param key - The requested key; `undefined` passes.
- * @throws {HttpError} SCHEMA_VALIDATION with `fields.known_as: 'invalid'`.
+ * @throws {HttpError} DB_UNAVAILABLE when the root cannot be read.
  */
-function requireConfiguredKnownAs(cfg: KnownAsConfig, key: string | undefined): void {
-  if (key === undefined || nameOf(cfg, key) !== null) return;
-  const valid = knownAsValues(cfg)
-    .map((v) => v.key)
-    .join(', ');
-  throw httpError('SCHEMA_VALIDATION', {
-    detail: `unknown known_as '${key}'; valid: ${valid}`,
-    fields: { known_as: 'invalid' },
-  });
+async function ownsParentOf(actor: Actor, org: Organisation): Promise<boolean> {
+  if (org.parentId === null || org.isDefault) return false;
+  if (ownedOrgIds(actor).includes(org.parentId)) return true;
+  if (!isNetworkAdmin(actor)) return false;
+  const root = await getOrganisationStore().findRoot();
+  if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
+  return root.value?.id === org.parentId;
+}
+
+/**
+ * Reads the "known as" list of an org or the root.
+ *
+ * @param id - The org id.
+ * @returns The list; empty when the org is not found.
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function childKnownAsOf(id: string): Promise<ChildKnownAs> {
+  const store = getOrganisationStore();
+  const found = await store.findById(id);
+  if (!found.ok) dbDown('orgStore.findById', found.error.message);
+  if (found.value) return found.value.childKnownAs;
+  const root = await store.findRoot();
+  if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
+  return root.value?.id === id ? root.value.childKnownAs : [];
+}
+
+/**
+ * The values the actor can pick for the org's `known_as`, or null when it
+ * cannot set it (see {@link ownsParentOf}; a rejected org is not changed).
+ *
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function knownAsOptionsFor(actor: Actor, org: Organisation): Promise<KnownAsEntry[] | null> {
+  if (org.status === 'inactive' || !(await ownsParentOf(actor, org))) return null;
+  return knownAsChoices(await childKnownAsOf(org.parentId!));
 }
 
 /**
@@ -185,35 +204,58 @@ function throwTreeError(e: OrgStoreError, subOperation: string): never {
 }
 
 /**
- * Reads the hierarchy response: the network, the tree limits, the org total
- * and each "known as" value with its pending and active org count.
+ * Maps a refused "known as" write from the store to its HTTP error.
  *
- * @throws {HttpError} DB_UNAVAILABLE when the root or the counts cannot be read.
+ * @param e - The store error.
+ * @param subOperation - The store call, for a `DB_UNAVAILABLE` log.
+ * @throws {HttpError} Always.
+ */
+function throwKnownAsError(e: OrgStoreError, subOperation: string): never {
+  switch (e.code) {
+    case 'NOT_FOUND':
+      throw httpError('NOT_FOUND');
+    case 'KNOWN_AS_INVALID':
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: "known_as is not one of the parent organisation's values.",
+        fields: { known_as: 'invalid' },
+      });
+    case 'ORG_MOVED':
+      throw httpError('CONFLICT', {
+        detail: 'The organisation was moved. Reload and try again.',
+        fields: { reason: 'moved' },
+      });
+    case 'NOT_EDITABLE':
+      throw httpError('CONFLICT', { detail: "This organisation's details are not editable." });
+    default:
+      dbDown(subOperation, e.message);
+  }
+}
+
+/**
+ * Reads the hierarchy response: the network with its "known as" list, the
+ * tree limits and the org total.
+ *
+ * @throws {HttpError} DB_UNAVAILABLE when the root or the total cannot be read.
  */
 async function readHierarchy(): Promise<OrgHierarchyResponse> {
   const store = getOrganisationStore();
-  const [root, counts, total] = await Promise.all([
-    store.findRoot(),
-    store.countByKnownAs(),
-    store.countTotal(),
-  ]);
+  const [root, total] = await Promise.all([store.findRoot(), store.countTotal()]);
   if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
   if (!root.value) dbDown('orgStore.findRoot', 'network root missing');
-  if (!counts.ok) dbDown('orgStore.countByKnownAs', counts.error.message);
   if (!total.ok) dbDown('orgStore.countTotal', total.error.message);
-  const { hierarchy, known_as } = await organisationConfig();
+  const { hierarchy } = await organisationConfig();
   return {
-    network: { id: root.value.id, name: root.value.displayName },
+    network: {
+      id: root.value.id,
+      name: root.value.displayName,
+      child_known_as: root.value.childKnownAs,
+    },
     limits: {
       max_depth: hierarchy.max_depth,
       max_children: hierarchy.max_children ?? null,
       max_total_orgs: hierarchy.max_total_orgs,
     },
     total_orgs: total.value,
-    known_as: {
-      values: knownAsValues(known_as).map((v) => ({ ...v, org_count: counts.value[v.key] ?? 0 })),
-      suggest: known_as.suggest.map((x) => ({ depth: x.depth, key: x.key })),
-    },
   };
 }
 
@@ -238,7 +280,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: 'One organisation within reach, with its owner and coordinator counts',
         description:
-          'An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked.',
+          'An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked. known_as_options lists the values the caller can pick for the org\'s known_as (the parent\'s list, or only "aggregator" when that list is empty); it is null unless the caller owns the parent (the network admin for a top-level organisation). can_have_children is false for the Default organisation and for an organisation at max_depth.',
         params: IdParamsSchema,
         response: { 200: OrgReadResponseSchema, ...errorResponses(401, 403, 404, 503) },
       },
@@ -252,6 +294,8 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       if (!counts.ok) dbDown('userStore.countByOrg', counts.error.message);
       const c = counts.value[org.id];
       const children = await childCountsOf([org.id]);
+      const { hierarchy } = await organisationConfig();
+      const isRoot = orgType === 'network_facilitator';
       req.log.info({
         operation: 'console.org.read',
         status: 'success',
@@ -260,12 +304,14 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         relation: below ? 'below' : 'own',
       });
       return reply.status(200).send({
-        org: toWireOrg(org, await knownAsConfig(), orgType),
+        org: toWireOrg(org, orgType),
         // An org only viewed from above shows its owner's contact masked.
         owner: { id: org.ownerUserId, contact: ownerContact(org, { masked: below }) },
         coordinator_count: c?.total ?? 0,
         child_count: children[org.id] ?? 0,
         pending_count: c?.pending ?? 0,
+        known_as_options: isRoot ? null : await knownAsOptionsFor(actor, org),
+        can_have_children: isRoot || (!org.isDefault && org.depth < hierarchy.max_depth),
       });
     },
   );
@@ -278,7 +324,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: 'Organisations within reach, by name',
         description:
-          'The network admin sees every aggregator organisation; an owner sees the ones it owns and, read-only, every one below them. With `descendants_of` set to an org within reach, lists every org below it instead (read-only). Filters by status, a case-insensitive name prefix and the "known as" key; keyset paged by an opaque cursor.',
+          'The network admin sees every aggregator organisation; an owner sees the ones it owns and, read-only, every one below them. With `descendants_of` set to an org within reach, lists every org below it instead (read-only). Filters by status and a case-insensitive name prefix; keyset paged by an opaque cursor.',
         body: OrgSearchRequestSchema,
         response: { 200: OrgSearchResponseSchema, ...errorResponses(400, 401, 403, 503) },
       },
@@ -292,13 +338,11 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       const view = await viewable(actor);
       let orgIds = view;
       if (below !== undefined) orgIds = view === null || view.includes(below) ? null : [];
-      const knownAs = await knownAsConfig();
       const page = await getOrganisationStore().search({
         orgIds,
         ...(below ? { descendantsOf: below } : {}),
         ...(body.filter.status ? { status: body.filter.status } : {}),
         ...(body.filter.name_prefix ? { namePrefix: body.filter.name_prefix } : {}),
-        ...(body.filter.known_as ? { knownAs: body.filter.known_as } : {}),
         ...(body.cursor ? { cursor: decodeOrgCursor(body.cursor) } : {}),
         ...(body.limit ? { limit: body.limit } : {}),
       });
@@ -309,7 +353,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       const children = await childCountsOf(ids);
       return reply.status(200).send({
         orgs: page.value.rows.map((o) => ({
-          ...toWireOrg(o, knownAs),
+          ...toWireOrg(o),
           coordinator_count: counts.value[o.id]?.total ?? 0,
           child_count: children[o.id] ?? 0,
           pending_count: counts.value[o.id]?.pending ?? 0,
@@ -327,7 +371,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: "Update an organisation's details",
         description:
-          "Every field but known_as, the name included, is the org's owner's only (the slug never changes); the network admin views other owners' orgs but does not edit them (403). known_as is the network admin's only: a configured value allowed at the org's depth (400 KNOWN_AS_DEPTH otherwise); it never changes the parent, which changes through PATCH /v1/org/parent/update/:id. The owner is emailed when the network admin changes it. The Default org's details are not editable. `profile` changes fields of the deployment's org-registration schema (e.g. website, GST number, domains): only fields marked x-updatable, checked against that schema; null removes a field. A bad field answers 400 with fields.field_errors and saves nothing. Locations, legal name, website and GST number are rendered for every coordinator of the org; description is shown in the console only.",
+          "Every field, the name included, is the org's owner's only (the slug never changes); the network admin views other owners' orgs but does not edit them (403). known_as changes through PATCH /v1/org/known-as/update/:id and the parent through PATCH /v1/org/parent/update/:id. The Default org's details are not editable. `profile` changes fields of the deployment's org-registration schema (e.g. website, GST number, domains): only fields marked x-updatable, checked against that schema; null removes a field. A bad field answers 400 with fields.field_errors and saves nothing. Locations, legal name, website and GST number are rendered for every coordinator of the org; description is shown in the console only.",
         params: IdParamsSchema,
         body: OrgMetadataUpdateRequestSchema,
         response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
@@ -341,9 +385,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       if (orgType !== 'aggregator' || org.isDefault) {
         throw httpError('CONFLICT', { detail: "This organisation's details are not editable." });
       }
-      requireEditRights(actor, org, Object.keys(body));
-      const orgCfg = await organisationConfig();
-      requireConfiguredKnownAs(orgCfg.known_as, body.known_as);
+      requireOwner(actor, org);
       // Schema fields: only those marked x-updatable, checked against the schema.
       let profileMerge: Record<string, unknown> | undefined;
       if (body.profile !== undefined) {
@@ -364,12 +406,11 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       if (body.name !== undefined) patch.displayName = body.name;
       if (body.locations !== undefined) patch.locations = body.locations;
       if (body.legal_name !== undefined) patch.legalName = body.legal_name;
-      if (body.known_as !== undefined) patch.knownAs = body.known_as;
       // An empty description is stored as "none".
       if (body.description !== undefined) patch.description = body.description || null;
       if (profileMerge) patch.profileMerge = profileMerge;
 
-      const updated = await getOrganisationStore().update(org.id, patch, treeRules(orgCfg));
+      const updated = await getOrganisationStore().update(org.id, patch);
       if (!updated.ok) {
         if (updated.error.code === 'DUPLICATE_NAME') throw httpError('ORG_NAME_TAKEN');
         throwTreeError(updated.error, 'orgStore.update');
@@ -382,14 +423,106 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         target_id: org.id,
         fields,
       });
-      // Only `known_as` can come from a network admin acting on another owner's org.
-      await notifyOwnerOfAdminAction(
-        actor,
-        updated.value,
-        `updated ${listPhrase(fields.map((f) => FIELD_LABELS[f] ?? f))}`,
-        req.log,
+      return reply.status(200).send(toWireOrg(updated.value));
+    },
+  );
+
+  app.patch(
+    '/v1/org/known-as/update/:id',
+    {
+      config: { rbac: { anyCapability: ['org.manage', 'orgs.onboard'] } },
+      schema: {
+        tags: ['console'],
+        summary: 'Set what an organisation is known as (owner of its parent)',
+        description:
+          "Only the owner of the organisation's parent sets it: the network admin for a top-level organisation, else the owner of the parent organisation (an active organisation it owns). An organisation the caller cannot see answers 404; one it sees but whose parent it does not own answers 403. known_as must be a key of the parent's list, or aggregator when that list is empty (400 SCHEMA_VALIDATION with fields.known_as otherwise). The network, the Default organisation and a rejected organisation answer 409, and so does an organisation moved while the request ran (fields.reason: moved). The organisation's owner is emailed when it is not the caller.",
+        params: IdParamsSchema,
+        body: OrgKnownAsUpdateRequestSchema,
+        response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
+      },
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const { actor } = await requireActor(req);
+      const { id } = req.params as IdParams;
+      const body = req.body as z.infer<typeof OrgKnownAsUpdateRequestSchema>;
+      const { org, orgType } = await orgInReach(actor, id, 'view');
+      if (orgType !== 'aggregator' || org.isDefault || org.status === 'inactive') {
+        throw httpError('CONFLICT', {
+          detail: 'What this organisation is known as cannot be changed.',
+        });
+      }
+      if (!(await ownsParentOf(actor, org))) throw httpError('FORBIDDEN');
+      await guardWriteRate(actor, reply);
+
+      const updated = await getOrganisationStore().setKnownAs(
+        org.id,
+        body.known_as,
+        org.parentId!,
+        actor.userId,
       );
-      return reply.status(200).send(toWireOrg(updated.value, orgCfg.known_as));
+      if (!updated.ok) throwKnownAsError(updated.error, 'orgStore.setKnownAs');
+      req.log.info({
+        operation: 'console.org.known_as',
+        status: 'success',
+        actor_id: actor.userId,
+        target_id: org.id,
+        parent_id: org.parentId,
+      });
+      await notifyOwnerOfParentAction(actor, updated.value, req.log);
+      return reply.status(200).send(toWireOrg(updated.value));
+    },
+  );
+
+  app.patch(
+    '/v1/org/child-known-as/update/:id',
+    {
+      config: { rbac: { anyCapability: ['org.manage', 'orgs.onboard'] } },
+      schema: {
+        tags: ['console'],
+        summary:
+          'Set the "known as" values an organisation defines for the organisations under it (owner)',
+        description:
+          "Replaces the whole list. Only the organisation's owner sets it (an active organisation it owns; the network's list for the network admin): 404 when the caller cannot see the organisation, 403 when it sees but does not own it, 409 for the Default organisation. An entry that is already saved sends its key back and keeps it; a new entry sends only a name, and the API makes its key from the name. A key that is not already in the list answers 400 SCHEMA_VALIDATION (fields.values: unknown_key, fields.index). At most one entry is the default; new organisations under this one get it, else aggregator. Organisations under this one whose value leaves the list take the default, else aggregator; a renamed entry keeps its key, so they keep it too.",
+        params: IdParamsSchema,
+        body: OrgChildKnownAsUpdateRequestSchema,
+        response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
+      },
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const { actor } = await requireActor(req);
+      const { id } = req.params as IdParams;
+      const body = req.body as z.infer<typeof OrgChildKnownAsUpdateRequestSchema>;
+      const { org, orgType } = await orgInReach(actor, id, 'view');
+      if (orgType === 'aggregator') {
+        if (org.isDefault) {
+          throw httpError('CONFLICT', { detail: "This organisation's details are not editable." });
+        }
+        if (!ownedOrgIds(actor).includes(org.id)) throw httpError('FORBIDDEN');
+      }
+      const values = fillKnownAsKeys(body.values, org.childKnownAs);
+      if (!values.ok) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: 'A value sent a key that is not saved. Send no key for a new value.',
+          fields: { values: 'unknown_key', index: values.error.index },
+        });
+      }
+      await guardWriteRate(actor, reply);
+
+      const updated = await getOrganisationStore().setChildKnownAs(
+        org.id,
+        values.value,
+        actor.userId,
+      );
+      if (!updated.ok) throwKnownAsError(updated.error, 'orgStore.setChildKnownAs');
+      req.log.info({
+        operation: 'console.org.child_known_as',
+        status: 'success',
+        actor_id: actor.userId,
+        target_id: org.id,
+        value_count: values.value.length,
+        reset_count: updated.value.resetCount,
+      });
+      return reply.status(200).send(toWireOrg(updated.value.org, orgType));
     },
   );
 
@@ -401,7 +534,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: 'Move an organisation under a new parent (network admin)',
         description:
-          "Moves the organisation and every organisation below it; their depths follow. The org must be pending or active, not the Default org. The parent must be the network or an active organisation, not the org or one below it, with room for another child, and the moved orgs must stay within max_depth. known_as, when sent, replaces the moved org's value. Every moved org's value must be allowed at its new depth (400 KNOWN_AS_DEPTH with fields.org_ids). The owner is told when the org moved.",
+          "Moves the organisation and every organisation below it; their depths follow. The org must be pending or active, not the Default org. The parent must be the network or an active organisation, not the org or one below it, with room for another child, and the moved orgs must stay within max_depth. The moved org keeps its known_as when the new parent's list has it; otherwise it takes the new parent's default value, else aggregator. Organisations below it keep theirs. The owner is told when the org moved.",
         params: IdParamsSchema,
         body: OrgParentUpdateRequestSchema,
         response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
@@ -413,12 +546,11 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       const { id } = req.params as IdParams;
       const body = req.body as z.infer<typeof OrgParentUpdateRequestSchema>;
       const orgCfg = await organisationConfig();
-      requireConfiguredKnownAs(orgCfg.known_as, body.known_as);
       await guardWriteRate(actor, reply);
 
       const moved = await getOrganisationStore().move(
         id,
-        { parentId: body.parent_id, ...(body.known_as ? { knownAs: body.known_as } : {}) },
+        { parentId: body.parent_id },
         treeRules(orgCfg),
       );
       if (!moved.ok) throwTreeError(moved.error, 'orgStore.move');
@@ -440,7 +572,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
           req.log,
         );
       }
-      return reply.status(200).send(toWireOrg(org, orgCfg.known_as));
+      return reply.status(200).send(toWireOrg(org));
     },
   );
 
@@ -452,7 +584,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: 'Candidate parents for moving an organisation (network admin)',
         description:
-          'Every org that could be the new parent, the network first, each with the result a move there would give: ok, or the refusal code in reason (INVALID_PARENT, PARENT_CYCLE, CHILD_LIMIT, DEPTH_LIMIT, NOT_MOVABLE, or KNOWN_AS_DEPTH when an org below would sit at a depth its known_as does not allow). subtree_size counts the orgs that move.',
+          'Every org that could be the new parent, the network first, each with the result a move there would give: ok, or the refusal code in reason (INVALID_PARENT, PARENT_CYCLE, CHILD_LIMIT, DEPTH_LIMIT, or NOT_MOVABLE). subtree_size counts the orgs that move.',
         params: IdParamsSchema,
         response: { 200: OrgParentOptionsResponseSchema, ...errorResponses(401, 403, 404, 503) },
       },
@@ -470,7 +602,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
           id: org.id,
           name: org.displayName,
           depth: org.depth,
-          known_as_name: org.depth === 0 ? null : nameOf(orgCfg.known_as, org.knownAs),
+          known_as_name: org.depth === 0 ? null : org.knownAsName,
           ok,
           reason,
         })),
@@ -575,9 +707,9 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       config: { rbac: { capability: 'network.administer' } },
       schema: {
         tags: ['console'],
-        summary: 'Organisation tree limits and "known as" values (network admin)',
+        summary: 'The network, its "known as" values and the tree limits (network admin)',
         description:
-          'Read-only. The tree limits from the instance config, how many pending and active organisations count toward max_total_orgs, and each "known as" value with the depths where it is allowed and how many pending and active organisations carry it. Depth 1 sits directly under the network.',
+          'Read-only. The network with the "known as" values it defines for top-level organisations (edited through PATCH /v1/org/child-known-as/update/:id), the tree limits from the instance config, and how many pending and active organisations count toward max_total_orgs. Depth 1 sits directly under the network.',
         response: { 200: OrgHierarchyResponseSchema, ...errorResponses(401, 403, 503) },
       },
     },

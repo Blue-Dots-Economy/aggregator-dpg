@@ -12,6 +12,7 @@
  */
 
 import type { AggregatorStatus, BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
+import type { ChildKnownAs } from '@aggregator-dpg/shared-primitives/user-org';
 import type { RecordConsentHook } from '../consent-ledger/hook.js';
 
 /** Slug of the fixed Default org, which holds coordinators with no other org. */
@@ -59,8 +60,15 @@ export interface Organisation {
   /** Org details, shown for every coordinator of the org. */
   locations: BecknLocation[];
   legalName: string | null;
-  /** Key of the org's "known as" value, from the instance config list. */
+  /** Key of the org's "known as" value: a key of the parent's list, or `aggregator`. */
   knownAs: string;
+  /**
+   * Name of `knownAs`, resolved from the parent's list ("Aggregator" for a key
+   * the list does not have, and for the Default org). `null` for the root.
+   */
+  knownAsName: string | null;
+  /** The "known as" values this org defines for its direct children. Empty for the Default org. */
+  childKnownAs: ChildKnownAs;
   /** Depth in the tree: 0 for the root, 1 for a top-level org. Set by the store on create and move. */
   depth: number;
   /** The parent org's id; the root for a top-level org, `null` for the root itself. */
@@ -72,8 +80,8 @@ export interface Organisation {
 }
 
 /**
- * Tree limits and "known as" rules, read from instance config by the caller.
- * The store applies them under its tree lock.
+ * Tree limits, read from instance config by the caller. The store applies
+ * them under its tree lock.
  */
 export interface TreeRules {
   /** The deepest an aggregator org can be; 1 keeps every org under the root. */
@@ -82,12 +90,6 @@ export interface TreeRules {
   maxChildren: number | null;
   /** The most pending and active aggregator orgs, root and Default excluded. */
   maxTotalOrgs: number;
-  /** Whether `key` may be used at `depth`. */
-  knownAsAllowed(key: string, depth: number): boolean;
-  /** Whether `key` is a value the instance still configures (the system value included). */
-  knownAsConfigured(key: string): boolean;
-  /** The "known as" key a new org gets at `depth`. */
-  suggestFor(depth: number): string;
 }
 
 export interface CreateOrgInput {
@@ -127,8 +129,6 @@ export interface UpdateOrgPatch {
   /** Org details, edited from the console. */
   locations?: BecknLocation[];
   legalName?: string | null;
-  /** "Known as" key; checked against the org's stored depth under the tree lock. */
-  knownAs?: string;
   description?: string | null;
   /**
    * Keys to merge into `profile`: each value replaces the stored one, `null`
@@ -154,8 +154,6 @@ export interface SearchOrgsFilter {
   status?: AggregatorStatus;
   /** Case-insensitive name prefix. */
   namePrefix?: string;
-  /** Exact "known as" key. */
-  knownAs?: string;
   /** Only orgs below this org, at any depth (the org itself excluded). */
   descendantsOf?: string;
   cursor?: OrgCursor;
@@ -194,8 +192,12 @@ export type OrgStoreError =
   | { code: 'NOT_MOVABLE'; message: string }
   /** The org row is locked by another write. */
   | { code: 'ORG_BUSY'; message: string }
-  /** A "known as" key is not allowed at the org's depth; `orgIds` names the orgs. */
-  | { code: 'KNOWN_AS_DEPTH'; message: string; orgIds: string[] }
+  /** The "known as" key is not one of the parent's choices. */
+  | { code: 'KNOWN_AS_INVALID'; message: string }
+  /** The org's parent is not the one the caller checked: it was moved. */
+  | { code: 'ORG_MOVED'; message: string }
+  /** The org is the Default org, whose "known as" values do not change. */
+  | { code: 'NOT_EDITABLE'; message: string }
   /** The `recordConsent` hook failed; nothing was created. */
   | { code: 'CONSENT_WRITE_FAILED'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
@@ -211,7 +213,9 @@ export abstract class OrganisationStoreBase {
    * Creates a pending org under its parent.
    *
    * @param input - The org, its owner and its parent.
-   * @param rules - Tree limits and the suggested "known as" key.
+   * The new org's `known_as` is the parent's default entry, else `aggregator`.
+   *
+   * @param rules - Tree limits.
    * @returns The new org; `INVALID_PARENT`, `DEPTH_LIMIT`, `CHILD_LIMIT` or `TOTAL_LIMIT` when refused.
    */
   abstract create(input: CreateOrgInput, rules: TreeRules): Promise<OrgStoreResult<Organisation>>;
@@ -219,12 +223,12 @@ export abstract class OrganisationStoreBase {
    * Sets a rejected org back to `pending` under the parent of the new registration.
    *
    * Checks the parent and the limits as {@link create} does, with the org counted as new.
-   * Sets `depth` from the parent. Keeps `known_as` when it is allowed at the new depth;
-   * otherwise sets the suggested key, because a rejected org's value is not kept.
+   * Sets `depth` from the parent. Sets `known_as` to the parent's default entry, else
+   * `aggregator`, as for a new org.
    *
    * @param id - The rejected org's id.
    * @param parentId - The new parent; the root when absent.
-   * @param rules - Tree limits and "known as" rules.
+   * @param rules - Tree limits.
    * @returns The revived org; `NOT_FOUND` when the org is not rejected, `NOT_MOVABLE` when it has
    *   child orgs, `INVALID_PARENT`, `DEPTH_LIMIT`, `CHILD_LIMIT` or `TOTAL_LIMIT` when refused.
    */
@@ -236,27 +240,26 @@ export abstract class OrganisationStoreBase {
   /**
    * Moves an org and every org below it under a new parent.
    *
-   * Recomputes `depth` for the moved orgs. Moving to the current parent without `knownAs` changes nothing.
+   * Recomputes `depth` for the moved orgs. Moving to the current parent changes nothing.
+   * The moved org keeps its `known_as` when the new parent's list has the key; otherwise it
+   * takes the new parent's default entry, else `aggregator`. Orgs below it keep theirs.
    *
    * @param id - The org to move; must be pending or active, not the root or the Default org.
-   * @param change - The new parent and, optionally, a new "known as" key for the org itself.
-   * @param rules - Tree limits and "known as" rules.
+   * @param change - The new parent.
+   * @param rules - Tree limits.
    * @returns The moved org, its parent before the move and the number of orgs moved; `NOT_MOVABLE`,
-   *   `ORG_BUSY`, `INVALID_PARENT`, `PARENT_CYCLE`, `CHILD_LIMIT`, `DEPTH_LIMIT` or `KNOWN_AS_DEPTH` when refused.
+   *   `ORG_BUSY`, `INVALID_PARENT`, `PARENT_CYCLE`, `CHILD_LIMIT` or `DEPTH_LIMIT` when refused.
    */
   abstract move(
     id: string,
-    change: { parentId: string; knownAs?: string },
+    change: { parentId: string },
     rules: TreeRules,
   ): Promise<OrgStoreResult<{ org: Organisation; oldParentId: string | null; movedCount: number }>>;
   /**
    * Lists every candidate parent for a move, with the result the move would give.
    *
-   * `KNOWN_AS_DEPTH` names a parent that puts an org below the moved org at a
-   * depth its value does not allow. The moved org's own value is not checked.
-   *
    * @param id - The org to move.
-   * @param rules - Tree limits and "known as" rules.
+   * @param rules - Tree limits.
    * @returns The size of the org's subtree (the org included) and one option per candidate.
    */
   abstract parentOptions(
@@ -326,19 +329,49 @@ export abstract class OrganisationStoreBase {
   /**
    * Updates an org's fields in one write.
    *
-   * With `patch.knownAs`, takes the tree lock and checks the key against the
-   * org's stored depth first; a refused key saves no field.
-   *
    * @param id - The org id.
    * @param patch - The fields to change.
-   * @param rules - "Known as" rules; required when `patch.knownAs` is set.
-   * @returns The updated org; `KNOWN_AS_DEPTH` when the key is not allowed at the org's depth.
+   * @returns The updated org; `NOT_FOUND` when absent.
    */
-  abstract update(
+  abstract update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<Organisation>>;
+  /**
+   * Sets an org's `known_as` to one of its parent's choices.
+   *
+   * Takes the tree lock first, so a move or a list edit cannot change the
+   * parent or its list between the check and the write.
+   *
+   * @param id - The org; an aggregator org other than the Default org.
+   * @param key - The new key: an entry of the parent's list, or `aggregator` when the list is empty.
+   * @param expectedParentId - The parent the caller checked the actor against.
+   * @param updatedBy - The acting admin's user id.
+   * @returns The updated org; `NOT_FOUND`, `NOT_EDITABLE` (the Default org), `ORG_MOVED` (the
+   *   parent is not `expectedParentId`) or `KNOWN_AS_INVALID` when refused.
+   */
+  abstract setKnownAs(
     id: string,
-    patch: UpdateOrgPatch,
-    rules?: TreeRules,
+    key: string,
+    expectedParentId: string,
+    updatedBy: string,
   ): Promise<OrgStoreResult<Organisation>>;
+  /**
+   * Replaces the "known as" values an org defines for its direct children.
+   *
+   * Takes the tree lock first. In the same write, every child (any status, the
+   * Default org excluded) whose key is neither in the new list nor `aggregator`
+   * takes the new default entry, else `aggregator`. Those children keep their
+   * `updated_at`. The root can be written too.
+   *
+   * @param id - The org, or the root.
+   * @param values - The new list, every key set and valid.
+   * @param updatedBy - The acting admin's user id.
+   * @returns The updated org and the number of children reset; `NOT_FOUND` or
+   *   `NOT_EDITABLE` (the Default org) when refused.
+   */
+  abstract setChildKnownAs(
+    id: string,
+    values: ChildKnownAs,
+    updatedBy: string,
+  ): Promise<OrgStoreResult<{ org: Organisation; resetCount: number }>>;
   /**
    * Hard-deletes an org row by id.
    *
@@ -396,12 +429,6 @@ export abstract class OrganisationStoreBase {
    * @returns The descendant ids, without the given ids themselves.
    */
   abstract descendantIds(ids: readonly string[]): Promise<OrgStoreResult<string[]>>;
-  /**
-   * Counts pending and active aggregator orgs per "known as" key.
-   *
-   * @returns Count per key; a key with no org is absent.
-   */
-  abstract countByKnownAs(): Promise<OrgStoreResult<Record<string, number>>>;
   /**
    * Deletes an org only while it is still `pending` and older than `cutoff`.
    *

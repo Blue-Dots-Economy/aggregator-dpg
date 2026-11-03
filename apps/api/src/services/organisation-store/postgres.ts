@@ -11,12 +11,30 @@
  * re-reads the joined row in that transaction, because `RETURNING` cannot
  * include the joined owner. A database trigger releases the owner's account
  * once it owns no org.
+ *
+ * Every read joins the parent row, so `knownAsName` is resolved from the
+ * parent's `child_known_as` list with no second query.
  */
 
-import { and, asc, desc, eq, gt, inArray, lt, ne, or, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  lt,
+  ne,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { organisations, contact, userIdentities, users } from '../../db/schema.js';
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
+import { SYSTEM_KNOWN_AS, type ChildKnownAs } from '@aggregator-dpg/shared-primitives/user-org';
+import { defaultKnownAsKey, knownAsChoices, knownAsNameOf } from '../known-as.js';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
 import { logger } from '../../logger.js';
@@ -45,10 +63,8 @@ import {
   DESCENDANT_LEVEL_CAP,
   buildTree,
   canParent,
-  knownAsBlocksMove,
   moveRefusal,
   newChildRefusal,
-  parentOptionRefusal,
   subtree,
   type Tree,
   type TreeNode,
@@ -63,15 +79,10 @@ class ConsentHookError extends Error {
   }
 }
 
-/**
- * A tree write was refused; rolls the transaction back and maps to `code`.
- *
- * `orgIds` names the orgs for `KNOWN_AS_DEPTH`.
- */
+/** A tree write was refused; rolls the transaction back and maps to `code`. */
 class TreeRefusalError extends Error {
   constructor(
-    readonly code: TreeRefusal | 'KNOWN_AS_DEPTH' | 'ORG_BUSY',
-    readonly orgIds: string[] = [],
+    readonly code: TreeRefusal | 'ORG_BUSY' | 'KNOWN_AS_INVALID' | 'ORG_MOVED' | 'NOT_EDITABLE',
   ) {
     super(code);
     this.name = 'TreeRefusalError';
@@ -119,7 +130,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
             orgOwner: ownerUserId,
             kcGroupId: input.kcGroupId ?? null,
             locations: input.locations ?? [],
-            knownAs: rules.suggestFor(depth),
+            knownAs: defaultKnownAsKey(parent.childKnownAs),
             profile: input.profile ?? {},
             profileRef: input.profileRef ?? null,
             createdBy: 'self',
@@ -165,7 +176,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       const revived = await getDb().transaction(async (tx) => {
         await lockTree(tx);
         const [org] = await tx
-          .select({ knownAs: organisations.knownAs })
+          .select({ status: organisations.status })
           .from(organisations)
           .where(scoped(and(eq(organisations.id, id), eq(organisations.status, 'inactive'))))
           .limit(1);
@@ -190,9 +201,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           .set({
             parentId: parent.id,
             depth,
-            knownAs: rules.knownAsAllowed(org.knownAs, depth)
-              ? org.knownAs
-              : rules.suggestFor(depth),
+            knownAs: defaultKnownAsKey(parent.childKnownAs),
             status: 'pending',
             rejectedAt: null,
             updatedAt: new Date(),
@@ -210,7 +219,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
 
   async move(
     id: string,
-    change: { parentId: string; knownAs?: string },
+    change: { parentId: string },
     rules: TreeRules,
   ): Promise<
     OrgStoreResult<{ org: Organisation; oldParentId: string | null; movedCount: number }>
@@ -231,44 +240,30 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
         if (refused) throw new TreeRefusalError(refused);
         const org = tree.byId.get(id)!;
         const oldParentId = org.parentId;
-        if (org.parentId === change.parentId) {
-          if (change.knownAs === undefined) return { oldParentId, movedCount: 0 };
-          if (!rules.knownAsAllowed(change.knownAs, org.depth)) {
-            throw new TreeRefusalError('KNOWN_AS_DEPTH', [id]);
-          }
-          await tx
-            .update(organisations)
-            .set({ knownAs: change.knownAs, updatedAt: new Date() })
-            .where(scoped(eq(organisations.id, id)));
-          return { oldParentId, movedCount: 0 };
-        }
+        if (org.parentId === change.parentId) return { oldParentId, movedCount: 0 };
         const delta = tree.byId.get(change.parentId)!.depth + 1 - org.depth;
+        const [current] = await tx
+          .select({ knownAs: organisations.knownAs })
+          .from(organisations)
+          .where(eq(organisations.id, id));
+        const newList = await childKnownAsOf(tx, change.parentId);
+        const keep = newList.some((e) => e.key === current?.knownAs);
         await tx
           .update(organisations)
           .set({
             parentId: change.parentId,
-            ...(change.knownAs === undefined ? {} : { knownAs: change.knownAs }),
+            ...(keep ? {} : { knownAs: defaultKnownAsKey(newList) }),
             updatedAt: new Date(),
           })
           .where(scoped(eq(organisations.id, id)));
-        const moved = await tx.execute<{ id: string; depth: number; known_as: string }>(sql`
+        const moved = await tx.execute<{ id: string }>(sql`
           WITH RECURSIVE sub(id) AS (
             SELECT ${id}::uuid
             UNION
             SELECT o.id FROM ${organisations} o JOIN sub s ON o.parent_id = s.id)
           UPDATE ${organisations} o SET depth = o.depth + ${delta}::int
             FROM sub WHERE o.id = sub.id
-          RETURNING o.id, o.depth, o.known_as`);
-        // The moved org needs an allowed value; an org below it is skipped
-        // when its value is no longer configured (knownAsBlocksMove).
-        const failing = moved.rows
-          .filter((r) =>
-            r.id === id
-              ? !rules.knownAsAllowed(r.known_as, Number(r.depth))
-              : knownAsBlocksMove(rules, r.known_as, Number(r.depth)),
-          )
-          .map((r) => r.id);
-        if (failing.length > 0) throw new TreeRefusalError('KNOWN_AS_DEPTH', failing);
+          RETURNING o.id`);
         return { oldParentId, movedCount: moved.rows.length };
       });
       const org = await this.findById(id);
@@ -313,7 +308,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       const options = rows
         .filter((r) => r.o.id !== id)
         .map((r) => {
-          const reason = parentOptionRefusal(tree, id, r.o.id, rules);
+          const reason = moveRefusal(tree, id, r.o.id, rules);
           return { org: toDomain(r), ok: reason === null, reason };
         });
       return { ok: true, value: { subtreeSize: subtree(tree, id).length, options } };
@@ -424,12 +419,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
     }
   }
 
-  async update(
-    id: string,
-    patch: UpdateOrgPatch,
-    rules?: TreeRules,
-  ): Promise<OrgStoreResult<Organisation>> {
-    const start = Date.now();
+  async update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<Organisation>> {
     // The owner's IdP login lives on the owner's account, not the org row.
     const { ownerKcSub, displayName, profileMerge, ...rest } = patch;
     const columns: Record<string, unknown> =
@@ -439,18 +429,6 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
     }
     try {
       const updated = await getDb().transaction(async (tx) => {
-        if (patch.knownAs !== undefined) {
-          await lockTree(tx);
-          const [org] = await tx
-            .select({ depth: organisations.depth })
-            .from(organisations)
-            .where(scoped(eq(organisations.id, id)))
-            .limit(1);
-          if (!org) return null;
-          if (!rules?.knownAsAllowed(patch.knownAs, org.depth)) {
-            throw new TreeRefusalError('KNOWN_AS_DEPTH', [id]);
-          }
-        }
         const rows = await tx
           .update(organisations)
           .set({ ...columns, updatedAt: new Date() })
@@ -465,8 +443,100 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       if (!updated) return errResult('NOT_FOUND', id);
       return { ok: true, value: updated };
     } catch (e) {
-      if (e instanceof TreeRefusalError) return refusal('orgStore.update', e, start);
       return mapDbError('orgStore.update', e);
+    }
+  }
+
+  async setKnownAs(
+    id: string,
+    key: string,
+    expectedParentId: string,
+    updatedBy: string,
+  ): Promise<OrgStoreResult<Organisation>> {
+    const start = Date.now();
+    try {
+      const updated = await getDb().transaction(async (tx) => {
+        await lockTree(tx);
+        const [org] = await tx
+          .select({ parentId: organisations.parentId, slug: organisations.slug })
+          .from(organisations)
+          .where(scoped(eq(organisations.id, id)))
+          .limit(1);
+        if (!org) return null;
+        if (org.slug === DEFAULT_ORG_SLUG) throw new TreeRefusalError('NOT_EDITABLE');
+        if (org.parentId !== expectedParentId) throw new TreeRefusalError('ORG_MOVED');
+        const list = await childKnownAsOf(tx, expectedParentId);
+        if (!knownAsChoices(list).some((e) => e.key === key)) {
+          throw new TreeRefusalError('KNOWN_AS_INVALID');
+        }
+        await tx
+          .update(organisations)
+          .set({ knownAs: key, updatedBy, updatedAt: new Date() })
+          .where(scoped(eq(organisations.id, id)));
+        return this.readIn(tx, id);
+      });
+      if (!updated) return errResult('NOT_FOUND', id);
+      return { ok: true, value: updated };
+    } catch (e) {
+      if (e instanceof TreeRefusalError) return refusal('orgStore.setKnownAs', e, start);
+      return mapDbError('orgStore.setKnownAs', e);
+    }
+  }
+
+  async setChildKnownAs(
+    id: string,
+    values: ChildKnownAs,
+    updatedBy: string,
+  ): Promise<OrgStoreResult<{ org: Organisation; resetCount: number }>> {
+    const start = Date.now();
+    try {
+      const result = await getDb().transaction(async (tx) => {
+        await lockTree(tx);
+        // Matched by id alone, not scoped(): the root has a list too.
+        const [org] = await tx
+          .select({ orgType: organisations.orgType, slug: organisations.slug })
+          .from(organisations)
+          .where(eq(organisations.id, id))
+          .limit(1);
+        if (!org) return null;
+        if (org.orgType === 'aggregator' && org.slug === DEFAULT_ORG_SLUG) {
+          throw new TreeRefusalError('NOT_EDITABLE');
+        }
+        await tx
+          .update(organisations)
+          .set({ childKnownAs: values, updatedBy, updatedAt: new Date() })
+          .where(eq(organisations.id, id));
+        // Children whose key left the list take the new default. updated_at is
+        // left alone, so the pending clean-up timing does not move.
+        const keep = [SYSTEM_KNOWN_AS.key, ...values.map((e) => e.key)];
+        const reset = await tx
+          .update(organisations)
+          .set({ knownAs: defaultKnownAsKey(values) })
+          .where(
+            scoped(
+              and(
+                eq(organisations.parentId, id),
+                ne(organisations.slug, DEFAULT_ORG_SLUG),
+                notInArray(organisations.knownAs, keep),
+              ),
+            ),
+          )
+          .returning({ id: organisations.id });
+        const [row] = await this.selectJoined(tx).where(eq(organisations.id, id)).limit(1);
+        return row ? { org: toDomain(row), resetCount: reset.length } : null;
+      });
+      if (!result) return errResult('NOT_FOUND', id);
+      logger.info({
+        operation: 'orgStore.setChildKnownAs',
+        status: 'success',
+        org_id: id,
+        reset_count: result.resetCount,
+        latency_ms: Date.now() - start,
+      });
+      return { ok: true, value: result };
+    } catch (e) {
+      if (e instanceof TreeRefusalError) return refusal('orgStore.setChildKnownAs', e, start);
+      return mapDbError('orgStore.setChildKnownAs', e);
     }
   }
 
@@ -511,7 +581,6 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       const conds: (SQL | undefined)[] = [];
       if (filter.orgIds !== null) conds.push(inArray(organisations.id, filter.orgIds));
       if (filter.status) conds.push(eq(organisations.status, filter.status));
-      if (filter.knownAs) conds.push(eq(organisations.knownAs, filter.knownAs));
       if (filter.descendantsOf) {
         // The walk stops after a fixed number of levels, so a cycle cannot loop.
         conds.push(sql`${organisations.id} IN (
@@ -574,19 +643,6 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       return { ok: true, value: rows.rows.map((r) => r.id).filter((id) => !given.has(id)) };
     } catch (e) {
       return mapDbError('orgStore.descendantIds', e);
-    }
-  }
-
-  async countByKnownAs(): Promise<OrgStoreResult<Record<string, number>>> {
-    try {
-      const rows = await getDb()
-        .select({ key: organisations.knownAs, n: sql<number>`count(*)::int` })
-        .from(organisations)
-        .where(scoped(inArray(organisations.status, ['pending', 'active'])))
-        .groupBy(organisations.knownAs);
-      return { ok: true, value: Object.fromEntries(rows.map((r) => [r.key, Number(r.n)])) };
-    } catch (e) {
-      return mapDbError('orgStore.countByKnownAs', e);
     }
   }
 
@@ -661,6 +717,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
         c: contact,
         ownerKcSub: userIdentities.subject,
         parentName: parentOrg.name,
+        parentChildKnownAs: parentOrg.childKnownAs,
       })
       .from(organisations)
       .leftJoin(parentOrg, eq(parentOrg.id, organisations.parentId))
@@ -719,10 +776,18 @@ type JoinedRow = {
   c: typeof contact.$inferSelect;
   ownerKcSub: string | null;
   parentName: string | null;
+  parentChildKnownAs: ChildKnownAs | null;
 };
 
 function toDomain(row: JoinedRow): Organisation {
   const { o, c } = row;
+  const isDefault = o.orgType === 'aggregator' && o.slug === DEFAULT_ORG_SLUG;
+  let knownAsName: string | null = null;
+  if (o.orgType !== 'network_facilitator') {
+    knownAsName = isDefault
+      ? SYSTEM_KNOWN_AS.name
+      : knownAsNameOf(row.parentChildKnownAs ?? [], o.knownAs);
+  }
   return {
     id: o.id,
     slug: o.slug,
@@ -742,10 +807,12 @@ function toDomain(row: JoinedRow): Organisation {
     updatedAt: o.updatedAt,
     updatedBy: o.updatedBy,
     rejectedAt: o.rejectedAt,
-    isDefault: o.orgType === 'aggregator' && o.slug === DEFAULT_ORG_SLUG,
+    isDefault,
     locations: (o.locations ?? []) as BecknLocation[],
     legalName: o.legalName,
     knownAs: o.knownAs,
+    knownAsName,
+    childKnownAs: o.childKnownAs ?? [],
     depth: o.depth,
     parentId: o.parentId,
     parentName: row.parentName,
@@ -760,16 +827,20 @@ function toDomain(row: JoinedRow): Organisation {
  *
  * @param tx - The write transaction.
  * @param requested - The requested parent id; the root when absent.
- * @returns The parent id and depth.
+ * @returns The parent id, depth and "known as" list.
  * @throws {TreeRefusalError} `INVALID_PARENT` when the requested org is not the root or an active, non-Default aggregator org.
  */
 async function resolveParent(
   tx: DbExecutor,
   requested: string | undefined,
-): Promise<{ id: string; depth: number }> {
+): Promise<{ id: string; depth: number; childKnownAs: ChildKnownAs }> {
   if (requested === undefined) {
     const [root] = await tx
-      .select({ id: organisations.id, depth: organisations.depth })
+      .select({
+        id: organisations.id,
+        depth: organisations.depth,
+        childKnownAs: organisations.childKnownAs,
+      })
       .from(organisations)
       .where(eq(organisations.orgType, 'network_facilitator'))
       .limit(1);
@@ -777,7 +848,7 @@ async function resolveParent(
     return root;
   }
   const [parent] = await tx
-    .select(NODE_COLUMNS)
+    .select({ ...NODE_COLUMNS, childKnownAs: organisations.childKnownAs })
     .from(organisations)
     .where(eq(organisations.id, requested))
     .for('share')
@@ -805,12 +876,11 @@ const NODE_COLUMNS = {
   status: organisations.status,
   orgType: organisations.orgType,
   slug: organisations.slug,
-  knownAs: organisations.knownAs,
 };
 
 type NodeRow = Pick<
   typeof organisations.$inferSelect,
-  'id' | 'parentId' | 'depth' | 'status' | 'orgType' | 'slug' | 'knownAs'
+  'id' | 'parentId' | 'depth' | 'status' | 'orgType' | 'slug'
 >;
 
 function toNode(row: NodeRow): TreeNode {
@@ -821,8 +891,23 @@ function toNode(row: NodeRow): TreeNode {
     status: row.status,
     isRoot: row.orgType === 'network_facilitator',
     isDefault: row.orgType === 'aggregator' && row.slug === DEFAULT_ORG_SLUG,
-    knownAs: row.knownAs,
   };
+}
+
+/**
+ * Reads the "known as" list of an org or the root.
+ *
+ * @param db - Executor.
+ * @param id - The org id.
+ * @returns The list; empty when the org is absent.
+ */
+async function childKnownAsOf(db: DbExecutor, id: string): Promise<ChildKnownAs> {
+  const [row] = await db
+    .select({ childKnownAs: organisations.childKnownAs })
+    .from(organisations)
+    .where(eq(organisations.id, id))
+    .limit(1);
+  return row?.childKnownAs ?? [];
 }
 
 /** Reads every org, the root included, as a tree snapshot. */
@@ -949,15 +1034,9 @@ function err(code: OrgStoreError['code'], message: string): OrgStoreError {
   return { code, message } as OrgStoreError;
 }
 
-/** Logs and returns a refused tree write; `KNOWN_AS_DEPTH` names the orgs. */
+/** Logs and returns a refused tree write. */
 function refusal<T>(op: string, e: TreeRefusalError, start: number): OrgStoreResult<T> {
   logger.warn({ operation: op, status: 'failure', error: e.code, latency_ms: Date.now() - start });
-  if (e.code === 'KNOWN_AS_DEPTH') {
-    return {
-      ok: false,
-      error: { code: 'KNOWN_AS_DEPTH', message: 'known_as not allowed at depth', orgIds: e.orgIds },
-    };
-  }
   return errResult(e.code, `refused: ${e.code}`);
 }
 

@@ -305,6 +305,19 @@ test_real_table_org_routes_need_org_manage_or_orgs_onboard if {
 	decide_real(req("GET", "/v1/org/read/0b1c", user(["network_admin"]))).allowed
 }
 
+test_real_table_known_as_routes_need_org_manage_or_orgs_onboard if {
+	for_value := decide_real(req("PATCH", "/v1/org/known-as/update/0b1c", user(["coordinator"])))
+	for_value.http_status == 403
+	body(for_value).fields.permission == "org.manage|orgs.onboard"
+	list := decide_real(req("PATCH", "/v1/org/child-known-as/update/0b1c", user(["coordinator"])))
+	list.http_status == 403
+	body(list).fields.permission == "org.manage|orgs.onboard"
+	decide_real(req("PATCH", "/v1/org/known-as/update/0b1c", user(["org_admin"]))).allowed
+	decide_real(req("PATCH", "/v1/org/known-as/update/0b1c", user(["network_admin"]))).allowed
+	decide_real(req("PATCH", "/v1/org/child-known-as/update/0b1c", user(["org_admin"]))).allowed
+	decide_real(req("PATCH", "/v1/org/child-known-as/update/0b1c", user(["network_admin"]))).allowed
+}
+
 test_real_table_owner_is_refused_network_admin_org_actions if {
 	repair := decide_real(req("POST", "/v1/org/access/repair/0b1c", user(["org_admin"])))
 	repair.http_status == 403
