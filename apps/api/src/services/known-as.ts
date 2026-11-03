@@ -128,7 +128,9 @@ export type FillKnownAsKeysResult =
  *
  * An entry that sends a key keeps it; the key must already be in the org's
  * list, so a client cannot choose keys. An entry with no key gets one made
- * from its name ({@link knownAsKeyFrom}).
+ * from its name ({@link knownAsKeyFrom}). A made key is never one of the
+ * current keys, even one this save drops, so children that held a dropped key
+ * are reset rather than matched to a new entry.
  *
  * @param values - The requested list. Given keys are unique (checked by the schema).
  * @param current - The org's stored `child_known_as` list.
@@ -140,12 +142,12 @@ export function fillKnownAsKeys(
   current: readonly KnownAsEntry[],
 ): FillKnownAsKeysResult {
   const known = new Set(current.map((e) => e.key));
-  const taken = new Set<string>();
   for (const [index, entry] of values.entries()) {
-    if (entry.key === undefined) continue;
-    if (!known.has(entry.key)) return { ok: false, error: { code: 'UNKNOWN_KEY', index } };
-    taken.add(entry.key);
+    if (entry.key !== undefined && !known.has(entry.key)) {
+      return { ok: false, error: { code: 'UNKNOWN_KEY', index } };
+    }
   }
+  const taken = new Set(known);
   const out: ChildKnownAs = values.map((entry) => {
     const key = entry.key ?? knownAsKeyFrom(entry.name, taken);
     taken.add(key);

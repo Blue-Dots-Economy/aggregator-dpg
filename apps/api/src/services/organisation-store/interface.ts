@@ -12,7 +12,7 @@
  */
 
 import type { AggregatorStatus, BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
-import type { ChildKnownAs } from '@aggregator-dpg/shared-primitives/user-org';
+import type { ChildKnownAs, ChildKnownAsRequest } from '@aggregator-dpg/shared-primitives/user-org';
 import type { RecordConsentHook } from '../consent-ledger/hook.js';
 
 /** Slug of the fixed Default org, which holds coordinators with no other org. */
@@ -196,7 +196,9 @@ export type OrgStoreError =
   | { code: 'KNOWN_AS_INVALID'; message: string }
   /** The org's parent is not the one the caller checked: it was moved. */
   | { code: 'ORG_MOVED'; message: string }
-  /** The org is the Default org, whose "known as" values do not change. */
+  /** A sent "known as" key is not in the org's stored list; `index` is the entry. */
+  | { code: 'KNOWN_AS_UNKNOWN_KEY'; message: string; index: number }
+  /** The org is the Default org or a rejected org, whose "known as" values do not change. */
   | { code: 'NOT_EDITABLE'; message: string }
   /** The `recordConsent` hook failed; nothing was created. */
   | { code: 'CONSENT_WRITE_FAILED'; message: string }
@@ -344,8 +346,8 @@ export abstract class OrganisationStoreBase {
    * @param key - The new key: an entry of the parent's list, or `aggregator` when the list is empty.
    * @param expectedParentId - The parent the caller checked the actor against.
    * @param updatedBy - The acting admin's user id.
-   * @returns The updated org; `NOT_FOUND`, `NOT_EDITABLE` (the Default org), `ORG_MOVED` (the
-   *   parent is not `expectedParentId`) or `KNOWN_AS_INVALID` when refused.
+   * @returns The updated org; `NOT_FOUND`, `NOT_EDITABLE` (the Default org or a rejected org),
+   *   `ORG_MOVED` (the parent is not `expectedParentId`) or `KNOWN_AS_INVALID` when refused.
    */
   abstract setKnownAs(
     id: string,
@@ -356,20 +358,21 @@ export abstract class OrganisationStoreBase {
   /**
    * Replaces the "known as" values an org defines for its direct children.
    *
-   * Takes the tree lock first. In the same write, every child (any status, the
-   * Default org excluded) whose key is neither in the new list nor `aggregator`
-   * takes the new default entry, else `aggregator`. Those children keep their
-   * `updated_at`. The root can be written too.
+   * Takes the tree lock first, then reads the org's stored list and fills the
+   * missing keys from it (`fillKnownAsKeys`). In the same write, every child
+   * (any status, the Default org excluded) whose key is neither in the new list
+   * nor `aggregator` takes the new default entry, else `aggregator`. Those
+   * children keep their `updated_at`. The root can be written too.
    *
    * @param id - The org, or the root.
-   * @param values - The new list, every key set and valid.
+   * @param values - The requested list; a sent key must be in the stored list.
    * @param updatedBy - The acting admin's user id.
-   * @returns The updated org and the number of children reset; `NOT_FOUND` or
-   *   `NOT_EDITABLE` (the Default org) when refused.
+   * @returns The updated org and the number of children reset; `NOT_FOUND`,
+   *   `NOT_EDITABLE` (the Default org) or `KNOWN_AS_UNKNOWN_KEY` when refused.
    */
   abstract setChildKnownAs(
     id: string,
-    values: ChildKnownAs,
+    values: ChildKnownAsRequest,
     updatedBy: string,
   ): Promise<OrgStoreResult<{ org: Organisation; resetCount: number }>>;
   /**

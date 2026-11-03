@@ -43,7 +43,7 @@ import { errorResponses } from '../errors/openapi.js';
 import { getUserStore } from '../services/user-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import type { OrganisationConfig } from '@aggregator-dpg/network-config/interface';
-import { fillKnownAsKeys, knownAsChoices, treeRules } from '../services/known-as.js';
+import { knownAsChoices, treeRules } from '../services/known-as.js';
 import {
   getOrganisationStore,
   type Organisation,
@@ -223,6 +223,11 @@ function throwKnownAsError(e: OrgStoreError, subOperation: string): never {
       throw httpError('CONFLICT', {
         detail: 'The organisation was moved. Reload and try again.',
         fields: { reason: 'moved' },
+      });
+    case 'KNOWN_AS_UNKNOWN_KEY':
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: 'A value sent a key that is not saved. Send no key for a new value.',
+        fields: { values: 'unknown_key', index: e.index },
       });
     case 'NOT_EDITABLE':
       throw httpError('CONFLICT', { detail: "This organisation's details are not editable." });
@@ -435,7 +440,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: 'Set what an organisation is known as (owner of its parent)',
         description:
-          "Only the owner of the organisation's parent sets it: the network admin for a top-level organisation, else the owner of the parent organisation (an active organisation it owns). An organisation the caller cannot see answers 404; one it sees but whose parent it does not own answers 403. known_as must be a key of the parent's list, or aggregator when that list is empty (400 SCHEMA_VALIDATION with fields.known_as otherwise). The network, the Default organisation and a rejected organisation answer 409, and so does an organisation moved while the request ran (fields.reason: moved). The organisation's owner is emailed when it is not the caller.",
+          "Only the owner of the organisation's parent sets it: the network admin for a top-level organisation, else the owner of the parent organisation (an active organisation it owns). An organisation the caller cannot see answers 404; one it sees but whose parent it does not own answers 403. known_as must be a key of the parent's list, or aggregator when that list is empty (400 SCHEMA_VALIDATION with fields.known_as otherwise). The network, the Default organisation and a rejected organisation answer 409, and so does an organisation moved while the request ran (fields.reason: moved). The organisation's owner is emailed when it is not the caller. Sending the current value answers 200 with the organisation unchanged and sends no email.",
         params: IdParamsSchema,
         body: OrgKnownAsUpdateRequestSchema,
         response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
@@ -452,6 +457,8 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         });
       }
       if (!(await ownsParentOf(actor, org))) throw httpError('FORBIDDEN');
+      // The org already has this value: nothing is written and no one is emailed.
+      if (body.known_as === org.knownAs) return reply.status(200).send(toWireOrg(org));
       await guardWriteRate(actor, reply);
 
       const updated = await getOrganisationStore().setKnownAs(
@@ -499,18 +506,11 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         }
         if (!ownedOrgIds(actor).includes(org.id)) throw httpError('FORBIDDEN');
       }
-      const values = fillKnownAsKeys(body.values, org.childKnownAs);
-      if (!values.ok) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'A value sent a key that is not saved. Send no key for a new value.',
-          fields: { values: 'unknown_key', index: values.error.index },
-        });
-      }
       await guardWriteRate(actor, reply);
 
       const updated = await getOrganisationStore().setChildKnownAs(
         org.id,
-        values.value,
+        body.values,
         actor.userId,
       );
       if (!updated.ok) throwKnownAsError(updated.error, 'orgStore.setChildKnownAs');
@@ -519,7 +519,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         status: 'success',
         actor_id: actor.userId,
         target_id: org.id,
-        value_count: values.value.length,
+        value_count: updated.value.org.childKnownAs.length,
         reset_count: updated.value.resetCount,
       });
       return reply.status(200).send(toWireOrg(updated.value.org, orgType));

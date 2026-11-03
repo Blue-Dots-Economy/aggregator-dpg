@@ -7419,7 +7419,7 @@
         "tags": [
           "console"
         ],
-        "description": "Only the owner of the organisation's parent sets it: the network admin for a top-level organisation, else the owner of the parent organisation (an active organisation it owns). An organisation the caller cannot see answers 404; one it sees but whose parent it does not own answers 403. known_as must be a key of the parent's list, or aggregator when that list is empty (400 SCHEMA_VALIDATION with fields.known_as otherwise). The network, the Default organisation and a rejected organisation answer 409, and so does an organisation moved while the request ran (fields.reason: moved). The organisation's owner is emailed when it is not the caller.",
+        "description": "Only the owner of the organisation's parent sets it: the network admin for a top-level organisation, else the owner of the parent organisation (an active organisation it owns). An organisation the caller cannot see answers 404; one it sees but whose parent it does not own answers 403. known_as must be a key of the parent's list, or aggregator when that list is empty (400 SCHEMA_VALIDATION with fields.known_as otherwise). The network, the Default organisation and a rejected organisation answer 409, and so does an organisation moved while the request ran (fields.reason: moved). The organisation's owner is emailed when it is not the caller. Sending the current value answers 200 with the organisation unchanged and sends no email.",
         "requestBody": {
           "required": true,
           "content": {

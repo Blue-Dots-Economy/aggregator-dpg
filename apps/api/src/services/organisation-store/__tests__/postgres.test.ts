@@ -961,7 +961,7 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
       if (fields.length === 1 && fields[0] === 'childKnownAs') {
         return [{ childKnownAs: script.list ?? [] }];
       }
-      if (fields.length === 2 && fields.includes('slug')) {
+      if (fields.length === 3 && fields.includes('slug')) {
         return script.target ? [script.target] : [];
       }
       if (fields.length === 1 && fields[0] === 'id') return script.child ? [{ id: 'kid' }] : [];
@@ -1105,7 +1105,7 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
 
   it('setKnownAs writes a key of the parent list with the writer', async () => {
     const s = scripted({
-      target: { parentId: 'p1', slug: 'o1' },
+      target: { parentId: 'p1', slug: 'o1', status: 'active' },
       list: [{ key: 'ward', name: 'Ward' }],
       read: makeRow({ id: 'o1', parentId: 'p1', knownAs: 'ward' }),
     });
@@ -1115,10 +1115,11 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
   });
 
   it.each([
-    ['KNOWN_AS_INVALID', { parentId: 'p1', slug: 'o1' }, 'block'],
-    ['KNOWN_AS_INVALID', { parentId: 'p1', slug: 'o1' }, 'aggregator'],
-    ['ORG_MOVED', { parentId: 'p2', slug: 'o1' }, 'ward'],
-    ['NOT_EDITABLE', { parentId: 'p1', slug: 'default' }, 'ward'],
+    ['KNOWN_AS_INVALID', { parentId: 'p1', slug: 'o1', status: 'active' }, 'block'],
+    ['KNOWN_AS_INVALID', { parentId: 'p1', slug: 'o1', status: 'active' }, 'aggregator'],
+    ['ORG_MOVED', { parentId: 'p2', slug: 'o1', status: 'active' }, 'ward'],
+    ['NOT_EDITABLE', { parentId: 'p1', slug: 'default', status: 'active' }, 'ward'],
+    ['NOT_EDITABLE', { parentId: 'p1', slug: 'o1', status: 'inactive' }, 'ward'],
     ['NOT_FOUND', null, 'ward'],
   ] as const)('setKnownAs refuses with %s and writes nothing', async (expected, target, key) => {
     const s = scripted({ target, list: [{ key: 'ward', name: 'Ward' }] });
@@ -1129,7 +1130,7 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
 
   it('setKnownAs allows only aggregator under an empty list', async () => {
     const s = scripted({
-      target: { parentId: 'p1', slug: 'o1' },
+      target: { parentId: 'p1', slug: 'o1', status: 'active' },
       list: [],
       read: makeRow({ id: 'o1', parentId: 'p1' }),
     });
@@ -1139,11 +1140,11 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
   it('setChildKnownAs writes the root by id and resets children outside the list', async () => {
     const list = [{ key: 'ward', name: 'Ward', default: true as const }];
     const s = scripted({
-      target: { orgType: 'network_facilitator', slug: 'network' },
+      target: { orgType: 'network_facilitator', slug: 'network', childKnownAs: [] },
       resetIds: [{ id: 'x' }, { id: 'y' }],
       read: makeRow({ id: 'root', childKnownAs: list }),
     });
-    const r = await s.store.setChildKnownAs('root', list, 'admin');
+    const r = await s.store.setChildKnownAs('root', [{ name: 'Ward', default: true }], 'admin');
     expect(r.ok && r.value.resetCount).toBe(2);
     expect(s.sets[0]).toMatchObject({ childKnownAs: list, updatedBy: 'admin' });
     // The list write is not limited to aggregator orgs, so the root can be written.
@@ -1156,13 +1157,48 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
   });
 
   it('setChildKnownAs refuses the Default org and an unknown org', async () => {
-    const def = scripted({ target: { orgType: 'aggregator', slug: 'default' } });
+    const def = scripted({ target: { orgType: 'aggregator', slug: 'default', childKnownAs: [] } });
     const r = await def.store.setChildKnownAs('d0', [], 'u1');
     expect(!r.ok && r.error.code).toBe('NOT_EDITABLE');
     expect(def.sets).toEqual([]);
     const none = scripted({ target: null });
     const n = await none.store.setChildKnownAs('x', [], 'u1');
     expect(!n.ok && n.error.code).toBe('NOT_FOUND');
+  });
+
+  it('setChildKnownAs refuses a sent key not in the list read under the lock', async () => {
+    const s = scripted({
+      target: {
+        orgType: 'aggregator',
+        slug: 'o1',
+        childKnownAs: [{ key: 'block', name: 'Block' }],
+      },
+    });
+    const r = await s.store.setChildKnownAs(
+      'o1',
+      [
+        { key: 'block', name: 'Block' },
+        { key: 'ward', name: 'Ward' },
+      ],
+      'u1',
+    );
+    expect(r.ok ? null : r.error).toMatchObject({ code: 'KNOWN_AS_UNKNOWN_KEY', index: 1 });
+    expect(s.sets).toEqual([]);
+  });
+
+  it('setChildKnownAs makes a new key that is not a dropped key of the stored list', async () => {
+    const s = scripted({
+      target: {
+        orgType: 'aggregator',
+        slug: 'o1',
+        childKnownAs: [{ key: 'state', name: 'State' }],
+      },
+      resetIds: [{ id: 'x' }],
+      read: makeRow({ id: 'o1' }),
+    });
+    const r = await s.store.setChildKnownAs('o1', [{ name: 'State' }], 'u1');
+    expect(r.ok && r.value.resetCount).toBe(1);
+    expect(s.sets[0]).toMatchObject({ childKnownAs: [{ key: 'state_2', name: 'State' }] });
   });
 
   it('revive answers NOT_FOUND when the org is no longer rejected', async () => {

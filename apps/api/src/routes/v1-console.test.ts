@@ -975,6 +975,16 @@ describe('console routes /v1/user, /v1/org', () => {
       expect((await setKnownAs('na', { known_as: 'state' }, id)).statusCode).toBe(409);
     });
 
+    it('answers 200 with no write and no email when the key is the current one', async () => {
+      await setOrg(ORG_B, { knownAs: 'taluk' });
+      const write = vi.spyOn(orgs, 'setKnownAs');
+      const res = await setKnownAs('a', { known_as: 'taluk' });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ id: ORG_B, known_as: 'taluk', known_as_name: 'Taluk' });
+      expect(write).not.toHaveBeenCalled();
+      expect(mailer.outbox).toHaveLength(0);
+    });
+
     it('refuses a rejected org (409)', async () => {
       await setOrg(ORG_B, { status: 'inactive' });
       expect((await setKnownAs('a', { known_as: 'block' })).statusCode).toBe(409);
@@ -1047,13 +1057,26 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(await knownAsOf(ORG_B)).toEqual(['block', 'Mandal']);
     });
 
-    it('refuses a key that is not saved (400 unknown_key)', async () => {
+    it('refuses a key that is not saved (400 unknown_key) and writes nothing', async () => {
       const res = await setList('a', [{ name: 'New' }, { key: 'made_up', name: 'X' }]);
       expect(res.statusCode).toBe(400);
       expect(errorOf(res)).toMatchObject({
         code: 'SCHEMA_VALIDATION',
         fields: { values: 'unknown_key', index: 1 },
       });
+      const a = await orgs.findById(ORG_A);
+      expect(a.ok && a.value?.childKnownAs).toEqual([BLOCK, TALUK]);
+    });
+
+    it('gives a re-added name a new key and resets the children of the removed entry', async () => {
+      const res = await setList('a', [BLOCK, { name: 'Taluk' }]);
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { child_known_as: unknown }).child_known_as).toEqual([
+        BLOCK,
+        { key: 'taluk_2', name: 'Taluk' },
+      ]);
+      expect(await knownAsOf(ORG_P)).toEqual(['aggregator', 'Aggregator']);
+      expect(await knownAsOf(ORG_B)).toEqual(['block', 'Block']);
     });
 
     it.each([

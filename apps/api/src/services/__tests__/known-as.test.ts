@@ -133,6 +133,23 @@ describe('fillKnownAsKeys', () => {
     });
   });
 
+  it('never gives a new entry the key of an entry the save drops', () => {
+    const r = fillKnownAsKeys(
+      [{ key: 'district', name: 'District' }, { name: 'State' }],
+      [
+        { key: 'state', name: 'State' },
+        { key: 'district', name: 'District' },
+      ],
+    );
+    expect(r).toEqual({
+      ok: true,
+      value: [
+        { key: 'district', name: 'District' },
+        { key: 'state_2', name: 'State' },
+      ],
+    });
+  });
+
   it('refuses a sent key that is not saved', () => {
     expect(fillKnownAsKeys([{ name: 'A' }, { key: 'made_up', name: 'B' }], [])).toEqual({
       ok: false,

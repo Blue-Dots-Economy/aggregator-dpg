@@ -10,8 +10,18 @@
 
 import { randomUUID } from 'node:crypto';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
-import { SYSTEM_KNOWN_AS, type ChildKnownAs } from '@aggregator-dpg/shared-primitives/user-org';
-import { defaultKnownAsKey, knownAsChoices, knownAsKeyValid, knownAsNameOf } from '../known-as.js';
+import {
+  SYSTEM_KNOWN_AS,
+  type ChildKnownAs,
+  type ChildKnownAsRequest,
+} from '@aggregator-dpg/shared-primitives/user-org';
+import {
+  defaultKnownAsKey,
+  fillKnownAsKeys,
+  knownAsChoices,
+  knownAsKeyValid,
+  knownAsNameOf,
+} from '../known-as.js';
 import {
   OrganisationStoreBase,
   DEFAULT_ORG_SLUG,
@@ -369,6 +379,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       const org = this.byId.get(id);
       if (!org) return Promise.resolve(err('NOT_FOUND', id));
       if (org.isDefault) return Promise.resolve(err('NOT_EDITABLE', 'the Default org'));
+      if (org.status === 'inactive') return Promise.resolve(err('NOT_EDITABLE', 'a rejected org'));
       if (org.parentId !== expectedParentId) {
         return Promise.resolve(err('ORG_MOVED', 'the org has a new parent'));
       }
@@ -383,7 +394,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
 
   setChildKnownAs(
     id: string,
-    values: ChildKnownAs,
+    requested: ChildKnownAsRequest,
     updatedBy: string,
   ): Promise<OrgStoreResult<{ org: Organisation; resetCount: number }>> {
     return this.withTreeLock(() => {
@@ -391,6 +402,18 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       const org = isRoot ? this.root : this.byId.get(id);
       if (!org) return Promise.resolve(err('NOT_FOUND', id));
       if (org.isDefault) return Promise.resolve(err('NOT_EDITABLE', 'the Default org'));
+      const filled = fillKnownAsKeys(requested, org.childKnownAs);
+      if (!filled.ok) {
+        return Promise.resolve({
+          ok: false,
+          error: {
+            code: 'KNOWN_AS_UNKNOWN_KEY',
+            message: 'a sent key is not in the list',
+            index: filled.error.index,
+          },
+        });
+      }
+      const values = filled.value;
       const next: Organisation = {
         ...org,
         childKnownAs: values.map((e) => ({ ...e })),
@@ -616,7 +639,10 @@ function pickOwned(
   );
 }
 
-function err<T>(code: OrgStoreError['code'], message: string): OrgStoreResult<T> {
+function err<T>(
+  code: Exclude<OrgStoreError['code'], 'KNOWN_AS_UNKNOWN_KEY'>,
+  message: string,
+): OrgStoreResult<T> {
   return { ok: false, error: { code, message } };
 }
 

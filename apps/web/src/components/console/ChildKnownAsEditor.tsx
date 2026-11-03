@@ -64,6 +64,11 @@ function requestOfSaved(values: ChildKnownAs): KnownAsEntryRequest[] {
   }));
 }
 
+/** Whether two saved lists have the same keys, names and default, in order. */
+function sameList(a: ChildKnownAs, b: ChildKnownAs): boolean {
+  return JSON.stringify(requestOfSaved(a)) === JSON.stringify(requestOfSaved(b));
+}
+
 /**
  * Renders the editor for an organisation's `child_known_as` list.
  *
@@ -85,9 +90,10 @@ export function ChildKnownAsEditor({
   const [busy, setBusy] = useState(false);
   const { rows, defaultId } = state;
 
-  // A newer list from the page (after a refresh) replaces the editor's copy.
+  // A list from the page with different keys, names or default replaces the
+  // editor's copy. The same list in a new object keeps unsaved edits.
   const [seen, setSeen] = useState(values);
-  if (values !== seen) {
+  if (values !== seen && !sameList(values, seen)) {
     setSeen(values);
     setSaved(values);
     setState(rowsOf(values));

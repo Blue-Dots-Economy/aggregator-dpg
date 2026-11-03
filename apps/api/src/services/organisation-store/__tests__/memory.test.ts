@@ -1039,6 +1039,14 @@ describe('InMemoryOrganisationStore — tree rules', () => {
       expect(code(await store.setKnownAs('d0', 'state', 'root', 'x'))).toBe('NOT_EDITABLE');
       expect(code(await store.setKnownAs('missing', 'state', 'root', 'x'))).toBe('NOT_FOUND');
     });
+
+    it('refuses a rejected org with NOT_EDITABLE and writes nothing', async () => {
+      const store = withLists();
+      store.seed([org('r', 'a', 2, { status: 'inactive' })]);
+      expect(code(await store.setKnownAs('r', 'block', 'a', 'x'))).toBe('NOT_EDITABLE');
+      const r = await store.findById('r');
+      expect(r.ok && r.value?.knownAs).toBe('aggregator');
+    });
   });
 
   describe('setChildKnownAs', () => {
@@ -1051,7 +1059,11 @@ describe('InMemoryOrganisationStore — tree rules', () => {
         org('t', 'a', 2, { knownAs: 'taluk', status: 'inactive', updatedAt: at }),
         org('g', 'a', 2, { knownAs: 'aggregator', updatedAt: at }),
       ]);
-      const r = await store.setChildKnownAs('a', [BLOCK, { ...WARD, default: true }], 'owner-a');
+      const r = await store.setChildKnownAs(
+        'a',
+        [BLOCK, { name: 'Ward', default: true }],
+        'owner-a',
+      );
       expect(r.ok && [r.value.resetCount, r.value.org.childKnownAs]).toEqual([
         1,
         [BLOCK, { ...WARD, default: true }],
@@ -1095,7 +1107,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
     it('writes the root list; the Default org is never reset', async () => {
       const store = tree();
       store.seed([org('a', 'root', 1, { knownAs: 'gone' })]);
-      const r = await store.setChildKnownAs('root', [{ ...WARD, default: true }], 'admin');
+      const r = await store.setChildKnownAs('root', [{ name: 'Ward', default: true }], 'admin');
       expect(r.ok && [r.value.org.id, r.value.org.knownAsName, r.value.resetCount]).toEqual([
         'root',
         null,
@@ -1110,6 +1122,35 @@ describe('InMemoryOrganisationStore — tree rules', () => {
       ]);
       const a = await store.findById('a');
       expect(a.ok && a.value?.knownAs).toBe('ward');
+    });
+
+    it('gives a new entry a fresh key when a dropped entry had its name', async () => {
+      const store = tree();
+      store.seed([
+        org('a', 'root', 1, { childKnownAs: [{ key: 'state', name: 'State' }, BLOCK] }),
+        org('b', 'a', 2, { knownAs: 'state' }),
+      ]);
+      const r = await store.setChildKnownAs('a', [BLOCK, { name: 'State' }], 'owner-a');
+      expect(r.ok && [r.value.resetCount, r.value.org.childKnownAs]).toEqual([
+        1,
+        [BLOCK, { key: 'state_2', name: 'State' }],
+      ]);
+      const b = await store.findById('b');
+      expect(b.ok && b.value?.knownAs).toBe('aggregator');
+    });
+
+    it('refuses a sent key that is not in the stored list and writes nothing', async () => {
+      const store = tree();
+      store.seed([org('a', 'root', 1, { childKnownAs: [BLOCK] })]);
+      // The client read [BLOCK, WARD]; WARD was removed before this save.
+      const r = await store.setChildKnownAs('a', [{ name: 'New' }, WARD], 'owner-a');
+      expect(r.ok ? null : r.error).toEqual({
+        code: 'KNOWN_AS_UNKNOWN_KEY',
+        message: expect.any(String),
+        index: 1,
+      });
+      const a = await store.findById('a');
+      expect(a.ok && a.value?.childKnownAs).toEqual([BLOCK]);
     });
 
     it('refuses the Default org with NOT_EDITABLE and an unknown org with NOT_FOUND', async () => {

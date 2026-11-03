@@ -33,8 +33,12 @@ import {
 import { alias } from 'drizzle-orm/pg-core';
 import { organisations, contact, userIdentities, users } from '../../db/schema.js';
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
-import { SYSTEM_KNOWN_AS, type ChildKnownAs } from '@aggregator-dpg/shared-primitives/user-org';
-import { defaultKnownAsKey, knownAsChoices, knownAsNameOf } from '../known-as.js';
+import {
+  SYSTEM_KNOWN_AS,
+  type ChildKnownAs,
+  type ChildKnownAsRequest,
+} from '@aggregator-dpg/shared-primitives/user-org';
+import { defaultKnownAsKey, fillKnownAsKeys, knownAsChoices, knownAsNameOf } from '../known-as.js';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
 import { logger } from '../../logger.js';
@@ -86,6 +90,14 @@ class TreeRefusalError extends Error {
   ) {
     super(code);
     this.name = 'TreeRefusalError';
+  }
+}
+
+/** A sent "known as" key is not in the stored list; rolls the transaction back. */
+class UnknownKnownAsKeyError extends Error {
+  constructor(readonly index: number) {
+    super('KNOWN_AS_UNKNOWN_KEY');
+    this.name = 'UnknownKnownAsKeyError';
   }
 }
 
@@ -458,12 +470,18 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       const updated = await getDb().transaction(async (tx) => {
         await lockTree(tx);
         const [org] = await tx
-          .select({ parentId: organisations.parentId, slug: organisations.slug })
+          .select({
+            parentId: organisations.parentId,
+            slug: organisations.slug,
+            status: organisations.status,
+          })
           .from(organisations)
           .where(scoped(eq(organisations.id, id)))
           .limit(1);
         if (!org) return null;
-        if (org.slug === DEFAULT_ORG_SLUG) throw new TreeRefusalError('NOT_EDITABLE');
+        if (org.slug === DEFAULT_ORG_SLUG || org.status === 'inactive') {
+          throw new TreeRefusalError('NOT_EDITABLE');
+        }
         if (org.parentId !== expectedParentId) throw new TreeRefusalError('ORG_MOVED');
         const list = await childKnownAsOf(tx, expectedParentId);
         if (!knownAsChoices(list).some((e) => e.key === key)) {
@@ -485,7 +503,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
 
   async setChildKnownAs(
     id: string,
-    values: ChildKnownAs,
+    requested: ChildKnownAsRequest,
     updatedBy: string,
   ): Promise<OrgStoreResult<{ org: Organisation; resetCount: number }>> {
     const start = Date.now();
@@ -494,7 +512,11 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
         await lockTree(tx);
         // Matched by id alone, not scoped(): the root has a list too.
         const [org] = await tx
-          .select({ orgType: organisations.orgType, slug: organisations.slug })
+          .select({
+            orgType: organisations.orgType,
+            slug: organisations.slug,
+            childKnownAs: organisations.childKnownAs,
+          })
           .from(organisations)
           .where(eq(organisations.id, id))
           .limit(1);
@@ -502,6 +524,9 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
         if (org.orgType === 'aggregator' && org.slug === DEFAULT_ORG_SLUG) {
           throw new TreeRefusalError('NOT_EDITABLE');
         }
+        const filled = fillKnownAsKeys(requested, org.childKnownAs);
+        if (!filled.ok) throw new UnknownKnownAsKeyError(filled.error.index);
+        const values = filled.value;
         await tx
           .update(organisations)
           .set({ childKnownAs: values, updatedBy, updatedAt: new Date() })
@@ -536,6 +561,19 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       return { ok: true, value: result };
     } catch (e) {
       if (e instanceof TreeRefusalError) return refusal('orgStore.setChildKnownAs', e, start);
+      if (e instanceof UnknownKnownAsKeyError) {
+        logger.warn({
+          operation: 'orgStore.setChildKnownAs',
+          status: 'failure',
+          error: 'KNOWN_AS_UNKNOWN_KEY',
+          index: e.index,
+          latency_ms: Date.now() - start,
+        });
+        return {
+          ok: false,
+          error: { code: 'KNOWN_AS_UNKNOWN_KEY', message: 'refused: unknown key', index: e.index },
+        };
+      }
       return mapDbError('orgStore.setChildKnownAs', e);
     }
   }

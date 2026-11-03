@@ -5,7 +5,8 @@
  * Covers: the empty state, saved rows with their default, adding, renaming
  * and removing rows (saved keys sent back, new rows without a key), the
  * default choice, the row limit, name checks before sending, the saved list
- * from the API, and an error.
+ * from the API, an error, a changed list from the page, and the same list
+ * in a new object (unsaved edits kept).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -174,5 +175,17 @@ describe('<ChildKnownAsEditor />', () => {
     );
     expect(nameField(1)).toHaveValue('Ward');
     expect(screen.getAllByRole('textbox')).toHaveLength(1);
+  });
+
+  it('keeps unsaved edits when the page passes the same list in a new object', () => {
+    const { rerender } = renderIt();
+    fireEvent.change(nameField(2), { target: { value: 'Mandal' } });
+    rerender(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <ChildKnownAsEditor orgId={ORG} values={SAVED.map((e) => ({ ...e }))} />
+      </NextIntlClientProvider>,
+    );
+    expect(nameField(2)).toHaveValue('Mandal');
+    expect(save()).toBeEnabled();
   });
 });
