@@ -153,8 +153,18 @@ Notes on the contract:
 - An unknown value fails at startup with a clear message, never at the first
   upload.
 - Each provider owns its own settings, named with its own prefix (for example
-  `AZURE_STORAGE_*` for a future Azure provider). Settings for providers that
-  are not selected are ignored.
+  `AZURE_STORAGE_*` for a future Azure provider).
+- **Required-ness depends on the selected provider.** In the schema every
+  provider's settings are optional on their own. A check on the whole config
+  then requires the settings of the provider named in `STORAGE_PROVIDER`
+  only, and fails startup naming each missing one. Settings of providers
+  that are not selected are ignored, so an S3 deployment never needs
+  `AZURE_STORAGE_*` and an Azure deployment never needs `S3_*`.
+- For `s3` the existing defaults and fallbacks are kept exactly:
+  `S3_REGION` defaults to `us-east-1`, `S3_BUCKET` to
+  `aggregator-bulk-uploads`, `S3_FORCE_PATH_STYLE` to `true`;
+  `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT` and the two keys stay optional. So no
+  existing deployment gains a newly required setting.
 
 ### 4.4 What stays in the apps
 
@@ -230,9 +240,11 @@ Where the names are:
 | Queue job payload | `s3Key` | `packages/queue/src/index.ts` (bulk file job) |
 | API responses | `s3_key`, `errors_csv_s3_key` | `routes/bulk-uploads.ts`, `openapi.json`; read by `apps/web/src/services/onboarding.service.ts` and `CSVUpload.tsx` |
 | Env vars | `S3_*` | both apps, `.env.example` files, docker-compose, `bluedots-automation` helm |
-| Docs and logs | `s3_key` log fields, `docs/onboarding-*.md` | — |
+| Text a coordinator can see | The upload error `S3 PUT failed (<status>): <body>` | `apps/web/src/services/onboarding.service.ts:263`, shown in the upload screen by `CSVUpload.tsx` |
+| API docs | "pre-signed S3 GET URL" and similar wording in route descriptions | `routes/bulk-uploads.ts`, `openapi.json` |
+| Docs and logs | `s3_key` log fields, `s3_object_missing` reason, `sub: 's3.put'`, `docs/onboarding-*.md` | api routes, worker jobs |
 
-### Option 1 — keep the names (recommended for this issue)
+### Option 1 — keep the names
 
 Everything goes through the interface; the existing names are only labels.
 A column called `s3_key` holds a storage key whatever the provider is, and
@@ -241,8 +253,9 @@ are S3 settings.
 
 - Cost: none beyond section 5.
 - Migration: none. Deploy as in section 6.
-- Downside: a reader on a non-S3 deployment sees "s3" in column and field
-  names; it is cosmetic.
+- Effect: on a non-S3 deployment "s3" still shows in column names, API
+  field names, API docs, logs, and the upload error text a coordinator can
+  see. None of these change behaviour.
 
 ### Option 2 — rename to neutral names
 
@@ -268,7 +281,7 @@ Extra work (about one more day):
    contract in `openapi.json`. To avoid breaking any caller, the api returns
    both the old and the new field for one release (old marked deprecated),
    the web app moves to the new field, and the old field is removed later.
-5. **Docs and logs** updated.
+5. **Docs, logs, API descriptions and the upload error text** updated to neutral wording.
 
 Deploy order for option 2:
 - **Before or with the new api**: run the column-rename migration. With
