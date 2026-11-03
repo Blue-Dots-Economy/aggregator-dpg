@@ -22,11 +22,97 @@ export type UserOrgStatus = z.infer<typeof UserOrgStatusSchema>;
 export const OrgTypeSchema = z.enum(['network_facilitator', 'aggregator']);
 export type OrgType = z.infer<typeof OrgTypeSchema>;
 
-/** Key of an org's "known as" value. Membership in the instance list is checked by the API. */
+/** Key of an org's "known as" value. Membership in the parent's list is checked by the API. */
 export const KnownAsKeySchema = z
   .string()
   .regex(/^[a-z][a-z0-9_]*$/)
   .max(64);
+
+/** Longest "known as" name. */
+export const KNOWN_AS_NAME_MAX = 60;
+
+/** Most entries in one org's `child_known_as` list. */
+export const KNOWN_AS_MAX_VALUES = 20;
+
+/**
+ * The built-in "known as" value. A valid stored value under every parent, and
+ * the value of a new org whose parent's list has no default.
+ */
+export const SYSTEM_KNOWN_AS = { key: 'aggregator', name: 'Aggregator' } as const;
+
+const KnownAsNameSchema = z.string().trim().min(1).max(KNOWN_AS_NAME_MAX);
+
+/** One entry of an org's `child_known_as` list, as the API returns it. */
+export const KnownAsEntrySchema = z.object({
+  key: KnownAsKeySchema,
+  name: KnownAsNameSchema,
+  /** Set on the entry new child orgs get. At most one entry per list. */
+  default: z.literal(true).optional(),
+});
+export type KnownAsEntry = z.infer<typeof KnownAsEntrySchema>;
+
+/**
+ * One entry of a `child_known_as` list in a request. An existing entry sends
+ * its key back to keep it; a new entry sends no key and the API makes one
+ * from the name.
+ */
+export const KnownAsEntryRequestSchema = z
+  .object({
+    key: KnownAsKeySchema.optional(),
+    name: KnownAsNameSchema,
+    default: z.literal(true).optional(),
+  })
+  .strict();
+export type KnownAsEntryRequest = z.infer<typeof KnownAsEntryRequestSchema>;
+
+/** Adds an issue for a repeated key and for more than one `default` entry. */
+function checkKnownAsList(
+  list: ReadonlyArray<{ key?: string | undefined; default?: true | undefined }>,
+  ctx: z.RefinementCtx,
+): void {
+  const seen = new Set<string>();
+  let defaults = 0;
+  list.forEach((entry, i) => {
+    if (entry.key !== undefined) {
+      if (seen.has(entry.key)) {
+        ctx.addIssue({ code: 'custom', path: [i, 'key'], message: 'known_as keys must be unique' });
+      }
+      seen.add(entry.key);
+    }
+    if (entry.default) {
+      defaults += 1;
+      if (defaults > 1) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [i, 'default'],
+          message: 'at most one known_as value can be the default',
+        });
+      }
+    }
+  });
+}
+
+/**
+ * The "known as" values an org defines for its direct children. Keys are
+ * unique, at most one entry is the default, and the list has at most
+ * {@link KNOWN_AS_MAX_VALUES} entries.
+ */
+export const ChildKnownAsSchema = z
+  .array(KnownAsEntrySchema)
+  .max(KNOWN_AS_MAX_VALUES)
+  .superRefine(checkKnownAsList);
+export type ChildKnownAs = z.infer<typeof ChildKnownAsSchema>;
+
+/**
+ * A `child_known_as` list in a request. The keys that are given are unique,
+ * at most one entry is the default, and the list has at most
+ * {@link KNOWN_AS_MAX_VALUES} entries.
+ */
+export const ChildKnownAsRequestSchema = z
+  .array(KnownAsEntryRequestSchema)
+  .max(KNOWN_AS_MAX_VALUES)
+  .superRefine(checkKnownAsList);
+export type ChildKnownAsRequest = z.infer<typeof ChildKnownAsRequestSchema>;
 
 /** A person's contact as the console shows it, unmasked. */
 export const PersonContactSchema = z.object({
@@ -188,8 +274,13 @@ export const OrgSchema = z.object({
   legal_name: z.string().nullable(),
   /** Key of the org's "known as" value; null for the network facilitator. */
   known_as: z.string().nullable(),
-  /** Configured name for `known_as`; null for the root or a key no longer configured. */
+  /**
+   * Name of `known_as`: the name in the parent's list, else "Aggregator".
+   * Null for the network facilitator.
+   */
   known_as_name: z.string().nullable(),
+  /** The "known as" values this org defines for its direct children. */
+  child_known_as: ChildKnownAsSchema,
   /** Depth in the tree: 0 for the network facilitator, 1 for a top-level org. */
   depth: z.number().int(),
   /** The parent org's id; null for the network facilitator. */
@@ -217,6 +308,14 @@ export const OrgReadResponseSchema = z.object({
   /** Pending and active direct child orgs, Default excluded. */
   child_count: z.number().int(),
   pending_count: z.number().int(),
+  /**
+   * The values the caller can pick for this org's `known_as`: the parent's
+   * list, or only the system value when that list is empty. Null when the
+   * caller does not own the parent.
+   */
+  known_as_options: z.array(KnownAsEntrySchema).nullable(),
+  /** Whether the org can have child orgs: below the depth limit and not the Default org. */
+  can_have_children: z.boolean(),
 });
 export type OrgReadResponse = z.infer<typeof OrgReadResponseSchema>;
 
@@ -227,7 +326,6 @@ export const OrgSearchRequestSchema = z
       .object({
         status: UserOrgStatusSchema.optional(),
         name_prefix: z.string().trim().min(1).max(100).optional(),
-        known_as: KnownAsKeySchema.optional(),
         /** Only orgs below this org, at any depth; the org must be within the caller's reach. */
         descendants_of: z.string().uuid().optional(),
       })
@@ -253,8 +351,7 @@ export const OrgSearchResponseSchema = z.object({
 export type OrgSearchResponse = z.infer<typeof OrgSearchResponseSchema>;
 
 /**
- * `PATCH /v1/org/metadata/update/:id`. `known_as` is the network admin's only;
- * every other field is the org owner's only.
+ * `PATCH /v1/org/metadata/update/:id`. Every field is the org owner's only.
  *
  * `profile` holds schema fields to change: each value replaces the stored one,
  * `null` removes it. The API checks them against the deployment's
@@ -265,8 +362,6 @@ export const OrgMetadataUpdateRequestSchema = z
     name: z.string().trim().min(2).max(200).optional(),
     locations: z.array(BecknLocationSchema).max(25).optional(),
     legal_name: z.string().trim().max(200).nullable().optional(),
-    /** Must be allowed at the org's depth. Network admin only. */
-    known_as: KnownAsKeySchema.optional(),
     description: z.string().trim().max(1000).nullable().optional(),
     profile: z
       .record(z.string(), z.unknown())
@@ -277,12 +372,15 @@ export const OrgMetadataUpdateRequestSchema = z
   .refine((b) => Object.keys(b).length > 0, { message: 'at least one field is required' });
 export type OrgMetadataUpdateRequest = z.infer<typeof OrgMetadataUpdateRequestSchema>;
 
-/** `PATCH /v1/org/parent/update/:id`: moves the org under a new parent. Network admin only. */
+/**
+ * `PATCH /v1/org/parent/update/:id`: moves the org under a new parent. Network admin only.
+ *
+ * The moved org keeps its `known_as` when the new parent's list has the key;
+ * otherwise it takes the new parent's default, else `aggregator`.
+ */
 export const OrgParentUpdateRequestSchema = z
   .object({
     parent_id: z.string().uuid(),
-    /** New "known as" key for the moved org; must be allowed at its new depth. */
-    known_as: KnownAsKeySchema.optional(),
   })
   .strict();
 export type OrgParentUpdateRequest = z.infer<typeof OrgParentUpdateRequestSchema>;
@@ -305,6 +403,30 @@ export const OrgParentOptionsResponseSchema = z.object({
   ),
 });
 export type OrgParentOptionsResponse = z.infer<typeof OrgParentOptionsResponseSchema>;
+
+/**
+ * `PATCH /v1/org/known-as/update/:id`: sets the org's `known_as`. Only the
+ * owner of the org's parent can call it; the key must be one of the parent's
+ * values, or `aggregator` when the parent's list is empty.
+ */
+export const OrgKnownAsUpdateRequestSchema = z
+  .object({
+    known_as: KnownAsKeySchema,
+  })
+  .strict();
+export type OrgKnownAsUpdateRequest = z.infer<typeof OrgKnownAsUpdateRequestSchema>;
+
+/**
+ * `PATCH /v1/org/child-known-as/update/:id`: replaces the "known as" values
+ * the org defines for its direct children. Only the org's owner can call it.
+ * Children whose key leaves the list take the new default, else `aggregator`.
+ */
+export const OrgChildKnownAsUpdateRequestSchema = z
+  .object({
+    values: ChildKnownAsRequestSchema,
+  })
+  .strict();
+export type OrgChildKnownAsUpdateRequest = z.infer<typeof OrgChildKnownAsUpdateRequestSchema>;
 
 /** `POST /v1/org/decision/:id` response: adds what owner access achieved. */
 export const OrgDecisionResponseSchema = DecisionResponseSchema.extend({
@@ -496,10 +618,15 @@ export type UpdateRoleRequest = z.infer<typeof UpdateRoleRequestSchema>;
 
 // ─── Hierarchy settings ─────────────────────────────────────────────────────
 
-/** `GET /v1/org/hierarchy`: tree limits and "known as" values, read-only. */
+/** `GET /v1/org/hierarchy`: the network facilitator and the tree limits. */
 export const OrgHierarchyResponseSchema = z.object({
   /** The network facilitator, depth 0: the top of the tree. */
-  network: z.object({ id: z.string(), name: z.string() }),
+  network: z.object({
+    id: z.string(),
+    name: z.string(),
+    /** The "known as" values the network defines for top-level orgs. */
+    child_known_as: ChildKnownAsSchema,
+  }),
   limits: z.object({
     /** The deepest an aggregator org can be; 1 keeps every org under the network. */
     max_depth: z.number().int(),
@@ -510,22 +637,5 @@ export const OrgHierarchyResponseSchema = z.object({
   }),
   /** Pending and active aggregator orgs, Default excluded. */
   total_orgs: z.number().int(),
-  known_as: z.object({
-    /** The system value first, then the instance values in config order. */
-    values: z.array(
-      z.object({
-        key: z.string(),
-        name: z.string(),
-        /** Depths where the value is allowed; null is any depth. */
-        depths: z.array(z.number().int()).nullable(),
-        /** True for the built-in `aggregator` value. */
-        system: z.boolean(),
-        /** Pending and active orgs carrying the value. */
-        org_count: z.number().int(),
-      }),
-    ),
-    /** The value a new self-registered org gets at a depth; other depths get `aggregator`. */
-    suggest: z.array(z.object({ depth: z.number().int(), key: z.string() })),
-  }),
 });
 export type OrgHierarchyResponse = z.infer<typeof OrgHierarchyResponseSchema>;

@@ -39,6 +39,13 @@ describe('organisations schema (migration 0028)', () => {
     expect(organisations.knownAs.default).toBe('aggregator');
   });
 
+  it('declares child_known_as as a required jsonb column defaulting to [] (migration 0034)', () => {
+    expect(organisations.childKnownAs.name).toBe('child_known_as');
+    expect(organisations.childKnownAs.notNull).toBe(true);
+    expect(organisations.childKnownAs.hasDefault).toBe(true);
+    expect(organisations.childKnownAs.getSQLType()).toBe('jsonb');
+  });
+
   it('declares depth as a required smallint with no default (migration 0032)', () => {
     expect(organisations.depth.name).toBe('depth');
     expect(organisations.depth.notNull).toBe(true);
