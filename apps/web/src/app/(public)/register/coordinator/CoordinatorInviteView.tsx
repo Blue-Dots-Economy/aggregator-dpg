@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, type JSX } from 'react';
+import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import type { RJSFSchema } from '@rjsf/utils';
@@ -69,6 +70,7 @@ export function CoordinatorInviteView({
   inviteToken,
   aggregatorConsentContent,
 }: Readonly<CoordinatorInviteViewProps>): JSX.Element {
+  const t = useTranslations('register');
   const claims = useMemo(() => decodeInviteClaims(inviteToken), [inviteToken]);
   const expired = claims !== null && claims.exp > 0 && claims.exp * 1000 < Date.now();
 
@@ -131,9 +133,8 @@ export function CoordinatorInviteView({
     );
   }
 
-  const headingTitle = (schema.title as string | undefined) ?? 'Aggregator Registration';
   return (
-    <RegisterPageShell heading={headingTitle} tagline={null}>
+    <RegisterPageShell heading={t('page_title')} tagline={null}>
       <CoordinatorRegisterForm
         schema={schema}
         uiSchema={uiSchema}

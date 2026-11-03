@@ -9,12 +9,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import { fillTerms } from '@/i18n/terms';
 import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 
 const refresh = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
 
 import { OrgsTable } from '@/components/console/OrgsTable';
+
+const term = (key: string): string => fillTerms(`[[${key}]]`, 'en');
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
@@ -76,7 +79,7 @@ describe('<OrgsTable />', () => {
     const link = screen.getByRole('link', { name: 'Pending Org' });
     expect(link).toHaveAttribute('href', `/console/orgs/${pendingOrg.id}`);
     expect(screen.getByText(messages.console.status.pending)).toBeInTheDocument();
-    expect(screen.getByText(/3 users/)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`3 ${term('users')}`))).toBeInTheDocument();
   });
 
   it('shows the known_as label, falling back to the key', () => {

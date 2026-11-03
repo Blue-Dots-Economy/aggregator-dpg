@@ -12,7 +12,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import hiMessages from '@/i18n/messages/hi.json';
+import { fillTerms } from '@/i18n/terms';
 import { InviteForm, parseRecipients } from '@/components/console/InviteForm';
+
+const term = (key: string): string => fillTerms(`[[${key}]]`, 'en');
 
 const orgs = [
   { id: 'org-1', name: 'First Org' },
@@ -190,7 +193,7 @@ describe('<InviteForm />', () => {
 
     await waitFor(() => expect(screen.getByText('3 invites sent')).toBeInTheDocument());
     const line = screen.getByText(/^Not sent:/);
-    expect(line).toHaveTextContent('known@x.org (already a user here)');
+    expect(line).toHaveTextContent(`known@x.org (already a ${term('user')} here)`);
     expect(line).toHaveTextContent('gone@x.org (previously rejected)');
     expect(line).toHaveTextContent('dup@x.org (listed twice)');
     expect(global.fetch).toHaveBeenCalledWith(
@@ -230,20 +233,22 @@ describe('<InviteForm />', () => {
     const help = screen.getByRole('complementary', { name: 'How it works' });
     expect(help).toHaveTextContent('You send the invite');
     expect(help).toHaveTextContent('They open the link and fill in the registration form.');
-    expect(help).toHaveTextContent('Review them under Users. Once approved, they can sign in.');
+    expect(help).toHaveTextContent(
+      `Review them under ${term('Users')}. Once approved, they can sign in.`,
+    );
     expect(help).toHaveTextContent('Up to 5 emails per send.');
   });
 
   it('links to the coordinators list only when the page passes a link', () => {
     const { unmount } = renderForm();
-    expect(screen.queryByRole('link', { name: 'Users' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: term('Users') })).not.toBeInTheDocument();
     unmount();
     render(
       <NextIntlClientProvider locale="en" messages={messages}>
         <InviteForm orgs={orgs} coordinatorsHref="/console/coordinators" />
       </NextIntlClientProvider>,
     );
-    expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: term('Users') })).toHaveAttribute(
       'href',
       '/console/coordinators',
     );

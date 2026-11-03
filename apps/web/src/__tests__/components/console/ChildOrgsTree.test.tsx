@@ -10,8 +10,11 @@ import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import { fillTerms } from '@/i18n/terms';
 import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { ChildOrgsTree, buildOrgTree } from '@/components/console/ChildOrgsTree';
+
+const term = (key: string): string => fillTerms(`[[${key}]]`, 'en');
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
@@ -114,7 +117,7 @@ describe('<ChildOrgsTree />', () => {
     const districtItem = screen.getByText('District A').closest('li') as HTMLElement;
     expect(within(districtItem).getByText('Agg One')).toBeInTheDocument();
     expect(within(districtItem).getAllByText('District')[0]).toBeInTheDocument();
-    expect(within(districtItem).getByText(/4 users/)).toBeInTheDocument();
+    expect(within(districtItem).getByText(new RegExp(`4 ${term('users')}`))).toBeInTheDocument();
     expect(within(districtItem).getByText('1 organisation below')).toBeInTheDocument();
     expect(within(districtItem).getAllByText('Depth 1')[0]).toBeInTheDocument();
     // A key no longer configured shows the raw key.
