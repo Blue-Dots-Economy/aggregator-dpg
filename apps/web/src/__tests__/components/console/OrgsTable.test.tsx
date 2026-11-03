@@ -76,7 +76,7 @@ describe('<OrgsTable />', () => {
     const link = screen.getByRole('link', { name: 'Pending Org' });
     expect(link).toHaveAttribute('href', `/console/orgs/${pendingOrg.id}`);
     expect(screen.getByText(messages.console.status.pending)).toBeInTheDocument();
-    expect(screen.getByText(/3 coordinators/)).toBeInTheDocument();
+    expect(screen.getByText(/3 users/)).toBeInTheDocument();
   });
 
   it('shows the known_as label, falling back to the key', () => {

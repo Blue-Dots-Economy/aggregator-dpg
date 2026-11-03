@@ -114,7 +114,7 @@ describe('<ChildOrgsTree />', () => {
     const districtItem = screen.getByText('District A').closest('li') as HTMLElement;
     expect(within(districtItem).getByText('Agg One')).toBeInTheDocument();
     expect(within(districtItem).getAllByText('District')[0]).toBeInTheDocument();
-    expect(within(districtItem).getByText(/4 coordinators/)).toBeInTheDocument();
+    expect(within(districtItem).getByText(/4 users/)).toBeInTheDocument();
     expect(within(districtItem).getByText('1 organisation below')).toBeInTheDocument();
     expect(within(districtItem).getAllByText('Depth 1')[0]).toBeInTheDocument();
     // A key no longer configured shows the raw key.

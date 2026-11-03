@@ -5,7 +5,7 @@ import { resolveMaxInvites } from '../../../../lib/invite-limit';
 import { OwnerInviteView } from './OwnerInviteView';
 
 export const metadata: Metadata = {
-  title: 'Invite coordinators',
+  title: 'Invite users',
 };
 
 export const dynamic = 'force-dynamic';

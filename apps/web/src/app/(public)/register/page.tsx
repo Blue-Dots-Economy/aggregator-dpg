@@ -7,8 +7,8 @@ import { loadConsentContent, warnIfLegacyHierarchyFlag } from './register-server
 
 export const metadata: Metadata = {
   // Matches the heading the page renders, which comes from the registration
-  // schema's own title (#873 renamed it to Coordinator Registration).
-  title: 'Coordinator Registration',
+  // schema's own title (now User Registration).
+  title: 'User Registration',
 };
 
 export const dynamic = 'force-dynamic';

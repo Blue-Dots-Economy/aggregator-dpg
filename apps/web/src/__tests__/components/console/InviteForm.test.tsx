@@ -190,7 +190,7 @@ describe('<InviteForm />', () => {
 
     await waitFor(() => expect(screen.getByText('3 invites sent')).toBeInTheDocument());
     const line = screen.getByText(/^Not sent:/);
-    expect(line).toHaveTextContent('known@x.org (already a coordinator here)');
+    expect(line).toHaveTextContent('known@x.org (already a user here)');
     expect(line).toHaveTextContent('gone@x.org (previously rejected)');
     expect(line).toHaveTextContent('dup@x.org (listed twice)');
     expect(global.fetch).toHaveBeenCalledWith(
@@ -230,22 +230,20 @@ describe('<InviteForm />', () => {
     const help = screen.getByRole('complementary', { name: 'How it works' });
     expect(help).toHaveTextContent('You send the invite');
     expect(help).toHaveTextContent('They open the link and fill in the registration form.');
-    expect(help).toHaveTextContent(
-      'Review them under Coordinators. Once approved, they can sign in.',
-    );
+    expect(help).toHaveTextContent('Review them under Users. Once approved, they can sign in.');
     expect(help).toHaveTextContent('Up to 5 emails per send.');
   });
 
   it('links to the coordinators list only when the page passes a link', () => {
     const { unmount } = renderForm();
-    expect(screen.queryByRole('link', { name: 'Coordinators' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Users' })).not.toBeInTheDocument();
     unmount();
     render(
       <NextIntlClientProvider locale="en" messages={messages}>
         <InviteForm orgs={orgs} coordinatorsHref="/console/coordinators" />
       </NextIntlClientProvider>,
     );
-    expect(screen.getByRole('link', { name: 'Coordinators' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute(
       'href',
       '/console/coordinators',
     );

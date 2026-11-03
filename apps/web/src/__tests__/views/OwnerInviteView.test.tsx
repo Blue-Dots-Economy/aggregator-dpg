@@ -70,7 +70,7 @@ describe('<OwnerInviteView />', () => {
     renderView();
     fireEvent.click(screen.getByRole('button', { name: /add another/i }));
     expect(screen.getAllByPlaceholderText('email@org.in')).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: /remove coordinator 2/i }));
+    fireEvent.click(screen.getByRole('button', { name: /remove user 2/i }));
     expect(screen.getAllByPlaceholderText('email@org.in')).toHaveLength(1);
   });
 

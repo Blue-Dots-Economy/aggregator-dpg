@@ -121,7 +121,7 @@ export function OwnerInviteView({
   }
 
   return (
-    <RegisterPageShell heading="Invite your coordinators" tagline={null}>
+    <RegisterPageShell heading="Invite your users" tagline={null}>
       <div className="mt-6">
         {state.status === 'invalid_grant' ? (
           <Banner tone="error">
@@ -156,7 +156,7 @@ export function OwnerInviteView({
                     <input
                       type="email"
                       inputMode="email"
-                      aria-label={`Coordinator email ${i + 1}`}
+                      aria-label={`User email ${i + 1}`}
                       placeholder="email@org.in"
                       value={row.email}
                       onChange={(e) => updateRow(i, 'email', e.target.value)}
@@ -164,7 +164,7 @@ export function OwnerInviteView({
                     />
                     <input
                       type="text"
-                      aria-label={`Coordinator name ${i + 1} (optional)`}
+                      aria-label={`User name ${i + 1} (optional)`}
                       placeholder="Name (optional)"
                       value={row.name}
                       onChange={(e) => updateRow(i, 'name', e.target.value)}
@@ -174,7 +174,7 @@ export function OwnerInviteView({
                   {rows.length > 1 ? (
                     <button
                       type="button"
-                      aria-label={`Remove coordinator ${i + 1}`}
+                      aria-label={`Remove user ${i + 1}`}
                       onClick={() => removeRow(i)}
                       className="mt-1 rounded-[8px] px-2 py-1.5 text-[18px] leading-none text-ink-400 hover:bg-ink-50 hover:text-ink-600"
                     >

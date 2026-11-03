@@ -64,12 +64,12 @@ const tableRows = () => screen.getAllByRole('row').slice(1);
 describe('OrgCoordinators', () => {
   it('shows a count on each tile and every coordinator by default', () => {
     renderList();
-    expect(tile(/^Coordinators\s*3/)).toHaveAttribute('aria-pressed', 'true');
+    expect(tile(/^Users\s*3/)).toHaveAttribute('aria-pressed', 'true');
     expect(tile(/^Active\s*1\s*Can sign in/)).toBeInTheDocument();
     expect(tile(/^Pending review\s*1\s*Waiting on you/)).toBeInTheDocument();
     expect(tile(/^Rejected\s*1\s*Not approved/)).toBeInTheDocument();
     expect(tableRows()).toHaveLength(3);
-    expect(tile(/^Coordinators/)).toHaveTextContent('Showing below');
+    expect(tile(/^Users/)).toHaveTextContent('Showing below');
     expect(tile(/^Active\s*1/)).toHaveTextContent('View list');
   });
 
@@ -78,7 +78,7 @@ describe('OrgCoordinators', () => {
     fireEvent.click(tile(/^Rejected\s*1/));
     expect(tableRows()).toHaveLength(1);
     expect(screen.getByText('rejected@edge.test')).toBeInTheDocument();
-    const group = screen.getByRole('group', { name: 'Show coordinators' });
+    const group = screen.getByRole('group', { name: 'Show users' });
     fireEvent.click(within(group).getByRole('button', { name: 'Active' }));
     expect(tableRows()).toHaveLength(1);
     expect(screen.getByText('Coord One')).toBeInTheDocument();
@@ -93,7 +93,7 @@ describe('OrgCoordinators', () => {
     expect(tableRows()).toHaveLength(1);
     expect(screen.getByText('Asha Rao')).toBeInTheDocument();
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'nobody' } });
-    expect(screen.getByText('No coordinators match.')).toBeInTheDocument();
+    expect(screen.getByText('No users match.')).toBeInTheDocument();
   });
 
   it('links each name, Review for a pending coordinator and a view icon for the others', () => {
@@ -122,16 +122,16 @@ describe('OrgCoordinators', () => {
     renderList({ rows: rows.filter((r) => r.status !== 'pending'), total: 2, pending: 0 });
     expect(tile(/^Pending review\s*0\s*Nothing to review/)).toBeInTheDocument();
     fireEvent.click(tile(/^Pending review/));
-    expect(screen.getByText('No coordinators waiting for review.')).toBeInTheDocument();
+    expect(screen.getByText('No users waiting for review.')).toBeInTheDocument();
   });
 
   it('marks counted tiles and links the full list when only part was loaded', () => {
     renderList({ total: 250, pending: 4, complete: false });
-    expect(tile(/^Coordinators\s*250/)).toBeInTheDocument();
+    expect(tile(/^Users\s*250/)).toBeInTheDocument();
     expect(tile(/^Pending review\s*4/)).toBeInTheDocument();
     expect(tile(/^Active\s*1\+/)).toBeInTheDocument();
     expect(screen.getByText(/Showing the newest 3\./)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'See all coordinators' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'See all users' })).toHaveAttribute(
       'href',
       '/console/coordinators?org_id=org-1',
     );
