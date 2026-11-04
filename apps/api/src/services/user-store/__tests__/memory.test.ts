@@ -43,6 +43,23 @@ describe('InMemoryUserStore.create', () => {
   });
 });
 
+describe('InMemoryUserStore create domains', () => {
+  it('stores the serves list and sets type to its first entry', async () => {
+    const store = new InMemoryUserStore();
+    const r = await store.create(
+      buildCreateCoordinatorInput({ type: 'seeker', serves: ['seeker', 'provider'] }),
+    );
+    expect(r.ok && r.value.serves).toEqual(['seeker', 'provider']);
+    expect(r.ok && r.value.type).toBe('seeker');
+  });
+
+  it('stores type as a one-item list when no serves is given', async () => {
+    const store = new InMemoryUserStore();
+    const r = await store.create(buildCreateCoordinatorInput({ type: 'provider' }));
+    expect(r.ok && r.value.serves).toEqual(['provider']);
+  });
+});
+
 describe('InMemoryUserStore lookups', () => {
   it('returns null for an unknown slug, phone or email', async () => {
     const { store } = await seeded();

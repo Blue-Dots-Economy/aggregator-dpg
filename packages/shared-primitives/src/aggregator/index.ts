@@ -66,15 +66,34 @@ export const RegistrationConsentSchema = ConsentRecordSchema.extend({
 
 // ─── Registration payload (slim — what the signup form submits) ─────────────
 
+/**
+ * The registration's domain ids as a list.
+ *
+ * @param type - The payload's `type`: one id or a list.
+ * @returns The ids, in the order given.
+ */
+export function registrationDomains(type: string | readonly string[]): string[] {
+  return typeof type === 'string' ? [type] : [...type];
+}
+
 export const RegistrationPayloadSchema = z
   .object({
     name: z.string().min(2).max(200),
     /**
-     * Coordinator's domain id. Stored in `users.serves`, which routes that
-     * write participant data check. Also copied to the Keycloak
+     * The domain ids the coordinator serves: one id, or a non-empty list
+     * without repeats. Stored in `users.serves`, which routes that write
+     * participant data check. The first id is also copied to the Keycloak
      * `aggregator_type` attribute, which nothing checks.
      */
-    type: RoleTypeSchema,
+    type: z.union([
+      RoleTypeSchema,
+      z
+        .array(RoleTypeSchema)
+        .min(1)
+        .refine((ids) => new Set(ids).size === ids.length, {
+          message: 'domain ids must not repeat',
+        }),
+    ]),
     url: z.string().url().max(2048).optional(),
     /**
      * Sub-org, division or institution name. Present only when the

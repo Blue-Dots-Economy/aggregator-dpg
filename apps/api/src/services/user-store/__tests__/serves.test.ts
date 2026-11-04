@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { servedDomains, servesOf } from '../serves.js';
+import { servedDomains, servesForCreate, servesOf } from '../serves.js';
 
 const NETWORK = ['seeker', 'provider'];
 
@@ -36,5 +36,27 @@ describe('servedDomains', () => {
 
   it('returns nothing for a network with no domains', () => {
     expect(servedDomains([], [])).toEqual([]);
+  });
+});
+
+describe('servesForCreate', () => {
+  it('uses the list when given', () => {
+    expect(servesForCreate({ type: 'seeker', serves: ['seeker', 'provider'] })).toEqual([
+      'seeker',
+      'provider',
+    ]);
+  });
+
+  it('drops repeats from the list', () => {
+    expect(servesForCreate({ type: null, serves: ['seeker', 'seeker'] })).toEqual(['seeker']);
+  });
+
+  it('keeps an empty list as every domain', () => {
+    expect(servesForCreate({ type: 'seeker', serves: [] })).toEqual([]);
+  });
+
+  it('falls back to type when no list is given', () => {
+    expect(servesForCreate({ type: 'provider' })).toEqual(['provider']);
+    expect(servesForCreate({ type: null })).toEqual([]);
   });
 });
