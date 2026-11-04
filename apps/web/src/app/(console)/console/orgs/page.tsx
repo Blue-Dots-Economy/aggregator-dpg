@@ -24,8 +24,11 @@ import { HierarchySettings } from '@/components/console/HierarchySettings';
 import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
 import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
 import { ORG_FILTERS, type OrgFilter } from '@/lib/org-filters';
-import { ConsoleCollapsible, ConsoleSection } from '@/components/console/ConsoleUi';
+import { ConsoleCollapsible, ConsoleSection, EmptyState } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
+import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
+
+type OrgRow = OrgSearchResponse['orgs'][number];
 
 export default async function ConsoleOrgsPage({
   searchParams,
@@ -46,13 +49,7 @@ export default async function ConsoleOrgsPage({
     <>
       <Topbar title={t('orgs.heading')} subtitle={t('orgs.subtitle')} />
       <div className="flex flex-col gap-6">
-        {pending.length > 0 ? (
-          <div id="pending" className="scroll-mt-6">
-            <ConsoleSection title={t('orgs.review_heading', { count: pending.length })} flush>
-              <OrgsTable orgs={pending} />
-            </ConsoleSection>
-          </div>
-        ) : null}
+        {pendingReview(pending, t)}
         <NetworkOrgsView
           rootName={hierarchy.network.name}
           orgs={network.orgs}
@@ -86,13 +83,7 @@ async function OwnerOrgs({ ownedIds }: Readonly<{ ownedIds: string[] }>) {
     <>
       <Topbar title={t('orgs.heading')} subtitle={t('orgs.subtitle_owner')} />
       <div className="flex flex-col gap-6">
-        {pending.length > 0 ? (
-          <div id="pending" className="scroll-mt-6">
-            <ConsoleSection title={t('orgs.review_heading', { count: pending.length })} flush>
-              <OrgsTable orgs={pending} />
-            </ConsoleSection>
-          </div>
-        ) : null}
+        {pendingReview(pending, t)}
         {roots.map((root) => (
           <ConsoleSection key={root.id} title={root.name}>
             <ChildOrgsTree
@@ -108,5 +99,31 @@ async function OwnerOrgs({ ownedIds }: Readonly<{ ownedIds: string[] }>) {
         ))}
       </div>
     </>
+  );
+}
+
+/**
+ * The organisations waiting for the viewer's decision. Shown even when empty,
+ * so the viewer knows where new registrations under its organisations appear.
+ *
+ * @param pending - The pending organisations the viewer decides.
+ * @param t - The console translator.
+ */
+function pendingReview(
+  pending: OrgRow[],
+  t: Awaited<ReturnType<typeof getTranslations<'console'>>>,
+) {
+  return (
+    <div id="pending" className="scroll-mt-6">
+      <ConsoleSection title={t('orgs.review_heading', { count: pending.length })} flush>
+        {pending.length > 0 ? (
+          <OrgsTable orgs={pending} />
+        ) : (
+          <EmptyState>
+            {t('orgs.empty_pending')} {t('orgs.review_hint')}
+          </EmptyState>
+        )}
+      </ConsoleSection>
+    </div>
   );
 }

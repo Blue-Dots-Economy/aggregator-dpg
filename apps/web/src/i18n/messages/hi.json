@@ -818,6 +818,7 @@
       "network_known_as": "नेटवर्क",
       "clear_filter": "फ़िल्टर हटाएँ",
       "empty_pending": "कोई [[org]] समीक्षा की प्रतीक्षा में नहीं है।",
+      "review_hint": "जब कोई [[org]] आपके संगठन के अंतर्गत पंजीकरण करता है, तो उसका अनुरोध यहाँ स्वीकृत या अस्वीकृत करने के लिए दिखाई देता है।",
       "open": "खोलें",
       "none": "कोई नहीं",
       "top_level_known_as": "\"Known as\" values for top-level [[orgs]]"
