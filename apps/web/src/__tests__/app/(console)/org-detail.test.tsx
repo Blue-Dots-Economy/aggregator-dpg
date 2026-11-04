@@ -26,7 +26,12 @@ vi.mock('next-intl/server', () => ({
   getFormatter: vi.fn(async () => ({ dateTime: () => '1 Jan 2026' })),
 }));
 vi.mock('@/components/shell/Topbar', () => ({
-  Topbar: ({ title }: { title: React.ReactNode }) => <h1>{title}</h1>,
+  Topbar: ({ title, right }: { title: React.ReactNode; right?: React.ReactNode }) => (
+    <>
+      <h1>{title}</h1>
+      {right}
+    </>
+  ),
 }));
 vi.mock('@/components/console/OrgEditForm', () => ({
   OrgEditForm: ({ knownAsPicked }: { knownAsPicked?: boolean }) => (
@@ -202,7 +207,11 @@ describe('console org detail — "known as" picker', () => {
     await show();
     expect(screen.queryByText('console.org.view_coordinators')).toBeNull();
     expect(screen.queryByText('console.org.tile.coordinators')).toBeNull();
+    expect(screen.queryByText('console.org.child_count')).toBeNull();
+    expect(screen.queryByText('console.org.children')).toBeNull();
     expect(screen.queryByTestId('org-decision')).toBeNull();
+    // The grandchildren are never asked for.
+    expect(vi.mocked(consoleRead).mock.calls.map(([path]) => path)).not.toContain('/v1/org/search');
   });
 
   it('lets the parent owner decide a pending child on its page', async () => {

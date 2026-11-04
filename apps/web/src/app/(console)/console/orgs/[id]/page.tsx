@@ -63,8 +63,9 @@ export default async function ConsoleOrgPage({
   const aggregatorOrg = org.org_type === 'aggregator' && !org.is_default;
   // The network admin repairs and moves the top-level organisations it views.
   const canRepair = canRename && aggregatorOrg && org.status === 'active';
+  // A child org's own children are not visible to the parent's owner.
   const children =
-    org.org_type === 'aggregator' && !org.is_default
+    org.org_type === 'aggregator' && !org.is_default && own
       ? await consoleRead<OrgSearchResponse>('/v1/org/search', {
           filter: { parent_id: org.id },
           limit: CHILD_LIMIT,
@@ -88,6 +89,22 @@ export default async function ConsoleOrgPage({
       <div>
         <BackLink href="/console/orgs">{t('orgs.heading')}</BackLink>
         <Topbar
+          right={
+            org.org_type === 'aggregator' ? (
+              <>
+                {canMove && hierarchy ? <OrgMoveDialog orgId={org.id} orgName={org.name} /> : null}
+                {own ? (
+                  <Link
+                    className={buttonClass('soft')}
+                    href={`/console/coordinators?org_id=${org.id}`}
+                  >
+                    <I.users size={15} />
+                    {t('org.view_coordinators')}
+                  </Link>
+                ) : null}
+              </>
+            ) : null
+          }
           leading={
             <span
               aria-hidden="true"
@@ -139,17 +156,6 @@ export default async function ConsoleOrgPage({
         )}
       </div>
       <div className="flex flex-col gap-6">
-        {org.org_type === 'aggregator' ? (
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {canMove && hierarchy ? <OrgMoveDialog orgId={org.id} orgName={org.name} /> : null}
-            {own ? (
-              <Link className={buttonClass('soft')} href={`/console/coordinators?org_id=${org.id}`}>
-                <I.users size={15} />
-                {t('org.view_coordinators')}
-              </Link>
-            ) : null}
-          </div>
-        ) : null}
         {!own && aggregatorOrg && org.status === 'pending' ? (
           <ConsoleSection title={t('orgs.review_heading', { count: 1 })} flush>
             <OrgsTable
@@ -214,19 +220,21 @@ export default async function ConsoleOrgPage({
               />
             </>
           ) : null}
-          <CountTile
-            icon={<Network size={20} strokeWidth={2} />}
-            tone="green"
-            label={t('org.child_count')}
-            count={String(data.child_count)}
-            sub={
-              maxChildren === null
-                ? t('org.tile.children_sub')
-                : t('org.children_of_max', { count: data.child_count, max: maxChildren })
-            }
-            muted={data.child_count === 0}
-            {...(children ? { showLabel: t('org_home.tile_show'), href: '#children' } : {})}
-          />
+          {own ? (
+            <CountTile
+              icon={<Network size={20} strokeWidth={2} />}
+              tone="green"
+              label={t('org.child_count')}
+              count={String(data.child_count)}
+              sub={
+                maxChildren === null
+                  ? t('org.tile.children_sub')
+                  : t('org.children_of_max', { count: data.child_count, max: maxChildren })
+              }
+              muted={data.child_count === 0}
+              {...(children ? { showLabel: t('org_home.tile_show'), href: '#children' } : {})}
+            />
+          ) : null}
           <CountTile
             icon={<Layers size={20} strokeWidth={2} />}
             tone="primary"
