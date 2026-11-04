@@ -8,8 +8,12 @@ import type { MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
 
 vi.mock('@/lib/server-session', () => ({ getSession: vi.fn() }));
 vi.mock('@/lib/console-actor', () => ({ getConsoleActor: vi.fn() }));
+const sidebarProps = vi.hoisted(() => ({ last: null as Record<string, unknown> | null }));
 vi.mock('@/components/console/ConsoleSidebar', () => ({
-  ConsoleSidebar: () => <nav data-testid="console-nav" />,
+  ConsoleSidebar: (props: Record<string, unknown>) => {
+    sidebarProps.last = props;
+    return <nav data-testid="console-nav" />;
+  },
 }));
 vi.mock('next-intl/server', () => ({
   getTranslations: vi.fn(async () => (key: string) => key),
@@ -58,6 +62,31 @@ describe('<ConsoleLayout />', () => {
     const el = await ConsoleLayout({ children: <p>child</p> });
     expect(el).toBeTruthy();
     expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('gives the network admin no Users link in the sidebar', async () => {
+    vi.mocked(getSession).mockResolvedValue(session);
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me({
+        is_network_admin: true,
+        capabilities: ['network.administer', 'org.manage'],
+        orgs: [
+          {
+            id: 'root',
+            name: 'Network',
+            slug: 'network',
+            org_type: 'network_facilitator',
+            role: 'owner',
+            is_default: false,
+            capabilities: ['network.administer'],
+          },
+        ],
+      }),
+    });
+    const { render } = await import('@testing-library/react');
+    render(await ConsoleLayout({ children: <p>child</p> }));
+    expect(sidebarProps.last).toMatchObject({ canManage: false, homeIsCoordinators: false });
   });
 
   it('sends a coordinator to the portal', async () => {
