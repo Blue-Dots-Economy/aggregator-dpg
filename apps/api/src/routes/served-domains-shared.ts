@@ -58,6 +58,33 @@ export async function resolveServedDomain(
 }
 
 /**
+ * Loads the calling coordinator and resolves the domain a read request acts on.
+ *
+ * `requested` must be a network domain the coordinator serves; when it is
+ * absent the first served domain is used.
+ *
+ * @param auth - The verified caller.
+ * @param requested - The domain named by the request, if any.
+ * @returns The coordinator and the domain id to act on.
+ * @throws SCHEMA_VALIDATION if `requested` is not a network domain.
+ * @throws DB_UNAVAILABLE if the coordinator cannot be read.
+ * @throws DOMAIN_NOT_SERVED if the domain is not served, or nothing is served.
+ */
+export async function resolveRequestedDomain(
+  auth: AuthContext,
+  requested: string | undefined,
+): Promise<{ caller: Coordinator; domain: string }> {
+  const networkCfg = await getNetworkConfig();
+  if (requested !== undefined && !networkCfg.domains[requested]) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: `unknown domain '${requested}' — valid: ${networkCfg.domainIds.join(', ')}`,
+    });
+  }
+  const caller = await loadCallingCoordinator(auth);
+  return { caller, domain: await resolveServedDomain(caller, requested) };
+}
+
+/**
  * Loads the calling coordinator and checks that it serves `domain`.
  *
  * @param auth - The verified caller.
