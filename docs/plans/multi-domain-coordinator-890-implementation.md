@@ -4,13 +4,13 @@ Builds on [multi-domain-coordinator-890.md](multi-domain-coordinator-890.md). ag
 
 ## Decisions
 
-| Topic          | Decision                                                                                    |
-| -------------- | ------------------------------------------------------------------------------------------- |
-| Domain checks  | Read the coordinator's domains (`users.serves`) from the database; empty means every domain |
-| Keycloak token | Still written at registration (first domain); nothing gates on it                           |
-| Registration   | Coordinator picks one or more domains                                                       |
-| Dashboard      | Dropdown, shown only with more than one domain; opens on the first served domain            |
-| Delivery       | One PR, one commit per phase, phases in order                                               |
+| Topic          | Decision                                                                                                    |
+| -------------- | ----------------------------------------------------------------------------------------------------------- |
+| Domain checks  | Read the coordinator's domains (`users.serves`) from the database; empty means every domain                 |
+| Keycloak token | Still written at registration (first domain); nothing gates on it                                           |
+| Registration   | Coordinator picks one or more domains                                                                       |
+| Dashboard      | Dropdown, shown only with more than one domain; opens on the first served domain                            |
+| Delivery       | Two PRs: backend (Phase 1, Phase 2 API tasks) into `feature`, then web (Phase 2 form tasks, Phase 3) on top |
 
 ## Phase 1: API checks and profile
 
@@ -41,7 +41,7 @@ Commit: `feat(registration): let a coordinator pick several domains (#890)`.
 | Network domain patch fills the list's choices                               | `apps/web/src/lib/aggregator-schema.server.ts`                                                                                                                    | patch test for the array field                              |
 | `/profile` shows the list, or "All domains" when empty                      | `apps/web/src/app/(protected)/profile/ProfileFormView.tsx`                                                                                                        | render test                                                 |
 
-An old single-choice schema copy keeps working, since the API still accepts one domain.
+The first three tasks ship in the backend PR; the form, schema patch and `/profile` tasks ship in the web PR. An old single-choice schema copy keeps working, since the API still accepts one domain.
 
 ## Phase 3: web portal
 
