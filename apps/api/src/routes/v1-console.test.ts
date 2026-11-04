@@ -1427,21 +1427,31 @@ describe('console routes /v1/user, /v1/org', () => {
       await setOrg(ORG_P, { parentId: ORG_A, depth: 2 });
     });
 
-    it('reads the pending and active direct children of an org', async () => {
-      const res = await get(`/v1/org/read/${ORG_A}`, 'na');
+    it('reads the pending and active direct children of an owned org', async () => {
+      const res = await get(`/v1/org/read/${ORG_A}`, 'a');
       expect((res.json() as { child_count: number }).child_count).toBe(1);
+    });
+
+    it('reports zero counts for an org the caller only views', async () => {
+      const res = await get(`/v1/org/read/${ORG_A}`, 'na');
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ coordinator_count: 0, pending_count: 0, child_count: 0 });
     });
 
     it('fills child_count on each search row and never includes known_as_values', async () => {
       await setOrg(ORG_A, { knownAsValues: [BLOCK] });
-      const res = await post('/v1/org/search', 'na', {});
-      const rows = (res.json() as { orgs: Array<{ id: string; child_count: number }> }).orgs;
+      const res = await post('/v1/org/search', 'a', {});
+      type Row = { id: string; child_count: number; coordinator_count: number };
+      const rows = (res.json() as { orgs: Row[] }).orgs;
       for (const row of rows) expect(row).not.toHaveProperty('known_as_values');
       expect(Object.fromEntries(rows.map((o) => [o.id, o.child_count]))).toEqual({
-        [DEFAULT]: 0,
         [ORG_A]: 1,
-        [ORG_B]: 0,
+        [ORG_P]: 0,
       });
+      // The network admin only views Alpha, so its counts are zero.
+      const na = (await post('/v1/org/search', 'na', {})).json() as { orgs: Row[] };
+      const alpha = na.orgs.find((o) => o.id === ORG_A);
+      expect(alpha).toMatchObject({ child_count: 0, coordinator_count: 0 });
     });
 
     it('answers 503 when the child counts cannot be read', async () => {

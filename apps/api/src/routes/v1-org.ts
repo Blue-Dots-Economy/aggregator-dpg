@@ -131,6 +131,25 @@ async function orgInReach(
   throw httpError('NOT_FOUND');
 }
 
+/**
+ * The counts shown for an org: its users, pending users and child orgs. A
+ * child org the caller only views reports zero for all three, since its users
+ * and its own children are not visible from above.
+ */
+function countsFor(
+  actor: Actor,
+  orgId: string,
+  users: { total: number; pending: number } | undefined,
+  childCount: number | undefined,
+): { coordinator_count: number; child_count: number; pending_count: number } {
+  if (isOnlyViewed(actor, orgId)) return { coordinator_count: 0, child_count: 0, pending_count: 0 };
+  return {
+    coordinator_count: users?.total ?? 0,
+    child_count: childCount ?? 0,
+    pending_count: users?.pending ?? 0,
+  };
+}
+
 /** Refuses a non-network-admin with 403 (a route its kind cannot use). */
 function requireNetworkAdmin(actor: Actor): void {
   if (!isNetworkAdmin(actor)) throw httpError('FORBIDDEN');
@@ -330,7 +349,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: 'One organisation within reach, with its owner and coordinator counts',
         description:
-          'An owner also reads, read-only, the direct children of its own organisations, and nothing deeper; the owner contact of such an organisation is masked. The network admin reads the top-level organisations the same way. The fields query adds data that is left out by default. fields=known_as_values adds org.known_as_values: the values the organisation defines for its direct children, or null when it cannot have child organisations (the Default organisation, or an organisation at max_depth). fields=parent.known_as_values adds org.parent: the parent\'s id, name and stored known_as_values list ([] when it has none), which holds the choices for this org\'s known_as (the list, or only "aggregator" when it is empty). org.parent is null unless the caller owns the parent (the network admin for a top-level organisation), and for the root, the Default organisation and a rejected organisation. An unknown name in fields answers 400 SCHEMA_VALIDATION.',
+          'An owner also reads, read-only, the direct children of its own organisations, and nothing deeper; the owner contact of such an organisation is masked. The network admin reads the top-level organisations the same way. For such an organisation coordinator_count, pending_count and child_count are 0. The fields query adds data that is left out by default. fields=known_as_values adds org.known_as_values: the values the organisation defines for its direct children, or null when it cannot have child organisations (the Default organisation, or an organisation at max_depth). fields=parent.known_as_values adds org.parent: the parent\'s id, name and stored known_as_values list ([] when it has none), which holds the choices for this org\'s known_as (the list, or only "aggregator" when it is empty). org.parent is null unless the caller owns the parent (the network admin for a top-level organisation), and for the root, the Default organisation and a rejected organisation. An unknown name in fields answers 400 SCHEMA_VALIDATION.',
         params: IdParamsSchema,
         querystring: OrgReadQuerySchema,
         response: { 200: OrgReadResponseSchema, ...errorResponses(401, 403, 404, 503) },
@@ -359,9 +378,10 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         org: toWireOrg(org, orgType),
         // An org only viewed from above shows its owner's contact masked.
         owner: { id: org.ownerUserId, contact: ownerContact(org, { masked: below }) },
-        coordinator_count: c?.total ?? 0,
-        child_count: children[org.id] ?? 0,
-        pending_count: c?.pending ?? 0,
+        // A child org's users and its own children are not visible from above.
+        coordinator_count: below ? 0 : (c?.total ?? 0),
+        child_count: below ? 0 : (children[org.id] ?? 0),
+        pending_count: below ? 0 : (c?.pending ?? 0),
       };
       if (fields.includes('known_as_values')) {
         const childrenAllowed = isRoot || (!org.isDefault && org.depth < hierarchy.max_depth);
@@ -382,7 +402,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: 'Organisations within reach, by name',
         description:
-          "An owner sees the organisations it owns and, read-only, their direct children; nothing deeper. The network admin owns the network, so it sees the top-level organisations. With `parent_id` set to an org within reach, lists that org's direct children. `descendants_of` lists the orgs below an org within reach, limited to the same reach. The two cannot be sent together. Filters by status and a case-insensitive name prefix; keyset paged by an opaque cursor.",
+          "An owner sees the organisations it owns and, read-only, their direct children; nothing deeper. The network admin owns the network, so it sees the top-level organisations. With `parent_id` set to an org within reach, lists that org's direct children. For an org the caller does not own, coordinator_count, pending_count and child_count are 0. `descendants_of` lists the orgs below an org within reach, limited to the same reach. The two cannot be sent together. Filters by status and a case-insensitive name prefix; keyset paged by an opaque cursor.",
         body: OrgSearchRequestSchema,
         response: { 200: OrgSearchResponseSchema, ...errorResponses(400, 401, 403, 503) },
       },
@@ -413,9 +433,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       return reply.status(200).send({
         orgs: page.value.rows.map((o) => ({
           ...toWireOrg(o),
-          coordinator_count: counts.value[o.id]?.total ?? 0,
-          child_count: children[o.id] ?? 0,
-          pending_count: counts.value[o.id]?.pending ?? 0,
+          ...countsFor(actor, o.id, counts.value[o.id], children[o.id]),
         })),
         next_cursor: page.value.nextCursor ? encodeOrgCursor(page.value.nextCursor) : null,
       });
