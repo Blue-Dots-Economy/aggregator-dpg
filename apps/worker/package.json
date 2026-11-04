@@ -7,7 +7,7 @@
     "build": "tsc",
     "dev": "tsx watch src/main.ts",
     "start": "node dist/main.js",
-    "lint": "eslint --no-warn-ignored --ignore-pattern coverage .",
+    "lint": "eslint --no-warn-ignored .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:coverage": "vitest run --coverage --passWithNoTests"

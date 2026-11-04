@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { ESLint } from 'eslint';
 
@@ -23,38 +23,58 @@ const WEB_FILE = 'apps/web/src/components/console/LintProbe.tsx';
 
 // ── import-x/no-cycle ──────────────────────────────────────────────────────
 
+const FIXTURE_PARENT = join(root, 'packages', 'shared-primitives', 'src');
+const FIXTURE_PREFIX = '.lint-cycle-';
+
+/** Writes `files` (name → source) into the fixture folder. */
+function writeFixtures(files) {
+  for (const [name, source] of Object.entries(files)) writeFileSync(join(cycleDir, name), source);
+}
+
+/** Lints one fixture file from disk, so import-x can follow its imports. */
+async function lintFixture(name) {
+  const [result] = await eslint.lintFiles([relative(root, join(cycleDir, name))]);
+  return severities(result.messages, 'import-x/no-cycle');
+}
+
 let cycleDir;
 before(() => {
-  cycleDir = mkdtempSync(join(root, 'packages', 'shared-primitives', 'src', '.lint-cycle-'));
-  writeFileSync(
-    join(cycleDir, 'a.ts'),
-    "import { b } from './b.js';\nexport const a = (): number => b() + 1;\n",
-  );
-  writeFileSync(
-    join(cycleDir, 'b.ts'),
-    "import { a } from './a.js';\nexport const b = (): number => (a() > 0 ? 1 : 0);\n",
-  );
+  // A run that was killed leaves its fixture behind; remove it so it cannot fail `pnpm lint`.
+  for (const entry of readdirSync(FIXTURE_PARENT)) {
+    if (entry.startsWith(FIXTURE_PREFIX)) {
+      rmSync(join(FIXTURE_PARENT, entry), { recursive: true, force: true });
+    }
+  }
+  cycleDir = mkdtempSync(join(FIXTURE_PARENT, FIXTURE_PREFIX));
+  writeFixtures({
+    'a.ts': "import { b } from './b.js';\nexport const a = (): number => b() + 1;\n",
+    'b.ts': "import { a } from './a.js';\nexport const b = (): number => (a() > 0 ? 1 : 0);\n",
+    // d/e and f/g are the same loop; only d uses `import type`.
+    'd.ts': "import type { E } from './e.js';\nexport const d = 1;\nexport type D = E;\n",
+    'e.ts': "import { d } from './d.js';\nexport type E = { v: number };\nexport const e = d;\n",
+    'f.ts': "import { G } from './g.js';\nexport const f = 1;\nexport type F = G;\n",
+    'g.ts': "import { f } from './f.js';\nexport type G = { v: number };\nexport const g = f;\n",
+  });
 });
 after(() => rmSync(cycleDir, { recursive: true, force: true }));
 
 test('import-x/no-cycle reports a cycle between two TypeScript files', async () => {
-  const [result] = await eslint.lintFiles([relative(root, join(cycleDir, 'a.ts'))]);
-  assert.deepEqual(severities(result.messages, 'import-x/no-cycle'), [2]);
+  assert.deepEqual(await lintFixture('a.ts'), [2]);
 });
 
-test('import-x/no-cycle ignores a type-only import back into the module', async () => {
-  const [result] = await eslint.lintText(
-    "import type { a } from './a.js';\nexport type B = typeof a;\n",
-    { filePath: join(cycleDir, 'c.ts') },
-  );
-  assert.deepEqual(severities(result.messages, 'import-x/no-cycle'), []);
+test('import-x/no-cycle reports a loop closed by a value import', async () => {
+  assert.deepEqual(await lintFixture('f.ts'), [2]);
+});
+
+test('import-x/no-cycle ignores the same loop when one side is a type-only import', async () => {
+  assert.deepEqual(await lintFixture('d.ts'), []);
 });
 
 // ── eqeqeq ─────────────────────────────────────────────────────────────────
 
-test('eqeqeq warns on == between values', async () => {
+test('eqeqeq fails on == between values', async () => {
   const m = await lint(PKG_FILE, 'export const f = (a: number, b: number): boolean => a == b;\n');
-  assert.deepEqual(severities(m, 'eqeqeq'), [1]);
+  assert.deepEqual(severities(m, 'eqeqeq'), [2]);
 });
 
 test('eqeqeq allows == null', async () => {

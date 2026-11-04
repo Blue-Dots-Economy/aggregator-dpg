@@ -28,3 +28,18 @@ test('every workspace with sources has a lint script, so turbo lints it', () => 
   });
   assert.deepEqual(missing, []);
 });
+
+test('every workspace lints with the same command, so the shared config decides what is ignored', () => {
+  const commands = new Set(
+    sourceWorkspaces().map(
+      (ws) => JSON.parse(readFileSync(join(root, ws, 'package.json'), 'utf8')).scripts.lint,
+    ),
+  );
+  assert.deepEqual([...commands], ['eslint --no-warn-ignored .']);
+});
+
+test('the turbo lint cache depends on the shared ESLint config', () => {
+  const turbo = JSON.parse(readFileSync(join(root, 'turbo.json'), 'utf8'));
+  assert.ok(turbo.tasks.lint.inputs?.includes('$TURBO_ROOT$/eslint.config.js'));
+  assert.ok(turbo.tasks.lint.inputs?.includes('$TURBO_DEFAULT$'));
+});

@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blockOf, summarize, formatReport } from './lint-report.mjs';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { blockOf, summarize, formatReport, LINT_TARGETS } from './lint-report.mjs';
 
 const root = '/repo';
 
@@ -56,4 +58,15 @@ test('formatReport prints one row per entry and a total line', () => {
 
 test('formatReport says so when there is nothing to report', () => {
   assert.match(formatReport([]), /No lint messages/);
+});
+
+test('LINT_TARGETS covers every workspace that `pnpm lint` lints', () => {
+  const repo = join(import.meta.dirname, '..');
+  const workspaces = ['apps', 'packages'].flatMap((group) =>
+    readdirSync(join(repo, group), { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => `${group}/${d.name}`),
+  );
+  const missed = workspaces.filter((ws) => !LINT_TARGETS.some((dir) => ws.startsWith(`${dir}/`)));
+  assert.deepEqual(missed, []);
 });

@@ -73,14 +73,13 @@ export function formatReport(rows) {
     .join('\n')}\n`;
 }
 
+/** Folders `main` lints: every workspace, the same files `pnpm lint` covers. */
+export const LINT_TARGETS = ['apps', 'packages'];
+
 async function main() {
   const root = join(import.meta.dirname, '..');
   const eslint = new ESLint({ cwd: root });
-  const results = await eslint.lintFiles([
-    'apps/*/src/**/*.{ts,tsx}',
-    'apps/web/middleware.ts',
-    'packages/*/src/**/*.ts',
-  ]);
+  const results = await eslint.lintFiles(LINT_TARGETS);
   process.stdout.write(formatReport(summarize(results, root)));
 }
 

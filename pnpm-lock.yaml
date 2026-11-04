@@ -38,7 +38,7 @@ importers:
         specifier: ^21.2.3
         version: 21.2.3
       '@next/eslint-plugin-next':
-        specifier: 15.5.28
+        specifier: ^15.5.28
         version: 15.5.28
       dependency-cruiser:
         specifier: ^18.4.0

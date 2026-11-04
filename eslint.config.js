@@ -35,6 +35,7 @@ export default tseslint.config(
       '**/*.tsbuildinfo',
       '**/pnpm-lock.yaml',
       '**/coverage/**',
+      '**/next-env.d.ts',
     ],
   },
 
@@ -84,7 +85,7 @@ export default tseslint.config(
       // No barrel re-exports of everything
       'import-x/no-cycle': 'error',
       // Lint ratchet: warn now, error once each block is clean.
-      eqeqeq: ['warn', 'always', { null: 'ignore' }],
+      eqeqeq: ['error', 'always', { null: 'ignore' }],
       '@typescript-eslint/consistent-type-assertions': ['warn', { assertionStyle: 'never' }],
     },
   },

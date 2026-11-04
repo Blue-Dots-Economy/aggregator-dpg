@@ -41,7 +41,7 @@
     "@changesets/cli": "^3.0.3",
     "@commitlint/cli": "^21.2.3",
     "@commitlint/config-conventional": "^21.2.3",
-    "@next/eslint-plugin-next": "15.5.28",
+    "@next/eslint-plugin-next": "^15.5.28",
     "dependency-cruiser": "^18.4.0",
     "eslint": "^10.11.0",
     "eslint-import-resolver-typescript": "^4.4.5",
