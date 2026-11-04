@@ -4,11 +4,21 @@
  * Matches the Postgres adapter's behaviour: slug uniqueness over live rows,
  * atomic approve/reject, lowercased owner email, Default org skipped by owner
  * lookups. It holds aggregator orgs only; the root is a separate slot (see
- * `OrganisationStoreFake`).
+ * `OrganisationStoreFake`). Each org's "known as" list is kept apart from
+ * the row, one entry per org with a non-empty list, as in `org_known_as`.
+ * `knownAsName` is resolved from the parent's
+ * values when a row is read, so a list edit shows on every child at once.
  */
 
 import { randomUUID } from 'node:crypto';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
+import {
+  SYSTEM_KNOWN_AS,
+  knownAsChoices,
+  type KnownAsValues,
+  type KnownAsValuesRequest,
+} from '@aggregator-dpg/shared-primitives/user-org';
+import { defaultKnownAsKey, fillKnownAsKeys, knownAsKeyValid, knownAsNameOf } from '../known-as.js';
 import {
   OrganisationStoreBase,
   DEFAULT_ORG_SLUG,
@@ -26,10 +36,8 @@ import {
   DESCENDANT_LEVEL_CAP,
   buildTree,
   counts,
-  knownAsBlocksMove,
   moveRefusal,
   newChildRefusal,
-  parentOptionRefusal,
   subtree,
   type Tree,
 } from './tree.js';
@@ -44,6 +52,8 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
   protected readonly coordinatorContacts = new Set<string>();
   /** The network-facilitator root, when a test seeds one. */
   protected root: Organisation | null = null;
+  /** The "known as" values each org defines for its children, by org id. */
+  protected readonly knownAsLists = new Map<string, KnownAsValues>();
   /** Tail of the tree-lock queue; see {@link withTreeLock}. */
   private treeLock: Promise<unknown> = Promise.resolve();
 
@@ -116,14 +126,15 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       isDefault: false,
       locations: input.locations ?? [],
       legalName: null,
-      knownAs: rules.suggestFor(depth),
+      knownAs: defaultKnownAsKey(this.listOf(parent?.id ?? null)),
+      knownAsName: null,
       depth,
       parentId: parent?.id ?? null,
       parentName: parent?.displayName ?? null,
       description: null,
     };
     this.byId.set(row.id, row);
-    return { ok: true, value: row };
+    return { ok: true, value: this.view(row) };
   }
 
   revive(
@@ -151,19 +162,19 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
         parentId: parent?.id ?? null,
         parentName: parent?.displayName ?? null,
         depth,
-        knownAs: rules.knownAsAllowed(org.knownAs, depth) ? org.knownAs : rules.suggestFor(depth),
+        knownAs: defaultKnownAsKey(this.listOf(parent?.id ?? null)),
         status: 'pending',
         rejectedAt: null,
         updatedAt: new Date(),
       };
       this.byId.set(id, next);
-      return Promise.resolve({ ok: true, value: next });
+      return Promise.resolve({ ok: true, value: this.view(next) });
     });
   }
 
   move(
     id: string,
-    change: { parentId: string; knownAs?: string },
+    change: { parentId: string },
     rules: TreeRules,
   ): Promise<
     OrgStoreResult<{ org: Organisation; oldParentId: string | null; movedCount: number }>
@@ -173,7 +184,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
 
   private moveLocked(
     id: string,
-    change: { parentId: string; knownAs?: string },
+    change: { parentId: string },
     rules: TreeRules,
   ): OrgStoreResult<{ org: Organisation; oldParentId: string | null; movedCount: number }> {
     const tree = this.treeSnapshot();
@@ -182,39 +193,29 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     const org = this.byId.get(id)!;
     const oldParentId = org.parentId;
     if (org.parentId === change.parentId) {
-      if (change.knownAs === undefined) {
-        return { ok: true, value: { org, oldParentId, movedCount: 0 } };
-      }
-      if (!rules.knownAsAllowed(change.knownAs, org.depth)) return knownAsDepth([id]);
-      const next = { ...org, knownAs: change.knownAs, updatedAt: new Date() };
-      this.byId.set(id, next);
-      return { ok: true, value: { org: next, oldParentId, movedCount: 0 } };
+      return { ok: true, value: { org: this.view(org), oldParentId, movedCount: 0 } };
     }
     const delta = tree.byId.get(change.parentId)!.depth + 1 - org.depth;
+    const newList = this.listOf(change.parentId);
     const moved = subtree(tree, id).map((n) => {
       const row = this.byId.get(n.id)!;
       return n.id === id
         ? {
             ...row,
             ...this.parentFields(change.parentId),
-            knownAs: change.knownAs ?? row.knownAs,
+            knownAs: knownAsKeyValid(newList, row.knownAs)
+              ? row.knownAs
+              : defaultKnownAsKey(newList),
             depth: row.depth + delta,
             updatedAt: new Date(),
           }
         : { ...row, depth: row.depth + delta };
     });
-    // As Postgres: the moved org needs an allowed value; an org below it is
-    // skipped when its value is no longer configured.
-    const failing = moved
-      .filter((o) =>
-        o.id === id
-          ? !rules.knownAsAllowed(o.knownAs, o.depth)
-          : knownAsBlocksMove(rules, o.knownAs, o.depth),
-      )
-      .map((o) => o.id);
-    if (failing.length > 0) return knownAsDepth(failing);
     for (const o of moved) this.byId.set(o.id, o);
-    return { ok: true, value: { org: moved[0]!, oldParentId, movedCount: moved.length } };
+    return {
+      ok: true,
+      value: { org: this.view(moved[0]!), oldParentId, movedCount: moved.length },
+    };
   }
 
   parentOptions(
@@ -234,8 +235,8 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       ...[...this.byId.values()].sort(byName),
     ].filter((o) => o.id !== id);
     const options = candidates.map((o) => {
-      const reason = parentOptionRefusal(tree, id, o.id, rules);
-      return { org: o, ok: reason === null, reason };
+      const reason = moveRefusal(tree, id, o.id, rules);
+      return { org: this.view(o), ok: reason === null, reason };
     });
     return Promise.resolve({
       ok: true,
@@ -256,13 +257,13 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
   }
 
   findById(id: string): Promise<OrgStoreResult<Organisation | null>> {
-    return Promise.resolve({ ok: true, value: this.byId.get(id) ?? null });
+    return Promise.resolve({ ok: true, value: this.viewOrNull(this.byId.get(id)) });
   }
 
   findBySlug(slug: string): Promise<OrgStoreResult<Organisation | null>> {
     return Promise.resolve({
       ok: true,
-      value: [...this.byId.values()].find((o) => o.slug === slug) ?? null,
+      value: this.viewOrNull([...this.byId.values()].find((o) => o.slug === slug)),
     });
   }
 
@@ -270,14 +271,14 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     const target = email.toLowerCase();
     return Promise.resolve({
       ok: true,
-      value: pickOwned((o) => o.ownerEmail === target && !o.isDefault, this.byId),
+      value: this.viewOrNull(pickOwned((o) => o.ownerEmail === target && !o.isDefault, this.byId)),
     });
   }
 
   findByOwnerPhone(phone: string): Promise<OrgStoreResult<Organisation | null>> {
     return Promise.resolve({
       ok: true,
-      value: pickOwned((o) => o.ownerPhone === phone && !o.isDefault, this.byId),
+      value: this.viewOrNull(pickOwned((o) => o.ownerPhone === phone && !o.isDefault, this.byId)),
     });
   }
 
@@ -297,18 +298,18 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     const rows = [...this.byId.values()]
       .filter((o) => o.status === 'active')
       .sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
-    return Promise.resolve({ ok: true, value: rows });
+    return Promise.resolve({ ok: true, value: rows.map((o) => this.view(o)) });
   }
 
   findDefault(): Promise<OrgStoreResult<Organisation | null>> {
     return Promise.resolve({
       ok: true,
-      value: [...this.byId.values()].find((o) => o.slug === DEFAULT_ORG_SLUG) ?? null,
+      value: this.viewOrNull([...this.byId.values()].find((o) => o.slug === DEFAULT_ORG_SLUG)),
     });
   }
 
   findRoot(): Promise<OrgStoreResult<Organisation | null>> {
-    return Promise.resolve({ ok: true, value: this.root });
+    return Promise.resolve({ ok: true, value: this.viewOrNull(this.root) });
   }
 
   listPending(updatedBefore?: Date): Promise<OrgStoreResult<Organisation[]>> {
@@ -317,7 +318,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       .filter((o) => o.status === 'pending')
       .filter((o) => before === undefined || o.updatedAt.getTime() < before)
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-    return Promise.resolve({ ok: true, value: rows });
+    return Promise.resolve({ ok: true, value: rows.map((o) => this.view(o)) });
   }
 
   deleteById(id: string): Promise<OrgStoreResult<void>> {
@@ -325,6 +326,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     // As in Postgres: the Default org is never removable here.
     if (gone?.isDefault) return Promise.resolve({ ok: true, value: undefined });
     this.byId.delete(id);
+    this.knownAsLists.delete(id);
     // Release the owner's account once it owns no other org, as the database trigger does.
     if (gone && ![...this.byId.values()].some((o) => o.ownerUserId === gone.ownerUserId)) {
       this.adminByContact.delete(gone.contactId);
@@ -332,33 +334,9 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     return Promise.resolve({ ok: true, value: undefined });
   }
 
-  update(
-    id: string,
-    patch: UpdateOrgPatch,
-    rules?: TreeRules,
-  ): Promise<OrgStoreResult<Organisation>> {
-    if (patch.knownAs === undefined) return Promise.resolve(this.updateNow(id, patch));
-    return this.withTreeLock(() => Promise.resolve(this.updateNow(id, patch, rules)));
-  }
-
-  /**
-   * Applies an update; with `patch.knownAs`, the caller holds the tree lock.
-   *
-   * @param id - The org id.
-   * @param patch - The fields to change.
-   * @param rules - "Known as" rules; a key is refused without them.
-   * @returns The updated org.
-   */
-  private updateNow(
-    id: string,
-    patch: UpdateOrgPatch,
-    rules?: TreeRules,
-  ): OrgStoreResult<Organisation> {
+  update(id: string, patch: UpdateOrgPatch): Promise<OrgStoreResult<Organisation>> {
     const existing = this.byId.get(id);
-    if (!existing) return err('NOT_FOUND', id);
-    if (patch.knownAs !== undefined && !rules?.knownAsAllowed(patch.knownAs, existing.depth)) {
-      return knownAsDepth([id]);
-    }
+    if (!existing) return Promise.resolve(err('NOT_FOUND', id));
     if (patch.displayName !== undefined) {
       // As in Postgres: names are unique (case-insensitively) among live orgs.
       const key = patch.displayName.trim().toLowerCase();
@@ -366,14 +344,13 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
         (o) =>
           o.id !== id && o.displayName.trim().toLowerCase() === key && NON_TERMINAL.has(o.status),
       );
-      if (taken) return err('DUPLICATE_NAME', 'organisation name already in use');
+      if (taken) return Promise.resolve(err('DUPLICATE_NAME', 'organisation name already in use'));
     }
     const next: Organisation = {
       ...existing,
       displayName: patch.displayName ?? existing.displayName,
       locations: patch.locations ?? existing.locations,
       legalName: patch.legalName !== undefined ? patch.legalName : existing.legalName,
-      knownAs: patch.knownAs ?? existing.knownAs,
       description: patch.description !== undefined ? patch.description : existing.description,
       profile: patch.profileMerge
         ? mergeProfile(existing.profile, patch.profileMerge)
@@ -388,7 +365,98 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       updatedAt: new Date(),
     };
     this.byId.set(id, next);
-    return { ok: true, value: next };
+    return Promise.resolve({ ok: true, value: this.view(next) });
+  }
+
+  setKnownAs(
+    id: string,
+    key: string,
+    expectedParentId: string,
+    updatedBy: string,
+  ): Promise<OrgStoreResult<Organisation>> {
+    return this.withTreeLock(() => {
+      const org = this.byId.get(id);
+      if (!org) return Promise.resolve(err('NOT_FOUND', id));
+      if (org.isDefault) return Promise.resolve(err('NOT_EDITABLE', 'the Default org'));
+      if (org.status === 'inactive') return Promise.resolve(err('NOT_EDITABLE', 'a rejected org'));
+      if (org.parentId !== expectedParentId) {
+        return Promise.resolve(err('ORG_MOVED', 'the org has a new parent'));
+      }
+      if (!knownAsChoices(this.listOf(expectedParentId)).some((e) => e.key === key)) {
+        return Promise.resolve(err('KNOWN_AS_INVALID', 'not one of the parent values'));
+      }
+      const next: Organisation = { ...org, knownAs: key, updatedBy, updatedAt: new Date() };
+      this.byId.set(id, next);
+      return Promise.resolve({ ok: true, value: this.view(next) });
+    });
+  }
+
+  setKnownAsValues(
+    id: string,
+    requested: KnownAsValuesRequest,
+    updatedBy: string,
+  ): Promise<OrgStoreResult<{ org: Organisation; values: KnownAsValues; resetCount: number }>> {
+    return this.withTreeLock(() => {
+      const isRoot = this.root?.id === id;
+      const org = isRoot ? this.root : this.byId.get(id);
+      if (!org) return Promise.resolve(err('NOT_FOUND', id));
+      if (org.isDefault) return Promise.resolve(err('NOT_EDITABLE', 'the Default org'));
+      const filled = fillKnownAsKeys(requested, this.listOf(id));
+      if (!filled.ok) {
+        return Promise.resolve({
+          ok: false,
+          error: {
+            code: 'KNOWN_AS_UNKNOWN_KEY',
+            message: 'a sent key is not in the list',
+            index: filled.error.index,
+          },
+        });
+      }
+      const values = filled.value;
+      if (values.length > 0)
+        this.knownAsLists.set(
+          id,
+          values.map((e) => ({ ...e })),
+        );
+      else this.knownAsLists.delete(id);
+      const next: Organisation = { ...org, updatedBy, updatedAt: new Date() };
+      if (isRoot) this.root = next;
+      else this.byId.set(id, next);
+      const fallback = defaultKnownAsKey(values);
+      let resetCount = 0;
+      for (const child of this.byId.values()) {
+        if (child.parentId !== id || child.isDefault || knownAsKeyValid(values, child.knownAs)) {
+          continue;
+        }
+        // An automatic reset keeps updated_at, as in Postgres.
+        this.byId.set(child.id, { ...child, knownAs: fallback });
+        resetCount += 1;
+      }
+      return Promise.resolve({
+        ok: true,
+        value: { org: this.view(next), values: values.map((e) => ({ ...e })), resetCount },
+      });
+    });
+  }
+
+  knownAsValues(orgId: string): Promise<OrgStoreResult<KnownAsValues>> {
+    return Promise.resolve({ ok: true, value: this.listOf(orgId).map((e) => ({ ...e })) });
+  }
+
+  defaultKnownAsNames(orgIds: readonly string[]): Promise<OrgStoreResult<Record<string, string>>> {
+    const out: Record<string, string> = {};
+    for (const id of orgIds) {
+      const name = this.listOf(id).find((e) => e.default)?.name;
+      if (name !== undefined) out[id] = name;
+    }
+    return Promise.resolve({ ok: true, value: out });
+  }
+
+  countStaleKnownAs(): Promise<OrgStoreResult<number>> {
+    const stale = [...this.byId.values()].filter(
+      (o) => counts(o) && !knownAsKeyValid(this.listOf(o.parentId), o.knownAs),
+    ).length;
+    return Promise.resolve({ ok: true, value: stale });
   }
 
   async approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
@@ -401,7 +469,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
 
   listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<Organisation[]>> {
     const rows = [...this.byId.values()].filter((o) => o.ownerUserId === ownerUserId).sort(byName);
-    return Promise.resolve({ ok: true, value: rows });
+    return Promise.resolve({ ok: true, value: rows.map((o) => this.view(o)) });
   }
 
   search(filter: SearchOrgsFilter): Promise<OrgStoreResult<SearchOrgsPage>> {
@@ -412,7 +480,6 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       rows = rows.filter((o) => scope.has(o.id));
     }
     if (filter.status) rows = rows.filter((o) => o.status === filter.status);
-    if (filter.knownAs) rows = rows.filter((o) => o.knownAs === filter.knownAs);
     if (filter.descendantsOf) {
       const below = this.descendantIdsOf(filter.descendantsOf);
       rows = rows.filter((o) => below.has(o.id));
@@ -434,7 +501,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     return Promise.resolve({
       ok: true,
       value: {
-        rows: page,
+        rows: page.map((o) => this.view(o)),
         nextCursor: rows.length > limit && last ? { name: last.displayName, id: last.id } : null,
       },
     });
@@ -447,12 +514,34 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     return Promise.resolve({ ok: true, value: [...found] });
   }
 
-  countByKnownAs(): Promise<OrgStoreResult<Record<string, number>>> {
-    const counts: Record<string, number> = {};
-    for (const o of this.byId.values()) {
-      if (NON_TERMINAL.has(o.status)) counts[o.knownAs] = (counts[o.knownAs] ?? 0) + 1;
-    }
-    return Promise.resolve({ ok: true, value: counts });
+  /**
+   * The "known as" values of an org or the root.
+   *
+   * @param id - The org id; `null` for no parent.
+   * @returns The list; empty when the org has none.
+   */
+  private listOf(id: string | null): KnownAsValues {
+    if (id === null) return [];
+    return this.knownAsLists.get(id) ?? [];
+  }
+
+  /**
+   * A stored row as a read returns it: `knownAsName` resolved from the parent's list.
+   *
+   * @param o - The stored row.
+   * @returns A copy with the name set; `null` for the root, "Aggregator" for the Default org.
+   */
+  protected view(o: Organisation): Organisation {
+    let knownAsName: string | null;
+    if (o === this.root) knownAsName = null;
+    else if (o.isDefault) knownAsName = SYSTEM_KNOWN_AS.name;
+    else knownAsName = knownAsNameOf(this.listOf(o.parentId), o.knownAs);
+    return { ...o, knownAsName };
+  }
+
+  /** {@link view} for an optional row. */
+  private viewOrNull(o: Organisation | null | undefined): Organisation | null {
+    return o ? this.view(o) : null;
   }
 
   /** The parent columns for a move, read from the root or a stored org. */
@@ -476,6 +565,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     }
     if (!(await beforeCommit())) return { ok: true, value: 'aborted' };
     this.byId.delete(id);
+    this.knownAsLists.delete(id);
     return { ok: true, value: 'deleted' };
   }
 
@@ -501,7 +591,6 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
         status: o.status,
         isRoot: o === this.root,
         isDefault: o.isDefault,
-        knownAs: o.knownAs,
       })),
     );
   }
@@ -556,7 +645,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       ...(next === 'inactive' ? { rejectedAt: new Date() } : {}),
     };
     this.byId.set(id, updated);
-    return Promise.resolve({ ok: true, value: updated });
+    return Promise.resolve({ ok: true, value: this.view(updated) });
   }
 }
 
@@ -574,17 +663,10 @@ function pickOwned(
 }
 
 function err<T>(
-  code: Exclude<OrgStoreError['code'], 'KNOWN_AS_DEPTH'>,
+  code: Exclude<OrgStoreError['code'], 'KNOWN_AS_UNKNOWN_KEY'>,
   message: string,
 ): OrgStoreResult<T> {
   return { ok: false, error: { code, message } };
-}
-
-function knownAsDepth<T>(orgIds: string[]): OrgStoreResult<T> {
-  return {
-    ok: false,
-    error: { code: 'KNOWN_AS_DEPTH', message: 'known_as not allowed at depth', orgIds },
-  };
 }
 
 /** Orders orgs as Postgres does: lower(name), then id. */

@@ -6,7 +6,7 @@
 
 import { InMemoryOrganisationStore } from './memory.js';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
-import { SYSTEM_KNOWN_AS } from '@aggregator-dpg/network-config/interface';
+import { SYSTEM_KNOWN_AS, type KnownAsValues } from '@aggregator-dpg/shared-primitives/user-org';
 import { DEFAULT_ORG_SLUG, type Organisation, type TreeRules } from './interface.js';
 export { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
 
@@ -30,9 +30,23 @@ export class OrganisationStoreFake extends InMemoryOrganisationStore {
     this.root = row;
   }
 
+  /**
+   * Seeds the "known as" values an org (or the root) defines for its children.
+   *
+   * @param orgId - The org id.
+   * @param values - The list, in order; replaces any seeded list.
+   */
+  seedKnownAsValues(orgId: string, values: KnownAsValues): void {
+    this.knownAsLists.set(
+      orgId,
+      values.map((e) => ({ ...e })),
+    );
+  }
+
   /** Reset between tests. */
   reset(): void {
     this.byId.clear();
+    this.knownAsLists.clear();
     this.root = null;
   }
 }
@@ -71,6 +85,7 @@ export function buildOrganisation(overrides: Partial<Organisation> = {}): Organi
     locations: [],
     legalName: null,
     knownAs: SYSTEM_KNOWN_AS.key,
+    knownAsName: SYSTEM_KNOWN_AS.name,
     depth: 1,
     parentId: null,
     parentName: null,
@@ -100,8 +115,7 @@ export function buildDefaultOrg(overrides: Partial<Organisation> = {}): Organisa
 /**
  * Tree rules that refuse nothing a test normally builds.
  *
- * Depth up to 10, no per-parent limit, a large total, every "known as" key
- * allowed at every depth, and the system key suggested.
+ * Depth up to 10, no per-parent limit and a large total.
  *
  * @param overrides - Rules to replace.
  * @returns The rules.
@@ -111,9 +125,6 @@ export function permissiveTreeRules(overrides: Partial<TreeRules> = {}): TreeRul
     maxDepth: 10,
     maxChildren: null,
     maxTotalOrgs: 100_000,
-    knownAsAllowed: () => true,
-    knownAsConfigured: () => true,
-    suggestFor: () => SYSTEM_KNOWN_AS.key,
     ...overrides,
   };
 }

@@ -10,10 +10,10 @@
  *   `x-updatable` are editable; the others are shown read-only.
  *
  * Only the org's owner edits the details, the name included. The "known as"
- * value is the network admin's only; its choices are the values allowed at
- * the org's depth, and changing it never moves the org. The network admin
- * sees every other detail read-only. The Default org, the root and an org
- * below the viewer's own are read-only.
+ * value is shown read-only here; the owner of the parent org sets it with
+ * `KnownAsPicker`. When the page shows that picker, this form leaves the value
+ * out. The network admin sees the details read-only. The Default
+ * org, the root and an org below the viewer's own are read-only.
  */
 
 import { useMemo, useRef, useState, type ReactNode, type SubmitEvent } from 'react';
@@ -29,7 +29,6 @@ import { Input } from '../ui/Input';
 import { Label } from '../ui/Label';
 import { RjsfThemedForm } from '../forms/RjsfThemed';
 import { errorKey, sendConsole } from '../../lib/console-client';
-import type { KnownAsChoice } from '../../lib/console-org-options';
 import { consoleOrgSchema, gstinCustomValidate, orgFieldText } from '../../lib/org-schema';
 import { readableFormErrors } from '../../lib/readable-form-errors';
 
@@ -41,7 +40,7 @@ type JsonRecord = Record<string, unknown>;
 /** Trimmed value, or null when blank (clears the field). */
 const orNull = (v: string) => (v.trim() ? v.trim() : null);
 
-/** The "known as" name, or the key when it is not configured. */
+/** The "known as" name, or the key when the name is missing. */
 const knownAsText = (o: Org) => o.known_as_name ?? o.known_as ?? '—';
 
 /** Whether a schema value is empty (cleared). */
@@ -61,26 +60,22 @@ export function OrgEditForm({
   org,
   editable,
   canEdit,
-  canSetKnownAs,
-  knownAsOptions = [],
   orgSchema,
+  knownAsPicked = false,
 }: Readonly<{
   org: Org;
   /** False for the Default org, the root and an org below the viewer's own. */
   editable: boolean;
   /** The signed-in user owns this org: every detail but "known as". */
   canEdit: boolean;
-  /** The network admin: the "known as" value only. */
-  canSetKnownAs: boolean;
-  /** The values allowed at the org's depth; empty shows the current value as text. */
-  knownAsOptions?: readonly KnownAsChoice[];
   /** The deployment's org-registration schema (network domains applied); `null` if unavailable. */
   orgSchema: { schema: RJSFSchema; uiSchema: JsonRecord } | null;
+  /** The page shows `KnownAsPicker` for this org, so the form leaves "known as" out. */
+  knownAsPicked?: boolean;
 }>) {
   const t = useTranslations('console');
   const router = useRouter();
   const editing = editable && canEdit;
-  const canChooseKnownAs = editable && canSetKnownAs && knownAsOptions.length > 0;
   const view = useMemo(
     () => (orgSchema ? consoleOrgSchema(orgSchema.schema, orgSchema.uiSchema, editing) : null),
     [orgSchema, editing],
@@ -91,17 +86,15 @@ export function OrgEditForm({
     [view],
   );
 
-  const [current, setCurrent] = useState(org);
+  const [current, setCurrent] = useState<Org>(org);
   const [name, setName] = useState(org.name);
   const [legalName, setLegalName] = useState(org.legal_name ?? '');
   const [description, setDescription] = useState(org.description ?? '');
-  const [knownAs, setKnownAs] = useState(org.known_as ?? '');
   const [profileData, setProfileData] = useState<JsonRecord>(() => pick(org.profile, fields));
   const [extraErrors, setExtraErrors] = useState<ErrorSchema | undefined>(undefined);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const schemaForm = useRef<Form<JsonRecord>>(null);
-  const currentAllowed = knownAsOptions.some((o) => o.key === current.known_as);
 
   /** Takes a newer org (after a save, a move or a refresh) as the form's values. */
   function adopt(next: Org) {
@@ -109,7 +102,6 @@ export function OrgEditForm({
     setName(next.name);
     setLegalName(next.legal_name ?? '');
     setDescription(next.description ?? '');
-    setKnownAs(next.known_as ?? '');
     // The API tidies values (e.g. a GSTIN is stored upper-cased).
     setProfileData(pick(next.profile, fields));
   }
@@ -160,7 +152,6 @@ export function OrgEditForm({
       const changes = profileChanges();
       if (Object.keys(changes).length > 0) patch['profile'] = changes;
     }
-    if (canChooseKnownAs && knownAs !== current.known_as) patch['known_as'] = knownAs;
     if (Object.keys(patch).length === 0) {
       setMessage(t('org.saved'));
       return;
@@ -207,34 +198,6 @@ export function OrgEditForm({
     </div>
   );
 
-  /** The "known as" choice, for whoever may set it. */
-  const knownAsSelect = (
-    <div className="flex flex-col gap-1.5">
-      <Label htmlFor="org-known-as">{t('org.known_as')}</Label>
-      <select
-        id="org-known-as"
-        className="bd-input"
-        value={knownAs}
-        onChange={(e) => {
-          setKnownAs(e.target.value);
-          setMessage(null);
-        }}
-      >
-        {currentAllowed ? null : (
-          <option value={current.known_as ?? ''}>{knownAsText(current)}</option>
-        )}
-        {knownAsOptions.map((o) => (
-          <option key={o.key} value={o.key}>
-            {o.name}
-          </option>
-        ))}
-      </select>
-      {currentAllowed ? null : (
-        <span className="text-[12px] text-ink-500">{t('org.known_as_not_allowed')}</span>
-      )}
-    </div>
-  );
-
   if (!editing) {
     // Read-only details (the Default org, the root, an org below the viewer's
     // own, or not the owner): plain text, not disabled inputs.
@@ -248,7 +211,7 @@ export function OrgEditForm({
     }));
     const items: Array<{ label: string; value: ReactNode }> = [
       { label: t('org.name'), value: current.name },
-      ...(current.known_as === null || canChooseKnownAs
+      ...(current.known_as === null || knownAsPicked
         ? []
         : [{ label: t('org.known_as'), value: knownAsText(current) }]),
       { label: t('org.legal_name'), value: current.legal_name ?? '—' },
@@ -272,17 +235,6 @@ export function OrgEditForm({
     return (
       <ConsoleSection title={t('org.details')}>
         {note ? <p className="text-[13px] text-ink-500 mb-4">{note}</p> : null}
-        {canChooseKnownAs ? (
-          // The network admin sets only the "known as" value.
-          <form
-            noValidate
-            onSubmit={(e) => void onSubmit(e)}
-            className="flex flex-col gap-4 mb-6 sm:max-w-[50%]"
-          >
-            {knownAsSelect}
-            {status}
-          </form>
-        ) : null}
         <DetailList items={items} />
       </ConsoleSection>
     );
@@ -296,13 +248,11 @@ export function OrgEditForm({
             <Label htmlFor="org-name">{t('org.name')}</Label>
             <Input id="org-name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          {canChooseKnownAs ? (
-            knownAsSelect
-          ) : (
+          {knownAsPicked ? null : (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="org-known-as">{t('org.known_as')}</Label>
               <Input id="org-known-as" value={knownAsText(current)} disabled readOnly />
-              <span className="text-[12px] text-ink-500">{t('org.known_as_admin_only')}</span>
+              <span className="text-[12px] text-ink-500">{t('org.known_as_parent_sets')}</span>
             </div>
           )}
           <div className="flex flex-col gap-1.5">

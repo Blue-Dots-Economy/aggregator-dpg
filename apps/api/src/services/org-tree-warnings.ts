@@ -6,10 +6,14 @@
  * kind of excess, with counts only, so an operator can see it. More orgs than
  * `max_total_orgs` is logged as an error, because it closes self-registration
  * of new orgs. It never stops boot.
+ *
+ * It also counts orgs whose `known_as` key is neither in their parent's list
+ * nor `aggregator`. Such keys read as "Aggregator" until someone sets them,
+ * and it warns when the config still has an `organisation.known_as` block,
+ * which the API ignores.
  */
 
 import type { OrganisationConfig } from '@aggregator-dpg/network-config/interface';
-import { isAllowedAt } from './known-as.js';
 import type {
   Organisation,
   OrganisationStoreBase,
@@ -47,10 +51,10 @@ async function countedOrgs(store: OrganisationStoreBase): Promise<Organisation[]
  *
  * Kinds: orgs deeper than `max_depth`; orgs (the root included) with more
  * children than `max_children`; more orgs than `max_total_orgs`; orgs whose
- * `known_as` key is not configured or not allowed at their depth. Counts
+ * `known_as` key is neither in the parent's list nor `aggregator`. Counts
  * pending and active orgs only, the Default org excluded. A total over the
  * limit, and a failure of the check, are logged as errors; a failure ends the
- * check and never throws.
+ * check and never throws. Also warns when `cfg` has a `known_as` block.
  *
  * @param store - The organisation store.
  * @param cfg - The instance's `organisation` config.
@@ -64,6 +68,15 @@ export async function warnOrgTreeOverLimits(
   const { max_depth, max_children, max_total_orgs } = cfg.hierarchy;
   const warn = (check: string, fields: object) =>
     log.warn({ operation: OPERATION, status: 'success', check, ...fields });
+  if (cfg.known_as !== undefined) {
+    log.warn({
+      operation: OPERATION,
+      status: 'skipped',
+      check: 'known_as_config',
+      detail:
+        'organisation.known_as in the instance config is ignored; owners set "known as" values in the console',
+    });
+  }
   try {
     const orgs = (await countedOrgs(store)).filter((o) => !o.isDefault);
 
@@ -91,7 +104,7 @@ export async function warnOrgTreeOverLimits(
       warn('total', { total_orgs: orgs.length, max_total_orgs, registration: 'closed' });
     }
 
-    const stale = orgs.filter((o) => !isAllowedAt(cfg.known_as, o.knownAs, o.depth)).length;
+    const stale = valueOf(await store.countStaleKnownAs());
     if (stale > 0) warn('known_as', { org_count: stale });
   } catch (e) {
     log.error({

@@ -7,6 +7,13 @@
  * @module apps/web/src/lib/console-client
  */
 
+import type {
+  KnownAsValues,
+  KnownAsValuesRequest,
+  Org,
+  OrgKnownAsUpdateRequest,
+} from '@aggregator-dpg/shared-primitives/user-org';
+
 /** The API's error envelope, as far as the console reads it. */
 export interface ConsoleError {
   code?: string;
@@ -47,6 +54,38 @@ export async function sendConsole<T>(
 }
 
 /**
+ * Sets an organisation's "known as" value (owner of its parent).
+ *
+ * @param orgId - The organisation.
+ * @param knownAs - A key from the choices of the org's parent (`knownAsChoices`).
+ * @returns The outcome, with the updated org on success.
+ */
+export function setOrgKnownAs(orgId: string, knownAs: string): Promise<ConsoleSendResult<Org>> {
+  const body: OrgKnownAsUpdateRequest = { known_as: knownAs };
+  return sendConsole<Org>(`/api/console/org/known-as/${orgId}`, 'PATCH', body);
+}
+
+/**
+ * Replaces the "known as" values an organisation defines for its direct
+ * children (its owner, or the network admin for the root).
+ *
+ * @param orgId - The organisation that defines the list.
+ * @param values - The full list; saved entries keep their key, new ones omit it.
+ * @returns The outcome, with the updated org and the saved list (keys filled) on success.
+ */
+export function setOrgKnownAsValues(
+  orgId: string,
+  values: KnownAsValuesRequest,
+): Promise<ConsoleSendResult<Org & { known_as_values: KnownAsValues }>> {
+  const body: OrgKnownAsUpdateRequest = { known_as_values: values };
+  return sendConsole<Org & { known_as_values: KnownAsValues }>(
+    `/api/console/org/known-as/${orgId}`,
+    'PATCH',
+    body,
+  );
+}
+
+/**
  * Returns the console message key for a failed call.
  *
  * @param r - A failed result.
@@ -70,17 +109,18 @@ export function errorKey(r: { status: number; error: ConsoleError }): string {
     ORG_CHILD_LIMIT: 'errors.child_limit',
     ORG_TOTAL_LIMIT: 'errors.total_limit',
     ORG_PARENT_CYCLE: 'errors.parent_cycle',
-    KNOWN_AS_DEPTH: 'errors.known_as_depth',
   };
   if (r.error.code && treeErrors[r.error.code]) return treeErrors[r.error.code]!;
   const fields = r.error.fields ?? {};
   if (r.error.code === 'CONFLICT') {
     if (fields['reason'] === 'busy') return 'errors.busy';
     if (fields['reason'] === 'not_movable') return 'errors.not_movable';
+    if (fields['reason'] === 'moved') return 'errors.org_moved';
   }
   if (r.error.code === 'SCHEMA_VALIDATION') {
     if (fields['parent_id'] === 'invalid') return 'errors.parent_invalid';
     if (fields['known_as'] === 'invalid') return 'errors.known_as_invalid';
+    if (fields['known_as_values'] === 'unknown_key') return 'errors.known_as_values_changed';
   }
   if (r.status === 0) return 'errors.network';
   if (r.status === 401) return 'errors.signed_out';

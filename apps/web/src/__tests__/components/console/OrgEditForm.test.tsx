@@ -5,11 +5,9 @@
  * schema-driven fields (website, GST number, domains) are the ones a default
  * deployment shows. Covers: the owner's form (fixed and schema fields in one
  * patch, clearing a schema field, schema checks before sending, server field
- * errors, the stored GSTIN after save), the "known as" value (the network
- * admin's only: choices at the depth, never a parent, page refresh, newer
- * values after a move, a key no longer configured, the depth error), and
- * read-only rendering (the Default org, an org below the viewer's own, a
- * non-owner).
+ * errors, the stored GSTIN after save), the "known as" value (shown
+ * read-only, never sent), and read-only rendering (the Default org, an org
+ * below the viewer's own, a non-owner).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -61,24 +59,16 @@ const baseOrg: Org = {
   updated_at: '2026-01-01T00:00:00Z',
 };
 
-/** Values allowed at the org's depth, as the page passes them. */
-const KNOWN_AS = [
-  { key: 'aggregator', name: 'Aggregator' },
-  { key: 'district', name: 'District' },
-];
-
 interface Viewer {
   editable?: boolean;
   /** The org's owner. */
   canEdit?: boolean;
-  /** The network admin. */
-  canSetKnownAs?: boolean;
-  knownAs?: typeof KNOWN_AS;
   orgSchema?: typeof ORG_SCHEMA | null;
+  /** The page shows the "known as" picker. */
+  knownAsPicked?: boolean;
 }
 
 const OWNER: Viewer = { editable: true, canEdit: true };
-const ADMIN: Viewer = { editable: true, canSetKnownAs: true, knownAs: KNOWN_AS };
 
 function form(org: Org, v: Viewer) {
   return (
@@ -87,9 +77,8 @@ function form(org: Org, v: Viewer) {
         org={org}
         editable={v.editable ?? false}
         canEdit={v.canEdit ?? false}
-        canSetKnownAs={v.canSetKnownAs ?? false}
-        knownAsOptions={v.knownAs ?? []}
         orgSchema={v.orgSchema === undefined ? ORG_SCHEMA : v.orgSchema}
+        knownAsPicked={v.knownAsPicked ?? false}
       />
     </NextIntlClientProvider>
   );
@@ -136,12 +125,35 @@ describe('<OrgEditForm />', () => {
       expect(screen.getByText('1 Main St, Bengaluru, KA')).toBeInTheDocument();
     });
 
-    it('shows known_as read-only with the admin-only hint', () => {
+    it('shows known_as read-only with the parent-owner hint', () => {
       renderForm(baseOrg, OWNER);
       const field = screen.getByLabelText(messages.console.org.known_as);
       expect(field).toBeDisabled();
       expect(field).toHaveValue('Aggregator');
-      expect(screen.getByText(messages.console.org.known_as_admin_only)).toBeInTheDocument();
+      expect(screen.getByText(messages.console.org.known_as_parent_sets)).toBeInTheDocument();
+    });
+
+    it('leaves known_as and its hint out when the page shows the picker', () => {
+      renderForm(baseOrg, { ...OWNER, knownAsPicked: true });
+      expect(screen.queryByLabelText(messages.console.org.known_as)).toBeNull();
+      expect(screen.queryByText(messages.console.org.known_as_parent_sets)).toBeNull();
+      expect(screen.getByLabelText(messages.console.org.name)).toBeInTheDocument();
+    });
+
+    it('shows the newer org the page passes after a refresh', () => {
+      const { rerender } = renderForm(baseOrg, OWNER);
+      rerender(
+        form(
+          {
+            ...baseOrg,
+            known_as: 'district',
+            known_as_name: 'District',
+            updated_at: '2026-02-01T00:00:00Z',
+          },
+          OWNER,
+        ),
+      );
+      expect(screen.getByLabelText(messages.console.org.known_as)).toHaveValue('District');
     });
 
     it('skips the network call and reports saved when nothing changed', async () => {
@@ -304,110 +316,6 @@ describe('<OrgEditForm />', () => {
     });
   });
 
-  describe('known_as (network admin)', () => {
-    it('offers the values allowed at the depth, and the details read-only', () => {
-      renderForm(baseOrg, ADMIN);
-      const select = screen.getByLabelText(messages.console.org.known_as);
-      expect(select).toHaveValue('aggregator');
-      expect(screen.getByRole('option', { name: 'District' })).toBeInTheDocument();
-      expect(screen.queryByLabelText(messages.console.orgs.col_parent)).toBeNull();
-      expect(screen.getByText(messages.console.org.details_owner_only)).toBeInTheDocument();
-      expect(screen.queryByRole('textbox')).toBeNull();
-      expect(screen.getByText('https://acme.example.org')).toBeInTheDocument();
-    });
-
-    it('sends only the new value, never a parent or a detail', async () => {
-      global.fetch = respond(
-        { ...baseOrg, known_as: 'district', known_as_name: 'District' },
-        200,
-      ) as never;
-      renderForm(baseOrg, ADMIN);
-      fireEvent.change(screen.getByLabelText(messages.console.org.known_as), {
-        target: { value: 'district' },
-      });
-      save();
-      await waitFor(() => expect(global.fetch).toHaveBeenCalled());
-      expect(sentBody()).toEqual({ known_as: 'district' });
-      expect(await screen.findByText(messages.console.org.saved)).toBeInTheDocument();
-    });
-
-    it('refreshes the page after a save so the rest of the page follows', async () => {
-      global.fetch = respond(
-        { ...baseOrg, known_as: 'district', known_as_name: 'District' },
-        200,
-      ) as never;
-      renderForm(baseOrg, ADMIN);
-      fireEvent.change(screen.getByLabelText(messages.console.org.known_as), {
-        target: { value: 'district' },
-      });
-      save();
-      await waitFor(() => expect(refresh).toHaveBeenCalled());
-    });
-
-    it('never sends known_as when the value is unchanged', async () => {
-      global.fetch = respond({}, 200) as never;
-      renderForm(baseOrg, ADMIN);
-      save();
-      await waitFor(() =>
-        expect(screen.getByRole('status')).toHaveTextContent(messages.console.org.saved),
-      );
-      expect(global.fetch).not.toHaveBeenCalled();
-    });
-
-    it('shows the newer values the page passes after a move', () => {
-      const { rerender } = renderForm(
-        { ...baseOrg, known_as: 'district', known_as_name: 'District', depth: 2 },
-        ADMIN,
-      );
-      const moved: Org = {
-        ...baseOrg,
-        known_as: 'training_partner',
-        known_as_name: 'Training Partner',
-        depth: 3,
-        parent_id: 'p2',
-        updated_at: '2026-02-01T00:00:00Z',
-      };
-      const atDepth3 = [
-        { key: 'aggregator', name: 'Aggregator' },
-        { key: 'training_partner', name: 'Training Partner' },
-      ];
-      rerender(form(moved, { ...ADMIN, knownAs: atDepth3 }));
-      expect(screen.getByLabelText(messages.console.org.known_as)).toHaveValue('training_partner');
-      expect(screen.queryByText(messages.console.org.known_as_not_allowed)).toBeNull();
-    });
-
-    it('shows a key no longer configured as the raw key with a note', () => {
-      renderForm({ ...baseOrg, known_as: 'retired_key', known_as_name: null }, ADMIN);
-      expect(screen.getByLabelText(messages.console.org.known_as)).toHaveValue('retired_key');
-      expect(screen.getByRole('option', { name: 'retired_key' })).toBeInTheDocument();
-      expect(screen.getByText(messages.console.org.known_as_not_allowed)).toBeInTheDocument();
-    });
-
-    it('shows the API message when the value is not allowed', async () => {
-      global.fetch = respond({ error: { code: 'KNOWN_AS_DEPTH' } }, 400) as never;
-      renderForm(baseOrg, ADMIN);
-      fireEvent.change(screen.getByLabelText(messages.console.org.known_as), {
-        target: { value: 'district' },
-      });
-      save();
-      expect(await screen.findByText(messages.console.errors.known_as_depth)).toBeInTheDocument();
-    });
-
-    it('lets a network admin who owns the org edit the details too', async () => {
-      global.fetch = respond(baseOrg, 200) as never;
-      renderForm(baseOrg, { ...ADMIN, canEdit: true });
-      fireEvent.change(screen.getByLabelText(messages.console.org.legal_name), {
-        target: { value: 'Own Ltd' },
-      });
-      fireEvent.change(screen.getByLabelText(messages.console.org.known_as), {
-        target: { value: 'district' },
-      });
-      save();
-      await waitFor(() => expect(global.fetch).toHaveBeenCalled());
-      expect(sentBody()).toEqual({ legal_name: 'Own Ltd', known_as: 'district' });
-    });
-  });
-
   describe('read-only', () => {
     it('says the Default org is not editable, with no inputs or save button', () => {
       renderForm({ ...baseOrg, is_default: true }, { canEdit: true });
@@ -444,6 +352,13 @@ describe('<OrgEditForm />', () => {
       expect(screen.getByText('29ABCDE1234F1ZW')).toBeInTheDocument();
       expect(screen.getByText('Providers, Seekers')).toBeInTheDocument();
       expect(screen.getByText(/Line one/)).toHaveClass('whitespace-pre-line');
+    });
+
+    it('leaves known_as out of the read-only details when the page shows the picker', () => {
+      renderForm(baseOrg, { editable: false, knownAsPicked: true });
+      expect(screen.queryByText(messages.console.org.known_as)).toBeNull();
+      expect(screen.queryByText('Aggregator')).toBeNull();
+      expect(screen.getByText('Acme Org')).toBeInTheDocument();
     });
 
     it('omits known_as for the root, and shows "—" and "no description" when empty', () => {
