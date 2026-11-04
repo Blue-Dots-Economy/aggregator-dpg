@@ -149,11 +149,6 @@ export default async function ConsoleOrgPage({
             </span>
           }
         />
-        {own ? null : (
-          <p className="mt-2 rounded-lg bg-[var(--bd-tint-primary)] px-3 py-2 text-[13px] text-ink-600">
-            {parent ? t('org.viewed_from_above_known_as') : t('org.viewed_from_above')}
-          </p>
-        )}
       </div>
       <div className="flex flex-col gap-6">
         {!own && aggregatorOrg && org.status === 'pending' ? (

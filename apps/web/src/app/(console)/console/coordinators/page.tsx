@@ -71,9 +71,12 @@ export default async function ConsoleCoordinatorsPage({
     readReachableOrgs(),
     getConsoleActor(),
   ]);
-  const counts = await countCoordinators(orgs, orgId, serves);
-  const orgOptions = orgOptionsInTreeOrder(orgs);
-  const orgById = new Map(orgs.map((o) => [o.id, o]));
+  // Users are visible only in the orgs the viewer owns, so filters and counts use those.
+  const ownedIds = new Set(actor.ok ? actor.me.orgs.map((o) => o.id) : []);
+  const ownOrgs = orgs.filter((o) => ownedIds.has(o.id));
+  const counts = await countCoordinators(ownOrgs, orgId, serves);
+  const orgOptions = orgOptionsInTreeOrder(ownOrgs);
+  const orgById = new Map(ownOrgs.map((o) => [o.id, o]));
   // Same gate the sidebar link used to apply, now checked here instead.
   const showInvite = actor.ok && canInvite(actor.me);
   const keep: Record<string, string> = {

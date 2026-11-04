@@ -190,15 +190,14 @@ describe('console org detail — "known as" picker', () => {
     known_as_values: [{ key: 'block', name: 'Block' }],
   };
 
-  it('shows the picker, its banner and a details form without the value to the parent owner', async () => {
+  it('shows the picker and a details form without the value to the parent owner, with no banner', async () => {
     mockPage(org({ depth: 2 }), 'parent-owner', { viewerOrgId: 'parent', parent: PARENT });
     await show();
     expect(screen.getByTestId('known-as-picker')).toHaveAttribute(
       'data-parent-values',
       JSON.stringify(PARENT.known_as_values),
     );
-    expect(screen.getByText('console.org.viewed_from_above_known_as')).toBeInTheDocument();
-    expect(screen.queryByText('console.org.viewed_from_above')).toBeNull();
+    expect(screen.queryByText(/viewed_from_above/)).toBeNull();
     expect(screen.getByTestId('org-edit-form')).toHaveAttribute('data-known-as-picked', 'true');
   });
 
@@ -231,11 +230,10 @@ describe('console org detail — "known as" picker', () => {
     expect(screen.queryByTestId('org-decision')).toBeNull();
   });
 
-  it('keeps the view-only banner and the value in the form for an ancestor that does not pick', async () => {
+  it('keeps the value in the form for a viewer that does not pick it', async () => {
     mockPage(org({ depth: 3 }), 'grandparent-owner', { viewerOrgId: 'grandparent' });
     await show();
     expect(screen.queryByTestId('known-as-picker')).toBeNull();
-    expect(screen.getByText('console.org.viewed_from_above')).toBeInTheDocument();
     expect(screen.getByTestId('org-edit-form')).toHaveAttribute('data-known-as-picked', 'false');
   });
 
