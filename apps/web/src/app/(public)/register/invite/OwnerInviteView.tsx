@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState, type JSX, type ReactNode } from 'react';
+import { useTranslations } from 'next-intl';
 import { RegisterPageShell } from '../RegisterPageShell';
 import { DEFAULT_MAX_INVITES } from '../../../../lib/invite-limit';
 
@@ -58,6 +59,7 @@ export function OwnerInviteView({
   grant,
   maxInvites = DEFAULT_MAX_INVITES,
 }: Readonly<OwnerInviteViewProps>): JSX.Element {
+  const t = useTranslations('register.owner_invite');
   const [rows, setRows] = useState<InviteRow[]>([newRow()]);
   const [state, setState] = useState<ViewState>({ status: 'idle' });
 
@@ -121,7 +123,7 @@ export function OwnerInviteView({
   }
 
   return (
-    <RegisterPageShell heading="Invite your coordinators" tagline={null}>
+    <RegisterPageShell heading={t('heading')} tagline={null}>
       <div className="mt-6">
         {state.status === 'invalid_grant' ? (
           <Banner tone="error">
@@ -156,7 +158,7 @@ export function OwnerInviteView({
                     <input
                       type="email"
                       inputMode="email"
-                      aria-label={`Coordinator email ${i + 1}`}
+                      aria-label={t('email_label', { n: i + 1 })}
                       placeholder="email@org.in"
                       value={row.email}
                       onChange={(e) => updateRow(i, 'email', e.target.value)}
@@ -164,7 +166,7 @@ export function OwnerInviteView({
                     />
                     <input
                       type="text"
-                      aria-label={`Coordinator name ${i + 1} (optional)`}
+                      aria-label={t('name_label', { n: i + 1 })}
                       placeholder="Name (optional)"
                       value={row.name}
                       onChange={(e) => updateRow(i, 'name', e.target.value)}
@@ -174,7 +176,7 @@ export function OwnerInviteView({
                   {rows.length > 1 ? (
                     <button
                       type="button"
-                      aria-label={`Remove coordinator ${i + 1}`}
+                      aria-label={t('remove_label', { n: i + 1 })}
                       onClick={() => removeRow(i)}
                       className="mt-1 rounded-[8px] px-2 py-1.5 text-[18px] leading-none text-ink-400 hover:bg-ink-50 hover:text-ink-600"
                     >

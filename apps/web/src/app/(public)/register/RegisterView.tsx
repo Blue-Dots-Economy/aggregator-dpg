@@ -1,6 +1,7 @@
 'use client';
 
 import { type JSX } from 'react';
+import { useTranslations } from 'next-intl';
 import type { RJSFSchema } from '@rjsf/utils';
 import { RegisterPageShell } from './RegisterPageShell';
 import { CoordinatorRegisterForm } from './CoordinatorRegisterForm';
@@ -28,10 +29,10 @@ export function RegisterView({
   uiSchema,
   aggregatorConsentContent,
 }: Readonly<RegisterViewProps>): JSX.Element {
-  const headingTitle = (schema.title as string | undefined) ?? 'Aggregator Registration';
+  const t = useTranslations('register');
 
   return (
-    <RegisterPageShell heading={headingTitle}>
+    <RegisterPageShell heading={t('page_title')}>
       <CoordinatorRegisterForm
         schema={schema}
         uiSchema={uiSchema}

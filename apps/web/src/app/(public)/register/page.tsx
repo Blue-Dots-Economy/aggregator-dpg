@@ -1,15 +1,20 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
+import { getTranslations } from 'next-intl/server';
 import { getSession } from '../../../lib/server-session';
 import { RegisterView } from './RegisterView';
 import { loadRegistrationSchema } from '../../../lib/aggregator-schema.server';
 import { loadConsentContent, warnIfLegacyHierarchyFlag } from './register-server';
 
-export const metadata: Metadata = {
-  // Matches the heading the page renders, which comes from the registration
-  // schema's own title (#873 renamed it to Coordinator Registration).
-  title: 'Coordinator Registration',
-};
+/**
+ * Sets the page title to the heading the page renders.
+ *
+ * @returns The page metadata.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations('register');
+  return { title: t('page_title') };
+}
 
 export const dynamic = 'force-dynamic';
 
