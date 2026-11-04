@@ -26,7 +26,7 @@ import {
 } from '../../db/schema.js';
 import { DEFAULT_ORG_SLUG } from '../organisation-store/interface.js';
 import { renderOrgDetails } from './org-details.js';
-import { servesOf } from './serves.js';
+import { servesForCreate, servesOf } from './serves.js';
 import {
   changeContact,
   ContactTakenError,
@@ -84,7 +84,7 @@ export class PostgresUserStore extends UserStoreBase {
             userType: 'coordinator',
             signalstackOrgSlug: input.orgSlug,
             signalstackOrgName: input.name,
-            serves: servesOf(input.type),
+            serves: servesForCreate(input),
             contactId,
             alternatePhone: extra.alternatePhone ?? null,
             createdBy: input.createdBy,

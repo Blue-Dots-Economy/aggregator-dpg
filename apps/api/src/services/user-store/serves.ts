@@ -17,6 +17,21 @@ export function servesOf(type: string | null): string[] {
 }
 
 /**
+ * The `serves` value for a new coordinator.
+ *
+ * Uses `serves` when given, without repeats, else {@link servesOf} of `type`.
+ *
+ * @param input - The create input's `type` and optional `serves`.
+ * @returns The domain ids to store.
+ */
+export function servesForCreate(input: {
+  type: string | null;
+  serves?: readonly string[] | undefined;
+}): string[] {
+  return input.serves !== undefined ? [...new Set(input.serves)] : servesOf(input.type);
+}
+
+/**
  * The network domains a coordinator serves, in network order.
  *
  * An empty `serves` means every domain. Ids that are not in the network are

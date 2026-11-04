@@ -108,6 +108,50 @@ describe('POST /v1/aggregator-registrations/create', () => {
     },
   };
 
+  /** Submits `validBody` with `type` replaced. */
+  async function registerWithType(type: unknown) {
+    return app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: { ...validBody, type },
+    });
+  }
+
+  it('stores every domain picked and writes the first to Keycloak', async () => {
+    const res = await registerWithType(['seeker', 'provider']);
+    expect(res.statusCode).toBe(201);
+    const { aggregator_id } = res.json() as { aggregator_id: string };
+    const stored = await userStore.findById(aggregator_id);
+    expect(stored.ok && stored.value?.serves).toEqual(['seeker', 'provider']);
+    const kcUser = await idp.findByEmail(validBody.contact.email);
+    expect(kcUser.ok && kcUser.value?.attributes?.aggregator_type).toEqual(['seeker']);
+  });
+
+  it('stores a single domain sent as a string as a one-item list', async () => {
+    const res = await registerWithType('provider');
+    expect(res.statusCode).toBe(201);
+    const { aggregator_id } = res.json() as { aggregator_id: string };
+    const stored = await userStore.findById(aggregator_id);
+    expect(stored.ok && stored.value?.serves).toEqual(['provider']);
+  });
+
+  it('400 when a picked domain is not in the network', async () => {
+    const res = await registerWithType(['seeker', 'learner']);
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('SCHEMA_VALIDATION');
+  });
+
+  it('400 on an empty domain list', async () => {
+    const res = await registerWithType([]);
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('400 on a repeated domain', async () => {
+    const res = await registerWithType(['seeker', 'seeker']);
+    expect(res.statusCode).toBe(400);
+  });
+
   it('creates an aggregator + disabled KC user on valid payload', async () => {
     const res = await app.inject({
       method: 'POST',

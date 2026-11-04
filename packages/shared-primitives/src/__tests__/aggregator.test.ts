@@ -3,6 +3,7 @@ import {
   ConsentRecordSchema,
   RegistrationConsentSchema,
   RegistrationPayloadSchema,
+  registrationDomains,
 } from '../aggregator/index.js';
 
 const validContact = {
@@ -72,5 +73,41 @@ describe('RegistrationPayloadSchema', () => {
         personas: [],
       }),
     ).toThrow();
+  });
+});
+
+describe('RegistrationPayloadSchema type', () => {
+  const base = { name: 'SkillBridge Network', contact: validContact, consent: validConsent };
+
+  it('accepts a list of domain ids', () => {
+    const parsed = RegistrationPayloadSchema.parse({ ...base, type: ['seeker', 'provider'] });
+    expect(parsed.type).toEqual(['seeker', 'provider']);
+  });
+
+  it('rejects an empty list', () => {
+    expect(() => RegistrationPayloadSchema.parse({ ...base, type: [] })).toThrow();
+  });
+
+  it('rejects a repeated id', () => {
+    expect(() =>
+      RegistrationPayloadSchema.parse({ ...base, type: ['seeker', 'seeker'] }),
+    ).toThrow();
+  });
+
+  it('rejects an empty id inside the list', () => {
+    expect(() => RegistrationPayloadSchema.parse({ ...base, type: ['seeker', ''] })).toThrow();
+  });
+});
+
+describe('registrationDomains', () => {
+  it('wraps one id in a list', () => {
+    expect(registrationDomains('seeker')).toEqual(['seeker']);
+  });
+
+  it('copies a list', () => {
+    const ids = ['seeker', 'provider'];
+    const out = registrationDomains(ids);
+    expect(out).toEqual(ids);
+    expect(out).not.toBe(ids);
   });
 });
