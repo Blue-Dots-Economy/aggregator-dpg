@@ -71,7 +71,7 @@ vi.mock('next-intl', () => ({
   },
 }));
 
-import { Sidebar } from '@/components/shell/Sidebar';
+import { AppSidebar, Sidebar } from '@/components/shell/Sidebar';
 
 function mockDefaults() {
   usePathname.mockReturnValue('/onboarding');
@@ -371,5 +371,36 @@ describe('<Sidebar /> mobile navigation drawer', () => {
     useCan.mockReturnValue((c: string) => c !== 'profiles.onboard');
     render(<Sidebar />);
     expect(screen.queryAllByText('Onboarding')).toHaveLength(0);
+  });
+});
+
+describe('<AppSidebar /> account card', () => {
+  const renderCard = (account: Parameters<typeof AppSidebar>[0]['account']) =>
+    render(<AppSidebar nav={[]} portalLabel="Console" account={account} />);
+
+  it('opens with the email once when the title is the email', () => {
+    renderCard({
+      title: 'admin@net.org',
+      subtitle: 'Network admin',
+      details: [{ label: 'Email', value: 'admin@net.org', icon: 'mail' }],
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: /admin@net\.org/ })[0]!);
+    const popup = screen.getByRole('dialog');
+    expect(within(popup).getAllByText('admin@net.org')).toHaveLength(1);
+    expect(within(popup).getByText('Network admin')).toBeInTheDocument();
+    expect(within(popup).getByText('AD')).toBeInTheDocument();
+  });
+
+  it('keeps the name and the role in the header when there is a name', () => {
+    renderCard({
+      title: 'Asha Rao',
+      subtitle: 'Organisation owner',
+      details: [{ label: 'Email', value: 'asha@a.org', icon: 'mail' }],
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: /Asha Rao/ })[0]!);
+    const popup = screen.getByRole('dialog');
+    expect(within(popup).getByText('Asha Rao')).toBeInTheDocument();
+    expect(within(popup).getByText('Organisation owner')).toBeInTheDocument();
+    expect(within(popup).getByText('asha@a.org')).toBeInTheDocument();
   });
 });

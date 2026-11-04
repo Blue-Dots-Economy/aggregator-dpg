@@ -26,7 +26,12 @@ vi.mock('next-intl/server', () => ({
   getFormatter: vi.fn(async () => ({ dateTime: () => '1 Jan 2026' })),
 }));
 vi.mock('@/components/shell/Topbar', () => ({
-  Topbar: ({ title }: { title: React.ReactNode }) => <h1>{title}</h1>,
+  Topbar: ({ title, right }: { title: React.ReactNode; right?: React.ReactNode }) => (
+    <>
+      <h1>{title}</h1>
+      {right}
+    </>
+  ),
 }));
 vi.mock('@/components/console/OrgEditForm', () => ({
   OrgEditForm: ({ knownAsPicked }: { knownAsPicked?: boolean }) => (
@@ -43,6 +48,11 @@ vi.mock('@/components/console/ChildOrgsTree', () => ({ ChildOrgsTree: () => null
 vi.mock('@/components/console/RolesPanel', () => ({ RolesPanel: () => null }));
 vi.mock('@/components/console/OwnerAccessRepair', () => ({ OwnerAccessRepair: () => null }));
 vi.mock('@/components/console/CopyButton', () => ({ CopyButton: () => null }));
+vi.mock('@/components/console/OrgsTable', () => ({
+  OrgsTable: ({ orgs }: { orgs: Array<{ id: string }> }) => (
+    <div data-testid="org-decision" data-ids={orgs.map((o) => o.id).join(',')} />
+  ),
+}));
 vi.mock('@/components/console/KnownAsValuesEditor', () => ({
   KnownAsValuesEditor: () => <div data-testid="known-as-values-editor" />,
 }));
@@ -180,23 +190,56 @@ describe('console org detail — "known as" picker', () => {
     known_as_values: [{ key: 'block', name: 'Block' }],
   };
 
-  it('shows the picker, its banner and a details form without the value to the parent owner', async () => {
+  it('shows the picker and a details form without the value to the parent owner, with no banner', async () => {
     mockPage(org({ depth: 2 }), 'parent-owner', { viewerOrgId: 'parent', parent: PARENT });
     await show();
     expect(screen.getByTestId('known-as-picker')).toHaveAttribute(
       'data-parent-values',
       JSON.stringify(PARENT.known_as_values),
     );
-    expect(screen.getByText('console.org.viewed_from_above_known_as')).toBeInTheDocument();
-    expect(screen.queryByText('console.org.viewed_from_above')).toBeNull();
+    expect(screen.queryByText(/viewed_from_above/)).toBeNull();
     expect(screen.getByTestId('org-edit-form')).toHaveAttribute('data-known-as-picked', 'true');
   });
 
-  it('keeps the view-only banner and the value in the form for an ancestor that does not pick', async () => {
+  it("hides a child org's coordinators from the parent owner", async () => {
+    mockPage(org({ depth: 2 }), 'parent-owner', { viewerOrgId: 'parent', parent: PARENT });
+    await show();
+    expect(screen.queryByText('console.org.view_coordinators')).toBeNull();
+    expect(screen.queryByText('console.org.tile.coordinators')).toBeNull();
+    expect(screen.queryByText('console.org.child_count')).toBeNull();
+    expect(screen.queryByText('console.org.children')).toBeNull();
+    expect(screen.queryByTestId('org-decision')).toBeNull();
+    // The grandchildren are never asked for.
+    expect(vi.mocked(consoleRead).mock.calls.map(([path]) => path)).not.toContain('/v1/org/search');
+  });
+
+  it('lets the parent owner decide a pending child on its page', async () => {
+    mockPage(org({ depth: 2, status: 'pending' }), 'parent-owner', {
+      viewerOrgId: 'parent',
+      parent: PARENT,
+    });
+    await show();
+    expect(screen.getByTestId('org-decision')).toHaveAttribute('data-ids', ORG_ID);
+  });
+
+  it('shows no child-organisations tile on the Default organisation', async () => {
+    mockPage(org({ is_default: true }));
+    await show();
+    expect(screen.queryByText('console.org.child_count')).toBeNull();
+  });
+
+  it("shows the owner its own org's coordinators", async () => {
+    mockPage(org());
+    await show();
+    expect(screen.getByText('console.org.view_coordinators')).toBeInTheDocument();
+    expect(screen.getByText('console.org.tile.coordinators')).toBeInTheDocument();
+    expect(screen.queryByTestId('org-decision')).toBeNull();
+  });
+
+  it('keeps the value in the form for a viewer that does not pick it', async () => {
     mockPage(org({ depth: 3 }), 'grandparent-owner', { viewerOrgId: 'grandparent' });
     await show();
     expect(screen.queryByTestId('known-as-picker')).toBeNull();
-    expect(screen.getByText('console.org.viewed_from_above')).toBeInTheDocument();
     expect(screen.getByTestId('org-edit-form')).toHaveAttribute('data-known-as-picked', 'false');
   });
 

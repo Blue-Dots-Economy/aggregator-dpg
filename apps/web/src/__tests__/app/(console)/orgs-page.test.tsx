@@ -26,6 +26,7 @@ vi.mock('@/components/shell/Topbar', () => ({
 vi.mock('@/components/console/ConsoleUi', () => ({
   ConsoleCollapsible: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   ConsoleSection: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  EmptyState: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
 }));
 vi.mock('@/components/console/OrgsTable', () => ({ OrgsTable: () => null }));
 vi.mock('@/components/console/NetworkOrgsView', () => ({ NetworkOrgsView: () => null }));
@@ -65,6 +66,11 @@ describe('console orgs page — hierarchy settings', () => {
       }
       throw new Error(`unexpected read ${path}`);
     });
+  });
+
+  it('shows the review box even when nothing is waiting, with where requests appear', async () => {
+    render(await ConsoleOrgsPage({ searchParams: Promise.resolve({}) }));
+    expect(screen.getByText(/orgs\.empty_pending.*orgs\.review_hint/)).toBeInTheDocument();
   });
 
   it("reads the hierarchy with the network's values and passes them to the settings", async () => {

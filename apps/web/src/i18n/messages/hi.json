@@ -669,10 +669,7 @@
     },
     "home": {
       "coordinators": "{count} [[users]]",
-      "pending": "{count} pending",
-      "below_heading": "[[Orgs]] below yours",
-      "below_summary": "{orgs, plural, one {# [[org]]} other {# [[orgs]]}} with {coordinators, plural, one {# [[user]]} other {# [[users]]}} sit below yours. You can view them; their owners manage them.",
-      "below_view": "View [[orgs]]"
+      "pending": "{count} pending"
     },
     "org": {
       "details": "[[Org]] details",
@@ -692,7 +689,6 @@
       "fix_fields": "Please fix the highlighted fields.",
       "owner": "Owner",
       "view_coordinators": "View [[users]]",
-      "owner_roles": "Owner's roles",
       "child_count": "Child [[orgs]]",
       "children_of_max": "{count} of {max}",
       "children": "Child [[orgs]]",
@@ -702,8 +698,6 @@
       "children_below": "{count, plural, one {# [[org]] below} other {# [[orgs]] below}}",
       "children_expand": "Show the [[orgs]] below {name}",
       "children_collapse": "Hide the [[orgs]] below {name}",
-      "viewed_from_above": "This [[org]] sits below yours, so you can view it. Only its owner and the network administrator can change it.",
-      "viewed_from_above_known_as": "यह संगठन आपके संगठन के अंतर्गत आता है। आप तय कर सकते हैं कि इसे किस नाम से जाना जाए; इसके अन्य विवरण केवल इसका स्वामी और नेटवर्क व्यवस्थापक बदल सकते हैं।",
       "move": "Move",
       "move_title": "Move {name}",
       "move_parent": "New parent [[org]]",
@@ -757,6 +751,8 @@
       "all": "All",
       "approve": "Approve",
       "reject": "Reject",
+      "reject_reason": "कारण (आवश्यक, आवेदक को भेजा जाएगा)",
+      "reject_confirm": "संगठन अस्वीकार करें",
       "repair": "Re-grant owner access",
       "repaired": "Owner access: {status}",
       "empty": "No [[orgs]] match.",
@@ -777,7 +773,7 @@
       "network": "Network",
       "network_tag": "The network",
       "col_parent": "Parent [[org]]",
-      "subtitle_owner": "Your [[orgs]] and every [[org]] below them. Those below are view-only.",
+      "subtitle_owner": "Your [[orgs]] and the [[orgs]] directly under them. Those under yours are view-only.",
       "yours": "Your [[org]]",
       "tile": {
         "all": {
@@ -822,6 +818,7 @@
       "network_known_as": "नेटवर्क",
       "clear_filter": "फ़िल्टर हटाएँ",
       "empty_pending": "कोई [[org]] समीक्षा की प्रतीक्षा में नहीं है।",
+      "review_hint": "जब कोई [[org]] आपके संगठन के अंतर्गत पंजीकरण करता है, तो उसका अनुरोध यहाँ स्वीकृत या अस्वीकृत करने के लिए दिखाई देता है।",
       "open": "खोलें",
       "none": "कोई नहीं",
       "top_level_known_as": "\"Known as\" values for top-level [[orgs]]"
@@ -840,7 +837,7 @@
       "coordinator": "[[User]]",
       "organisation": "[[Org]]",
       "access": "Access",
-      "subtitle": "[[Users]] in your [[orgs]] and, view-only, in those below them. Newest first.",
+      "subtitle": "[[Users]] in your [[orgs]]. Newest first.",
       "apply": "Apply",
       "org_filter": "[[Org]]",
       "all_orgs": "All [[orgs]]",

@@ -17,6 +17,11 @@ import type {
 } from '@aggregator-dpg/shared-primitives/user-org';
 
 vi.mock('@/lib/console-actor', () => ({ getConsoleActor: vi.fn() }));
+vi.mock('next/navigation', () => ({
+  notFound: vi.fn(() => {
+    throw new Error('NOT_FOUND');
+  }),
+}));
 vi.mock('@/lib/console-api.server', () => ({
   consoleRead: vi.fn(),
   consoleReadOptional: vi.fn(),
@@ -88,17 +93,17 @@ describe('console coordinators page — invite button', () => {
     expect(link).toHaveAttribute('href', '/console/invite');
   });
 
-  it('withholds Invite from a network admin with only the read-only view', async () => {
+  it('has no users page for the network admin', async () => {
     vi.mocked(getConsoleActor).mockResolvedValue({
       ok: true,
       me: me({
         is_network_admin: true,
-        capabilities: ['network.administer'],
+        capabilities: ['network.administer', 'org.manage'],
         orgs: [org({ org_type: 'network_facilitator', capabilities: ['network.administer'] })],
       }),
     });
-    show(await renderPage());
-    expect(screen.queryByRole('link', { name: /console\.nav\.invite/ })).not.toBeInTheDocument();
+    await expect(renderPage()).rejects.toThrow('NOT_FOUND');
+    expect(consoleRead).not.toHaveBeenCalled();
   });
 
   it('offers Invite to everyone when access control is off', async () => {
@@ -162,7 +167,13 @@ const coordinatorRow = (over: Partial<User>): User => ({
 describe('console coordinators page — filters', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getConsoleActor).mockResolvedValue({ ok: true, me: me({}) });
+    // The viewer owns both organisations; users are visible only in owned orgs.
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me({
+        orgs: [org({ id: ORG_K, name: 'Karnataka' }), org({ id: ORG_M, name: 'Mysuru' })],
+      }),
+    });
     vi.mocked(consoleRead).mockResolvedValue(emptyPage);
     vi.mocked(readReachableOrgs).mockResolvedValue([
       orgRow(ORG_K, 'Karnataka', { known_as: 'state', known_as_name: 'State', depth: 1 }),
@@ -190,6 +201,25 @@ describe('console coordinators page — filters', () => {
       filter: { status: 'active' },
       limit: 100,
     });
+  });
+
+  it('leaves a child org the viewer only views out of the counts and the filter', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me({ orgs: [org({ id: ORG_K, name: 'Karnataka' })] }),
+    });
+    vi.mocked(readReachableOrgs).mockResolvedValue([
+      orgRow(ORG_K, 'Karnataka', { coordinator_count: 7, pending_count: 2 }),
+      orgRow(ORG_M, 'Mysuru', { parent_id: ORG_K, coordinator_count: 3, pending_count: 1 }),
+    ]);
+    show(await renderWith({}));
+    expect(
+      screen.getByRole('link', { name: /console\.org_home\.tile\.all\.label\s*7/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /console\.org_home\.tile\.pending\.label\s*2/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /Mysuru/ })).toBeNull();
   });
 
   it('marks the status filter in use among the counts', async () => {

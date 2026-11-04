@@ -6,6 +6,7 @@
  * viewer who cannot manage the coordinator's organisation.
  */
 
+import { notFound } from 'next/navigation';
 import { getFormatter, getTranslations } from 'next-intl/server';
 import { Briefcase, CalendarDays, Mail, Phone } from 'lucide-react';
 import type {
@@ -15,7 +16,7 @@ import type {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
 import { getConsoleActor } from '@/lib/console-actor';
-import { canManageOrg, coordinatorsHref } from '@/lib/capabilities';
+import { canManageOrg, canViewCoordinators, coordinatorsHref } from '@/lib/capabilities';
 import { RolesPanel } from '@/components/console/RolesPanel';
 import { Topbar } from '@/components/shell/Topbar';
 import { BackLink, ConsoleStatusPill } from '@/components/console/ConsoleUi';
@@ -33,6 +34,8 @@ export default async function ConsoleCoordinatorPage({
   const format = await getFormatter();
   const { id } = await params;
   const actor = await getConsoleActor();
+  // The network admin has no users page.
+  if (actor.ok && !canViewCoordinators(actor.me)) notFound();
   const [user, domains] = await Promise.all([
     consoleRead<User>(`/v1/user/read/${encodeURIComponent(id)}`),
     networkDomains(),

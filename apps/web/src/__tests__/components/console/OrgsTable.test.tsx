@@ -136,10 +136,47 @@ describe('<OrgsTable />', () => {
     ) as never;
     renderTable([pendingOrg]);
     fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.reject }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'duplicate' } });
+    fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.reject_confirm }));
     await waitFor(() =>
       expect(screen.getByText(messages.console.status.inactive)).toBeInTheDocument(),
     );
     expect(screen.queryByRole('button', { name: messages.console.orgs.approve })).toBeNull();
+  });
+
+  it('asks for a reason before a rejection and sends it', async () => {
+    global.fetch = respond(
+      { id: pendingOrg.id, status: 'inactive', notified: true, owner_access: 'none' },
+      200,
+    ) as never;
+    renderTable([pendingOrg]);
+    fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.reject }));
+    expect(global.fetch).not.toHaveBeenCalled();
+    const confirm = screen.getByRole('button', {
+      name: messages.console.orgs.reject_confirm,
+    });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '  ' } });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: ' Not a real org ' } });
+    fireEvent.click(confirm);
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        `/api/console/org/decision/${pendingOrg.id}`,
+        expect.objectContaining({
+          body: JSON.stringify({ decision: 'reject', reason: 'Not a real org' }),
+        }),
+      ),
+    );
+  });
+
+  it('cancels a rejection without sending anything', async () => {
+    global.fetch = respond({}, 200) as never;
+    renderTable([pendingOrg]);
+    fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.reject }));
+    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.cancel }));
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('shows a plain message when a decision fails on the server', async () => {

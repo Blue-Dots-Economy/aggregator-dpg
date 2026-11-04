@@ -1,9 +1,8 @@
 /**
  * Server Component test: `(console)/console` home. An owner of one
- * organisation gets the organisation view with its coordinators and a summary
- * of the organisations below it; an owner of several keeps the organisation
- * cards. An owner's own orgs are read by id, so they show even when many orgs
- * below them sort first.
+ * organisation gets the organisation view with its coordinators, and no child
+ * organisations; an owner of several keeps the organisation cards. An owner's
+ * own orgs are read by id.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -159,16 +158,20 @@ describe('console home — owner', () => {
     });
   });
 
-  it('keeps the summary of the organisations below on the organisation view', async () => {
+  it('shows no child organisations on the home page', async () => {
     vi.mocked(getConsoleActor).mockResolvedValue({
       ok: true,
       me: me([meOrg('own', 'Zeta Own')]),
     });
-    const below = Array.from({ length: 100 }, (_, i) => row(`b${i}`, `Alpha ${i}`));
-    mockReads([row('own', 'Zeta Own')], below);
+    mockReads(
+      [row('own', 'Zeta Own')],
+      [row('c1', 'Child Pending', { status: 'pending' }), row('c2', 'Child Live')],
+    );
     await show();
     expect(screen.getByText('Zeta Own')).toBeInTheDocument();
-    expect(screen.getByText(/home\.below_summary.*"orgs":100/)).toBeInTheDocument();
+    expect(screen.queryByText('Child Pending')).not.toBeInTheDocument();
+    expect(screen.queryByText(/home\.below/)).not.toBeInTheDocument();
+    expect(readReachableOrgs).not.toHaveBeenCalled();
   });
 
   it('sends an owner of several organisations to the organisations page', async () => {

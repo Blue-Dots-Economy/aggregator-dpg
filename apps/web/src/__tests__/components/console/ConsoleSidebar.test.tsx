@@ -67,11 +67,11 @@ describe('<ConsoleSidebar />', () => {
     expect(hrefs).toEqual(['/console/orgs']);
   });
 
-  it('names the home link Coordinators when the home page lists them', () => {
+  it('lists Organisations first and names the home link Coordinators when it lists them', () => {
     render(<ConsoleSidebar canManage={false} homeIsCoordinators account={account} />);
     const links = within(aside()).getAllByRole('link');
-    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/console', '/console/orgs']);
-    expect(links[0]).toHaveAccessibleName('nav.coordinators');
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/console/orgs', '/console']);
+    expect(links[1]).toHaveAccessibleName('nav.coordinators');
   });
 
   it('marks the home link active only on /console itself', () => {
