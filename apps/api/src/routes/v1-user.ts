@@ -43,7 +43,6 @@ import {
   type ActorOrg,
 } from '../services/auth/actor/index.js';
 import { narrowOrgFilter } from '../services/authz/scope.js';
-import { isOnlyViewed, withOrgsBelow } from '../services/authz/view-scope.js';
 import {
   inManageScope,
   manageableOrgIds,
@@ -95,9 +94,9 @@ async function rootOrgId(): Promise<string | null> {
 }
 
 /**
- * The organisations whose coordinators the actor may manage, or with
- * `view` only read (the network admin sees every organisation's) (#873).
- * `view` also covers every organisation below those, read-only.
+ * The organisations whose coordinators the actor may manage, or with `view`
+ * only read. Both stay within the organisations the actor owns; coordinators
+ * of a child organisation are not visible to the parent's owner.
  *
  * @throws {HttpError} DB_UNAVAILABLE.
  */
@@ -105,25 +104,8 @@ async function manageScope(
   req: FastifyRequest,
   actor: Actor,
   purpose: ScopePurpose = 'manage',
-): Promise<string[] | null> {
-  const ids = await manageableOrgIds(req, actor, await rootOrgId(), purpose);
-  if (purpose !== 'view') return ids;
-  const wider = await withOrgsBelow(ids);
-  if (!wider.ok) dbDown('orgStore.descendantIds', wider.error.message);
-  return wider.value;
-}
-
-/**
- * Whether a coordinator's contact shows unmasked: `contact.unmask` in its
- * organisation, and never in an organisation only viewed from above.
- */
-async function showsContactOf(
-  req: FastifyRequest,
-  actor: Actor,
-  orgId: string | null,
-): Promise<boolean> {
-  if (isOnlyViewed(actor, orgId)) return false;
-  return showsContact(req, actor, orgId);
+): Promise<string[]> {
+  return manageableOrgIds(req, actor, await rootOrgId(), purpose);
 }
 
 /**
@@ -316,7 +298,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
       const row = await coordinatorInReach(req, actor, id, 'view');
-      const plain = await showsContactOf(req, actor, row.parentOrgId ?? null);
+      const plain = await showsContact(req, actor, row.parentOrgId ?? null);
       // Audit the contact read: ids only.
       req.log.info({
         operation: 'console.user.read',
@@ -324,7 +306,6 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         actor_id: actor.userId,
         target_id: row.id,
         contact: plain ? 'plain' : 'masked',
-        relation: isOnlyViewed(actor, row.parentOrgId ?? null) ? 'below' : 'own',
       });
       return reply.status(200).send(toWireUser(row, { masked: !plain }));
     },
@@ -338,7 +319,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: 'Coordinators within reach, newest first',
         description:
-          'Filters by org, status and served domain; an org outside reach yields an empty page. An owner also sees, read-only and with masked contacts, the coordinators of every organisation below its own. Keyset paged by an opaque cursor.',
+          'Filters by org, status and served domain; an org outside reach yields an empty page. An owner sees the coordinators of the organisations it owns only, not those of their child organisations. Keyset paged by an opaque cursor.',
         body: UserSearchRequestSchema,
         response: { 200: UserSearchResponseSchema, ...errorResponses(400, 401, 403, 503) },
       },
@@ -359,23 +340,10 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const plainIn = new Map<string | null, boolean>();
       for (const row of page.value.rows) {
         const orgId = row.parentOrgId ?? null;
-        if (!plainIn.has(orgId)) plainIn.set(orgId, await showsContactOf(req, actor, orgId)); // NOSONAR typescript:S9382 — one check per distinct org
+        if (!plainIn.has(orgId)) plainIn.set(orgId, await showsContact(req, actor, orgId)); // NOSONAR typescript:S9382 — one check per distinct org
       }
       const isPlain = (row: Coordinator) => plainIn.get(row.parentOrgId ?? null) === true;
       const plainCount = page.value.rows.filter(isPlain).length;
-      const belowCount = page.value.rows.filter((r) =>
-        isOnlyViewed(actor, r.parentOrgId ?? null),
-      ).length;
-      if (belowCount > 0) {
-        // Coordinators of organisations below the actor's own, listed read-only and masked.
-        req.log.info({
-          operation: 'console.user.search',
-          status: 'success',
-          actor_id: actor.userId,
-          relation: 'below',
-          count: belowCount,
-        });
-      }
       if (plainCount > 0) {
         // Unmasked contacts in a list are audited by count, never values.
         req.log.info({

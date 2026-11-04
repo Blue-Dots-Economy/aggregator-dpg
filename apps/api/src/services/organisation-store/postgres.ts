@@ -681,6 +681,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
              WHERE b.lvl < ${DESCENDANT_LEVEL_CAP})
           SELECT id FROM below)`);
       }
+      if (filter.parentId) conds.push(eq(organisations.parentId, filter.parentId));
       if (filter.namePrefix) {
         // A prefix match on the name; LIKE wildcards in the input are escaped.
         const p = filter.namePrefix.toLowerCase().replace(/[\\%_]/g, (m) => `\\${m}`);
@@ -733,6 +734,21 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       return { ok: true, value: rows.rows.map((r) => r.id).filter((id) => !given.has(id)) };
     } catch (e) {
       return mapDbError('orgStore.descendantIds', e);
+    }
+  }
+
+  async childIds(ids: readonly string[]): Promise<OrgStoreResult<string[]>> {
+    if (ids.length === 0) return { ok: true, value: [] };
+    try {
+      const rows = await getDb()
+        .select({ id: organisations.id })
+        .from(organisations)
+        .where(
+          and(inArray(organisations.parentId, [...ids]), eq(organisations.orgType, 'aggregator')),
+        );
+      return { ok: true, value: rows.map((r) => r.id) };
+    } catch (e) {
+      return mapDbError('orgStore.childIds', e);
     }
   }
 

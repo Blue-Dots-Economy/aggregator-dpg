@@ -449,7 +449,7 @@
       "method": "POST",
       "path": "/v1/org/access/repair/:id",
       "access": {
-        "capability": "network.administer"
+        "capability": "orgs.onboard"
       }
     },
     {

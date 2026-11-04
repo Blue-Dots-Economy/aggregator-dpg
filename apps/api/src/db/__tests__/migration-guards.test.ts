@@ -27,6 +27,8 @@ const BOOT_SAFE_AFTER_UPGRADE = [
   '0033_org_description_profile',
   // Adds `org_known_as` and resets `known_as` to `aggregator` (a display label only); idempotent.
   '0034_org_known_as',
+  // Adds orgs.onboard to the built-in Org Admin role; idempotent.
+  '0035_org_admin_onboard',
 ];
 
 const journal: JournalEntry[] = [

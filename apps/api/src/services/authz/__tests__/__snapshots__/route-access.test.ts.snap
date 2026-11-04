@@ -63,7 +63,7 @@ exports[`declared route table > declares every route of the app 1`] = `
   "POST /v1/links/:id/activate": "profiles.onboard",
   "POST /v1/links/:id/deactivate": "profiles.onboard",
   "POST /v1/links/create": "profiles.onboard",
-  "POST /v1/org/access/repair/:id": "network.administer",
+  "POST /v1/org/access/repair/:id": "orgs.onboard",
   "POST /v1/org/decision/:id": "orgs.onboard",
   "POST /v1/org/search": "org.manage|orgs.onboard",
   "POST /v1/orgs/create": "service",

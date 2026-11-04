@@ -157,6 +157,8 @@ export interface SearchOrgsFilter {
   namePrefix?: string;
   /** Only orgs below this org, at any depth (the org itself excluded). */
   descendantsOf?: string;
+  /** Only the direct children of this org. */
+  parentId?: string;
   cursor?: OrgCursor;
   /** 1..100, default 20. */
   limit?: number;
@@ -460,6 +462,13 @@ export abstract class OrganisationStoreBase {
    * @returns The descendant ids, without the given ids themselves.
    */
   abstract descendantIds(ids: readonly string[]): Promise<OrgStoreResult<string[]>>;
+  /**
+   * Ids of the aggregator orgs directly below the given orgs, any status.
+   *
+   * @param ids - The parent org ids; an empty list returns none.
+   * @returns The child ids.
+   */
+  abstract childIds(ids: readonly string[]): Promise<OrgStoreResult<string[]>>;
   /**
    * Deletes an org only while it is still `pending` and older than `cutoff`.
    *

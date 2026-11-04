@@ -29,6 +29,7 @@ const MATRIX: Record<string, string[]> = {
     'campaigns.run',
     'contact.unmask',
     'org.manage',
+    'orgs.onboard',
     'profiles.export',
     'profiles.onboard',
     'profiles.retire',

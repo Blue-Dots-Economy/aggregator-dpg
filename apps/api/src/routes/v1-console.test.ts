@@ -170,9 +170,10 @@ describe('console routes /v1/user, /v1/org', () => {
       }),
     );
     orgs.seed([
-      { ...buildDefaultOrg(), ownerUserId: NA, ownerEmail: 'na@net.org' },
+      { ...buildDefaultOrg(), parentId: ROOT, ownerUserId: NA, ownerEmail: 'na@net.org' },
       buildOrganisation({
         id: ORG_A,
+        parentId: ROOT,
         slug: 'org-a',
         displayName: 'Alpha',
         status: 'active',
@@ -182,6 +183,7 @@ describe('console routes /v1/user, /v1/org', () => {
       }),
       buildOrganisation({
         id: ORG_B,
+        parentId: ROOT,
         slug: 'org-b',
         displayName: 'Beta',
         status: 'active',
@@ -190,6 +192,7 @@ describe('console routes /v1/user, /v1/org', () => {
       }),
       buildOrganisation({
         id: ORG_P,
+        parentId: ROOT,
         slug: 'org-p',
         displayName: 'Pending Org',
         status: 'pending',
@@ -337,7 +340,8 @@ describe('console routes /v1/user, /v1/org', () => {
     it.each([
       ['a', C1, 200],
       ['a', C2, 404],
-      ['na', C2, 200],
+      // The network admin does not see the coordinators of the orgs under it.
+      ['na', C2, 404],
       ['b', C1, 404],
     ] as const)('%s reads coordinator %s → %i', async (who, id, status) => {
       expect((await get(`/v1/user/read/${id}`, who)).statusCode).toBe(status);
@@ -469,7 +473,8 @@ describe('console routes /v1/user, /v1/org', () => {
       // Alpha's owner picks Beta's; Alpha has no list, so the list is empty.
       expect(await read(ORG_B, 'a')).toEqual({ id: ORG_A, name: 'Alpha', known_as_values: [] });
       expect(await read(ORG_B, 'b')).toBeNull();
-      expect(await read(ORG_B, 'na')).toBeNull();
+      // Beta is two levels below the network now, so the network admin does not see it.
+      expect((await get(`/v1/org/read/${ORG_B}`, 'na')).statusCode).toBe(404);
       expect(await read(ROOT, 'na')).toBeNull();
       expect(await read(DEFAULT, 'na')).toBeNull();
       // A rejected org is not changed.
@@ -511,9 +516,10 @@ describe('console routes /v1/user, /v1/org', () => {
     const ids = (res: { json: () => unknown }) =>
       (res.json() as { users: Array<{ id: string }> }).users.map((u) => u.id).sort();
 
-    it('scopes an owner to its org, the network admin to all', async () => {
+    it('scopes an owner to its org, and the network admin to the orgs it owns', async () => {
       expect(ids(await post('/v1/user/search', 'a', {}))).toEqual([C1, C3].sort());
-      expect(ids(await post('/v1/user/search', 'na', {}))).toEqual([C1, C2, C3].sort());
+      // The network admin owns the root and the Default org; neither has a coordinator here.
+      expect(ids(await post('/v1/user/search', 'na', {}))).toEqual([]);
     });
 
     it('answers an out-of-reach org_id with an empty page', async () => {
@@ -523,14 +529,14 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('pages with an opaque cursor', async () => {
-      const first = (await post('/v1/user/search', 'na', { limit: 2 })).json() as {
+      const first = (await post('/v1/user/search', 'a', { limit: 1 })).json() as {
         users: Array<{ id: string }>;
         next_cursor: string | null;
       };
-      expect(first.users.map((u) => u.id)).toEqual([C3, C2]);
+      expect(first.users.map((u) => u.id)).toEqual([C3]);
       expect(first.next_cursor).not.toBeNull();
       const second = (
-        await post('/v1/user/search', 'na', { limit: 2, cursor: first.next_cursor })
+        await post('/v1/user/search', 'a', { limit: 1, cursor: first.next_cursor })
       ).json() as { users: Array<{ id: string }>; next_cursor: string | null };
       expect(second.users.map((u) => u.id)).toEqual([C1]);
       expect(second.next_cursor).toBeNull();
@@ -566,14 +572,15 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(row.ok && row.value?.status).toBe('pending');
     });
 
-    it('tells the owner when the network admin decides in their org (C13)', async () => {
+    it("does not let the network admin decide another org's coordinator (404)", async () => {
       const res = await post(`/v1/user/decision/${C2}`, 'na', {
         decision: 'reject',
         reason: 'incomplete',
       });
-      expect(res.statusCode).toBe(200);
-      const notice = mailer.outbox.find((m) => m.to === 'b@b.org');
-      expect(notice?.html).toContain('rejected a coordinator');
+      expect(res.statusCode).toBe(404);
+      const row = await coordinators.findById(C2);
+      expect(row.ok && row.value?.status).toBe('pending');
+      expect(mailer.outbox.find((m) => m.to === 'b@b.org')).toBeUndefined();
     });
 
     it('answers 429 when the console write budget is spent', async () => {
@@ -659,7 +666,7 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(res.statusCode).toBe(400);
     });
 
-    describe('descendants_of', () => {
+    describe('descendants_of and parent_id', () => {
       // ROOT → Alpha (ORG_A) → Beta (ORG_B) → Pending Org (ORG_P).
       beforeEach(async () => {
         for (const [id, parentId, parentName] of [
@@ -674,15 +681,14 @@ describe('console routes /v1/user, /v1/org', () => {
       });
       const below = (token: string, id: string) =>
         post('/v1/org/search', token, { filter: { descendants_of: id } });
+      const children = (token: string, id: string) =>
+        post('/v1/org/search', token, { filter: { parent_id: id } });
 
-      it('lists every org below an owned org, with its parent, at any depth', async () => {
+      it('lists only the direct children below an owned org, never deeper', async () => {
         const res = await below('a', ORG_A);
         expect(res.statusCode).toBe(200);
         const body = res.json() as { orgs: Array<{ id: string; parent_name: string | null }> };
-        expect(body.orgs.map((o) => [o.id, o.parent_name])).toEqual([
-          [ORG_B, 'Alpha'],
-          [ORG_P, 'Beta'],
-        ]);
+        expect(body.orgs.map((o) => [o.id, o.parent_name])).toEqual([[ORG_B, 'Alpha']]);
       });
 
       it('lists only the orgs below a lower org', async () => {
@@ -693,22 +699,47 @@ describe('console routes /v1/user, /v1/org', () => {
         expect(ids(await below('b', ORG_A))).toEqual([]);
       });
 
-      it('lets the network admin list below any org', async () => {
-        expect(ids(await below('na', ORG_A))).toEqual([ORG_B, ORG_P].sort());
+      it('gives the network admin nothing below a top-level org', async () => {
+        expect(ids(await below('na', ORG_A))).toEqual([]);
       });
 
       it('narrows with the other filters', async () => {
-        const res = await post('/v1/org/search', 'a', {
-          filter: { descendants_of: ORG_A, status: 'pending' },
+        const res = await post('/v1/org/search', 'b', {
+          filter: { descendants_of: ORG_B, status: 'pending' },
         });
         expect(ids(res)).toEqual([ORG_P]);
       });
 
-      it('lets an owner read the orgs below its own, but not edit them', async () => {
-        expect(ids(await post('/v1/org/search', 'a', {}))).toEqual([ORG_A, ORG_B, ORG_P].sort());
+      it('lists the direct children of an owned org with parent_id', async () => {
+        expect(ids(await children('a', ORG_A))).toEqual([ORG_B]);
+        expect(ids(await children('b', ORG_B))).toEqual([ORG_P]);
+        const top = ids(await children('na', ROOT));
+        expect(top).toContain(ORG_A);
+        expect(top).not.toContain(ORG_B);
+      });
+
+      it('never returns a grandchild, whatever filter is sent', async () => {
+        // A child's children, an edited filter and no filter all stop at one level.
+        expect(ids(await children('a', ORG_B))).toEqual([]);
+        expect(ids(await children('a', ORG_P))).toEqual([]);
+        expect(ids(await post('/v1/org/search', 'a', {}))).not.toContain(ORG_P);
+        expect(ids(await post('/v1/org/search', 'na', {}))).not.toContain(ORG_B);
+        expect((await get(`/v1/org/read/${ORG_P}`, 'a')).statusCode).toBe(404);
+        expect((await get(`/v1/org/read/${ORG_B}`, 'na')).statusCode).toBe(404);
+      });
+
+      it('refuses descendants_of and parent_id together (400)', async () => {
+        const res = await post('/v1/org/search', 'a', {
+          filter: { descendants_of: ORG_A, parent_id: ORG_A },
+        });
+        expect(res.statusCode).toBe(400);
+      });
+
+      it('lets an owner read its direct children, but not edit them', async () => {
+        expect(ids(await post('/v1/org/search', 'a', {}))).toEqual([ORG_A, ORG_B].sort());
         expect((await get(`/v1/org/read/${ORG_B}`, 'a')).statusCode).toBe(200);
         const edit = await patch(`/v1/org/metadata/update/${ORG_B}`, 'a', { legal_name: null });
-        expect(edit.statusCode).toBe(404);
+        expect(edit.statusCode).toBe(403);
       });
 
       it('refuses a descendants_of that is not a uuid (400)', async () => {
@@ -1002,8 +1033,8 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(notice?.html).not.toContain('State');
     });
 
-    it('refuses the network admin on a depth-2 org (403)', async () => {
-      expect((await setKnownAs('na', { known_as: 'taluk' })).statusCode).toBe(403);
+    it('answers 404 to the network admin on a depth-2 org, which it cannot see', async () => {
+      expect((await setKnownAs('na', { known_as: 'taluk' })).statusCode).toBe(404);
     });
 
     it("refuses the org's own owner (403)", async () => {
@@ -1303,16 +1334,18 @@ describe('console routes /v1/user, /v1/org', () => {
       });
     });
 
-    it('refuses a parent below the org with ORG_PARENT_CYCLE', async () => {
+    it('refuses an org or a new parent the network admin cannot see (404)', async () => {
       await setOrg(ORG_B, {
         knownAs: 'aggregator',
         parentId: ORG_A,
         parentName: 'Alpha',
         depth: 2,
       });
-      const res = await move('na', { parent_id: ORG_B });
-      expect(res.statusCode).toBe(400);
-      expect(errorOf(res).code).toBe('ORG_PARENT_CYCLE');
+      // Beta is two levels down now: neither moved nor used as a parent.
+      expect((await move('na', { parent_id: ORG_B })).statusCode).toBe(404);
+      expect((await move('na', { parent_id: ROOT }, ORG_B)).statusCode).toBe(404);
+      const after = await orgs.findById(ORG_A);
+      expect(after.ok && after.value?.parentId).toBe(ROOT);
     });
 
     it('refuses a full parent with ORG_CHILD_LIMIT', async () => {
@@ -1381,6 +1414,15 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(res.statusCode).toBe(404);
     });
 
+    it('offers only parents within view, and answers 404 for an org out of view', async () => {
+      await setOrg(ORG_P, { parentId: ORG_B, parentName: 'Beta', depth: 2 });
+      const res = await get(`/v1/org/parent/options/${ORG_A}`, 'na');
+      const ids = (res.json() as { options: Array<{ id: string }> }).options.map((o) => o.id);
+      expect(ids).not.toContain(ORG_P);
+      expect(ids).toContain(ORG_B);
+      expect((await get(`/v1/org/parent/options/${ORG_P}`, 'na')).statusCode).toBe(404);
+    });
+
     it('is the network admin’s only (403 for an owner)', async () => {
       expect((await get(`/v1/org/parent/options/${ORG_A}`, 'a')).statusCode).toBe(403);
     });
@@ -1396,22 +1438,31 @@ describe('console routes /v1/user, /v1/org', () => {
       await setOrg(ORG_P, { parentId: ORG_A, depth: 2 });
     });
 
-    it('reads the pending and active direct children of an org', async () => {
-      const res = await get(`/v1/org/read/${ORG_A}`, 'na');
+    it('reads the pending and active direct children of an owned org', async () => {
+      const res = await get(`/v1/org/read/${ORG_A}`, 'a');
       expect((res.json() as { child_count: number }).child_count).toBe(1);
+    });
+
+    it('reports zero counts for an org the caller only views', async () => {
+      const res = await get(`/v1/org/read/${ORG_A}`, 'na');
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ coordinator_count: 0, pending_count: 0, child_count: 0 });
     });
 
     it('fills child_count on each search row and never includes known_as_values', async () => {
       await setOrg(ORG_A, { knownAsValues: [BLOCK] });
-      const res = await post('/v1/org/search', 'na', {});
-      const rows = (res.json() as { orgs: Array<{ id: string; child_count: number }> }).orgs;
+      const res = await post('/v1/org/search', 'a', {});
+      type Row = { id: string; child_count: number; coordinator_count: number };
+      const rows = (res.json() as { orgs: Row[] }).orgs;
       for (const row of rows) expect(row).not.toHaveProperty('known_as_values');
       expect(Object.fromEntries(rows.map((o) => [o.id, o.child_count]))).toEqual({
-        [DEFAULT]: 0,
         [ORG_A]: 1,
-        [ORG_B]: 0,
         [ORG_P]: 0,
       });
+      // The network admin only views Alpha, so its counts are zero.
+      const na = (await post('/v1/org/search', 'na', {})).json() as { orgs: Row[] };
+      const alpha = na.orgs.find((o) => o.id === ORG_A);
+      expect(alpha).toMatchObject({ child_count: 0, coordinator_count: 0 });
     });
 
     it('answers 503 when the child counts cannot be read', async () => {
@@ -1483,8 +1534,8 @@ describe('console routes /v1/user, /v1/org', () => {
     });
   });
 
-  describe('owners read the orgs below theirs, read-only', () => {
-    // Beta sits under Alpha: Alpha's owner (a) views Beta and its coordinator C2.
+  describe('owners read their direct child orgs, read-only', () => {
+    // Beta sits under Alpha: Alpha's owner (a) views Beta, but not its coordinator C2.
     beforeEach(async () => {
       await setOrg(ORG_B, { parentId: ORG_A, parentName: 'Alpha' });
     });
@@ -1492,7 +1543,7 @@ describe('console routes /v1/user, /v1/org', () => {
     const emailOf = (res: { json: () => unknown }, id: string) =>
       (res.json() as Users).users.find((u) => u.id === id)?.contact.email;
 
-    it('lists its own orgs and every org below, never the one above', async () => {
+    it('lists its own orgs and their direct children, never the one above', async () => {
       const ids = (res: { json: () => unknown }) =>
         (res.json() as { orgs: Array<{ id: string }> }).orgs.map((o) => o.id).sort();
       expect(ids(await post('/v1/org/search', 'a', {}))).toEqual([ORG_A, ORG_B].sort());
@@ -1507,28 +1558,25 @@ describe('console routes /v1/user, /v1/org', () => {
       expect((await get(`/v1/org/read/${ORG_A}`, 'b')).statusCode).toBe(404);
     });
 
-    it('cannot edit an org below (404)', async () => {
+    it('cannot edit a child org (403)', async () => {
       const res = await patch(`/v1/org/metadata/update/${ORG_B}`, 'a', { legal_name: null });
-      expect(res.statusCode).toBe(404);
+      expect(res.statusCode).toBe(403);
     });
 
-    it('lists coordinators below with masked contacts, its own unmasked', async () => {
+    it("lists only its own coordinators, never a child org's", async () => {
       const res = await post('/v1/user/search', 'a', {});
       const ids = (res.json() as Users).users.map((u) => u.id).sort();
-      expect(ids).toEqual([C1, C2, C3].sort());
-      expect(emailOf(res, C2)).not.toBe('c2@x.org');
+      expect(ids).toEqual([C1, C3].sort());
       expect(emailOf(res, C1)).toBe('c1@x.org');
     });
 
-    it('filters coordinators to an org below', async () => {
+    it('answers an empty page for the coordinators of a child org', async () => {
       const res = await post('/v1/user/search', 'a', { filter: { org_id: ORG_B } });
-      expect((res.json() as Users).users.map((u) => u.id)).toEqual([C2]);
+      expect((res.json() as Users).users).toEqual([]);
     });
 
-    it('reads a coordinator below masked, but cannot decide it (404)', async () => {
-      const read = await get(`/v1/user/read/${C2}`, 'a');
-      expect(read.statusCode).toBe(200);
-      expect((read.json() as { contact: { email: string } }).contact.email).not.toBe('c2@x.org');
+    it("neither reads nor decides a child org's coordinator (404)", async () => {
+      expect((await get(`/v1/user/read/${C2}`, 'a')).statusCode).toBe(404);
       const decide = await post(`/v1/user/decision/${C2}`, 'a', { decision: 'approve' });
       expect(decide.statusCode).toBe(404);
     });
@@ -1542,18 +1590,63 @@ describe('console routes /v1/user, /v1/org', () => {
   });
 
   describe('POST /v1/org/decision/:id and access repair', () => {
-    it('is the network admin’s only', async () => {
+    it("is the parent's owner's only, for decisions and repair", async () => {
+      // Pending Org and Alpha sit under the network, so only the network admin acts on them.
       expect(
         (await post(`/v1/org/decision/${ORG_P}`, 'a', { decision: 'approve' })).statusCode,
-      ).toBe(403);
-      expect((await post(`/v1/org/access/repair/${ORG_A}`, 'a', {})).statusCode).toBe(403);
+      ).toBe(404);
+      expect((await post(`/v1/org/access/repair/${ORG_A}`, 'a', {})).statusCode).toBe(404);
+    });
+
+    it("lets a parent org's owner repair its direct child, and nobody else", async () => {
+      await setOrg(ORG_B, { parentId: ORG_A, parentName: 'Alpha', depth: 2 });
+      await idp.createUser({ email: 'b@b.org', enabled: false, attributes: {} });
+      expect((await post(`/v1/org/access/repair/${ORG_B}`, 'na', {})).statusCode).toBe(404);
+      expect((await post(`/v1/org/access/repair/${ORG_B}`, 'b', {})).statusCode).toBe(404);
+      const res = await post(`/v1/org/access/repair/${ORG_B}`, 'a', {});
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ id: ORG_B });
+    });
+
+    it("shows the pending child's owner contact unmasked to the parent owner who decides it", async () => {
+      await setOrg(ORG_P, { parentId: ORG_A, parentName: 'Alpha', depth: 2 });
+      type Read = { owner: { contact: { email: string } } };
+      const pending = (await get(`/v1/org/read/${ORG_P}`, 'a')).json() as Read;
+      expect(pending.owner.contact.email).toBe('p@p.org');
+      await setOrg(ORG_P, { status: 'active' });
+      const active = (await get(`/v1/org/read/${ORG_P}`, 'a')).json() as Read;
+      expect(active.owner.contact.email).not.toBe('p@p.org');
+    });
+
+    it("lets a parent org's owner decide its direct child, and nobody else", async () => {
+      await setOrg(ORG_P, { parentId: ORG_A, parentName: 'Alpha', depth: 2 });
+      // The network admin does not see an org two levels down.
+      expect(
+        (await post(`/v1/org/decision/${ORG_P}`, 'na', { decision: 'approve' })).statusCode,
+      ).toBe(404);
+      expect(
+        (await post(`/v1/org/decision/${ORG_P}`, 'b', { decision: 'approve' })).statusCode,
+      ).toBe(404);
+      const res = await post(`/v1/org/decision/${ORG_P}`, 'a', { decision: 'approve' });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ id: ORG_P, status: 'active' });
+    });
+
+    it('refuses a rejection without a reason (400) and leaves the org pending', async () => {
+      const res = await post(`/v1/org/decision/${ORG_P}`, 'na', { decision: 'reject' });
+      expect(res.statusCode).toBe(400);
+      const row = await orgs.findById(ORG_P);
+      expect(row.ok && row.value?.status).toBe('pending');
     });
 
     it('approves a pending org, then answers ALREADY_DECIDED', async () => {
       const res = await post(`/v1/org/decision/${ORG_P}`, 'na', { decision: 'approve' });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ id: ORG_P, status: 'active', owner_access: 'no_login' });
-      const again = await post(`/v1/org/decision/${ORG_P}`, 'na', { decision: 'reject' });
+      const again = await post(`/v1/org/decision/${ORG_P}`, 'na', {
+        decision: 'reject',
+        reason: 'duplicate',
+      });
       expect(again.statusCode).toBe(409);
       expect(
         (again.json() as { error: { fields: { decided_by: string } } }).error.fields.decided_by,
@@ -1624,7 +1717,7 @@ describe('console routes /v1/user, /v1/org', () => {
     it('503 when loading the invite org fails (loadOrg)', async () => {
       orgs.findById = async () => storeErr();
       const res = await post('/v1/user/create', 'na', {
-        org_id: ORG_X,
+        org_id: DEFAULT,
         recipients: [{ email: 'new@x.org' }],
       });
       expect(res.statusCode).toBe(503);
@@ -1772,6 +1865,10 @@ describe('console routes /v1/user, /v1/org', () => {
 
   describe('v1-user: decision-failure outcomes (console-shared throwDecisionFailure)', () => {
     it('409 TARGET_ORG_INACTIVE when the coordinator org is no longer active', async () => {
+      // The owner still holds Alpha when the request starts; it is no longer active by the decision.
+      const active = await orgs.findById(ORG_A);
+      if (!active.ok || !active.value) throw new Error('seed');
+      vi.spyOn(orgs, 'listOwnedBy').mockResolvedValue({ ok: true, value: [active.value] });
       orgs.seed([
         buildOrganisation({
           id: ORG_A,
@@ -1783,7 +1880,7 @@ describe('console routes /v1/user, /v1/org', () => {
           ownerKcSub: 'sub-a',
         }),
       ]);
-      const res = await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' });
+      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
       expect(res.statusCode).toBe(409);
       expect((res.json() as { error: { code: string } }).error.code).toBe('TARGET_ORG_INACTIVE');
     });
@@ -1792,7 +1889,7 @@ describe('console routes /v1/user, /v1/org', () => {
       const ss = new SignalStackWriterFake();
       ss.upsertAggregator = async () => err(new UpstreamError('down', { code: 'SS_DOWN' }));
       _setSignalStackWriter(ss);
-      const res = await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' });
+      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
       expect(res.statusCode).toBe(502);
     });
 
@@ -1801,19 +1898,19 @@ describe('console routes /v1/user, /v1/org', () => {
         ok: false,
         error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
       });
-      const res = await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' });
+      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
       expect(res.statusCode).toBe(503);
     });
 
     it('503 DB_UNAVAILABLE when the approval compare-and-set fails', async () => {
       coordinators.approveFromPending = async () => storeErr();
-      const res = await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' });
+      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
       expect(res.statusCode).toBe(503);
     });
 
     it('404 NOT_FOUND when the identity record is missing at decision time', async () => {
       idp.findByAttribute = async () => ({ ok: true, value: null });
-      const res = await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' });
+      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
       expect(res.statusCode).toBe(404);
     });
   });
@@ -1824,7 +1921,7 @@ describe('console routes /v1/user, /v1/org', () => {
         ok: false,
         error: { code: 'TRANSPORT_FAILED', message: 'smtp down' },
       });
-      const res = await post(`/v1/user/decision/${C2}`, 'na', { decision: 'reject', reason: 'x' });
+      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'reject', reason: 'x' });
       expect(res.statusCode).toBe(200);
     });
 
@@ -1849,7 +1946,7 @@ describe('console routes /v1/user, /v1/org', () => {
           rejectedAt: new Date('2026-03-01T00:00:00Z'),
         },
       ]);
-      const res = await get(`/v1/user/read/${C6}`, 'na');
+      const res = await get(`/v1/user/read/${C6}`, 'a');
       expect(res.statusCode).toBe(200);
       const body = res.json() as { contact: { name: null; phone: null }; rejected_at: string };
       expect(body.contact).toMatchObject({ name: null, phone: null });
@@ -1980,6 +2077,30 @@ describe('console routes /v1/user, /v1/org', () => {
       expect((await post(`/v1/org/access/repair/${ORG_A}`, 'na', {})).statusCode).toBe(200);
     });
 
+    it('lets an owner decide its child org with orgs.onboard in the parent', async () => {
+      await setOrg(ORG_P, { parentId: ORG_A, parentName: 'Alpha', depth: 2 });
+      const res = await post(`/v1/org/decision/${ORG_P}`, 'a', { decision: 'approve' });
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('refuses the decision when the parent org does not grant orgs.onboard', async () => {
+      await setOrg(ORG_P, { parentId: ORG_A, parentName: 'Alpha', depth: 2 });
+      _setRbacRuntime({
+        ...(await testRbacRuntime('enforce')),
+        roles: indexRoles(
+          (await shippedRoles()).map((r) =>
+            r.key === 'org_admin'
+              ? { ...r, permissions: r.permissions.filter((c) => c !== 'orgs.onboard') }
+              : r,
+          ),
+        ),
+      });
+      const res = await post(`/v1/org/decision/${ORG_P}`, 'a', { decision: 'approve' });
+      expect([403, 404]).toContain(res.statusCode);
+      const row = await orgs.findById(ORG_P);
+      expect(row.ok && row.value?.status).toBe('pending');
+    });
+
     it('lets a signed-in coordinator read itself', async () => {
       expect((await get('/v1/user/read/me', 'coord')).statusCode).toBe(200);
     });
@@ -2000,7 +2121,8 @@ describe('console routes /v1/user, /v1/org', () => {
       };
       const a = me.orgs.find((o) => o.id === ORG_A);
       expect(a?.capabilities).toContain('org.manage');
-      expect(a?.capabilities).not.toContain('orgs.onboard');
+      // Every owner invites and decides the orgs directly under it.
+      expect(a?.capabilities).toContain('orgs.onboard');
     });
 
     it('returns null capabilities when RBAC is off', async () => {
@@ -2204,29 +2326,27 @@ describe('console routes /v1/user, /v1/org', () => {
       });
 
       it('refuses an organisation the user is not part of', async () => {
-        const res = await assign('na', C3, { role_key: 'data_export', org_id: ORG_B });
+        const res = await assign('a', C3, { role_key: 'data_export', org_id: ORG_B });
         expect([res.statusCode, reasonOf(res)]).toEqual([409, 'not_member']);
       });
 
       it('refuses the wrong account type and assigning to yourself', async () => {
         // Org Onboarder is admin-only; the network admin may assign it (network.administer).
-        const type = await assign('na', C3, { role_key: 'org_onboarder', org_id: ORG_A });
+        coordinators.seed([coordinator(C7, DEFAULT, 'active', 7)]);
+        const type = await assign('na', C7, { role_key: 'org_onboarder', org_id: DEFAULT });
         expect([type.statusCode, reasonOf(type)]).toEqual([409, 'account_type']);
         const self = await assign('na', NA, { role_key: 'org_onboarder', org_id: DEFAULT });
         expect([self.statusCode, reasonOf(self)]).toEqual([409, 'self']);
       });
 
-      it('lets only the network admin assign Org Onboarder, which applies in that org only', async () => {
+      it('lets only the network admin assign Org Onboarder, and not to the owner of another org', async () => {
         const byOwner = await assign('a', OWNER_A, { role_key: 'org_onboarder', org_id: ORG_A });
         expect(byOwner.statusCode).toBe(403);
         expect(permissionOf(byOwner)).toBe('network.administer');
 
+        // The network admin does not reach the users of the orgs under it.
         const res = await assign('na', OWNER_A, { role_key: 'org_onboarder', org_id: ORG_A });
-        expect(res.statusCode).toBe(200);
-        const me = (await get('/v1/user/read/me', 'a')).json() as {
-          orgs: Array<{ id: string; capabilities: string[] }>;
-        };
-        expect(me.orgs.find((o) => o.id === ORG_A)?.capabilities).toContain('orgs.onboard');
+        expect(res.statusCode).toBe(404);
       });
 
       it('revokes a coordinator’s additional roles when it is rejected', async () => {
@@ -2312,15 +2432,15 @@ describe('console routes /v1/user, /v1/org', () => {
       };
       const C9 = '00000000-0000-4000-8000-0000000000c9';
 
-      it('lets the network admin view every org’s coordinators but change only its own', async () => {
+      it('lets the network admin view and change only its own org’s coordinators', async () => {
         coordinators.seed([coordinator(C9, DEFAULT, 'pending', 9)]);
         await idp.createUser({
           email: 'c9@x.org',
           enabled: false,
           attributes: { [KC_ATTR.AGGREGATOR_ID]: C9 },
         });
-        expect(await searchIds('na')).toEqual([C1, C2, C3, C9]);
-        expect((await get(`/v1/user/read/${C3}`, 'na')).statusCode).toBe(200);
+        expect(await searchIds('na')).toEqual([C9]);
+        expect((await get(`/v1/user/read/${C3}`, 'na')).statusCode).toBe(404);
         // Its own (Default) org: the network admin still decides.
         expect(
           (await post(`/v1/user/decision/${C9}`, 'na', { decision: 'reject' })).statusCode,
@@ -2349,8 +2469,8 @@ describe('console routes /v1/user, /v1/org', () => {
           role_key: 'pii_access',
           org_id: ORG_A,
         });
-        expect(res.statusCode).toBe(403);
-        expect(permissionOf(res)).toBe('org.manage');
+        // Another org's coordinator is out of the network admin's reach.
+        expect(res.statusCode).toBe(404);
       });
 
       it('keeps the owner managing its own coordinators', async () => {
@@ -2372,11 +2492,20 @@ describe('console routes /v1/user, /v1/org', () => {
       // Route permission, decided at the edge: policy/rbac/edge_test.rego (test_real_table_*).
 
       it('only logs the narrower scope in log mode', async () => {
-        _setRbacRuntime(await testRbacRuntime('log'));
-        expect(await searchIds('na')).toEqual([C1, C2, C3]);
+        // Org Admin without org.manage would narrow the owner to nothing; log mode keeps its reach.
+        _setRbacRuntime({
+          ...(await testRbacRuntime('log')),
+          roles: indexRoles(
+            (await shippedRoles()).map((r) => ({
+              ...r,
+              permissions: r.permissions.filter((c) => c !== 'org.manage'),
+            })),
+          ),
+        });
+        expect(await searchIds('a')).toEqual([C1, C3]);
       });
 
-      it('keeps every org in scope for a deployment whose Network Admin keeps org.manage', async () => {
+      it('keeps the network admin to its own orgs even when Network Admin holds org.manage', async () => {
         _setRbacRuntime({
           ...(await testRbacRuntime('enforce')),
           roles: indexRoles(
@@ -2387,8 +2516,8 @@ describe('console routes /v1/user, /v1/org', () => {
             ),
           ),
         });
-        expect(await searchIds('na')).toEqual([C1, C2, C3]);
-        expect((await get(`/v1/user/read/${C3}`, 'na')).statusCode).toBe(200);
+        expect(await searchIds('na')).toEqual([]);
+        expect((await get(`/v1/user/read/${C3}`, 'na')).statusCode).toBe(404);
       });
     });
 
