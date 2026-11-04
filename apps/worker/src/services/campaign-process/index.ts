@@ -38,8 +38,6 @@ import { runVoiceForJob, type VoiceCollaborators } from './voice.js';
 import { runEmailForJob, type EmailCollaborators } from './email.js';
 import { chunkArray, truncateReason } from './util.js';
 
-export { chunkArray, truncateReason } from './util.js';
-
 /** Minimal structured logger surface (satisfied by the worker's pino child). */
 export interface CampaignLogger {
   info(obj: object): void;
