@@ -1,25 +1,9 @@
 /**
  * Public surface and factory for the actor resolver, in the aggregator API
- * (`@aggregator-dpg/api`). Returns a process-wide singleton; tests override it
- * with `_setActorResolver`.
+ * (`@aggregator-dpg/api`). The singleton lives in `resolver.ts`.
  */
 
-import type { ActorResolverBase } from './interface.js';
-import { StoreActorResolver } from './store.js';
-
-let instance: ActorResolverBase | null = null;
-
-/** Returns the shared actor resolver (lazy). */
-export function getActorResolver(): ActorResolverBase {
-  instance ??= new StoreActorResolver();
-  return instance;
-}
-
-/** Test helper — replace the singleton (`null` restores the default). */
-export function _setActorResolver(r: ActorResolverBase | null): void {
-  instance = r;
-}
-
+export { getActorResolver, _setActorResolver } from './resolver.js';
 export { ActorResolverBase } from './interface.js';
 export type {
   Actor,

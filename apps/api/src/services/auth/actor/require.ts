@@ -9,7 +9,7 @@
 import type { FastifyRequest } from 'fastify';
 import { authenticateAny, type AnyAuthContext } from '../access-token.js';
 import { httpError } from '../../../errors/http-error.js';
-import { getActorResolver } from './index.js';
+import { getActorResolver } from './resolver.js';
 import type { Actor } from './interface.js';
 
 /** A verified, resolved caller. */
