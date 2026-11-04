@@ -9,7 +9,8 @@
  * Keycloak carries five attributes:
  *
  *   - `aggregator_id`      — reverse pointer to Postgres
- *   - `aggregator_type`    — `seeker` | `provider`, drives single-type enforcement
+ *   - `aggregator_type`    — the registration domain; informational, no check
+ *                            reads it (`users.serves` is the authority)
  *   - `phoneNumber`        — read by the OTP login authenticator
  *   - `decision_made`      — gates login at the auth middleware
  *   - `signalstack_org_id` — signalstack organisation id, written after the

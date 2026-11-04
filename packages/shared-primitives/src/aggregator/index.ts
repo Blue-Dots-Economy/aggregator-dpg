@@ -70,9 +70,9 @@ export const RegistrationPayloadSchema = z
   .object({
     name: z.string().min(2).max(200),
     /**
-     * Coordinator's domain id. Copied to the Keycloak `aggregator_type`
-     * attribute and JWT claim. Routes that write participant data check
-     * the request against that claim.
+     * Coordinator's domain id. Stored in `users.serves`, which routes that
+     * write participant data check. Also copied to the Keycloak
+     * `aggregator_type` attribute, which nothing checks.
      */
     type: RoleTypeSchema,
     url: z.string().url().max(2048).optional(),

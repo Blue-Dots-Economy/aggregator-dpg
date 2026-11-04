@@ -33,6 +33,7 @@ import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { _setRedis } from '../services/redis/index.js';
+import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 
 // Hoisted so the vi.mock factories can reference them (mocks are hoisted
 // above module code).
@@ -255,6 +256,25 @@ function buildUpload(overrides: Partial<BulkUpload> = {}): BulkUpload {
 
 const AGG_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const AGG_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const AGG_BOTH = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const AGG_ALL = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+
+/** Coordinators keyed by id; their stored domains decide what they may upload. */
+function seedCoordinators(): UserStoreFake {
+  const users = new UserStoreFake();
+  users.seed([
+    buildCoordinator({ id: AGG_A, orgSlug: 'agg-a', serves: ['seeker'], status: 'active' }),
+    buildCoordinator({ id: AGG_B, orgSlug: 'agg-b', serves: ['seeker'], status: 'active' }),
+    buildCoordinator({
+      id: AGG_BOTH,
+      orgSlug: 'agg-both',
+      serves: ['seeker', 'provider'],
+      status: 'active',
+    }),
+    buildCoordinator({ id: AGG_ALL, orgSlug: 'agg-all', serves: [], status: 'active' }),
+  ]);
+  return users;
+}
 
 const VALID_CONSENT_CFG = {
   audiences: {
@@ -313,6 +333,7 @@ describe('bulk-uploads routes', () => {
     redisHmget = vi.fn().mockResolvedValue(['0', '0', '0']);
     redisHget = vi.fn().mockResolvedValue(null);
     _setRedis({ hmget: redisHmget, hget: redisHget } as never);
+    _setUserStore(seedCoordinators());
 
     _setAccessTokenVerifier(async (token) => {
       if (token === 'no-agg-id') {
@@ -340,6 +361,18 @@ describe('bulk-uploads routes', () => {
       if (token === 'no-type-approved') {
         return { sub: 'kc-3', aggregator_id: AGG_A, decision_made: 'approved' };
       }
+      if (token === 'both-approved') {
+        // The claim still carries the registration domain only.
+        return {
+          sub: 'kc-5',
+          aggregator_id: AGG_BOTH,
+          aggregator_type: 'seeker',
+          decision_made: 'approved',
+        };
+      }
+      if (token === 'all-approved') {
+        return { sub: 'kc-6', aggregator_id: AGG_ALL, decision_made: 'approved' };
+      }
       if (token === 'seeker-approved-b') {
         return {
           sub: 'kc-4',
@@ -359,6 +392,7 @@ describe('bulk-uploads routes', () => {
     _setBulkUploadsStore(null);
     _setConsentLedger(null);
     _setRedis(null);
+    _setUserStore(null);
     _setAccessTokenVerifier(null);
     _setNetworkConfig(null);
   });
@@ -531,28 +565,57 @@ describe('bulk-uploads routes', () => {
       expect(res.statusCode).toBe(400);
     });
 
-    it('403 AGGREGATOR_TYPE_MISSING when the token has no aggregator_type claim', async () => {
+    it('ignores the token claim and checks the stored domains', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/template?participant_type=seeker',
         headers: AUTH('no-type-approved'),
       });
-      expect(res.statusCode).toBe(403);
-      expect((res.json() as { error: { code: string } }).error.code).toBe(
-        'AGGREGATOR_TYPE_MISSING',
-      );
+      expect(res.statusCode).toBe(200);
     });
 
-    it('403 AGGREGATOR_TYPE_MISMATCH when requesting a different type than registered', async () => {
+    it('403 DOMAIN_NOT_SERVED when requesting a domain the coordinator does not serve', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/template?participant_type=provider',
         headers: AUTH('seeker-approved'),
       });
       expect(res.statusCode).toBe(403);
-      expect((res.json() as { error: { code: string } }).error.code).toBe(
-        'AGGREGATOR_TYPE_MISMATCH',
-      );
+      expect((res.json() as { error: { code: string } }).error.code).toBe('DOMAIN_NOT_SERVED');
+    });
+
+    it('accepts a second served domain the token claim does not carry', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/template?participant_type=provider',
+        headers: AUTH('both-approved'),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-disposition']).toContain('provider-template.csv');
+    });
+
+    it('accepts any domain for a coordinator that serves every domain', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/template?participant_type=provider',
+        headers: AUTH('all-approved'),
+      });
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('503 DB_UNAVAILABLE when the coordinator cannot be read', async () => {
+      const users = seedCoordinators();
+      users.findById = async () => ({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'down' },
+      });
+      _setUserStore(users);
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/template?participant_type=seeker',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(503);
     });
 
     it('200s with a schema-generated CSV', async () => {
@@ -640,7 +703,7 @@ describe('bulk-uploads routes', () => {
       expect(res.statusCode).toBe(400);
     });
 
-    it('403 AGGREGATOR_TYPE_MISMATCH when creating for a different type', async () => {
+    it('403 DOMAIN_NOT_SERVED when creating for a domain the coordinator does not serve', async () => {
       const res = await app.inject({
         method: 'POST',
         url: '/v1/bulk-uploads',
@@ -648,6 +711,18 @@ describe('bulk-uploads routes', () => {
         payload: { participant_type: 'provider' },
       });
       expect(res.statusCode).toBe(403);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('DOMAIN_NOT_SERVED');
+    });
+
+    it('201s for a second served domain', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/bulk-uploads',
+        headers: AUTH('both-approved'),
+        payload: { participant_type: 'provider' },
+      });
+      expect(res.statusCode).toBe(201);
+      expect((res.json() as Record<string, unknown>).schema_id).toBe('participant-provider');
     });
 
     it('503 DB_UNAVAILABLE when the store fails to reserve the row', async () => {
