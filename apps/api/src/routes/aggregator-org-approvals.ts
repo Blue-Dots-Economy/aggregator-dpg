@@ -16,6 +16,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { DecisionReasonSchema } from '@aggregator-dpg/shared-primitives/user-org';
 import { config } from '../config.js';
 import { getOrganisationStore } from '../services/organisation-store/index.js';
 import type { Organisation } from '../services/organisation-store/index.js';
@@ -34,15 +35,15 @@ import {
   type HtmlPage,
 } from './approval-shared.js';
 
-/** The longest reason, the same cap as the console's org decision route. */
-const ORG_REASON_MAX = 500;
+/** The longest reason, from the shared decision schema, so the console and the emailed form agree. */
+const ORG_REASON_MAX = DecisionReasonSchema.maxLength;
 
 const OrgDecisionBodySchema = z
   .object({
     token: z.string().min(1),
     decision: z.enum(['approve', 'reject']),
     /** Surfaced to the applicant. */
-    reason: z.string().trim().max(ORG_REASON_MAX).optional(),
+    reason: DecisionReasonSchema.optional(),
   })
   .refine((b) => b.decision !== 'reject' || (b.reason ?? '').length > 0, {
     message: 'reason required',
@@ -143,7 +144,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         200,
         renderConfirmPage({
           reasonRequired: true,
-          reasonMaxLength: ORG_REASON_MAX,
+          ...(ORG_REASON_MAX === null ? {} : { reasonMaxLength: ORG_REASON_MAX }),
           aggregatorId: orgId,
           token,
           applicantEmail: lookup.value.ownerEmail,
@@ -274,7 +275,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         200,
         renderConfirmPage({
           reasonRequired: true,
-          reasonMaxLength: ORG_REASON_MAX,
+          ...(ORG_REASON_MAX === null ? {} : { reasonMaxLength: ORG_REASON_MAX }),
           aggregatorId: orgId,
           token: freshToken,
           applicantEmail: lookup.value.ownerEmail,
