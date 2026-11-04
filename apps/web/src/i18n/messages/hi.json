@@ -872,6 +872,8 @@
       "discard": "रद्द करें",
       "save_domains": "डोमेन सहेजें",
       "domains_saved": "डोमेन सहेजे गए।",
+      "remove_domains_note": "{domains} हटाने से यह समन्वयक उन रिकॉर्ड पर काम नहीं कर पाएगा।",
+      "remove_domains_confirm": "हटाएँ और सहेजें",
       "back": "[[users_obl]] पर वापस",
       "joined": "{date} को जुड़े",
       "copy_email": "ईमेल कॉपी करें",

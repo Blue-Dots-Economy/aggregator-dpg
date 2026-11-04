@@ -49,17 +49,18 @@ The first three tasks ship in the backend PR; the form, schema patch and `/profi
 
 Commit: `feat(web): domain dropdown and selectors for multi-domain coordinators (#890)`.
 
-| Task                                                                                                      | Files                                                                        | Tests                                         |
-| --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------- |
-| Profile client reads `serves`                                                                             | `services/profile.service.ts`                                                | service test                                  |
-| Active-domain hook: URL `?domain=`, then last choice, then first served; always one of the served domains | new `hooks/useActiveDomain.ts`                                               | each fallback; invalid URL value ignored      |
-| Dashboard dropdown in the top bar; changing domain resets page, filter and selection                      | `app/(protected)/dashboard/page.tsx`                                         | replace "no tab strip" test; switch test      |
-| Fix the loading-screen hang for "all domains" coordinators                                                | `app/(protected)/dashboard/page.tsx`                                         | empty `serves` renders                        |
-| Sidebar badge follows the active domain                                                                   | `components/shell/Sidebar.tsx`                                               | badge test                                    |
-| Link creation: domain selector, defaults to the active domain; link list shows every served domain        | `onboarding/_components/RegistrationLinksSection.tsx`, `onboarding/page.tsx` | replace read-only field test                  |
-| Bulk upload: domain selector drives template download and upload                                          | `onboarding/_components/CSVUpload.tsx`                                       | replace read-only chip and template URL tests |
-| Console: confirm before removing a domain from a coordinator                                              | `components/console/CoordinatorActions.tsx`                                  | confirm shown on removal only                 |
-| Copy for the dropdown, selectors and confirmation in en, hi, kn                                           | `apps/web/src/i18n/messages`                                                 | catalogue key test                            |
+| Task                                                                                                      | Files                                                                        | Tests                                              |
+| --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------- |
+| Profile client reads `serves`                                                                             | `services/profile.service.ts`                                                | service test                                       |
+| Active-domain hook: URL `?domain=`, then last choice, then first served; always one of the served domains | new `hooks/useActiveDomain.ts`                                               | each fallback; invalid URL value ignored           |
+| Dashboard dropdown in the top bar; changing domain resets page, filter and selection                      | `app/(protected)/dashboard/page.tsx`                                         | replace "no tab strip" test; switch test           |
+| Fix the loading-screen hang for "all domains" coordinators                                                | `app/(protected)/dashboard/page.tsx`                                         | empty `serves` renders                             |
+| Sidebar badge follows the active domain                                                                   | `components/shell/Sidebar.tsx`                                               | badge test                                         |
+| Link creation: domain selector, defaults to the active domain; link list shows every served domain        | `onboarding/_components/RegistrationLinksSection.tsx`, `onboarding/page.tsx` | replace read-only field test                       |
+| Bulk upload: domain selector drives template download and upload                                          | `onboarding/_components/CSVUpload.tsx`                                       | replace read-only chip and template URL tests      |
+| Console: confirm before removing a domain from a coordinator                                              | `components/console/CoordinatorActions.tsx`                                  | confirm shown on removal only                      |
+| Console: domains editable for pending and approved coordinators; read-only once rejected or retired       | `components/console/CoordinatorActions.tsx`                                  | editable after approval; read-only after rejection |
+| Copy for the dropdown, selectors and confirmation in en, hi, kn                                           | `apps/web/src/i18n/messages`                                                 | catalogue key test                                 |
 
 ## Verification
 

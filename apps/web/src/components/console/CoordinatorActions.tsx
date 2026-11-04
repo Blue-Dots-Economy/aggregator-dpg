@@ -7,12 +7,13 @@
  * shows only while pending or just decided. A viewer who cannot manage the
  * coordinator's organisation sees the domains read-only and no actions.
  *
- * Domains can be changed only while the coordinator is pending; after a
- * decision they are shown read-only.
+ * Domains can be changed while the coordinator is pending or approved; a
+ * rejected or retired coordinator's domains are shown read-only.
  *
  * Domains are the network's configured domains. A coordinator saved with none
  * serves every domain, so all are shown ticked. A save bar appears once the
  * choice differs from what is saved, and at least one domain must stay ticked.
+ * A save that removes a saved domain asks for confirmation first.
  */
 
 import { useState } from 'react';
@@ -113,6 +114,7 @@ export function CoordinatorActions({
   const [decisionNote, setDecisionNote] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState(false);
   const [servesNote, setServesNote] = useState<string | null>(null);
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function decide(decision: 'approve' | 'reject') {
@@ -140,18 +142,38 @@ export function CoordinatorActions({
 
   const dirty = !sameIds(chosen, saved);
   const empty = chosen.length === 0;
+  const editable = !readOnly && (status === 'pending' || status === 'active');
+  const removed = domains.filter((d) => saved.includes(d.id) && !chosen.includes(d.id));
 
   function toggle(id: string) {
     setServesNote(null);
+    setConfirmingRemoval(false);
     setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
+  }
+
+  /** The save bar's message: an empty choice, a removal to confirm, or unsaved changes. */
+  function barNote(): string {
+    if (empty) return t('coordinator.domains_empty');
+    if (confirmingRemoval) {
+      return t('coordinator.remove_domains_note', {
+        domains: removed.map((d) => d.label).join(', '),
+      });
+    }
+    return t('coordinator.unsaved');
   }
 
   function discard() {
     setChosen(saved);
     setServesNote(null);
+    setConfirmingRemoval(false);
   }
 
   async function saveServes() {
+    if (removed.length > 0 && !confirmingRemoval) {
+      setConfirmingRemoval(true);
+      return;
+    }
+    setConfirmingRemoval(false);
     setBusy(true);
     const r = await sendConsole(`/api/console/user/metadata/${user.id}`, 'PATCH', UserSchema, {
       serves: chosen,
@@ -198,9 +220,7 @@ export function CoordinatorActions({
             <p className="mt-0.5 text-[13px] text-ink-500">{t('coordinator.domains_sub')}</p>
           </header>
           <div className="flex flex-col gap-3.5 px-[22px] pt-4 pb-[22px] text-[13.5px]">
-            {readOnly || status !== 'pending' ? (
-              <DomainChips domains={domains.filter((d) => saved.includes(d.id))} />
-            ) : (
+            {editable ? (
               <>
                 <fieldset
                   aria-label={t('coordinator.domains')}
@@ -251,13 +271,25 @@ export function CoordinatorActions({
                         empty ? 'text-rose-700' : 'text-ink-500',
                       )}
                     >
-                      {empty ? t('coordinator.domains_empty') : t('coordinator.unsaved')}
+                      {barNote()}
                     </span>
-                    <Button kind="ghost" disabled={busy} onClick={discard}>
-                      {t('coordinator.discard')}
-                    </Button>
+                    {confirmingRemoval ? (
+                      <Button
+                        kind="ghost"
+                        disabled={busy}
+                        onClick={() => setConfirmingRemoval(false)}
+                      >
+                        {t('coordinator.cancel')}
+                      </Button>
+                    ) : (
+                      <Button kind="ghost" disabled={busy} onClick={discard}>
+                        {t('coordinator.discard')}
+                      </Button>
+                    )}
                     <Button disabled={busy || empty} onClick={() => void saveServes()}>
-                      {t('coordinator.save_domains')}
+                      {confirmingRemoval
+                        ? t('coordinator.remove_domains_confirm')
+                        : t('coordinator.save_domains')}
                     </Button>
                   </div>
                 ) : null}
@@ -265,6 +297,8 @@ export function CoordinatorActions({
                   <output className="text-[13px] text-ink-600">{servesNote}</output>
                 ) : null}
               </>
+            ) : (
+              <DomainChips domains={domains.filter((d) => saved.includes(d.id))} />
             )}
           </div>
         </section>
