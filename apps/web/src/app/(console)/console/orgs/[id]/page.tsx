@@ -217,7 +217,8 @@ export default async function ConsoleOrgPage({
               />
             </>
           ) : null}
-          {own ? (
+          {/* The Default org never has child orgs. */}
+          {own && !org.is_default ? (
             <CountTile
               icon={<Network size={20} strokeWidth={2} />}
               tone="green"

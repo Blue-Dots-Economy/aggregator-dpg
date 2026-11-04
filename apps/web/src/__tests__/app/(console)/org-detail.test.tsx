@@ -222,6 +222,12 @@ describe('console org detail — "known as" picker', () => {
     expect(screen.getByTestId('org-decision')).toHaveAttribute('data-ids', ORG_ID);
   });
 
+  it('shows no child-organisations tile on the Default organisation', async () => {
+    mockPage(org({ is_default: true }));
+    await show();
+    expect(screen.queryByText('console.org.child_count')).toBeNull();
+  });
+
   it("shows the owner its own org's coordinators", async () => {
     mockPage(org());
     await show();
