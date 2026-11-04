@@ -86,6 +86,10 @@ export default async function ConsoleOrgPage({
   const canMove =
     hierarchy !== null && aggregatorOrg && (org.status === 'pending' || org.status === 'active');
   const maxChildren = hierarchy?.limits.max_children ?? null;
+  const childrenSub =
+    maxChildren === null
+      ? t('org.tile.children_sub')
+      : t('org.children_of_max', { count: data.child_count, max: maxChildren });
   return (
     <>
       <div>
@@ -224,11 +228,7 @@ export default async function ConsoleOrgPage({
               tone="green"
               label={t('org.child_count')}
               count={String(data.child_count)}
-              sub={
-                maxChildren === null
-                  ? t('org.tile.children_sub')
-                  : t('org.children_of_max', { count: data.child_count, max: maxChildren })
-              }
+              sub={childrenSub}
               muted={data.child_count === 0}
               {...(children ? { showLabel: t('org_home.tile_show'), href: '#children' } : {})}
             />
