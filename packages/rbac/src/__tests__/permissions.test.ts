@@ -94,9 +94,11 @@ describe('effectivePermissions', () => {
       memberships: [ownerOf('A'), ownerOf('B')],
       held: [{ roleKey: 'org_onboarder', orgId: 'A', expiresAt: null }],
     };
-    expect(effectivePermissions(index, owner, new Set(['A']), NOW)).toContain('orgs.onboard');
-    expect(effectivePermissions(index, owner, new Set(['B']), NOW)).not.toContain('orgs.onboard');
-    expect(effectivePermissions(index, owner, null, NOW)).toContain('orgs.onboard');
+    expect(effectivePermissions(index, owner, new Set(['A']), NOW)).toContain('profiles.verify');
+    expect(effectivePermissions(index, owner, new Set(['B']), NOW)).not.toContain(
+      'profiles.verify',
+    );
+    expect(effectivePermissions(index, owner, null, NOW)).toContain('profiles.verify');
   });
 
   it("applies the root owner's role in an organisation below it", () => {
