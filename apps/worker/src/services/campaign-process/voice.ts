@@ -35,7 +35,8 @@ import type {
 } from '@aggregator-dpg/signalstack-writer/interface';
 import type { VoiceContact, VoiceProviderBase } from '@aggregator-dpg/voice-provider/interface';
 import { TERMINAL_ITEM_STATUSES, type ProcessingJob } from '../campaign-job-client.js';
-import { chunkArray, truncateReason, type CampaignJobDeps } from './index.js';
+import type { CampaignJobDeps } from './index.js';
+import { chunkArray, truncateReason } from './util.js';
 
 /** Voice collaborators (decrypt + provider). */
 export interface VoiceCollaborators {
