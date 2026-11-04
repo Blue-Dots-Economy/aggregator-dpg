@@ -41,8 +41,8 @@ const coordinator: Actor = {
 };
 
 describe('reachableOrgIds', () => {
-  it('returns null for the network admin (every org)', () => {
-    expect(reachableOrgIds(networkAdmin)).toBeNull();
+  it('returns the root and the owned orgs for the network admin, never every org', () => {
+    expect(reachableOrgIds(networkAdmin)).toEqual(['root-1', 'org-a']);
   });
 
   it('returns the owned aggregator org ids for an owner', () => {
@@ -60,8 +60,10 @@ describe('reachesOrg', () => {
     expect(reachesOrg(owner, null)).toBe(false);
   });
 
-  it('the network admin reaches any org', () => {
-    expect(reachesOrg(networkAdmin, 'any-org')).toBe(true);
+  it('the network admin reaches the root and its own orgs only', () => {
+    expect(reachesOrg(networkAdmin, 'root-1')).toBe(true);
+    expect(reachesOrg(networkAdmin, 'org-a')).toBe(true);
+    expect(reachesOrg(networkAdmin, 'any-org')).toBe(false);
   });
 
   it('an owner reaches an owned org but not an unowned one', () => {
@@ -75,14 +77,15 @@ describe('reachesOrg', () => {
 });
 
 describe('scopeOrgFilter', () => {
-  it('with no requested org returns the full reach (null for the admin)', () => {
-    expect(scopeOrgFilter(networkAdmin)).toBeNull();
+  it('with no requested org returns the full reach', () => {
+    expect(scopeOrgFilter(networkAdmin)).toEqual(['root-1', 'org-a']);
     expect(scopeOrgFilter(owner)).toEqual(['org-a', 'org-b']);
   });
 
   it('narrows a requested in-reach org to just that org', () => {
     expect(scopeOrgFilter(owner, 'org-b')).toEqual(['org-b']);
-    expect(scopeOrgFilter(networkAdmin, 'org-x')).toEqual(['org-x']);
+    expect(scopeOrgFilter(networkAdmin, 'org-a')).toEqual(['org-a']);
+    expect(scopeOrgFilter(networkAdmin, 'org-x')).toEqual([]);
   });
 
   it('narrows a requested out-of-reach org to an empty page', () => {

@@ -555,6 +555,20 @@ describe('aggregator-orgs routes', () => {
       expect(mailer.outbox[0]?.text).toContain('Parent:      State Org');
     });
 
+    it("sends the review to the parent org's owner, not the network admin", async () => {
+      const res = await create({ ...orgBody, parent_id: STATE_ID });
+      expect(res.statusCode).toBe(201);
+      expect(mailer.outbox).toHaveLength(1);
+      expect(mailer.outbox[0]?.to).toEqual([state.ownerEmail]);
+      expect(mailer.outbox[0]?.to).not.toContain('reviewer@bluedots.local');
+    });
+
+    it('sends the review for a top-level org to the network admin', async () => {
+      const res = await create(orgBody);
+      expect(res.statusCode).toBe(201);
+      expect(mailer.outbox[0]?.to).toContain('reviewer@bluedots.local');
+    });
+
     it.each([
       ['an unknown org', '00000000-0000-4000-8000-0000000000ff'],
       ['the Default org', buildDefaultOrg().id],
@@ -1302,6 +1316,9 @@ describe('aggregator-orgs routes', () => {
         return { ok: true, value: [] };
       }
       async descendantIds(): Promise<OrgStoreResult<string[]>> {
+        return { ok: true, value: [] };
+      }
+      async childIds(): Promise<OrgStoreResult<string[]>> {
         return { ok: true, value: [] };
       }
       async setKnownAs(): Promise<OrgStoreResult<Organisation>> {

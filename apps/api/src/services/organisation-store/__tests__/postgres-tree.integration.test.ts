@@ -165,6 +165,22 @@ suite('organisation store tree rules (Postgres)', () => {
     await admin?.end();
   });
 
+  describe('childIds and the parentId search filter', () => {
+    it('return the direct children only, never a grandchild', async () => {
+      const a = await org('a');
+      const b = await org('b', a);
+      const c = await org('c', b);
+      const top = await store.childIds([rootId]);
+      expect(top.ok && top.value).toEqual(expect.arrayContaining([a, defaultId]));
+      expect(top.ok && top.value).not.toContain(b);
+      const below = await store.childIds([a, b]);
+      expect(below.ok && [...below.value].sort()).toEqual([b, c].sort());
+      expect(await store.childIds([])).toEqual({ ok: true, value: [] });
+      const page = await store.search({ orgIds: null, parentId: a });
+      expect(page.ok && page.value.rows.map((o) => o.id)).toEqual([b]);
+    });
+  });
+
   describe('create', () => {
     it("sets depth from a nested parent and the parent's default known_as", async () => {
       const a = await org('a');

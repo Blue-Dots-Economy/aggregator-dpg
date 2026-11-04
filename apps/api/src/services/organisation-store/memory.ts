@@ -484,6 +484,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       const below = this.descendantIdsOf(filter.descendantsOf);
       rows = rows.filter((o) => below.has(o.id));
     }
+    if (filter.parentId) rows = rows.filter((o) => o.parentId === filter.parentId);
     if (filter.namePrefix) {
       const p = filter.namePrefix.toLowerCase();
       rows = rows.filter((o) => o.displayName.toLowerCase().startsWith(p));
@@ -512,6 +513,14 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     for (const id of ids) for (const d of this.descendantIdsOf(id)) found.add(d);
     for (const id of ids) found.delete(id);
     return Promise.resolve({ ok: true, value: [...found] });
+  }
+
+  childIds(ids: readonly string[]): Promise<OrgStoreResult<string[]>> {
+    const parents = new Set(ids);
+    const found = [...this.byId.values()]
+      .filter((o) => o.parentId !== null && parents.has(o.parentId))
+      .map((o) => o.id);
+    return Promise.resolve({ ok: true, value: found });
   }
 
   /**

@@ -43,7 +43,7 @@ import {
   type ActorOrg,
 } from '../services/auth/actor/index.js';
 import { narrowOrgFilter } from '../services/authz/scope.js';
-import { isOnlyViewed, withOrgsBelow } from '../services/authz/view-scope.js';
+import { isOnlyViewed } from '../services/authz/view-scope.js';
 import {
   inManageScope,
   manageableOrgIds,
@@ -95,9 +95,9 @@ async function rootOrgId(): Promise<string | null> {
 }
 
 /**
- * The organisations whose coordinators the actor may manage, or with
- * `view` only read (the network admin sees every organisation's) (#873).
- * `view` also covers every organisation below those, read-only.
+ * The organisations whose coordinators the actor may manage, or with `view`
+ * only read. Both stay within the organisations the actor owns; coordinators
+ * of a child organisation are not visible to the parent's owner.
  *
  * @throws {HttpError} DB_UNAVAILABLE.
  */
@@ -106,11 +106,7 @@ async function manageScope(
   actor: Actor,
   purpose: ScopePurpose = 'manage',
 ): Promise<string[] | null> {
-  const ids = await manageableOrgIds(req, actor, await rootOrgId(), purpose);
-  if (purpose !== 'view') return ids;
-  const wider = await withOrgsBelow(ids);
-  if (!wider.ok) dbDown('orgStore.descendantIds', wider.error.message);
-  return wider.value;
+  return manageableOrgIds(req, actor, await rootOrgId(), purpose);
 }
 
 /**
@@ -338,7 +334,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: 'Coordinators within reach, newest first',
         description:
-          'Filters by org, status and served domain; an org outside reach yields an empty page. An owner also sees, read-only and with masked contacts, the coordinators of every organisation below its own. Keyset paged by an opaque cursor.',
+          'Filters by org, status and served domain; an org outside reach yields an empty page. An owner sees the coordinators of the organisations it owns only, not those of their child organisations. Keyset paged by an opaque cursor.',
         body: UserSearchRequestSchema,
         response: { 200: UserSearchResponseSchema, ...errorResponses(400, 401, 403, 503) },
       },

@@ -246,6 +246,13 @@
       "when": 1791900000000,
       "tag": "0034_org_known_as",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1792000000000,
+      "tag": "0035_org_admin_onboard",
+      "breakpoints": true
     }
   ]
 }
