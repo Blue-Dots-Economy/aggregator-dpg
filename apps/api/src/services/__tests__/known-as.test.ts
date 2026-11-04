@@ -1,7 +1,7 @@
 /**
  * Unit tests for the "known as" helpers.
  *
- * Covers: the store's tree rules, the choices for a child, the default key,
+ * Covers: the store's tree rules, the default key,
  * name resolution, key validity, key generation from names (Latin, Hindi,
  * Kannada, digits first, empty, clashes, length) and filling a requested list.
  */
@@ -11,7 +11,6 @@ import { KnownAsKeySchema } from '@aggregator-dpg/shared-primitives/user-org';
 import {
   defaultKnownAsKey,
   fillKnownAsKeys,
-  knownAsChoices,
   knownAsKeyFrom,
   knownAsKeyValid,
   knownAsNameOf,
@@ -30,13 +29,6 @@ describe('treeRules', () => {
     expect(
       treeRules({ hierarchy: { max_depth: 1, max_total_orgs: 5, max_children: 2 } }).maxChildren,
     ).toBe(2);
-  });
-});
-
-describe('knownAsChoices', () => {
-  it('is the list, or only the system value when the list is empty', () => {
-    expect(knownAsChoices(list)).toEqual(list);
-    expect(knownAsChoices([])).toEqual([{ key: 'aggregator', name: 'Aggregator' }]);
   });
 });
 

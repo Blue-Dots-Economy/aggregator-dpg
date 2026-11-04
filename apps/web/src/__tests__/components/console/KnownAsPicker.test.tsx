@@ -2,7 +2,7 @@
  * Unit tests for KnownAsPicker: the parent owner's choice of an
  * organisation's "known as" value.
  *
- * Covers: the choices, the hint for a top-level organisation, the current
+ * Covers: the choices from the parent's list and the Aggregator fallback, the hint for a top-level organisation, the current
  * value kept when it is not a choice, the key sent on save, nothing sent while
  * unchanged, a newer value from the page, and the API's message for a value
  * that is not allowed.
@@ -39,9 +39,9 @@ const OPTIONS: KnownAsEntry[] = [
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-const picker = (org: PickerOrg, options: KnownAsEntry[]) => (
+const picker = (org: PickerOrg, parentValues: KnownAsEntry[]) => (
   <NextIntlClientProvider locale="en" messages={messages}>
-    <KnownAsPicker org={org} options={options} />
+    <KnownAsPicker org={org} parentValues={parentValues} />
   </NextIntlClientProvider>
 );
 
@@ -79,6 +79,18 @@ describe('<KnownAsPicker />', () => {
     render(picker({ ...ORG, known_as: 'aggregator', known_as_name: 'Aggregator' }, OPTIONS));
     expect(select()).toHaveValue('aggregator');
     expect(optionNames()).toEqual(['Aggregator', 'District', 'Block']);
+  });
+
+  it('offers only Aggregator when the parent has no values', () => {
+    render(picker({ ...ORG, known_as: 'aggregator', known_as_name: 'Aggregator' }, []));
+    expect(select()).toHaveValue('aggregator');
+    expect(optionNames()).toEqual(['Aggregator']);
+  });
+
+  it('keeps a current value that is not Aggregator when the parent has no values', () => {
+    render(picker(ORG, []));
+    expect(select()).toHaveValue('district');
+    expect(optionNames()).toEqual(['District', 'Aggregator']);
   });
 
   it('shows the key when the current value has no name', () => {

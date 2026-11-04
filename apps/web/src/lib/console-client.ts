@@ -57,7 +57,7 @@ export async function sendConsole<T>(
  * Sets an organisation's "known as" value (owner of its parent).
  *
  * @param orgId - The organisation.
- * @param knownAs - A key from the org's `known_as_options`.
+ * @param knownAs - A key from the choices of the org's parent (`knownAsChoices`).
  * @returns The outcome, with the updated org on success.
  */
 export function setOrgKnownAs(orgId: string, knownAs: string): Promise<ConsoleSendResult<Org>> {

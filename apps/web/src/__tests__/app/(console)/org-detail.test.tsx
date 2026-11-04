@@ -34,7 +34,9 @@ vi.mock('@/components/console/OrgEditForm', () => ({
   ),
 }));
 vi.mock('@/components/console/KnownAsPicker', () => ({
-  KnownAsPicker: () => <div data-testid="known-as-picker" />,
+  KnownAsPicker: ({ parentValues }: { parentValues: unknown }) => (
+    <div data-testid="known-as-picker" data-parent-values={JSON.stringify(parentValues)} />
+  ),
 }));
 vi.mock('@/components/console/OrgMoveDialog', () => ({ OrgMoveDialog: () => null }));
 vi.mock('@/components/console/ChildOrgsTree', () => ({ ChildOrgsTree: () => null }));
@@ -95,7 +97,8 @@ const me = (userId: string, ownOrgId = ORG_ID): MeResponse => ({
 interface PageOptions {
   /** The org the viewer owns. */
   viewerOrgId?: string;
-  knownAsOptions?: OrgReadResponse['known_as_options'];
+  /** The parent block; null when the viewer does not own the parent. */
+  parent?: OrgReadResponse['org']['parent'];
   /** The org's own list; null when it cannot have child orgs. */
   knownAsValues?: OrgReadResponse['org']['known_as_values'];
 }
@@ -107,7 +110,7 @@ function mockPage(target: OrgReadResponse['org'], viewerId = 'owner', opts: Page
   } as never);
   vi.mocked(consoleRead).mockImplementation(async (path: string) => {
     // The page asks for both lists in its one read.
-    if (path === `/v1/org/read/${ORG_ID}?fields=known_as_values,known_as_options`) {
+    if (path === `/v1/org/read/${ORG_ID}?fields=known_as_values,parent.known_as_values`) {
       return {
         org: {
           ...target,
@@ -115,12 +118,12 @@ function mockPage(target: OrgReadResponse['org'], viewerId = 'owner', opts: Page
             opts.knownAsValues === undefined
               ? [{ key: 'block', name: 'Block' }]
               : opts.knownAsValues,
+          parent: opts.parent ?? null,
         },
         owner: { id: 'owner', contact: { name: null, email: 'owner@a.org', phone: null } },
         coordinator_count: 0,
         child_count: 0,
         pending_count: 0,
-        known_as_options: opts.knownAsOptions ?? null,
       } satisfies OrgReadResponse as never;
     }
     if (path === '/v1/org/search') {
@@ -171,15 +174,19 @@ describe('console org detail — child "known as" editor', () => {
 describe('console org detail — "known as" picker', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  const OPTIONS = [{ key: 'block', name: 'Block' }];
+  const PARENT = {
+    id: 'parent',
+    name: 'Parent',
+    known_as_values: [{ key: 'block', name: 'Block' }],
+  };
 
   it('shows the picker, its banner and a details form without the value to the parent owner', async () => {
-    mockPage(org({ depth: 2 }), 'parent-owner', {
-      viewerOrgId: 'parent',
-      knownAsOptions: OPTIONS,
-    });
+    mockPage(org({ depth: 2 }), 'parent-owner', { viewerOrgId: 'parent', parent: PARENT });
     await show();
-    expect(screen.getByTestId('known-as-picker')).toBeInTheDocument();
+    expect(screen.getByTestId('known-as-picker')).toHaveAttribute(
+      'data-parent-values',
+      JSON.stringify(PARENT.known_as_values),
+    );
     expect(screen.getByText('console.org.viewed_from_above_known_as')).toBeInTheDocument();
     expect(screen.queryByText('console.org.viewed_from_above')).toBeNull();
     expect(screen.getByTestId('org-edit-form')).toHaveAttribute('data-known-as-picked', 'true');
@@ -190,6 +197,22 @@ describe('console org detail — "known as" picker', () => {
     await show();
     expect(screen.queryByTestId('known-as-picker')).toBeNull();
     expect(screen.getByText('console.org.viewed_from_above')).toBeInTheDocument();
+    expect(screen.getByTestId('org-edit-form')).toHaveAttribute('data-known-as-picked', 'false');
+  });
+
+  it('shows the picker when the parent has an empty list', async () => {
+    mockPage(org({ depth: 2 }), 'parent-owner', {
+      viewerOrgId: 'parent',
+      parent: { ...PARENT, known_as_values: [] },
+    });
+    await show();
+    expect(screen.getByTestId('known-as-picker')).toHaveAttribute('data-parent-values', '[]');
+  });
+
+  it('hides the picker on the Default organisation even with a parent block', async () => {
+    mockPage(org({ is_default: true }), 'parent-owner', { viewerOrgId: 'parent', parent: PARENT });
+    await show();
+    expect(screen.queryByTestId('known-as-picker')).toBeNull();
     expect(screen.getByTestId('org-edit-form')).toHaveAttribute('data-known-as-picked', 'false');
   });
 });

@@ -88,6 +88,7 @@ export const FilterSchema = z.object({
  * Builds the `fields` query parameter of a read that returns some data only on request.
  *
  * The value is a comma-separated list of names from `allowed`, with no spaces.
+ * A name may contain dots, as in `parent.known_as_values`; they match only a dot.
  * An absent or empty value requests nothing extra. Any other name fails validation.
  *
  * @param allowed - The names the read accepts.

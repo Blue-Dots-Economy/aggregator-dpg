@@ -36,15 +36,11 @@ import { organisations, orgKnownAs, contact, userIdentities, users } from '../..
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import {
   SYSTEM_KNOWN_AS,
+  knownAsChoices,
   type KnownAsValues,
   type KnownAsValuesRequest,
 } from '@aggregator-dpg/shared-primitives/user-org';
-import {
-  defaultKnownAsKey,
-  fillKnownAsKeys,
-  knownAsChoices,
-  knownAsKeyValid,
-} from '../known-as.js';
+import { defaultKnownAsKey, fillKnownAsKeys, knownAsKeyValid } from '../known-as.js';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
 import { logger } from '../../logger.js';

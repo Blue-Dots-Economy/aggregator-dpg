@@ -5706,17 +5706,17 @@
         "tags": [
           "console"
         ],
-        "description": "An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked. The fields query adds data that is left out by default. fields=known_as_values adds org.known_as_values: the values the organisation defines for its direct children, or null when it cannot have child organisations (the Default organisation, or an organisation at max_depth). fields=known_as_options adds known_as_options: the values the caller can pick for the org's known_as (the parent's list, or only \"aggregator\" when that list is empty), or null unless the caller owns the parent (the network admin for a top-level organisation). An unknown name in fields answers 400 SCHEMA_VALIDATION.",
+        "description": "An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked. The fields query adds data that is left out by default. fields=known_as_values adds org.known_as_values: the values the organisation defines for its direct children, or null when it cannot have child organisations (the Default organisation, or an organisation at max_depth). fields=parent.known_as_values adds org.parent: the parent's id, name and stored known_as_values list ([] when it has none), which holds the choices for this org's known_as (the list, or only \"aggregator\" when it is empty). org.parent is null unless the caller owns the parent (the network admin for a top-level organisation), and for the root, the Default organisation and a rejected organisation. An unknown name in fields answers 400 SCHEMA_VALIDATION.",
         "parameters": [
           {
             "schema": {
               "type": "string",
-              "pattern": "^(?:(?:known_as_values|known_as_options)(?:,(?:known_as_values|known_as_options))*)?$"
+              "pattern": "^(?:(?:known_as_values|parent\\.known_as_values)(?:,(?:known_as_values|parent\\.known_as_values))*)?$"
             },
             "in": "query",
             "name": "fields",
             "required": false,
-            "description": "Comma-separated list of extra data to include: known_as_values, known_as_options."
+            "description": "Comma-separated list of extra data to include: known_as_values, parent.known_as_values."
           },
           {
             "schema": {
@@ -5911,6 +5911,54 @@
                           },
                           "maxItems": 20,
                           "nullable": true
+                        },
+                        "parent": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "known_as_values": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "type": "string",
+                                    "pattern": "^[a-z][a-z0-9_]*$",
+                                    "maxLength": 64
+                                  },
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 60
+                                  },
+                                  "default": {
+                                    "type": "boolean",
+                                    "enum": [
+                                      true
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "key",
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "maxItems": 20
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "known_as_values"
+                          ],
+                          "additionalProperties": false,
+                          "nullable": true
                         }
                       },
                       "required": [
@@ -5978,36 +6026,6 @@
                     },
                     "pending_count": {
                       "type": "integer"
-                    },
-                    "known_as_options": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "key": {
-                            "type": "string",
-                            "pattern": "^[a-z][a-z0-9_]*$",
-                            "maxLength": 64
-                          },
-                          "name": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 60
-                          },
-                          "default": {
-                            "type": "boolean",
-                            "enum": [
-                              true
-                            ]
-                          }
-                        },
-                        "required": [
-                          "key",
-                          "name"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "nullable": true
                     }
                   },
                   "required": [

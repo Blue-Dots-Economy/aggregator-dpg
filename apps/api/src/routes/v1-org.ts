@@ -38,7 +38,7 @@ import {
   OwnerAccessResponseSchema,
   type KnownAsValues,
   type KnownAsValuesRequest,
-  type KnownAsEntry,
+  type OrgReadParent,
   type OrgKnownAsUpdateRequest,
   type OrgHierarchyQuery,
   type OrgHierarchyResponse,
@@ -50,7 +50,7 @@ import { errorResponses } from '../errors/openapi.js';
 import { getUserStore } from '../services/user-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import type { OrganisationConfig } from '@aggregator-dpg/network-config/interface';
-import { knownAsChoices, treeRules } from '../services/known-as.js';
+import { treeRules } from '../services/known-as.js';
 import {
   getOrganisationStore,
   type Organisation,
@@ -183,14 +183,17 @@ async function knownAsValuesOf(id: string): Promise<KnownAsValues> {
 }
 
 /**
- * The values the actor can pick for the org's `known_as`, or null when it
- * cannot set it (see {@link ownsParentOf}; a rejected org is not changed).
+ * The parent block of the org read: the parent and its stored list, or null
+ * when the actor cannot set the org's `known_as` (see {@link ownsParentOf}; a
+ * rejected org is not changed).
  *
  * @throws {HttpError} DB_UNAVAILABLE.
  */
-async function knownAsOptionsFor(actor: Actor, org: Organisation): Promise<KnownAsEntry[] | null> {
+async function parentBlockFor(actor: Actor, org: Organisation): Promise<OrgReadParent | null> {
   if (org.status === 'inactive' || !(await ownsParentOf(actor, org))) return null;
-  return knownAsChoices(await knownAsValuesOf(org.parentId!));
+  const parentId = org.parentId!;
+  // The store sets parentName for every org but the root.
+  return { id: parentId, name: org.parentName!, known_as_values: await knownAsValuesOf(parentId) };
 }
 
 /**
@@ -329,7 +332,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: 'One organisation within reach, with its owner and coordinator counts',
         description:
-          'An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked. The fields query adds data that is left out by default. fields=known_as_values adds org.known_as_values: the values the organisation defines for its direct children, or null when it cannot have child organisations (the Default organisation, or an organisation at max_depth). fields=known_as_options adds known_as_options: the values the caller can pick for the org\'s known_as (the parent\'s list, or only "aggregator" when that list is empty), or null unless the caller owns the parent (the network admin for a top-level organisation). An unknown name in fields answers 400 SCHEMA_VALIDATION.',
+          'An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked. The fields query adds data that is left out by default. fields=known_as_values adds org.known_as_values: the values the organisation defines for its direct children, or null when it cannot have child organisations (the Default organisation, or an organisation at max_depth). fields=parent.known_as_values adds org.parent: the parent\'s id, name and stored known_as_values list ([] when it has none), which holds the choices for this org\'s known_as (the list, or only "aggregator" when it is empty). org.parent is null unless the caller owns the parent (the network admin for a top-level organisation), and for the root, the Default organisation and a rejected organisation. An unknown name in fields answers 400 SCHEMA_VALIDATION.',
         params: IdParamsSchema,
         querystring: OrgReadQuerySchema,
         response: { 200: OrgReadResponseSchema, ...errorResponses(401, 403, 404, 503) },
@@ -366,8 +369,8 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         const childrenAllowed = isRoot || (!org.isDefault && org.depth < hierarchy.max_depth);
         body.org.known_as_values = childrenAllowed ? await knownAsValuesOf(org.id) : null;
       }
-      if (fields.includes('known_as_options')) {
-        body.known_as_options = isRoot ? null : await knownAsOptionsFor(actor, org);
+      if (fields.includes('parent.known_as_values')) {
+        body.org.parent = isRoot ? null : await parentBlockFor(actor, org);
       }
       return reply.status(200).send(body);
     },

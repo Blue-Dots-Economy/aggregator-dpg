@@ -121,7 +121,6 @@ function mockReads(own: Row[], below: Row[] = []) {
         coordinator_count,
         child_count,
         pending_count,
-        known_as_options: null,
       } satisfies OrgReadResponse as never;
     }
     if (path === '/v1/user/search') return users as never;

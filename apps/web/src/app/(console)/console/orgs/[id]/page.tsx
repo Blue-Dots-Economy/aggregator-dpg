@@ -54,7 +54,7 @@ export default async function ConsoleOrgPage({
   const canAssignOwner =
     actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer');
   const data = await consoleRead<OrgReadResponse>(
-    `/v1/org/read/${encodeURIComponent(id)}?fields=known_as_values,known_as_options`,
+    `/v1/org/read/${encodeURIComponent(id)}?fields=known_as_values,parent.known_as_values`,
   );
   const { org, owner } = data;
   // Owner roles; null when access control is off.
@@ -82,8 +82,8 @@ export default async function ConsoleOrgPage({
   const hierarchy = canRename ? await consoleRead<OrgHierarchyResponse>('/v1/org/hierarchy') : null;
   const isOwner = owner.id === actor.me.user.id;
   const aggregatorOrg = org.org_type === 'aggregator' && !org.is_default;
-  // Null when the viewer does not own the parent.
-  const knownAsOptions = aggregatorOrg ? (data.known_as_options ?? null) : null;
+  // The parent and its list; null when the viewer cannot set this org's value.
+  const parent = aggregatorOrg ? (org.parent ?? null) : null;
   // Null when the org cannot have child orgs.
   const knownAsValues = org.known_as_values ?? null;
   // The API takes list edits only on an active org the viewer owns.
@@ -143,7 +143,7 @@ export default async function ConsoleOrgPage({
         />
         {own ? null : (
           <p className="mt-2 rounded-lg bg-[var(--bd-tint-primary)] px-3 py-2 text-[13px] text-ink-600">
-            {knownAsOptions ? t('org.viewed_from_above_known_as') : t('org.viewed_from_above')}
+            {parent ? t('org.viewed_from_above_known_as') : t('org.viewed_from_above')}
           </p>
         )}
       </div>
@@ -224,9 +224,9 @@ export default async function ConsoleOrgPage({
             sub={t('org.tile.level_sub')}
           />
         </div>
-        {knownAsOptions ? (
+        {parent ? (
           <ConsoleSection title={t('org.known_as_pick_title')}>
-            <KnownAsPicker org={org} options={knownAsOptions} />
+            <KnownAsPicker org={org} parentValues={parent.known_as_values} />
           </ConsoleSection>
         ) : null}
         <OrgEditForm
@@ -234,7 +234,7 @@ export default async function ConsoleOrgPage({
           editable={editable}
           canEdit={isOwner}
           orgSchema={orgSchema}
-          knownAsPicked={knownAsOptions !== null}
+          knownAsPicked={parent !== null}
         />
         {canEditKnownAsValues && knownAsValues !== null ? (
           <ConsoleSection title={t('org.known_as_values_title')}>

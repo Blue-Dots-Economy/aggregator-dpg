@@ -4,7 +4,9 @@
  * Each org defines the "known as" values of its direct children
  * (`known_as_values`). A child stores the key of one entry, or the built-in
  * `aggregator`. Both organisation stores and the console routes use these
- * helpers, so they resolve names, defaults and choices the same way.
+ * helpers, so they resolve names and defaults the same way. The choices for a
+ * child come from `knownAsChoices` in `@aggregator-dpg/shared-primitives/user-org`,
+ * which the console uses too.
  */
 
 import anyAscii from 'any-ascii';
@@ -32,16 +34,6 @@ export function treeRules(org: OrganisationConfig): TreeRules {
     maxChildren: org.hierarchy.max_children ?? null,
     maxTotalOrgs: org.hierarchy.max_total_orgs,
   };
-}
-
-/**
- * The values a child of an org can be given.
- *
- * @param list - The parent's `known_as_values` list.
- * @returns The list, or only the system value when the list is empty.
- */
-export function knownAsChoices(list: readonly KnownAsEntry[]): KnownAsEntry[] {
-  return list.length > 0 ? [...list] : [{ ...SYSTEM_KNOWN_AS }];
 }
 
 /**

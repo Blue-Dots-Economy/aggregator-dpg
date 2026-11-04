@@ -11,7 +11,11 @@
 import { useState, type SubmitEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import type { KnownAsEntry, Org } from '@aggregator-dpg/shared-primitives/user-org';
+import {
+  knownAsChoices,
+  type KnownAsEntry,
+  type Org,
+} from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { Label } from '../ui/Label';
 import { errorKey, setOrgKnownAs } from '../../lib/console-client';
@@ -20,14 +24,14 @@ import { errorKey, setOrgKnownAs } from '../../lib/console-client';
  * Renders the "known as" picker.
  *
  * @param org - The organisation whose value is set. At depth 1 the network's values apply.
- * @param options - The values the viewer can pick, from `known_as_options`.
+ * @param parentValues - The parent's stored list, from `org.parent.known_as_values`.
  */
 export function KnownAsPicker({
   org,
-  options,
+  parentValues,
 }: Readonly<{
   org: Pick<Org, 'id' | 'known_as' | 'known_as_name' | 'parent_name' | 'depth'>;
-  options: readonly KnownAsEntry[];
+  parentValues: readonly KnownAsEntry[];
 }>) {
   const t = useTranslations('console');
   const router = useRouter();
@@ -44,6 +48,7 @@ export function KnownAsPicker({
     setSelected(org.known_as ?? '');
   }
 
+  const options = knownAsChoices(parentValues);
   const currentListed = options.some((o) => o.key === current.key);
 
   async function onSubmit(e: SubmitEvent<HTMLFormElement>) {

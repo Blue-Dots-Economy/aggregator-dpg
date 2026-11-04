@@ -53,6 +53,17 @@ export const KnownAsEntrySchema = z.object({
 export type KnownAsEntry = z.infer<typeof KnownAsEntrySchema>;
 
 /**
+ * The values a child of an org can be given. The API checks a picked value
+ * against them and the console offers them.
+ *
+ * @param list - The parent's `known_as_values` list.
+ * @returns The list, or only the system value when the list is empty.
+ */
+export function knownAsChoices(list: readonly KnownAsEntry[]): KnownAsEntry[] {
+  return list.length > 0 ? [...list] : [{ ...SYSTEM_KNOWN_AS }];
+}
+
+/**
  * One entry of a `known_as_values` list in a request. An existing entry sends
  * its key back to keep it; a new entry sends no key and the API makes one
  * from the name.
@@ -308,12 +319,24 @@ export const OrgSchema = z.object({
 });
 export type Org = z.infer<typeof OrgSchema>;
 
-/** Extra data `GET /v1/org/read/:id` returns only when the `fields` query names it. */
-export const ORG_READ_FIELDS = ['known_as_values', 'known_as_options'] as const;
+/**
+ * Extra data `GET /v1/org/read/:id` returns only when the `fields` query names it.
+ * A dotted name adds data under a nested key: `parent.known_as_values` adds `org.parent`.
+ */
+export const ORG_READ_FIELDS = ['known_as_values', 'parent.known_as_values'] as const;
 
 /** `GET /v1/org/read/:id` query. */
 export const OrgReadQuerySchema = z.object({ fields: fieldsQuerySchema(ORG_READ_FIELDS) });
 export type OrgReadQuery = z.infer<typeof OrgReadQuerySchema>;
+
+/** The parent block of `GET /v1/org/read/:id`. The network admin's root for a top-level org. */
+export const OrgReadParentSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** The parent's stored list; empty when it has none. */
+  known_as_values: KnownAsValuesSchema,
+});
+export type OrgReadParent = z.infer<typeof OrgReadParentSchema>;
 
 /** An organisation as `GET /v1/org/read/:id` returns it. */
 export const OrgReadOrgSchema = OrgSchema.extend({
@@ -323,6 +346,13 @@ export const OrgReadOrgSchema = OrgSchema.extend({
    * at `max_depth`, or it is the Default org.
    */
   known_as_values: KnownAsValuesSchema.nullable().optional(),
+  /**
+   * Only with `fields=parent.known_as_values`. The parent org and its stored
+   * "known as" list, which holds this org's choices (see {@link knownAsChoices}).
+   * Null when the caller cannot set this org's `known_as`: it does not own the
+   * parent, or the org is the root, the Default org or rejected.
+   */
+  parent: OrgReadParentSchema.nullable().optional(),
 });
 export type OrgReadOrg = z.infer<typeof OrgReadOrgSchema>;
 
@@ -334,12 +364,6 @@ export const OrgReadResponseSchema = z.object({
   /** Pending and active direct child orgs, Default excluded. */
   child_count: z.number().int(),
   pending_count: z.number().int(),
-  /**
-   * Only with `fields=known_as_options`. The values the caller can pick for
-   * this org's `known_as`: the parent's list, or only the system value when
-   * that list is empty. Null when the caller does not own the parent.
-   */
-  known_as_options: z.array(KnownAsEntrySchema).nullable().optional(),
 });
 export type OrgReadResponse = z.infer<typeof OrgReadResponseSchema>;
 

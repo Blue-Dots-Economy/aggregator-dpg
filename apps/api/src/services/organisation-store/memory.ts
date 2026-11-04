@@ -14,16 +14,11 @@ import { randomUUID } from 'node:crypto';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import {
   SYSTEM_KNOWN_AS,
+  knownAsChoices,
   type KnownAsValues,
   type KnownAsValuesRequest,
 } from '@aggregator-dpg/shared-primitives/user-org';
-import {
-  defaultKnownAsKey,
-  fillKnownAsKeys,
-  knownAsChoices,
-  knownAsKeyValid,
-  knownAsNameOf,
-} from '../known-as.js';
+import { defaultKnownAsKey, fillKnownAsKeys, knownAsKeyValid, knownAsNameOf } from '../known-as.js';
 import {
   OrganisationStoreBase,
   DEFAULT_ORG_SLUG,
