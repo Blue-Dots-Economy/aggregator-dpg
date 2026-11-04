@@ -59,7 +59,7 @@ const row = (id: string, name: string, over: Partial<Row> = {}): Row => ({
   gst_number: null,
   known_as: null,
   known_as_name: null,
-  child_known_as: [],
+  known_as_values: [],
   depth: 2,
   parent_id: null,
   parent_name: null,
@@ -123,7 +123,6 @@ function mockReads(own: Row[], below: Row[] = []) {
         child_count,
         pending_count,
         known_as_options: null,
-        can_have_children: true,
       } satisfies OrgReadResponse as never;
     }
     if (path === '/v1/user/search') return users as never;

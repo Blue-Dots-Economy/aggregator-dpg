@@ -124,10 +124,10 @@ describe('console routes /v1/user, /v1/org', () => {
   }
 
   /** Sets the root's "known as" list. */
-  async function setRootList(list: Organisation['childKnownAs']): Promise<void> {
+  async function setRootList(list: Organisation['knownAsValues']): Promise<void> {
     const r = await orgs.findRoot();
     if (!r.ok || !r.value) throw new Error('seed');
-    orgs.seedRoot({ ...r.value, childKnownAs: list });
+    orgs.seedRoot({ ...r.value, knownAsValues: list });
   }
 
   /** Re-seeds an org with some fields changed. */
@@ -367,13 +367,13 @@ describe('console routes /v1/user, /v1/org', () => {
     it("returns known_as with its name from the parent's list; depth 0 for the root; Aggregator for a stale key", async () => {
       useHierarchy();
       await setRootList([STATE]);
-      await setOrg(ORG_A, { parentId: ROOT, knownAs: 'state', childKnownAs: [BLOCK] });
+      await setOrg(ORG_A, { parentId: ROOT, knownAs: 'state', knownAsValues: [BLOCK] });
       type Read = {
         org: {
           known_as: string | null;
           known_as_name: string | null;
           depth: number;
-          child_known_as: unknown[];
+          known_as_values: unknown[];
         };
         child_count: number;
       };
@@ -382,7 +382,7 @@ describe('console routes /v1/user, /v1/org', () => {
         known_as: 'state',
         known_as_name: 'State',
         depth: 1,
-        child_known_as: [BLOCK],
+        known_as_values: [BLOCK],
       });
       expect(a.child_count).toBe(0);
       const root = (await get(`/v1/org/read/${ROOT}`, 'na')).json() as Read;
@@ -390,7 +390,7 @@ describe('console routes /v1/user, /v1/org', () => {
         known_as: null,
         known_as_name: null,
         depth: 0,
-        child_known_as: [STATE],
+        known_as_values: [STATE],
       });
       await setOrg(ORG_A, { knownAs: 'retired_key' });
       const stale = (await get(`/v1/org/read/${ORG_A}`, 'a')).json() as Read;
@@ -400,7 +400,7 @@ describe('console routes /v1/user, /v1/org', () => {
     it('offers known_as_options only to the owner of the parent', async () => {
       useHierarchy();
       await setRootList([STATE]);
-      await setOrg(ORG_A, { parentId: ROOT, childKnownAs: [] });
+      await setOrg(ORG_A, { parentId: ROOT, knownAsValues: [] });
       await setOrg(ORG_B, { parentId: ORG_A, parentName: 'Alpha', depth: 2 });
       type Read = { known_as_options: unknown[] | null };
       const read = async (id: string, who: keyof typeof TOKENS) =>
@@ -417,16 +417,17 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(await read(DEFAULT, 'na')).toBeNull();
     });
 
-    it('reports can_have_children from max_depth; false for the Default org', async () => {
+    it('reads known_as_values as null at max_depth and for the Default org', async () => {
       useHierarchy({ max_depth: 2 });
+      await setOrg(ORG_A, { knownAsValues: [BLOCK] });
       await setOrg(ORG_B, { parentId: ORG_A, parentName: 'Alpha', depth: 2 });
-      type Read = { can_have_children: boolean };
-      const can = async (id: string, who: keyof typeof TOKENS) =>
-        ((await get(`/v1/org/read/${id}`, who)).json() as Read).can_have_children;
-      expect(await can(ORG_A, 'a')).toBe(true);
-      expect(await can(ORG_B, 'b')).toBe(false);
-      expect(await can(DEFAULT, 'na')).toBe(false);
-      expect(await can(ROOT, 'na')).toBe(true);
+      type Read = { org: { known_as_values: unknown } };
+      const values = async (id: string, who: keyof typeof TOKENS) =>
+        ((await get(`/v1/org/read/${id}`, who)).json() as Read).org.known_as_values;
+      expect(await values(ORG_A, 'a')).toEqual([BLOCK]);
+      expect(await values(ORG_B, 'b')).toBeNull();
+      expect(await values(DEFAULT, 'na')).toBeNull();
+      expect(await values(ROOT, 'na')).toEqual([]);
     });
   });
 
@@ -892,7 +893,7 @@ describe('console routes /v1/user, /v1/org', () => {
       await setOrg(ORG_A, {
         parentId: ROOT,
         parentName: 'The Network',
-        childKnownAs: [BLOCK, TALUK],
+        knownAsValues: [BLOCK, TALUK],
       });
       await setOrg(ORG_B, { parentId: ORG_A, parentName: 'Alpha', depth: 2 });
     });
@@ -951,7 +952,7 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('allows only aggregator when the parent list is empty', async () => {
-      await setOrg(ORG_A, { childKnownAs: [] });
+      await setOrg(ORG_A, { knownAsValues: [] });
       expect((await setKnownAs('a', { known_as: 'block' })).statusCode).toBe(400);
       expect((await setKnownAs('a', { known_as: 'aggregator' })).statusCode).toBe(200);
     });
@@ -1008,20 +1009,20 @@ describe('console routes /v1/user, /v1/org', () => {
     });
   });
 
-  describe('PATCH /v1/org/child-known-as/update/:id', () => {
+  describe('PATCH /v1/org/known-as/update/:id with known_as_values', () => {
     // ROOT → Alpha (Block, Taluk) → Beta (block), Pending Org (taluk).
     beforeEach(async () => {
       useHierarchy();
       await setOrg(ORG_A, {
         parentId: ROOT,
         parentName: 'The Network',
-        childKnownAs: [BLOCK, TALUK],
+        knownAsValues: [BLOCK, TALUK],
       });
       await setOrg(ORG_B, { parentId: ORG_A, parentName: 'Alpha', depth: 2, knownAs: 'block' });
       await setOrg(ORG_P, { parentId: ORG_A, parentName: 'Alpha', depth: 2, knownAs: 'taluk' });
     });
     const setList = (who: keyof typeof TOKENS, values: object[], id = ORG_A) =>
-      patch(`/v1/org/child-known-as/update/${id}`, who, { values });
+      patch(`/v1/org/known-as/update/${id}`, who, { known_as_values: values });
     const errorOf = (res: { json: () => unknown }) =>
       (res.json() as { error: { code: string; fields?: Record<string, unknown> } }).error;
     const knownAsOf = async (id: string) => {
@@ -1036,7 +1037,7 @@ describe('console routes /v1/user, /v1/org', () => {
         { name: 'Block!' },
       ]);
       expect(res.statusCode).toBe(200);
-      expect((res.json() as { child_known_as: unknown }).child_known_as).toEqual([
+      expect((res.json() as { known_as_values: unknown }).known_as_values).toEqual([
         BLOCK,
         { key: 'jila', name: 'जिला' },
         { key: 'block_2', name: 'Block!' },
@@ -1067,16 +1068,16 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(res.statusCode).toBe(400);
       expect(errorOf(res)).toMatchObject({
         code: 'SCHEMA_VALIDATION',
-        fields: { values: 'unknown_key', index: 1 },
+        fields: { known_as_values: 'unknown_key', index: 1 },
       });
       const a = await orgs.findById(ORG_A);
-      expect(a.ok && a.value?.childKnownAs).toEqual([BLOCK, TALUK]);
+      expect(a.ok && a.value?.knownAsValues).toEqual([BLOCK, TALUK]);
     });
 
     it('gives a re-added name a new key and resets the children of the removed entry', async () => {
       const res = await setList('a', [BLOCK, { name: 'Taluk' }]);
       expect(res.statusCode).toBe(200);
-      expect((res.json() as { child_known_as: unknown }).child_known_as).toEqual([
+      expect((res.json() as { known_as_values: unknown }).known_as_values).toEqual([
         BLOCK,
         { key: 'taluk_2', name: 'Taluk' },
       ]);
@@ -1107,14 +1108,14 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({
         org_type: 'network_facilitator',
-        child_known_as: [{ key: 'state', name: 'State', default: true }],
+        known_as_values: [{ key: 'state', name: 'State', default: true }],
       });
       // Alpha's aggregator value is kept.
       expect(await knownAsOf(ORG_A)).toEqual(['aggregator', 'Aggregator']);
       const h = (await get('/v1/org/hierarchy', 'na')).json() as {
-        network: { child_known_as: unknown };
+        network: { known_as_values: unknown };
       };
-      expect(h.network.child_known_as).toEqual([{ key: 'state', name: 'State', default: true }]);
+      expect(h.network.known_as_values).toEqual([{ key: 'state', name: 'State', default: true }]);
     });
 
     it('refuses the network admin on an org it does not own (403)', async () => {
@@ -1132,8 +1133,18 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('answers 503 when the store fails', async () => {
-      vi.spyOn(orgs, 'setChildKnownAs').mockResolvedValueOnce(storeErr());
+      vi.spyOn(orgs, 'setKnownAsValues').mockResolvedValueOnce(storeErr());
       expect((await setList('a', [])).statusCode).toBe(503);
+    });
+
+    it.each([
+      ['both fields', { known_as: 'block', known_as_values: [] }],
+      ['neither field', {}],
+      ['the list under another name', { values: [] }],
+    ])('refuses a body with %s (400)', async (_label, body) => {
+      const res = await patch(`/v1/org/known-as/update/${ORG_A}`, 'a', body);
+      expect(res.statusCode).toBe(400);
+      expect(errorOf(res).code).toBe('SCHEMA_VALIDATION');
     });
   });
 
@@ -1164,7 +1175,7 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('keeps a key the new parent has and takes the default for one it lacks', async () => {
-      await setOrg(ORG_B, { childKnownAs: [BLOCK, { ...TALUK, default: true }] });
+      await setOrg(ORG_B, { knownAsValues: [BLOCK, { ...TALUK, default: true }] });
       await setOrg(ORG_A, { knownAs: 'block' });
       const kept = await move('na', { parent_id: ORG_B });
       expect(kept.json()).toMatchObject({ known_as: 'block', known_as_name: 'Block', depth: 2 });
@@ -1345,7 +1356,7 @@ describe('console routes /v1/user, /v1/org', () => {
         network: {
           id: ROOT,
           name: 'The Network',
-          child_known_as: [{ ...STATE, default: true }],
+          known_as_values: [{ ...STATE, default: true }],
         },
         limits: { max_depth: 3, max_children: 10, max_total_orgs: 50 },
         total_orgs: 3,

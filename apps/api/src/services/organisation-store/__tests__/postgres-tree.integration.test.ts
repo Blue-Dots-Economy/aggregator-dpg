@@ -23,7 +23,7 @@ import { PostgresOrganisationStore } from '../postgres.js';
 import { permissiveTreeRules } from '../testing.js';
 import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
 import { knownAsKeyValid } from '../../known-as.js';
-import type { ChildKnownAs } from '@aggregator-dpg/shared-primitives/user-org';
+import type { KnownAsValues } from '@aggregator-dpg/shared-primitives/user-org';
 import type { CreateOrgInput, OrgStoreResult } from '../interface.js';
 
 const adminUrl = process.env.INTEGRATION_DATABASE_URL;
@@ -111,14 +111,14 @@ suite('organisation store tree rules (Postgres)', () => {
       `DELETE FROM organisations WHERE org_type = 'aggregator' AND slug <> 'default'`,
     );
     await pool.query(
-      `UPDATE organisations SET child_known_as = '[]'::jsonb, known_as = 'aggregator'
+      `UPDATE organisations SET known_as_values = '[]'::jsonb, known_as = 'aggregator'
         WHERE org_type = 'network_facilitator' OR slug = 'default'`,
     );
   });
 
-  /** Writes an org's `child_known_as` list directly, keys included, for test setup. */
-  async function seedList(id: string, list: ChildKnownAs): Promise<void> {
-    await pool.query('UPDATE organisations SET child_known_as = $2::jsonb WHERE id = $1', [
+  /** Writes an org's `known_as_values` list directly, keys included, for test setup. */
+  async function seedList(id: string, list: KnownAsValues): Promise<void> {
+    await pool.query('UPDATE organisations SET known_as_values = $2::jsonb WHERE id = $1', [
       id,
       JSON.stringify(list),
     ]);
@@ -483,7 +483,7 @@ suite('organisation store tree rules (Postgres)', () => {
     });
   });
 
-  describe('setChildKnownAs', () => {
+  describe('setKnownAsValues', () => {
     it('resets children whose key left the list, in every status, keeping updated_at', async () => {
       const a = await org('a');
       const b = await org('b', a);
@@ -497,8 +497,12 @@ suite('organisation store tree rules (Postgres)', () => {
         x,
       ]);
       const before = await Promise.all([b, p, x, g].map(knownAsRow));
-      const r = await store.setChildKnownAs(a, [TALUK, { name: 'Ward', default: true }], 'owner-a');
-      expect(r.ok && [r.value.resetCount, r.value.org.childKnownAs]).toEqual([
+      const r = await store.setKnownAsValues(
+        a,
+        [TALUK, { name: 'Ward', default: true }],
+        'owner-a',
+      );
+      expect(r.ok && [r.value.resetCount, r.value.org.knownAsValues]).toEqual([
         3,
         [TALUK, { ...WARD, default: true }],
       ]);
@@ -514,7 +518,7 @@ suite('organisation store tree rules (Postgres)', () => {
       await seedList(a, [BLOCK, TALUK]);
       await store.setKnownAs(b, 'block', a, 'test');
       await store.setKnownAs(c, 'taluk', a, 'test');
-      const r = await store.setChildKnownAs(a, [{ key: 'block', name: 'Mandal' }], 'test');
+      const r = await store.setKnownAsValues(a, [{ key: 'block', name: 'Mandal' }], 'test');
       expect(r.ok && r.value.resetCount).toBe(1);
       const rows = await Promise.all([b, c].map((id) => store.findById(id)));
       expect(rows.map((x) => x.ok && [x.value?.knownAs, x.value?.knownAsName])).toEqual([
@@ -529,14 +533,14 @@ suite('organisation store tree rules (Postgres)', () => {
         a,
         defaultId,
       ]);
-      const r = await store.setChildKnownAs(rootId, [{ name: 'State', default: true }], 'admin');
+      const r = await store.setKnownAsValues(rootId, [{ name: 'State', default: true }], 'admin');
       expect(r.ok && [r.value.org.id, r.value.org.knownAsName, r.value.resetCount]).toEqual([
         rootId,
         null,
         1,
       ]);
       const root = await store.findRoot();
-      expect(root.ok && root.value?.childKnownAs).toEqual([{ ...STATE, default: true }]);
+      expect(root.ok && root.value?.knownAsValues).toEqual([{ ...STATE, default: true }]);
       expect((await knownAsRow(a))[0]).toBe('state');
       expect((await knownAsRow(defaultId))[0]).toBe('gone');
       const def = await store.findDefault();
@@ -548,8 +552,8 @@ suite('organisation store tree rules (Postgres)', () => {
       const b = await org('b', a);
       await seedList(a, [STATE, BLOCK]);
       await pool.query(`UPDATE organisations SET known_as = 'state' WHERE id = $1`, [b]);
-      const r = await store.setChildKnownAs(a, [BLOCK, { name: 'State' }], 'owner-a');
-      expect(r.ok && [r.value.resetCount, r.value.org.childKnownAs]).toEqual([
+      const r = await store.setKnownAsValues(a, [BLOCK, { name: 'State' }], 'owner-a');
+      expect(r.ok && [r.value.resetCount, r.value.org.knownAsValues]).toEqual([
         1,
         [BLOCK, { key: 'state_2', name: 'State' }],
       ]);
@@ -559,16 +563,16 @@ suite('organisation store tree rules (Postgres)', () => {
     it('refuses a sent key that is not in the list read under the lock', async () => {
       const a = await org('a');
       await seedList(a, [BLOCK]);
-      const r = await store.setChildKnownAs(a, [{ name: 'New' }, TALUK], 'owner-a');
+      const r = await store.setKnownAsValues(a, [{ name: 'New' }, TALUK], 'owner-a');
       expect(r.ok ? null : r.error).toMatchObject({ code: 'KNOWN_AS_UNKNOWN_KEY', index: 1 });
       const row = await store.findById(a);
-      expect(row.ok && row.value?.childKnownAs).toEqual([BLOCK]);
+      expect(row.ok && row.value?.knownAsValues).toEqual([BLOCK]);
     });
 
     it('refuses the Default org with NOT_EDITABLE and an unknown org with NOT_FOUND', async () => {
-      expect(code(await store.setChildKnownAs(defaultId, [BLOCK], 'x'))).toBe('NOT_EDITABLE');
+      expect(code(await store.setKnownAsValues(defaultId, [BLOCK], 'x'))).toBe('NOT_EDITABLE');
       expect(
-        code(await store.setChildKnownAs('00000000-0000-0000-0000-000000000000', [BLOCK], 'x')),
+        code(await store.setKnownAsValues('00000000-0000-0000-0000-000000000000', [BLOCK], 'x')),
       ).toBe('NOT_FOUND');
     });
   });
@@ -628,7 +632,7 @@ suite('organisation store tree rules (Postgres)', () => {
       const b = await org('b', a);
       await seedList(a, [BLOCK]);
       await withWritesHeld(async () => {
-        const edit = store.setChildKnownAs(a, [{ name: 'Taluk' }], 'test');
+        const edit = store.setKnownAsValues(a, [{ name: 'Taluk' }], 'test');
         await sleep(100);
         const named = store.setKnownAs(b, 'block', a, 'test');
         return Promise.all([edit, named]);

@@ -14,7 +14,7 @@
  */
 
 import type { OrganisationConfig } from '@aggregator-dpg/network-config/interface';
-import type { ChildKnownAs } from '@aggregator-dpg/shared-primitives/user-org';
+import type { KnownAsValues } from '@aggregator-dpg/shared-primitives/user-org';
 import { knownAsKeyValid } from './known-as.js';
 import type {
   Organisation,
@@ -131,15 +131,15 @@ async function countStaleKnownAs(
   store: OrganisationStoreBase,
   orgs: Organisation[],
 ): Promise<number> {
-  const lists = new Map<string, ChildKnownAs>(orgs.map((o) => [o.id, o.childKnownAs]));
+  const lists = new Map<string, KnownAsValues>(orgs.map((o) => [o.id, o.knownAsValues]));
   const root = valueOf(await store.findRoot());
-  if (root) lists.set(root.id, root.childKnownAs);
+  if (root) lists.set(root.id, root.knownAsValues);
   let stale = 0;
   for (const o of orgs) {
     if (o.parentId === null) continue;
     let list = lists.get(o.parentId);
     if (list === undefined) {
-      list = valueOf(await store.findById(o.parentId))?.childKnownAs ?? [];
+      list = valueOf(await store.findById(o.parentId))?.knownAsValues ?? [];
       lists.set(o.parentId, list);
     }
     if (!knownAsKeyValid(list, o.knownAs)) stale += 1;

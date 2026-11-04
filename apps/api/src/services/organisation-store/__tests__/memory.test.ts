@@ -720,7 +720,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
   describe('create', () => {
     it("sets depth from a nested parent and the parent's default known_as", async () => {
       const store = tree();
-      store.seed([org('b', 'a', 2, { childKnownAs: [BLOCK, { ...TALUK, default: true }] })]);
+      store.seed([org('b', 'a', 2, { knownAsValues: [BLOCK, { ...TALUK, default: true }] })]);
       const r = await create(store, 'new', rules(), 'b');
       expect(
         r.ok && [r.value.depth, r.value.knownAs, r.value.knownAsName, r.value.parentId],
@@ -729,7 +729,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('gives aggregator when the parent has no default', async () => {
       const store = tree();
-      store.seed([org('b', 'a', 2, { childKnownAs: [BLOCK] })]);
+      store.seed([org('b', 'a', 2, { knownAsValues: [BLOCK] })]);
       const r = await create(store, 'new', rules(), 'b');
       expect(r.ok && [r.value.knownAs, r.value.knownAsName]).toEqual(['aggregator', 'Aggregator']);
     });
@@ -741,7 +741,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
           id: 'root',
           slug: 'network',
           depth: 0,
-          childKnownAs: [{ key: 'state', name: 'State', default: true }],
+          knownAsValues: [{ key: 'state', name: 'State', default: true }],
         }),
       );
       const r = await create(store, 'top', rules());
@@ -842,7 +842,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
     it("takes the new parent's default known_as, else aggregator", async () => {
       const store = tree();
       store.seed([
-        org('a', 'root', 1, { childKnownAs: [BLOCK, { ...TALUK, default: true }] }),
+        org('a', 'root', 1, { knownAsValues: [BLOCK, { ...TALUK, default: true }] }),
         org('x', 'c', 2, { status: 'inactive', knownAs: 'block' }),
         org('y', 'c', 2, { status: 'inactive', knownAs: 'block' }),
       ]);
@@ -959,10 +959,10 @@ describe('InMemoryOrganisationStore — tree rules', () => {
     it('keeps a key the new parent has and resets one it lacks; orgs below keep theirs', async () => {
       const store = tree();
       store.seed([
-        org('a', 'root', 1, { childKnownAs: [BLOCK, TALUK] }),
-        org('c', 'root', 1, { childKnownAs: [BLOCK, { ...WARD, default: true }] }),
-        org('e', 'root', 1, { childKnownAs: [TALUK] }),
-        org('b', 'a', 2, { knownAs: 'block', childKnownAs: [{ key: 'unit', name: 'Unit' }] }),
+        org('a', 'root', 1, { knownAsValues: [BLOCK, TALUK] }),
+        org('c', 'root', 1, { knownAsValues: [BLOCK, { ...WARD, default: true }] }),
+        org('e', 'root', 1, { knownAsValues: [TALUK] }),
+        org('b', 'a', 2, { knownAs: 'block', knownAsValues: [{ key: 'unit', name: 'Unit' }] }),
         org('deep', 'b', 3, { knownAs: 'unit' }),
         org('t', 'a', 2, { knownAs: 'taluk' }),
       ]);
@@ -982,7 +982,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
     it('keeps aggregator under a new parent that has a default', async () => {
       const store = tree();
       store.seed([
-        org('c', 'root', 1, { childKnownAs: [{ ...WARD, default: true }] }),
+        org('c', 'root', 1, { knownAsValues: [{ ...WARD, default: true }] }),
         org('g', 'a', 2, { knownAs: 'aggregator' }),
       ]);
       const moved = await store.move('g', { parentId: 'c' }, rules());
@@ -1008,10 +1008,10 @@ describe('InMemoryOrganisationStore — tree rules', () => {
           id: 'root',
           slug: 'network',
           depth: 0,
-          childKnownAs: [{ key: 'state', name: 'State' }],
+          knownAsValues: [{ key: 'state', name: 'State' }],
         }),
       );
-      store.seed([org('a', 'root', 1, { childKnownAs: [BLOCK, TALUK] })]);
+      store.seed([org('a', 'root', 1, { knownAsValues: [BLOCK, TALUK] })]);
       return store;
     };
 
@@ -1062,22 +1062,22 @@ describe('InMemoryOrganisationStore — tree rules', () => {
     });
   });
 
-  describe('setChildKnownAs', () => {
+  describe('setKnownAsValues', () => {
     it('resets children whose key left the list to the new default; keeps updated_at', async () => {
       const store = tree();
       const at = new Date('2026-02-01T00:00:00Z');
       store.seed([
-        org('a', 'root', 1, { childKnownAs: [BLOCK, TALUK] }),
+        org('a', 'root', 1, { knownAsValues: [BLOCK, TALUK] }),
         org('b', 'a', 2, { knownAs: 'block', updatedAt: at }),
         org('t', 'a', 2, { knownAs: 'taluk', status: 'inactive', updatedAt: at }),
         org('g', 'a', 2, { knownAs: 'aggregator', updatedAt: at }),
       ]);
-      const r = await store.setChildKnownAs(
+      const r = await store.setKnownAsValues(
         'a',
         [BLOCK, { name: 'Ward', default: true }],
         'owner-a',
       );
-      expect(r.ok && [r.value.resetCount, r.value.org.childKnownAs]).toEqual([
+      expect(r.ok && [r.value.resetCount, r.value.org.knownAsValues]).toEqual([
         1,
         [BLOCK, { ...WARD, default: true }],
       ]);
@@ -1093,10 +1093,10 @@ describe('InMemoryOrganisationStore — tree rules', () => {
     it('resets to aggregator when the new list has no default', async () => {
       const store = tree();
       store.seed([
-        org('a', 'root', 1, { childKnownAs: [BLOCK] }),
+        org('a', 'root', 1, { knownAsValues: [BLOCK] }),
         org('b', 'a', 2, { knownAs: 'block' }),
       ]);
-      const r = await store.setChildKnownAs('a', [], 'owner-a');
+      const r = await store.setKnownAsValues('a', [], 'owner-a');
       expect(r.ok && r.value.resetCount).toBe(1);
       const b = await store.findById('b');
       expect(b.ok && [b.value?.knownAs, b.value?.knownAsName]).toEqual([
@@ -1108,10 +1108,10 @@ describe('InMemoryOrganisationStore — tree rules', () => {
     it('renames an entry: children keep the key and read the new name', async () => {
       const store = tree();
       store.seed([
-        org('a', 'root', 1, { childKnownAs: [BLOCK] }),
+        org('a', 'root', 1, { knownAsValues: [BLOCK] }),
         org('b', 'a', 2, { knownAs: 'block' }),
       ]);
-      const r = await store.setChildKnownAs('a', [{ key: 'block', name: 'Mandal' }], 'owner-a');
+      const r = await store.setKnownAsValues('a', [{ key: 'block', name: 'Mandal' }], 'owner-a');
       expect(r.ok && r.value.resetCount).toBe(0);
       const b = await store.findById('b');
       expect(b.ok && [b.value?.knownAs, b.value?.knownAsName]).toEqual(['block', 'Mandal']);
@@ -1120,14 +1120,14 @@ describe('InMemoryOrganisationStore — tree rules', () => {
     it('writes the root list; the Default org is never reset', async () => {
       const store = tree();
       store.seed([org('a', 'root', 1, { knownAs: 'gone' })]);
-      const r = await store.setChildKnownAs('root', [{ name: 'Ward', default: true }], 'admin');
+      const r = await store.setKnownAsValues('root', [{ name: 'Ward', default: true }], 'admin');
       expect(r.ok && [r.value.org.id, r.value.org.knownAsName, r.value.resetCount]).toEqual([
         'root',
         null,
         1,
       ]);
       const root = await store.findRoot();
-      expect(root.ok && root.value?.childKnownAs).toEqual([{ ...WARD, default: true }]);
+      expect(root.ok && root.value?.knownAsValues).toEqual([{ ...WARD, default: true }]);
       const d0 = await store.findById('d0');
       expect(d0.ok && [d0.value?.knownAs, d0.value?.knownAsName]).toEqual([
         'aggregator',
@@ -1140,11 +1140,11 @@ describe('InMemoryOrganisationStore — tree rules', () => {
     it('gives a new entry a fresh key when a dropped entry had its name', async () => {
       const store = tree();
       store.seed([
-        org('a', 'root', 1, { childKnownAs: [{ key: 'state', name: 'State' }, BLOCK] }),
+        org('a', 'root', 1, { knownAsValues: [{ key: 'state', name: 'State' }, BLOCK] }),
         org('b', 'a', 2, { knownAs: 'state' }),
       ]);
-      const r = await store.setChildKnownAs('a', [BLOCK, { name: 'State' }], 'owner-a');
-      expect(r.ok && [r.value.resetCount, r.value.org.childKnownAs]).toEqual([
+      const r = await store.setKnownAsValues('a', [BLOCK, { name: 'State' }], 'owner-a');
+      expect(r.ok && [r.value.resetCount, r.value.org.knownAsValues]).toEqual([
         1,
         [BLOCK, { key: 'state_2', name: 'State' }],
       ]);
@@ -1154,22 +1154,22 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('refuses a sent key that is not in the stored list and writes nothing', async () => {
       const store = tree();
-      store.seed([org('a', 'root', 1, { childKnownAs: [BLOCK] })]);
+      store.seed([org('a', 'root', 1, { knownAsValues: [BLOCK] })]);
       // The client read [BLOCK, WARD]; WARD was removed before this save.
-      const r = await store.setChildKnownAs('a', [{ name: 'New' }, WARD], 'owner-a');
+      const r = await store.setKnownAsValues('a', [{ name: 'New' }, WARD], 'owner-a');
       expect(r.ok ? null : r.error).toEqual({
         code: 'KNOWN_AS_UNKNOWN_KEY',
         message: expect.any(String),
         index: 1,
       });
       const a = await store.findById('a');
-      expect(a.ok && a.value?.childKnownAs).toEqual([BLOCK]);
+      expect(a.ok && a.value?.knownAsValues).toEqual([BLOCK]);
     });
 
     it('refuses the Default org with NOT_EDITABLE and an unknown org with NOT_FOUND', async () => {
       const store = tree();
-      expect(code(await store.setChildKnownAs('d0', [BLOCK], 'x'))).toBe('NOT_EDITABLE');
-      expect(code(await store.setChildKnownAs('missing', [BLOCK], 'x'))).toBe('NOT_FOUND');
+      expect(code(await store.setKnownAsValues('d0', [BLOCK], 'x'))).toBe('NOT_EDITABLE');
+      expect(code(await store.setKnownAsValues('missing', [BLOCK], 'x'))).toBe('NOT_FOUND');
     });
   });
 

@@ -4,8 +4,8 @@
  *   GET   /v1/org/read/:id              one org within reach, owner and counts
  *   POST  /v1/org/search                orgs within reach (or below one), by name, keyset paged
  *   PATCH /v1/org/metadata/update/:id   org details (owner only)
- *   PATCH /v1/org/known-as/update/:id   an org's "known as" value (the parent's owner)
- *   PATCH /v1/org/child-known-as/update/:id  the "known as" values an org defines for its children (owner)
+ *   PATCH /v1/org/known-as/update/:id   an org's "known as" value (the parent's owner), or the
+ *                                       values it defines for its children (the org's owner)
  *   PATCH /v1/org/parent/update/:id     move an org and the orgs below it (network admin)
  *   GET   /v1/org/parent/options/:id    candidate parents for a move (network admin)
  *   POST  /v1/org/decision/:id          approve / reject a pending org (network admin)
@@ -22,7 +22,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   DecisionRequestSchema,
-  OrgChildKnownAsUpdateRequestSchema,
   OrgDecisionResponseSchema,
   OrgHierarchyResponseSchema,
   OrgKnownAsUpdateRequestSchema,
@@ -34,8 +33,10 @@ import {
   OrgSearchRequestSchema,
   OrgSearchResponseSchema,
   OwnerAccessResponseSchema,
-  type ChildKnownAs,
+  type KnownAsValues,
+  type KnownAsValuesRequest,
   type KnownAsEntry,
+  type OrgKnownAsUpdateRequest,
   type OrgHierarchyResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { httpError } from '../errors/http-error.js';
@@ -169,14 +170,14 @@ async function ownsParentOf(actor: Actor, org: Organisation): Promise<boolean> {
  * @returns The list; empty when the org is not found.
  * @throws {HttpError} DB_UNAVAILABLE.
  */
-async function childKnownAsOf(id: string): Promise<ChildKnownAs> {
+async function knownAsValuesOf(id: string): Promise<KnownAsValues> {
   const store = getOrganisationStore();
   const found = await store.findById(id);
   if (!found.ok) dbDown('orgStore.findById', found.error.message);
-  if (found.value) return found.value.childKnownAs;
+  if (found.value) return found.value.knownAsValues;
   const root = await store.findRoot();
   if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
-  return root.value?.id === id ? root.value.childKnownAs : [];
+  return root.value?.id === id ? root.value.knownAsValues : [];
 }
 
 /**
@@ -187,7 +188,7 @@ async function childKnownAsOf(id: string): Promise<ChildKnownAs> {
  */
 async function knownAsOptionsFor(actor: Actor, org: Organisation): Promise<KnownAsEntry[] | null> {
   if (org.status === 'inactive' || !(await ownsParentOf(actor, org))) return null;
-  return knownAsChoices(await childKnownAsOf(org.parentId!));
+  return knownAsChoices(await knownAsValuesOf(org.parentId!));
 }
 
 /**
@@ -227,7 +228,7 @@ function throwKnownAsError(e: OrgStoreError, subOperation: string): never {
     case 'KNOWN_AS_UNKNOWN_KEY':
       throw httpError('SCHEMA_VALIDATION', {
         detail: 'A value sent a key that is not saved. Send no key for a new value.',
-        fields: { values: 'unknown_key', index: e.index },
+        fields: { known_as_values: 'unknown_key', index: e.index },
       });
     case 'NOT_EDITABLE':
       throw httpError('CONFLICT', { detail: "This organisation's details are not editable." });
@@ -253,7 +254,7 @@ async function readHierarchy(): Promise<OrgHierarchyResponse> {
     network: {
       id: root.value.id,
       name: root.value.displayName,
-      child_known_as: root.value.childKnownAs,
+      known_as_values: root.value.knownAsValues,
     },
     limits: {
       max_depth: hierarchy.max_depth,
@@ -272,6 +273,42 @@ async function childCountsOf(ids: string[]): Promise<Record<string, number>> {
 }
 
 /**
+ * Replaces the "known as" values an org defines for its direct children.
+ * Only the org's owner may, or the network admin for the root.
+ *
+ * @param found - The org, already in the actor's view reach.
+ * @param values - The new list from the request.
+ * @throws {HttpError} CONFLICT for the Default org, FORBIDDEN for a non-owner, and the store refusals.
+ */
+async function setKnownAsValues(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  actor: Actor,
+  { org, orgType }: FoundOrg,
+  values: KnownAsValuesRequest,
+): Promise<FastifyReply> {
+  if (orgType === 'aggregator') {
+    if (org.isDefault) {
+      throw httpError('CONFLICT', { detail: "This organisation's details are not editable." });
+    }
+    if (!ownedOrgIds(actor).includes(org.id)) throw httpError('FORBIDDEN');
+  }
+  await guardWriteRate(actor, reply);
+
+  const updated = await getOrganisationStore().setKnownAsValues(org.id, values, actor.userId);
+  if (!updated.ok) throwKnownAsError(updated.error, 'orgStore.setKnownAsValues');
+  req.log.info({
+    operation: 'console.org.known_as_values',
+    status: 'success',
+    actor_id: actor.userId,
+    target_id: org.id,
+    value_count: updated.value.org.knownAsValues.length,
+    reset_count: updated.value.resetCount,
+  });
+  return reply.status(200).send(toWireOrg(updated.value.org, orgType));
+}
+
+/**
  * Registers the `/v1/org/*` console routes.
  *
  * @param app - Fastify instance to attach the routes to.
@@ -285,7 +322,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: 'One organisation within reach, with its owner and coordinator counts',
         description:
-          'An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked. known_as_options lists the values the caller can pick for the org\'s known_as (the parent\'s list, or only "aggregator" when that list is empty); it is null unless the caller owns the parent (the network admin for a top-level organisation). can_have_children is false for the Default organisation and for an organisation at max_depth.',
+          'An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked. known_as_options lists the values the caller can pick for the org\'s known_as (the parent\'s list, or only "aggregator" when that list is empty); it is null unless the caller owns the parent (the network admin for a top-level organisation). org.known_as_values is null when the organisation cannot have child organisations: the Default organisation, or an organisation at max_depth.',
         params: IdParamsSchema,
         response: { 200: OrgReadResponseSchema, ...errorResponses(401, 403, 404, 503) },
       },
@@ -308,15 +345,16 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         target_id: org.id,
         relation: below ? 'below' : 'own',
       });
+      const childrenAllowed = isRoot || (!org.isDefault && org.depth < hierarchy.max_depth);
+      const wireOrg = toWireOrg(org, orgType);
       return reply.status(200).send({
-        org: toWireOrg(org, orgType),
+        org: childrenAllowed ? wireOrg : { ...wireOrg, known_as_values: null },
         // An org only viewed from above shows its owner's contact masked.
         owner: { id: org.ownerUserId, contact: ownerContact(org, { masked: below }) },
         coordinator_count: c?.total ?? 0,
         child_count: children[org.id] ?? 0,
         pending_count: c?.pending ?? 0,
         known_as_options: isRoot ? null : await knownAsOptionsFor(actor, org),
-        can_have_children: isRoot || (!org.isDefault && org.depth < hierarchy.max_depth),
       });
     },
   );
@@ -438,9 +476,12 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       config: { rbac: { anyCapability: ['org.manage', 'orgs.onboard'] } },
       schema: {
         tags: ['console'],
-        summary: 'Set what an organisation is known as (owner of its parent)',
+        summary:
+          'Set what an organisation is known as, or the "known as" values it defines for the organisations under it',
         description:
-          "Only the owner of the organisation's parent sets it: the network admin for a top-level organisation, else the owner of the parent organisation (an active organisation it owns). An organisation the caller cannot see answers 404; one it sees but whose parent it does not own answers 403. known_as must be a key of the parent's list, or aggregator when that list is empty (400 SCHEMA_VALIDATION with fields.known_as otherwise). The network, the Default organisation and a rejected organisation answer 409, and so does an organisation moved while the request ran (fields.reason: moved). The organisation's owner is emailed when it is not the caller. Sending the current value answers 200 with the organisation unchanged and sends no email.",
+          'The body has exactly one of known_as or known_as_values. An organisation the caller cannot see answers 404.\n\n' +
+          "known_as sets the organisation's own value. Only the owner of the organisation's parent sets it: the network admin for a top-level organisation, else the owner of the parent organisation (an active organisation it owns); anyone else gets 403. known_as must be a key of the parent's list, or aggregator when that list is empty (400 SCHEMA_VALIDATION with fields.known_as otherwise). The network, the Default organisation and a rejected organisation answer 409, and so does an organisation moved while the request ran (fields.reason: moved). The organisation's owner is emailed when it is not the caller. Sending the current value answers 200 with the organisation unchanged and sends no email.\n\n" +
+          "known_as_values replaces the whole list the organisation defines for its direct children. Only the organisation's owner sets it (an active organisation it owns; the network's list for the network admin): 403 when the caller sees but does not own it, 409 for the Default organisation. An entry that is already saved sends its key back and keeps it; a new entry sends only a name, and the API makes its key from the name. A key that is not already in the list answers 400 SCHEMA_VALIDATION (fields.known_as_values: unknown_key, fields.index). At most one entry is the default; new organisations under this one get it, else aggregator. Organisations under this one whose value leaves the list take the default, else aggregator; a renamed entry keeps its key, so they keep it too.",
         params: IdParamsSchema,
         body: OrgKnownAsUpdateRequestSchema,
         response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
@@ -449,8 +490,11 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof OrgKnownAsUpdateRequestSchema>;
+      const body = req.body as OrgKnownAsUpdateRequest;
       const { org, orgType } = await orgInReach(actor, id, 'view');
+      if ('known_as_values' in body) {
+        return setKnownAsValues(req, reply, actor, { org, orgType }, body.known_as_values);
+      }
       if (orgType !== 'aggregator' || org.isDefault || org.status === 'inactive') {
         throw httpError('CONFLICT', {
           detail: 'What this organisation is known as cannot be changed.',
@@ -477,52 +521,6 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       });
       await notifyOwnerOfParentAction(actor, updated.value, req.log);
       return reply.status(200).send(toWireOrg(updated.value));
-    },
-  );
-
-  app.patch(
-    '/v1/org/child-known-as/update/:id',
-    {
-      config: { rbac: { anyCapability: ['org.manage', 'orgs.onboard'] } },
-      schema: {
-        tags: ['console'],
-        summary:
-          'Set the "known as" values an organisation defines for the organisations under it (owner)',
-        description:
-          "Replaces the whole list. Only the organisation's owner sets it (an active organisation it owns; the network's list for the network admin): 404 when the caller cannot see the organisation, 403 when it sees but does not own it, 409 for the Default organisation. An entry that is already saved sends its key back and keeps it; a new entry sends only a name, and the API makes its key from the name. A key that is not already in the list answers 400 SCHEMA_VALIDATION (fields.values: unknown_key, fields.index). At most one entry is the default; new organisations under this one get it, else aggregator. Organisations under this one whose value leaves the list take the default, else aggregator; a renamed entry keeps its key, so they keep it too.",
-        params: IdParamsSchema,
-        body: OrgChildKnownAsUpdateRequestSchema,
-        response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
-      },
-    },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof OrgChildKnownAsUpdateRequestSchema>;
-      const { org, orgType } = await orgInReach(actor, id, 'view');
-      if (orgType === 'aggregator') {
-        if (org.isDefault) {
-          throw httpError('CONFLICT', { detail: "This organisation's details are not editable." });
-        }
-        if (!ownedOrgIds(actor).includes(org.id)) throw httpError('FORBIDDEN');
-      }
-      await guardWriteRate(actor, reply);
-
-      const updated = await getOrganisationStore().setChildKnownAs(
-        org.id,
-        body.values,
-        actor.userId,
-      );
-      if (!updated.ok) throwKnownAsError(updated.error, 'orgStore.setChildKnownAs');
-      req.log.info({
-        operation: 'console.org.child_known_as',
-        status: 'success',
-        actor_id: actor.userId,
-        target_id: org.id,
-        value_count: updated.value.org.childKnownAs.length,
-        reset_count: updated.value.resetCount,
-      });
-      return reply.status(200).send(toWireOrg(updated.value.org, orgType));
     },
   );
 
@@ -709,7 +707,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: 'The network, its "known as" values and the tree limits (network admin)',
         description:
-          'Read-only. The network with the "known as" values it defines for top-level organisations (edited through PATCH /v1/org/child-known-as/update/:id), the tree limits from the instance config, and how many pending and active organisations count toward max_total_orgs. Depth 1 sits directly under the network.',
+          'Read-only. The network with the "known as" values it defines for top-level organisations (edited through PATCH /v1/org/known-as/update/:id with known_as_values), the tree limits from the instance config, and how many pending and active organisations count toward max_total_orgs. Depth 1 sits directly under the network.',
         response: { 200: OrgHierarchyResponseSchema, ...errorResponses(401, 403, 503) },
       },
     },

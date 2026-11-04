@@ -19,7 +19,7 @@ import type { CoordinatorCursor } from '../services/user-store/interface.js';
 import type { OrgCursor } from '../services/organisation-store/interface.js';
 import { isNetworkAdmin, type Actor } from '../services/auth/actor/index.js';
 import { checkConsoleWriteRate } from '../services/console-rate.js';
-import { renderOrgAdminAction, renderOrgParentAction } from '../services/email-templates/index.js';
+import { renderOrgAdminAction, renderOrgKnownAs } from '../services/email-templates/index.js';
 import type { DecisionOutcome } from '../services/decisions/coordinator.js';
 
 /** The console's landing URL, used in owner notices. */
@@ -105,7 +105,7 @@ export function toWireOrg(
     legal_name: o.legalName,
     known_as: isRoot ? null : o.knownAs,
     known_as_name: isRoot ? null : o.knownAsName,
-    child_known_as: o.childKnownAs,
+    known_as_values: o.knownAsValues,
     depth: o.depth,
     parent_id: o.parentId,
     parent_name: o.parentName,
@@ -285,7 +285,7 @@ export async function notifyOwnerOfParentAction(
           action: 'changed what the organisation is known as',
           consoleUrl: consoleUrl(),
         })
-      : renderOrgParentAction({
+      : renderOrgKnownAs({
           orgName: org.displayName,
           parentName: org.parentName,
           consoleUrl: consoleUrl(),
@@ -299,7 +299,7 @@ export async function notifyOwnerOfParentAction(
   if (!sent.ok) {
     log.warn({
       status: 'failure',
-      sub_operation: 'mailer.send.orgParentAction',
+      sub_operation: 'mailer.send.orgKnownAs',
       org_id: org.id,
       code: sent.error.code,
     });

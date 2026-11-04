@@ -12,7 +12,10 @@
  */
 
 import type { AggregatorStatus, BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
-import type { ChildKnownAs, ChildKnownAsRequest } from '@aggregator-dpg/shared-primitives/user-org';
+import type {
+  KnownAsValues,
+  KnownAsValuesRequest,
+} from '@aggregator-dpg/shared-primitives/user-org';
 import type { RecordConsentHook } from '../consent-ledger/hook.js';
 
 /** Slug of the fixed Default org, which holds coordinators with no other org. */
@@ -68,7 +71,7 @@ export interface Organisation {
    */
   knownAsName: string | null;
   /** The "known as" values this org defines for its direct children. Empty for the Default org. */
-  childKnownAs: ChildKnownAs;
+  knownAsValues: KnownAsValues;
   /** Depth in the tree: 0 for the root, 1 for a top-level org. Set by the store on create and move. */
   depth: number;
   /** The parent org's id; the root for a top-level org, `null` for the root itself. */
@@ -371,9 +374,9 @@ export abstract class OrganisationStoreBase {
    * @returns The updated org and the number of children reset; `NOT_FOUND`,
    *   `NOT_EDITABLE` (the Default org) or `KNOWN_AS_UNKNOWN_KEY` when refused.
    */
-  abstract setChildKnownAs(
+  abstract setKnownAsValues(
     id: string,
-    values: ChildKnownAsRequest,
+    values: KnownAsValuesRequest,
     updatedBy: string,
   ): Promise<OrgStoreResult<{ org: Organisation; resetCount: number }>>;
   /**

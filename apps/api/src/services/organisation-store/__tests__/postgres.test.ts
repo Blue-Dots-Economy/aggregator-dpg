@@ -20,7 +20,7 @@ import { PostgresOrganisationStore } from '../postgres.js';
 import { permissiveTreeRules } from '../testing.js';
 import { _setDbClients } from '../../../db/client.js';
 import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
-import type { ChildKnownAs } from '@aggregator-dpg/shared-primitives/user-org';
+import type { KnownAsValues } from '@aggregator-dpg/shared-primitives/user-org';
 import type { Organisation, CreateOrgInput, TreeRules } from '../interface.js';
 
 // ─── Fake Drizzle chain ─────────────────────────────────────────────────────
@@ -140,7 +140,7 @@ function makeRow(overrides: Partial<Organisation> = {}): Organisation {
     legalName: null,
     knownAs: 'aggregator',
     knownAsName: 'Aggregator',
-    childKnownAs: [],
+    knownAsValues: [],
     depth: 1,
     parentId: null,
     parentName: null,
@@ -784,7 +784,7 @@ describe('PostgresOrganisationStore — tree rules', () => {
     ['revive', (s: PostgresOrganisationStore) => s.revive('o1', 'p1', rules)],
     ['move', (s: PostgresOrganisationStore) => s.move('o1', { parentId: 'p1' }, rules)],
     ['setKnownAs', (s: PostgresOrganisationStore) => s.setKnownAs('o1', 'state', 'p1', 'u1')],
-    ['setChildKnownAs', (s: PostgresOrganisationStore) => s.setChildKnownAs('o1', [], 'u1')],
+    ['setKnownAsValues', (s: PostgresOrganisationStore) => s.setKnownAsValues('o1', [], 'u1')],
   ] as const)('%s takes the tree lock as the first statement', async (_name, call) => {
     const statements: string[] = [];
     _setDbClients(
@@ -862,13 +862,13 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     status: string;
     orgType: 'network_facilitator' | 'aggregator';
     slug: string;
-    childKnownAs: ChildKnownAs;
+    knownAsValues: KnownAsValues;
   };
   const node = (
     id: string,
     parentId: string | null,
     depth: number,
-    childKnownAs: ChildKnownAs = [],
+    knownAsValues: KnownAsValues = [],
   ) =>
     ({
       id,
@@ -877,7 +877,7 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
       status: 'active',
       orgType: parentId === null ? 'network_facilitator' : 'aggregator',
       slug: id,
-      childKnownAs,
+      knownAsValues,
     }) as NodeRow;
 
   /** A joined read row (`selectJoined`), built from a domain row like makeFakeDb does. */
@@ -895,7 +895,7 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     },
     ownerKcSub: r.ownerKcSub,
     parentName: r.parentName,
-    parentChildKnownAs: [],
+    parentKnownAsValues: [],
     c: {
       id: 'c'.repeat(64),
       email: r.ownerEmail,
@@ -912,8 +912,8 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     moved?: Array<{ id: string }>;
     /** move: the moved org's key and the new parent's list. */
     current?: string;
-    list?: ChildKnownAs;
-    /** setKnownAs / setChildKnownAs: the target row. */
+    list?: KnownAsValues;
+    /** setKnownAs / setKnownAsValues: the target row. */
     target?: Record<string, unknown> | null;
     /** revive: the rejected row, a child, the parent, live counts. */
     rejected?: { status: string } | null;
@@ -921,7 +921,7 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     parent?: NodeRow;
     live?: number;
     read?: Organisation;
-    /** setChildKnownAs: the children the reset returns. */
+    /** setKnownAsValues: the children the reset returns. */
     resetIds?: Array<{ id: string }>;
   }
 
@@ -958,8 +958,8 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
       if (fields.length === 1 && fields[0] === 'knownAs') {
         return [{ knownAs: script.current ?? 'aggregator' }];
       }
-      if (fields.length === 1 && fields[0] === 'childKnownAs') {
-        return [{ childKnownAs: script.list ?? [] }];
+      if (fields.length === 1 && fields[0] === 'knownAsValues') {
+        return [{ knownAsValues: script.list ?? [] }];
       }
       if (fields.length === 3 && fields.includes('slug')) {
         return script.target ? [script.target] : [];
@@ -1150,16 +1150,16 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     expect((await s.store.setKnownAs('o1', 'aggregator', 'p1', 'u1')).ok).toBe(true);
   });
 
-  it('setChildKnownAs writes the root by id and resets children outside the list', async () => {
+  it('setKnownAsValues writes the root by id and resets children outside the list', async () => {
     const list = [{ key: 'ward', name: 'Ward', default: true as const }];
     const s = scripted({
-      target: { orgType: 'network_facilitator', slug: 'network', childKnownAs: [] },
+      target: { orgType: 'network_facilitator', slug: 'network', knownAsValues: [] },
       resetIds: [{ id: 'x' }, { id: 'y' }],
-      read: makeRow({ id: 'root', childKnownAs: list }),
+      read: makeRow({ id: 'root', knownAsValues: list }),
     });
-    const r = await s.store.setChildKnownAs('root', [{ name: 'Ward', default: true }], 'admin');
+    const r = await s.store.setKnownAsValues('root', [{ name: 'Ward', default: true }], 'admin');
     expect(r.ok && r.value.resetCount).toBe(2);
-    expect(s.sets[0]).toMatchObject({ childKnownAs: list, updatedBy: 'admin' });
+    expect(s.sets[0]).toMatchObject({ knownAsValues: list, updatedBy: 'admin' });
     // The list write is not limited to aggregator orgs, so the root can be written.
     expect(s.wheres[0]).not.toContain('org_type');
     // The reset sets only known_as (updated_at is kept) and skips aggregator, the list and Default.
@@ -1169,25 +1169,25 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     expect(s.wheres[1]).toContain('"known_as" not in');
   });
 
-  it('setChildKnownAs refuses the Default org and an unknown org', async () => {
-    const def = scripted({ target: { orgType: 'aggregator', slug: 'default', childKnownAs: [] } });
-    const r = await def.store.setChildKnownAs('d0', [], 'u1');
+  it('setKnownAsValues refuses the Default org and an unknown org', async () => {
+    const def = scripted({ target: { orgType: 'aggregator', slug: 'default', knownAsValues: [] } });
+    const r = await def.store.setKnownAsValues('d0', [], 'u1');
     expect(!r.ok && r.error.code).toBe('NOT_EDITABLE');
     expect(def.sets).toEqual([]);
     const none = scripted({ target: null });
-    const n = await none.store.setChildKnownAs('x', [], 'u1');
+    const n = await none.store.setKnownAsValues('x', [], 'u1');
     expect(!n.ok && n.error.code).toBe('NOT_FOUND');
   });
 
-  it('setChildKnownAs refuses a sent key not in the list read under the lock', async () => {
+  it('setKnownAsValues refuses a sent key not in the list read under the lock', async () => {
     const s = scripted({
       target: {
         orgType: 'aggregator',
         slug: 'o1',
-        childKnownAs: [{ key: 'block', name: 'Block' }],
+        knownAsValues: [{ key: 'block', name: 'Block' }],
       },
     });
-    const r = await s.store.setChildKnownAs(
+    const r = await s.store.setKnownAsValues(
       'o1',
       [
         { key: 'block', name: 'Block' },
@@ -1199,19 +1199,19 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     expect(s.sets).toEqual([]);
   });
 
-  it('setChildKnownAs makes a new key that is not a dropped key of the stored list', async () => {
+  it('setKnownAsValues makes a new key that is not a dropped key of the stored list', async () => {
     const s = scripted({
       target: {
         orgType: 'aggregator',
         slug: 'o1',
-        childKnownAs: [{ key: 'state', name: 'State' }],
+        knownAsValues: [{ key: 'state', name: 'State' }],
       },
       resetIds: [{ id: 'x' }],
       read: makeRow({ id: 'o1' }),
     });
-    const r = await s.store.setChildKnownAs('o1', [{ name: 'State' }], 'u1');
+    const r = await s.store.setKnownAsValues('o1', [{ name: 'State' }], 'u1');
     expect(r.ok && r.value.resetCount).toBe(1);
-    expect(s.sets[0]).toMatchObject({ childKnownAs: [{ key: 'state_2', name: 'State' }] });
+    expect(s.sets[0]).toMatchObject({ knownAsValues: [{ key: 'state_2', name: 'State' }] });
   });
 
   it('revive answers NOT_FOUND when the org is no longer rejected', async () => {

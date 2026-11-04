@@ -41,7 +41,6 @@ exports[`declared route table > declares every route of the app 1`] = `
   "GET /v1/user/roles/:id": "org.manage",
   "PATCH /v1/aggregators/profile/me": "self",
   "PATCH /v1/links/:id": "profiles.onboard",
-  "PATCH /v1/org/child-known-as/update/:id": "org.manage|orgs.onboard",
   "PATCH /v1/org/known-as/update/:id": "org.manage|orgs.onboard",
   "PATCH /v1/org/metadata/update/:id": "org.manage|orgs.onboard",
   "PATCH /v1/org/parent/update/:id": "network.administer",

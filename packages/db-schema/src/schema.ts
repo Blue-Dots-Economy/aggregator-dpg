@@ -42,7 +42,7 @@ import {
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
-import type { ChildKnownAs } from '@aggregator-dpg/shared-primitives/user-org';
+import type { KnownAsValues } from '@aggregator-dpg/shared-primitives/user-org';
 
 export type {
   BecknContact,
@@ -382,8 +382,8 @@ export const organisations = pgTable(
      * The "known as" values this org defines for its direct children (migration 0034).
      * Entries are validated by the API; the database checks only that it is an array.
      */
-    childKnownAs: jsonb('child_known_as')
-      .$type<ChildKnownAs>()
+    knownAsValues: jsonb('known_as_values')
+      .$type<KnownAsValues>()
       .notNull()
       .default(sql`'[]'::jsonb`),
     /** Depth in the tree: root 0, top-level 1. Set by the store (migration 0032). */

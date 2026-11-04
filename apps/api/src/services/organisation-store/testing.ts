@@ -72,7 +72,7 @@ export function buildOrganisation(overrides: Partial<Organisation> = {}): Organi
     legalName: null,
     knownAs: SYSTEM_KNOWN_AS.key,
     knownAsName: SYSTEM_KNOWN_AS.name,
-    childKnownAs: [],
+    knownAsValues: [],
     depth: 1,
     parentId: null,
     parentName: null,

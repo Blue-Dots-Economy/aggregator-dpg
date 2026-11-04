@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { sendConsole, errorKey, setOrgKnownAs, setOrgChildKnownAs } from '@/lib/console-client';
+import { sendConsole, errorKey, setOrgKnownAs, setOrgKnownAsValues } from '@/lib/console-client';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -66,16 +66,19 @@ describe('known_as calls (console-client)', () => {
     );
   });
 
-  it('setOrgChildKnownAs sends the list to the child-known-as route', async () => {
+  it('setOrgKnownAsValues sends the list to the known-as route', async () => {
     vi.mocked(global.fetch).mockResolvedValue(json({ id: ID }));
     const values = [
       { key: 'district', name: 'District' },
       { name: 'Block', default: true as const },
     ];
-    await setOrgChildKnownAs(ID, values);
+    await setOrgKnownAsValues(ID, values);
     expect(global.fetch).toHaveBeenCalledWith(
-      `/api/console/org/child-known-as/${ID}`,
-      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ values }) }),
+      `/api/console/org/known-as/${ID}`,
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ known_as_values: values }),
+      }),
     );
   });
 });
@@ -124,13 +127,13 @@ describe('errorKey (console-client)', () => {
       }),
     ).toBe('errors.known_as_invalid');
   });
-  it('maps a known-as list key that is not saved to known_as_list_changed', () => {
+  it('maps a known-as list key that is not saved to known_as_values_changed', () => {
     expect(
       errorKey({
         status: 400,
-        error: { code: 'SCHEMA_VALIDATION', fields: { values: 'unknown_key', index: 1 } },
+        error: { code: 'SCHEMA_VALIDATION', fields: { known_as_values: 'unknown_key', index: 1 } },
       }),
-    ).toBe('errors.known_as_list_changed');
+    ).toBe('errors.known_as_values_changed');
   });
   it.each([
     [0, 'errors.network'],

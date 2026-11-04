@@ -1,5 +1,6 @@
 /**
- * Console BFF: set an organisation's "known as" value (owner of its parent).
+ * Console BFF: set an organisation's "known as" value (`known_as`, owner of its
+ * parent) or the values it defines for its children (`known_as_values`, its owner).
  *   PATCH /api/console/org/known-as/:id → API PATCH /v1/org/known-as/update/:id
  *
  * Guarded by `consoleMutation` (JSON body, same-origin) and sent with the

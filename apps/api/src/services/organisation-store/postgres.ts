@@ -13,7 +13,7 @@
  * once it owns no org.
  *
  * Every read joins the parent row, so `knownAsName` is resolved from the
- * parent's `child_known_as` list with no second query.
+ * parent's `known_as_values` list with no second query.
  */
 
 import {
@@ -35,8 +35,8 @@ import { organisations, contact, userIdentities, users } from '../../db/schema.j
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import {
   SYSTEM_KNOWN_AS,
-  type ChildKnownAs,
-  type ChildKnownAsRequest,
+  type KnownAsValues,
+  type KnownAsValuesRequest,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import {
   defaultKnownAsKey,
@@ -148,7 +148,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
             orgOwner: ownerUserId,
             kcGroupId: input.kcGroupId ?? null,
             locations: input.locations ?? [],
-            knownAs: defaultKnownAsKey(parent.childKnownAs),
+            knownAs: defaultKnownAsKey(parent.knownAsValues),
             profile: input.profile ?? {},
             profileRef: input.profileRef ?? null,
             createdBy: 'self',
@@ -219,7 +219,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           .set({
             parentId: parent.id,
             depth,
-            knownAs: defaultKnownAsKey(parent.childKnownAs),
+            knownAs: defaultKnownAsKey(parent.knownAsValues),
             status: 'pending',
             rejectedAt: null,
             updatedAt: new Date(),
@@ -264,7 +264,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           .select({ knownAs: organisations.knownAs })
           .from(organisations)
           .where(eq(organisations.id, id));
-        const newList = await childKnownAsOf(tx, change.parentId);
+        const newList = await knownAsValuesOf(tx, change.parentId);
         const keep = current !== undefined && knownAsKeyValid(newList, current.knownAs);
         await tx
           .update(organisations)
@@ -489,7 +489,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           throw new TreeRefusalError('NOT_EDITABLE');
         }
         if (org.parentId !== expectedParentId) throw new TreeRefusalError('ORG_MOVED');
-        const list = await childKnownAsOf(tx, expectedParentId);
+        const list = await knownAsValuesOf(tx, expectedParentId);
         if (!knownAsChoices(list).some((e) => e.key === key)) {
           throw new TreeRefusalError('KNOWN_AS_INVALID');
         }
@@ -507,9 +507,9 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
     }
   }
 
-  async setChildKnownAs(
+  async setKnownAsValues(
     id: string,
-    requested: ChildKnownAsRequest,
+    requested: KnownAsValuesRequest,
     updatedBy: string,
   ): Promise<OrgStoreResult<{ org: Organisation; resetCount: number }>> {
     const start = Date.now();
@@ -521,7 +521,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           .select({
             orgType: organisations.orgType,
             slug: organisations.slug,
-            childKnownAs: organisations.childKnownAs,
+            knownAsValues: organisations.knownAsValues,
           })
           .from(organisations)
           .where(eq(organisations.id, id))
@@ -530,12 +530,12 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
         if (org.orgType === 'aggregator' && org.slug === DEFAULT_ORG_SLUG) {
           throw new TreeRefusalError('NOT_EDITABLE');
         }
-        const filled = fillKnownAsKeys(requested, org.childKnownAs);
+        const filled = fillKnownAsKeys(requested, org.knownAsValues);
         if (!filled.ok) throw new UnknownKnownAsKeyError(filled.error.index);
         const values = filled.value;
         await tx
           .update(organisations)
-          .set({ childKnownAs: values, updatedBy, updatedAt: new Date() })
+          .set({ knownAsValues: values, updatedBy, updatedAt: new Date() })
           .where(eq(organisations.id, id));
         // Children whose key left the list take the new default. updated_at is
         // left alone, so the pending clean-up timing does not move.
@@ -558,7 +558,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       });
       if (!result) return errResult('NOT_FOUND', id);
       logger.info({
-        operation: 'orgStore.setChildKnownAs',
+        operation: 'orgStore.setKnownAsValues',
         status: 'success',
         org_id: id,
         reset_count: result.resetCount,
@@ -566,10 +566,10 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       });
       return { ok: true, value: result };
     } catch (e) {
-      if (e instanceof TreeRefusalError) return refusal('orgStore.setChildKnownAs', e, start);
+      if (e instanceof TreeRefusalError) return refusal('orgStore.setKnownAsValues', e, start);
       if (e instanceof UnknownKnownAsKeyError) {
         logger.warn({
-          operation: 'orgStore.setChildKnownAs',
+          operation: 'orgStore.setKnownAsValues',
           status: 'failure',
           error: 'KNOWN_AS_UNKNOWN_KEY',
           index: e.index,
@@ -580,7 +580,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           error: { code: 'KNOWN_AS_UNKNOWN_KEY', message: 'refused: unknown key', index: e.index },
         };
       }
-      return mapDbError('orgStore.setChildKnownAs', e);
+      return mapDbError('orgStore.setKnownAsValues', e);
     }
   }
 
@@ -761,7 +761,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
         c: contact,
         ownerKcSub: userIdentities.subject,
         parentName: parentOrg.name,
-        parentChildKnownAs: parentOrg.childKnownAs,
+        parentKnownAsValues: parentOrg.knownAsValues,
       })
       .from(organisations)
       .leftJoin(parentOrg, eq(parentOrg.id, organisations.parentId))
@@ -820,7 +820,7 @@ type JoinedRow = {
   c: typeof contact.$inferSelect;
   ownerKcSub: string | null;
   parentName: string | null;
-  parentChildKnownAs: ChildKnownAs | null;
+  parentKnownAsValues: KnownAsValues | null;
 };
 
 function toDomain(row: JoinedRow): Organisation {
@@ -830,7 +830,7 @@ function toDomain(row: JoinedRow): Organisation {
   if (o.orgType !== 'network_facilitator') {
     knownAsName = isDefault
       ? SYSTEM_KNOWN_AS.name
-      : knownAsNameOf(row.parentChildKnownAs ?? [], o.knownAs);
+      : knownAsNameOf(row.parentKnownAsValues ?? [], o.knownAs);
   }
   return {
     id: o.id,
@@ -856,7 +856,7 @@ function toDomain(row: JoinedRow): Organisation {
     legalName: o.legalName,
     knownAs: o.knownAs,
     knownAsName,
-    childKnownAs: o.childKnownAs ?? [],
+    knownAsValues: o.knownAsValues ?? [],
     depth: o.depth,
     parentId: o.parentId,
     parentName: row.parentName,
@@ -877,13 +877,13 @@ function toDomain(row: JoinedRow): Organisation {
 async function resolveParent(
   tx: DbExecutor,
   requested: string | undefined,
-): Promise<{ id: string; depth: number; childKnownAs: ChildKnownAs }> {
+): Promise<{ id: string; depth: number; knownAsValues: KnownAsValues }> {
   if (requested === undefined) {
     const [root] = await tx
       .select({
         id: organisations.id,
         depth: organisations.depth,
-        childKnownAs: organisations.childKnownAs,
+        knownAsValues: organisations.knownAsValues,
       })
       .from(organisations)
       .where(eq(organisations.orgType, 'network_facilitator'))
@@ -892,7 +892,7 @@ async function resolveParent(
     return root;
   }
   const [parent] = await tx
-    .select({ ...NODE_COLUMNS, childKnownAs: organisations.childKnownAs })
+    .select({ ...NODE_COLUMNS, knownAsValues: organisations.knownAsValues })
     .from(organisations)
     .where(eq(organisations.id, requested))
     .for('share')
@@ -945,13 +945,13 @@ function toNode(row: NodeRow): TreeNode {
  * @param id - The org id.
  * @returns The list; empty when the org is absent.
  */
-async function childKnownAsOf(db: DbExecutor, id: string): Promise<ChildKnownAs> {
+async function knownAsValuesOf(db: DbExecutor, id: string): Promise<KnownAsValues> {
   const [row] = await db
-    .select({ childKnownAs: organisations.childKnownAs })
+    .select({ knownAsValues: organisations.knownAsValues })
     .from(organisations)
     .where(eq(organisations.id, id))
     .limit(1);
-  return row?.childKnownAs ?? [];
+  return row?.knownAsValues ?? [];
 }
 
 /** Reads every org, the root included, as a tree snapshot. */

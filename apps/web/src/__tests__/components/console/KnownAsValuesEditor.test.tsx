@@ -1,5 +1,5 @@
 /**
- * Unit tests for ChildKnownAsEditor: the "known as" values an organisation
+ * Unit tests for KnownAsValuesEditor: the "known as" values an organisation
  * defines for the organisations under it.
  *
  * Covers: the empty state, saved rows with their default, adding, renaming
@@ -16,18 +16,18 @@ import messages from '@/i18n/messages/en.json';
 import {
   KNOWN_AS_MAX_VALUES,
   KNOWN_AS_NAME_MAX,
-  type ChildKnownAs,
+  type KnownAsValues,
 } from '@aggregator-dpg/shared-primitives/user-org';
 
 const refresh = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
 
-import { ChildKnownAsEditor } from '@/components/console/ChildKnownAsEditor';
+import { KnownAsValuesEditor } from '@/components/console/KnownAsValuesEditor';
 
 const ORG = '00000000-0000-4000-8000-0000000000b1';
 const m = messages.console.org;
 
-const SAVED: ChildKnownAs = [
+const SAVED: KnownAsValues = [
   { key: 'district', name: 'District', default: true },
   { key: 'block', name: 'Block' },
 ];
@@ -35,10 +35,10 @@ const SAVED: ChildKnownAs = [
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-function renderIt(values: ChildKnownAs = SAVED) {
+function renderIt(values: KnownAsValues = SAVED) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <ChildKnownAsEditor orgId={ORG} values={values} />
+      <KnownAsValuesEditor orgId={ORG} values={values} />
     </NextIntlClientProvider>,
   );
 }
@@ -53,7 +53,7 @@ function sentBody(): unknown {
   return JSON.parse(String((call?.[1] as { body: string }).body));
 }
 
-describe('<ChildKnownAsEditor />', () => {
+describe('<KnownAsValuesEditor />', () => {
   const original = global.fetch;
   beforeEach(() => {
     vi.clearAllMocks();
@@ -65,9 +65,9 @@ describe('<ChildKnownAsEditor />', () => {
 
   it('shows the empty state and the notes when there are no values', () => {
     renderIt([]);
-    expect(screen.getByText(m.child_known_as_empty)).toBeInTheDocument();
-    expect(screen.getByText(m.child_known_as_default_note)).toBeInTheDocument();
-    expect(screen.getByText(m.child_known_as_remove_note)).toBeInTheDocument();
+    expect(screen.getByText(m.known_as_values_empty)).toBeInTheDocument();
+    expect(screen.getByText(m.known_as_values_default_note)).toBeInTheDocument();
+    expect(screen.getByText(m.known_as_values_remove_note)).toBeInTheDocument();
     expect(save()).toBeDisabled();
   });
 
@@ -88,20 +88,20 @@ describe('<ChildKnownAsEditor />', () => {
       { key: 'block', name: 'Block' },
       { key: 'ward', name: 'Ward', default: true },
     ];
-    vi.mocked(global.fetch).mockResolvedValue(json({ id: ORG, child_known_as: after }));
+    vi.mocked(global.fetch).mockResolvedValue(json({ id: ORG, known_as_values: after }));
     renderIt();
     fireEvent.change(nameField(1), { target: { value: 'Zone' } });
-    fireEvent.click(screen.getByRole('button', { name: m.child_known_as_add }));
+    fireEvent.click(screen.getByRole('button', { name: m.known_as_values_add }));
     fireEvent.change(nameField(3), { target: { value: '  Ward ' } });
     fireEvent.click(defaults()[2]!);
     fireEvent.click(save());
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(global.fetch).toHaveBeenCalledWith(
-      `/api/console/org/child-known-as/${ORG}`,
+      `/api/console/org/known-as/${ORG}`,
       expect.objectContaining({ method: 'PATCH' }),
     );
     expect(sentBody()).toEqual({
-      values: [
+      known_as_values: [
         { key: 'district', name: 'Zone' },
         { key: 'block', name: 'Block' },
         { name: 'Ward', default: true },
@@ -112,23 +112,23 @@ describe('<ChildKnownAsEditor />', () => {
   });
 
   it('removes a row and clears the default when it was the default', async () => {
-    vi.mocked(global.fetch).mockResolvedValue(json({ id: ORG, child_known_as: [SAVED[1]] }));
+    vi.mocked(global.fetch).mockResolvedValue(json({ id: ORG, known_as_values: [SAVED[1]] }));
     renderIt();
     fireEvent.click(screen.getByRole('button', { name: 'Remove District' }));
-    expect(screen.getByRole('radio', { name: m.child_known_as_no_default })).toBeChecked();
+    expect(screen.getByRole('radio', { name: m.known_as_values_no_default })).toBeChecked();
     fireEvent.click(save());
     await waitFor(() => expect(global.fetch).toHaveBeenCalled());
-    expect(sentBody()).toEqual({ values: [{ key: 'block', name: 'Block' }] });
+    expect(sentBody()).toEqual({ known_as_values: [{ key: 'block', name: 'Block' }] });
   });
 
   it('sends no default when "No default" is chosen', async () => {
-    vi.mocked(global.fetch).mockResolvedValue(json({ id: ORG, child_known_as: [] }));
+    vi.mocked(global.fetch).mockResolvedValue(json({ id: ORG, known_as_values: [] }));
     renderIt();
-    fireEvent.click(screen.getByRole('radio', { name: m.child_known_as_no_default }));
+    fireEvent.click(screen.getByRole('radio', { name: m.known_as_values_no_default }));
     fireEvent.click(save());
     await waitFor(() => expect(global.fetch).toHaveBeenCalled());
     expect(sentBody()).toEqual({
-      values: [
+      known_as_values: [
         { key: 'district', name: 'District' },
         { key: 'block', name: 'Block' },
       ],
@@ -137,12 +137,12 @@ describe('<ChildKnownAsEditor />', () => {
 
   it('refuses an empty or repeated name before sending', () => {
     renderIt();
-    fireEvent.click(screen.getByRole('button', { name: m.child_known_as_add }));
+    fireEvent.click(screen.getByRole('button', { name: m.known_as_values_add }));
     fireEvent.click(save());
-    expect(screen.getByText(m.child_known_as_name_required)).toBeInTheDocument();
+    expect(screen.getByText(m.known_as_values_name_required)).toBeInTheDocument();
     fireEvent.change(nameField(3), { target: { value: 'district ' } });
     fireEvent.click(save());
-    expect(screen.getByText(m.child_known_as_name_repeated)).toBeInTheDocument();
+    expect(screen.getByText(m.known_as_values_name_repeated)).toBeInTheDocument();
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -152,7 +152,7 @@ describe('<ChildKnownAsEditor />', () => {
       name: `Value ${i}`,
     }));
     renderIt(full);
-    expect(screen.getByRole('button', { name: m.child_known_as_add })).toBeDisabled();
+    expect(screen.getByRole('button', { name: m.known_as_values_add })).toBeDisabled();
     expect(
       screen.getByText(`You can have up to ${KNOWN_AS_MAX_VALUES} values.`),
     ).toBeInTheDocument();
@@ -171,7 +171,7 @@ describe('<ChildKnownAsEditor />', () => {
     const { rerender } = renderIt();
     rerender(
       <NextIntlClientProvider locale="en" messages={messages}>
-        <ChildKnownAsEditor orgId={ORG} values={[{ key: 'ward', name: 'Ward' }]} />
+        <KnownAsValuesEditor orgId={ORG} values={[{ key: 'ward', name: 'Ward' }]} />
       </NextIntlClientProvider>,
     );
     expect(nameField(1)).toHaveValue('Ward');
@@ -180,7 +180,7 @@ describe('<ChildKnownAsEditor />', () => {
 
   it("names each row's default and remove controls after the row", () => {
     renderIt();
-    fireEvent.click(screen.getByRole('button', { name: m.child_known_as_add }));
+    fireEvent.click(screen.getByRole('button', { name: m.known_as_values_add }));
     expect(screen.getByRole('radio', { name: 'Make District the default' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'Make Block the default' })).not.toBeChecked();
     expect(screen.getByRole('radio', { name: 'Make value 3 the default' })).toBeInTheDocument();
@@ -201,11 +201,11 @@ describe('<ChildKnownAsEditor />', () => {
     expect(nameField(2)).toBeDisabled();
     for (const radio of screen.getAllByRole('radio')) expect(radio).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Remove District' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: m.child_known_as_add })).toBeDisabled();
+    expect(screen.getByRole('button', { name: m.known_as_values_add })).toBeDisabled();
     finish(
       json({
         id: ORG,
-        child_known_as: [SAVED[0], { key: 'block', name: 'Taluk' }],
+        known_as_values: [SAVED[0], { key: 'block', name: 'Taluk' }],
       }),
     );
     await waitFor(() => expect(nameField(1)).toBeEnabled());
@@ -217,7 +217,7 @@ describe('<ChildKnownAsEditor />', () => {
     fireEvent.change(nameField(2), { target: { value: 'Mandal' } });
     rerender(
       <NextIntlClientProvider locale="en" messages={messages}>
-        <ChildKnownAsEditor orgId={ORG} values={SAVED.map((e) => ({ ...e }))} />
+        <KnownAsValuesEditor orgId={ORG} values={SAVED.map((e) => ({ ...e }))} />
       </NextIntlClientProvider>,
     );
     expect(nameField(2)).toHaveValue('Mandal');

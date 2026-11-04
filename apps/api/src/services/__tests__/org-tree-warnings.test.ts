@@ -25,7 +25,7 @@ function seeded(): OrganisationStoreFake {
       slug: 'network',
       status: 'active',
       depth: 0,
-      childKnownAs: [{ key: 'state', name: 'State' }],
+      knownAsValues: [{ key: 'state', name: 'State' }],
     }),
   );
   store.seed([
@@ -122,7 +122,7 @@ describe('warnOrgTreeOverLimits', () => {
         status: 'active',
         parentId: 'a',
         depth: 2,
-        childKnownAs: [{ key: 'state', name: 'State' }],
+        knownAsValues: [{ key: 'state', name: 'State' }],
       }),
       buildOrganisation({ id: 'e', slug: 'e', parentId: 'b', depth: 3 }),
     ]);
@@ -140,7 +140,7 @@ describe('warnOrgTreeOverLimits', () => {
         status: 'inactive',
         parentId: 'b',
         depth: 3,
-        childKnownAs: [{ key: 'block', name: 'Block' }],
+        knownAsValues: [{ key: 'block', name: 'Block' }],
       }),
       buildOrganisation({ id: 'f', slug: 'f', parentId: 'd', depth: 3, knownAs: 'block' }),
       buildOrganisation({ id: 'g', slug: 'g', parentId: 'd', depth: 3, knownAs: 'gone' }),

@@ -286,16 +286,6 @@
     },
     {
       "method": "PATCH",
-      "path": "/v1/org/child-known-as/update/:id",
-      "access": {
-        "anyCapability": [
-          "org.manage",
-          "orgs.onboard"
-        ]
-      }
-    },
-    {
-      "method": "PATCH",
       "path": "/v1/org/known-as/update/:id",
       "access": {
         "anyCapability": [

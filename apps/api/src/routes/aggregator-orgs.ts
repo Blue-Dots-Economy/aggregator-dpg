@@ -647,7 +647,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
             name: o.displayName,
             is_root: isRoot,
             known_as_name: isRoot ? null : o.knownAsName,
-            child_known_as_name: knownAsNameOf(o.childKnownAs, defaultKnownAsKey(o.childKnownAs)),
+            child_known_as_name: knownAsNameOf(o.knownAsValues, defaultKnownAsKey(o.knownAsValues)),
           };
         });
       const accepting = total.value < rules.maxTotalOrgs && parents.length > 0;

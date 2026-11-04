@@ -1,8 +1,8 @@
 /**
- * Integration test for migration 0034 (`org_child_known_as`) against a live
+ * Integration test for migration 0034 (`org_known_as_values`) against a live
  * Postgres: a database at 0033 holding a nested org tree with config-era
  * `known_as` keys is upgraded, and the result is checked — the new
- * `child_known_as` column and its CHECK, the `known_as` reset, unchanged
+ * `known_as_values` column and its CHECK, the `known_as` reset, unchanged
  * depth and `updated_at`, and a re-run.
  *
  * Skipped unless `INTEGRATION_DATABASE_URL` is set; the URL is only used to
@@ -41,7 +41,7 @@ interface OrgRow {
   id: string;
   known_as: string;
   depth: number;
-  child_known_as: unknown;
+  known_as_values: unknown;
   updated_at: Date;
 }
 
@@ -74,7 +74,7 @@ async function seedOrg(
   return r.id;
 }
 
-suite('org child_known_as (migration 0034) — integration', () => {
+suite('org known_as_values (migration 0034) — integration', () => {
   let admin: pg.Client;
   let tmpDir: string;
   let pool: pg.Pool;
@@ -83,9 +83,9 @@ suite('org child_known_as (migration 0034) — integration', () => {
   let before: Map<string, OrgRow>;
 
   async function rows(): Promise<Map<string, OrgRow>> {
-    // `to_jsonb` reads `child_known_as` as null before the column exists.
+    // `to_jsonb` reads `known_as_values` as null before the column exists.
     const r = await pool.query<OrgRow>(
-      `SELECT id, known_as, depth, to_jsonb(o) -> 'child_known_as' AS child_known_as, updated_at
+      `SELECT id, known_as, depth, to_jsonb(o) -> 'known_as_values' AS known_as_values, updated_at
          FROM organisations o`,
     );
     return new Map(r.rows.map((row) => [row.id, row]));
@@ -98,7 +98,7 @@ suite('org child_known_as (migration 0034) — integration', () => {
       await readFile(path.join(MIGRATIONS_DIR, 'meta/_journal.json'), 'utf8'),
     ) as { entries: JournalEntry[] } & Record<string, unknown>;
     const older = journal.entries.filter((e) => e.idx <= LAST_BEFORE_IDX);
-    tmpDir = await mkdtemp(path.join(os.tmpdir(), 'org-child-known-as-'));
+    tmpDir = await mkdtemp(path.join(os.tmpdir(), 'org-known-as-values-'));
     const beforeFolder = path.join(tmpDir, 'migrations');
     await mkdir(path.join(beforeFolder, 'meta'), { recursive: true });
     for (const e of older) {
@@ -152,12 +152,12 @@ suite('org child_known_as (migration 0034) — integration', () => {
     if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('adds child_known_as as a required jsonb column, [] on every row', async () => {
+  it('adds known_as_values as a required jsonb column, [] on every row', async () => {
     const col = await one<{ is_nullable: string; data_type: string; column_default: string }>(
       pool,
       `SELECT is_nullable, data_type, column_default FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'organisations'
-          AND column_name = 'child_known_as'`,
+          AND column_name = 'known_as_values'`,
     );
     expect(col).toEqual({
       is_nullable: 'NO',
@@ -165,25 +165,25 @@ suite('org child_known_as (migration 0034) — integration', () => {
       column_default: "'[]'::jsonb",
     });
     for (const row of (await rows()).values()) {
-      expect(row.child_known_as).toEqual([]);
+      expect(row.known_as_values).toEqual([]);
     }
   });
 
   it('accepts an array and refuses any other JSON type', async () => {
     const list = [{ key: 'state', name: 'State', default: true }];
-    await pool.query(`UPDATE organisations SET child_known_as = $2::jsonb WHERE id = $1`, [
+    await pool.query(`UPDATE organisations SET known_as_values = $2::jsonb WHERE id = $1`, [
       ids.root,
       JSON.stringify(list),
     ]);
-    expect((await rows()).get(ids.root)?.child_known_as).toEqual(list);
-    await pool.query(`UPDATE organisations SET child_known_as = '[]' WHERE id = $1`, [ids.root]);
+    expect((await rows()).get(ids.root)?.known_as_values).toEqual(list);
+    await pool.query(`UPDATE organisations SET known_as_values = '[]' WHERE id = $1`, [ids.root]);
     for (const bad of ['{}', '"state"', 'null']) {
       await expect(
-        pool.query(`UPDATE organisations SET child_known_as = $2::jsonb WHERE id = $1`, [
+        pool.query(`UPDATE organisations SET known_as_values = $2::jsonb WHERE id = $1`, [
           ids.a,
           bad,
         ]),
-      ).rejects.toThrow(/organisations_child_known_as_chk/);
+      ).rejects.toThrow(/organisations_known_as_values_chk/);
     }
   });
 
@@ -203,14 +203,14 @@ suite('org child_known_as (migration 0034) — integration', () => {
   });
 
   it('is a no-op when re-applied', async () => {
-    const sql = await readFile(path.join(MIGRATIONS_DIR, '0034_org_child_known_as.sql'), 'utf8');
+    const sql = await readFile(path.join(MIGRATIONS_DIR, '0034_org_known_as_values.sql'), 'utf8');
     const shape = `SELECT
       (SELECT md5(string_agg(id::text || ':' || depth || ':' || known_as || ':' ||
-                             child_known_as::text || ':' || updated_at::text, ',' ORDER BY id))
+                             known_as_values::text || ':' || updated_at::text, ',' ORDER BY id))
          FROM organisations) AS rows,
       (SELECT count(*)::int FROM pg_constraint
         WHERE conrelid = 'public.organisations'::regclass
-          AND conname = 'organisations_child_known_as_chk') AS checks`;
+          AND conname = 'organisations_known_as_values_chk') AS checks`;
     const first = await one<{ rows: string; checks: number }>(pool, shape);
     expect(first.checks).toBe(1);
     const c = await pool.connect();

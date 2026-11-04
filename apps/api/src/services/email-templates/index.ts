@@ -16,7 +16,7 @@ export {
   type InviteExistingAccountVars,
 } from './invite-existing-account.js';
 export { renderOrgAdminAction, type OrgAdminActionVars } from './org-admin-action.js';
-export { renderOrgParentAction, type OrgParentActionVars } from './org-parent-action.js';
+export { renderOrgKnownAs, type OrgKnownAsVars } from './org-known-as.js';
 export {
   renderSupportRequest,
   generateSupportReference,

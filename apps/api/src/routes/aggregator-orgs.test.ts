@@ -450,7 +450,7 @@ describe('aggregator-orgs routes', () => {
       ownerEmail: 'nf@test.local',
       status: 'active',
       depth: 0,
-      childKnownAs: [{ key: 'state', name: 'State', default: true }],
+      knownAsValues: [{ key: 'state', name: 'State', default: true }],
     });
     const state = buildOrganisation({
       id: STATE_ID,
@@ -460,7 +460,7 @@ describe('aggregator-orgs routes', () => {
       status: 'active',
       parentId: ROOT_ID,
       knownAs: 'state',
-      childKnownAs: [
+      knownAsValues: [
         { key: 'block', name: 'Block' },
         { key: 'district', name: 'District', default: true },
       ],
@@ -797,7 +797,7 @@ describe('aggregator-orgs routes', () => {
           parentId: STATE_ID,
           knownAs: 'district',
           depth: 2,
-          childKnownAs: [{ key: 'ward', name: 'Ward' }],
+          knownAsValues: [{ key: 'ward', name: 'Ward' }],
         }),
         buildOrganisation({
           id: '00000000-0000-4000-8000-0000000000f4',
@@ -1305,7 +1305,7 @@ describe('aggregator-orgs routes', () => {
       async setKnownAs(): Promise<OrgStoreResult<Organisation>> {
         return { ok: false, error: { code: 'NOT_FOUND', message: 'x' } };
       }
-      async setChildKnownAs(): Promise<OrgStoreResult<{ org: Organisation; resetCount: number }>> {
+      async setKnownAsValues(): Promise<OrgStoreResult<{ org: Organisation; resetCount: number }>> {
         return { ok: false, error: { code: 'NOT_FOUND', message: 'x' } };
       }
       async search(): Promise<OrgStoreResult<{ rows: Organisation[]; nextCursor: null }>> {

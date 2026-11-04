@@ -12,8 +12,8 @@ import { randomUUID } from 'node:crypto';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
 import {
   SYSTEM_KNOWN_AS,
-  type ChildKnownAs,
-  type ChildKnownAsRequest,
+  type KnownAsValues,
+  type KnownAsValuesRequest,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import {
   defaultKnownAsKey,
@@ -127,9 +127,9 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       isDefault: false,
       locations: input.locations ?? [],
       legalName: null,
-      knownAs: defaultKnownAsKey(parent?.childKnownAs ?? []),
+      knownAs: defaultKnownAsKey(parent?.knownAsValues ?? []),
       knownAsName: null,
-      childKnownAs: [],
+      knownAsValues: [],
       depth,
       parentId: parent?.id ?? null,
       parentName: parent?.displayName ?? null,
@@ -164,7 +164,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
         parentId: parent?.id ?? null,
         parentName: parent?.displayName ?? null,
         depth,
-        knownAs: defaultKnownAsKey(parent?.childKnownAs ?? []),
+        knownAs: defaultKnownAsKey(parent?.knownAsValues ?? []),
         status: 'pending',
         rejectedAt: null,
         updatedAt: new Date(),
@@ -392,9 +392,9 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     });
   }
 
-  setChildKnownAs(
+  setKnownAsValues(
     id: string,
-    requested: ChildKnownAsRequest,
+    requested: KnownAsValuesRequest,
     updatedBy: string,
   ): Promise<OrgStoreResult<{ org: Organisation; resetCount: number }>> {
     return this.withTreeLock(() => {
@@ -402,7 +402,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       const org = isRoot ? this.root : this.byId.get(id);
       if (!org) return Promise.resolve(err('NOT_FOUND', id));
       if (org.isDefault) return Promise.resolve(err('NOT_EDITABLE', 'the Default org'));
-      const filled = fillKnownAsKeys(requested, org.childKnownAs);
+      const filled = fillKnownAsKeys(requested, org.knownAsValues);
       if (!filled.ok) {
         return Promise.resolve({
           ok: false,
@@ -416,7 +416,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       const values = filled.value;
       const next: Organisation = {
         ...org,
-        childKnownAs: values.map((e) => ({ ...e })),
+        knownAsValues: values.map((e) => ({ ...e })),
         updatedBy,
         updatedAt: new Date(),
       };
@@ -497,10 +497,10 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
    * @param id - The org id; `null` for no parent.
    * @returns The list; empty when the org is not stored.
    */
-  private listOf(id: string | null): ChildKnownAs {
+  private listOf(id: string | null): KnownAsValues {
     if (id === null) return [];
     const org = this.root?.id === id ? this.root : this.byId.get(id);
-    return org?.childKnownAs ?? [];
+    return org?.knownAsValues ?? [];
   }
 
   /**

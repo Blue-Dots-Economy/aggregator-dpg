@@ -41,8 +41,8 @@ vi.mock('@/components/console/ChildOrgsTree', () => ({ ChildOrgsTree: () => null
 vi.mock('@/components/console/RolesPanel', () => ({ RolesPanel: () => null }));
 vi.mock('@/components/console/OwnerAccessRepair', () => ({ OwnerAccessRepair: () => null }));
 vi.mock('@/components/console/CopyButton', () => ({ CopyButton: () => null }));
-vi.mock('@/components/console/ChildKnownAsEditor', () => ({
-  ChildKnownAsEditor: () => <div data-testid="child-known-as-editor" />,
+vi.mock('@/components/console/KnownAsValuesEditor', () => ({
+  KnownAsValuesEditor: () => <div data-testid="known-as-values-editor" />,
 }));
 
 import ConsoleOrgPage from '@/app/(console)/console/orgs/[id]/page';
@@ -67,7 +67,7 @@ const org = (over: Partial<Org> = {}): Org =>
     gst_number: null,
     known_as: 'aggregator',
     known_as_name: 'Aggregator',
-    child_known_as: [{ key: 'block', name: 'Block' }],
+    known_as_values: [{ key: 'block', name: 'Block' }],
     depth: 1,
     parent_id: 'root',
     parent_name: 'The Network',
@@ -99,7 +99,7 @@ interface PageOptions {
   knownAsOptions?: OrgReadResponse['known_as_options'];
 }
 
-function mockPage(target: Org, viewerId = 'owner', opts: PageOptions = {}) {
+function mockPage(target: OrgReadResponse['org'], viewerId = 'owner', opts: PageOptions = {}) {
   vi.mocked(getConsoleActor).mockResolvedValue({
     ok: true,
     me: me(viewerId, opts.viewerOrgId),
@@ -113,7 +113,6 @@ function mockPage(target: Org, viewerId = 'owner', opts: PageOptions = {}) {
         child_count: 0,
         pending_count: 0,
         known_as_options: opts.knownAsOptions ?? null,
-        can_have_children: true,
       } satisfies OrgReadResponse as never;
     }
     if (path === '/v1/org/search') {
@@ -136,7 +135,7 @@ describe('console org detail — child "known as" editor', () => {
   it('shows the editor to the owner of an active organisation', async () => {
     mockPage(org());
     await show();
-    expect(screen.getByTestId('child-known-as-editor')).toBeInTheDocument();
+    expect(screen.getByTestId('known-as-values-editor')).toBeInTheDocument();
   });
 
   it.each(['pending', 'inactive'] as const)(
@@ -144,14 +143,20 @@ describe('console org detail — child "known as" editor', () => {
     async (status) => {
       mockPage(org({ status }));
       await show();
-      expect(screen.queryByTestId('child-known-as-editor')).toBeNull();
+      expect(screen.queryByTestId('known-as-values-editor')).toBeNull();
     },
   );
 
   it('hides the editor from a viewer who is not the owner', async () => {
     mockPage(org(), 'someone-else');
     await show();
-    expect(screen.queryByTestId('child-known-as-editor')).toBeNull();
+    expect(screen.queryByTestId('known-as-values-editor')).toBeNull();
+  });
+
+  it('hides the editor when the organisation cannot have child organisations', async () => {
+    mockPage({ ...org(), known_as_values: null });
+    await show();
+    expect(screen.queryByTestId('known-as-values-editor')).toBeNull();
   });
 });
 
@@ -167,7 +172,7 @@ describe('console org detail — "known as" picker', () => {
     });
     await show();
     expect(screen.getByTestId('known-as-picker')).toBeInTheDocument();
-    expect(screen.getByText('console.org.viewed_from_above_picker')).toBeInTheDocument();
+    expect(screen.getByText('console.org.viewed_from_above_known_as')).toBeInTheDocument();
     expect(screen.queryByText('console.org.viewed_from_above')).toBeNull();
     expect(screen.getByTestId('org-edit-form')).toHaveAttribute('data-known-as-picked', 'true');
   });

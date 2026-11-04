@@ -187,7 +187,7 @@ export const EMAIL_CASES: Readonly<Record<string, EmailCaseDef>> = {
     ],
   },
 
-  org_parent_action: {
+  org_known_as: {
     tokens: { orgName: 'text', parentName: 'text', consoleUrl: 'text' },
     layout: [
       { block: 'heading', key: 'heading' },

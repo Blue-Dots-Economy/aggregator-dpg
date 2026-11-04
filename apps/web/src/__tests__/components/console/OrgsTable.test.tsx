@@ -31,7 +31,7 @@ const pendingOrg: OrgRow = {
   gst_number: null,
   known_as: 'aggregator',
   known_as_name: 'Aggregator',
-  child_known_as: [],
+  known_as_values: [],
   depth: 1,
   parent_id: null,
   parent_name: 'State One',

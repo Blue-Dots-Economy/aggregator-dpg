@@ -1,8 +1,8 @@
--- Migration 0034: organisation `child_known_as`; every `known_as` reset to `aggregator`.
--- * `organisations.child_known_as`: the "known as" values an org defines for
+-- Migration 0034: organisation `known_as_values`; every `known_as` reset to `aggregator`.
+-- * `organisations.known_as_values`: the "known as" values an org defines for
 --   its direct children, a JSON array of `{ key, name, default? }`. The API
 --   validates the entries; the database checks only that it is an array.
--- * `organisations.known_as` holds a key from the parent's `child_known_as`,
+-- * `organisations.known_as` holds a key from the parent's `known_as_values`,
 --   or `aggregator`. Keys from the instance config are not in any list, so
 --   every org is reset to `aggregator`. Only a display label changes.
 --   `updated_at` is not bumped.
@@ -12,7 +12,7 @@ SELECT set_config('aggregator_dpg.prev_lock_timeout', current_setting('lock_time
        set_config('aggregator_dpg.prev_statement_timeout', current_setting('statement_timeout'), true);
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '60s';
-SELECT pg_advisory_xact_lock(hashtext('aggregator-dpg:0034_org_child_known_as'));
+SELECT pg_advisory_xact_lock(hashtext('aggregator-dpg:0034_org_known_as_values'));
 
 -- Run as the table owner (same rule as 0025–0033).
 DO $$
@@ -31,15 +31,15 @@ BEGIN
   END IF;
 END $$;
 
-ALTER TABLE organisations ADD COLUMN IF NOT EXISTS child_known_as jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE organisations ADD COLUMN IF NOT EXISTS known_as_values jsonb NOT NULL DEFAULT '[]'::jsonb;
 
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conrelid = 'public.organisations'::regclass
-                    AND conname = 'organisations_child_known_as_chk') THEN
-    ALTER TABLE organisations ADD CONSTRAINT organisations_child_known_as_chk
-      CHECK (jsonb_typeof(child_known_as) = 'array');
+                    AND conname = 'organisations_known_as_values_chk') THEN
+    ALTER TABLE organisations ADD CONSTRAINT organisations_known_as_values_chk
+      CHECK (jsonb_typeof(known_as_values) = 'array');
   END IF;
 END $$;
 

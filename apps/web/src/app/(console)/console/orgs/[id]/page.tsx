@@ -32,7 +32,7 @@ import { initialsOf } from '@/lib/initials';
 import { I } from '@/icons';
 import { OrgEditForm } from '@/components/console/OrgEditForm';
 import { KnownAsPicker } from '@/components/console/KnownAsPicker';
-import { ChildKnownAsEditor } from '@/components/console/ChildKnownAsEditor';
+import { KnownAsValuesEditor } from '@/components/console/KnownAsValuesEditor';
 import { OrgMoveDialog } from '@/components/console/OrgMoveDialog';
 import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
 import { RolesPanel } from '@/components/console/RolesPanel';
@@ -82,9 +82,10 @@ export default async function ConsoleOrgPage({
   const aggregatorOrg = org.org_type === 'aggregator' && !org.is_default;
   // Null when the viewer does not own the parent.
   const knownAsOptions = aggregatorOrg ? data.known_as_options : null;
+  // Null when the org cannot have child orgs.
+  const knownAsValues = org.known_as_values;
   // The API takes list edits only on an active org the viewer owns.
-  const canEditChildKnownAs =
-    aggregatorOrg && isOwner && org.status === 'active' && data.can_have_children;
+  const canEditKnownAsValues = aggregatorOrg && isOwner && org.status === 'active';
   // The Default org and the root never move; only pending and active orgs can.
   const canMove =
     hierarchy !== null && editable && (org.status === 'pending' || org.status === 'active');
@@ -140,7 +141,7 @@ export default async function ConsoleOrgPage({
         />
         {own ? null : (
           <p className="mt-2 rounded-lg bg-[var(--bd-tint-primary)] px-3 py-2 text-[13px] text-ink-600">
-            {knownAsOptions ? t('org.viewed_from_above_picker') : t('org.viewed_from_above')}
+            {knownAsOptions ? t('org.viewed_from_above_known_as') : t('org.viewed_from_above')}
           </p>
         )}
       </div>
@@ -233,9 +234,9 @@ export default async function ConsoleOrgPage({
           orgSchema={orgSchema}
           knownAsPicked={knownAsOptions !== null}
         />
-        {canEditChildKnownAs ? (
-          <ConsoleSection title={t('org.child_known_as_title')}>
-            <ChildKnownAsEditor orgId={org.id} values={org.child_known_as} />
+        {canEditKnownAsValues && knownAsValues !== null ? (
+          <ConsoleSection title={t('org.known_as_values_title')}>
+            <KnownAsValuesEditor orgId={org.id} values={knownAsValues} />
           </ConsoleSection>
         ) : null}
         {children ? (

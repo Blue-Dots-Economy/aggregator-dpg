@@ -2,7 +2,7 @@
  * "Known as" values and tree rules (`@aggregator-dpg/api`).
  *
  * Each org defines the "known as" values of its direct children
- * (`child_known_as`). A child stores the key of one entry, or the built-in
+ * (`known_as_values`). A child stores the key of one entry, or the built-in
  * `aggregator`. Both organisation stores and the console routes use these
  * helpers, so they resolve names, defaults and choices the same way.
  */
@@ -11,8 +11,8 @@ import anyAscii from 'any-ascii';
 import type { OrganisationConfig } from '@aggregator-dpg/network-config/interface';
 import {
   SYSTEM_KNOWN_AS,
-  type ChildKnownAs,
-  type ChildKnownAsRequest,
+  type KnownAsValues,
+  type KnownAsValuesRequest,
   type KnownAsEntry,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import type { TreeRules } from './organisation-store/interface.js';
@@ -37,7 +37,7 @@ export function treeRules(org: OrganisationConfig): TreeRules {
 /**
  * The values a child of an org can be given.
  *
- * @param list - The parent's `child_known_as` list.
+ * @param list - The parent's `known_as_values` list.
  * @returns The list, or only the system value when the list is empty.
  */
 export function knownAsChoices(list: readonly KnownAsEntry[]): KnownAsEntry[] {
@@ -48,7 +48,7 @@ export function knownAsChoices(list: readonly KnownAsEntry[]): KnownAsEntry[] {
  * The key a new child of an org gets, and the key a child falls back to when
  * its value leaves the parent's list.
  *
- * @param list - The parent's `child_known_as` list.
+ * @param list - The parent's `known_as_values` list.
  * @returns The key of the default entry, else `aggregator`.
  */
 export function defaultKnownAsKey(list: readonly KnownAsEntry[]): string {
@@ -61,7 +61,7 @@ export function defaultKnownAsKey(list: readonly KnownAsEntry[]): string {
  * The parent's entry for the key wins, `aggregator` included. A key the list
  * does not have reads as "Aggregator", so a read never fails.
  *
- * @param parentList - The parent's `child_known_as` list.
+ * @param parentList - The parent's `known_as_values` list.
  * @param key - The child's stored key.
  * @returns The name.
  */
@@ -73,7 +73,7 @@ export function knownAsNameOf(parentList: readonly KnownAsEntry[], key: string):
  * Whether a child may keep `key` under a parent with `list`: the key is in
  * the list, or it is `aggregator`.
  *
- * @param list - The parent's `child_known_as` list.
+ * @param list - The parent's `known_as_values` list.
  * @param key - The child's stored key.
  * @returns True when the key needs no reset.
  */
@@ -122,10 +122,10 @@ function cut(key: string, max: number): string {
 
 /** Outcome of {@link fillKnownAsKeys}. */
 export type FillKnownAsKeysResult =
-  { ok: true; value: ChildKnownAs } | { ok: false; error: { code: 'UNKNOWN_KEY'; index: number } };
+  { ok: true; value: KnownAsValues } | { ok: false; error: { code: 'UNKNOWN_KEY'; index: number } };
 
 /**
- * Turns a requested `child_known_as` list into the list to store.
+ * Turns a requested `known_as_values` list into the list to store.
  *
  * An entry that sends a key keeps it; the key must already be in the org's
  * list, so a client cannot choose keys. An entry with no key gets one made
@@ -135,12 +135,12 @@ export type FillKnownAsKeysResult =
  * `aggregator`, because every child may hold that key.
  *
  * @param values - The requested list. Given keys are unique (checked by the schema).
- * @param current - The org's stored `child_known_as` list.
+ * @param current - The org's stored `known_as_values` list.
  * @returns The list with every key set; `UNKNOWN_KEY` names the first entry
  *   whose key is not in `current`.
  */
 export function fillKnownAsKeys(
-  values: ChildKnownAsRequest,
+  values: KnownAsValuesRequest,
   current: readonly KnownAsEntry[],
 ): FillKnownAsKeysResult {
   const known = new Set(current.map((e) => e.key));
@@ -150,7 +150,7 @@ export function fillKnownAsKeys(
     }
   }
   const taken = new Set([...known, SYSTEM_KNOWN_AS.key]);
-  const out: ChildKnownAs = values.map((entry) => {
+  const out: KnownAsValues = values.map((entry) => {
     const key = entry.key ?? knownAsKeyFrom(entry.name, taken);
     taken.add(key);
     return entry.default ? { key, name: entry.name, default: true } : { key, name: entry.name };

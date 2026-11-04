@@ -17,13 +17,13 @@ import { Trash2 } from 'lucide-react';
 import {
   KNOWN_AS_MAX_VALUES,
   KNOWN_AS_NAME_MAX,
-  type ChildKnownAs,
+  type KnownAsValues,
   type KnownAsEntryRequest,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { I } from '../../icons';
-import { errorKey, setOrgChildKnownAs } from '../../lib/console-client';
+import { errorKey, setOrgKnownAsValues } from '../../lib/console-client';
 
 /** One row of the editor. `key` is set for a saved value only. */
 interface Row {
@@ -36,7 +36,7 @@ interface Row {
 let nextRowId = 0;
 
 /** The rows and the default row's id for a saved list. */
-function rowsOf(values: ChildKnownAs): { rows: Row[]; defaultId: number | null } {
+function rowsOf(values: KnownAsValues): { rows: Row[]; defaultId: number | null } {
   let defaultId: number | null = null;
   const rows = values.map((v) => {
     const row: Row = { id: ++nextRowId, key: v.key, name: v.name };
@@ -56,7 +56,7 @@ function toRequest(rows: readonly Row[], defaultId: number | null): KnownAsEntry
 }
 
 /** The request body entries that would save `values` unchanged. */
-function requestOfSaved(values: ChildKnownAs): KnownAsEntryRequest[] {
+function requestOfSaved(values: KnownAsValues): KnownAsEntryRequest[] {
   return values.map((v) => ({
     key: v.key,
     name: v.name,
@@ -65,22 +65,22 @@ function requestOfSaved(values: ChildKnownAs): KnownAsEntryRequest[] {
 }
 
 /** Whether two saved lists have the same keys, names and default, in order. */
-function sameList(a: ChildKnownAs, b: ChildKnownAs): boolean {
+function sameList(a: KnownAsValues, b: KnownAsValues): boolean {
   return JSON.stringify(requestOfSaved(a)) === JSON.stringify(requestOfSaved(b));
 }
 
 /**
- * Renders the editor for an organisation's `child_known_as` list.
+ * Renders the editor for an organisation's `known_as_values` list.
  *
  * @param orgId - The organisation that defines the list (the root for the network).
  * @param values - The saved list.
  */
-export function ChildKnownAsEditor({
+export function KnownAsValuesEditor({
   orgId,
   values,
 }: Readonly<{
   orgId: string;
-  values: ChildKnownAs;
+  values: KnownAsValues;
 }>) {
   const t = useTranslations('console');
   const router = useRouter();
@@ -126,8 +126,8 @@ export function ChildKnownAsEditor({
   /** The message key of the first problem in the rows, or null. */
   function problem(): string | null {
     const names = rows.map((r) => r.name.trim().toLowerCase());
-    if (names.some((n) => n === '')) return 'org.child_known_as_name_required';
-    if (new Set(names).size !== names.length) return 'org.child_known_as_name_repeated';
+    if (names.some((n) => n === '')) return 'org.known_as_values_name_required';
+    if (new Set(names).size !== names.length) return 'org.known_as_values_name_repeated';
     return null;
   }
 
@@ -139,11 +139,11 @@ export function ChildKnownAsEditor({
       return;
     }
     setBusy(true);
-    const r = await setOrgChildKnownAs(orgId, toRequest(rows, defaultId));
+    const r = await setOrgKnownAsValues(orgId, toRequest(rows, defaultId));
     setBusy(false);
     if (r.ok) {
-      setSaved(r.data.child_known_as);
-      setState(rowsOf(r.data.child_known_as));
+      setSaved(r.data.known_as_values);
+      setState(rowsOf(r.data.known_as_values));
       setMessage(t('org.saved'));
       router.refresh();
       return;
@@ -156,23 +156,23 @@ export function ChildKnownAsEditor({
       {/* Disabled while saving: the saved list replaces the rows, so an edit
           made meanwhile would be lost. */}
       <fieldset disabled={busy} className="flex min-w-0 flex-col gap-4">
-        <p className="text-[13px] text-ink-500">{t('org.child_known_as_hint')}</p>
+        <p className="text-[13px] text-ink-500">{t('org.known_as_values_hint')}</p>
         {rows.length === 0 ? (
           <p className="rounded-[12px] border border-dashed border-(--bd-border) px-3.5 py-3 text-[13px] text-ink-500">
-            {t('org.child_known_as_empty')}
+            {t('org.known_as_values_empty')}
           </p>
         ) : (
           <fieldset className="flex flex-col gap-2">
-            <legend className="sr-only">{t('org.child_known_as_title')}</legend>
+            <legend className="sr-only">{t('org.known_as_values_title')}</legend>
             {rows.map((r, i) => {
-              const label = r.name.trim() || t('org.child_known_as_value', { n: i + 1 });
+              const label = r.name.trim() || t('org.known_as_values_value', { n: i + 1 });
               return (
                 <div
                   key={r.id}
                   className="flex flex-wrap items-center gap-3 rounded-[12px] border border-(--bd-border) px-3.5 py-2.5"
                 >
                   <Input
-                    aria-label={t('org.child_known_as_name', { n: i + 1 })}
+                    aria-label={t('org.known_as_values_name', { n: i + 1 })}
                     className="min-w-[12rem] flex-1"
                     value={r.name}
                     maxLength={KNOWN_AS_NAME_MAX}
@@ -181,16 +181,16 @@ export function ChildKnownAsEditor({
                   <label className="inline-flex items-center gap-1.5 text-[13px] text-ink-700">
                     <input
                       type="radio"
-                      aria-label={t('org.child_known_as_make_default', { name: label })}
-                      name={`child-known-as-default-${orgId}`}
+                      aria-label={t('org.known_as_values_make_default', { name: label })}
+                      name={`known-as-values-default-${orgId}`}
                       checked={defaultId === r.id}
                       onChange={() => update({ defaultId: r.id })}
                     />
-                    {t('org.child_known_as_default')}
+                    {t('org.known_as_values_default')}
                   </label>
                   <Button
                     kind="ghost"
-                    aria-label={t('org.child_known_as_remove', { name: label })}
+                    aria-label={t('org.known_as_values_remove', { name: label })}
                     icon={<Trash2 size={14} aria-hidden="true" />}
                     onClick={() => remove(r.id)}
                   />
@@ -200,17 +200,17 @@ export function ChildKnownAsEditor({
             <label className="inline-flex items-center gap-1.5 px-3.5 text-[13px] text-ink-700">
               <input
                 type="radio"
-                name={`child-known-as-default-${orgId}`}
+                name={`known-as-values-default-${orgId}`}
                 checked={defaultId === null}
                 onChange={() => update({ defaultId: null })}
               />
-              {t('org.child_known_as_no_default')}
+              {t('org.known_as_values_no_default')}
             </label>
           </fieldset>
         )}
         <ul className="flex list-disc flex-col gap-1 pl-5 text-[12px] text-ink-500">
-          <li>{t('org.child_known_as_default_note')}</li>
-          <li>{t('org.child_known_as_remove_note')}</li>
+          <li>{t('org.known_as_values_default_note')}</li>
+          <li>{t('org.known_as_values_remove_note')}</li>
         </ul>
         <div className="flex flex-wrap items-center gap-3">
           <Button
@@ -219,11 +219,11 @@ export function ChildKnownAsEditor({
             disabled={rows.length >= KNOWN_AS_MAX_VALUES}
             onClick={add}
           >
-            {t('org.child_known_as_add')}
+            {t('org.known_as_values_add')}
           </Button>
           {rows.length >= KNOWN_AS_MAX_VALUES ? (
             <span className="text-[12px] text-ink-500">
-              {t('org.child_known_as_max', { max: KNOWN_AS_MAX_VALUES })}
+              {t('org.known_as_values_max', { max: KNOWN_AS_MAX_VALUES })}
             </span>
           ) : null}
         </div>

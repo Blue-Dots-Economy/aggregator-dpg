@@ -8,8 +8,8 @@
  */
 
 import type {
+  KnownAsValuesRequest,
   Org,
-  OrgChildKnownAsUpdateRequest,
   OrgKnownAsUpdateRequest,
 } from '@aggregator-dpg/shared-primitives/user-org';
 
@@ -72,12 +72,12 @@ export function setOrgKnownAs(orgId: string, knownAs: string): Promise<ConsoleSe
  * @param values - The full list; saved entries keep their key, new ones omit it.
  * @returns The outcome, with the updated org (keys filled) on success.
  */
-export function setOrgChildKnownAs(
+export function setOrgKnownAsValues(
   orgId: string,
-  values: OrgChildKnownAsUpdateRequest['values'],
+  values: KnownAsValuesRequest,
 ): Promise<ConsoleSendResult<Org>> {
-  const body: OrgChildKnownAsUpdateRequest = { values };
-  return sendConsole<Org>(`/api/console/org/child-known-as/${orgId}`, 'PATCH', body);
+  const body: OrgKnownAsUpdateRequest = { known_as_values: values };
+  return sendConsole<Org>(`/api/console/org/known-as/${orgId}`, 'PATCH', body);
 }
 
 /**
@@ -115,7 +115,7 @@ export function errorKey(r: { status: number; error: ConsoleError }): string {
   if (r.error.code === 'SCHEMA_VALIDATION') {
     if (fields['parent_id'] === 'invalid') return 'errors.parent_invalid';
     if (fields['known_as'] === 'invalid') return 'errors.known_as_invalid';
-    if (fields['values'] === 'unknown_key') return 'errors.known_as_list_changed';
+    if (fields['known_as_values'] === 'unknown_key') return 'errors.known_as_values_changed';
   }
   if (r.status === 0) return 'errors.network';
   if (r.status === 401) return 'errors.signed_out';

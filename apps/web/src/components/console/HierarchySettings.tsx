@@ -8,7 +8,7 @@
 import type { ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import type { OrgHierarchyResponse } from '@aggregator-dpg/shared-primitives/user-org';
-import { ChildKnownAsEditor } from './ChildKnownAsEditor';
+import { KnownAsValuesEditor } from './KnownAsValuesEditor';
 
 /** Usage at or above this share of the maximum shows in amber. */
 const NEAR_LIMIT = 0.8;
@@ -60,9 +60,9 @@ export function HierarchySettings({ hierarchy }: Readonly<{ hierarchy: OrgHierar
 
       <section>
         <h3 className="mb-2 text-[13px] font-bold text-ink-900">{t('orgs.top_level_known_as')}</h3>
-        <ChildKnownAsEditor
+        <KnownAsValuesEditor
           orgId={hierarchy.network.id}
-          values={hierarchy.network.child_known_as}
+          values={hierarchy.network.known_as_values}
         />
       </section>
     </div>

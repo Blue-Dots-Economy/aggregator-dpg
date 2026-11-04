@@ -19,7 +19,7 @@ const hierarchy: OrgHierarchyResponse = {
   network: {
     id: '00000000-0000-4000-8000-0000000000a0',
     name: 'Blue Dots Network',
-    child_known_as: [
+    known_as_values: [
       { key: 'state', name: 'State', default: true },
       { key: 'partner', name: 'Partner' },
     ],
@@ -67,7 +67,7 @@ describe('<HierarchySettings />', () => {
   });
 
   it('shows the empty state when the network has no values', () => {
-    renderIt({ ...hierarchy, network: { ...hierarchy.network, child_known_as: [] } });
-    expect(screen.getByText(messages.console.org.child_known_as_empty)).toBeInTheDocument();
+    renderIt({ ...hierarchy, network: { ...hierarchy.network, known_as_values: [] } });
+    expect(screen.getByText(messages.console.org.known_as_values_empty)).toBeInTheDocument();
   });
 });

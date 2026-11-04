@@ -6,7 +6,7 @@ import { renderCoordinatorInvite } from './coordinator-invite.js';
 import { renderOwnerGrantRefreshed } from './owner-grant-refreshed.js';
 import { renderOrgAlreadyRegistered } from './org-already-registered.js';
 import { renderOrgOwnerApproved } from './org-owner-approved.js';
-import { renderOrgParentAction } from './org-parent-action.js';
+import { renderOrgKnownAs } from './org-known-as.js';
 
 describe('admin-review template', () => {
   it('renders applicant fields and action links', () => {
@@ -253,9 +253,9 @@ describe('org-already-registered template', () => {
   });
 });
 
-describe('org-parent-action template', () => {
+describe('org-known-as template', () => {
   it('names the parent org and the org, and links the console; no value is named', () => {
-    const out = renderOrgParentAction({
+    const out = renderOrgKnownAs({
       orgName: 'Beta Org',
       parentName: 'Alpha Org',
       consoleUrl: 'https://portal.example.org/console',
@@ -270,7 +270,7 @@ describe('org-parent-action template', () => {
   });
 
   it('escapes the org names in the HTML part', () => {
-    const out = renderOrgParentAction({
+    const out = renderOrgKnownAs({
       orgName: '<b>Beta</b>',
       parentName: 'A & B',
       consoleUrl: 'https://portal.example.org/console',
