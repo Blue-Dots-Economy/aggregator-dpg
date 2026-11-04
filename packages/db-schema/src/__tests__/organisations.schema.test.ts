@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { getTableConfig } from 'drizzle-orm/pg-core';
-import { organisations, orgTypeEnum, users } from '../schema.js';
+import { organisations, orgKnownAs, orgTypeEnum, users } from '../schema.js';
 
 describe('organisations schema (migration 0028)', () => {
   it('declares the org columns with snake_case SQL names', () => {
@@ -37,6 +37,28 @@ describe('organisations schema (migration 0028)', () => {
     expect(organisations.knownAs.name).toBe('known_as');
     expect(organisations.knownAs.notNull).toBe(true);
     expect(organisations.knownAs.default).toBe('aggregator');
+  });
+
+  it('has no known_as_values column: the values live in org_known_as (migration 0034)', () => {
+    expect('knownAsValues' in organisations).toBe(false);
+  });
+
+  it('declares org_known_as with one row per org (migration 0034)', () => {
+    const cfg = getTableConfig(orgKnownAs);
+    expect(cfg.name).toBe('org_known_as');
+    expect(orgKnownAs.orgId.name).toBe('org_id');
+    expect(orgKnownAs.orgId.primary).toBe(true);
+    expect(orgKnownAs.knownAsValues.name).toBe('known_as_values');
+    expect(orgKnownAs.knownAsValues.getSQLType()).toBe('jsonb');
+    for (const col of [orgKnownAs.orgId, orgKnownAs.knownAsValues, orgKnownAs.updatedBy]) {
+      expect(col.notNull).toBe(true);
+    }
+    expect(orgKnownAs.createdAt.hasDefault).toBe(true);
+    expect(orgKnownAs.updatedAt.hasDefault).toBe(true);
+    expect(orgKnownAs.updatedBy.hasDefault).toBe(false);
+    expect(cfg.foreignKeys[0]?.onDelete).toBe('cascade');
+    expect(cfg.foreignKeys[0]?.reference().foreignTable).toBe(organisations);
+    expect(cfg.indexes).toEqual([]);
   });
 
   it('declares depth as a required smallint with no default (migration 0032)', () => {

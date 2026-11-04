@@ -305,6 +305,14 @@ test_real_table_org_routes_need_org_manage_or_orgs_onboard if {
 	decide_real(req("GET", "/v1/org/read/0b1c", user(["network_admin"]))).allowed
 }
 
+test_real_table_known_as_route_needs_org_manage_or_orgs_onboard if {
+	d := decide_real(req("PATCH", "/v1/org/known-as/update/0b1c", user(["coordinator"])))
+	d.http_status == 403
+	body(d).fields.permission == "org.manage|orgs.onboard"
+	decide_real(req("PATCH", "/v1/org/known-as/update/0b1c", user(["org_admin"]))).allowed
+	decide_real(req("PATCH", "/v1/org/known-as/update/0b1c", user(["network_admin"]))).allowed
+}
+
 test_real_table_owner_is_refused_network_admin_org_actions if {
 	repair := decide_real(req("POST", "/v1/org/access/repair/0b1c", user(["org_admin"])))
 	repair.http_status == 403

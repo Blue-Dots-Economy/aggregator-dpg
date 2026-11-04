@@ -16,7 +16,6 @@ export interface TreeNode {
   status: string;
   isRoot: boolean;
   isDefault: boolean;
-  knownAs: string;
 }
 
 /** A tree snapshot indexed by id and by parent. */
@@ -130,7 +129,7 @@ export function subtree(tree: Tree, id: string, maxLevels = Infinity): TreeNode[
 }
 
 /**
- * Checks a move of `id` under `parentId`, ignoring "known as" values.
+ * Checks a move of `id` under `parentId`.
  *
  * Moving to the current parent is allowed whenever the org itself may move.
  *
@@ -159,49 +158,4 @@ export function moveRefusal(
   const height = Math.max(...moved.map((n) => n.depth)) - org.depth;
   if (parent.depth + 1 + height > rules.maxDepth) return 'DEPTH_LIMIT';
   return null;
-}
-
-/**
- * Whether an org below a moved org blocks the move with its "known as" value.
- *
- * A value the instance no longer configures does not block: the move does not
- * make it less valid, and the boot check reports it. A configured value must
- * be allowed at the org's new depth.
- *
- * @param rules - The tree rules.
- * @param key - The org's "known as" key.
- * @param depth - The org's depth after the move.
- * @returns True when the move must be refused.
- */
-export function knownAsBlocksMove(rules: TreeRules, key: string, depth: number): boolean {
-  return rules.knownAsConfigured(key) && !rules.knownAsAllowed(key, depth);
-}
-
-/**
- * Checks `parentId` as a move option for `id`: the move checks, then the "known as" values below.
- *
- * The moved org's own value is not checked, because the move can give it a new one.
- *
- * @param tree - The snapshot.
- * @param id - The org to move.
- * @param parentId - The candidate parent.
- * @param rules - Tree limits and "known as" rules.
- * @returns The refusal code, `KNOWN_AS_DEPTH` when an org below would sit at a depth its
- *   value does not allow, or `null` when the option is allowed.
- */
-export function parentOptionRefusal(
-  tree: Tree,
-  id: string,
-  parentId: string,
-  rules: TreeRules,
-): TreeRefusal | 'KNOWN_AS_DEPTH' | null {
-  const refused = moveRefusal(tree, id, parentId, rules);
-  if (refused) return refused;
-  const org = tree.byId.get(id)!;
-  if (org.parentId === parentId) return null;
-  const delta = tree.byId.get(parentId)!.depth + 1 - org.depth;
-  const below = subtree(tree, id).slice(1);
-  return below.some((n) => knownAsBlocksMove(rules, n.knownAs, n.depth + delta))
-    ? 'KNOWN_AS_DEPTH'
-    : null;
 }

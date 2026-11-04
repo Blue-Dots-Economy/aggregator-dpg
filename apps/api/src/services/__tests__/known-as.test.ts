@@ -1,122 +1,165 @@
 /**
  * Unit tests for the "known as" helpers.
  *
- * Covers: the value list with the system value first, the name of a key, the
- * depths a value is allowed at (one value at several depths, several values at
- * one depth, the system value everywhere, an unknown key), the suggestion per
- * depth with its fallback, and the store's tree rules.
+ * Covers: the store's tree rules, the default key,
+ * name resolution, key validity, key generation from names (Latin, Hindi,
+ * Kannada, digits first, empty, clashes, length) and filling a requested list.
  */
 import { describe, expect, it } from 'vitest';
-import type { KnownAsConfig, OrganisationConfig } from '@aggregator-dpg/network-config/interface';
-import { isAllowedAt, knownAsValues, nameOf, suggestFor, treeRules } from '../known-as.js';
+import type { OrganisationConfig } from '@aggregator-dpg/network-config/interface';
+import { KnownAsKeySchema } from '@aggregator-dpg/shared-primitives/user-org';
+import {
+  defaultKnownAsKey,
+  fillKnownAsKeys,
+  knownAsKeyFrom,
+  knownAsKeyValid,
+  knownAsNameOf,
+  treeRules,
+} from '../known-as.js';
 
-const cfg: KnownAsConfig = {
-  values: [
-    { key: 'state', name: 'State', depths: [1] },
-    { key: 'district', name: 'District', depths: [1, 2] },
-    { key: 'training_partner', name: 'Training Partner' },
-  ],
-  suggest: [
-    { depth: 1, key: 'state' },
-    { depth: 2, key: 'district' },
-  ],
-};
-
-describe('knownAsValues', () => {
-  it('lists the system value first, then the instance values', () => {
-    expect(knownAsValues(cfg)).toEqual([
-      { key: 'aggregator', name: 'Aggregator', depths: null, system: true },
-      { key: 'state', name: 'State', depths: [1], system: false },
-      { key: 'district', name: 'District', depths: [1, 2], system: false },
-      { key: 'training_partner', name: 'Training Partner', depths: null, system: false },
-    ]);
-  });
-
-  it('lists only the system value when the instance adds none', () => {
-    expect(knownAsValues({ values: [], suggest: [] })).toEqual([
-      { key: 'aggregator', name: 'Aggregator', depths: null, system: true },
-    ]);
-  });
-});
-
-describe('nameOf', () => {
-  it('names the system value and an instance value', () => {
-    expect(nameOf(cfg, 'aggregator')).toBe('Aggregator');
-    expect(nameOf(cfg, 'district')).toBe('District');
-  });
-
-  it('gives null for a key that is not configured', () => {
-    expect(nameOf(cfg, 'gone')).toBeNull();
-  });
-});
-
-describe('isAllowedAt', () => {
-  it('allows one value at each of its depths only', () => {
-    expect(isAllowedAt(cfg, 'district', 1)).toBe(true);
-    expect(isAllowedAt(cfg, 'district', 2)).toBe(true);
-    expect(isAllowedAt(cfg, 'district', 3)).toBe(false);
-  });
-
-  it('allows several values at one depth', () => {
-    expect(['state', 'district', 'training_partner'].map((k) => isAllowedAt(cfg, k, 1))).toEqual([
-      true,
-      true,
-      true,
-    ]);
-    expect(isAllowedAt(cfg, 'state', 2)).toBe(false);
-  });
-
-  it('allows a value with no depths at any depth', () => {
-    expect([1, 2, 7].map((d) => isAllowedAt(cfg, 'training_partner', d))).toEqual([
-      true,
-      true,
-      true,
-    ]);
-  });
-
-  it('allows the system value at every depth', () => {
-    expect([1, 2, 10].map((d) => isAllowedAt(cfg, 'aggregator', d))).toEqual([true, true, true]);
-  });
-
-  it('refuses a key that is not configured', () => {
-    expect(isAllowedAt(cfg, 'gone', 1)).toBe(false);
-  });
-});
-
-describe('suggestFor', () => {
-  it('gives the suggestion for a depth', () => {
-    expect(suggestFor(cfg, 1)).toBe('state');
-    expect(suggestFor(cfg, 2)).toBe('district');
-  });
-
-  it('falls back to the system value for a depth with no suggestion', () => {
-    expect(suggestFor(cfg, 3)).toBe('aggregator');
-    expect(suggestFor({ values: [], suggest: [] }, 1)).toBe('aggregator');
-  });
-});
+const list = [
+  { key: 'state', name: 'State' },
+  { key: 'district', name: 'District', default: true as const },
+];
 
 describe('treeRules', () => {
-  it('reads the limits and the known_as rules from the organisation config', () => {
-    const org: OrganisationConfig = {
-      hierarchy: { max_depth: 3, max_children: 5, max_total_orgs: 40 },
-      known_as: cfg,
-    };
-    const rules = treeRules(org);
-    expect(rules).toMatchObject({ maxDepth: 3, maxChildren: 5, maxTotalOrgs: 40 });
-    expect(rules.knownAsAllowed('state', 2)).toBe(false);
-    expect(rules.knownAsAllowed('district', 2)).toBe(true);
-    expect(rules.suggestFor(1)).toBe('state');
-    expect(rules.suggestFor(3)).toBe('aggregator');
-    expect(rules.knownAsConfigured('district')).toBe(true);
-    expect(rules.knownAsConfigured('aggregator')).toBe(true);
-    expect(rules.knownAsConfigured('gone')).toBe(false);
+  it('maps the limits; max_children unset is no limit', () => {
+    const org: OrganisationConfig = { hierarchy: { max_depth: 3, max_total_orgs: 40 } };
+    expect(treeRules(org)).toEqual({ maxDepth: 3, maxChildren: null, maxTotalOrgs: 40 });
+    expect(
+      treeRules({ hierarchy: { max_depth: 1, max_total_orgs: 5, max_children: 2 } }).maxChildren,
+    ).toBe(2);
+  });
+});
+
+describe('defaultKnownAsKey', () => {
+  it('is the default entry, else aggregator', () => {
+    expect(defaultKnownAsKey(list)).toBe('district');
+    expect(defaultKnownAsKey([{ key: 'state', name: 'State' }])).toBe('aggregator');
+    expect(defaultKnownAsKey([])).toBe('aggregator');
+  });
+});
+
+describe('knownAsNameOf', () => {
+  it("takes the parent's entry, aggregator included", () => {
+    expect(knownAsNameOf(list, 'state')).toBe('State');
+    expect(knownAsNameOf([{ key: 'aggregator', name: 'Partner' }], 'aggregator')).toBe('Partner');
   });
 
-  it('gives a null child limit when max_children is unset', () => {
-    const rules = treeRules({
-      hierarchy: { max_depth: 1, max_total_orgs: 50 },
-      known_as: { values: [], suggest: [] },
+  it('reads aggregator and an unknown key as Aggregator', () => {
+    expect(knownAsNameOf(list, 'aggregator')).toBe('Aggregator');
+    expect(knownAsNameOf(list, 'gone')).toBe('Aggregator');
+    expect(knownAsNameOf([], 'state')).toBe('Aggregator');
+  });
+});
+
+describe('knownAsKeyValid', () => {
+  it('accepts a listed key and aggregator; refuses any other key', () => {
+    expect(knownAsKeyValid(list, 'state')).toBe(true);
+    expect(knownAsKeyValid(list, 'aggregator')).toBe(true);
+    expect(knownAsKeyValid([], 'aggregator')).toBe(true);
+    expect(knownAsKeyValid(list, 'block')).toBe(false);
+  });
+});
+
+describe('knownAsKeyFrom', () => {
+  const none = new Set<string>();
+
+  it('lower-cases Latin names and joins words with _', () => {
+    expect(knownAsKeyFrom('Training Partner', none)).toBe('training_partner');
+    expect(knownAsKeyFrom('  State / UT  ', none)).toBe('state_ut');
+    expect(knownAsKeyFrom('Café Owner', none)).toBe('cafe_owner');
+  });
+
+  it('transliterates Hindi and Kannada', () => {
+    const hindi = knownAsKeyFrom('जिला', none);
+    const kannada = knownAsKeyFrom('ಜಿಲ್ಲೆ', none);
+    expect(hindi).toMatch(/^[a-z][a-z0-9_]*$/);
+    expect(kannada).toMatch(/^[a-z][a-z0-9_]*$/);
+    expect(hindi).toBe('jila');
+    expect(kannada).toBe('jille');
+    expect(knownAsKeyFrom('ತಾಲ್ಲೂಕು', none)).toBe('talluku');
+    // A nukta transliterates to an apostrophe, which is dropped.
+    expect(knownAsKeyFrom('ज़िला', none)).toBe('jila');
+    expect(knownAsKeyFrom("O'Brien Block", none)).toBe('obrien_block');
+  });
+
+  it('prefixes v_ when the key would start with a digit', () => {
+    expect(knownAsKeyFrom('2nd Tier', none)).toBe('v_2nd_tier');
+  });
+
+  it('gives value_<n> when nothing is left', () => {
+    expect(knownAsKeyFrom('!!!', none)).toBe('value_1');
+    expect(knownAsKeyFrom('***', new Set(['value_1', 'value_2']))).toBe('value_3');
+  });
+
+  it('adds _2, _3 on a clash', () => {
+    expect(knownAsKeyFrom('State', new Set(['state']))).toBe('state_2');
+    expect(knownAsKeyFrom('State', new Set(['state', 'state_2']))).toBe('state_3');
+  });
+
+  it('cuts the key to 64 characters, the clash suffix included', () => {
+    const long = 'a'.repeat(80);
+    const key = knownAsKeyFrom(long, none);
+    expect(key).toHaveLength(64);
+    const clash = knownAsKeyFrom(long, new Set([key]));
+    expect(clash).toHaveLength(64);
+    expect(clash.endsWith('_2')).toBe(true);
+    expect(KnownAsKeySchema.safeParse(clash).success).toBe(true);
+  });
+});
+
+describe('fillKnownAsKeys', () => {
+  it('keeps sent keys and makes keys for new entries without clashes', () => {
+    const r = fillKnownAsKeys(
+      [{ name: 'State' }, { key: 'state', name: 'State (old)', default: true }, { name: 'Block' }],
+      [{ key: 'state', name: 'State' }],
+    );
+    expect(r).toEqual({
+      ok: true,
+      value: [
+        { key: 'state_2', name: 'State' },
+        { key: 'state', name: 'State (old)', default: true },
+        { key: 'block', name: 'Block' },
+      ],
     });
-    expect(rules).toMatchObject({ maxDepth: 1, maxChildren: null, maxTotalOrgs: 50 });
+  });
+
+  it('never gives a new entry the key of an entry the save drops', () => {
+    const r = fillKnownAsKeys(
+      [{ key: 'district', name: 'District' }, { name: 'State' }],
+      [
+        { key: 'state', name: 'State' },
+        { key: 'district', name: 'District' },
+      ],
+    );
+    expect(r).toEqual({
+      ok: true,
+      value: [
+        { key: 'district', name: 'District' },
+        { key: 'state_2', name: 'State' },
+      ],
+    });
+  });
+
+  it('never makes the key aggregator', () => {
+    expect(fillKnownAsKeys([{ name: 'Aggregator' }, { name: 'aggregator' }], [])).toEqual({
+      ok: true,
+      value: [
+        { key: 'aggregator_2', name: 'Aggregator' },
+        { key: 'aggregator_3', name: 'aggregator' },
+      ],
+    });
+  });
+
+  it('refuses a sent key that is not saved', () => {
+    expect(fillKnownAsKeys([{ name: 'A' }, { key: 'made_up', name: 'B' }], [])).toEqual({
+      ok: false,
+      error: { code: 'UNKNOWN_KEY', index: 1 },
+    });
+  });
+
+  it('accepts an empty list', () => {
+    expect(fillKnownAsKeys([], list)).toEqual({ ok: true, value: [] });
   });
 });

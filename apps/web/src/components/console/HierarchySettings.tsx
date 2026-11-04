@@ -1,13 +1,14 @@
 /**
- * The network's hierarchy settings, read-only: the tree limits, how many
- * organisations exist against the maximum, and each "known as" value with
- * the depths where it is allowed and how many organisations carry it. All of
- * it comes from the instance configuration.
+ * The network's hierarchy settings: the tree limits and how many
+ * organisations exist against the maximum, read-only from the instance
+ * configuration, and the editor for the "known as" values the network
+ * defines for top-level organisations.
  */
 
 import type { ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import type { OrgHierarchyResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import { KnownAsValuesEditor } from './KnownAsValuesEditor';
 
 /** Usage at or above this share of the maximum shows in amber. */
 const NEAR_LIMIT = 0.8;
@@ -15,7 +16,7 @@ const NEAR_LIMIT = 0.8;
 /**
  * Renders the hierarchy settings.
  *
- * @param hierarchy - The settings as read on the server.
+ * @param hierarchy - The settings as read on the server, with `fields=known_as_values`.
  */
 export function HierarchySettings({ hierarchy }: Readonly<{ hierarchy: OrgHierarchyResponse }>) {
   const t = useTranslations('console');
@@ -58,28 +59,11 @@ export function HierarchySettings({ hierarchy }: Readonly<{ hierarchy: OrgHierar
       </div>
 
       <section>
-        <h3 className="mb-2 text-[13px] font-bold text-ink-900">{t('orgs.known_as_values')}</h3>
-        <ul className="flex flex-col gap-2">
-          {hierarchy.known_as.values.map((v) => (
-            <li
-              key={v.key}
-              className="flex flex-wrap items-center gap-3 rounded-[12px] border border-(--bd-border) px-3.5 py-2.5 text-[13px] text-ink-500"
-            >
-              <span className="rounded-[7px] bg-(--bd-primary-50) px-2 py-0.5 text-[12px] font-semibold text-(--bd-primary-600)">
-                {v.name}
-              </span>
-              <span>
-                {v.system ? `${t('orgs.system_value')} · ` : ''}
-                {v.depths === null
-                  ? t('orgs.any_depth')
-                  : t('orgs.depths', { count: v.depths.length, list: v.depths.join(', ') })}
-              </span>
-              <span className="ml-auto font-semibold text-ink-700">
-                {t('orgs.value_orgs', { count: v.org_count })}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <h3 className="mb-2 text-[13px] font-bold text-ink-900">{t('orgs.top_level_known_as')}</h3>
+        <KnownAsValuesEditor
+          orgId={hierarchy.network.id}
+          values={hierarchy.network.known_as_values ?? []}
+        />
       </section>
     </div>
   );

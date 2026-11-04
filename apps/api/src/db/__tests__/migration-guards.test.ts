@@ -25,6 +25,8 @@ const BOOT_SAFE_AFTER_UPGRADE = [
   '0031_rbac_seed',
   '0032_org_known_as',
   '0033_org_description_profile',
+  // Adds `org_known_as` and resets `known_as` to `aggregator` (a display label only); idempotent.
+  '0034_org_known_as',
 ];
 
 const journal: JournalEntry[] = [

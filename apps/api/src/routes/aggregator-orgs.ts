@@ -47,7 +47,8 @@ import type { RecordConsentHook } from '../services/consent-ledger/hook.js';
 import { stampConsent } from '../services/registration-consent.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
 import { getNetworkConfig } from '../services/network-config.js';
-import { nameOf, suggestFor, treeRules } from '../services/known-as.js';
+import { SYSTEM_KNOWN_AS } from '@aggregator-dpg/shared-primitives/user-org';
+import { treeRules } from '../services/known-as.js';
 import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
 
 /**
@@ -156,7 +157,7 @@ const OrgParentsResponseSchema = z.object({
       name: z.string(),
       /** True for the network root. */
       is_root: z.boolean(),
-      /** The name of the org's "known as" value; null for the root and for a key no longer configured. */
+      /** The name of the org's "known as" value, from its parent's list; null for the root. */
       known_as_name: z.string().nullable(),
       /** The name of the "known as" value an org registered under this one gets. */
       child_known_as_name: z.string().nullable(),
@@ -632,6 +633,13 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           fields: { sub_operation: 'orgStore.childCounts' },
         });
       }
+      const childNames = await store.defaultKnownAsNames(candidates.map((o) => o.id));
+      if (!childNames.ok) {
+        throw httpError('DB_UNAVAILABLE', {
+          cause: new Error(childNames.error.message),
+          fields: { sub_operation: 'orgStore.defaultKnownAsNames' },
+        });
+      }
       const org = (await getNetworkConfig()).aggregator.organisation;
       const rules = treeRules(org);
       // The instance total is reported by `accepting`, not per parent.
@@ -646,8 +654,8 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
             id: o.id,
             name: o.displayName,
             is_root: isRoot,
-            known_as_name: isRoot ? null : nameOf(org.known_as, o.knownAs),
-            child_known_as_name: nameOf(org.known_as, suggestFor(org.known_as, o.depth + 1)),
+            known_as_name: isRoot ? null : o.knownAsName,
+            child_known_as_name: childNames.value[o.id] ?? SYSTEM_KNOWN_AS.name,
           };
         });
       const accepting = total.value < rules.maxTotalOrgs && parents.length > 0;

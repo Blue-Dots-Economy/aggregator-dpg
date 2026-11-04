@@ -6,6 +6,7 @@ import { renderCoordinatorInvite } from './coordinator-invite.js';
 import { renderOwnerGrantRefreshed } from './owner-grant-refreshed.js';
 import { renderOrgAlreadyRegistered } from './org-already-registered.js';
 import { renderOrgOwnerApproved } from './org-owner-approved.js';
+import { renderOrgKnownAs } from './org-known-as.js';
 
 describe('admin-review template', () => {
   it('renders applicant fields and action links', () => {
@@ -249,5 +250,32 @@ describe('org-already-registered template', () => {
     });
     expect(out.html).not.toContain('<script>alert(1)</script>');
     expect(out.html).toContain('&lt;script&gt;');
+  });
+});
+
+describe('org-known-as template', () => {
+  it('names the parent org and the org, and links the console; no value is named', () => {
+    const out = renderOrgKnownAs({
+      orgName: 'Beta Org',
+      parentName: 'Alpha Org',
+      consoleUrl: 'https://portal.example.org/console',
+    });
+    expect(out.subject).toContain('a change to Beta Org');
+    expect(out.html).toContain(
+      'The owner of <strong>Alpha Org</strong> changed what <strong>Beta Org</strong> is known as.',
+    );
+    expect(out.html).not.toContain('network administrator');
+    expect(out.html).toContain('https://portal.example.org/console');
+    expect(out.text).toContain('The owner of Alpha Org changed what Beta Org is known as.');
+  });
+
+  it('escapes the org names in the HTML part', () => {
+    const out = renderOrgKnownAs({
+      orgName: '<b>Beta</b>',
+      parentName: 'A & B',
+      consoleUrl: 'https://portal.example.org/console',
+    });
+    expect(out.html).not.toContain('<b>Beta</b>');
+    expect(out.html).toContain('A &amp; B');
   });
 });

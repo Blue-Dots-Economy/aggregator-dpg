@@ -42,6 +42,7 @@ import {
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
+import type { KnownAsValues } from '@aggregator-dpg/shared-primitives/user-org';
 
 export type {
   BecknContact,
@@ -375,7 +376,7 @@ export const organisations = pgTable(
       .default(sql`'[]'::jsonb`),
     legalName: text('legal_name'),
     gstNumber: text('gst_number'),
-    /** Key of the org's "known as" value, from the instance config list. Validated by the API. */
+    /** Key of the org's "known as" value: from the parent's list, or `aggregator`. */
     knownAs: text('known_as').notNull().default('aggregator'),
     /** Depth in the tree: root 0, top-level 1. Set by the store (migration 0032). */
     depth: smallint('depth').notNull(),
@@ -415,6 +416,27 @@ export const organisations = pgTable(
       .where(sql`org_type = 'network_facilitator'`),
   ],
 );
+
+// ─── org_known_as ────────────────────────────────────────────────────────────
+// The "known as" values an org defines for its direct children, one row per
+// org (migration 0034). A child's `organisations.known_as` holds a key of its
+// parent's list, or `aggregator`. An org with an empty list has no row.
+
+export const orgKnownAs = pgTable('org_known_as', {
+  orgId: uuid('org_id')
+    .primaryKey()
+    .references(() => organisations.id, { onDelete: 'cascade' }),
+  /**
+   * The list as the API serves it, in display order. The API checks the
+   * entries on every write; the table checks only the array shape and the
+   * cap of 20 entries.
+   */
+  knownAsValues: jsonb('known_as_values').$type<KnownAsValues>().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  /** The acting admin's user id. */
+  updatedBy: text('updated_by').notNull(),
+});
 
 // ─── registration_invites ────────────────────────────────────────────────────
 // Coordinator invites. The row makes an invite single-use, revocable and

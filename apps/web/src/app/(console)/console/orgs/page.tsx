@@ -13,7 +13,6 @@
 
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import { Lock } from 'lucide-react';
 import type { OrgHierarchyResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
@@ -37,7 +36,9 @@ export default async function ConsoleOrgsPage({
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   if (!actor.me.is_network_admin) return <OwnerOrgs ownedIds={actor.me.orgs.map((o) => o.id)} />;
-  const hierarchy = await consoleRead<OrgHierarchyResponse>('/v1/org/hierarchy');
+  const hierarchy = await consoleRead<OrgHierarchyResponse>(
+    '/v1/org/hierarchy?fields=known_as_values',
+  );
   const network = await readNetworkOrgs(hierarchy.network.id);
   const pending = network.orgs.filter((o) => o.status === 'pending');
   return (
@@ -60,15 +61,7 @@ export default async function ConsoleOrgsPage({
           initialView={initialView}
           initialFilter={initialFilter}
         />
-        <ConsoleCollapsible
-          title={t('orgs.hierarchy')}
-          hint={
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-(--bd-border-soft) px-2.5 py-0.5 text-[12px] font-semibold text-ink-500">
-              <Lock size={12} aria-hidden="true" />
-              {t('orgs.read_only')}
-            </span>
-          }
-        >
+        <ConsoleCollapsible title={t('orgs.hierarchy')}>
           <HierarchySettings hierarchy={hierarchy} />
         </ConsoleCollapsible>
       </div>
