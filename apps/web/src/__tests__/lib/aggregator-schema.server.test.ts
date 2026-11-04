@@ -97,6 +97,34 @@ describe('patchTypeFromNetwork', () => {
     expect(uiSchema.type).toEqual({ 'ui:enumNames': ['Seekers', 'Providers'] });
   });
 
+  it('patches the item choices and labels of a list field', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          domains: [
+            { id: 'seeker', label: 'Seekers' },
+            { id: 'provider', label: 'Providers' },
+          ],
+        }),
+        { status: 200 },
+      ),
+    ) as unknown as typeof fetch;
+
+    const schema = {
+      properties: { type: { type: 'array', items: { type: 'string', enum: ['old'] } } },
+    } as never;
+    const uiSchema: Record<string, unknown> = { type: { 'ui:widget': 'checkboxes' } };
+    await patchTypeFromNetwork(schema, uiSchema);
+
+    const props = (schema as { properties: Record<string, Record<string, unknown>> }).properties;
+    expect(props.type!.items).toEqual({ type: 'string', enum: ['seeker', 'provider'] });
+    expect(props.type!.enum).toBeUndefined();
+    expect(uiSchema.type).toEqual({
+      'ui:widget': 'checkboxes',
+      items: { 'ui:enumNames': ['Seekers', 'Providers'] },
+    });
+  });
+
   it('falls back to the id when a domain has no label', async () => {
     globalThis.fetch = vi
       .fn()
