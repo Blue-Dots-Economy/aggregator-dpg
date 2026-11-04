@@ -473,6 +473,64 @@ describe('GET /v1/dashboard', () => {
     );
   });
 
+  /** Re-seeds AGG_A so it serves only `serves`. */
+  function seedAggAServes(serves: string[]): void {
+    userStore.seed([
+      buildCoordinator({
+        id: AGG_A,
+        orgSlug: 'agg-a',
+        name: 'Agg A',
+        status: 'active',
+        signalstackOrgId: ORG_A,
+        serves,
+      }),
+    ]);
+  }
+
+  it('defaults to the first served domain when no ?domain= is given', async () => {
+    seedAggAServes(['provider']);
+    const spy = vi.spyOn(writer, 'fetchDashboard');
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ domain: 'provider' }));
+  });
+
+  it('403 DOMAIN_NOT_SERVED for a dashboard domain the coordinator does not serve', async () => {
+    seedAggAServes(['provider']);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard?domain=seeker',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('DOMAIN_NOT_SERVED');
+  });
+
+  it('serves the second domain of a multi-domain coordinator', async () => {
+    seedAggAServes(['seeker', 'provider']);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard?domain=provider',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('403 DOMAIN_NOT_SERVED for an export domain the coordinator does not serve', async () => {
+    seedAggAServes(['provider']);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard/export?domain=seeker',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('DOMAIN_NOT_SERVED');
+  });
+
   it('400 SCHEMA_VALIDATION on an unknown domain for /v1/dashboard/export', async () => {
     const res = await app.inject({
       method: 'GET',
@@ -679,6 +737,27 @@ describe('POST /v1/dashboard/export/profiles', () => {
       payload: { item_ids: ['x'], domain: 'bogus' },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  it('403 DOMAIN_NOT_SERVED for a profile export domain the coordinator does not serve', async () => {
+    userStore.seed([
+      buildCoordinator({
+        id: AGG_A,
+        orgSlug: 'agg-a',
+        name: 'Agg A',
+        status: 'active',
+        signalstackOrgId: ORG_A,
+        serves: ['provider'],
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/dashboard/export/profiles',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+      payload: { item_ids: ['p1'], domain: 'seeker' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('DOMAIN_NOT_SERVED');
   });
 
   it('500 INTERNAL when signalstack is not configured', async () => {

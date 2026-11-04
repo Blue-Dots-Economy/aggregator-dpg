@@ -196,8 +196,7 @@ export async function registerAggregatorApprovalRoutes(base: FastifyInstance): P
           applicantEmail: lookup.kcUser.email,
           ...(lookup.aggregator.inviteEmail ? { invitedEmail: lookup.aggregator.inviteEmail } : {}),
           association: lookup.aggregator.name,
-          // `type` is null when the coordinator serves every domain; show `actor_type` then.
-          aggregatorType: lookup.aggregator.type ?? lookup.aggregator.actorType,
+          aggregatorType: servesLabel(lookup.aggregator.serves),
           postUrl: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
           expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
         }),
@@ -381,7 +380,7 @@ export async function registerAggregatorApprovalRoutes(base: FastifyInstance): P
           applicantEmail: lookup.kcUser.email,
           ...(lookup.aggregator.inviteEmail ? { invitedEmail: lookup.aggregator.inviteEmail } : {}),
           association: lookup.aggregator.name,
-          aggregatorType: lookup.aggregator.type ?? lookup.aggregator.actorType,
+          aggregatorType: servesLabel(lookup.aggregator.serves),
           postUrl: `${config.PUBLIC_API_URL}/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
           expiresInText: formatApprovalTtl(config.APPROVAL_TOKEN_TTL_SECONDS),
         }),
@@ -497,4 +496,14 @@ async function loadAggregatorAndUser(aggregatorId: string): Promise<LookupOk | L
   // Record the coordinator's IdP login. Best effort; never blocks the review.
   await recordLoginIdentity(aggregatorId, kc.value.id, 'aggregator-approvals.recordIdentity');
   return { ok: true, aggregator: stored.value, kcUser: kc.value };
+}
+
+/**
+ * The domains a coordinator serves, as shown on the review page.
+ *
+ * @param serves - The stored domain ids; empty means every domain.
+ * @returns The ids joined by commas, or `All domains`.
+ */
+function servesLabel(serves: readonly string[]): string {
+  return serves.length > 0 ? serves.join(', ') : 'All domains';
 }

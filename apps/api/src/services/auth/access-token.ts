@@ -9,6 +9,7 @@
 import { jwtVerify, createRemoteJWKSet, type JWTPayload } from 'jose';
 import type { FastifyRequest } from 'fastify';
 import { getUserStore } from '../user-store/index.js';
+import { servedDomains } from '../user-store/serves.js';
 import { getIdpAdmin } from '../idp-admin/index.js';
 import { KC_ATTR } from '../idp-admin/attributes.js';
 import { getSignalStackWriter } from '../signalstack.js';
@@ -21,18 +22,11 @@ let cachedJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 let cachedJwksUrl: string | null = null;
 let testOverride: ((token: string) => Promise<JWTPayload>) | null = null;
 
-export type AggregatorType = string;
-
 export interface AuthContext {
   /** Keycloak `sub` claim — stable user id. */
   userId: string;
   /** Custom claim mapped from the `aggregator_id` user attribute. */
   aggregatorId: string;
-  /**
-   * Claim from the `aggregator_type` user attribute. Bulk uploads and public
-   * registration links accept only this type.
-   */
-  aggregatorType?: AggregatorType;
   /**
    * Approval state from the `decision_made` claim; `'pending'` until decided.
    * {@link requireApproved} rejects anything other than `'approved'`.
@@ -170,9 +164,6 @@ function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayloa
   if (decision === 'pending' || decision === 'approved' || decision === 'rejected') {
     ctx.decisionMade = decision;
   }
-  // Accept any non-empty domain id; the network config decides which are valid.
-  const aggregatorType = readStringOrFirst(claims.aggregator_type);
-  if (aggregatorType) ctx.aggregatorType = aggregatorType;
   const signalstackOrgId = readStringOrFirst(claims.signalstack_org_id);
   if (signalstackOrgId) ctx.signalstackOrgId = signalstackOrgId;
   return ctx;
@@ -249,15 +240,13 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
     return;
   }
 
-  // Domains come from the live network config, so the backfill never writes a
-  // stale domain set into org.metadata.domains: the aggregator's registered
-  // type when set, else every domain of the network.
+  // Every domain the coordinator serves, filtered by the live network config so
+  // no stale id reaches org.metadata.domains; every network domain when none is
+  // left. Signals replaces the whole list, so a partial list would hide the
+  // participants of the domains left out.
   const networkCfg = await getNetworkConfig();
-  const aggregatorType = found.value.type;
-  const upsertDomains: string[] =
-    aggregatorType && networkCfg.domainIds.includes(aggregatorType)
-      ? [aggregatorType]
-      : networkCfg.domainIds;
+  const served = servedDomains(found.value.serves, networkCfg.domainIds);
+  const upsertDomains: string[] = served.length > 0 ? served : networkCfg.domainIds;
   const upsert = await signalstack.upsertAggregator({
     external_id: ctx.aggregatorId,
     name: found.value.name,

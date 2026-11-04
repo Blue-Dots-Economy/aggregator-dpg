@@ -45,6 +45,7 @@ import { onboarding } from '../db/schema.js';
 import { getRedis } from '../services/redis/index.js';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
 import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
+import { requireServedDomain } from './served-domains-shared.js';
 
 /**
  * Returns the valid participant types for the active network.
@@ -220,7 +221,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         security: [{ bearerAuth: [] }],
         querystring: TemplateQuerySchema,
         response: {
-          ...errorResponses(400, 401, 403, 429, 500),
+          ...errorResponses(400, 401, 403, 429, 500, 503),
         },
       },
     },
@@ -247,7 +248,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
           fields: { participant_type: 'invalid' },
         });
       }
-      enforceAggregatorType(auth, participantType);
+      await requireServedDomain(auth, participantType);
 
       // Both formats are generated from the live participant schema, one
       // participant type per file.
@@ -326,7 +327,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
           fields: { participant_type: 'invalid' },
         });
       }
-      enforceAggregatorType(auth, participantType);
+      await requireServedDomain(auth, participantType);
 
       // Record the schema version at create time. Only v1 exists.
       const schemaId = `participant-${participantType}`;
@@ -861,25 +862,6 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   }
   await recordRouteCaller(req, callerFromAuth(result.context));
   return result.context;
-}
-
-/**
- * Rejects a participant type that differs from the token's `aggregator_type` claim.
- */
-function enforceAggregatorType(auth: AuthContext, participantType: string): void {
-  if (!auth.aggregatorType) {
-    throw httpError('AGGREGATOR_TYPE_MISSING', {
-      fields: { aggregator_id: auth.aggregatorId },
-    });
-  }
-  if (auth.aggregatorType !== participantType) {
-    throw httpError('AGGREGATOR_TYPE_MISMATCH', {
-      fields: {
-        aggregator_type: auth.aggregatorType,
-        requested_type: participantType,
-      },
-    });
-  }
 }
 
 /**
