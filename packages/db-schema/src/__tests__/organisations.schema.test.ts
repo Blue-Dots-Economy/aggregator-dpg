@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { getTableConfig } from 'drizzle-orm/pg-core';
-import { organisations, orgTypeEnum, users } from '../schema.js';
+import { organisations, orgKnownAs, orgTypeEnum, users } from '../schema.js';
 
 describe('organisations schema (migration 0028)', () => {
   it('declares the org columns with snake_case SQL names', () => {
@@ -39,11 +39,31 @@ describe('organisations schema (migration 0028)', () => {
     expect(organisations.knownAs.default).toBe('aggregator');
   });
 
-  it('declares known_as_values as a required jsonb column defaulting to [] (migration 0034)', () => {
-    expect(organisations.knownAsValues.name).toBe('known_as_values');
-    expect(organisations.knownAsValues.notNull).toBe(true);
-    expect(organisations.knownAsValues.hasDefault).toBe(true);
-    expect(organisations.knownAsValues.getSQLType()).toBe('jsonb');
+  it('has no known_as_values column: the values live in org_known_as (migration 0034)', () => {
+    expect('knownAsValues' in organisations).toBe(false);
+  });
+
+  it('declares org_known_as with one row per value (migration 0034)', () => {
+    const cfg = getTableConfig(orgKnownAs);
+    expect(cfg.name).toBe('org_known_as');
+    expect(orgKnownAs.orgId.name).toBe('org_id');
+    expect(orgKnownAs.key.name).toBe('key');
+    expect(orgKnownAs.name.name).toBe('name');
+    expect(orgKnownAs.isDefault.name).toBe('is_default');
+    expect(orgKnownAs.isDefault.default).toBe(false);
+    expect(orgKnownAs.position.getSQLType()).toBe('smallint');
+    for (const col of [orgKnownAs.orgId, orgKnownAs.key, orgKnownAs.name, orgKnownAs.position]) {
+      expect(col.notNull).toBe(true);
+    }
+    expect(orgKnownAs.createdAt.hasDefault).toBe(true);
+    expect(orgKnownAs.updatedAt.hasDefault).toBe(true);
+    expect(cfg.primaryKeys[0]?.columns.map((c) => c.name)).toEqual(['org_id', 'key']);
+    expect(cfg.foreignKeys[0]?.onDelete).toBe('cascade');
+    expect(cfg.indexes.map((i) => i.config.name).sort()).toEqual([
+      'org_known_as_default_unique',
+      'org_known_as_name_unique',
+    ]);
+    expect(cfg.indexes.every((i) => i.config.unique)).toBe(true);
   });
 
   it('declares depth as a required smallint with no default (migration 0032)', () => {

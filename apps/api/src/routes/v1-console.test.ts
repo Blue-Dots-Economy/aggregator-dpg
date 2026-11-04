@@ -21,6 +21,7 @@ import {
   _setOrganisationStore,
 } from '../services/organisation-store/index.js';
 import type { Organisation } from '../services/organisation-store/index.js';
+import type { KnownAsValues } from '@aggregator-dpg/shared-primitives/user-org';
 import { IdpAdminFake, _setIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -124,17 +125,22 @@ describe('console routes /v1/user, /v1/org', () => {
   }
 
   /** Sets the root's "known as" list. */
-  async function setRootList(list: Organisation['knownAsValues']): Promise<void> {
+  async function setRootList(list: KnownAsValues): Promise<void> {
     const r = await orgs.findRoot();
     if (!r.ok || !r.value) throw new Error('seed');
-    orgs.seedRoot({ ...r.value, knownAsValues: list });
+    orgs.seedKnownAsValues(r.value.id, list);
   }
 
-  /** Re-seeds an org with some fields changed. */
-  async function setOrg(id: string, fields: Partial<Organisation>): Promise<void> {
+  /** Re-seeds an org with some fields changed, and the "known as" list it defines when given. */
+  async function setOrg(
+    id: string,
+    fields: Partial<Organisation> & { knownAsValues?: KnownAsValues },
+  ): Promise<void> {
     const r = await orgs.findById(id);
     if (!r.ok || !r.value) throw new Error('seed');
-    orgs.seed([{ ...r.value, ...fields }]);
+    const { knownAsValues, ...rest } = fields;
+    orgs.seed([{ ...r.value, ...rest }]);
+    if (knownAsValues) orgs.seedKnownAsValues(id, knownAsValues);
   }
 
   const savedCustomRoles = config.RBAC_CUSTOM_ROLES_ENABLED;
@@ -369,33 +375,63 @@ describe('console routes /v1/user, /v1/org', () => {
       await setRootList([STATE]);
       await setOrg(ORG_A, { parentId: ROOT, knownAs: 'state', knownAsValues: [BLOCK] });
       type Read = {
-        org: {
-          known_as: string | null;
-          known_as_name: string | null;
-          depth: number;
-          known_as_values: unknown[];
-        };
+        org: { known_as: string | null; known_as_name: string | null; depth: number };
         child_count: number;
       };
       const a = (await get(`/v1/org/read/${ORG_A}`, 'a')).json() as Read;
-      expect(a.org).toMatchObject({
-        known_as: 'state',
-        known_as_name: 'State',
-        depth: 1,
-        known_as_values: [BLOCK],
-      });
+      expect(a.org).toMatchObject({ known_as: 'state', known_as_name: 'State', depth: 1 });
       expect(a.child_count).toBe(0);
       const root = (await get(`/v1/org/read/${ROOT}`, 'na')).json() as Read;
-      expect(root.org).toMatchObject({
-        known_as: null,
-        known_as_name: null,
-        depth: 0,
-        known_as_values: [STATE],
-      });
+      expect(root.org).toMatchObject({ known_as: null, known_as_name: null, depth: 0 });
       await setOrg(ORG_A, { knownAs: 'retired_key' });
       const stale = (await get(`/v1/org/read/${ORG_A}`, 'a')).json() as Read;
       expect(stale.org).toMatchObject({ known_as: 'retired_key', known_as_name: 'Aggregator' });
     });
+
+    it('leaves out known_as_values and known_as_options without fields, and reads nothing for them', async () => {
+      useHierarchy();
+      await setRootList([STATE]);
+      await setOrg(ORG_A, { parentId: ROOT, knownAsValues: [BLOCK] });
+      const lists = vi.spyOn(orgs, 'knownAsValues');
+      for (const url of [`/v1/org/read/${ORG_A}`, `/v1/org/read/${ORG_A}?fields=`]) {
+        const res = await get(url, 'na');
+        expect(res.statusCode).toBe(200);
+        const body = res.json() as Record<string, unknown> & { org: Record<string, unknown> };
+        expect(body).not.toHaveProperty('known_as_values');
+        expect(body).not.toHaveProperty('known_as_options');
+        expect(body.org).not.toHaveProperty('known_as_values');
+      }
+      expect(lists).not.toHaveBeenCalled();
+    });
+
+    it('adds only the fields that are requested', async () => {
+      useHierarchy();
+      await setRootList([STATE]);
+      await setOrg(ORG_A, { parentId: ROOT, knownAsValues: [BLOCK] });
+      const both = (
+        await get(`/v1/org/read/${ORG_A}?fields=known_as_values,known_as_options`, 'na')
+      ).json() as Record<string, unknown>;
+      expect(both).toMatchObject({ known_as_values: [BLOCK], known_as_options: [STATE] });
+      const values = (
+        await get(`/v1/org/read/${ORG_A}?fields=known_as_values`, 'na')
+      ).json() as Record<string, unknown>;
+      expect(values['known_as_values']).toEqual([BLOCK]);
+      expect(values).not.toHaveProperty('known_as_options');
+      const options = (
+        await get(`/v1/org/read/${ORG_A}?fields=known_as_options`, 'na')
+      ).json() as Record<string, unknown>;
+      expect(options['known_as_options']).toEqual([STATE]);
+      expect(options).not.toHaveProperty('known_as_values');
+    });
+
+    it.each(['children', 'known_as_values,', 'known_as_values,owner'])(
+      'refuses fields=%s (400 SCHEMA_VALIDATION)',
+      async (fields) => {
+        const res = await get(`/v1/org/read/${ORG_A}?fields=${fields}`, 'a');
+        expect(res.statusCode).toBe(400);
+        expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
+      },
+    );
 
     it('offers known_as_options only to the owner of the parent', async () => {
       useHierarchy();
@@ -404,7 +440,8 @@ describe('console routes /v1/user, /v1/org', () => {
       await setOrg(ORG_B, { parentId: ORG_A, parentName: 'Alpha', depth: 2 });
       type Read = { known_as_options: unknown[] | null };
       const read = async (id: string, who: keyof typeof TOKENS) =>
-        ((await get(`/v1/org/read/${id}`, who)).json() as Read).known_as_options;
+        ((await get(`/v1/org/read/${id}?fields=known_as_options`, who)).json() as Read)
+          .known_as_options;
       // The network admin owns the root, the parent of Alpha.
       expect(await read(ORG_A, 'na')).toEqual([STATE]);
       // Alpha's own owner does not pick its value.
@@ -421,13 +458,20 @@ describe('console routes /v1/user, /v1/org', () => {
       useHierarchy({ max_depth: 2 });
       await setOrg(ORG_A, { knownAsValues: [BLOCK] });
       await setOrg(ORG_B, { parentId: ORG_A, parentName: 'Alpha', depth: 2 });
-      type Read = { org: { known_as_values: unknown } };
+      type Read = { known_as_values: unknown };
       const values = async (id: string, who: keyof typeof TOKENS) =>
-        ((await get(`/v1/org/read/${id}`, who)).json() as Read).org.known_as_values;
+        ((await get(`/v1/org/read/${id}?fields=known_as_values`, who)).json() as Read)
+          .known_as_values;
       expect(await values(ORG_A, 'a')).toEqual([BLOCK]);
       expect(await values(ORG_B, 'b')).toBeNull();
       expect(await values(DEFAULT, 'na')).toBeNull();
       expect(await values(ROOT, 'na')).toEqual([]);
+    });
+
+    it('answers 503 when a requested list cannot be read', async () => {
+      useHierarchy();
+      vi.spyOn(orgs, 'knownAsValues').mockResolvedValueOnce(storeErr());
+      expect((await get(`/v1/org/read/${ORG_A}?fields=known_as_values`, 'a')).statusCode).toBe(503);
     });
   });
 
@@ -906,6 +950,7 @@ describe('console routes /v1/user, /v1/org', () => {
       const res = await setKnownAs('a', { known_as: 'taluk' });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ id: ORG_B, known_as: 'taluk', known_as_name: 'Taluk' });
+      expect(res.json()).not.toHaveProperty('known_as_values');
       const notice = mailer.outbox.find((m) => m.to === 'b@b.org');
       expect(notice?.html).toContain('The owner of <strong>Alpha</strong> changed what');
       expect(notice?.html).not.toContain('Taluk');
@@ -1070,8 +1115,8 @@ describe('console routes /v1/user, /v1/org', () => {
         code: 'SCHEMA_VALIDATION',
         fields: { known_as_values: 'unknown_key', index: 1 },
       });
-      const a = await orgs.findById(ORG_A);
-      expect(a.ok && a.value?.knownAsValues).toEqual([BLOCK, TALUK]);
+      const a = await orgs.knownAsValues(ORG_A);
+      expect(a.ok && a.value).toEqual([BLOCK, TALUK]);
     });
 
     it('gives a re-added name a new key and resets the children of the removed entry', async () => {
@@ -1112,7 +1157,7 @@ describe('console routes /v1/user, /v1/org', () => {
       });
       // Alpha's aggregator value is kept.
       expect(await knownAsOf(ORG_A)).toEqual(['aggregator', 'Aggregator']);
-      const h = (await get('/v1/org/hierarchy', 'na')).json() as {
+      const h = (await get('/v1/org/hierarchy?fields=known_as_values', 'na')).json() as {
         network: { known_as_values: unknown };
       };
       expect(h.network.known_as_values).toEqual([{ key: 'state', name: 'State', default: true }]);
@@ -1324,9 +1369,11 @@ describe('console routes /v1/user, /v1/org', () => {
       expect((res.json() as { child_count: number }).child_count).toBe(1);
     });
 
-    it('fills child_count on each search row', async () => {
+    it('fills child_count on each search row and never includes known_as_values', async () => {
+      await setOrg(ORG_A, { knownAsValues: [BLOCK] });
       const res = await post('/v1/org/search', 'na', {});
       const rows = (res.json() as { orgs: Array<{ id: string; child_count: number }> }).orgs;
+      for (const row of rows) expect(row).not.toHaveProperty('known_as_values');
       expect(Object.fromEntries(rows.map((o) => [o.id, o.child_count]))).toEqual({
         [DEFAULT]: 0,
         [ORG_A]: 1,
@@ -1348,19 +1395,39 @@ describe('console routes /v1/user, /v1/org', () => {
       useHierarchy({ max_children: 10 });
     });
 
-    it('shows the network with its list, the limits and the org total', async () => {
+    it('shows the network, the limits and the org total; the list only on request', async () => {
       await setRootList([{ ...STATE, default: true }]);
+      const lists = vi.spyOn(orgs, 'knownAsValues');
       const res = await get('/v1/org/hierarchy', 'na');
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({
+        network: { id: ROOT, name: 'The Network' },
+        limits: { max_depth: 3, max_children: 10, max_total_orgs: 50 },
+        total_orgs: 3,
+      });
+      expect(lists).not.toHaveBeenCalled();
+      const withList = await get('/v1/org/hierarchy?fields=known_as_values', 'na');
+      expect(withList.json()).toMatchObject({
         network: {
           id: ROOT,
           name: 'The Network',
           known_as_values: [{ ...STATE, default: true }],
         },
-        limits: { max_depth: 3, max_children: 10, max_total_orgs: 50 },
-        total_orgs: 3,
       });
+    });
+
+    it.each(['known_as_options', 'everything'])(
+      'refuses fields=%s (400 SCHEMA_VALIDATION)',
+      async (fields) => {
+        const res = await get(`/v1/org/hierarchy?fields=${fields}`, 'na');
+        expect(res.statusCode).toBe(400);
+        expect((res.json() as { error: { code: string } }).error.code).toBe('SCHEMA_VALIDATION');
+      },
+    );
+
+    it('answers 503 when the requested list cannot be read', async () => {
+      vi.spyOn(orgs, 'knownAsValues').mockResolvedValueOnce(storeErr());
+      expect((await get('/v1/org/hierarchy?fields=known_as_values', 'na')).statusCode).toBe(503);
     });
 
     it('reports max_children as null when unset', async () => {

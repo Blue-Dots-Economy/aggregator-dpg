@@ -25,9 +25,9 @@ function seeded(): OrganisationStoreFake {
       slug: 'network',
       status: 'active',
       depth: 0,
-      knownAsValues: [{ key: 'state', name: 'State' }],
     }),
   );
+  store.seedKnownAsValues(ROOT, [{ key: 'state', name: 'State' }]);
   store.seed([
     buildDefaultOrg({ parentId: ROOT }),
     buildOrganisation({ id: 'a', slug: 'a', status: 'active', parentId: ROOT, knownAs: 'state' }),
@@ -122,10 +122,10 @@ describe('warnOrgTreeOverLimits', () => {
         status: 'active',
         parentId: 'a',
         depth: 2,
-        knownAsValues: [{ key: 'state', name: 'State' }],
       }),
       buildOrganisation({ id: 'e', slug: 'e', parentId: 'b', depth: 3 }),
     ]);
+    store.seedKnownAsValues('b', [{ key: 'state', name: 'State' }]);
     const warn = vi.fn();
     await warnOrgTreeOverLimits(store, cfg({ max_depth: 3 }), { warn, error: vi.fn() });
     expect(checks(warn).known_as).toBeUndefined();
@@ -140,15 +140,26 @@ describe('warnOrgTreeOverLimits', () => {
         status: 'inactive',
         parentId: 'b',
         depth: 3,
-        knownAsValues: [{ key: 'block', name: 'Block' }],
       }),
       buildOrganisation({ id: 'f', slug: 'f', parentId: 'd', depth: 3, knownAs: 'block' }),
       buildOrganisation({ id: 'g', slug: 'g', parentId: 'd', depth: 3, knownAs: 'gone' }),
     ]);
+    store.seedKnownAsValues('d', [{ key: 'block', name: 'Block' }]);
     const warn = vi.fn();
     await warnOrgTreeOverLimits(store, cfg({ max_depth: 3 }), { warn, error: vi.fn() });
     // C ("state" under B) and G ("gone" under D).
     expect(checks(warn).known_as).toMatchObject({ org_count: 2 });
+  });
+
+  it('logs an error when the stale count cannot be read', async () => {
+    const store = seeded();
+    vi.spyOn(store, 'countStaleKnownAs').mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'down' },
+    });
+    const error = vi.fn();
+    await warnOrgTreeOverLimits(store, cfg({ max_depth: 3 }), { warn: vi.fn(), error });
+    expect(error.mock.calls[0]?.[0]).toMatchObject({ status: 'failure', error: 'down' });
   });
 
   it('logs a failure as an error and returns when the store cannot be read', async () => {

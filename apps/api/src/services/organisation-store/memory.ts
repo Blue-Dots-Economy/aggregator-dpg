@@ -4,8 +4,9 @@
  * Matches the Postgres adapter's behaviour: slug uniqueness over live rows,
  * atomic approve/reject, lowercased owner email, Default org skipped by owner
  * lookups. It holds aggregator orgs only; the root is a separate slot (see
- * `OrganisationStoreFake`). `knownAsName` is resolved from the parent's list
- * when a row is read, so a list edit shows on every child at once.
+ * `OrganisationStoreFake`). Each org's "known as" values are kept apart from
+ * the row, as in `org_known_as`. `knownAsName` is resolved from the parent's
+ * values when a row is read, so a list edit shows on every child at once.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -55,6 +56,8 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
   protected readonly coordinatorContacts = new Set<string>();
   /** The network-facilitator root, when a test seeds one. */
   protected root: Organisation | null = null;
+  /** The "known as" values each org defines for its children, by org id. */
+  protected readonly knownAsLists = new Map<string, KnownAsValues>();
   /** Tail of the tree-lock queue; see {@link withTreeLock}. */
   private treeLock: Promise<unknown> = Promise.resolve();
 
@@ -127,9 +130,8 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
       isDefault: false,
       locations: input.locations ?? [],
       legalName: null,
-      knownAs: defaultKnownAsKey(parent?.knownAsValues ?? []),
+      knownAs: defaultKnownAsKey(this.listOf(parent?.id ?? null)),
       knownAsName: null,
-      knownAsValues: [],
       depth,
       parentId: parent?.id ?? null,
       parentName: parent?.displayName ?? null,
@@ -164,7 +166,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
         parentId: parent?.id ?? null,
         parentName: parent?.displayName ?? null,
         depth,
-        knownAs: defaultKnownAsKey(parent?.knownAsValues ?? []),
+        knownAs: defaultKnownAsKey(this.listOf(parent?.id ?? null)),
         status: 'pending',
         rejectedAt: null,
         updatedAt: new Date(),
@@ -328,6 +330,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     // As in Postgres: the Default org is never removable here.
     if (gone?.isDefault) return Promise.resolve({ ok: true, value: undefined });
     this.byId.delete(id);
+    this.knownAsLists.delete(id);
     // Release the owner's account once it owns no other org, as the database trigger does.
     if (gone && ![...this.byId.values()].some((o) => o.ownerUserId === gone.ownerUserId)) {
       this.adminByContact.delete(gone.contactId);
@@ -396,13 +399,13 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     id: string,
     requested: KnownAsValuesRequest,
     updatedBy: string,
-  ): Promise<OrgStoreResult<{ org: Organisation; resetCount: number }>> {
+  ): Promise<OrgStoreResult<{ org: Organisation; values: KnownAsValues; resetCount: number }>> {
     return this.withTreeLock(() => {
       const isRoot = this.root?.id === id;
       const org = isRoot ? this.root : this.byId.get(id);
       if (!org) return Promise.resolve(err('NOT_FOUND', id));
       if (org.isDefault) return Promise.resolve(err('NOT_EDITABLE', 'the Default org'));
-      const filled = fillKnownAsKeys(requested, org.knownAsValues);
+      const filled = fillKnownAsKeys(requested, this.listOf(id));
       if (!filled.ok) {
         return Promise.resolve({
           ok: false,
@@ -414,12 +417,13 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
         });
       }
       const values = filled.value;
-      const next: Organisation = {
-        ...org,
-        knownAsValues: values.map((e) => ({ ...e })),
-        updatedBy,
-        updatedAt: new Date(),
-      };
+      if (values.length > 0)
+        this.knownAsLists.set(
+          id,
+          values.map((e) => ({ ...e })),
+        );
+      else this.knownAsLists.delete(id);
+      const next: Organisation = { ...org, updatedBy, updatedAt: new Date() };
       if (isRoot) this.root = next;
       else this.byId.set(id, next);
       const fallback = defaultKnownAsKey(values);
@@ -432,8 +436,31 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
         this.byId.set(child.id, { ...child, knownAs: fallback });
         resetCount += 1;
       }
-      return Promise.resolve({ ok: true, value: { org: this.view(next), resetCount } });
+      return Promise.resolve({
+        ok: true,
+        value: { org: this.view(next), values: values.map((e) => ({ ...e })), resetCount },
+      });
     });
+  }
+
+  knownAsValues(orgId: string): Promise<OrgStoreResult<KnownAsValues>> {
+    return Promise.resolve({ ok: true, value: this.listOf(orgId).map((e) => ({ ...e })) });
+  }
+
+  defaultKnownAsNames(orgIds: readonly string[]): Promise<OrgStoreResult<Record<string, string>>> {
+    const out: Record<string, string> = {};
+    for (const id of orgIds) {
+      const name = this.listOf(id).find((e) => e.default)?.name;
+      if (name !== undefined) out[id] = name;
+    }
+    return Promise.resolve({ ok: true, value: out });
+  }
+
+  countStaleKnownAs(): Promise<OrgStoreResult<number>> {
+    const stale = [...this.byId.values()].filter(
+      (o) => counts(o) && !knownAsKeyValid(this.listOf(o.parentId), o.knownAs),
+    ).length;
+    return Promise.resolve({ ok: true, value: stale });
   }
 
   async approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
@@ -492,15 +519,14 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
   }
 
   /**
-   * The "known as" list of an org or the root.
+   * The "known as" values of an org or the root.
    *
    * @param id - The org id; `null` for no parent.
-   * @returns The list; empty when the org is not stored.
+   * @returns The list; empty when the org has none.
    */
   private listOf(id: string | null): KnownAsValues {
     if (id === null) return [];
-    const org = this.root?.id === id ? this.root : this.byId.get(id);
-    return org?.knownAsValues ?? [];
+    return this.knownAsLists.get(id) ?? [];
   }
 
   /**
@@ -543,6 +569,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     }
     if (!(await beforeCommit())) return { ok: true, value: 'aborted' };
     this.byId.delete(id);
+    this.knownAsLists.delete(id);
     return { ok: true, value: 'deleted' };
   }
 

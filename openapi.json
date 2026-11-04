@@ -5706,8 +5706,18 @@
         "tags": [
           "console"
         ],
-        "description": "An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked. known_as_options lists the values the caller can pick for the org's known_as (the parent's list, or only \"aggregator\" when that list is empty); it is null unless the caller owns the parent (the network admin for a top-level organisation). org.known_as_values is null when the organisation cannot have child organisations: the Default organisation, or an organisation at max_depth.",
+        "description": "An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked. The fields query adds data that is left out by default. fields=known_as_values adds known_as_values: the values the organisation defines for its direct children, or null when it cannot have child organisations (the Default organisation, or an organisation at max_depth). fields=known_as_options adds known_as_options: the values the caller can pick for the org's known_as (the parent's list, or only \"aggregator\" when that list is empty), or null unless the caller owns the parent (the network admin for a top-level organisation). An unknown name in fields answers 400 SCHEMA_VALIDATION.",
         "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:(?:known_as_values|known_as_options)(?:,(?:known_as_values|known_as_options))*)?$"
+            },
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "description": "Comma-separated list of extra data to include: known_as_values, known_as_options."
+          },
           {
             "schema": {
               "type": "string",
@@ -5842,37 +5852,6 @@
                           "type": "string",
                           "nullable": true
                         },
-                        "known_as_values": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "key": {
-                                "type": "string",
-                                "pattern": "^[a-z][a-z0-9_]*$",
-                                "maxLength": 64
-                              },
-                              "name": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 60
-                              },
-                              "default": {
-                                "type": "boolean",
-                                "enum": [
-                                  true
-                                ]
-                              }
-                            },
-                            "required": [
-                              "key",
-                              "name"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "maxItems": 20,
-                          "nullable": true
-                        },
                         "depth": {
                           "type": "integer"
                         },
@@ -5914,7 +5893,6 @@
                         "legal_name",
                         "known_as",
                         "known_as_name",
-                        "known_as_values",
                         "depth",
                         "parent_id",
                         "parent_name",
@@ -5970,6 +5948,37 @@
                     "pending_count": {
                       "type": "integer"
                     },
+                    "known_as_values": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_]*$",
+                            "maxLength": 64
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 60
+                          },
+                          "default": {
+                            "type": "boolean",
+                            "enum": [
+                              true
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "maxItems": 20,
+                      "nullable": true
+                    },
                     "known_as_options": {
                       "type": "array",
                       "items": {
@@ -6006,8 +6015,7 @@
                     "owner",
                     "coordinator_count",
                     "child_count",
-                    "pending_count",
-                    "known_as_options"
+                    "pending_count"
                   ],
                   "additionalProperties": false
                 }
@@ -6402,36 +6410,6 @@
                             "type": "string",
                             "nullable": true
                           },
-                          "known_as_values": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "key": {
-                                  "type": "string",
-                                  "pattern": "^[a-z][a-z0-9_]*$",
-                                  "maxLength": 64
-                                },
-                                "name": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 60
-                                },
-                                "default": {
-                                  "type": "boolean",
-                                  "enum": [
-                                    true
-                                  ]
-                                }
-                              },
-                              "required": [
-                                "key",
-                                "name"
-                              ],
-                              "additionalProperties": false
-                            },
-                            "maxItems": 20
-                          },
                           "depth": {
                             "type": "integer"
                           },
@@ -6482,7 +6460,6 @@
                           "legal_name",
                           "known_as",
                           "known_as_name",
-                          "known_as_values",
                           "depth",
                           "parent_id",
                           "parent_name",
@@ -6964,36 +6941,6 @@
                       "type": "string",
                       "nullable": true
                     },
-                    "known_as_values": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "key": {
-                            "type": "string",
-                            "pattern": "^[a-z][a-z0-9_]*$",
-                            "maxLength": 64
-                          },
-                          "name": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 60
-                          },
-                          "default": {
-                            "type": "boolean",
-                            "enum": [
-                              true
-                            ]
-                          }
-                        },
-                        "required": [
-                          "key",
-                          "name"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "maxItems": 20
-                    },
                     "depth": {
                       "type": "integer"
                     },
@@ -7035,7 +6982,6 @@
                     "legal_name",
                     "known_as",
                     "known_as_name",
-                    "known_as_values",
                     "depth",
                     "parent_id",
                     "parent_name",
@@ -7416,7 +7362,7 @@
         "tags": [
           "console"
         ],
-        "description": "The body has exactly one of known_as or known_as_values. An organisation the caller cannot see answers 404.\n\nknown_as sets the organisation's own value. Only the owner of the organisation's parent sets it: the network admin for a top-level organisation, else the owner of the parent organisation (an active organisation it owns); anyone else gets 403. known_as must be a key of the parent's list, or aggregator when that list is empty (400 SCHEMA_VALIDATION with fields.known_as otherwise). The network, the Default organisation and a rejected organisation answer 409, and so does an organisation moved while the request ran (fields.reason: moved). The organisation's owner is emailed when it is not the caller. Sending the current value answers 200 with the organisation unchanged and sends no email.\n\nknown_as_values replaces the whole list the organisation defines for its direct children. Only the organisation's owner sets it (an active organisation it owns; the network's list for the network admin): 403 when the caller sees but does not own it, 409 for the Default organisation. An entry that is already saved sends its key back and keeps it; a new entry sends only a name, and the API makes its key from the name. A key that is not already in the list answers 400 SCHEMA_VALIDATION (fields.known_as_values: unknown_key, fields.index). At most one entry is the default; new organisations under this one get it, else aggregator. Organisations under this one whose value leaves the list take the default, else aggregator; a renamed entry keeps its key, so they keep it too.",
+        "description": "The body has exactly one of known_as or known_as_values. An organisation the caller cannot see answers 404.\n\nknown_as sets the organisation's own value. Only the owner of the organisation's parent sets it: the network admin for a top-level organisation, else the owner of the parent organisation (an active organisation it owns); anyone else gets 403. known_as must be a key of the parent's list, or aggregator when that list is empty (400 SCHEMA_VALIDATION with fields.known_as otherwise). The network, the Default organisation and a rejected organisation answer 409, and so does an organisation moved while the request ran (fields.reason: moved). The organisation's owner is emailed when it is not the caller. Sending the current value answers 200 with the organisation unchanged and sends no email.\n\nknown_as_values replaces the whole list the organisation defines for its direct children, and the response adds the saved known_as_values with every key set. Only the organisation's owner sets it (an active organisation it owns; the network's list for the network admin): 403 when the caller sees but does not own it, 409 for the Default organisation. An entry that is already saved sends its key back and keeps it; a new entry sends only a name, and the API makes its key from the name. A key that is not already in the list answers 400 SCHEMA_VALIDATION (fields.known_as_values: unknown_key, fields.index). At most one entry is the default; new organisations under this one get it, else aggregator. Organisations under this one whose value leaves the list take the default, else aggregator; a renamed entry keeps its key, so they keep it too.",
         "requestBody": {
           "required": true,
           "content": {
@@ -7612,6 +7558,35 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "depth": {
+                      "type": "integer"
+                    },
+                    "parent_id": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "parent_name": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "profile": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "profile_ref": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
                     "known_as_values": {
                       "type": "array",
                       "items": {
@@ -7641,35 +7616,6 @@
                         "additionalProperties": false
                       },
                       "maxItems": 20
-                    },
-                    "depth": {
-                      "type": "integer"
-                    },
-                    "parent_id": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "parent_name": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "description": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "profile": {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    "profile_ref": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "updated_at": {
-                      "type": "string"
                     }
                   },
                   "required": [
@@ -7683,7 +7629,6 @@
                     "legal_name",
                     "known_as",
                     "known_as_name",
-                    "known_as_values",
                     "depth",
                     "parent_id",
                     "parent_name",
@@ -8217,36 +8162,6 @@
                       "type": "string",
                       "nullable": true
                     },
-                    "known_as_values": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "key": {
-                            "type": "string",
-                            "pattern": "^[a-z][a-z0-9_]*$",
-                            "maxLength": 64
-                          },
-                          "name": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 60
-                          },
-                          "default": {
-                            "type": "boolean",
-                            "enum": [
-                              true
-                            ]
-                          }
-                        },
-                        "required": [
-                          "key",
-                          "name"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "maxItems": 20
-                    },
                     "depth": {
                       "type": "integer"
                     },
@@ -8288,7 +8203,6 @@
                     "legal_name",
                     "known_as",
                     "known_as_name",
-                    "known_as_values",
                     "depth",
                     "parent_id",
                     "parent_name",
@@ -9785,7 +9699,19 @@
         "tags": [
           "console"
         ],
-        "description": "Read-only. The network with the \"known as\" values it defines for top-level organisations (edited through PATCH /v1/org/known-as/update/:id with known_as_values), the tree limits from the instance config, and how many pending and active organisations count toward max_total_orgs. Depth 1 sits directly under the network.",
+        "description": "Read-only. The network, the tree limits from the instance config, and how many pending and active organisations count toward max_total_orgs. Depth 1 sits directly under the network. fields=known_as_values adds network.known_as_values: the \"known as\" values the network defines for top-level organisations (edited through PATCH /v1/org/known-as/update/:id with known_as_values). An unknown name in fields answers 400 SCHEMA_VALIDATION.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:(?:known_as_values)(?:,(?:known_as_values))*)?$"
+            },
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "description": "Comma-separated list of extra data to include: known_as_values."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -9836,8 +9762,7 @@
                       },
                       "required": [
                         "id",
-                        "name",
-                        "known_as_values"
+                        "name"
                       ],
                       "additionalProperties": false
                     },

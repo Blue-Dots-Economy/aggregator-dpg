@@ -70,4 +70,9 @@ describe('<HierarchySettings />', () => {
     renderIt({ ...hierarchy, network: { ...hierarchy.network, known_as_values: [] } });
     expect(screen.getByText(messages.console.org.known_as_values_empty)).toBeInTheDocument();
   });
+
+  it('shows the empty state when the read did not include the values', () => {
+    renderIt({ ...hierarchy, network: { id: hierarchy.network.id, name: hierarchy.network.name } });
+    expect(screen.getByText(messages.console.org.known_as_values_empty)).toBeInTheDocument();
+  });
 });

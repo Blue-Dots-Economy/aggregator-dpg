@@ -105,7 +105,6 @@ export function toWireOrg(
     legal_name: o.legalName,
     known_as: isRoot ? null : o.knownAs,
     known_as_name: isRoot ? null : o.knownAsName,
-    known_as_values: o.knownAsValues,
     depth: o.depth,
     parent_id: o.parentId,
     parent_name: o.parentName,

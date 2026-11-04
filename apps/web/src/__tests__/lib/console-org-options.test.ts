@@ -29,7 +29,6 @@ const row = (
   gst_number: null,
   known_as: 'aggregator',
   known_as_name: 'Aggregator',
-  known_as_values: [],
   depth: 3,
   parent_id: parentId,
   parent_name: null,

@@ -31,6 +31,9 @@ import {
   KnownAsValuesSchema,
   KnownAsValuesRequestSchema,
   OrgKnownAsUpdateRequestSchema,
+  OrgKnownAsUpdateResponseSchema,
+  OrgReadQuerySchema,
+  OrgHierarchyQuerySchema,
   KNOWN_AS_MAX_VALUES,
   KNOWN_AS_NAME_MAX,
   SYSTEM_KNOWN_AS,
@@ -162,7 +165,6 @@ describe('user-org wire schemas', () => {
       legal_name: null,
       known_as: 'aggregator',
       known_as_name: 'Aggregator',
-      known_as_values: [{ key: 'district', name: 'District', default: true }],
       depth: 1,
       parent_id: 'root',
       parent_name: 'Network',
@@ -175,42 +177,36 @@ describe('user-org wire schemas', () => {
     expect(OrgSchema.parse(org)).toBeTruthy();
     expect(OrgSchema.parse({ ...org, known_as: null, known_as_name: null })).toBeTruthy();
     expect(OrgSchema.safeParse({ ...org, known_as: undefined }).success).toBe(false);
-    expect(OrgSchema.parse({ ...org, known_as_values: [] })).toBeTruthy();
-    expect(OrgSchema.safeParse({ ...org, known_as_values: undefined }).success).toBe(false);
+    expect(OrgSchema.parse({ ...org, known_as_values: [] })).not.toHaveProperty('known_as_values');
     expect(OrgSchema.parse({ ...org, depth: 0 })).toBeTruthy();
     expect(OrgSchema.safeParse({ ...org, depth: null }).success).toBe(false);
     expect(OrgSchema.safeParse({ ...org, depth: 1.5 }).success).toBe(false);
     expect(OrgSchema.safeParse({ ...org, depth: undefined }).success).toBe(false);
     expect(OrgSchema.parse({ ...org, parent_id: null, parent_name: null })).toBeTruthy();
     expect(OrgSchema.safeParse({ ...org, parent_id: undefined }).success).toBe(false);
+    const read = {
+      org,
+      owner: { id: 'a1', contact },
+      coordinator_count: 3,
+      child_count: 2,
+      pending_count: 1,
+    };
+    const parsed = OrgReadResponseSchema.parse(read);
+    expect(parsed).not.toHaveProperty('known_as_values');
+    expect(parsed).not.toHaveProperty('known_as_options');
     expect(
       OrgReadResponseSchema.parse({
-        org,
-        owner: { id: 'a1', contact },
-        coordinator_count: 3,
-        child_count: 2,
-        pending_count: 1,
+        ...read,
+        known_as_values: [{ key: 'district', name: 'District', default: true }],
         known_as_options: [SYSTEM_KNOWN_AS],
       }),
     ).toBeTruthy();
     expect(
-      OrgReadResponseSchema.parse({
-        org: { ...org, known_as_values: null },
-        owner: { id: 'a1', contact },
-        coordinator_count: 3,
-        child_count: 2,
-        pending_count: 1,
-        known_as_options: null,
-      }),
+      OrgReadResponseSchema.parse({ ...read, known_as_values: null, known_as_options: null }),
     ).toBeTruthy();
     expect(
-      OrgReadResponseSchema.safeParse({
-        org,
-        owner: { id: 'a1', contact },
-        coordinator_count: 3,
-        child_count: 2,
-        pending_count: 1,
-      }).success,
+      OrgReadResponseSchema.safeParse({ ...read, known_as_values: [{ key: 'Bad', name: 'x' }] })
+        .success,
     ).toBe(false);
     expect(
       OrgReadResponseSchema.safeParse({
@@ -315,10 +311,8 @@ describe('user-org wire schemas', () => {
       total_orgs: 4,
     };
     expect(OrgHierarchyResponseSchema.parse(body)).toEqual(body);
-    expect(
-      OrgHierarchyResponseSchema.safeParse({ ...body, network: { id: 'root', name: 'Network' } })
-        .success,
-    ).toBe(false);
+    const bare = { ...body, network: { id: 'root', name: 'Network' } };
+    expect(OrgHierarchyResponseSchema.parse(bare)).toEqual(bare);
     expect(
       OrgHierarchyResponseSchema.safeParse({ ...body, limits: { max_depth: 3 } }).success,
     ).toBe(false);
@@ -367,6 +361,62 @@ describe('user-org wire schemas', () => {
       }),
     ).toBeTruthy();
     expect(OwnerAccessResponseSchema.safeParse({ id: 'o1', status: 'nope' }).success).toBe(false);
+  });
+});
+
+describe('fields query schemas', () => {
+  it('reads the requested fields of an org read', () => {
+    expect(OrgReadQuerySchema.parse({}).fields).toEqual([]);
+    expect(OrgReadQuerySchema.parse({ fields: '' }).fields).toEqual([]);
+    expect(OrgReadQuerySchema.parse({ fields: 'known_as_values' }).fields).toEqual([
+      'known_as_values',
+    ]);
+    expect(
+      OrgReadQuerySchema.parse({ fields: 'known_as_options,known_as_values,known_as_options' })
+        .fields,
+    ).toEqual(['known_as_options', 'known_as_values']);
+  });
+
+  it('refuses an unknown or badly formed fields value', () => {
+    for (const fields of ['children', 'known_as_values,', 'known_as_values, known_as_options']) {
+      expect(OrgReadQuerySchema.safeParse({ fields }).success).toBe(false);
+    }
+    expect(OrgHierarchyQuerySchema.safeParse({ fields: 'known_as_options' }).success).toBe(false);
+    expect(OrgHierarchyQuerySchema.parse({ fields: 'known_as_values' }).fields).toEqual([
+      'known_as_values',
+    ]);
+  });
+});
+
+describe('known_as update response', () => {
+  const org = {
+    id: 'o1',
+    slug: 'org-a',
+    name: 'Org A',
+    org_type: 'aggregator',
+    status: 'active',
+    is_default: false,
+    locations: [],
+    legal_name: null,
+    known_as: 'aggregator',
+    known_as_name: 'Aggregator',
+    depth: 1,
+    parent_id: 'root',
+    parent_name: 'Network',
+    description: null,
+    profile: {},
+    profile_ref: null,
+    created_at: 't',
+    updated_at: 't',
+  };
+
+  it('carries the saved list only when one was sent', () => {
+    expect(OrgKnownAsUpdateResponseSchema.parse(org)).toEqual(org);
+    const withList = { ...org, known_as_values: [{ key: 'state', name: 'State' }] };
+    expect(OrgKnownAsUpdateResponseSchema.parse(withList)).toEqual(withList);
+    expect(
+      OrgKnownAsUpdateResponseSchema.safeParse({ ...org, known_as_values: null }).success,
+    ).toBe(false);
   });
 });
 

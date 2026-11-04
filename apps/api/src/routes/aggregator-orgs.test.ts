@@ -450,7 +450,6 @@ describe('aggregator-orgs routes', () => {
       ownerEmail: 'nf@test.local',
       status: 'active',
       depth: 0,
-      knownAsValues: [{ key: 'state', name: 'State', default: true }],
     });
     const state = buildOrganisation({
       id: STATE_ID,
@@ -460,10 +459,6 @@ describe('aggregator-orgs routes', () => {
       status: 'active',
       parentId: ROOT_ID,
       knownAs: 'state',
-      knownAsValues: [
-        { key: 'block', name: 'Block' },
-        { key: 'district', name: 'District', default: true },
-      ],
     });
     const create = (payload: Record<string, unknown>) =>
       app.inject({ method: 'POST', url: '/v1/orgs/create', headers: AUTH_HEADER, payload });
@@ -512,6 +507,11 @@ describe('aggregator-orgs routes', () => {
     beforeEach(() => {
       orgStore.seedRoot(root);
       orgStore.seed([state]);
+      orgStore.seedKnownAsValues(ROOT_ID, [{ key: 'state', name: 'State', default: true }]);
+      orgStore.seedKnownAsValues(STATE_ID, [
+        { key: 'block', name: 'Block' },
+        { key: 'district', name: 'District', default: true },
+      ]);
       setHierarchy({ max_depth: 3, max_total_orgs: 50 });
     });
 
@@ -797,7 +797,6 @@ describe('aggregator-orgs routes', () => {
           parentId: STATE_ID,
           knownAs: 'district',
           depth: 2,
-          knownAsValues: [{ key: 'ward', name: 'Ward' }],
         }),
         buildOrganisation({
           id: '00000000-0000-4000-8000-0000000000f4',
@@ -809,6 +808,9 @@ describe('aggregator-orgs routes', () => {
           knownAs: 'retired_key',
           depth: 2,
         }),
+      ]);
+      orgStore.seedKnownAsValues('00000000-0000-4000-8000-0000000000f2', [
+        { key: 'ward', name: 'Ward' },
       ]);
       const res = await app.inject({
         method: 'GET',
@@ -1305,8 +1307,19 @@ describe('aggregator-orgs routes', () => {
       async setKnownAs(): Promise<OrgStoreResult<Organisation>> {
         return { ok: false, error: { code: 'NOT_FOUND', message: 'x' } };
       }
-      async setKnownAsValues(): Promise<OrgStoreResult<{ org: Organisation; resetCount: number }>> {
+      async setKnownAsValues(): Promise<
+        OrgStoreResult<{ org: Organisation; values: []; resetCount: number }>
+      > {
         return { ok: false, error: { code: 'NOT_FOUND', message: 'x' } };
+      }
+      async knownAsValues(): Promise<OrgStoreResult<[]>> {
+        return { ok: true, value: [] };
+      }
+      async defaultKnownAsNames(): Promise<OrgStoreResult<Record<string, string>>> {
+        return { ok: true, value: {} };
+      }
+      async countStaleKnownAs(): Promise<OrgStoreResult<number>> {
+        return { ok: true, value: 0 };
       }
       async search(): Promise<OrgStoreResult<{ rows: Organisation[]; nextCursor: null }>> {
         return { ok: true, value: { rows: [], nextCursor: null } };

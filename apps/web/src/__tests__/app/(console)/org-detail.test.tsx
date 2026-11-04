@@ -67,7 +67,6 @@ const org = (over: Partial<Org> = {}): Org =>
     gst_number: null,
     known_as: 'aggregator',
     known_as_name: 'Aggregator',
-    known_as_values: [{ key: 'block', name: 'Block' }],
     depth: 1,
     parent_id: 'root',
     parent_name: 'The Network',
@@ -97,6 +96,8 @@ interface PageOptions {
   /** The org the viewer owns. */
   viewerOrgId?: string;
   knownAsOptions?: OrgReadResponse['known_as_options'];
+  /** The org's own list; null when it cannot have child orgs. */
+  knownAsValues?: OrgReadResponse['known_as_values'];
 }
 
 function mockPage(target: OrgReadResponse['org'], viewerId = 'owner', opts: PageOptions = {}) {
@@ -105,13 +106,16 @@ function mockPage(target: OrgReadResponse['org'], viewerId = 'owner', opts: Page
     me: me(viewerId, opts.viewerOrgId),
   } as never);
   vi.mocked(consoleRead).mockImplementation(async (path: string) => {
-    if (path === `/v1/org/read/${ORG_ID}`) {
+    // The page asks for both lists in its one read.
+    if (path === `/v1/org/read/${ORG_ID}?fields=known_as_values,known_as_options`) {
       return {
         org: target,
         owner: { id: 'owner', contact: { name: null, email: 'owner@a.org', phone: null } },
         coordinator_count: 0,
         child_count: 0,
         pending_count: 0,
+        known_as_values:
+          opts.knownAsValues === undefined ? [{ key: 'block', name: 'Block' }] : opts.knownAsValues,
         known_as_options: opts.knownAsOptions ?? null,
       } satisfies OrgReadResponse as never;
     }
@@ -154,7 +158,7 @@ describe('console org detail — child "known as" editor', () => {
   });
 
   it('hides the editor when the organisation cannot have child organisations', async () => {
-    mockPage({ ...org(), known_as_values: null });
+    mockPage(org(), 'owner', { knownAsValues: null });
     await show();
     expect(screen.queryByTestId('known-as-values-editor')).toBeNull();
   });

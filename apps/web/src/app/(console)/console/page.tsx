@@ -23,7 +23,7 @@ import { ConsoleSection, ConsoleStatusPill } from '@/components/console/ConsoleU
 import { OrgCoordinators, type OrgCoordinatorRow } from '@/components/console/OrgCoordinators';
 import { I } from '@/icons';
 
-type OrgRow = Omit<OrgSearchResponse['orgs'][number], 'known_as_values'>;
+type OrgRow = OrgSearchResponse['orgs'][number];
 
 /** Coordinators loaded for the single-organisation view, the API's page maximum. */
 const ORG_HOME_LIMIT = 100;

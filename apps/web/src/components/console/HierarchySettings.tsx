@@ -16,7 +16,7 @@ const NEAR_LIMIT = 0.8;
 /**
  * Renders the hierarchy settings.
  *
- * @param hierarchy - The settings as read on the server.
+ * @param hierarchy - The settings as read on the server, with `fields=known_as_values`.
  */
 export function HierarchySettings({ hierarchy }: Readonly<{ hierarchy: OrgHierarchyResponse }>) {
   const t = useTranslations('console');
@@ -62,7 +62,7 @@ export function HierarchySettings({ hierarchy }: Readonly<{ hierarchy: OrgHierar
         <h3 className="mb-2 text-[13px] font-bold text-ink-900">{t('orgs.top_level_known_as')}</h3>
         <KnownAsValuesEditor
           orgId={hierarchy.network.id}
-          values={hierarchy.network.known_as_values}
+          values={hierarchy.network.known_as_values ?? []}
         />
       </section>
     </div>

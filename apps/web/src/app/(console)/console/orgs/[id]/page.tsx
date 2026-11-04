@@ -53,7 +53,9 @@ export default async function ConsoleOrgPage({
   const { id } = await params;
   const canAssignOwner =
     actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer');
-  const data = await consoleRead<OrgReadResponse>(`/v1/org/read/${encodeURIComponent(id)}`);
+  const data = await consoleRead<OrgReadResponse>(
+    `/v1/org/read/${encodeURIComponent(id)}?fields=known_as_values,known_as_options`,
+  );
   const { org, owner } = data;
   // Owner roles; null when access control is off.
   const [ownerRoles, catalogue] =
@@ -81,9 +83,9 @@ export default async function ConsoleOrgPage({
   const isOwner = owner.id === actor.me.user.id;
   const aggregatorOrg = org.org_type === 'aggregator' && !org.is_default;
   // Null when the viewer does not own the parent.
-  const knownAsOptions = aggregatorOrg ? data.known_as_options : null;
+  const knownAsOptions = aggregatorOrg ? (data.known_as_options ?? null) : null;
   // Null when the org cannot have child orgs.
-  const knownAsValues = org.known_as_values;
+  const knownAsValues = data.known_as_values ?? null;
   // The API takes list edits only on an active org the viewer owns.
   const canEditKnownAsValues = aggregatorOrg && isOwner && org.status === 'active';
   // The Default org and the root never move; only pending and active orgs can.

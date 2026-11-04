@@ -49,7 +49,6 @@ const baseOrg: Org = {
   legal_name: 'Acme Private Ltd',
   known_as: 'aggregator',
   known_as_name: 'Aggregator',
-  known_as_values: [],
   depth: 3,
   parent_id: 'd1',
   parent_name: null,

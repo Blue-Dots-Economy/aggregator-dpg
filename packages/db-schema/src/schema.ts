@@ -42,7 +42,6 @@ import {
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
-import type { KnownAsValues } from '@aggregator-dpg/shared-primitives/user-org';
 
 export type {
   BecknContact,
@@ -378,14 +377,6 @@ export const organisations = pgTable(
     gstNumber: text('gst_number'),
     /** Key of the org's "known as" value: from the parent's list, or `aggregator`. */
     knownAs: text('known_as').notNull().default('aggregator'),
-    /**
-     * The "known as" values this org defines for its direct children (migration 0034).
-     * Entries are validated by the API; the database checks only that it is an array.
-     */
-    knownAsValues: jsonb('known_as_values')
-      .$type<KnownAsValues>()
-      .notNull()
-      .default(sql`'[]'::jsonb`),
     /** Depth in the tree: root 0, top-level 1. Set by the store (migration 0032). */
     depth: smallint('depth').notNull(),
     // Written by the org owner in the console. Informational only.
@@ -422,6 +413,36 @@ export const organisations = pgTable(
     uniqueIndex('organisations_single_nf')
       .on(table.orgType)
       .where(sql`org_type = 'network_facilitator'`),
+  ],
+);
+
+// ─── org_known_as ────────────────────────────────────────────────────────────
+// The "known as" values an org defines for its direct children, one row per
+// value (migration 0034). A child's `organisations.known_as` holds a `key` of
+// its parent's rows, or `aggregator`. The API caps a list at 20 rows.
+
+export const orgKnownAs = pgTable(
+  'org_known_as',
+  {
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organisations.id, { onDelete: 'cascade' }),
+    /** Made by the API from the name; never changes once saved. */
+    key: text('key').notNull(),
+    name: text('name').notNull(),
+    /** The value new children get. At most one per org. */
+    isDefault: boolean('is_default').notNull().default(false),
+    /** Order of the value in the org's list, from 0. */
+    position: smallint('position').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ name: 'org_known_as_pkey', columns: [table.orgId, table.key] }),
+    uniqueIndex('org_known_as_default_unique')
+      .on(table.orgId)
+      .where(sql`is_default`),
+    uniqueIndex('org_known_as_name_unique').on(table.orgId, sql`lower(${table.name})`),
   ],
 );
 

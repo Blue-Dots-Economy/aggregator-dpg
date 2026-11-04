@@ -8,6 +8,7 @@ import {
 } from '../testing.js';
 import { NO_CONSENT_WRITE } from '../../consent-ledger/hook.js';
 import type { CreateOrgInput, Organisation, TreeRules } from '../interface.js';
+import type { KnownAsValues } from '@aggregator-dpg/shared-primitives/user-org';
 
 describe('InMemoryOrganisationStore', () => {
   it('creates and finds an org by slug and owner email', async () => {
@@ -674,8 +675,15 @@ describe('InMemoryOrganisationStore — tree rules', () => {
     maxTotalOrgs: 50,
     ...over,
   });
-  const org = (id: string, parentId: string, depth: number, over: Partial<Organisation> = {}) =>
-    buildOrganisation({
+  type SeedOrg = Organisation & { knownAsValues?: KnownAsValues };
+  const org = (
+    id: string,
+    parentId: string,
+    depth: number,
+    over: Partial<Organisation> & { knownAsValues?: KnownAsValues } = {},
+  ): SeedOrg => {
+    const { knownAsValues, ...rest } = over;
+    const row: SeedOrg = buildOrganisation({
       id,
       slug: id,
       displayName: id.toUpperCase(),
@@ -683,15 +691,23 @@ describe('InMemoryOrganisationStore — tree rules', () => {
       status: 'active',
       parentId,
       depth,
-      ...over,
+      ...rest,
     });
+    if (knownAsValues) row.knownAsValues = knownAsValues;
+    return row;
+  };
+  /** Seeds orgs and the "known as" values each one defines. */
+  const seed = (store: OrganisationStoreFake, rows: SeedOrg[]) => {
+    store.seed(rows.map(({ knownAsValues: _list, ...o }) => o));
+    for (const r of rows) if (r.knownAsValues) store.seedKnownAsValues(r.id, r.knownAsValues);
+  };
   /** root → A → B, root → C, root → Default. */
   const tree = (): OrganisationStoreFake => {
     const store = new OrganisationStoreFake();
     store.seedRoot(
       buildOrganisation({ id: 'root', slug: 'network', displayName: 'Network', depth: 0 }),
     );
-    store.seed([
+    seed(store, [
       buildDefaultOrg({ id: 'd0', parentId: 'root', depth: 1 }),
       org('a', 'root', 1),
       org('b', 'a', 2),
@@ -720,7 +736,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
   describe('create', () => {
     it("sets depth from a nested parent and the parent's default known_as", async () => {
       const store = tree();
-      store.seed([org('b', 'a', 2, { knownAsValues: [BLOCK, { ...TALUK, default: true }] })]);
+      seed(store, [org('b', 'a', 2, { knownAsValues: [BLOCK, { ...TALUK, default: true }] })]);
       const r = await create(store, 'new', rules(), 'b');
       expect(
         r.ok && [r.value.depth, r.value.knownAs, r.value.knownAsName, r.value.parentId],
@@ -729,21 +745,14 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('gives aggregator when the parent has no default', async () => {
       const store = tree();
-      store.seed([org('b', 'a', 2, { knownAsValues: [BLOCK] })]);
+      seed(store, [org('b', 'a', 2, { knownAsValues: [BLOCK] })]);
       const r = await create(store, 'new', rules(), 'b');
       expect(r.ok && [r.value.knownAs, r.value.knownAsName]).toEqual(['aggregator', 'Aggregator']);
     });
 
     it("takes the root's default for a top-level org", async () => {
       const store = tree();
-      store.seedRoot(
-        buildOrganisation({
-          id: 'root',
-          slug: 'network',
-          depth: 0,
-          knownAsValues: [{ key: 'state', name: 'State', default: true }],
-        }),
-      );
+      store.seedKnownAsValues('root', [{ key: 'state', name: 'State', default: true }]);
       const r = await create(store, 'top', rules());
       expect(r.ok && [r.value.knownAs, r.value.knownAsName]).toEqual(['state', 'State']);
     });
@@ -769,7 +778,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('counts pending children; a rejected child does not count', async () => {
       const store = tree();
-      store.seed([
+      seed(store, [
         org('p', 'c', 2, { status: 'pending' }),
         org('x', 'c', 2, { status: 'inactive' }),
       ]);
@@ -779,7 +788,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('refuses with TOTAL_LIMIT; Default and rejected orgs do not count, pending ones do', async () => {
       const store = tree();
-      store.seed([
+      seed(store, [
         org('p', 'root', 1, { status: 'pending' }),
         org('x', 'root', 1, { status: 'inactive' }),
       ]);
@@ -810,28 +819,28 @@ describe('InMemoryOrganisationStore — tree rules', () => {
   describe('revive', () => {
     it('sets a rejected org back to pending and clears rejected_at', async () => {
       const store = tree();
-      store.seed([org('x', 'c', 2, { status: 'inactive', rejectedAt: new Date() })]);
+      seed(store, [org('x', 'c', 2, { status: 'inactive', rejectedAt: new Date() })]);
       const r = await store.revive('x', 'c', rules());
       expect(r.ok && [r.value.status, r.value.rejectedAt]).toEqual(['pending', null]);
     });
 
     it('revives under the submitted parent and sets parent and depth from it', async () => {
       const store = tree();
-      store.seed([org('x', 'c', 2, { status: 'inactive' })]);
+      seed(store, [org('x', 'c', 2, { status: 'inactive' })]);
       const r = await store.revive('x', 'b', rules());
       expect(r.ok && [r.value.parentId, r.value.parentName, r.value.depth]).toEqual(['b', 'B', 3]);
     });
 
     it('revives under the root when no parent is submitted', async () => {
       const store = tree();
-      store.seed([org('x', 'b', 3, { status: 'inactive' })]);
+      seed(store, [org('x', 'b', 3, { status: 'inactive' })]);
       const r = await store.revive('x', undefined, rules());
       expect(r.ok && [r.value.parentId, r.value.depth]).toEqual(['root', 1]);
     });
 
     it('revives under a valid new parent when the stored parent is no longer active', async () => {
       const store = tree();
-      store.seed([
+      seed(store, [
         org('p', 'root', 1, { status: 'inactive' }),
         org('x', 'p', 2, { status: 'inactive' }),
       ]);
@@ -841,7 +850,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it("takes the new parent's default known_as, else aggregator", async () => {
       const store = tree();
-      store.seed([
+      seed(store, [
         org('a', 'root', 1, { knownAsValues: [BLOCK, { ...TALUK, default: true }] }),
         org('x', 'c', 2, { status: 'inactive', knownAs: 'block' }),
         org('y', 'c', 2, { status: 'inactive', knownAs: 'block' }),
@@ -859,7 +868,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
       ['INVALID_PARENT', rules(), 'd0'],
     ] as const)('refuses with %s and leaves the org rejected', async (expected, r, parentId) => {
       const store = tree();
-      store.seed([org('y', 'c', 2), org('x', 'a', 2, { status: 'inactive' })]);
+      seed(store, [org('y', 'c', 2), org('x', 'a', 2, { status: 'inactive' })]);
       expect(code(await store.revive('x', parentId, r))).toBe(expected);
       const found = await store.findById('x');
       expect(found.ok && [found.value?.status, found.value?.parentId]).toEqual(['inactive', 'a']);
@@ -867,7 +876,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('refuses with NOT_MOVABLE when the rejected org has child orgs', async () => {
       const store = tree();
-      store.seed([org('x', 'c', 2, { status: 'inactive' }), org('z', 'x', 3)]);
+      seed(store, [org('x', 'c', 2, { status: 'inactive' }), org('z', 'x', 3)]);
       expect(code(await store.revive('x', 'a', rules()))).toBe('NOT_MOVABLE');
     });
 
@@ -931,7 +940,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('refuses a rejected org with NOT_MOVABLE and a pending parent with INVALID_PARENT', async () => {
       const store = tree();
-      store.seed([
+      seed(store, [
         org('x', 'root', 1, { status: 'inactive' }),
         org('p', 'root', 1, { status: 'pending' }),
       ]);
@@ -950,7 +959,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('refuses a full new parent with CHILD_LIMIT', async () => {
       const store = tree();
-      store.seed([org('y', 'c', 2)]);
+      seed(store, [org('y', 'c', 2)]);
       expect(code(await store.move('b', { parentId: 'c' }, rules({ maxChildren: 1 })))).toBe(
         'CHILD_LIMIT',
       );
@@ -958,7 +967,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('keeps a key the new parent has and resets one it lacks; orgs below keep theirs', async () => {
       const store = tree();
-      store.seed([
+      seed(store, [
         org('a', 'root', 1, { knownAsValues: [BLOCK, TALUK] }),
         org('c', 'root', 1, { knownAsValues: [BLOCK, { ...WARD, default: true }] }),
         org('e', 'root', 1, { knownAsValues: [TALUK] }),
@@ -981,7 +990,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('keeps aggregator under a new parent that has a default', async () => {
       const store = tree();
-      store.seed([
+      seed(store, [
         org('c', 'root', 1, { knownAsValues: [{ ...WARD, default: true }] }),
         org('g', 'a', 2, { knownAs: 'aggregator' }),
       ]);
@@ -994,7 +1003,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('is a no-op for the current parent', async () => {
       const store = tree();
-      store.seed([org('b', 'a', 2, { knownAs: 'gone' })]);
+      seed(store, [org('b', 'a', 2, { knownAs: 'gone' })]);
       const same = await store.move('b', { parentId: 'a' }, rules());
       expect(same.ok && [same.value.movedCount, same.value.org.knownAs]).toEqual([0, 'gone']);
     });
@@ -1003,15 +1012,8 @@ describe('InMemoryOrganisationStore — tree rules', () => {
   describe('setKnownAs', () => {
     const withLists = () => {
       const store = tree();
-      store.seedRoot(
-        buildOrganisation({
-          id: 'root',
-          slug: 'network',
-          depth: 0,
-          knownAsValues: [{ key: 'state', name: 'State' }],
-        }),
-      );
-      store.seed([org('a', 'root', 1, { knownAsValues: [BLOCK, TALUK] })]);
+      store.seedKnownAsValues('root', [{ key: 'state', name: 'State' }]);
+      seed(store, [org('a', 'root', 1, { knownAsValues: [BLOCK, TALUK] })]);
       return store;
     };
 
@@ -1055,7 +1057,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('refuses a rejected org with NOT_EDITABLE and writes nothing', async () => {
       const store = withLists();
-      store.seed([org('r', 'a', 2, { status: 'inactive' })]);
+      seed(store, [org('r', 'a', 2, { status: 'inactive' })]);
       expect(code(await store.setKnownAs('r', 'block', 'a', 'x'))).toBe('NOT_EDITABLE');
       const r = await store.findById('r');
       expect(r.ok && r.value?.knownAs).toBe('aggregator');
@@ -1066,7 +1068,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
     it('resets children whose key left the list to the new default; keeps updated_at', async () => {
       const store = tree();
       const at = new Date('2026-02-01T00:00:00Z');
-      store.seed([
+      seed(store, [
         org('a', 'root', 1, { knownAsValues: [BLOCK, TALUK] }),
         org('b', 'a', 2, { knownAs: 'block', updatedAt: at }),
         org('t', 'a', 2, { knownAs: 'taluk', status: 'inactive', updatedAt: at }),
@@ -1077,10 +1079,12 @@ describe('InMemoryOrganisationStore — tree rules', () => {
         [BLOCK, { name: 'Ward', default: true }],
         'owner-a',
       );
-      expect(r.ok && [r.value.resetCount, r.value.org.knownAsValues]).toEqual([
+      expect(r.ok && [r.value.resetCount, r.value.values]).toEqual([
         1,
         [BLOCK, { ...WARD, default: true }],
       ]);
+      const stored = await store.knownAsValues('a');
+      expect(stored.ok && stored.value).toEqual([BLOCK, { ...WARD, default: true }]);
       const ids = ['b', 't', 'g'];
       const rows = await Promise.all(ids.map((id) => store.findById(id)));
       expect(rows.map((x) => x.ok && [x.value?.knownAs, x.value?.updatedAt])).toEqual([
@@ -1092,7 +1096,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('resets to aggregator when the new list has no default', async () => {
       const store = tree();
-      store.seed([
+      seed(store, [
         org('a', 'root', 1, { knownAsValues: [BLOCK] }),
         org('b', 'a', 2, { knownAs: 'block' }),
       ]);
@@ -1107,7 +1111,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('renames an entry: children keep the key and read the new name', async () => {
       const store = tree();
-      store.seed([
+      seed(store, [
         org('a', 'root', 1, { knownAsValues: [BLOCK] }),
         org('b', 'a', 2, { knownAs: 'block' }),
       ]);
@@ -1119,15 +1123,15 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('writes the root list; the Default org is never reset', async () => {
       const store = tree();
-      store.seed([org('a', 'root', 1, { knownAs: 'gone' })]);
+      seed(store, [org('a', 'root', 1, { knownAs: 'gone' })]);
       const r = await store.setKnownAsValues('root', [{ name: 'Ward', default: true }], 'admin');
       expect(r.ok && [r.value.org.id, r.value.org.knownAsName, r.value.resetCount]).toEqual([
         'root',
         null,
         1,
       ]);
-      const root = await store.findRoot();
-      expect(root.ok && root.value?.knownAsValues).toEqual([{ ...WARD, default: true }]);
+      const root = await store.knownAsValues('root');
+      expect(root.ok && root.value).toEqual([{ ...WARD, default: true }]);
       const d0 = await store.findById('d0');
       expect(d0.ok && [d0.value?.knownAs, d0.value?.knownAsName]).toEqual([
         'aggregator',
@@ -1139,12 +1143,12 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('gives a new entry a fresh key when a dropped entry had its name', async () => {
       const store = tree();
-      store.seed([
+      seed(store, [
         org('a', 'root', 1, { knownAsValues: [{ key: 'state', name: 'State' }, BLOCK] }),
         org('b', 'a', 2, { knownAs: 'state' }),
       ]);
       const r = await store.setKnownAsValues('a', [BLOCK, { name: 'State' }], 'owner-a');
-      expect(r.ok && [r.value.resetCount, r.value.org.knownAsValues]).toEqual([
+      expect(r.ok && [r.value.resetCount, r.value.values]).toEqual([
         1,
         [BLOCK, { key: 'state_2', name: 'State' }],
       ]);
@@ -1154,7 +1158,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('refuses a sent key that is not in the stored list and writes nothing', async () => {
       const store = tree();
-      store.seed([org('a', 'root', 1, { knownAsValues: [BLOCK] })]);
+      seed(store, [org('a', 'root', 1, { knownAsValues: [BLOCK] })]);
       // The client read [BLOCK, WARD]; WARD was removed before this save.
       const r = await store.setKnownAsValues('a', [{ name: 'New' }, WARD], 'owner-a');
       expect(r.ok ? null : r.error).toEqual({
@@ -1162,8 +1166,8 @@ describe('InMemoryOrganisationStore — tree rules', () => {
         message: expect.any(String),
         index: 1,
       });
-      const a = await store.findById('a');
-      expect(a.ok && a.value?.knownAsValues).toEqual([BLOCK]);
+      const a = await store.knownAsValues('a');
+      expect(a.ok && a.value).toEqual([BLOCK]);
     });
 
     it('refuses the Default org with NOT_EDITABLE and an unknown org with NOT_FOUND', async () => {
@@ -1173,10 +1177,56 @@ describe('InMemoryOrganisationStore — tree rules', () => {
     });
   });
 
+  describe('known_as reads', () => {
+    it('reads an org list in order; an org with no list or no row reads empty', async () => {
+      const store = tree();
+      seed(store, [org('a', 'root', 1, { knownAsValues: [TALUK, BLOCK] })]);
+      const a = await store.knownAsValues('a');
+      expect(a.ok && a.value).toEqual([TALUK, BLOCK]);
+      const c = await store.knownAsValues('c');
+      expect(c.ok && c.value).toEqual([]);
+      const none = await store.knownAsValues('missing');
+      expect(none.ok && none.value).toEqual([]);
+    });
+
+    it('names the default value of each org that has one', async () => {
+      const store = tree();
+      store.seedKnownAsValues('root', [{ key: 'state', name: 'State', default: true }]);
+      seed(store, [org('a', 'root', 1, { knownAsValues: [BLOCK, { ...TALUK, default: true }] })]);
+      store.seedKnownAsValues('c', [WARD]);
+      const r = await store.defaultKnownAsNames(['root', 'a', 'c', 'missing']);
+      expect(r.ok && r.value).toEqual({ root: 'State', a: 'Taluk' });
+      const empty = await store.defaultKnownAsNames([]);
+      expect(empty.ok && empty.value).toEqual({});
+    });
+
+    it('counts live orgs whose key is neither aggregator nor in the parent list', async () => {
+      const store = tree();
+      store.seedKnownAsValues('root', [{ key: 'state', name: 'State' }]);
+      seed(store, [
+        org('a', 'root', 1, { knownAs: 'state', knownAsValues: [BLOCK] }),
+        org('b', 'a', 2, { knownAs: 'gone' }),
+        org('p', 'a', 2, { knownAs: 'block', status: 'pending' }),
+        org('x', 'a', 2, { knownAs: 'gone', status: 'inactive' }),
+        org('c', 'root', 1, { knownAs: 'county' }),
+      ]);
+      const r = await store.countStaleKnownAs();
+      expect(r.ok && r.value).toBe(2);
+    });
+
+    it('drops the list of a deleted org', async () => {
+      const store = tree();
+      seed(store, [org('p', 'root', 1, { status: 'pending', knownAsValues: [BLOCK] })]);
+      await store.deleteById('p');
+      const r = await store.knownAsValues('p');
+      expect(r.ok && r.value).toEqual([]);
+    });
+  });
+
   describe('parentOptions', () => {
     it('lists the root and every other org with the result a move would give', async () => {
       const store = tree();
-      store.seed([
+      seed(store, [
         org('p', 'root', 1, { status: 'pending' }),
         org('full', 'root', 1),
         org('f1', 'full', 2),
@@ -1209,7 +1259,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
   describe('counts', () => {
     it('childCounts counts pending and active children, Default and rejected excluded', async () => {
       const store = tree();
-      store.seed([
+      seed(store, [
         org('p', 'c', 2, { status: 'pending' }),
         org('x', 'c', 2, { status: 'inactive' }),
       ]);
@@ -1219,7 +1269,7 @@ describe('InMemoryOrganisationStore — tree rules', () => {
 
     it('countTotal counts pending and active orgs, Default and rejected excluded', async () => {
       const store = tree();
-      store.seed([
+      seed(store, [
         org('p', 'c', 2, { status: 'pending' }),
         org('x', 'c', 2, { status: 'inactive' }),
       ]);

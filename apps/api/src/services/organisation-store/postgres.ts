@@ -12,8 +12,8 @@
  * include the joined owner. A database trigger releases the owner's account
  * once it owns no org.
  *
- * Every read joins the parent row, so `knownAsName` is resolved from the
- * parent's `known_as_values` list with no second query.
+ * Every read joins the parent row and the parent's `org_known_as` row for the
+ * org's key, so `knownAsName` is resolved with no second query.
  */
 
 import {
@@ -31,20 +31,15 @@ import {
   type SQL,
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
-import { organisations, contact, userIdentities, users } from '../../db/schema.js';
+import { organisations, orgKnownAs, contact, userIdentities, users } from '../../db/schema.js';
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import {
   SYSTEM_KNOWN_AS,
+  type KnownAsEntry,
   type KnownAsValues,
   type KnownAsValuesRequest,
 } from '@aggregator-dpg/shared-primitives/user-org';
-import {
-  defaultKnownAsKey,
-  fillKnownAsKeys,
-  knownAsChoices,
-  knownAsKeyValid,
-  knownAsNameOf,
-} from '../known-as.js';
+import { defaultKnownAsKey, fillKnownAsKeys, knownAsChoices } from '../known-as.js';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
 import { logger } from '../../logger.js';
@@ -113,6 +108,9 @@ const PG_LOCK_NOT_AVAILABLE = '55P03';
 /** The parent org, joined to read its name. */
 const parentOrg = alias(organisations, 'parent_org');
 
+/** The parent's "known as" row for the org's key, joined to read its name. */
+const parentKnownAs = alias(orgKnownAs, 'parent_known_as');
+
 export class PostgresOrganisationStore extends OrganisationStoreBase {
   async create(input: CreateOrgInput, rules: TreeRules): Promise<OrgStoreResult<Organisation>> {
     const start = Date.now();
@@ -148,7 +146,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
             orgOwner: ownerUserId,
             kcGroupId: input.kcGroupId ?? null,
             locations: input.locations ?? [],
-            knownAs: defaultKnownAsKey(parent.knownAsValues),
+            knownAs: await defaultKeyOf(tx, parent.id),
             profile: input.profile ?? {},
             profileRef: input.profileRef ?? null,
             createdBy: 'self',
@@ -219,7 +217,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           .set({
             parentId: parent.id,
             depth,
-            knownAs: defaultKnownAsKey(parent.knownAsValues),
+            knownAs: await defaultKeyOf(tx, parent.id),
             status: 'pending',
             rejectedAt: null,
             updatedAt: new Date(),
@@ -264,13 +262,13 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           .select({ knownAs: organisations.knownAs })
           .from(organisations)
           .where(eq(organisations.id, id));
-        const newList = await knownAsValuesOf(tx, change.parentId);
-        const keep = current !== undefined && knownAsKeyValid(newList, current.knownAs);
+        const keep =
+          current !== undefined && (await keyValidUnder(tx, change.parentId, current.knownAs));
         await tx
           .update(organisations)
           .set({
             parentId: change.parentId,
-            ...(keep ? {} : { knownAs: defaultKnownAsKey(newList) }),
+            ...(keep ? {} : { knownAs: await defaultKeyOf(tx, change.parentId) }),
             updatedAt: new Date(),
           })
           .where(scoped(eq(organisations.id, id)));
@@ -489,7 +487,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           throw new TreeRefusalError('NOT_EDITABLE');
         }
         if (org.parentId !== expectedParentId) throw new TreeRefusalError('ORG_MOVED');
-        const list = await knownAsValuesOf(tx, expectedParentId);
+        const list = await listOf(tx, expectedParentId);
         if (!knownAsChoices(list).some((e) => e.key === key)) {
           throw new TreeRefusalError('KNOWN_AS_INVALID');
         }
@@ -511,18 +509,14 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
     id: string,
     requested: KnownAsValuesRequest,
     updatedBy: string,
-  ): Promise<OrgStoreResult<{ org: Organisation; resetCount: number }>> {
+  ): Promise<OrgStoreResult<{ org: Organisation; values: KnownAsValues; resetCount: number }>> {
     const start = Date.now();
     try {
       const result = await getDb().transaction(async (tx) => {
         await lockTree(tx);
         // Matched by id alone, not scoped(): the root has a list too.
         const [org] = await tx
-          .select({
-            orgType: organisations.orgType,
-            slug: organisations.slug,
-            knownAsValues: organisations.knownAsValues,
-          })
+          .select({ orgType: organisations.orgType, slug: organisations.slug })
           .from(organisations)
           .where(eq(organisations.id, id))
           .limit(1);
@@ -530,12 +524,18 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
         if (org.orgType === 'aggregator' && org.slug === DEFAULT_ORG_SLUG) {
           throw new TreeRefusalError('NOT_EDITABLE');
         }
-        const filled = fillKnownAsKeys(requested, org.knownAsValues);
+        const stored = await tx
+          .select()
+          .from(orgKnownAs)
+          .where(eq(orgKnownAs.orgId, id))
+          .orderBy(asc(orgKnownAs.position));
+        const filled = fillKnownAsKeys(requested, stored.map(toEntry));
         if (!filled.ok) throw new UnknownKnownAsKeyError(filled.error.index);
         const values = filled.value;
+        await replaceKnownAs(tx, id, stored, values);
         await tx
           .update(organisations)
-          .set({ knownAsValues: values, updatedBy, updatedAt: new Date() })
+          .set({ updatedBy, updatedAt: new Date() })
           .where(eq(organisations.id, id));
         // Children whose key left the list take the new default. updated_at is
         // left alone, so the pending clean-up timing does not move.
@@ -554,7 +554,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           )
           .returning({ id: organisations.id });
         const [row] = await this.selectJoined(tx).where(eq(organisations.id, id)).limit(1);
-        return row ? { org: toDomain(row), resetCount: reset.length } : null;
+        return row ? { org: toDomain(row), values, resetCount: reset.length } : null;
       });
       if (!result) return errResult('NOT_FOUND', id);
       logger.info({
@@ -581,6 +581,49 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
         };
       }
       return mapDbError('orgStore.setKnownAsValues', e);
+    }
+  }
+
+  async knownAsValues(orgId: string): Promise<OrgStoreResult<KnownAsValues>> {
+    try {
+      return { ok: true, value: await listOf(getDb(), orgId) };
+    } catch (e) {
+      return mapDbError('orgStore.knownAsValues', e);
+    }
+  }
+
+  async defaultKnownAsNames(
+    orgIds: readonly string[],
+  ): Promise<OrgStoreResult<Record<string, string>>> {
+    if (orgIds.length === 0) return { ok: true, value: {} };
+    try {
+      const rows = await getDb()
+        .select({ orgId: orgKnownAs.orgId, name: orgKnownAs.name })
+        .from(orgKnownAs)
+        .where(and(inArray(orgKnownAs.orgId, [...orgIds]), eq(orgKnownAs.isDefault, true)));
+      return { ok: true, value: Object.fromEntries(rows.map((r) => [r.orgId, r.name])) };
+    } catch (e) {
+      return mapDbError('orgStore.defaultKnownAsNames', e);
+    }
+  }
+
+  async countStaleKnownAs(): Promise<OrgStoreResult<number>> {
+    try {
+      const [row] = await getDb()
+        .select({ n: sql<number>`count(*)::int` })
+        .from(organisations)
+        .where(
+          and(
+            counted(),
+            ne(organisations.knownAs, SYSTEM_KNOWN_AS.key),
+            sql`NOT EXISTS (SELECT 1 FROM ${orgKnownAs} k
+                             WHERE k.org_id = ${organisations.parentId}
+                               AND k.key = ${organisations.knownAs})`,
+          ),
+        );
+      return { ok: true, value: Number(row?.n ?? 0) };
+    } catch (e) {
+      return mapDbError('orgStore.countStaleKnownAs', e);
     }
   }
 
@@ -761,10 +804,17 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
         c: contact,
         ownerKcSub: userIdentities.subject,
         parentName: parentOrg.name,
-        parentKnownAsValues: parentOrg.knownAsValues,
+        parentKnownAsName: parentKnownAs.name,
       })
       .from(organisations)
       .leftJoin(parentOrg, eq(parentOrg.id, organisations.parentId))
+      .leftJoin(
+        parentKnownAs,
+        and(
+          eq(parentKnownAs.orgId, organisations.parentId),
+          eq(parentKnownAs.key, organisations.knownAs),
+        ),
+      )
       .innerJoin(users, eq(users.id, organisations.orgOwner))
       .innerJoin(contact, eq(contact.id, users.contactId))
       .leftJoin(
@@ -820,7 +870,8 @@ type JoinedRow = {
   c: typeof contact.$inferSelect;
   ownerKcSub: string | null;
   parentName: string | null;
-  parentKnownAsValues: KnownAsValues | null;
+  /** Name of the parent's row for the org's key; `null` when the parent has no such row. */
+  parentKnownAsName: string | null;
 };
 
 function toDomain(row: JoinedRow): Organisation {
@@ -830,7 +881,7 @@ function toDomain(row: JoinedRow): Organisation {
   if (o.orgType !== 'network_facilitator') {
     knownAsName = isDefault
       ? SYSTEM_KNOWN_AS.name
-      : knownAsNameOf(row.parentKnownAsValues ?? [], o.knownAs);
+      : (row.parentKnownAsName ?? SYSTEM_KNOWN_AS.name);
   }
   return {
     id: o.id,
@@ -856,7 +907,6 @@ function toDomain(row: JoinedRow): Organisation {
     legalName: o.legalName,
     knownAs: o.knownAs,
     knownAsName,
-    knownAsValues: o.knownAsValues ?? [],
     depth: o.depth,
     parentId: o.parentId,
     parentName: row.parentName,
@@ -871,20 +921,16 @@ function toDomain(row: JoinedRow): Organisation {
  *
  * @param tx - The write transaction.
  * @param requested - The requested parent id; the root when absent.
- * @returns The parent id, depth and "known as" list.
+ * @returns The parent id and depth.
  * @throws {TreeRefusalError} `INVALID_PARENT` when the requested org is not the root or an active, non-Default aggregator org.
  */
 async function resolveParent(
   tx: DbExecutor,
   requested: string | undefined,
-): Promise<{ id: string; depth: number; knownAsValues: KnownAsValues }> {
+): Promise<{ id: string; depth: number }> {
   if (requested === undefined) {
     const [root] = await tx
-      .select({
-        id: organisations.id,
-        depth: organisations.depth,
-        knownAsValues: organisations.knownAsValues,
-      })
+      .select({ id: organisations.id, depth: organisations.depth })
       .from(organisations)
       .where(eq(organisations.orgType, 'network_facilitator'))
       .limit(1);
@@ -892,7 +938,7 @@ async function resolveParent(
     return root;
   }
   const [parent] = await tx
-    .select({ ...NODE_COLUMNS, knownAsValues: organisations.knownAsValues })
+    .select(NODE_COLUMNS)
     .from(organisations)
     .where(eq(organisations.id, requested))
     .for('share')
@@ -938,20 +984,108 @@ function toNode(row: NodeRow): TreeNode {
   };
 }
 
+/** A stored `org_known_as` row as a list entry. */
+function toEntry(
+  row: Pick<typeof orgKnownAs.$inferSelect, 'key' | 'name' | 'isDefault'>,
+): KnownAsEntry {
+  return row.isDefault
+    ? { key: row.key, name: row.name, default: true }
+    : { key: row.key, name: row.name };
+}
+
 /**
- * Reads the "known as" list of an org or the root.
+ * Reads the "known as" values of an org or the root, in list order.
  *
  * @param db - Executor.
- * @param id - The org id.
- * @returns The list; empty when the org is absent.
+ * @param orgId - The org id.
+ * @returns The list; empty when the org has none.
  */
-async function knownAsValuesOf(db: DbExecutor, id: string): Promise<KnownAsValues> {
+async function listOf(db: DbExecutor, orgId: string): Promise<KnownAsValues> {
+  const rows = await db
+    .select({ key: orgKnownAs.key, name: orgKnownAs.name, isDefault: orgKnownAs.isDefault })
+    .from(orgKnownAs)
+    .where(eq(orgKnownAs.orgId, orgId))
+    .orderBy(asc(orgKnownAs.position));
+  return rows.map(toEntry);
+}
+
+/**
+ * The key a new child of an org gets: the org's default value, else `aggregator`.
+ *
+ * @param db - Executor.
+ * @param orgId - The parent org id.
+ * @returns The key.
+ */
+async function defaultKeyOf(db: DbExecutor, orgId: string): Promise<string> {
   const [row] = await db
-    .select({ knownAsValues: organisations.knownAsValues })
-    .from(organisations)
-    .where(eq(organisations.id, id))
+    .select({ key: orgKnownAs.key })
+    .from(orgKnownAs)
+    .where(and(eq(orgKnownAs.orgId, orgId), eq(orgKnownAs.isDefault, true)))
     .limit(1);
-  return row?.knownAsValues ?? [];
+  return row?.key ?? SYSTEM_KNOWN_AS.key;
+}
+
+/**
+ * Whether a child may keep `key` under the org: the key is `aggregator` or one of the org's values.
+ *
+ * @param db - Executor.
+ * @param orgId - The parent org id.
+ * @param key - The child's key.
+ * @returns True when the key needs no reset.
+ */
+async function keyValidUnder(db: DbExecutor, orgId: string, key: string): Promise<boolean> {
+  if (key === SYSTEM_KNOWN_AS.key) return true;
+  const [row] = await db
+    .select({ key: orgKnownAs.key })
+    .from(orgKnownAs)
+    .where(and(eq(orgKnownAs.orgId, orgId), eq(orgKnownAs.key, key)))
+    .limit(1);
+  return row !== undefined;
+}
+
+/**
+ * Replaces an org's `org_known_as` rows with `values`.
+ *
+ * Deletes every row and inserts the list, so the unique indexes on the
+ * default and the name never see two rows mid-change. A kept value keeps its
+ * `created_at`, and its `updated_at` when its name, default and position are
+ * unchanged. Must run in the caller's transaction, under the tree lock.
+ *
+ * @param tx - The write transaction.
+ * @param orgId - The org id.
+ * @param stored - The org's rows before the change.
+ * @param values - The new list, every key set.
+ */
+async function replaceKnownAs(
+  tx: DbExecutor & Pick<ReturnType<typeof getDb>, 'delete'>,
+  orgId: string,
+  stored: ReadonlyArray<typeof orgKnownAs.$inferSelect>,
+  values: KnownAsValues,
+): Promise<void> {
+  await tx.delete(orgKnownAs).where(eq(orgKnownAs.orgId, orgId));
+  if (values.length === 0) return;
+  const before = new Map(stored.map((r) => [r.key, r]));
+  const now = new Date();
+  await tx.insert(orgKnownAs).values(
+    values.map((e, position) => {
+      const old = before.get(e.key);
+      const isDefault = e.default === true;
+      const same =
+        old !== undefined &&
+        old.name === e.name &&
+        old.isDefault === isDefault &&
+        old.position === position;
+      return {
+        orgId,
+        key: e.key,
+        name: e.name,
+        isDefault,
+        position,
+        createdAt: old?.createdAt ?? now,
+        updatedAt: same ? old.updatedAt : now,
+      };
+    }),
+  );
 }
 
 /** Reads every org, the root included, as a tree snapshot. */

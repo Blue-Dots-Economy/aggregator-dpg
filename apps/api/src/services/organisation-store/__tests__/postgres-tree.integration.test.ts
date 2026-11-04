@@ -110,18 +110,29 @@ suite('organisation store tree rules (Postgres)', () => {
     await pool.query(
       `DELETE FROM organisations WHERE org_type = 'aggregator' AND slug <> 'default'`,
     );
+    await pool.query('DELETE FROM org_known_as');
     await pool.query(
-      `UPDATE organisations SET known_as_values = '[]'::jsonb, known_as = 'aggregator'
+      `UPDATE organisations SET known_as = 'aggregator'
         WHERE org_type = 'network_facilitator' OR slug = 'default'`,
     );
   });
 
-  /** Writes an org's `known_as_values` list directly, keys included, for test setup. */
+  /** Writes an org's `org_known_as` rows directly, keys included, for test setup. */
   async function seedList(id: string, list: KnownAsValues): Promise<void> {
-    await pool.query('UPDATE organisations SET known_as_values = $2::jsonb WHERE id = $1', [
-      id,
-      JSON.stringify(list),
-    ]);
+    await pool.query('DELETE FROM org_known_as WHERE org_id = $1', [id]);
+    for (const [position, e] of list.entries()) {
+      await pool.query(
+        `INSERT INTO org_known_as (org_id, key, name, is_default, position, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+        [id, e.key, e.name, e.default === true, position],
+      );
+    }
+  }
+
+  /** The stored list of an org, read through the store. */
+  async function listOf(id: string): Promise<KnownAsValues | null> {
+    const r = await store.knownAsValues(id);
+    return r.ok ? r.value : null;
   }
 
   /** The stored key and updated_at of an org. */
@@ -502,10 +513,11 @@ suite('organisation store tree rules (Postgres)', () => {
         [TALUK, { name: 'Ward', default: true }],
         'owner-a',
       );
-      expect(r.ok && [r.value.resetCount, r.value.org.knownAsValues]).toEqual([
+      expect(r.ok && [r.value.resetCount, r.value.values]).toEqual([
         3,
         [TALUK, { ...WARD, default: true }],
       ]);
+      expect(await listOf(a)).toEqual([TALUK, { ...WARD, default: true }]);
       const after = await Promise.all([b, p, x, g].map(knownAsRow));
       expect(after.map((row) => row[0])).toEqual(['ward', 'ward', 'ward', 'aggregator']);
       expect(after.map((row) => row[1])).toEqual(before.map((row) => row[1]));
@@ -539,8 +551,7 @@ suite('organisation store tree rules (Postgres)', () => {
         null,
         1,
       ]);
-      const root = await store.findRoot();
-      expect(root.ok && root.value?.knownAsValues).toEqual([{ ...STATE, default: true }]);
+      expect(await listOf(rootId)).toEqual([{ ...STATE, default: true }]);
       expect((await knownAsRow(a))[0]).toBe('state');
       expect((await knownAsRow(defaultId))[0]).toBe('gone');
       const def = await store.findDefault();
@@ -553,7 +564,7 @@ suite('organisation store tree rules (Postgres)', () => {
       await seedList(a, [STATE, BLOCK]);
       await pool.query(`UPDATE organisations SET known_as = 'state' WHERE id = $1`, [b]);
       const r = await store.setKnownAsValues(a, [BLOCK, { name: 'State' }], 'owner-a');
-      expect(r.ok && [r.value.resetCount, r.value.org.knownAsValues]).toEqual([
+      expect(r.ok && [r.value.resetCount, r.value.values]).toEqual([
         1,
         [BLOCK, { key: 'state_2', name: 'State' }],
       ]);
@@ -565,8 +576,58 @@ suite('organisation store tree rules (Postgres)', () => {
       await seedList(a, [BLOCK]);
       const r = await store.setKnownAsValues(a, [{ name: 'New' }, TALUK], 'owner-a');
       expect(r.ok ? null : r.error).toMatchObject({ code: 'KNOWN_AS_UNKNOWN_KEY', index: 1 });
-      const row = await store.findById(a);
-      expect(row.ok && row.value?.knownAsValues).toEqual([BLOCK]);
+      expect(await listOf(a)).toEqual([BLOCK]);
+    });
+
+    it('keeps the timestamps of an unchanged value and stamps a changed or new one', async () => {
+      const a = await org('a');
+      await seedList(a, [BLOCK, TALUK]);
+      const r = await store.setKnownAsValues(
+        a,
+        [BLOCK, { key: 'taluk', name: 'Tehsil', default: true }, { name: 'Ward' }],
+        'owner-a',
+      );
+      expect(r.ok).toBe(true);
+      const rows = await pool.query<{
+        key: string;
+        position: number;
+        created: string;
+        updated: string;
+      }>(
+        `SELECT key, position, created_at::text AS created, updated_at::text AS updated
+           FROM org_known_as WHERE org_id = $1 ORDER BY position`,
+        [a],
+      );
+      const seeded = (
+        await pool.query<{ t: string }>(`SELECT '2026-01-01T00:00:00Z'::timestamptz::text AS t`)
+      ).rows[0]!.t;
+      expect(rows.rows.map((x) => [x.key, x.position])).toEqual([
+        ['block', 0],
+        ['taluk', 1],
+        ['ward', 2],
+      ]);
+      expect(rows.rows[0]).toMatchObject({ created: seeded, updated: seeded });
+      expect(rows.rows[1]?.created).toBe(seeded);
+      expect(rows.rows[1]?.updated).not.toBe(seeded);
+      expect(rows.rows[2]?.created).not.toBe(seeded);
+    });
+
+    it('swaps names and moves the default in one save without a unique violation', async () => {
+      const a = await org('a');
+      await seedList(a, [{ ...BLOCK, default: true }, TALUK]);
+      const r = await store.setKnownAsValues(
+        a,
+        [
+          { key: 'block', name: 'Taluk' },
+          { key: 'taluk', name: 'Block', default: true },
+        ],
+        'owner-a',
+      );
+      expect(code(r)).toBe('ok');
+      expect(await listOf(a)).toEqual([
+        { key: 'block', name: 'Taluk' },
+        { key: 'taluk', name: 'Block', default: true },
+      ]);
     });
 
     it('refuses the Default org with NOT_EDITABLE and an unknown org with NOT_FOUND', async () => {
@@ -574,6 +635,52 @@ suite('organisation store tree rules (Postgres)', () => {
       expect(
         code(await store.setKnownAsValues('00000000-0000-0000-0000-000000000000', [BLOCK], 'x')),
       ).toBe('NOT_FOUND');
+    });
+  });
+
+  describe('known_as reads', () => {
+    it('resolves known_as_name from the parent row, Aggregator for a key it lacks', async () => {
+      const a = await org('a');
+      const b = await org('b', a);
+      const c = await org('c', a);
+      await seedList(a, [BLOCK]);
+      await pool.query(`UPDATE organisations SET known_as = 'block' WHERE id = $1`, [b]);
+      await pool.query(`UPDATE organisations SET known_as = 'gone' WHERE id = $1`, [c]);
+      const rows = await Promise.all([b, c].map((id) => store.findById(id)));
+      expect(rows.map((x) => x.ok && x.value?.knownAsName)).toEqual(['Block', 'Aggregator']);
+    });
+
+    it('names the default value of each org that has one', async () => {
+      const a = await org('a');
+      const c = await org('c');
+      await seedList(rootId, [{ ...STATE, default: true }]);
+      await seedList(a, [BLOCK, { ...TALUK, default: true }]);
+      await seedList(c, [WARD]);
+      const r = await store.defaultKnownAsNames([rootId, a, c]);
+      expect(r.ok && r.value).toEqual({ [rootId]: 'State', [a]: 'Taluk' });
+    });
+
+    it('counts live orgs whose key is neither aggregator nor a key of the parent', async () => {
+      const a = await org('a');
+      const b = await org('b', a);
+      const p = await org('p', a, 'pending');
+      const x = await org('x', a, 'inactive');
+      await seedList(a, [BLOCK]);
+      await pool.query(`UPDATE organisations SET known_as = 'block' WHERE id = $1`, [b]);
+      await pool.query(`UPDATE organisations SET known_as = 'gone' WHERE id IN ($1, $2, $3)`, [
+        p,
+        x,
+        defaultId,
+      ]);
+      const r = await store.countStaleKnownAs();
+      expect(r.ok && r.value).toBe(1);
+    });
+
+    it('drops the values of a deleted org', async () => {
+      const p = await org('p', undefined, 'pending');
+      await seedList(p, [BLOCK]);
+      await store.deleteById(p);
+      expect(await listOf(p)).toEqual([]);
     });
   });
 

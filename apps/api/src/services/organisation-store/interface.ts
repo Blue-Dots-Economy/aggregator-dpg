@@ -66,12 +66,10 @@ export interface Organisation {
   /** Key of the org's "known as" value: a key of the parent's list, or `aggregator`. */
   knownAs: string;
   /**
-   * Name of `knownAs`, resolved from the parent's list ("Aggregator" for a key
-   * the list does not have, and for the Default org). `null` for the root.
+   * Name of `knownAs`: the parent's value with that key ("Aggregator" for a key
+   * the parent does not have, and for the Default org). `null` for the root.
    */
   knownAsName: string | null;
-  /** The "known as" values this org defines for its direct children. Empty for the Default org. */
-  knownAsValues: KnownAsValues;
   /** Depth in the tree: 0 for the root, 1 for a top-level org. Set by the store on create and move. */
   depth: number;
   /** The parent org's id; the root for a top-level org, `null` for the root itself. */
@@ -362,23 +360,49 @@ export abstract class OrganisationStoreBase {
   /**
    * Replaces the "known as" values an org defines for its direct children.
    *
-   * Takes the tree lock first, then reads the org's stored list and fills the
-   * missing keys from it (`fillKnownAsKeys`). In the same write, every child
-   * (any status, the Default org excluded) whose key is neither in the new list
-   * nor `aggregator` takes the new default entry, else `aggregator`. Those
-   * children keep their `updated_at`. The root can be written too.
+   * Takes the tree lock first, then reads the org's stored values and fills
+   * the missing keys from them (`fillKnownAsKeys`). The org's values are
+   * replaced in one transaction; a value that did not change keeps its
+   * timestamps. In the same transaction, every child (any status, the Default
+   * org excluded) whose key is neither in the new list nor `aggregator` takes
+   * the new default entry, else `aggregator`. Those children keep their
+   * `updated_at`. The root can be written too.
    *
    * @param id - The org, or the root.
    * @param values - The requested list; a sent key must be in the stored list.
    * @param updatedBy - The acting admin's user id.
-   * @returns The updated org and the number of children reset; `NOT_FOUND`,
-   *   `NOT_EDITABLE` (the Default org) or `KNOWN_AS_UNKNOWN_KEY` when refused.
+   * @returns The updated org, the saved list and the number of children reset;
+   *   `NOT_FOUND`, `NOT_EDITABLE` (the Default org) or `KNOWN_AS_UNKNOWN_KEY` when refused.
    */
   abstract setKnownAsValues(
     id: string,
     values: KnownAsValuesRequest,
     updatedBy: string,
-  ): Promise<OrgStoreResult<{ org: Organisation; resetCount: number }>>;
+  ): Promise<OrgStoreResult<{ org: Organisation; values: KnownAsValues; resetCount: number }>>;
+  /**
+   * Reads the "known as" values an org defines for its direct children.
+   *
+   * @param orgId - The org, or the root.
+   * @returns The values in list order; empty when the org has none or does not exist.
+   */
+  abstract knownAsValues(orgId: string): Promise<OrgStoreResult<KnownAsValues>>;
+  /**
+   * Reads the name of each org's default "known as" value: the value a new child gets.
+   *
+   * @param orgIds - The orgs, the root allowed.
+   * @returns The name per org id; an org with no default value is absent.
+   */
+  abstract defaultKnownAsNames(
+    orgIds: readonly string[],
+  ): Promise<OrgStoreResult<Record<string, string>>>;
+  /**
+   * Counts pending and active aggregator orgs, Default excluded, whose
+   * `known_as` is neither `aggregator` nor a key of their parent's values.
+   * Such orgs read as "Aggregator".
+   *
+   * @returns The count.
+   */
+  abstract countStaleKnownAs(): Promise<OrgStoreResult<number>>;
   /**
    * Hard-deletes an org row by id.
    *

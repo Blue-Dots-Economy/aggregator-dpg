@@ -11,6 +11,7 @@
 import { z } from 'zod';
 
 import { BecknLocationSchema } from '../beckn/index.js';
+import { fieldsQuerySchema } from '../dto/index.js';
 
 // ─── Shared pieces ──────────────────────────────────────────────────────────
 
@@ -288,8 +289,6 @@ export const OrgSchema = z.object({
    * Null for the network facilitator.
    */
   known_as_name: z.string().nullable(),
-  /** The "known as" values this org defines for its direct children. */
-  known_as_values: KnownAsValuesSchema,
   /** Depth in the tree: 0 for the network facilitator, 1 for a top-level org. */
   depth: z.number().int(),
   /** The parent org's id; null for the network facilitator. */
@@ -309,24 +308,33 @@ export const OrgSchema = z.object({
 });
 export type Org = z.infer<typeof OrgSchema>;
 
+/** Extra data `GET /v1/org/read/:id` returns only when the `fields` query names it. */
+export const ORG_READ_FIELDS = ['known_as_values', 'known_as_options'] as const;
+
+/** `GET /v1/org/read/:id` query. */
+export const OrgReadQuerySchema = z.object({ fields: fieldsQuerySchema(ORG_READ_FIELDS) });
+export type OrgReadQuery = z.infer<typeof OrgReadQuerySchema>;
+
 /** `GET /v1/org/read/:id`. */
 export const OrgReadResponseSchema = z.object({
-  /**
-   * The org. Its `known_as_values` is null when the org cannot have child
-   * orgs: it is at `max_depth`, or it is the Default org.
-   */
-  org: OrgSchema.extend({ known_as_values: KnownAsValuesSchema.nullable() }),
+  org: OrgSchema,
   owner: z.object({ id: z.string(), contact: PersonContactSchema }),
   coordinator_count: z.number().int(),
   /** Pending and active direct child orgs, Default excluded. */
   child_count: z.number().int(),
   pending_count: z.number().int(),
   /**
-   * The values the caller can pick for this org's `known_as`: the parent's
-   * list, or only the system value when that list is empty. Null when the
-   * caller does not own the parent.
+   * Only with `fields=known_as_values`. The "known as" values the org defines
+   * for its direct children. Null when the org cannot have child orgs: it is
+   * at `max_depth`, or it is the Default org.
    */
-  known_as_options: z.array(KnownAsEntrySchema).nullable(),
+  known_as_values: KnownAsValuesSchema.nullable().optional(),
+  /**
+   * Only with `fields=known_as_options`. The values the caller can pick for
+   * this org's `known_as`: the parent's list, or only the system value when
+   * that list is empty. Null when the caller does not own the parent.
+   */
+  known_as_options: z.array(KnownAsEntrySchema).nullable().optional(),
 });
 export type OrgReadResponse = z.infer<typeof OrgReadResponseSchema>;
 
@@ -429,6 +437,15 @@ export const OrgKnownAsUpdateRequestSchema = z.union([
   z.object({ known_as_values: KnownAsValuesRequestSchema }).strict(),
 ]);
 export type OrgKnownAsUpdateRequest = z.infer<typeof OrgKnownAsUpdateRequestSchema>;
+
+/**
+ * `PATCH /v1/org/known-as/update/:id` response: the org. A `known_as_values`
+ * request also returns the saved list, with the keys the API made.
+ */
+export const OrgKnownAsUpdateResponseSchema = OrgSchema.extend({
+  known_as_values: KnownAsValuesSchema.optional(),
+});
+export type OrgKnownAsUpdateResponse = z.infer<typeof OrgKnownAsUpdateResponseSchema>;
 
 /** `POST /v1/org/decision/:id` response: adds what owner access achieved. */
 export const OrgDecisionResponseSchema = DecisionResponseSchema.extend({
@@ -620,14 +637,23 @@ export type UpdateRoleRequest = z.infer<typeof UpdateRoleRequestSchema>;
 
 // ─── Hierarchy settings ─────────────────────────────────────────────────────
 
+/** Extra data `GET /v1/org/hierarchy` returns only when the `fields` query names it. */
+export const ORG_HIERARCHY_FIELDS = ['known_as_values'] as const;
+
+/** `GET /v1/org/hierarchy` query. */
+export const OrgHierarchyQuerySchema = z.object({
+  fields: fieldsQuerySchema(ORG_HIERARCHY_FIELDS),
+});
+export type OrgHierarchyQuery = z.infer<typeof OrgHierarchyQuerySchema>;
+
 /** `GET /v1/org/hierarchy`: the network facilitator and the tree limits. */
 export const OrgHierarchyResponseSchema = z.object({
   /** The network facilitator, depth 0: the top of the tree. */
   network: z.object({
     id: z.string(),
     name: z.string(),
-    /** The "known as" values the network defines for top-level orgs. */
-    known_as_values: KnownAsValuesSchema,
+    /** Only with `fields=known_as_values`. The "known as" values the network defines for top-level orgs. */
+    known_as_values: KnownAsValuesSchema.optional(),
   }),
   limits: z.object({
     /** The deepest an aggregator org can be; 1 keeps every org under the network. */

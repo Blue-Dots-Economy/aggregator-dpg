@@ -47,7 +47,8 @@ import type { RecordConsentHook } from '../services/consent-ledger/hook.js';
 import { stampConsent } from '../services/registration-consent.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
 import { getNetworkConfig } from '../services/network-config.js';
-import { defaultKnownAsKey, knownAsNameOf, treeRules } from '../services/known-as.js';
+import { SYSTEM_KNOWN_AS } from '@aggregator-dpg/shared-primitives/user-org';
+import { treeRules } from '../services/known-as.js';
 import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
 
 /**
@@ -632,6 +633,13 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           fields: { sub_operation: 'orgStore.childCounts' },
         });
       }
+      const childNames = await store.defaultKnownAsNames(candidates.map((o) => o.id));
+      if (!childNames.ok) {
+        throw httpError('DB_UNAVAILABLE', {
+          cause: new Error(childNames.error.message),
+          fields: { sub_operation: 'orgStore.defaultKnownAsNames' },
+        });
+      }
       const org = (await getNetworkConfig()).aggregator.organisation;
       const rules = treeRules(org);
       // The instance total is reported by `accepting`, not per parent.
@@ -647,7 +655,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
             name: o.displayName,
             is_root: isRoot,
             known_as_name: isRoot ? null : o.knownAsName,
-            child_known_as_name: knownAsNameOf(o.knownAsValues, defaultKnownAsKey(o.knownAsValues)),
+            child_known_as_name: childNames.value[o.id] ?? SYSTEM_KNOWN_AS.name,
           };
         });
       const accepting = total.value < rules.maxTotalOrgs && parents.length > 0;

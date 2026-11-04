@@ -40,11 +40,8 @@ type JsonRecord = Record<string, unknown>;
 /** Trimmed value, or null when blank (clears the field). */
 const orNull = (v: string) => (v.trim() ? v.trim() : null);
 
-/** The org fields the form shows; the "known as" values list is edited elsewhere. */
-type OrgDetails = Omit<Org, 'known_as_values'>;
-
 /** The "known as" name, or the key when the name is missing. */
-const knownAsText = (o: OrgDetails) => o.known_as_name ?? o.known_as ?? '—';
+const knownAsText = (o: Org) => o.known_as_name ?? o.known_as ?? '—';
 
 /** Whether a schema value is empty (cleared). */
 const isEmpty = (v: unknown) =>
@@ -66,7 +63,7 @@ export function OrgEditForm({
   orgSchema,
   knownAsPicked = false,
 }: Readonly<{
-  org: OrgDetails;
+  org: Org;
   /** False for the Default org, the root and an org below the viewer's own. */
   editable: boolean;
   /** The signed-in user owns this org: every detail but "known as". */
@@ -89,7 +86,7 @@ export function OrgEditForm({
     [view],
   );
 
-  const [current, setCurrent] = useState<OrgDetails>(org);
+  const [current, setCurrent] = useState<Org>(org);
   const [name, setName] = useState(org.name);
   const [legalName, setLegalName] = useState(org.legal_name ?? '');
   const [description, setDescription] = useState(org.description ?? '');
@@ -100,7 +97,7 @@ export function OrgEditForm({
   const schemaForm = useRef<Form<JsonRecord>>(null);
 
   /** Takes a newer org (after a save, a move or a refresh) as the form's values. */
-  function adopt(next: OrgDetails) {
+  function adopt(next: Org) {
     setCurrent(next);
     setName(next.name);
     setLegalName(next.legal_name ?? '');

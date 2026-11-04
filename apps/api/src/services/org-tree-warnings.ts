@@ -14,8 +14,6 @@
  */
 
 import type { OrganisationConfig } from '@aggregator-dpg/network-config/interface';
-import type { KnownAsValues } from '@aggregator-dpg/shared-primitives/user-org';
-import { knownAsKeyValid } from './known-as.js';
 import type {
   Organisation,
   OrganisationStoreBase,
@@ -106,7 +104,7 @@ export async function warnOrgTreeOverLimits(
       warn('total', { total_orgs: orgs.length, max_total_orgs, registration: 'closed' });
     }
 
-    const stale = await countStaleKnownAs(store, orgs);
+    const stale = valueOf(await store.countStaleKnownAs());
     if (stale > 0) warn('known_as', { org_count: stale });
   } catch (e) {
     log.error({
@@ -115,34 +113,4 @@ export async function warnOrgTreeOverLimits(
       error: e instanceof Error ? e.message : String(e),
     });
   }
-}
-
-/**
- * Counts orgs whose `known_as` key is neither in the parent's list nor `aggregator`.
- *
- * Parents outside `orgs` (the root, an inactive org) are read one by one.
- *
- * @param store - The organisation store.
- * @param orgs - The orgs to check, the Default org excluded.
- * @returns The count.
- * @throws {Error} When a store read fails.
- */
-async function countStaleKnownAs(
-  store: OrganisationStoreBase,
-  orgs: Organisation[],
-): Promise<number> {
-  const lists = new Map<string, KnownAsValues>(orgs.map((o) => [o.id, o.knownAsValues]));
-  const root = valueOf(await store.findRoot());
-  if (root) lists.set(root.id, root.knownAsValues);
-  let stale = 0;
-  for (const o of orgs) {
-    if (o.parentId === null) continue;
-    let list = lists.get(o.parentId);
-    if (list === undefined) {
-      list = valueOf(await store.findById(o.parentId))?.knownAsValues ?? [];
-      lists.set(o.parentId, list);
-    }
-    if (!knownAsKeyValid(list, o.knownAs)) stale += 1;
-  }
-  return stale;
 }

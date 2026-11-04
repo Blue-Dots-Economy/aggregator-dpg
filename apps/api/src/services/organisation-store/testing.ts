@@ -6,7 +6,7 @@
 
 import { InMemoryOrganisationStore } from './memory.js';
 import { contactId } from '@aggregator-dpg/shared-primitives/contact';
-import { SYSTEM_KNOWN_AS } from '@aggregator-dpg/shared-primitives/user-org';
+import { SYSTEM_KNOWN_AS, type KnownAsValues } from '@aggregator-dpg/shared-primitives/user-org';
 import { DEFAULT_ORG_SLUG, type Organisation, type TreeRules } from './interface.js';
 export { NO_CONSENT_WRITE } from '../consent-ledger/hook.js';
 
@@ -30,9 +30,23 @@ export class OrganisationStoreFake extends InMemoryOrganisationStore {
     this.root = row;
   }
 
+  /**
+   * Seeds the "known as" values an org (or the root) defines for its children.
+   *
+   * @param orgId - The org id.
+   * @param values - The list, in order; replaces any seeded list.
+   */
+  seedKnownAsValues(orgId: string, values: KnownAsValues): void {
+    this.knownAsLists.set(
+      orgId,
+      values.map((e) => ({ ...e })),
+    );
+  }
+
   /** Reset between tests. */
   reset(): void {
     this.byId.clear();
+    this.knownAsLists.clear();
     this.root = null;
   }
 }
@@ -72,7 +86,6 @@ export function buildOrganisation(overrides: Partial<Organisation> = {}): Organi
     legalName: null,
     knownAs: SYSTEM_KNOWN_AS.key,
     knownAsName: SYSTEM_KNOWN_AS.name,
-    knownAsValues: [],
     depth: 1,
     parentId: null,
     parentName: null,

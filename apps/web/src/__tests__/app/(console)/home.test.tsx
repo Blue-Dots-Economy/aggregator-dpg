@@ -59,7 +59,6 @@ const row = (id: string, name: string, over: Partial<Row> = {}): Row => ({
   gst_number: null,
   known_as: null,
   known_as_name: null,
-  known_as_values: [],
   depth: 2,
   parent_id: null,
   parent_name: null,

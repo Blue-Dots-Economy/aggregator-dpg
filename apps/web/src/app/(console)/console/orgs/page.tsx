@@ -36,7 +36,9 @@ export default async function ConsoleOrgsPage({
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   if (!actor.me.is_network_admin) return <OwnerOrgs ownedIds={actor.me.orgs.map((o) => o.id)} />;
-  const hierarchy = await consoleRead<OrgHierarchyResponse>('/v1/org/hierarchy');
+  const hierarchy = await consoleRead<OrgHierarchyResponse>(
+    '/v1/org/hierarchy?fields=known_as_values',
+  );
   const network = await readNetworkOrgs(hierarchy.network.id);
   const pending = network.orgs.filter((o) => o.status === 'pending');
   return (

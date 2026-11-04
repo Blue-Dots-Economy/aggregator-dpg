@@ -8,6 +8,7 @@
  */
 
 import type {
+  KnownAsValues,
   KnownAsValuesRequest,
   Org,
   OrgKnownAsUpdateRequest,
@@ -70,14 +71,18 @@ export function setOrgKnownAs(orgId: string, knownAs: string): Promise<ConsoleSe
  *
  * @param orgId - The organisation that defines the list.
  * @param values - The full list; saved entries keep their key, new ones omit it.
- * @returns The outcome, with the updated org (keys filled) on success.
+ * @returns The outcome, with the updated org and the saved list (keys filled) on success.
  */
 export function setOrgKnownAsValues(
   orgId: string,
   values: KnownAsValuesRequest,
-): Promise<ConsoleSendResult<Org>> {
+): Promise<ConsoleSendResult<Org & { known_as_values: KnownAsValues }>> {
   const body: OrgKnownAsUpdateRequest = { known_as_values: values };
-  return sendConsole<Org>(`/api/console/org/known-as/${orgId}`, 'PATCH', body);
+  return sendConsole<Org & { known_as_values: KnownAsValues }>(
+    `/api/console/org/known-as/${orgId}`,
+    'PATCH',
+    body,
+  );
 }
 
 /**
