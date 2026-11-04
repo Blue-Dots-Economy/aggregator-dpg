@@ -150,6 +150,16 @@ describe('fillKnownAsKeys', () => {
     });
   });
 
+  it('never makes the key aggregator', () => {
+    expect(fillKnownAsKeys([{ name: 'Aggregator' }, { name: 'aggregator' }], [])).toEqual({
+      ok: true,
+      value: [
+        { key: 'aggregator_2', name: 'Aggregator' },
+        { key: 'aggregator_3', name: 'aggregator' },
+      ],
+    });
+  });
+
   it('refuses a sent key that is not saved', () => {
     expect(fillKnownAsKeys([{ name: 'A' }, { key: 'made_up', name: 'B' }], [])).toEqual({
       ok: false,

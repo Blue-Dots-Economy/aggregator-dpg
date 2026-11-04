@@ -140,7 +140,7 @@ export default async function ConsoleOrgPage({
         />
         {own ? null : (
           <p className="mt-2 rounded-lg bg-[var(--bd-tint-primary)] px-3 py-2 text-[13px] text-ink-600">
-            {t('org.viewed_from_above')}
+            {knownAsOptions ? t('org.viewed_from_above_picker') : t('org.viewed_from_above')}
           </p>
         )}
       </div>
@@ -226,7 +226,13 @@ export default async function ConsoleOrgPage({
             <KnownAsPicker org={org} options={knownAsOptions} />
           </ConsoleSection>
         ) : null}
-        <OrgEditForm org={org} editable={editable} canEdit={isOwner} orgSchema={orgSchema} />
+        <OrgEditForm
+          org={org}
+          editable={editable}
+          canEdit={isOwner}
+          orgSchema={orgSchema}
+          knownAsPicked={knownAsOptions !== null}
+        />
         {canEditChildKnownAs ? (
           <ConsoleSection title={t('org.child_known_as_title')}>
             <ChildKnownAsEditor orgId={org.id} values={org.child_known_as} />

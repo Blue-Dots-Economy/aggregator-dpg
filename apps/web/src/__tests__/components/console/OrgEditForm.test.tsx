@@ -65,6 +65,8 @@ interface Viewer {
   /** The org's owner. */
   canEdit?: boolean;
   orgSchema?: typeof ORG_SCHEMA | null;
+  /** The page shows the "known as" picker. */
+  knownAsPicked?: boolean;
 }
 
 const OWNER: Viewer = { editable: true, canEdit: true };
@@ -77,6 +79,7 @@ function form(org: Org, v: Viewer) {
         editable={v.editable ?? false}
         canEdit={v.canEdit ?? false}
         orgSchema={v.orgSchema === undefined ? ORG_SCHEMA : v.orgSchema}
+        knownAsPicked={v.knownAsPicked ?? false}
       />
     </NextIntlClientProvider>
   );
@@ -129,6 +132,13 @@ describe('<OrgEditForm />', () => {
       expect(field).toBeDisabled();
       expect(field).toHaveValue('Aggregator');
       expect(screen.getByText(messages.console.org.known_as_parent_sets)).toBeInTheDocument();
+    });
+
+    it('leaves known_as and its hint out when the page shows the picker', () => {
+      renderForm(baseOrg, { ...OWNER, knownAsPicked: true });
+      expect(screen.queryByLabelText(messages.console.org.known_as)).toBeNull();
+      expect(screen.queryByText(messages.console.org.known_as_parent_sets)).toBeNull();
+      expect(screen.getByLabelText(messages.console.org.name)).toBeInTheDocument();
     });
 
     it('shows the newer org the page passes after a refresh', () => {
@@ -343,6 +353,13 @@ describe('<OrgEditForm />', () => {
       expect(screen.getByText('29ABCDE1234F1ZW')).toBeInTheDocument();
       expect(screen.getByText('Providers, Seekers')).toBeInTheDocument();
       expect(screen.getByText(/Line one/)).toHaveClass('whitespace-pre-line');
+    });
+
+    it('leaves known_as out of the read-only details when the page shows the picker', () => {
+      renderForm(baseOrg, { editable: false, knownAsPicked: true });
+      expect(screen.queryByText(messages.console.org.known_as)).toBeNull();
+      expect(screen.queryByText('Aggregator')).toBeNull();
+      expect(screen.getByText('Acme Org')).toBeInTheDocument();
     });
 
     it('omits known_as for the root, and shows "—" and "no description" when empty', () => {

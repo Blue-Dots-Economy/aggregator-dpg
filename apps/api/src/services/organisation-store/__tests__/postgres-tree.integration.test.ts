@@ -368,7 +368,7 @@ suite('organisation store tree rules (Postgres)', () => {
       ).toBe('CHILD_LIMIT');
     });
 
-    it('keeps a key the new parent has and resets one it lacks; orgs below keep theirs', async () => {
+    it('keeps a key the new parent has or aggregator, resets any other; orgs below keep theirs', async () => {
       const a = await org('a');
       const b = await org('b', a);
       const deep = await org('deep', b);
@@ -387,6 +387,10 @@ suite('organisation store tree rules (Postgres)', () => {
       ]);
       const reset = await store.move(b, { parentId: e }, permissiveTreeRules());
       expect(reset.ok && reset.value.org.knownAs).toBe('aggregator');
+      const keptSystem = await store.move(b, { parentId: c }, permissiveTreeRules());
+      expect(keptSystem.ok && keptSystem.value.org.knownAs).toBe('aggregator');
+      await store.move(b, { parentId: e }, permissiveTreeRules());
+      await store.setKnownAs(b, 'taluk', e, 'test');
       const toDefault = await store.move(b, { parentId: c }, permissiveTreeRules());
       expect(toDefault.ok && toDefault.value.org.knownAs).toBe('ward');
       const d = await store.findById(deep);

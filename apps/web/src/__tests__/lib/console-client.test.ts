@@ -105,6 +105,9 @@ describe('errorKey (console-client)', () => {
     expect(
       errorKey({ status: 409, error: { code: 'CONFLICT', fields: { reason: 'not_movable' } } }),
     ).toBe('errors.not_movable');
+    expect(
+      errorKey({ status: 409, error: { code: 'CONFLICT', fields: { reason: 'moved' } } }),
+    ).toBe('errors.org_moved');
     expect(errorKey({ status: 409, error: { code: 'CONFLICT' } })).toBe('errors.generic');
   });
   it('maps an invalid parent or known-as field', () => {
@@ -120,6 +123,14 @@ describe('errorKey (console-client)', () => {
         error: { code: 'SCHEMA_VALIDATION', fields: { known_as: 'invalid' } },
       }),
     ).toBe('errors.known_as_invalid');
+  });
+  it('maps a known-as list key that is not saved to known_as_list_changed', () => {
+    expect(
+      errorKey({
+        status: 400,
+        error: { code: 'SCHEMA_VALIDATION', fields: { values: 'unknown_key', index: 1 } },
+      }),
+    ).toBe('errors.known_as_list_changed');
   });
   it.each([
     [0, 'errors.network'],

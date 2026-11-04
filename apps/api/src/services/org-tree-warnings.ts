@@ -8,7 +8,9 @@
  * of new orgs. It never stops boot.
  *
  * It also counts orgs whose `known_as` key is neither in their parent's list
- * nor `aggregator`. Such keys read as "Aggregator" until someone sets them.
+ * nor `aggregator`. Such keys read as "Aggregator" until someone sets them,
+ * and it warns when the config still has an `organisation.known_as` block,
+ * which the API ignores.
  */
 
 import type { OrganisationConfig } from '@aggregator-dpg/network-config/interface';
@@ -54,7 +56,7 @@ async function countedOrgs(store: OrganisationStoreBase): Promise<Organisation[]
  * `known_as` key is neither in the parent's list nor `aggregator`. Counts
  * pending and active orgs only, the Default org excluded. A total over the
  * limit, and a failure of the check, are logged as errors; a failure ends the
- * check and never throws.
+ * check and never throws. Also warns when `cfg` has a `known_as` block.
  *
  * @param store - The organisation store.
  * @param cfg - The instance's `organisation` config.
@@ -68,6 +70,15 @@ export async function warnOrgTreeOverLimits(
   const { max_depth, max_children, max_total_orgs } = cfg.hierarchy;
   const warn = (check: string, fields: object) =>
     log.warn({ operation: OPERATION, status: 'success', check, ...fields });
+  if (cfg.known_as !== undefined) {
+    log.warn({
+      operation: OPERATION,
+      status: 'skipped',
+      check: 'known_as_config',
+      detail:
+        'organisation.known_as in the instance config is ignored; owners set "known as" values in the console',
+    });
+  }
   try {
     const orgs = (await countedOrgs(store)).filter((o) => !o.isDefault);
 

@@ -5,8 +5,9 @@
  * Covers: the empty state, saved rows with their default, adding, renaming
  * and removing rows (saved keys sent back, new rows without a key), the
  * default choice, the row limit, name checks before sending, the saved list
- * from the API, an error, a changed list from the page, and the same list
- * in a new object (unsaved edits kept).
+ * from the API, an error, a changed list from the page, the same list in a
+ * new object (unsaved edits kept), the controls locked while saving, and the
+ * per-row accessible names.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -44,7 +45,7 @@ function renderIt(values: ChildKnownAs = SAVED) {
 
 const save = () => screen.getByRole('button', { name: m.save });
 const nameField = (n: number) => screen.getByLabelText(`Name of value ${n}`);
-const defaults = () => screen.getAllByRole('radio', { name: m.child_known_as_default });
+const defaults = () => screen.getAllByRole('radio', { name: /^Make .+ the default$/ });
 
 /** The JSON body of the first PATCH sent. */
 function sentBody(): unknown {
@@ -175,6 +176,40 @@ describe('<ChildKnownAsEditor />', () => {
     );
     expect(nameField(1)).toHaveValue('Ward');
     expect(screen.getAllByRole('textbox')).toHaveLength(1);
+  });
+
+  it("names each row's default and remove controls after the row", () => {
+    renderIt();
+    fireEvent.click(screen.getByRole('button', { name: m.child_known_as_add }));
+    expect(screen.getByRole('radio', { name: 'Make District the default' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Make Block the default' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Make value 3 the default' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove value 3' })).toBeInTheDocument();
+  });
+
+  it('locks every control while the save is in flight', async () => {
+    let finish: (r: Response) => void = () => undefined;
+    vi.mocked(global.fetch).mockReturnValue(
+      new Promise<Response>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    renderIt();
+    fireEvent.change(nameField(2), { target: { value: 'Taluk' } });
+    fireEvent.click(save());
+    await waitFor(() => expect(nameField(1)).toBeDisabled());
+    expect(nameField(2)).toBeDisabled();
+    for (const radio of screen.getAllByRole('radio')) expect(radio).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Remove District' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: m.child_known_as_add })).toBeDisabled();
+    finish(
+      json({
+        id: ORG,
+        child_known_as: [SAVED[0], { key: 'block', name: 'Taluk' }],
+      }),
+    );
+    await waitFor(() => expect(nameField(1)).toBeEnabled());
+    expect(nameField(2)).toHaveValue('Taluk');
   });
 
   it('keeps unsaved edits when the page passes the same list in a new object', () => {

@@ -19,14 +19,14 @@ import { errorKey, setOrgKnownAs } from '../../lib/console-client';
 /**
  * Renders the "known as" picker.
  *
- * @param org - The organisation whose value is set.
+ * @param org - The organisation whose value is set. At depth 1 the network's values apply.
  * @param options - The values the viewer can pick, from `known_as_options`.
  */
 export function KnownAsPicker({
   org,
   options,
 }: Readonly<{
-  org: Pick<Org, 'id' | 'known_as' | 'known_as_name' | 'parent_name'>;
+  org: Pick<Org, 'id' | 'known_as' | 'known_as_name' | 'parent_name' | 'depth'>;
   options: readonly KnownAsEntry[];
 }>) {
   const t = useTranslations('console');
@@ -89,9 +89,9 @@ export function KnownAsPicker({
           ))}
         </select>
         <span className="text-[12px] text-ink-500">
-          {org.parent_name
-            ? t('org.known_as_pick_hint', { parent: org.parent_name })
-            : t('org.known_as_pick_hint_network')}
+          {org.depth === 1 || !org.parent_name
+            ? t('org.known_as_pick_hint_network')
+            : t('org.known_as_pick_hint', { parent: org.parent_name })}
         </span>
       </div>
       <div className="flex items-center gap-3">

@@ -1062,12 +1062,25 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     const s = scripted({
       tree: tree(),
       moved: [{ id: 'a' }],
-      current: 'aggregator',
+      current: 'gone',
       list: [{ key: 'block', name: 'Block' }],
       read: makeRow({ id: 'a', depth: 2, parentId: 'c' }),
     });
     await s.store.move('a', { parentId: 'c' }, baseRules);
     expect(s.sets[0]).toMatchObject({ knownAs: 'aggregator' });
+  });
+
+  it('keeps aggregator even when the new parent has a default', async () => {
+    const s = scripted({
+      tree: tree(),
+      moved: [{ id: 'a' }],
+      current: 'aggregator',
+      list: [{ key: 'ward', name: 'Ward', default: true }],
+      read: makeRow({ id: 'a', depth: 2, parentId: 'c' }),
+    });
+    await s.store.move('a', { parentId: 'c' }, baseRules);
+    expect(s.sets[0]).toMatchObject({ parentId: 'c' });
+    expect(s.sets[0]).not.toHaveProperty('knownAs');
   });
 
   it('sends no write for a move to the current parent without a new value', async () => {

@@ -63,10 +63,7 @@ describe('<HierarchySettings />', () => {
     expect(screen.getByText(messages.console.orgs.top_level_known_as)).toBeInTheDocument();
     expect(screen.getByDisplayValue('State')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Partner')).toBeInTheDocument();
-    const radios = screen.getAllByRole('radio', {
-      name: messages.console.org.child_known_as_default,
-    });
-    expect(radios[0]).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Make State the default' })).toBeChecked();
   });
 
   it('shows the empty state when the network has no values', () => {

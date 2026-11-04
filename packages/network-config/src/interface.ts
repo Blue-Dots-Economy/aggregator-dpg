@@ -309,6 +309,11 @@ export type HierarchyConfig = z.infer<typeof HierarchyConfigSchema>;
  */
 export const OrganisationConfigSchema = z.object({
   hierarchy: HierarchyConfigSchema.default({}),
+  /**
+   * Not used. Kept so the API can warn at boot that the block is ignored;
+   * "known as" values are set in the console.
+   */
+  known_as: z.unknown().optional(),
 });
 export type OrganisationConfig = z.infer<typeof OrganisationConfigSchema>;
 

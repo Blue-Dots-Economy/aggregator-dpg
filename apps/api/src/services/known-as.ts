@@ -85,9 +85,10 @@ export function knownAsKeyValid(list: readonly KnownAsEntry[], key: string): boo
  * Makes a key from a name.
  *
  * The name is transliterated to Latin and lower-cased. Apostrophes from the
- * transliteration are dropped, and every run of other characters becomes `_`. A key that starts with a digit gets `v_` in front.
- * The key is cut to 64 characters. An empty result becomes `value_<n>`. A key
- * already taken gets `_2`, `_3`, and so on.
+ * transliteration are dropped, and every run of other characters becomes `_`.
+ * A key that starts with a digit gets `v_` in front. The key is cut to 64
+ * characters. An empty result becomes `value_<n>`. A key already taken gets
+ * `_2`, `_3`, and so on.
  *
  * @param name - The entry's name.
  * @param taken - Keys already used in the list.
@@ -130,7 +131,8 @@ export type FillKnownAsKeysResult =
  * list, so a client cannot choose keys. An entry with no key gets one made
  * from its name ({@link knownAsKeyFrom}). A made key is never one of the
  * current keys, even one this save drops, so children that held a dropped key
- * are reset rather than matched to a new entry.
+ * are reset rather than matched to a new entry. A made key is never
+ * `aggregator`, because every child may hold that key.
  *
  * @param values - The requested list. Given keys are unique (checked by the schema).
  * @param current - The org's stored `child_known_as` list.
@@ -147,7 +149,7 @@ export function fillKnownAsKeys(
       return { ok: false, error: { code: 'UNKNOWN_KEY', index } };
     }
   }
-  const taken = new Set(known);
+  const taken = new Set([...known, SYSTEM_KNOWN_AS.key]);
   const out: ChildKnownAs = values.map((entry) => {
     const key = entry.key ?? knownAsKeyFrom(entry.name, taken);
     taken.add(key);

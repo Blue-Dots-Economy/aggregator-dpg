@@ -38,7 +38,13 @@ import {
   type ChildKnownAs,
   type ChildKnownAsRequest,
 } from '@aggregator-dpg/shared-primitives/user-org';
-import { defaultKnownAsKey, fillKnownAsKeys, knownAsChoices, knownAsNameOf } from '../known-as.js';
+import {
+  defaultKnownAsKey,
+  fillKnownAsKeys,
+  knownAsChoices,
+  knownAsKeyValid,
+  knownAsNameOf,
+} from '../known-as.js';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
 import { logger } from '../../logger.js';
@@ -259,7 +265,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           .from(organisations)
           .where(eq(organisations.id, id));
         const newList = await childKnownAsOf(tx, change.parentId);
-        const keep = newList.some((e) => e.key === current?.knownAs);
+        const keep = current !== undefined && knownAsKeyValid(newList, current.knownAs);
         await tx
           .update(organisations)
           .set({

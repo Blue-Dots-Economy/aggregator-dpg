@@ -2,7 +2,8 @@
  * Server Component test: `(console)/console/orgs/[id]`. The owner of an active
  * organisation gets the editor for the "known as" values of the organisations
  * under it; the owner of a pending or rejected one, and a viewer who is not
- * the owner, do not.
+ * the owner, do not. A viewer who picks the org's "known as" value gets the
+ * picker, the matching banner, and a details form without that value.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -27,8 +28,14 @@ vi.mock('next-intl/server', () => ({
 vi.mock('@/components/shell/Topbar', () => ({
   Topbar: ({ title }: { title: React.ReactNode }) => <h1>{title}</h1>,
 }));
-vi.mock('@/components/console/OrgEditForm', () => ({ OrgEditForm: () => null }));
-vi.mock('@/components/console/KnownAsPicker', () => ({ KnownAsPicker: () => null }));
+vi.mock('@/components/console/OrgEditForm', () => ({
+  OrgEditForm: ({ knownAsPicked }: { knownAsPicked?: boolean }) => (
+    <div data-testid="org-edit-form" data-known-as-picked={String(knownAsPicked)} />
+  ),
+}));
+vi.mock('@/components/console/KnownAsPicker', () => ({
+  KnownAsPicker: () => <div data-testid="known-as-picker" />,
+}));
 vi.mock('@/components/console/OrgMoveDialog', () => ({ OrgMoveDialog: () => null }));
 vi.mock('@/components/console/ChildOrgsTree', () => ({ ChildOrgsTree: () => null }));
 vi.mock('@/components/console/RolesPanel', () => ({ RolesPanel: () => null }));
@@ -69,12 +76,12 @@ const org = (over: Partial<Org> = {}): Org =>
     ...over,
   }) as Org;
 
-const me = (userId: string): MeResponse => ({
+const me = (userId: string, ownOrgId = ORG_ID): MeResponse => ({
   kind: 'admin',
   user: { id: userId, contact: { name: null, email: 'owner@a.org', phone: null } },
   orgs: [
     {
-      id: ORG_ID,
+      id: ownOrgId,
       name: 'Alpha',
       slug: 'alpha',
       org_type: 'aggregator',
@@ -86,8 +93,17 @@ const me = (userId: string): MeResponse => ({
   is_network_admin: false,
 });
 
-function mockPage(target: Org, viewerId = 'owner') {
-  vi.mocked(getConsoleActor).mockResolvedValue({ ok: true, me: me(viewerId) } as never);
+interface PageOptions {
+  /** The org the viewer owns. */
+  viewerOrgId?: string;
+  knownAsOptions?: OrgReadResponse['known_as_options'];
+}
+
+function mockPage(target: Org, viewerId = 'owner', opts: PageOptions = {}) {
+  vi.mocked(getConsoleActor).mockResolvedValue({
+    ok: true,
+    me: me(viewerId, opts.viewerOrgId),
+  } as never);
   vi.mocked(consoleRead).mockImplementation(async (path: string) => {
     if (path === `/v1/org/read/${ORG_ID}`) {
       return {
@@ -96,7 +112,7 @@ function mockPage(target: Org, viewerId = 'owner') {
         coordinator_count: 0,
         child_count: 0,
         pending_count: 0,
-        known_as_options: null,
+        known_as_options: opts.knownAsOptions ?? null,
         can_have_children: true,
       } satisfies OrgReadResponse as never;
     }
@@ -136,5 +152,31 @@ describe('console org detail — child "known as" editor', () => {
     mockPage(org(), 'someone-else');
     await show();
     expect(screen.queryByTestId('child-known-as-editor')).toBeNull();
+  });
+});
+
+describe('console org detail — "known as" picker', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const OPTIONS = [{ key: 'block', name: 'Block' }];
+
+  it('shows the picker, its banner and a details form without the value to the parent owner', async () => {
+    mockPage(org({ depth: 2 }), 'parent-owner', {
+      viewerOrgId: 'parent',
+      knownAsOptions: OPTIONS,
+    });
+    await show();
+    expect(screen.getByTestId('known-as-picker')).toBeInTheDocument();
+    expect(screen.getByText('console.org.viewed_from_above_picker')).toBeInTheDocument();
+    expect(screen.queryByText('console.org.viewed_from_above')).toBeNull();
+    expect(screen.getByTestId('org-edit-form')).toHaveAttribute('data-known-as-picked', 'true');
+  });
+
+  it('keeps the view-only banner and the value in the form for an ancestor that does not pick', async () => {
+    mockPage(org({ depth: 3 }), 'grandparent-owner', { viewerOrgId: 'grandparent' });
+    await show();
+    expect(screen.queryByTestId('known-as-picker')).toBeNull();
+    expect(screen.getByText('console.org.viewed_from_above')).toBeInTheDocument();
+    expect(screen.getByTestId('org-edit-form')).toHaveAttribute('data-known-as-picked', 'false');
   });
 });

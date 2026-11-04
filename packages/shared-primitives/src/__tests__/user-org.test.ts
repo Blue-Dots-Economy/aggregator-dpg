@@ -450,9 +450,33 @@ describe('known_as list schemas', () => {
     expect(ChildKnownAsSchema.safeParse(tooMany).success).toBe(false);
   });
 
+  it('refuses repeated names, compared trimmed and case-insensitively', () => {
+    const dup = ChildKnownAsSchema.safeParse([
+      { key: 'state', name: 'State' },
+      { key: 'state_2', name: ' state ' },
+    ]);
+    expect(dup.success).toBe(false);
+    if (!dup.success) {
+      expect(dup.error.issues[0]).toMatchObject({
+        path: [1, 'name'],
+        message: 'known_as names must be unique',
+      });
+    }
+    expect(
+      ChildKnownAsRequestSchema.safeParse([{ name: 'District' }, { name: 'DISTRICT' }]).success,
+    ).toBe(false);
+    expect(
+      ChildKnownAsRequestSchema.safeParse([{ key: 'state', name: 'State' }, { name: 'state' }])
+        .success,
+    ).toBe(false);
+    expect(ChildKnownAsRequestSchema.parse([{ name: 'State' }, { name: 'States' }])).toHaveLength(
+      2,
+    );
+  });
+
   it('request list checks only the keys that are given', () => {
     expect(
-      ChildKnownAsRequestSchema.parse([{ name: 'State' }, { name: 'State' }, entry('a')]),
+      ChildKnownAsRequestSchema.parse([{ name: 'State' }, { name: 'District' }, entry('a')]),
     ).toHaveLength(3);
     expect(ChildKnownAsRequestSchema.safeParse([entry('a'), entry('a')]).success).toBe(false);
     expect(

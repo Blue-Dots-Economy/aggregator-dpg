@@ -979,6 +979,19 @@ describe('InMemoryOrganisationStore — tree rules', () => {
       expect(deep.ok && [deep.value?.knownAs, deep.value?.knownAsName]).toEqual(['unit', 'Unit']);
     });
 
+    it('keeps aggregator under a new parent that has a default', async () => {
+      const store = tree();
+      store.seed([
+        org('c', 'root', 1, { childKnownAs: [{ ...WARD, default: true }] }),
+        org('g', 'a', 2, { knownAs: 'aggregator' }),
+      ]);
+      const moved = await store.move('g', { parentId: 'c' }, rules());
+      expect(moved.ok && [moved.value.org.knownAs, moved.value.org.knownAsName]).toEqual([
+        'aggregator',
+        'Aggregator',
+      ]);
+    });
+
     it('is a no-op for the current parent', async () => {
       const store = tree();
       store.seed([org('b', 'a', 2, { knownAs: 'gone' })]);

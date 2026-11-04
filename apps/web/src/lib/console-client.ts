@@ -110,10 +110,12 @@ export function errorKey(r: { status: number; error: ConsoleError }): string {
   if (r.error.code === 'CONFLICT') {
     if (fields['reason'] === 'busy') return 'errors.busy';
     if (fields['reason'] === 'not_movable') return 'errors.not_movable';
+    if (fields['reason'] === 'moved') return 'errors.org_moved';
   }
   if (r.error.code === 'SCHEMA_VALIDATION') {
     if (fields['parent_id'] === 'invalid') return 'errors.parent_invalid';
     if (fields['known_as'] === 'invalid') return 'errors.known_as_invalid';
+    if (fields['values'] === 'unknown_key') return 'errors.known_as_list_changed';
   }
   if (r.status === 0) return 'errors.network';
   if (r.status === 401) return 'errors.signed_out';

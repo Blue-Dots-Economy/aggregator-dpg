@@ -916,7 +916,12 @@ describe('console routes /v1/user, /v1/org', () => {
       const res = await setKnownAs('na', { known_as: 'state' }, ORG_A);
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ known_as: 'state', known_as_name: 'State' });
-      expect(mailer.outbox.find((m) => m.to === 'a@a.org')).toBeDefined();
+      const notice = mailer.outbox.find((m) => m.to === 'a@a.org');
+      expect(notice?.html).toContain(
+        'network administrator changed what the organisation is known as for <strong>Alpha</strong>',
+      );
+      expect(notice?.html).not.toContain('The owner of');
+      expect(notice?.html).not.toContain('State');
     });
 
     it('refuses the network admin on a depth-2 org (403)', async () => {
@@ -1028,13 +1033,13 @@ describe('console routes /v1/user, /v1/org', () => {
       const res = await setList('a', [
         { key: 'block', name: 'Block' },
         { name: 'जिला' },
-        { name: 'Block' },
+        { name: 'Block!' },
       ]);
       expect(res.statusCode).toBe(200);
       expect((res.json() as { child_known_as: unknown }).child_known_as).toEqual([
         BLOCK,
         { key: 'jila', name: 'जिला' },
-        { key: 'block_2', name: 'Block' },
+        { key: 'block_2', name: 'Block!' },
       ]);
     });
 
@@ -1081,6 +1086,7 @@ describe('console routes /v1/user, /v1/org', () => {
 
     it.each([
       ['a duplicate key', [BLOCK, { key: 'block', name: 'Again' }]],
+      ['a duplicate name', [BLOCK, { name: ' block ' }]],
       [
         'two defaults',
         [

@@ -11,7 +11,8 @@
  *
  * Only the org's owner edits the details, the name included. The "known as"
  * value is shown read-only here; the owner of the parent org sets it with
- * `KnownAsPicker`. The network admin sees the details read-only. The Default
+ * `KnownAsPicker`. When the page shows that picker, this form leaves the value
+ * out. The network admin sees the details read-only. The Default
  * org, the root and an org below the viewer's own are read-only.
  */
 
@@ -60,6 +61,7 @@ export function OrgEditForm({
   editable,
   canEdit,
   orgSchema,
+  knownAsPicked = false,
 }: Readonly<{
   org: Org;
   /** False for the Default org, the root and an org below the viewer's own. */
@@ -68,6 +70,8 @@ export function OrgEditForm({
   canEdit: boolean;
   /** The deployment's org-registration schema (network domains applied); `null` if unavailable. */
   orgSchema: { schema: RJSFSchema; uiSchema: JsonRecord } | null;
+  /** The page shows `KnownAsPicker` for this org, so the form leaves "known as" out. */
+  knownAsPicked?: boolean;
 }>) {
   const t = useTranslations('console');
   const router = useRouter();
@@ -207,7 +211,7 @@ export function OrgEditForm({
     }));
     const items: Array<{ label: string; value: ReactNode }> = [
       { label: t('org.name'), value: current.name },
-      ...(current.known_as === null
+      ...(current.known_as === null || knownAsPicked
         ? []
         : [{ label: t('org.known_as'), value: knownAsText(current) }]),
       { label: t('org.legal_name'), value: current.legal_name ?? '—' },
@@ -244,11 +248,13 @@ export function OrgEditForm({
             <Label htmlFor="org-name">{t('org.name')}</Label>
             <Input id="org-name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="org-known-as">{t('org.known_as')}</Label>
-            <Input id="org-known-as" value={knownAsText(current)} disabled readOnly />
-            <span className="text-[12px] text-ink-500">{t('org.known_as_parent_sets')}</span>
-          </div>
+          {knownAsPicked ? null : (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="org-known-as">{t('org.known_as')}</Label>
+              <Input id="org-known-as" value={knownAsText(current)} disabled readOnly />
+              <span className="text-[12px] text-ink-500">{t('org.known_as_parent_sets')}</span>
+            </div>
+          )}
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="org-legal">{t('org.legal_name')}</Label>
             <Input

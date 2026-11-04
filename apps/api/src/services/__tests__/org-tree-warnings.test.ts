@@ -99,6 +99,20 @@ describe('warnOrgTreeOverLimits', () => {
     expect(Object.keys(checks(warn))).toEqual(['known_as']);
   });
 
+  it('warns once when the config still has a known_as block', async () => {
+    const warn = vi.fn();
+    await warnOrgTreeOverLimits(
+      seeded(),
+      { ...cfg({ max_depth: 3 }), known_as: { values: [] } },
+      { warn, error: vi.fn() },
+    );
+    expect(checks(warn).known_as_config).toMatchObject({
+      operation: 'orgTree.bootCheck',
+      status: 'skipped',
+    });
+    expect(Object.keys(checks(warn))).toEqual(['known_as_config', 'known_as']);
+  });
+
   it('does not count a key in the parent list, or aggregator', async () => {
     const store = seeded();
     store.seed([

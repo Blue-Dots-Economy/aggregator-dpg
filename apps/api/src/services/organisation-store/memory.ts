@@ -205,7 +205,7 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
         ? {
             ...row,
             ...this.parentFields(change.parentId),
-            knownAs: newList.some((e) => e.key === row.knownAs)
+            knownAs: knownAsKeyValid(newList, row.knownAs)
               ? row.knownAs
               : defaultKnownAsKey(newList),
             depth: row.depth + delta,

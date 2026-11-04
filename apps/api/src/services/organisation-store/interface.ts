@@ -243,8 +243,9 @@ export abstract class OrganisationStoreBase {
    * Moves an org and every org below it under a new parent.
    *
    * Recomputes `depth` for the moved orgs. Moving to the current parent changes nothing.
-   * The moved org keeps its `known_as` when the new parent's list has the key; otherwise it
-   * takes the new parent's default entry, else `aggregator`. Orgs below it keep theirs.
+   * The moved org keeps its `known_as` when the new parent's list has the key or the key is
+   * `aggregator`; otherwise it takes the new parent's default entry, else `aggregator`. Orgs
+   * below it keep theirs.
    *
    * @param id - The org to move; must be pending or active, not the root or the Default org.
    * @param change - The new parent.

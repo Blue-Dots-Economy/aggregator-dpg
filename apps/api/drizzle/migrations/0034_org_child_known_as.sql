@@ -2,10 +2,10 @@
 -- * `organisations.child_known_as`: the "known as" values an org defines for
 --   its direct children, a JSON array of `{ key, name, default? }`. The API
 --   validates the entries; the database checks only that it is an array.
--- * `organisations.known_as` now holds a key from the parent's
---   `child_known_as`, or `aggregator`. Keys from the instance config have no
---   meaning any more, so every org is reset to `aggregator`. Only a display
---   label changes. `updated_at` is not bumped.
+-- * `organisations.known_as` holds a key from the parent's `child_known_as`,
+--   or `aggregator`. Keys from the instance config are not in any list, so
+--   every org is reset to `aggregator`. Only a display label changes.
+--   `updated_at` is not bumped.
 -- Idempotent; boot-safe while older pods keep serving.
 
 SELECT set_config('aggregator_dpg.prev_lock_timeout', current_setting('lock_timeout'), true),

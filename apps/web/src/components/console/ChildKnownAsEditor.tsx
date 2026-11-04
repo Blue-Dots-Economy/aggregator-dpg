@@ -152,80 +152,88 @@ export function ChildKnownAsEditor({
   }
 
   return (
-    <form noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
-      <p className="text-[13px] text-ink-500">{t('org.child_known_as_hint')}</p>
-      {rows.length === 0 ? (
-        <p className="rounded-[12px] border border-dashed border-(--bd-border) px-3.5 py-3 text-[13px] text-ink-500">
-          {t('org.child_known_as_empty')}
-        </p>
-      ) : (
-        <fieldset className="flex flex-col gap-2">
-          <legend className="sr-only">{t('org.child_known_as_title')}</legend>
-          {rows.map((r, i) => (
-            <div
-              key={r.id}
-              className="flex flex-wrap items-center gap-3 rounded-[12px] border border-(--bd-border) px-3.5 py-2.5"
-            >
-              <Input
-                aria-label={t('org.child_known_as_name', { n: i + 1 })}
-                className="min-w-[12rem] flex-1"
-                value={r.name}
-                maxLength={KNOWN_AS_NAME_MAX}
-                onChange={(e) => rename(r.id, e.target.value)}
+    <form noValidate onSubmit={(e) => void onSubmit(e)}>
+      {/* Disabled while saving: the saved list replaces the rows, so an edit
+          made meanwhile would be lost. */}
+      <fieldset disabled={busy} className="flex min-w-0 flex-col gap-4">
+        <p className="text-[13px] text-ink-500">{t('org.child_known_as_hint')}</p>
+        {rows.length === 0 ? (
+          <p className="rounded-[12px] border border-dashed border-(--bd-border) px-3.5 py-3 text-[13px] text-ink-500">
+            {t('org.child_known_as_empty')}
+          </p>
+        ) : (
+          <fieldset className="flex flex-col gap-2">
+            <legend className="sr-only">{t('org.child_known_as_title')}</legend>
+            {rows.map((r, i) => {
+              const label = r.name.trim() || t('org.child_known_as_value', { n: i + 1 });
+              return (
+                <div
+                  key={r.id}
+                  className="flex flex-wrap items-center gap-3 rounded-[12px] border border-(--bd-border) px-3.5 py-2.5"
+                >
+                  <Input
+                    aria-label={t('org.child_known_as_name', { n: i + 1 })}
+                    className="min-w-[12rem] flex-1"
+                    value={r.name}
+                    maxLength={KNOWN_AS_NAME_MAX}
+                    onChange={(e) => rename(r.id, e.target.value)}
+                  />
+                  <label className="inline-flex items-center gap-1.5 text-[13px] text-ink-700">
+                    <input
+                      type="radio"
+                      aria-label={t('org.child_known_as_make_default', { name: label })}
+                      name={`child-known-as-default-${orgId}`}
+                      checked={defaultId === r.id}
+                      onChange={() => update({ defaultId: r.id })}
+                    />
+                    {t('org.child_known_as_default')}
+                  </label>
+                  <Button
+                    kind="ghost"
+                    aria-label={t('org.child_known_as_remove', { name: label })}
+                    icon={<Trash2 size={14} aria-hidden="true" />}
+                    onClick={() => remove(r.id)}
+                  />
+                </div>
+              );
+            })}
+            <label className="inline-flex items-center gap-1.5 px-3.5 text-[13px] text-ink-700">
+              <input
+                type="radio"
+                name={`child-known-as-default-${orgId}`}
+                checked={defaultId === null}
+                onChange={() => update({ defaultId: null })}
               />
-              <label className="inline-flex items-center gap-1.5 text-[13px] text-ink-700">
-                <input
-                  type="radio"
-                  name={`child-known-as-default-${orgId}`}
-                  checked={defaultId === r.id}
-                  onChange={() => update({ defaultId: r.id })}
-                />
-                {t('org.child_known_as_default')}
-              </label>
-              <Button
-                kind="ghost"
-                aria-label={t('org.child_known_as_remove', { name: r.name.trim() || i + 1 })}
-                icon={<Trash2 size={14} aria-hidden="true" />}
-                onClick={() => remove(r.id)}
-              />
-            </div>
-          ))}
-          <label className="inline-flex items-center gap-1.5 px-3.5 text-[13px] text-ink-700">
-            <input
-              type="radio"
-              name={`child-known-as-default-${orgId}`}
-              checked={defaultId === null}
-              onChange={() => update({ defaultId: null })}
-            />
-            {t('org.child_known_as_no_default')}
-          </label>
-        </fieldset>
-      )}
-      <ul className="flex list-disc flex-col gap-1 pl-5 text-[12px] text-ink-500">
-        <li>{t('org.child_known_as_default_note')}</li>
-        <li>{t('org.child_known_as_remove_note')}</li>
-      </ul>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          kind="soft"
-          icon={<I.plus size={14} aria-hidden="true" />}
-          disabled={rows.length >= KNOWN_AS_MAX_VALUES}
-          onClick={add}
-        >
-          {t('org.child_known_as_add')}
-        </Button>
-        {rows.length >= KNOWN_AS_MAX_VALUES ? (
-          <span className="text-[12px] text-ink-500">
-            {t('org.child_known_as_max', { max: KNOWN_AS_MAX_VALUES })}
-          </span>
-        ) : null}
-      </div>
-      <div className="flex items-center gap-3">
-        <Button type="submit" disabled={busy || !dirty}>
-          {t('org.save')}
-        </Button>
-        {message ? <output className="text-[13px] text-ink-600">{message}</output> : null}
-      </div>
+              {t('org.child_known_as_no_default')}
+            </label>
+          </fieldset>
+        )}
+        <ul className="flex list-disc flex-col gap-1 pl-5 text-[12px] text-ink-500">
+          <li>{t('org.child_known_as_default_note')}</li>
+          <li>{t('org.child_known_as_remove_note')}</li>
+        </ul>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            kind="soft"
+            icon={<I.plus size={14} aria-hidden="true" />}
+            disabled={rows.length >= KNOWN_AS_MAX_VALUES}
+            onClick={add}
+          >
+            {t('org.child_known_as_add')}
+          </Button>
+          {rows.length >= KNOWN_AS_MAX_VALUES ? (
+            <span className="text-[12px] text-ink-500">
+              {t('org.child_known_as_max', { max: KNOWN_AS_MAX_VALUES })}
+            </span>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-3">
+          <Button type="submit" disabled={busy || !dirty}>
+            {t('org.save')}
+          </Button>
+          {message ? <output className="text-[13px] text-ink-600">{message}</output> : null}
+        </div>
+      </fieldset>
     </form>
   );
 }

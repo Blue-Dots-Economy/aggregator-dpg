@@ -264,7 +264,9 @@ export async function notifyOwnerOfAdminAction(
 /**
  * Emails an org's owner that the owner of the parent org changed what the org is known as.
  *
- * Skipped when the actor owns the org. A failed send is logged and never fails the action.
+ * For a top-level org the parent is the network, so the email names the
+ * network administrator. Skipped when the actor owns the org. A failed send is
+ * logged and never fails the action.
  *
  * @param actor - The acting admin, the parent's owner.
  * @param org - The org acted on.
@@ -276,11 +278,18 @@ export async function notifyOwnerOfParentAction(
   log: FastifyBaseLogger,
 ): Promise<void> {
   if (org.ownerUserId === actor.userId) return;
-  const mail = renderOrgParentAction({
-    orgName: org.displayName,
-    parentName: org.parentName ?? '',
-    consoleUrl: consoleUrl(),
-  });
+  const mail =
+    org.depth <= 1 || org.parentName === null
+      ? renderOrgAdminAction({
+          orgName: org.displayName,
+          action: 'changed what the organisation is known as',
+          consoleUrl: consoleUrl(),
+        })
+      : renderOrgParentAction({
+          orgName: org.displayName,
+          parentName: org.parentName,
+          consoleUrl: consoleUrl(),
+        });
   const sent = await getMailer().send({
     to: org.ownerEmail,
     subject: mail.subject,

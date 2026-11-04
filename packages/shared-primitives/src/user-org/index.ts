@@ -65,12 +65,16 @@ export const KnownAsEntryRequestSchema = z
   .strict();
 export type KnownAsEntryRequest = z.infer<typeof KnownAsEntryRequestSchema>;
 
-/** Adds an issue for a repeated key and for more than one `default` entry. */
+/**
+ * Adds an issue for a repeated key, a repeated name and more than one
+ * `default` entry. Names are compared trimmed and case-insensitively.
+ */
 function checkKnownAsList(
-  list: ReadonlyArray<{ key?: string | undefined; default?: true | undefined }>,
+  list: ReadonlyArray<{ key?: string | undefined; name: string; default?: true | undefined }>,
   ctx: z.RefinementCtx,
 ): void {
   const seen = new Set<string>();
+  const seenNames = new Set<string>();
   let defaults = 0;
   list.forEach((entry, i) => {
     if (entry.key !== undefined) {
@@ -79,6 +83,11 @@ function checkKnownAsList(
       }
       seen.add(entry.key);
     }
+    const name = entry.name.trim().toLowerCase();
+    if (seenNames.has(name)) {
+      ctx.addIssue({ code: 'custom', path: [i, 'name'], message: 'known_as names must be unique' });
+    }
+    seenNames.add(name);
     if (entry.default) {
       defaults += 1;
       if (defaults > 1) {
@@ -93,8 +102,8 @@ function checkKnownAsList(
 }
 
 /**
- * The "known as" values an org defines for its direct children. Keys are
- * unique, at most one entry is the default, and the list has at most
+ * The "known as" values an org defines for its direct children. Keys and
+ * names are unique, at most one entry is the default, and the list has at most
  * {@link KNOWN_AS_MAX_VALUES} entries.
  */
 export const ChildKnownAsSchema = z
@@ -104,8 +113,8 @@ export const ChildKnownAsSchema = z
 export type ChildKnownAs = z.infer<typeof ChildKnownAsSchema>;
 
 /**
- * A `child_known_as` list in a request. The keys that are given are unique,
- * at most one entry is the default, and the list has at most
+ * A `child_known_as` list in a request. The keys that are given and all names
+ * are unique, at most one entry is the default, and the list has at most
  * {@link KNOWN_AS_MAX_VALUES} entries.
  */
 export const ChildKnownAsRequestSchema = z

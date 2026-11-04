@@ -450,9 +450,11 @@ describe('AggregatorConfigSchema.registration_modes', () => {
     });
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.data.aggregator.organisation).toEqual({
-      hierarchy: { max_depth: 2, max_total_orgs: 50 },
+    expect(result.data.aggregator.organisation.hierarchy).toEqual({
+      max_depth: 2,
+      max_total_orgs: 50,
     });
+    expect(result.data.aggregator.organisation.known_as).toBeDefined();
   });
 
   it.each([

@@ -2,9 +2,10 @@
  * Unit tests for KnownAsPicker: the parent owner's choice of an
  * organisation's "known as" value.
  *
- * Covers: the choices, the current value kept when it is not a choice, the
- * key sent on save, nothing sent while unchanged, a newer value from the
- * page, and the API's message for a value that is not allowed.
+ * Covers: the choices, the hint for a top-level organisation, the current
+ * value kept when it is not a choice, the key sent on save, nothing sent while
+ * unchanged, a newer value from the page, and the API's message for a value
+ * that is not allowed.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -20,13 +21,14 @@ import { KnownAsPicker } from '@/components/console/KnownAsPicker';
 const ID = '00000000-0000-4000-8000-0000000000c1';
 const m = messages.console.org;
 
-type PickerOrg = Pick<Org, 'id' | 'known_as' | 'known_as_name' | 'parent_name'>;
+type PickerOrg = Pick<Org, 'id' | 'known_as' | 'known_as_name' | 'parent_name' | 'depth'>;
 
 const ORG: PickerOrg = {
   id: ID,
   known_as: 'district',
   known_as_name: 'District',
   parent_name: 'Karnataka',
+  depth: 2,
 };
 
 const OPTIONS: KnownAsEntry[] = [
@@ -65,6 +67,12 @@ describe('<KnownAsPicker />', () => {
       screen.getByText('Choose from the values Karnataka has set for the organisations under it.'),
     ).toBeInTheDocument();
     expect(save()).toBeDisabled();
+  });
+
+  it("uses the network's hint for a top-level organisation", () => {
+    render(picker({ ...ORG, depth: 1, parent_name: 'Blue Dots' }, OPTIONS));
+    expect(screen.getByText(m.known_as_pick_hint_network)).toBeInTheDocument();
+    expect(screen.queryByText(/Blue Dots has set/)).toBeNull();
   });
 
   it('keeps the current value when it is not among the choices', () => {
