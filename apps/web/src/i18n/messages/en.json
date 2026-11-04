@@ -669,9 +669,7 @@
     },
     "home": {
       "coordinators": "{count} [[users]]",
-      "pending": "{count} pending",
-      "below_heading": "[[Orgs]] directly under yours",
-      "below_view": "View [[orgs]]"
+      "pending": "{count} pending"
     },
     "org": {
       "details": "[[Org]] details",

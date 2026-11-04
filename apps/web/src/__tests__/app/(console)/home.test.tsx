@@ -1,9 +1,8 @@
 /**
  * Server Component test: `(console)/console` home. An owner of one
- * organisation gets the organisation view with its coordinators and a summary
- * of the organisations below it; an owner of several keeps the organisation
- * cards. An owner's own orgs are read by id, so they show even when many orgs
- * below them sort first.
+ * organisation gets the organisation view with its coordinators, and no child
+ * organisations; an owner of several keeps the organisation cards. An owner's
+ * own orgs are read by id.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -37,15 +36,6 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('@/components/shell/Topbar', () => ({
   Topbar: ({ title }: { title: string }) => <h1>{title}</h1>,
-}));
-vi.mock('@/components/console/OrgsTable', () => ({
-  OrgsTable: ({ orgs }: { orgs: Array<{ id: string; name: string }> }) => (
-    <ul aria-label="awaiting decision">
-      {orgs.map((o) => (
-        <li key={o.id}>{o.name}</li>
-      ))}
-    </ul>
-  ),
 }));
 
 import ConsoleHomePage from '@/app/(console)/console/page';
@@ -168,7 +158,7 @@ describe('console home — owner', () => {
     });
   });
 
-  it('lists the child organisations awaiting the owner, and no coordinator counts below', async () => {
+  it('shows no child organisations on the home page', async () => {
     vi.mocked(getConsoleActor).mockResolvedValue({
       ok: true,
       me: me([meOrg('own', 'Zeta Own')]),
@@ -179,20 +169,9 @@ describe('console home — owner', () => {
     );
     await show();
     expect(screen.getByText('Zeta Own')).toBeInTheDocument();
-    const awaiting = screen.getByRole('list', { name: 'awaiting decision' });
-    expect(awaiting).toHaveTextContent('Child Pending');
-    expect(awaiting).not.toHaveTextContent('Child Live');
-    expect(screen.queryByText(/home\.below_summary/)).not.toBeInTheDocument();
-  });
-
-  it('says when no child organisation is awaiting the owner', async () => {
-    vi.mocked(getConsoleActor).mockResolvedValue({
-      ok: true,
-      me: me([meOrg('own', 'Zeta Own')]),
-    });
-    mockReads([row('own', 'Zeta Own')], [row('c2', 'Child Live')]);
-    await show();
-    expect(screen.getByText(/orgs\.empty_pending/)).toBeInTheDocument();
+    expect(screen.queryByText('Child Pending')).not.toBeInTheDocument();
+    expect(screen.queryByText(/home\.below/)).not.toBeInTheDocument();
+    expect(readReachableOrgs).not.toHaveBeenCalled();
   });
 
   it('sends an owner of several organisations to the organisations page', async () => {

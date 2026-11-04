@@ -1,7 +1,7 @@
 /**
- * Console home page: the coordinators of an owner of one organisation, with
- * the organisations directly under it that wait for the owner's decision.
- * Everyone else is sent to the organisations page.
+ * Console home page: the coordinators of an owner of one organisation. Child
+ * organisations awaiting a decision are on the organisations page. Everyone
+ * else is sent to the organisations page.
  */
 
 import Link from 'next/link';
@@ -14,14 +14,12 @@ import type {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
-import { readReachableOrgs } from '@/lib/console-hierarchy.server';
 import { canInvite, CONSOLE_HOME_HREF, coordinatorsHref } from '@/lib/capabilities';
 import { networkDomains, servedDomains } from '@/lib/console-domains.server';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
-import { ConsoleSection, ConsoleStatusPill } from '@/components/console/ConsoleUi';
+import { ConsoleStatusPill } from '@/components/console/ConsoleUi';
 import { OrgCoordinators, type OrgCoordinatorRow } from '@/components/console/OrgCoordinators';
-import { OrgsTable } from '@/components/console/OrgsTable';
 import { I } from '@/icons';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
@@ -38,22 +36,18 @@ export default async function ConsoleHomePage() {
 
   const homeOrgId = me.orgs.find((o) => o.org_type === 'aggregator' && !o.is_default)?.id;
   if (!homeOrgId) redirect('/console/orgs');
-  const [read, reach] = await Promise.all([
-    consoleRead<OrgReadResponse>(`/v1/org/read/${homeOrgId}`),
-    readReachableOrgs(),
-  ]);
+  const read = await consoleRead<OrgReadResponse>(`/v1/org/read/${homeOrgId}`);
   const homeOrg: OrgRow = {
     ...read.org,
     coordinator_count: read.coordinator_count,
     child_count: read.child_count,
     pending_count: read.pending_count,
   };
-  const below = reach.filter((o) => o.id !== homeOrgId);
-  return renderOrgHome(homeOrg, below, canInvite(me));
+  return renderOrgHome(homeOrg, canInvite(me));
 }
 
 /** The owner's single organisation with its coordinators. */
-async function renderOrgHome(org: OrgRow, below: OrgRow[], showInvite: boolean) {
+async function renderOrgHome(org: OrgRow, showInvite: boolean) {
   const t = await getTranslations('console');
   const [page, domains] = await Promise.all([
     consoleRead<UserSearchResponse>('/v1/user/search', {
@@ -102,34 +96,7 @@ async function renderOrgHome(org: OrgRow, below: OrgRow[], showInvite: boolean) 
           complete={page.next_cursor === null}
           allHref={`/console/coordinators?org_id=${org.id}`}
         />
-        {below.length > 0 ? await renderChildOrgs(below) : null}
       </div>
     </>
-  );
-}
-
-/**
- * The organisations directly under the owner's own: those awaiting the owner's
- * decision, approved or rejected in place, and a link to all of them.
- */
-async function renderChildOrgs(children: OrgRow[]) {
-  const t = await getTranslations('console');
-  const pending = children.filter((o) => o.status === 'pending');
-  return (
-    <ConsoleSection
-      title={t('home.below_heading')}
-      action={
-        <Link className={buttonClass('soft')} href="/console/orgs">
-          {t('home.below_view')}
-        </Link>
-      }
-      flush={pending.length > 0}
-    >
-      {pending.length > 0 ? (
-        <OrgsTable orgs={pending} />
-      ) : (
-        <p className="text-[13.5px] text-ink-600">{t('orgs.empty_pending')}</p>
-      )}
-    </ConsoleSection>
   );
 }
