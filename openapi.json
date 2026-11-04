@@ -6281,6 +6281,10 @@
                       "descendants_of": {
                         "type": "string",
                         "format": "uuid"
+                      },
+                      "parent_id": {
+                        "type": "string",
+                        "format": "uuid"
                       }
                     },
                     "additionalProperties": false,
