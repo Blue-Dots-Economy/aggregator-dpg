@@ -17,6 +17,8 @@ import {
 } from '../../../../hooks/useOnboarding';
 import { useProfile, useProfileRaw } from '../../../../hooks/useProfile';
 import { useAggregatorConfig } from '../../../../hooks/useAggregatorConfig';
+import { useActiveDomain } from '../../../../hooks/useActiveDomain';
+import { DomainSelect } from '../../../../components/ui/DomainSelect';
 import type { ApiRegistrationLink } from '../../../../services/onboarding.service';
 
 interface CreateLinkFormState {
@@ -242,11 +244,11 @@ export function CreateLinkSection() {
   const profile = useProfile();
   const rawProfile = useProfileRaw();
   const orgName = profile.data?.org ?? '';
-  const aggregatorType = rawProfile.data?.type ?? '';
+  const { domains: servedDomains, active: activeDomain } = useActiveDomain();
   const { data: cfg } = useAggregatorConfig();
-  const domainCfg = cfg?.domains?.find((d) => d.id === aggregatorType);
+  const domainCfg = servedDomains.find((d) => d.id === form.domain);
   // Label for the read-only Domain field, from network config.
-  const domainLabel = domainCfg?.plural_label ?? domainCfg?.label ?? aggregatorType;
+  const domainLabel = domainCfg?.plural_label ?? domainCfg?.label ?? form.domain;
   // Caption listing every configured domain, e.g. "Seekers / Providers".
   const domainsCaption =
     (cfg?.domains ?? []).map((d) => d.plural_label ?? d.label ?? d.id).join(' / ') ||
@@ -260,14 +262,14 @@ export function CreateLinkSection() {
   if (!form.domain) createBlockers.push(t('create_link.blockers.domain'));
   if (!form.registration_mode) createBlockers.push(t('create_link.blockers.registration_mode'));
 
-  // Use the aggregator's registered type. The API rejects other types.
+  // Default to the active domain whenever the form holds no served domain,
+  // including after the form resets. The API rejects a domain not served.
   useEffect(() => {
-    if (rawProfile.data?.type) {
-      setForm((f) =>
-        f.domain === rawProfile.data.type ? f : { ...f, domain: rawProfile.data.type! },
-      );
-    }
-  }, [rawProfile.data?.type]);
+    if (!activeDomain) return;
+    setForm((f) =>
+      servedDomains.some((d) => d.id === f.domain) ? f : { ...f, domain: activeDomain },
+    );
+  }, [activeDomain, servedDomains, form.domain]);
 
   // Default the mode once config loads: `form` if declared, else the first
   // mode. Only fills while empty, so a user choice is kept.
@@ -405,8 +407,17 @@ export function CreateLinkSection() {
             />
           </Field>
           <Field label={domainsCaption} required>
-            {/* Read-only: set to the aggregator's registered type. */}
-            <input className="bd-input" value={domainLabel} readOnly aria-readonly="true" />
+            {servedDomains.length > 1 ? (
+              <DomainSelect
+                domains={servedDomains}
+                value={form.domain}
+                onChange={(id) => setForm((f) => ({ ...f, domain: id }))}
+                className="w-full text-[14px] py-2.5"
+              />
+            ) : (
+              // Read-only: the coordinator serves one domain.
+              <input className="bd-input" value={domainLabel} readOnly aria-readonly="true" />
+            )}
           </Field>
           {/*
            * Registration mode, set at create time and fixed afterwards. Options
@@ -822,11 +833,9 @@ export function YourLinksBody() {
   useEffect(() => {
     if (newLinkId) setToast(t('your_links.draft_created'));
   }, [newLinkId, t]);
-  const rawProfile = useProfileRaw();
-  const { data: cfg } = useAggregatorConfig();
-  // Aggregator's domain; the network's first domain until the profile loads.
-  const aggregatorType: string = rawProfile.data?.type ?? cfg?.domains[0]?.id ?? '';
-  // Links are filtered to the aggregator's registered type.
+  const { domains: servedDomains, active, setActive } = useActiveDomain();
+  const aggregatorType: string = active ?? '';
+  // Links are filtered to the active domain.
   const { data, isLoading, error } = useRegistrationLinks(aggregatorType);
   const links: ApiRegistrationLink[] = data ?? [];
   const activeCount = links.filter((l) => l.status === 'live').length;
@@ -845,6 +854,7 @@ export function YourLinksBody() {
             {t('your_links.type_pill', { type: aggregatorType })}
           </span>
         </div>
+        <DomainSelect domains={servedDomains} value={active} onChange={setActive} />
       </div>
       <div className="flex flex-col gap-3 overflow-y-auto pr-1" style={{ maxHeight: 300 }}>
         {isLoading ? (

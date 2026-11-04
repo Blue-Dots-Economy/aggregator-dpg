@@ -38,7 +38,8 @@
     "back": "Back",
     "cancel": "Cancel",
     "continue": "Continue",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "domain_label": "Domain"
   },
   "register": {
     "heading_tagline": "Tell us about your [[org]].",

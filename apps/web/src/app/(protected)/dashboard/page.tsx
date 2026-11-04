@@ -29,7 +29,8 @@ import { resolveTiles } from '../../../services/tiles';
 import { DASHBOARD_BULK_ACTIONS, type BulkAction } from '../../../services/bulk-actions';
 import { useCan } from '../../../lib/auth-context';
 import type { DashboardTileDef, StatusRule } from '../../../hooks/useAggregatorConfig';
-import { useProfileRaw } from '../../../hooks/useProfile';
+import { useActiveDomain, type ActiveDomainState } from '../../../hooks/useActiveDomain';
+import { DomainSelect } from '../../../components/ui/DomainSelect';
 import { useThemeMode } from '../../../lib/theme-mode';
 import type {
   DirectionalStats,
@@ -1401,7 +1402,7 @@ function filterRowsByLifecycle<R extends { lifecycle_status?: LifecycleStatus }>
 
 /** Props for the participant-profile tab (any `profile_*` domain). */
 interface DomainTabProps {
-  /** The signed-in coordinator's own domain, from its `aggregator_type`. */
+  /** The active domain the coordinator is working with. */
   domainId: string | undefined;
 }
 
@@ -1987,13 +1988,13 @@ function toProviderRow(
 }
 
 export default function DashboardPageRoot() {
-  const rawProfile = useProfileRaw();
-  // Wait for the profile before mounting a tab, so no tab fetches the wrong domain.
-  const profileType = rawProfile.data?.type;
-  if (!profileType) {
+  const activeDomain = useActiveDomain();
+  // Wait for the profile and the stored choice before mounting a tab, so no
+  // tab fetches the wrong domain.
+  if (!activeDomain.ready) {
     return <DashboardLoadingFrame />;
   }
-  return <DashboardContent aggregatorType={profileType} />;
+  return <DashboardContent activeDomain={activeDomain} />;
 }
 
 function DashboardLoadingFrame() {
@@ -2010,13 +2011,14 @@ function DashboardLoadingFrame() {
   );
 }
 
-function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
+function DashboardContent({ activeDomain }: { activeDomain: ActiveDomainState }) {
   const router = useRouter();
   const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Domain id from the config entry matching `aggregatorType`. Undefined when
-  // no entry matches, which skips the dashboard fetch.
-  const primaryDomainCfg = cfg.domains?.find((d) => d.id === aggregatorType);
+  const { domains, active, setActive } = activeDomain;
+  // Undefined when the coordinator serves no network domain, which skips the
+  // dashboard fetch.
+  const primaryDomainCfg = domains.find((d) => d.id === active);
   const primaryDomain = primaryDomainCfg?.id;
   // Provider-like when the domain's `item_type` is job postings, not profiles.
   const isProviderLike = (primaryDomainCfg?.item_type ?? '').startsWith('job_posting');
@@ -2029,6 +2031,7 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
         right={
           <div className="flex items-center gap-2">
+            <DomainSelect domains={domains} value={active} onChange={setActive} />
             {canOnboard && (
               <Button icon={<I.plus size={14} />} onClick={() => router.push('/onboarding')}>
                 {t('buttons.addParticipants')}
@@ -2038,11 +2041,11 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
         }
       />
 
-      {/* No tab strip: the tab is fixed by the aggregator's type. */}
+      {/* Keyed by domain so a switch resets paging, filters and selection. */}
       {isProviderLike ? (
-        <ProvidersTab domainId={primaryDomain} />
+        <ProvidersTab key={primaryDomain} domainId={primaryDomain} />
       ) : (
-        <SeekersTab domainId={primaryDomain} />
+        <SeekersTab key={primaryDomain} domainId={primaryDomain} />
       )}
     </div>
   );

@@ -38,7 +38,8 @@
     "back": "ಹಿಂದೆ",
     "cancel": "ರದ್ದುಮಾಡಿ",
     "continue": "ಮುಂದುವರಿಸಿ",
-    "loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ…"
+    "loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ…",
+    "domain_label": "ಡೊಮೇನ್"
   },
   "register": {
     "heading_tagline": "ನಿಮ್ಮ [[org]]ಯ ಬಗ್ಗೆ ನಮಗೆ ತಿಳಿಸಿ.",
