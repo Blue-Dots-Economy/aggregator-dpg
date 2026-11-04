@@ -361,9 +361,9 @@ export abstract class OrganisationStoreBase {
    * Replaces the "known as" values an org defines for its direct children.
    *
    * Takes the tree lock first, then reads the org's stored values and fills
-   * the missing keys from them (`fillKnownAsKeys`). The org's values are
-   * replaced in one transaction; a value that did not change keeps its
-   * timestamps. In the same transaction, every child (any status, the Default
+   * the missing keys from them (`fillKnownAsKeys`). The org's list is saved in
+   * one transaction; an empty list removes it, and an unchanged list is not
+   * written. In the same transaction, every child (any status, the Default
    * org excluded) whose key is neither in the new list nor `aggregator` takes
    * the new default entry, else `aggregator`. Those children keep their
    * `updated_at`. The root can be written too.

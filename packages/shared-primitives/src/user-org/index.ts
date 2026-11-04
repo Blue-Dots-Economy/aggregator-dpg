@@ -315,20 +315,25 @@ export const ORG_READ_FIELDS = ['known_as_values', 'known_as_options'] as const;
 export const OrgReadQuerySchema = z.object({ fields: fieldsQuerySchema(ORG_READ_FIELDS) });
 export type OrgReadQuery = z.infer<typeof OrgReadQuerySchema>;
 
-/** `GET /v1/org/read/:id`. */
-export const OrgReadResponseSchema = z.object({
-  org: OrgSchema,
-  owner: z.object({ id: z.string(), contact: PersonContactSchema }),
-  coordinator_count: z.number().int(),
-  /** Pending and active direct child orgs, Default excluded. */
-  child_count: z.number().int(),
-  pending_count: z.number().int(),
+/** An organisation as `GET /v1/org/read/:id` returns it. */
+export const OrgReadOrgSchema = OrgSchema.extend({
   /**
    * Only with `fields=known_as_values`. The "known as" values the org defines
    * for its direct children. Null when the org cannot have child orgs: it is
    * at `max_depth`, or it is the Default org.
    */
   known_as_values: KnownAsValuesSchema.nullable().optional(),
+});
+export type OrgReadOrg = z.infer<typeof OrgReadOrgSchema>;
+
+/** `GET /v1/org/read/:id`. */
+export const OrgReadResponseSchema = z.object({
+  org: OrgReadOrgSchema,
+  owner: z.object({ id: z.string(), contact: PersonContactSchema }),
+  coordinator_count: z.number().int(),
+  /** Pending and active direct child orgs, Default excluded. */
+  child_count: z.number().int(),
+  pending_count: z.number().int(),
   /**
    * Only with `fields=known_as_options`. The values the caller can pick for
    * this org's `known_as`: the parent's list, or only the system value when

@@ -408,20 +408,25 @@ describe('console routes /v1/user, /v1/org', () => {
       useHierarchy();
       await setRootList([STATE]);
       await setOrg(ORG_A, { parentId: ROOT, knownAsValues: [BLOCK] });
+      type Body = Record<string, unknown> & { org: Record<string, unknown> };
       const both = (
         await get(`/v1/org/read/${ORG_A}?fields=known_as_values,known_as_options`, 'na')
-      ).json() as Record<string, unknown>;
-      expect(both).toMatchObject({ known_as_values: [BLOCK], known_as_options: [STATE] });
+      ).json() as Body;
+      // The list is on the org; the options are about the caller, so they stay top-level.
+      expect(both.org['known_as_values']).toEqual([BLOCK]);
+      expect(both['known_as_options']).toEqual([STATE]);
+      expect(both).not.toHaveProperty('known_as_values');
       const values = (
         await get(`/v1/org/read/${ORG_A}?fields=known_as_values`, 'na')
-      ).json() as Record<string, unknown>;
-      expect(values['known_as_values']).toEqual([BLOCK]);
+      ).json() as Body;
+      expect(values.org['known_as_values']).toEqual([BLOCK]);
+      expect(values).not.toHaveProperty('known_as_values');
       expect(values).not.toHaveProperty('known_as_options');
       const options = (
         await get(`/v1/org/read/${ORG_A}?fields=known_as_options`, 'na')
-      ).json() as Record<string, unknown>;
+      ).json() as Body;
       expect(options['known_as_options']).toEqual([STATE]);
-      expect(options).not.toHaveProperty('known_as_values');
+      expect(options.org).not.toHaveProperty('known_as_values');
     });
 
     it.each(['children', 'known_as_values,', 'known_as_values,owner'])(
@@ -458,9 +463,9 @@ describe('console routes /v1/user, /v1/org', () => {
       useHierarchy({ max_depth: 2 });
       await setOrg(ORG_A, { knownAsValues: [BLOCK] });
       await setOrg(ORG_B, { parentId: ORG_A, parentName: 'Alpha', depth: 2 });
-      type Read = { known_as_values: unknown };
+      type Read = { org: { known_as_values: unknown } };
       const values = async (id: string, who: keyof typeof TOKENS) =>
-        ((await get(`/v1/org/read/${id}?fields=known_as_values`, who)).json() as Read)
+        ((await get(`/v1/org/read/${id}?fields=known_as_values`, who)).json() as Read).org
           .known_as_values;
       expect(await values(ORG_A, 'a')).toEqual([BLOCK]);
       expect(await values(ORG_B, 'b')).toBeNull();

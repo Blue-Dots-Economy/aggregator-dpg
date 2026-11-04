@@ -43,27 +43,22 @@ describe('organisations schema (migration 0028)', () => {
     expect('knownAsValues' in organisations).toBe(false);
   });
 
-  it('declares org_known_as with one row per value (migration 0034)', () => {
+  it('declares org_known_as with one row per org (migration 0034)', () => {
     const cfg = getTableConfig(orgKnownAs);
     expect(cfg.name).toBe('org_known_as');
     expect(orgKnownAs.orgId.name).toBe('org_id');
-    expect(orgKnownAs.key.name).toBe('key');
-    expect(orgKnownAs.name.name).toBe('name');
-    expect(orgKnownAs.isDefault.name).toBe('is_default');
-    expect(orgKnownAs.isDefault.default).toBe(false);
-    expect(orgKnownAs.position.getSQLType()).toBe('smallint');
-    for (const col of [orgKnownAs.orgId, orgKnownAs.key, orgKnownAs.name, orgKnownAs.position]) {
+    expect(orgKnownAs.orgId.primary).toBe(true);
+    expect(orgKnownAs.knownAsValues.name).toBe('known_as_values');
+    expect(orgKnownAs.knownAsValues.getSQLType()).toBe('jsonb');
+    for (const col of [orgKnownAs.orgId, orgKnownAs.knownAsValues, orgKnownAs.updatedBy]) {
       expect(col.notNull).toBe(true);
     }
     expect(orgKnownAs.createdAt.hasDefault).toBe(true);
     expect(orgKnownAs.updatedAt.hasDefault).toBe(true);
-    expect(cfg.primaryKeys[0]?.columns.map((c) => c.name)).toEqual(['org_id', 'key']);
+    expect(orgKnownAs.updatedBy.hasDefault).toBe(false);
     expect(cfg.foreignKeys[0]?.onDelete).toBe('cascade');
-    expect(cfg.indexes.map((i) => i.config.name).sort()).toEqual([
-      'org_known_as_default_unique',
-      'org_known_as_name_unique',
-    ]);
-    expect(cfg.indexes.every((i) => i.config.unique)).toBe(true);
+    expect(cfg.foreignKeys[0]?.reference().foreignTable).toBe(organisations);
+    expect(cfg.indexes).toEqual([]);
   });
 
   it('declares depth as a required smallint with no default (migration 0032)', () => {

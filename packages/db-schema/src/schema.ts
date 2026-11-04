@@ -42,6 +42,7 @@ import {
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
+import type { KnownAsValues } from '@aggregator-dpg/shared-primitives/user-org';
 
 export type {
   BecknContact,
@@ -418,33 +419,24 @@ export const organisations = pgTable(
 
 // ─── org_known_as ────────────────────────────────────────────────────────────
 // The "known as" values an org defines for its direct children, one row per
-// value (migration 0034). A child's `organisations.known_as` holds a `key` of
-// its parent's rows, or `aggregator`. The API caps a list at 20 rows.
+// org (migration 0034). A child's `organisations.known_as` holds a key of its
+// parent's list, or `aggregator`. An org with an empty list has no row.
 
-export const orgKnownAs = pgTable(
-  'org_known_as',
-  {
-    orgId: uuid('org_id')
-      .notNull()
-      .references(() => organisations.id, { onDelete: 'cascade' }),
-    /** Made by the API from the name; never changes once saved. */
-    key: text('key').notNull(),
-    name: text('name').notNull(),
-    /** The value new children get. At most one per org. */
-    isDefault: boolean('is_default').notNull().default(false),
-    /** Order of the value in the org's list, from 0. */
-    position: smallint('position').notNull(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    primaryKey({ name: 'org_known_as_pkey', columns: [table.orgId, table.key] }),
-    uniqueIndex('org_known_as_default_unique')
-      .on(table.orgId)
-      .where(sql`is_default`),
-    uniqueIndex('org_known_as_name_unique').on(table.orgId, sql`lower(${table.name})`),
-  ],
-);
+export const orgKnownAs = pgTable('org_known_as', {
+  orgId: uuid('org_id')
+    .primaryKey()
+    .references(() => organisations.id, { onDelete: 'cascade' }),
+  /**
+   * The list as the API serves it, in display order. The API checks the
+   * entries on every write; the table checks only the array shape and the
+   * cap of 20 entries.
+   */
+  knownAsValues: jsonb('known_as_values').$type<KnownAsValues>().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  /** The acting admin's user id. */
+  updatedBy: text('updated_by').notNull(),
+});
 
 // ─── registration_invites ────────────────────────────────────────────────────
 // Coordinator invites. The row makes an invite single-use, revocable and

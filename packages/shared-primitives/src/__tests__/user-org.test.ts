@@ -192,21 +192,32 @@ describe('user-org wire schemas', () => {
       pending_count: 1,
     };
     const parsed = OrgReadResponseSchema.parse(read);
-    expect(parsed).not.toHaveProperty('known_as_values');
+    expect(parsed.org).not.toHaveProperty('known_as_values');
     expect(parsed).not.toHaveProperty('known_as_options');
+    const values = [{ key: 'district', name: 'District', default: true as const }];
     expect(
       OrgReadResponseSchema.parse({
         ...read,
-        known_as_values: [{ key: 'district', name: 'District', default: true }],
+        org: { ...org, known_as_values: values },
         known_as_options: [SYSTEM_KNOWN_AS],
-      }),
-    ).toBeTruthy();
+      }).org.known_as_values,
+    ).toEqual(values);
     expect(
-      OrgReadResponseSchema.parse({ ...read, known_as_values: null, known_as_options: null }),
-    ).toBeTruthy();
+      OrgReadResponseSchema.parse({
+        ...read,
+        org: { ...org, known_as_values: null },
+        known_as_options: null,
+      }).org.known_as_values,
+    ).toBeNull();
+    // The list belongs on the org; a top-level copy is dropped.
+    expect(OrgReadResponseSchema.parse({ ...read, known_as_values: values })).not.toHaveProperty(
+      'known_as_values',
+    );
     expect(
-      OrgReadResponseSchema.safeParse({ ...read, known_as_values: [{ key: 'Bad', name: 'x' }] })
-        .success,
+      OrgReadResponseSchema.safeParse({
+        ...read,
+        org: { ...org, known_as_values: [{ key: 'Bad', name: 'x' }] },
+      }).success,
     ).toBe(false);
     expect(
       OrgReadResponseSchema.safeParse({

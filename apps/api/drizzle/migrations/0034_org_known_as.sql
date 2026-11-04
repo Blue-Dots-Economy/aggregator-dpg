@@ -1,11 +1,13 @@
 -- Migration 0034: table `org_known_as`; every `known_as` reset to `aggregator`.
 -- * `org_known_as`: the "known as" values an org defines for its direct
---   children, one row per value. `key` is made by the API from the name and
---   never changes; `position` is the order of the list; at most one row per
---   org is the default (the value new children get). Names are unique per org,
---   ignoring case. The API caps a list at 20 rows. The rows go with their org.
--- * `organisations.known_as` holds a key of the parent's rows, or
---   `aggregator`. Keys from the instance config are in no org's rows, so every
+--   children, one row per org. `known_as_values` is the list as the API
+--   serves it, in display order: `[{"key", "name", "default"?}, ...]`. The API
+--   checks the entries (key format, name length, unique keys and names, at
+--   most one default) on every write; the table checks the shape and the cap
+--   of 20 entries. An org with an empty list has no row. The row goes with its
+--   org.
+-- * `organisations.known_as` holds a key of the parent's list, or
+--   `aggregator`. Keys from the instance config are in no org's list, so every
 --   org is reset to `aggregator`. Only a display label changes.
 --   `updated_at` is not bumped.
 -- Idempotent; boot-safe while older pods keep serving.
@@ -34,24 +36,16 @@ BEGIN
 END $$;
 
 CREATE TABLE IF NOT EXISTS org_known_as (
-  org_id      uuid NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
-  key         text NOT NULL,
-  name        text NOT NULL,
-  is_default  boolean NOT NULL DEFAULT false,
-  position    smallint NOT NULL,
-  created_at  timestamptz NOT NULL DEFAULT now(),
-  updated_at  timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT org_known_as_pkey PRIMARY KEY (org_id, key),
-  -- Same rule as the API's KnownAsKeySchema.
-  CONSTRAINT org_known_as_key_chk CHECK (key ~ '^[a-z][a-z0-9_]*$' AND char_length(key) <= 64),
-  -- Same rule as the API's name schema: trimmed, 1 to 60 characters (KNOWN_AS_NAME_MAX).
-  CONSTRAINT org_known_as_name_chk CHECK (name = btrim(name) AND char_length(name) BETWEEN 1 AND 60),
-  CONSTRAINT org_known_as_position_chk CHECK (position >= 0)
+  org_id           uuid PRIMARY KEY REFERENCES organisations(id) ON DELETE CASCADE,
+  known_as_values  jsonb NOT NULL,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  updated_at       timestamptz NOT NULL DEFAULT now(),
+  -- The acting admin's user id, as in `organisations.updated_by`.
+  updated_by       text NOT NULL,
+  CONSTRAINT org_known_as_values_array_chk CHECK (jsonb_typeof(known_as_values) = 'array'),
+  -- KNOWN_AS_MAX_VALUES in the API.
+  CONSTRAINT org_known_as_values_max_chk CHECK (jsonb_array_length(known_as_values) <= 20)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS org_known_as_default_unique
-  ON org_known_as (org_id) WHERE is_default;
-CREATE UNIQUE INDEX IF NOT EXISTS org_known_as_name_unique
-  ON org_known_as (org_id, lower(name));
 
 UPDATE organisations SET known_as = 'aggregator' WHERE known_as <> 'aggregator';
 

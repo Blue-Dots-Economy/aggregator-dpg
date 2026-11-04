@@ -329,7 +329,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: 'One organisation within reach, with its owner and coordinator counts',
         description:
-          'An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked. The fields query adds data that is left out by default. fields=known_as_values adds known_as_values: the values the organisation defines for its direct children, or null when it cannot have child organisations (the Default organisation, or an organisation at max_depth). fields=known_as_options adds known_as_options: the values the caller can pick for the org\'s known_as (the parent\'s list, or only "aggregator" when that list is empty), or null unless the caller owns the parent (the network admin for a top-level organisation). An unknown name in fields answers 400 SCHEMA_VALIDATION.',
+          'An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked. The fields query adds data that is left out by default. fields=known_as_values adds org.known_as_values: the values the organisation defines for its direct children, or null when it cannot have child organisations (the Default organisation, or an organisation at max_depth). fields=known_as_options adds known_as_options: the values the caller can pick for the org\'s known_as (the parent\'s list, or only "aggregator" when that list is empty), or null unless the caller owns the parent (the network admin for a top-level organisation). An unknown name in fields answers 400 SCHEMA_VALIDATION.',
         params: IdParamsSchema,
         querystring: OrgReadQuerySchema,
         response: { 200: OrgReadResponseSchema, ...errorResponses(401, 403, 404, 503) },
@@ -364,7 +364,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       };
       if (fields.includes('known_as_values')) {
         const childrenAllowed = isRoot || (!org.isDefault && org.depth < hierarchy.max_depth);
-        body.known_as_values = childrenAllowed ? await knownAsValuesOf(org.id) : null;
+        body.org.known_as_values = childrenAllowed ? await knownAsValuesOf(org.id) : null;
       }
       if (fields.includes('known_as_options')) {
         body.known_as_options = isRoot ? null : await knownAsOptionsFor(actor, org);

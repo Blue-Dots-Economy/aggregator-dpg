@@ -117,16 +117,30 @@ suite('organisation store tree rules (Postgres)', () => {
     );
   });
 
-  /** Writes an org's `org_known_as` rows directly, keys included, for test setup. */
+  /** Writes an org's `org_known_as` row directly, keys included, for test setup. */
   async function seedList(id: string, list: KnownAsValues): Promise<void> {
     await pool.query('DELETE FROM org_known_as WHERE org_id = $1', [id]);
-    for (const [position, e] of list.entries()) {
-      await pool.query(
-        `INSERT INTO org_known_as (org_id, key, name, is_default, position, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
-        [id, e.key, e.name, e.default === true, position],
-      );
-    }
+    if (list.length === 0) return;
+    await pool.query(
+      `INSERT INTO org_known_as (org_id, known_as_values, created_at, updated_at, updated_by)
+       VALUES ($1, $2::jsonb, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'seed')`,
+      [id, JSON.stringify(list)],
+    );
+  }
+
+  /** The org's `org_known_as` row, timestamps as text; undefined when it has none. */
+  async function listRow(id: string) {
+    const r = await pool.query<{
+      known_as_values: KnownAsValues;
+      created: string;
+      updated: string;
+      updated_by: string;
+    }>(
+      `SELECT known_as_values, created_at::text AS created, updated_at::text AS updated, updated_by
+         FROM org_known_as WHERE org_id = $1`,
+      [id],
+    );
+    return r.rows[0];
   }
 
   /** The stored list of an org, read through the store. */
@@ -579,37 +593,46 @@ suite('organisation store tree rules (Postgres)', () => {
       expect(await listOf(a)).toEqual([BLOCK]);
     });
 
-    it('keeps the timestamps of an unchanged value and stamps a changed or new one', async () => {
+    it('stores the list as one row, in order, and stamps the writer', async () => {
       const a = await org('a');
       await seedList(a, [BLOCK, TALUK]);
+      const seeded = await listRow(a);
       const r = await store.setKnownAsValues(
         a,
-        [BLOCK, { key: 'taluk', name: 'Tehsil', default: true }, { name: 'Ward' }],
+        [{ key: 'taluk', name: 'Tehsil', default: true }, BLOCK, { name: 'Ward' }],
         'owner-a',
       );
       expect(r.ok).toBe(true);
-      const rows = await pool.query<{
-        key: string;
-        position: number;
-        created: string;
-        updated: string;
-      }>(
-        `SELECT key, position, created_at::text AS created, updated_at::text AS updated
-           FROM org_known_as WHERE org_id = $1 ORDER BY position`,
-        [a],
-      );
-      const seeded = (
-        await pool.query<{ t: string }>(`SELECT '2026-01-01T00:00:00Z'::timestamptz::text AS t`)
-      ).rows[0]!.t;
-      expect(rows.rows.map((x) => [x.key, x.position])).toEqual([
-        ['block', 0],
-        ['taluk', 1],
-        ['ward', 2],
+      const row = await listRow(a);
+      expect(row?.known_as_values).toEqual([
+        { key: 'taluk', name: 'Tehsil', default: true },
+        BLOCK,
+        { key: 'ward', name: 'Ward' },
       ]);
-      expect(rows.rows[0]).toMatchObject({ created: seeded, updated: seeded });
-      expect(rows.rows[1]?.created).toBe(seeded);
-      expect(rows.rows[1]?.updated).not.toBe(seeded);
-      expect(rows.rows[2]?.created).not.toBe(seeded);
+      expect(row?.created).toBe(seeded?.created);
+      expect(row?.updated).not.toBe(seeded?.updated);
+      expect(row?.updated_by).toBe('owner-a');
+      const n = await pool.query('SELECT 1 FROM org_known_as WHERE org_id = $1', [a]);
+      expect(n.rowCount).toBe(1);
+    });
+
+    it('does not write an unchanged list', async () => {
+      const a = await org('a');
+      await seedList(a, [BLOCK, { ...TALUK, default: true }]);
+      const seeded = await listRow(a);
+      const r = await store.setKnownAsValues(a, [BLOCK, { ...TALUK, default: true }], 'owner-a');
+      expect(r.ok && r.value.values).toEqual([BLOCK, { ...TALUK, default: true }]);
+      expect(await listRow(a)).toEqual(seeded);
+    });
+
+    it('creates the row for a first list and deletes it for an empty list', async () => {
+      const a = await org('a');
+      expect(await listRow(a)).toBeUndefined();
+      expect(code(await store.setKnownAsValues(a, [{ name: 'Block' }], 'owner-a'))).toBe('ok');
+      expect((await listRow(a))?.known_as_values).toEqual([BLOCK]);
+      expect(code(await store.setKnownAsValues(a, [], 'owner-a'))).toBe('ok');
+      expect(await listRow(a)).toBeUndefined();
+      expect(await listOf(a)).toEqual([]);
     });
 
     it('swaps names and moves the default in one save without a unique violation', async () => {
@@ -643,11 +666,21 @@ suite('organisation store tree rules (Postgres)', () => {
       const a = await org('a');
       const b = await org('b', a);
       const c = await org('c', a);
-      await seedList(a, [BLOCK]);
+      const d = await org('d', a);
+      const e = await org('e');
+      await seedList(a, [BLOCK, { ...TALUK, default: true }]);
       await pool.query(`UPDATE organisations SET known_as = 'block' WHERE id = $1`, [b]);
       await pool.query(`UPDATE organisations SET known_as = 'gone' WHERE id = $1`, [c]);
-      const rows = await Promise.all([b, c].map((id) => store.findById(id)));
-      expect(rows.map((x) => x.ok && x.value?.knownAsName)).toEqual(['Block', 'Aggregator']);
+      await pool.query(`UPDATE organisations SET known_as = 'taluk' WHERE id = $1`, [d]);
+      // The root has no row: its children read as Aggregator.
+      await pool.query(`UPDATE organisations SET known_as = 'state' WHERE id = $1`, [e]);
+      const rows = await Promise.all([b, c, d, e].map((id) => store.findById(id)));
+      expect(rows.map((x) => x.ok && x.value?.knownAsName)).toEqual([
+        'Block',
+        'Aggregator',
+        'Taluk',
+        'Aggregator',
+      ]);
     });
 
     it('names the default value of each org that has one', async () => {

@@ -12,8 +12,9 @@
  * include the joined owner. A database trigger releases the owner's account
  * once it owns no org.
  *
- * Every read joins the parent row and the parent's `org_known_as` row for the
- * org's key, so `knownAsName` is resolved with no second query.
+ * Every read joins the parent row and the parent's `org_known_as` row, and
+ * picks the name for the org's key from that row's list, so `knownAsName` is
+ * resolved with no second query.
  */
 
 import {
@@ -35,11 +36,15 @@ import { organisations, orgKnownAs, contact, userIdentities, users } from '../..
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import {
   SYSTEM_KNOWN_AS,
-  type KnownAsEntry,
   type KnownAsValues,
   type KnownAsValuesRequest,
 } from '@aggregator-dpg/shared-primitives/user-org';
-import { defaultKnownAsKey, fillKnownAsKeys, knownAsChoices } from '../known-as.js';
+import {
+  defaultKnownAsKey,
+  fillKnownAsKeys,
+  knownAsChoices,
+  knownAsKeyValid,
+} from '../known-as.js';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode, pgConstraint } from '../../db/pg-error.js';
 import { logger } from '../../logger.js';
@@ -108,7 +113,7 @@ const PG_LOCK_NOT_AVAILABLE = '55P03';
 /** The parent org, joined to read its name. */
 const parentOrg = alias(organisations, 'parent_org');
 
-/** The parent's "known as" row for the org's key, joined to read its name. */
+/** The parent's "known as" row, joined to read the name of the org's key. */
 const parentKnownAs = alias(orgKnownAs, 'parent_known_as');
 
 export class PostgresOrganisationStore extends OrganisationStoreBase {
@@ -146,7 +151,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
             orgOwner: ownerUserId,
             kcGroupId: input.kcGroupId ?? null,
             locations: input.locations ?? [],
-            knownAs: await defaultKeyOf(tx, parent.id),
+            knownAs: defaultKnownAsKey(await listOf(tx, parent.id)),
             profile: input.profile ?? {},
             profileRef: input.profileRef ?? null,
             createdBy: 'self',
@@ -217,7 +222,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           .set({
             parentId: parent.id,
             depth,
-            knownAs: await defaultKeyOf(tx, parent.id),
+            knownAs: defaultKnownAsKey(await listOf(tx, parent.id)),
             status: 'pending',
             rejectedAt: null,
             updatedAt: new Date(),
@@ -262,13 +267,13 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           .select({ knownAs: organisations.knownAs })
           .from(organisations)
           .where(eq(organisations.id, id));
-        const keep =
-          current !== undefined && (await keyValidUnder(tx, change.parentId, current.knownAs));
+        const newList = await listOf(tx, change.parentId);
+        const keep = current !== undefined && knownAsKeyValid(newList, current.knownAs);
         await tx
           .update(organisations)
           .set({
             parentId: change.parentId,
-            ...(keep ? {} : { knownAs: await defaultKeyOf(tx, change.parentId) }),
+            ...(keep ? {} : { knownAs: defaultKnownAsKey(newList) }),
             updatedAt: new Date(),
           })
           .where(scoped(eq(organisations.id, id)));
@@ -524,15 +529,11 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
         if (org.orgType === 'aggregator' && org.slug === DEFAULT_ORG_SLUG) {
           throw new TreeRefusalError('NOT_EDITABLE');
         }
-        const stored = await tx
-          .select()
-          .from(orgKnownAs)
-          .where(eq(orgKnownAs.orgId, id))
-          .orderBy(asc(orgKnownAs.position));
-        const filled = fillKnownAsKeys(requested, stored.map(toEntry));
+        const stored = await listOf(tx, id);
+        const filled = fillKnownAsKeys(requested, stored);
         if (!filled.ok) throw new UnknownKnownAsKeyError(filled.error.index);
         const values = filled.value;
-        await replaceKnownAs(tx, id, stored, values);
+        await saveKnownAs(tx, id, stored, values, updatedBy);
         await tx
           .update(organisations)
           .set({ updatedBy, updatedAt: new Date() })
@@ -598,10 +599,15 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
     if (orgIds.length === 0) return { ok: true, value: {} };
     try {
       const rows = await getDb()
-        .select({ orgId: orgKnownAs.orgId, name: orgKnownAs.name })
+        .select({ orgId: orgKnownAs.orgId, values: orgKnownAs.knownAsValues })
         .from(orgKnownAs)
-        .where(and(inArray(orgKnownAs.orgId, [...orgIds]), eq(orgKnownAs.isDefault, true)));
-      return { ok: true, value: Object.fromEntries(rows.map((r) => [r.orgId, r.name])) };
+        .where(inArray(orgKnownAs.orgId, [...orgIds]));
+      const names: Record<string, string> = {};
+      for (const r of rows) {
+        const entry = r.values.find((e) => e.default === true);
+        if (entry) names[r.orgId] = entry.name;
+      }
+      return { ok: true, value: names };
     } catch (e) {
       return mapDbError('orgStore.defaultKnownAsNames', e);
     }
@@ -618,7 +624,8 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
             ne(organisations.knownAs, SYSTEM_KNOWN_AS.key),
             sql`NOT EXISTS (SELECT 1 FROM ${orgKnownAs} k
                              WHERE k.org_id = ${organisations.parentId}
-                               AND k.key = ${organisations.knownAs})`,
+                               AND k.known_as_values @> jsonb_build_array(
+                                     jsonb_build_object('key', ${organisations.knownAs})))`,
           ),
         );
       return { ok: true, value: Number(row?.n ?? 0) };
@@ -804,17 +811,13 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
         c: contact,
         ownerKcSub: userIdentities.subject,
         parentName: parentOrg.name,
-        parentKnownAsName: parentKnownAs.name,
+        parentKnownAsName: sql<string | null>`(
+          SELECT e->>'name' FROM jsonb_array_elements(${parentKnownAs.knownAsValues}) e
+           WHERE e->>'key' = ${organisations.knownAs} LIMIT 1)`,
       })
       .from(organisations)
       .leftJoin(parentOrg, eq(parentOrg.id, organisations.parentId))
-      .leftJoin(
-        parentKnownAs,
-        and(
-          eq(parentKnownAs.orgId, organisations.parentId),
-          eq(parentKnownAs.key, organisations.knownAs),
-        ),
-      )
+      .leftJoin(parentKnownAs, eq(parentKnownAs.orgId, organisations.parentId))
       .innerJoin(users, eq(users.id, organisations.orgOwner))
       .innerJoin(contact, eq(contact.id, users.contactId))
       .leftJoin(
@@ -870,7 +873,7 @@ type JoinedRow = {
   c: typeof contact.$inferSelect;
   ownerKcSub: string | null;
   parentName: string | null;
-  /** Name of the parent's row for the org's key; `null` when the parent has no such row. */
+  /** Name of the org's key in the parent's list; `null` when the list has no such entry. */
   parentKnownAsName: string | null;
 };
 
@@ -984,107 +987,65 @@ function toNode(row: NodeRow): TreeNode {
   };
 }
 
-/** A stored `org_known_as` row as a list entry. */
-function toEntry(
-  row: Pick<typeof orgKnownAs.$inferSelect, 'key' | 'name' | 'isDefault'>,
-): KnownAsEntry {
-  return row.isDefault
-    ? { key: row.key, name: row.name, default: true }
-    : { key: row.key, name: row.name };
-}
-
 /**
  * Reads the "known as" values of an org or the root, in list order.
  *
  * @param db - Executor.
  * @param orgId - The org id.
- * @returns The list; empty when the org has none.
+ * @returns The list; empty when the org has no row.
  */
 async function listOf(db: DbExecutor, orgId: string): Promise<KnownAsValues> {
-  const rows = await db
-    .select({ key: orgKnownAs.key, name: orgKnownAs.name, isDefault: orgKnownAs.isDefault })
+  const [row] = await db
+    .select({ values: orgKnownAs.knownAsValues })
     .from(orgKnownAs)
     .where(eq(orgKnownAs.orgId, orgId))
-    .orderBy(asc(orgKnownAs.position));
-  return rows.map(toEntry);
-}
-
-/**
- * The key a new child of an org gets: the org's default value, else `aggregator`.
- *
- * @param db - Executor.
- * @param orgId - The parent org id.
- * @returns The key.
- */
-async function defaultKeyOf(db: DbExecutor, orgId: string): Promise<string> {
-  const [row] = await db
-    .select({ key: orgKnownAs.key })
-    .from(orgKnownAs)
-    .where(and(eq(orgKnownAs.orgId, orgId), eq(orgKnownAs.isDefault, true)))
     .limit(1);
-  return row?.key ?? SYSTEM_KNOWN_AS.key;
+  return row?.values ?? [];
 }
 
 /**
- * Whether a child may keep `key` under the org: the key is `aggregator` or one of the org's values.
- *
- * @param db - Executor.
- * @param orgId - The parent org id.
- * @param key - The child's key.
- * @returns True when the key needs no reset.
- */
-async function keyValidUnder(db: DbExecutor, orgId: string, key: string): Promise<boolean> {
-  if (key === SYSTEM_KNOWN_AS.key) return true;
-  const [row] = await db
-    .select({ key: orgKnownAs.key })
-    .from(orgKnownAs)
-    .where(and(eq(orgKnownAs.orgId, orgId), eq(orgKnownAs.key, key)))
-    .limit(1);
-  return row !== undefined;
-}
-
-/**
- * Replaces an org's `org_known_as` rows with `values`.
- *
- * Deletes every row and inserts the list, so the unique indexes on the
- * default and the name never see two rows mid-change. A kept value keeps its
- * `created_at`, and its `updated_at` when its name, default and position are
- * unchanged. Must run in the caller's transaction, under the tree lock.
+ * Writes an org's `org_known_as` row: upserts the list, or deletes the row
+ * when the list is empty. An unchanged list is not written, so `updated_at`
+ * and `updated_by` stay. Must run in the caller's transaction, under the tree lock.
  *
  * @param tx - The write transaction.
  * @param orgId - The org id.
- * @param stored - The org's rows before the change.
+ * @param stored - The org's list before the change.
  * @param values - The new list, every key set.
+ * @param updatedBy - The acting admin's user id.
  */
-async function replaceKnownAs(
+async function saveKnownAs(
   tx: DbExecutor & Pick<ReturnType<typeof getDb>, 'delete'>,
   orgId: string,
-  stored: ReadonlyArray<typeof orgKnownAs.$inferSelect>,
+  stored: KnownAsValues,
   values: KnownAsValues,
+  updatedBy: string,
 ): Promise<void> {
-  await tx.delete(orgKnownAs).where(eq(orgKnownAs.orgId, orgId));
-  if (values.length === 0) return;
-  const before = new Map(stored.map((r) => [r.key, r]));
+  if (values.length === 0) {
+    await tx.delete(orgKnownAs).where(eq(orgKnownAs.orgId, orgId));
+    return;
+  }
+  if (sameKnownAs(stored, values)) return;
   const now = new Date();
-  await tx.insert(orgKnownAs).values(
-    values.map((e, position) => {
-      const old = before.get(e.key);
-      const isDefault = e.default === true;
-      const same =
-        old !== undefined &&
-        old.name === e.name &&
-        old.isDefault === isDefault &&
-        old.position === position;
-      return {
-        orgId,
-        key: e.key,
-        name: e.name,
-        isDefault,
-        position,
-        createdAt: old?.createdAt ?? now,
-        updatedAt: same ? old.updatedAt : now,
-      };
-    }),
+  await tx
+    .insert(orgKnownAs)
+    .values({ orgId, knownAsValues: values, updatedBy, createdAt: now, updatedAt: now })
+    .onConflictDoUpdate({
+      target: orgKnownAs.orgId,
+      set: { knownAsValues: values, updatedBy, updatedAt: now },
+    });
+}
+
+/** Whether two lists have the same entries in the same order. */
+function sameKnownAs(a: KnownAsValues, b: KnownAsValues): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (e, i) =>
+        e.key === b[i]!.key &&
+        e.name === b[i]!.name &&
+        (e.default === true) === (b[i]!.default === true),
+    )
   );
 }
 

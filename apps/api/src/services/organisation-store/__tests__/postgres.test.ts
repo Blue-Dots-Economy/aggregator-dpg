@@ -905,7 +905,7 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     moved?: Array<{ id: string }>;
     /** move: the moved org's key. */
     current?: string;
-    /** The `org_known_as` rows of the org the statement reads (parent or target). */
+    /** The `org_known_as` list of the org the statement reads (parent or target). */
     list?: KnownAsValues;
     /** setKnownAs / setKnownAsValues: the target row. */
     target?: Record<string, unknown> | null;
@@ -922,7 +922,8 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
   /** A Drizzle-like executor answering each statement from the script, recording writes. */
   function scripted(script: Script) {
     const sets: Array<Record<string, unknown>> = [];
-    const inserts: Array<Array<Record<string, unknown>>> = [];
+    const inserts: Array<Record<string, unknown>> = [];
+    const upserts: Array<Record<string, unknown>> = [];
     const deletes: string[] = [];
     const wheres: string[] = [];
     const executed: string[] = [];
@@ -936,7 +937,10 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
         return { rows: q.sql.includes('WITH RECURSIVE sub') ? (script.moved ?? []) : [] };
       }
       if (first?.method === 'insert') {
-        inserts.push(callArgs(chain, 'values')?.[0] as Array<Record<string, unknown>>);
+        inserts.push(callArgs(chain, 'values')?.[0] as Record<string, unknown>);
+        const conflict = callArgs(chain, 'onConflictDoUpdate')?.[0] as
+          { set: Record<string, unknown> } | undefined;
+        if (conflict) upserts.push(conflict.set);
         return [];
       }
       if (first?.method === 'delete') {
@@ -954,26 +958,7 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
       const fields = Object.keys((callArgs(chain, 'select')?.[0] ?? {}) as object);
       if (callArgs(chain, 'from')?.[0] === orgKnownAs) {
         const list = script.list ?? [];
-        const where = dialect.sqlToQuery(callArgs(chain, 'where')?.[0] as SQL);
-        if (fields.length === 0) {
-          return list.map((e, position) => ({
-            orgId: 'o',
-            key: e.key,
-            name: e.name,
-            isDefault: e.default === true,
-            position,
-            createdAt: new Date(0),
-            updatedAt: new Date(0),
-          }));
-        }
-        if (fields.includes('isDefault')) {
-          return list.map((e) => ({ key: e.key, name: e.name, isDefault: e.default === true }));
-        }
-        if (where.sql.includes('"is_default"')) {
-          const d = list.find((e) => e.default);
-          return d ? [{ key: d.key }] : [];
-        }
-        return list.filter((e) => where.params.includes(e.key)).map((e) => ({ key: e.key }));
+        return list.length > 0 ? [{ values: list }] : [];
       }
       const forArg = callArgs(chain, 'for')?.[0];
       if (forArg === 'update') return [{ id: 'locked' }];
@@ -1017,6 +1002,7 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     return {
       sets,
       inserts,
+      upserts,
       deletes,
       wheres,
       executed,
@@ -1183,7 +1169,7 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     expect((await s.store.setKnownAs('o1', 'aggregator', 'p1', 'u1')).ok).toBe(true);
   });
 
-  it('setKnownAsValues replaces the root rows by id and resets children outside the list', async () => {
+  it('setKnownAsValues upserts the root row by id and resets children outside the list', async () => {
     const s = scripted({
       target: { orgType: 'network_facilitator', slug: 'network' },
       resetIds: [{ id: 'x' }, { id: 'y' }],
@@ -1192,15 +1178,18 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     const r = await s.store.setKnownAsValues('root', [{ name: 'Ward', default: true }], 'admin');
     expect(r.ok && r.value.resetCount).toBe(2);
     expect(r.ok && r.value.values).toEqual([{ key: 'ward', name: 'Ward', default: true }]);
-    expect(s.deletes).toHaveLength(1);
-    expect(s.deletes[0]).toContain('"org_id" = ');
-    expect(s.inserts[0]).toEqual([
+    expect(s.deletes).toEqual([]);
+    expect(s.inserts).toEqual([
       expect.objectContaining({
         orgId: 'root',
-        key: 'ward',
-        name: 'Ward',
-        isDefault: true,
-        position: 0,
+        knownAsValues: [{ key: 'ward', name: 'Ward', default: true }],
+        updatedBy: 'admin',
+      }),
+    ]);
+    expect(s.upserts).toEqual([
+      expect.objectContaining({
+        knownAsValues: [{ key: 'ward', name: 'Ward', default: true }],
+        updatedBy: 'admin',
       }),
     ]);
     expect(s.sets[0]).toMatchObject({ updatedBy: 'admin' });
@@ -1213,7 +1202,7 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     expect(s.wheres[1]).toContain('"known_as" not in');
   });
 
-  it('setKnownAsValues keeps the timestamps of a value that did not change', async () => {
+  it('setKnownAsValues writes a changed list as one row, in the sent order', async () => {
     const s = scripted({
       target: { orgType: 'aggregator', slug: 'o1' },
       list: [
@@ -1224,24 +1213,31 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     });
     const r = await s.store.setKnownAsValues(
       'o1',
-      [{ key: 'state', name: 'State' }, { key: 'block', name: 'Blocks' }, { name: 'Ward' }],
+      [{ key: 'block', name: 'Blocks' }, { key: 'state', name: 'State' }, { name: 'Ward' }],
       'u1',
     );
     expect(r.ok).toBe(true);
-    const [state, block, ward] = s.inserts[0]!;
-    expect(state).toMatchObject({
-      key: 'state',
-      position: 0,
-      createdAt: new Date(0),
-      updatedAt: new Date(0),
-    });
-    expect(block).toMatchObject({ key: 'block', name: 'Blocks', createdAt: new Date(0) });
-    expect((block!['updatedAt'] as Date).getTime()).toBeGreaterThan(0);
-    expect(ward).toMatchObject({ key: 'ward', position: 2, isDefault: false });
-    expect((ward!['createdAt'] as Date).getTime()).toBeGreaterThan(0);
+    expect(s.inserts).toHaveLength(1);
+    expect(s.inserts[0]!['knownAsValues']).toEqual([
+      { key: 'block', name: 'Blocks' },
+      { key: 'state', name: 'State' },
+      { key: 'ward', name: 'Ward' },
+    ]);
   });
 
-  it('setKnownAsValues with an empty list deletes the rows and inserts none', async () => {
+  it('setKnownAsValues does not write an unchanged list', async () => {
+    const list = [
+      { key: 'state', name: 'State', default: true as const },
+      { key: 'block', name: 'Block' },
+    ];
+    const s = scripted({ target: { orgType: 'aggregator', slug: 'o1' }, list, read: makeRow() });
+    const r = await s.store.setKnownAsValues('o1', list, 'u1');
+    expect(r.ok && r.value.values).toEqual(list);
+    expect(s.inserts).toEqual([]);
+    expect(s.deletes).toEqual([]);
+  });
+
+  it('setKnownAsValues with an empty list deletes the row and inserts none', async () => {
     const s = scripted({
       target: { orgType: 'aggregator', slug: 'o1' },
       list: [{ key: 'state', name: 'State' }],
@@ -1250,6 +1246,7 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     const r = await s.store.setKnownAsValues('o1', [], 'u1');
     expect(r.ok && r.value.values).toEqual([]);
     expect(s.deletes).toHaveLength(1);
+    expect(s.deletes[0]).toContain('"org_id" = ');
     expect(s.inserts).toEqual([]);
     expect(s.sets[1]).toEqual({ knownAs: 'aggregator' });
   });
@@ -1293,7 +1290,7 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
     });
     const r = await s.store.setKnownAsValues('o1', [{ name: 'State' }], 'u1');
     expect(r.ok && r.value.resetCount).toBe(1);
-    expect(s.inserts[0]).toEqual([expect.objectContaining({ key: 'state_2', name: 'State' })]);
+    expect(s.inserts[0]!['knownAsValues']).toEqual([{ key: 'state_2', name: 'State' }]);
   });
 
   it('countStaleKnownAs counts with one statement', async () => {
@@ -1312,7 +1309,16 @@ describe('PostgresOrganisationStore — move and revive statements', () => {
   });
 
   it('defaultKnownAsNames maps each org to its default name', async () => {
-    const db = makeFakeDb(() => [{ orgId: 'p1', name: 'District' }]);
+    const db = makeFakeDb(() => [
+      {
+        orgId: 'p1',
+        values: [
+          { key: 'block', name: 'Block' },
+          { key: 'district', name: 'District', default: true },
+        ],
+      },
+      { orgId: 'p2', values: [{ key: 'ward', name: 'Ward' }] },
+    ]);
     _setDbClients(null, db as never);
     const r = await new PostgresOrganisationStore().defaultKnownAsNames(['p1', 'p2']);
     expect(r.ok && r.value).toEqual({ p1: 'District' });

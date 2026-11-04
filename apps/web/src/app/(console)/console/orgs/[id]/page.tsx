@@ -85,7 +85,7 @@ export default async function ConsoleOrgPage({
   // Null when the viewer does not own the parent.
   const knownAsOptions = aggregatorOrg ? (data.known_as_options ?? null) : null;
   // Null when the org cannot have child orgs.
-  const knownAsValues = data.known_as_values ?? null;
+  const knownAsValues = org.known_as_values ?? null;
   // The API takes list edits only on an active org the viewer owns.
   const canEditKnownAsValues = aggregatorOrg && isOwner && org.status === 'active';
   // The Default org and the root never move; only pending and active orgs can.

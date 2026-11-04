@@ -4,8 +4,9 @@
  * Matches the Postgres adapter's behaviour: slug uniqueness over live rows,
  * atomic approve/reject, lowercased owner email, Default org skipped by owner
  * lookups. It holds aggregator orgs only; the root is a separate slot (see
- * `OrganisationStoreFake`). Each org's "known as" values are kept apart from
- * the row, as in `org_known_as`. `knownAsName` is resolved from the parent's
+ * `OrganisationStoreFake`). Each org's "known as" list is kept apart from
+ * the row, one entry per org with a non-empty list, as in `org_known_as`.
+ * `knownAsName` is resolved from the parent's
  * values when a row is read, so a list edit shows on every child at once.
  */
 

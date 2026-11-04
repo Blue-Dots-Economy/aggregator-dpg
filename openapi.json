@@ -5706,7 +5706,7 @@
         "tags": [
           "console"
         ],
-        "description": "An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked. The fields query adds data that is left out by default. fields=known_as_values adds known_as_values: the values the organisation defines for its direct children, or null when it cannot have child organisations (the Default organisation, or an organisation at max_depth). fields=known_as_options adds known_as_options: the values the caller can pick for the org's known_as (the parent's list, or only \"aggregator\" when that list is empty), or null unless the caller owns the parent (the network admin for a top-level organisation). An unknown name in fields answers 400 SCHEMA_VALIDATION.",
+        "description": "An owner also reads, read-only, every organisation below its own; the owner contact of such an organisation is masked. The fields query adds data that is left out by default. fields=known_as_values adds org.known_as_values: the values the organisation defines for its direct children, or null when it cannot have child organisations (the Default organisation, or an organisation at max_depth). fields=known_as_options adds known_as_options: the values the caller can pick for the org's known_as (the parent's list, or only \"aggregator\" when that list is empty), or null unless the caller owns the parent (the network admin for a top-level organisation). An unknown name in fields answers 400 SCHEMA_VALIDATION.",
         "parameters": [
           {
             "schema": {
@@ -5880,6 +5880,37 @@
                         },
                         "updated_at": {
                           "type": "string"
+                        },
+                        "known_as_values": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9_]*$",
+                                "maxLength": 64
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 60
+                              },
+                              "default": {
+                                "type": "boolean",
+                                "enum": [
+                                  true
+                                ]
+                              }
+                            },
+                            "required": [
+                              "key",
+                              "name"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "maxItems": 20,
+                          "nullable": true
                         }
                       },
                       "required": [
@@ -5947,37 +5978,6 @@
                     },
                     "pending_count": {
                       "type": "integer"
-                    },
-                    "known_as_values": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "key": {
-                            "type": "string",
-                            "pattern": "^[a-z][a-z0-9_]*$",
-                            "maxLength": 64
-                          },
-                          "name": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 60
-                          },
-                          "default": {
-                            "type": "boolean",
-                            "enum": [
-                              true
-                            ]
-                          }
-                        },
-                        "required": [
-                          "key",
-                          "name"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "maxItems": 20,
-                      "nullable": true
                     },
                     "known_as_options": {
                       "type": "array",

@@ -2,7 +2,7 @@
  * Integration test for migration 0034 (`org_known_as`) against a live
  * Postgres: a database at 0033 holding a nested org tree with config-era
  * `known_as` keys is upgraded, and the result is checked: the `org_known_as`
- * table with its key, constraints and indexes, the cascade from
+ * table (one row per org) with its key and checks, the cascade from
  * `organisations`, the `known_as` reset, unchanged depth and `updated_at`, and
  * a re-run.
  *
@@ -87,13 +87,16 @@ suite('org_known_as (migration 0034) — integration', () => {
     return new Map(r.rows.map((row) => [row.id, row]));
   }
 
-  /** Inserts one value row; `position` defaults to 0. */
-  const addValue = (orgId: string, key: string, name: string, isDefault = false, position = 0) =>
+  /** Inserts an org's list row; `values` is sent as JSON text. */
+  const addList = (orgId: string, values: unknown) =>
     pool.query(
-      `INSERT INTO org_known_as (org_id, key, name, is_default, position)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [orgId, key, name, isDefault, position],
+      `INSERT INTO org_known_as (org_id, known_as_values, updated_by) VALUES ($1, $2::jsonb, 'u1')`,
+      [orgId, JSON.stringify(values)],
     );
+
+  /** A list of `n` entries with distinct keys and names. */
+  const listOf = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ key: `k${i}`, name: `N${i}` }));
 
   beforeAll(async () => {
     admin = new pg.Client({ connectionString: adminUrl });
@@ -168,29 +171,22 @@ suite('org_known_as (migration 0034) — integration', () => {
         WHERE table_schema = 'public' AND table_name = 'org_known_as'
         ORDER BY ordinal_position`,
     );
+    const ts = {
+      data_type: 'timestamp with time zone',
+      is_nullable: 'NO',
+      column_default: 'now()',
+    };
     expect(cols.rows).toEqual([
       { column_name: 'org_id', data_type: 'uuid', is_nullable: 'NO', column_default: null },
-      { column_name: 'key', data_type: 'text', is_nullable: 'NO', column_default: null },
-      { column_name: 'name', data_type: 'text', is_nullable: 'NO', column_default: null },
       {
-        column_name: 'is_default',
-        data_type: 'boolean',
+        column_name: 'known_as_values',
+        data_type: 'jsonb',
         is_nullable: 'NO',
-        column_default: 'false',
+        column_default: null,
       },
-      { column_name: 'position', data_type: 'smallint', is_nullable: 'NO', column_default: null },
-      {
-        column_name: 'created_at',
-        data_type: 'timestamp with time zone',
-        is_nullable: 'NO',
-        column_default: 'now()',
-      },
-      {
-        column_name: 'updated_at',
-        data_type: 'timestamp with time zone',
-        is_nullable: 'NO',
-        column_default: 'now()',
-      },
+      { column_name: 'created_at', ...ts },
+      { column_name: 'updated_at', ...ts },
+      { column_name: 'updated_by', data_type: 'text', is_nullable: 'NO', column_default: null },
     ]);
     expect((await one<{ n: number }>(pool, 'SELECT count(*)::int AS n FROM org_known_as')).n).toBe(
       0,
@@ -203,57 +199,54 @@ suite('org_known_as (migration 0034) — integration', () => {
     expect(col.n).toBe(0);
   });
 
-  it('keys a value by org and key (primary key)', async () => {
-    await addValue(ids.a, 'block', 'Block');
-    await expect(addValue(ids.a, 'block', 'Other', false, 1)).rejects.toThrow(/org_known_as_pkey/);
-    // The same key under another org is a different value.
-    await addValue(ids.c, 'block', 'Block');
-    await pool.query('DELETE FROM org_known_as');
-  });
-
-  it('allows one default per org', async () => {
-    await addValue(ids.a, 'block', 'Block', true, 0);
-    await expect(addValue(ids.a, 'ward', 'Ward', true, 1)).rejects.toThrow(
-      /org_known_as_default_unique/,
+  it('keys the table by org: one row per org', async () => {
+    const values = [
+      { key: 'block', name: 'Block', default: true },
+      { key: 'ward', name: 'Ward' },
+    ];
+    await addList(ids.a, values);
+    await expect(addList(ids.a, [])).rejects.toThrow(/org_known_as_pkey/);
+    await addList(ids.c, values);
+    const stored = await one<{ known_as_values: unknown }>(
+      pool,
+      'SELECT known_as_values FROM org_known_as WHERE org_id = $1',
+      [ids.a],
     );
-    await addValue(ids.a, 'ward', 'Ward', false, 1);
-    await addValue(ids.c, 'ward', 'Ward', true, 0);
-    await pool.query('DELETE FROM org_known_as');
-  });
-
-  it('keeps names unique per org, ignoring case', async () => {
-    await addValue(ids.a, 'state', 'State');
-    await expect(addValue(ids.a, 'state_2', 'STATE', false, 1)).rejects.toThrow(
-      /org_known_as_name_unique/,
-    );
-    await addValue(ids.root, 'state', 'state');
+    // The list comes back as stored, in order.
+    expect(stored.known_as_values).toEqual(values);
     await pool.query('DELETE FROM org_known_as');
   });
 
   it.each([
-    ['a key with a capital', 'Block', 'Block', /org_known_as_key_chk/],
-    ['a key starting with a digit', '1block', 'Block', /org_known_as_key_chk/],
-    ['a key of 65 characters', `a${'b'.repeat(64)}`, 'Block', /org_known_as_key_chk/],
-    ['an empty name', 'block', '', /org_known_as_name_chk/],
-    ['an untrimmed name', 'block', ' Block', /org_known_as_name_chk/],
-    ['a name of 61 characters', 'block', 'n'.repeat(61), /org_known_as_name_chk/],
-  ])('refuses %s', async (_label, key, name, error) => {
-    await expect(addValue(ids.a, key, name)).rejects.toThrow(error);
+    ['an object', { key: 'block', name: 'Block' }],
+    ['a string', 'block'],
+    ['null as JSON', null],
+  ])('refuses %s instead of an array', async (_label, value) => {
+    await expect(addList(ids.a, value)).rejects.toThrow(/org_known_as_values_array_chk/);
   });
 
-  it('refuses a negative position and an unknown org', async () => {
-    await expect(addValue(ids.a, 'block', 'Block', false, -1)).rejects.toThrow(
-      /org_known_as_position_chk/,
-    );
+  it('takes 20 entries and refuses 21', async () => {
+    await addList(ids.a, listOf(20));
+    await expect(addList(ids.c, listOf(21))).rejects.toThrow(/org_known_as_values_max_chk/);
+    await pool.query('DELETE FROM org_known_as');
+  });
+
+  it('refuses a missing list, a missing writer and an unknown org', async () => {
     await expect(
-      addValue('00000000-0000-4000-8000-0000000000ff', 'block', 'Block'),
-    ).rejects.toThrow(/org_known_as_org_id_fkey/);
+      pool.query(`INSERT INTO org_known_as (org_id, updated_by) VALUES ($1, 'u1')`, [ids.a]),
+    ).rejects.toThrow(/known_as_values/);
+    await expect(
+      pool.query(`INSERT INTO org_known_as (org_id, known_as_values) VALUES ($1, '[]')`, [ids.a]),
+    ).rejects.toThrow(/updated_by/);
+    await expect(addList('00000000-0000-4000-8000-0000000000ff', [])).rejects.toThrow(
+      /org_known_as_org_id_fkey/,
+    );
   });
 
-  it('deletes the values with their org', async () => {
+  it('deletes the row with its org', async () => {
     const gone = await seedOrg(pool, 'org-gone', ids.root, 'aggregator');
-    await addValue(gone, 'block', 'Block', true);
-    await addValue(ids.a, 'block', 'Block', true);
+    await addList(gone, [{ key: 'block', name: 'Block', default: true }]);
+    await addList(ids.a, [{ key: 'block', name: 'Block', default: true }]);
     await pool.query('DELETE FROM organisations WHERE id = $1', [gone]);
     const left = await pool.query<{ org_id: string }>('SELECT org_id FROM org_known_as');
     expect(left.rows).toEqual([{ org_id: ids.a }]);
@@ -275,14 +268,14 @@ suite('org_known_as (migration 0034) — integration', () => {
   });
 
   it('is a no-op when re-applied', async () => {
-    await addValue(ids.a, 'block', 'Block', true);
+    await addList(ids.a, [{ key: 'block', name: 'Block', default: true }]);
     const sql = await readFile(path.join(MIGRATIONS_DIR, '0034_org_known_as.sql'), 'utf8');
     const shape = `SELECT
       (SELECT md5(string_agg(id::text || ':' || depth || ':' || known_as || ':' ||
                              updated_at::text, ',' ORDER BY id))
          FROM organisations) AS rows,
-      (SELECT md5(string_agg(org_id::text || ':' || key || ':' || name || ':' || is_default,
-                             ',' ORDER BY org_id, key))
+      (SELECT md5(string_agg(org_id::text || ':' || known_as_values::text || ':' ||
+                             updated_at::text, ',' ORDER BY org_id))
          FROM org_known_as) AS values,
       (SELECT count(*)::int FROM pg_indexes WHERE tablename = 'org_known_as') AS indexes,
       (SELECT count(*)::int FROM pg_constraint
@@ -291,8 +284,8 @@ suite('org_known_as (migration 0034) — integration', () => {
       pool,
       shape,
     );
-    // The primary key and the two unique indexes; pkey, fkey and three checks.
-    expect([first.indexes, first.constraints]).toEqual([3, 5]);
+    // The primary key index; pkey, fkey and two checks.
+    expect([first.indexes, first.constraints]).toEqual([1, 4]);
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
