@@ -691,7 +691,6 @@
       "fix_fields": "Please fix the highlighted fields.",
       "owner": "Owner",
       "view_coordinators": "View [[users]]",
-      "owner_roles": "Owner's roles",
       "child_count": "Child [[orgs]]",
       "children_of_max": "{count} of {max}",
       "children": "Child [[orgs]]",

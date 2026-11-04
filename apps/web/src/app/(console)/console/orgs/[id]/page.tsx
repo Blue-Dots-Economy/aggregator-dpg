@@ -5,9 +5,10 @@
  * details, the name included; the network admin sees them read-only. The owner
  * of the parent org sets the org's "known as" value; the org's owner defines
  * the values for the organisations under it. Only the network admin can
- * re-grant an active org's owner access, assign roles to its owner, or move it
- * under another parent. An owner also views, read-only, the organisations
- * directly under its own, and approves or rejects one that is pending; the
+ * re-grant an active org's owner access or move it under another parent. An
+ * owner approves its child orgs by default, so no role is assigned here. An
+ * owner also views, read-only, the organisations directly under its own, and
+ * approves or rejects one that is pending; the
  * coordinators of such an organisation stay with its own owner. The
  * organisations directly under an aggregator org are listed read-only.
  */
@@ -19,11 +20,9 @@ import type {
   OrgHierarchyResponse,
   OrgReadResponse,
   OrgSearchResponse,
-  RolesResponse,
-  UserRolesResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
-import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
+import { consoleRead } from '@/lib/console-api.server';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
 import { BackLink, ConsoleSection, ConsoleStatusPill } from '@/components/console/ConsoleUi';
@@ -37,7 +36,6 @@ import { KnownAsValuesEditor } from '@/components/console/KnownAsValuesEditor';
 import { OrgMoveDialog } from '@/components/console/OrgMoveDialog';
 import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
 import { OrgsTable } from '@/components/console/OrgsTable';
-import { RolesPanel } from '@/components/console/RolesPanel';
 import { OwnerAccessRepair } from '@/components/console/OwnerAccessRepair';
 import { can } from '@/lib/capabilities';
 import { loadOrgSchema } from '@/lib/org-schema.server';
@@ -53,20 +51,10 @@ export default async function ConsoleOrgPage({
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   const { id } = await params;
-  const canAssignOwner =
-    actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer');
   const data = await consoleRead<OrgReadResponse>(
     `/v1/org/read/${encodeURIComponent(id)}?fields=known_as_values,parent.known_as_values`,
   );
   const { org, owner } = data;
-  // Owner roles; null when access control is off.
-  const [ownerRoles, catalogue] =
-    canAssignOwner && org.org_type === 'aggregator'
-      ? await Promise.all([
-          consoleReadOptional<UserRolesResponse>(`/v1/user/roles/${encodeURIComponent(owner.id)}`),
-          consoleReadOptional<RolesResponse>('/v1/roles'),
-        ])
-      : [null, null];
   // An owner also views, read-only, the orgs directly under its own.
   const own = actor.me.orgs.some((o) => o.id === org.id);
   const editable = org.org_type === 'aggregator' && !org.is_default && own;
@@ -277,15 +265,6 @@ export default async function ConsoleOrgPage({
               />
             </ConsoleSection>
           </div>
-        ) : null}
-        {ownerRoles && catalogue ? (
-          <RolesPanel
-            userId={owner.id}
-            orgId={org.id}
-            initial={ownerRoles}
-            roles={catalogue.roles}
-            title={t('org.owner_roles')}
-          />
         ) : null}
       </div>
     </>
