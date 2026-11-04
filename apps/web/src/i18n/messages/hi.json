@@ -38,7 +38,8 @@
     "back": "वापस",
     "cancel": "रद्द करें",
     "continue": "जारी रखें",
-    "loading": "लोड हो रहा है…"
+    "loading": "लोड हो रहा है…",
+    "domain_label": "डोमेन"
   },
   "register": {
     "heading_tagline": "हमें अपने [[org]] के बारे में बताएं।",

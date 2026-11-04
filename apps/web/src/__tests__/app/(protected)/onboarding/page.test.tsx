@@ -18,7 +18,9 @@ import messages from '@/i18n/messages/en.json';
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: pushMock }),
+  useRouter: () => ({ push: pushMock, replace: vi.fn() }),
+  usePathname: () => '/onboarding',
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock('@/components/shell/Topbar', () => ({
@@ -181,14 +183,26 @@ describe('<OnboardingPage />', () => {
     expect(screen.getByText(/Last link 2d ago/)).toBeInTheDocument();
   });
 
-  it('falls back to the aggregator config default domain when the profile has not loaded yet', () => {
+  it('names no domain for the links count until the profile has loaded', () => {
     useProfileRaw.mockReturnValue({ data: undefined });
     useRecentBulkUploads.mockReturnValue({ data: { items: [] }, isLoading: false });
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false });
 
     renderPage();
 
-    expect(useRegistrationLinks).toHaveBeenCalledWith('seeker');
+    expect(useRegistrationLinks).toHaveBeenLastCalledWith('');
+  });
+
+  it('counts links for the stored active domain of a multi-domain coordinator', async () => {
+    window.localStorage.setItem('bd:active-domain', 'provider');
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker', 'provider'] } });
+    useRecentBulkUploads.mockReturnValue({ data: { items: [] }, isLoading: false });
+    useRegistrationLinks.mockReturnValue({ data: [], isLoading: false });
+
+    renderPage();
+
+    expect(useRegistrationLinks).toHaveBeenLastCalledWith('provider');
+    window.localStorage.clear();
   });
 
   it('navigates to the bulk-uploads and links sub-pages on CTA click', async () => {

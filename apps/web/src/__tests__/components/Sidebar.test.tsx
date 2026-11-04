@@ -35,6 +35,7 @@ const {
   useDashboard,
   useProfileRaw,
   usePathname,
+  search,
 } = vi.hoisted(() => ({
   useAuth: vi.fn(),
   useCan: vi.fn(),
@@ -43,6 +44,7 @@ const {
   useDashboard: vi.fn(),
   useProfileRaw: vi.fn(),
   usePathname: vi.fn(),
+  search: { value: '' },
 }));
 
 vi.mock('@/lib/auth-context', () => ({ useAuth, useCan }));
@@ -60,7 +62,11 @@ vi.mock('@/hooks/useAggregatorConfig', () => ({
 }));
 vi.mock('@/hooks/useDashboard', () => ({ useDashboard }));
 vi.mock('@/hooks/useProfile', () => ({ useProfileRaw }));
-vi.mock('next/navigation', () => ({ usePathname }));
+vi.mock('next/navigation', () => ({
+  usePathname,
+  useRouter: () => ({ replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(search.value),
+}));
 vi.mock('next/image', () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   default: (props: any) => <img {...props} alt={props.alt} />,
@@ -133,6 +139,39 @@ describe('<Sidebar />', () => {
     });
     render(<Sidebar />);
     expect(screen.getByText('42')).toBeInTheDocument();
+  });
+
+  it('shows the badge for the active domain of a multi-domain coordinator', () => {
+    search.value = 'domain=provider';
+    useAggregatorConfig.mockReturnValue({
+      data: {
+        aggregator: { name: 'Aggregator' },
+        brand: { short_name: 'Blue Dots', long_name: 'Blue Dots Portal', url_slug: 'dashboard' },
+        network: { id: 'blue_dot' },
+        domains: [
+          { id: 'seeker', label: 'Seeker', plural_label: 'Seekers', item_type: 'profile_1.0' },
+          {
+            id: 'provider',
+            label: 'Provider',
+            plural_label: 'Providers',
+            item_type: 'job_posting_1.0',
+          },
+        ],
+      },
+    });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker', 'provider'] } });
+    useDashboard.mockReturnValue({
+      data: {
+        by_domain: {
+          seeker: { rollup: { total_items: 42 } },
+          provider: { rollup: { total_items: 7 } },
+        },
+      },
+    });
+    render(<Sidebar />);
+    expect(screen.getAllByText('7').length).toBeGreaterThan(0);
+    expect(screen.queryByText('42')).toBeNull();
+    search.value = '';
   });
 
   it('omits the badge when no rollup total is available yet', () => {

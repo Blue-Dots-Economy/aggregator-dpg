@@ -24,7 +24,8 @@ const { pushMock, searchParamsRef } = vi.hoisted(() => ({
   searchParamsRef: { current: new URLSearchParams() },
 }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: pushMock }),
+  useRouter: () => ({ push: pushMock, replace: vi.fn() }),
+  usePathname: () => '/onboarding',
   // YourLinksBody reads `?new=` to highlight a freshly-created draft.
   useSearchParams: () => searchParamsRef.current,
 }));
@@ -70,6 +71,7 @@ import {
 } from '@/app/(protected)/onboarding/_components/RegistrationLinksSection';
 
 const testMessages = {
+  common: messages.common,
   onboarding: messages.onboarding,
   regmode: { form: 'Form', voice: 'Voice' },
 };
@@ -105,6 +107,15 @@ const cfg = {
     },
   },
 };
+
+const twoDomainCfg = {
+  ...cfg,
+  domains: [
+    { id: 'seeker', label: 'Seeker', plural_label: 'Seekers' },
+    { id: 'provider', label: 'Provider', plural_label: 'Providers' },
+  ],
+};
+const BOTH = { type: 'seeker', serves: ['seeker', 'provider'] };
 
 function baseLink(overrides: Partial<ApiRegistrationLink> = {}): ApiRegistrationLink {
   return {
@@ -259,6 +270,37 @@ describe('<CreateLinkSection />', () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 
+  it('lets a multi-domain coordinator pick the link domain', async () => {
+    window.localStorage.clear();
+    useAggregatorConfig.mockReturnValue({ data: twoDomainCfg });
+    useProfileRaw.mockReturnValue({ data: BOTH });
+    createMutateAsync.mockResolvedValue(baseLink());
+    const user = userEvent.setup();
+    renderCreate();
+
+    const domainSelect = screen.getByRole('combobox', { name: 'Domain' });
+    expect(domainSelect).toHaveValue('seeker');
+    fireEvent.change(domainSelect, { target: { value: 'provider' } });
+    await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
+    await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
+    await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Drive');
+    await user.click(screen.getByRole('button', { name: 'Create link' }));
+
+    expect(createMutateAsync.mock.calls[0]![0].domain).toBe('provider');
+  });
+
+  it('keeps the domain set after the form resets on success', async () => {
+    createMutateAsync.mockResolvedValue(baseLink());
+    const user = userEvent.setup();
+    renderCreate();
+    await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
+    await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
+    await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Drive');
+    await user.click(screen.getByRole('button', { name: 'Create link' }));
+    await screen.findByText('Registration link created');
+    expect(screen.queryByText('Domain is not set.')).not.toBeInTheDocument();
+  });
+
   it('changes the registration mode via the select and reflects it on submit', async () => {
     createMutateAsync.mockResolvedValue(baseLink());
     const user = userEvent.setup();
@@ -334,6 +376,25 @@ describe('<YourLinksBody />', () => {
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
     renderLinks();
     expect(screen.getByText('No seeker links yet. Create one above.')).toBeInTheDocument();
+  });
+
+  it('lists the active domain and switches domain from the header', () => {
+    window.localStorage.clear();
+    useAggregatorConfig.mockReturnValue({ data: twoDomainCfg });
+    useProfileRaw.mockReturnValue({ data: BOTH });
+    useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
+    renderLinks();
+    expect(useRegistrationLinks).toHaveBeenLastCalledWith('seeker');
+    fireEvent.change(screen.getByRole('combobox', { name: 'Domain' }), {
+      target: { value: 'provider' },
+    });
+    expect(useRegistrationLinks).toHaveBeenLastCalledWith('provider');
+  });
+
+  it('shows no domain dropdown for a single-domain coordinator', () => {
+    useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
+    renderLinks();
+    expect(screen.queryByRole('combobox', { name: 'Domain' })).not.toBeInTheDocument();
   });
 
   it('renders the active-count and type-pill badges alongside each link card', () => {
