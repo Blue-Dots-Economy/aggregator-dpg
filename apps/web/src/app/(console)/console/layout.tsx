@@ -60,9 +60,26 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
           account={{
             title: name,
             subtitle: me.is_network_admin ? t('nav.network_admin') : t('nav.org_owner'),
+            // The email shows once: as the title when there is no name. No phone, no row.
             details: [
-              { label: t('account.email'), value: me.user.contact.email, icon: 'mail' },
-              { label: t('account.phone'), value: me.user.contact.phone ?? '—', icon: 'phone' },
+              ...(me.user.contact.name
+                ? [
+                    {
+                      label: t('account.email'),
+                      value: me.user.contact.email,
+                      icon: 'mail' as const,
+                    },
+                  ]
+                : []),
+              ...(me.user.contact.phone
+                ? [
+                    {
+                      label: t('account.phone'),
+                      value: me.user.contact.phone,
+                      icon: 'phone' as const,
+                    },
+                  ]
+                : []),
             ],
           }}
         />

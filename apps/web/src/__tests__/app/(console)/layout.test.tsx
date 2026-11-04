@@ -89,6 +89,28 @@ describe('<ConsoleLayout />', () => {
     expect(sidebarProps.last).toMatchObject({ canManage: false, homeIsCoordinators: false });
   });
 
+  it('shows the email once and no empty phone in the account card', async () => {
+    vi.mocked(getSession).mockResolvedValue(session);
+    const { render } = await import('@testing-library/react');
+    vi.mocked(getConsoleActor).mockResolvedValue({ ok: true, me: me({}) });
+    render(await ConsoleLayout({ children: <p>child</p> }));
+    expect(sidebarProps.last).toMatchObject({ account: { title: 'a@a.org', details: [] } });
+
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me({
+        user: { id: 'u', contact: { name: 'Asha', email: 'a@a.org', phone: '+919000000001' } },
+      }),
+    });
+    render(await ConsoleLayout({ children: <p>child</p> }));
+    const account = sidebarProps.last?.['account'] as {
+      title: string;
+      details: Array<{ value: string }>;
+    };
+    expect(account.title).toBe('Asha');
+    expect(account.details.map((d) => d.value)).toEqual(['a@a.org', '+919000000001']);
+  });
+
   it('sends a coordinator to the portal', async () => {
     vi.mocked(getSession).mockResolvedValue(session);
     vi.mocked(getConsoleActor).mockResolvedValue({ ok: true, me: me({ kind: 'coordinator' }) });

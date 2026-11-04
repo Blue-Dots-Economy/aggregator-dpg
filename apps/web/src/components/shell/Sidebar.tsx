@@ -146,7 +146,8 @@ function SidebarPanel({
 }: SidebarPanelProps) {
   const t = useTranslations('nav');
   const { signOut, supportEnabled } = useAuth();
-  const initials = initialsOf(account.title);
+  // An email title gives its local part's initials ("admin@x.org" → "AD").
+  const initials = initialsOf(account.title.split('@')[0] ?? account.title);
 
   const [detailsOpen, setDetailsOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
@@ -242,7 +243,7 @@ function SidebarPanel({
                   {initials}
                 </div>
                 <div className="min-w-0">
-                  <div className="truncate text-[14px] font-bold text-(--bd-fg)">
+                  <div className="wrap-break-word text-[14px] font-bold text-(--bd-fg)">
                     {account.title}
                   </div>
                   <div className="truncate text-[12px] text-(--bd-fg-muted)">
@@ -287,7 +288,10 @@ function SidebarPanel({
                   {initials}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-semibold text-(--bd-fg) truncate">
+                  <div
+                    className="text-[13px] font-semibold text-(--bd-fg) truncate"
+                    title={account.title}
+                  >
                     {account.title}
                   </div>
                   <div className="text-[11px] text-(--bd-fg-muted) truncate">
@@ -301,7 +305,10 @@ function SidebarPanel({
                   {initials}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-semibold text-(--bd-fg) truncate">
+                  <div
+                    className="text-[13px] font-semibold text-(--bd-fg) truncate"
+                    title={account.title}
+                  >
                     {account.title}
                   </div>
                   <div className="text-[11px] text-(--bd-fg-muted) truncate">
