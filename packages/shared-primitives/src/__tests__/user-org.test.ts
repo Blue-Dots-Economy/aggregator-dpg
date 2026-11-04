@@ -256,6 +256,22 @@ describe('user-org wire schemas', () => {
       OrgSearchRequestSchema.safeParse({ filter: { descendants_of: 'not-a-uuid' } }).success,
     ).toBe(false);
     expect(
+      OrgSearchRequestSchema.parse({
+        filter: { parent_id: '00000000-0000-4000-8000-000000000001' },
+      }).filter.parent_id,
+    ).toBe('00000000-0000-4000-8000-000000000001');
+    expect(OrgSearchRequestSchema.safeParse({ filter: { parent_id: 'not-a-uuid' } }).success).toBe(
+      false,
+    );
+    expect(
+      OrgSearchRequestSchema.safeParse({
+        filter: {
+          parent_id: '00000000-0000-4000-8000-000000000001',
+          descendants_of: '00000000-0000-4000-8000-000000000001',
+        },
+      }).success,
+    ).toBe(false);
+    expect(
       OrgSearchResponseSchema.parse({
         orgs: [{ ...org, coordinator_count: 3, child_count: 0, pending_count: 1 }],
         next_cursor: null,

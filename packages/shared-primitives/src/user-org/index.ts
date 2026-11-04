@@ -374,10 +374,16 @@ export const OrgSearchRequestSchema = z
       .object({
         status: UserOrgStatusSchema.optional(),
         name_prefix: z.string().trim().min(1).max(100).optional(),
-        /** Only orgs below this org, at any depth; the org must be within the caller's reach. */
+        /** Only orgs below this org; the result never goes past the caller's reach. */
         descendants_of: z.string().uuid().optional(),
+        /** Only the direct children of this org; the org must be within the caller's reach. */
+        parent_id: z.string().uuid().optional(),
       })
       .strict()
+      .refine((f) => f.descendants_of === undefined || f.parent_id === undefined, {
+        message: 'Send descendants_of or parent_id, not both.',
+        path: ['parent_id'],
+      })
       .default({}),
     cursor: CursorSchema.optional(),
     limit: PageLimitSchema.optional(),
