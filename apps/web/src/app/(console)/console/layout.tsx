@@ -60,17 +60,9 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
           account={{
             title: name,
             subtitle: me.is_network_admin ? t('nav.network_admin') : t('nav.org_owner'),
-            // The email shows once: as the title when there is no name. No phone, no row.
+            // No phone, no row. The popup skips a title that repeats the email.
             details: [
-              ...(me.user.contact.name
-                ? [
-                    {
-                      label: t('account.email'),
-                      value: me.user.contact.email,
-                      icon: 'mail' as const,
-                    },
-                  ]
-                : []),
+              { label: t('account.email'), value: me.user.contact.email, icon: 'mail' as const },
               ...(me.user.contact.phone
                 ? [
                     {

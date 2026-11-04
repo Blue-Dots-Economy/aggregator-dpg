@@ -89,12 +89,17 @@ describe('<ConsoleLayout />', () => {
     expect(sidebarProps.last).toMatchObject({ canManage: false, homeIsCoordinators: false });
   });
 
-  it('shows the email once and no empty phone in the account card', async () => {
+  it('keeps the email row and drops an empty phone in the account card', async () => {
     vi.mocked(getSession).mockResolvedValue(session);
     const { render } = await import('@testing-library/react');
     vi.mocked(getConsoleActor).mockResolvedValue({ ok: true, me: me({}) });
     render(await ConsoleLayout({ children: <p>child</p> }));
-    expect(sidebarProps.last).toMatchObject({ account: { title: 'a@a.org', details: [] } });
+    const bare = sidebarProps.last?.['account'] as {
+      title: string;
+      details: Array<{ value: string }>;
+    };
+    expect(bare.title).toBe('a@a.org');
+    expect(bare.details.map((d) => d.value)).toEqual(['a@a.org']);
 
     vi.mocked(getConsoleActor).mockResolvedValue({
       ok: true,
