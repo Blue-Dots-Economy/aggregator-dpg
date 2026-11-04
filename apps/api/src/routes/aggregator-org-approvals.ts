@@ -34,17 +34,34 @@ import {
   type HtmlPage,
 } from './approval-shared.js';
 
+/** The longest reason, the same cap as the console's org decision route. */
+const ORG_REASON_MAX = 500;
+
 const OrgDecisionBodySchema = z
   .object({
     token: z.string().min(1),
     decision: z.enum(['approve', 'reject']),
-    /** Same cap as the coordinator decision route; surfaced to the applicant. */
-    reason: z.string().trim().max(2000).optional(),
+    /** Surfaced to the applicant. */
+    reason: z.string().trim().max(ORG_REASON_MAX).optional(),
   })
   .refine((b) => b.decision !== 'reject' || (b.reason ?? '').length > 0, {
     message: 'reason required',
     path: ['reason'],
   });
+
+/**
+ * The error page text for a bad decision form.
+ *
+ * @param reasonIssue - The Zod issue code on `reason`, if any.
+ * @returns The message for the applicant's reviewer.
+ */
+function reasonMessage(reasonIssue: string | undefined): string {
+  if (reasonIssue === 'too_big') {
+    return `The reason can be at most ${ORG_REASON_MAX} characters. Go back and shorten it.`;
+  }
+  if (reasonIssue) return 'Give a reason when rejecting an organisation. Go back and try again.';
+  return 'Invalid form submission.';
+}
 
 const OrgApprovalParamsSchema = z.object({ id: z.string() });
 
@@ -126,6 +143,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         200,
         renderConfirmPage({
           reasonRequired: true,
+          reasonMaxLength: ORG_REASON_MAX,
           aggregatorId: orgId,
           token,
           applicantEmail: lookup.value.ownerEmail,
@@ -156,16 +174,14 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
 
       const parsed = OrgDecisionBodySchema.safeParse(req.body);
       if (!parsed.success) {
-        const missingReason = parsed.error.issues.some((i) => i.path[0] === 'reason');
+        const reasonIssue = parsed.error.issues.find((i) => i.path[0] === 'reason');
         return sendHtml(
           reply,
           400,
           renderResultPage({
             status: 'error',
             title: 'Bad request',
-            message: missingReason
-              ? 'Give a reason when rejecting an organisation. Go back and try again.'
-              : 'Invalid form submission.',
+            message: reasonMessage(reasonIssue?.code),
           }),
         );
       }
@@ -258,6 +274,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         200,
         renderConfirmPage({
           reasonRequired: true,
+          reasonMaxLength: ORG_REASON_MAX,
           aggregatorId: orgId,
           token: freshToken,
           applicantEmail: lookup.value.ownerEmail,

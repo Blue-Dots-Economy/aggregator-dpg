@@ -25,7 +25,7 @@ catalogue(mode) := {
 	"mode": mode,
 	"roles": {
 		"coordinator": {"permissions": ["profiles.view", "profiles.onboard", "campaigns.run"]},
-		"org_admin": {"permissions": ["profiles.view", "org.manage", "contact.unmask"]},
+		"org_admin": {"permissions": ["profiles.view", "org.manage", "contact.unmask", "orgs.onboard"]},
 		"network_admin": {"permissions": ["network.administer", "orgs.onboard"]},
 		"pii_access": {"permissions": ["profiles.view_pii"]},
 	},
@@ -313,15 +313,15 @@ test_real_table_known_as_route_needs_org_manage_or_orgs_onboard if {
 	decide_real(req("PATCH", "/v1/org/known-as/update/0b1c", user(["network_admin"]))).allowed
 }
 
-test_real_table_owner_is_refused_network_admin_org_actions if {
-	repair := decide_real(req("POST", "/v1/org/access/repair/0b1c", user(["org_admin"])))
-	repair.http_status == 403
-	body(repair).fields.permission == "network.administer"
-	decide := decide_real(req("POST", "/v1/org/decision/0b1c", user(["org_admin"])))
-	decide.http_status == 403
-	body(decide).fields.permission == "orgs.onboard"
+# Every owner decides and repairs its child orgs; which ones is the API's check.
+test_real_table_owner_decides_and_repairs_child_orgs if {
+	decide_real(req("POST", "/v1/org/access/repair/0b1c", user(["org_admin"]))).allowed
+	decide_real(req("POST", "/v1/org/decision/0b1c", user(["org_admin"]))).allowed
 	decide_real(req("POST", "/v1/org/access/repair/0b1c", user(["network_admin"]))).allowed
 	decide_real(req("POST", "/v1/org/decision/0b1c", user(["network_admin"]))).allowed
+	d := decide_real(req("POST", "/v1/org/decision/0b1c", user(["coordinator"])))
+	d.http_status == 403
+	body(d).fields.permission == "orgs.onboard"
 }
 
 test_real_table_encoded_template_path_keeps_its_permission if {

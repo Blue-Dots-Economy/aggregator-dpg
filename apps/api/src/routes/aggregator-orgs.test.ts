@@ -1442,6 +1442,23 @@ describe('aggregator-orgs routes', () => {
     expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
   });
 
+  it('503 DB_UNAVAILABLE (nothing written, no email) when the reviewer lookup fails', async () => {
+    orgStore.findById = async () => ({
+      ok: false,
+      error: { code: 'DB_UNAVAILABLE', message: 'db down' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/orgs/create',
+      headers: AUTH_HEADER,
+      payload: { ...orgBody, parent_id: '00000000-0000-4000-8000-0000000000f9' },
+    });
+    expect(res.statusCode).toBe(503);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+    expect(await orgStore.findByOwnerEmail('ravi@enable.org')).toEqual({ ok: true, value: null });
+    expect(mailer.outbox).toHaveLength(0);
+  });
+
   it.each(['findByContactEmail', 'findByContactPhone', 'findByOwnerPhone'] as const)(
     '503 DB_UNAVAILABLE (nothing written) when the owner-contact pre-check %s fails',
     async (method) => {

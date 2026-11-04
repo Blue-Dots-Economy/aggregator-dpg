@@ -42,9 +42,9 @@ export function reachesOrg(actor: Actor, orgId: string | null): boolean {
  *
  * @param actor - A resolved admin actor.
  * @param requested - The `org_id` filter, if any.
- * @returns The ids to search, or `null` for every org.
+ * @returns The ids to search.
  */
-export function scopeOrgFilter(actor: Actor, requested?: string): string[] | null {
+export function scopeOrgFilter(actor: Actor, requested?: string): string[] {
   return narrowOrgFilter(reachableOrgIds(actor), requested);
 }
 
@@ -52,11 +52,11 @@ export function scopeOrgFilter(actor: Actor, requested?: string): string[] | nul
  * Narrows a requested org filter to a set of orgs: one outside the set yields
  * "no orgs" (an empty page).
  *
- * @param ids - The allowed org ids, or `null` for every org.
+ * @param ids - The allowed org ids.
  * @param requested - The `org_id` filter, if any.
- * @returns The ids to search, or `null` for every org.
+ * @returns The ids to search.
  */
-export function narrowOrgFilter(ids: string[] | null, requested?: string): string[] | null {
+export function narrowOrgFilter(ids: string[], requested?: string): string[] {
   if (requested === undefined) return ids;
-  return ids === null || ids.includes(requested) ? [requested] : [];
+  return ids.includes(requested) ? [requested] : [];
 }

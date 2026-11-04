@@ -22,7 +22,7 @@ import { getUserStore } from '../services/user-store/index.js';
 import type { Organisation } from '../services/organisation-store/interface.js';
 import { resolveProfileRef } from '../services/schema-ref.js';
 import { getIdpAdmin, KC_ATTR, OWNER_CREATED_BY } from '../services/idp-admin/index.js';
-import { sendOrgReviewEmail } from '../services/org-registration-notify.js';
+import { orgReviewRecipients, sendOrgReviewEmail } from '../services/org-registration-notify.js';
 import { getMailer } from '@aggregator-dpg/mailer';
 import { renderOrgAlreadyRegistered } from '../services/email-templates/index.js';
 import { ownerSignInUrl } from '../services/decisions/org.js';
@@ -228,6 +228,8 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
       const orgStore = getOrganisationStore();
       const idp = getIdpAdmin();
       const ownerEmail = body.owner.email.toLowerCase();
+      // Looked up before any write, so a failure here leaves nothing half created.
+      const reviewers = await orgReviewRecipients(body.parent_id ?? null);
 
       // Re-sends the review link for an existing pending or revived org.
       // The row, the Keycloak owner and the group are reused unchanged.
@@ -555,6 +557,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
           ownerPhone: phoneE164,
           parentId: org.parentId,
           parentName: org.parentName,
+          recipients: reviewers,
         },
         log,
       );

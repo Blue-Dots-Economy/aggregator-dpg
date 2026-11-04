@@ -79,11 +79,10 @@ export async function manageableOrgIds(
 /**
  * Whether an organisation is in a manage scope.
  *
- * @param ids - From {@link manageableOrgIds}; null means every organisation.
+ * @param ids - From {@link manageableOrgIds}.
  * @param orgId - The organisation, or null for none.
  * @returns True when the organisation may be managed.
  */
-export function inManageScope(ids: string[] | null, orgId: string | null): boolean {
-  if (!orgId) return false;
-  return ids === null || ids.includes(orgId);
+export function inManageScope(ids: string[], orgId: string | null): boolean {
+  return orgId !== null && ids.includes(orgId);
 }

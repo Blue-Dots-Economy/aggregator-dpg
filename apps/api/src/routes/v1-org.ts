@@ -9,7 +9,7 @@
  *   PATCH /v1/org/parent/update/:id     move an org and the orgs below it (network admin)
  *   GET   /v1/org/parent/options/:id    candidate parents for a move (network admin)
  *   POST  /v1/org/decision/:id          approve / reject a pending org (its parent's owner)
- *   POST  /v1/org/access/repair/:id     re-apply the owner's sign-in access (network admin)
+ *   POST  /v1/org/access/repair/:id     re-apply the owner's sign-in access (its parent's owner)
  *   GET   /v1/org/hierarchy             the network, its "known as" values and the tree limits (network admin)
  *
  * Every handler calls `requireActor` first (admins only). A target out of
@@ -63,6 +63,8 @@ import {
   requireActor,
   type Actor,
 } from '../services/auth/actor/index.js';
+import { permissionsByOrg } from '../services/authz/guard.js';
+import { getRbacRuntime } from '../services/authz/runtime.js';
 import { reachesOrg } from '../services/authz/scope.js';
 import { isOnlyViewed, viewableOrgIds } from '../services/authz/view-scope.js';
 import { decideOrg, grantOwnerAccess } from '../services/decisions/org.js';
@@ -184,6 +186,24 @@ async function ownsParentOf(actor: Actor, org: Organisation): Promise<boolean> {
   const root = await getOrganisationStore().findRoot();
   if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
   return root.value?.id === org.parentId;
+}
+
+/**
+ * Whether the actor decides for an org: it owns the org's parent and, with
+ * access control enforced, holds `orgs.onboard` in that parent. The route
+ * guard only checks the permission somewhere among the actor's orgs.
+ *
+ * @throws {HttpError} DB_UNAVAILABLE when the root cannot be read.
+ */
+async function decidesFor(req: FastifyRequest, actor: Actor, org: Organisation): Promise<boolean> {
+  if (!(await ownsParentOf(actor, org))) return false;
+  const rt = getRbacRuntime();
+  if (rt?.mode !== 'enforce' || org.parentId === null) return true;
+  const root = await getOrganisationStore().findRoot();
+  if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
+  const perms = await permissionsByOrg(req, actor, root.value?.id ?? null);
+  if (perms === null) return true;
+  return (perms[org.parentId] ?? []).includes('orgs.onboard');
 }
 
 /**
@@ -349,7 +369,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         tags: ['console'],
         summary: 'One organisation within reach, with its owner and coordinator counts',
         description:
-          'An owner also reads, read-only, the direct children of its own organisations, and nothing deeper; the owner contact of such an organisation is masked. The network admin reads the top-level organisations the same way. For such an organisation coordinator_count, pending_count and child_count are 0. The fields query adds data that is left out by default. fields=known_as_values adds org.known_as_values: the values the organisation defines for its direct children, or null when it cannot have child organisations (the Default organisation, or an organisation at max_depth). fields=parent.known_as_values adds org.parent: the parent\'s id, name and stored known_as_values list ([] when it has none), which holds the choices for this org\'s known_as (the list, or only "aggregator" when it is empty). org.parent is null unless the caller owns the parent (the network admin for a top-level organisation), and for the root, the Default organisation and a rejected organisation. An unknown name in fields answers 400 SCHEMA_VALIDATION.',
+          "An owner also reads, read-only, the direct children of its own organisations, and nothing deeper; the owner contact of such an organisation is masked, except to the parent's owner while the organisation is pending. The network admin reads the top-level organisations the same way. For such an organisation coordinator_count, pending_count and child_count are 0. The fields query adds data that is left out by default. fields=known_as_values adds org.known_as_values: the values the organisation defines for its direct children, or null when it cannot have child organisations (the Default organisation, or an organisation at max_depth). fields=parent.known_as_values adds org.parent: the parent's id, name and stored known_as_values list ([] when it has none), which holds the choices for this org's known_as (the list, or only \"aggregator\" when it is empty). org.parent is null unless the caller owns the parent (the network admin for a top-level organisation), and for the root, the Default organisation and a rejected organisation. An unknown name in fields answers 400 SCHEMA_VALIDATION.",
         params: IdParamsSchema,
         querystring: OrgReadQuerySchema,
         response: { 200: OrgReadResponseSchema, ...errorResponses(401, 403, 404, 503) },
@@ -376,8 +396,14 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       });
       const body: OrgReadResponse = {
         org: toWireOrg(org, orgType),
-        // An org only viewed from above shows its owner's contact masked.
-        owner: { id: org.ownerUserId, contact: ownerContact(org, { masked: below }) },
+        // An org only viewed from above shows its owner's contact masked, except
+        // to the parent's owner while the org waits for that owner's decision.
+        owner: {
+          id: org.ownerUserId,
+          contact: ownerContact(org, {
+            masked: below && !(org.status === 'pending' && (await ownsParentOf(actor, org))),
+          }),
+        },
         // A child org's users and its own children are not visible from above.
         coordinator_count: below ? 0 : (c?.total ?? 0),
         child_count: below ? 0 : (children[org.id] ?? 0),
@@ -581,6 +607,9 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       requireNetworkAdmin(actor);
       const { id } = req.params as IdParams;
       const body = req.body as z.infer<typeof OrgParentUpdateRequestSchema>;
+      // The org and its new parent must both be within the admin's view reach.
+      const view = await viewable(actor);
+      if (!view.includes(id) || !view.includes(body.parent_id)) throw httpError('NOT_FOUND');
       const orgCfg = await organisationConfig();
       await guardWriteRate(actor, reply);
 
@@ -629,19 +658,24 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       requireNetworkAdmin(actor);
       const { id } = req.params as IdParams;
+      // Only orgs within the admin's view reach are moved or offered as parents.
+      const view = await viewable(actor);
+      if (!view.includes(id)) throw httpError('NOT_FOUND');
       const orgCfg = await organisationConfig();
       const result = await getOrganisationStore().parentOptions(id, treeRules(orgCfg));
       if (!result.ok) throwTreeError(result.error, 'orgStore.parentOptions');
       return reply.status(200).send({
         subtree_size: result.value.subtreeSize,
-        options: result.value.options.map(({ org, ok, reason }) => ({
-          id: org.id,
-          name: org.displayName,
-          depth: org.depth,
-          known_as_name: org.depth === 0 ? null : org.knownAsName,
-          ok,
-          reason,
-        })),
+        options: result.value.options
+          .filter(({ org }) => view.includes(org.id))
+          .map(({ org, ok, reason }) => ({
+            id: org.id,
+            name: org.displayName,
+            depth: org.depth,
+            known_as_name: org.depth === 0 ? null : org.knownAsName,
+            ok,
+            reason,
+          })),
       });
     },
   );
@@ -669,7 +703,9 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       const body = req.body as z.infer<typeof OrgDecisionRequestSchema>;
       const found = await getOrganisationStore().findById(id);
       if (!found.ok) dbDown('orgStore.findById', found.error.message);
-      if (!found.value || !(await ownsParentOf(actor, found.value))) throw httpError('NOT_FOUND');
+      if (!found.value || !(await decidesFor(req, actor, found.value))) {
+        throw httpError('NOT_FOUND');
+      }
       await guardWriteRate(actor, reply);
 
       const outcome = await decideOrg({
@@ -706,12 +742,12 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
   app.post(
     '/v1/org/access/repair/:id',
     {
-      config: { rbac: { capability: 'network.administer' } },
+      config: { rbac: { capability: 'orgs.onboard' } },
       schema: {
         tags: ['console'],
-        summary: "Re-apply an active organisation's owner sign-in access (network admin)",
+        summary: "Re-apply an active organisation's owner sign-in access (its parent's owner)",
         description:
-          "Enables the owner's Keycloak user, grants the org_owner role and adds them to the org's group. Idempotent.",
+          "Only the owner of the organisation's parent repairs it: the network admin for a top-level organisation, else the owner of the parent organisation. Anyone else gets 404. Enables the owner's Keycloak user, grants the org_owner role and adds them to the org's group. Idempotent.",
         params: IdParamsSchema,
         response: {
           200: OwnerAccessResponseSchema,
@@ -721,10 +757,11 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
     },
     async (req: FastifyRequest, reply: FastifyReply) => {
       const { actor } = await requireActor(req);
-      requireNetworkAdmin(actor);
       const { id } = req.params as IdParams;
-      // The network admin repairs the top-level organisations it views.
       const { org, orgType } = await orgInReach(actor, id, 'view');
+      if (orgType === 'aggregator' && !(await decidesFor(req, actor, org))) {
+        throw httpError('NOT_FOUND');
+      }
       if (orgType !== 'aggregator' || org.status !== 'active') {
         throw httpError('CONFLICT', { detail: 'Only an active organisation has owner access.' });
       }

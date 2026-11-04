@@ -24,6 +24,8 @@ export interface OrgReviewNotifyInput {
   parentId: string | null;
   /** Parent organisation's name; omitted when unknown. */
   parentName?: string | null;
+  /** Reviewers already looked up with {@link orgReviewRecipients}; looked up from `parentId` when absent. */
+  recipients?: string[];
 }
 
 /**
@@ -66,7 +68,7 @@ export async function sendOrgReviewEmail(
       applicantName: input.displayName,
       applicantEmail: input.ownerEmail,
       applicantPhone: input.ownerPhone,
-      recipients: await orgReviewRecipients(input.parentId),
+      recipients: input.recipients ?? (await orgReviewRecipients(input.parentId)),
       entityLabel: 'organisation',
       ...(input.parentName ? { parentName: input.parentName } : {}),
       logOperation: 'org-registration-notify.sendOrgReviewEmail',

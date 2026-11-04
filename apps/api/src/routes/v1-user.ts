@@ -43,7 +43,6 @@ import {
   type ActorOrg,
 } from '../services/auth/actor/index.js';
 import { narrowOrgFilter } from '../services/authz/scope.js';
-import { isOnlyViewed } from '../services/authz/view-scope.js';
 import {
   inManageScope,
   manageableOrgIds,
@@ -105,21 +104,8 @@ async function manageScope(
   req: FastifyRequest,
   actor: Actor,
   purpose: ScopePurpose = 'manage',
-): Promise<string[] | null> {
+): Promise<string[]> {
   return manageableOrgIds(req, actor, await rootOrgId(), purpose);
-}
-
-/**
- * Whether a coordinator's contact shows unmasked: `contact.unmask` in its
- * organisation, and never in an organisation only viewed from above.
- */
-async function showsContactOf(
-  req: FastifyRequest,
-  actor: Actor,
-  orgId: string | null,
-): Promise<boolean> {
-  if (isOnlyViewed(actor, orgId)) return false;
-  return showsContact(req, actor, orgId);
 }
 
 /**
@@ -312,7 +298,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const { actor } = await requireActor(req);
       const { id } = req.params as IdParams;
       const row = await coordinatorInReach(req, actor, id, 'view');
-      const plain = await showsContactOf(req, actor, row.parentOrgId ?? null);
+      const plain = await showsContact(req, actor, row.parentOrgId ?? null);
       // Audit the contact read: ids only.
       req.log.info({
         operation: 'console.user.read',
@@ -320,7 +306,6 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         actor_id: actor.userId,
         target_id: row.id,
         contact: plain ? 'plain' : 'masked',
-        relation: isOnlyViewed(actor, row.parentOrgId ?? null) ? 'below' : 'own',
       });
       return reply.status(200).send(toWireUser(row, { masked: !plain }));
     },
@@ -355,23 +340,10 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       const plainIn = new Map<string | null, boolean>();
       for (const row of page.value.rows) {
         const orgId = row.parentOrgId ?? null;
-        if (!plainIn.has(orgId)) plainIn.set(orgId, await showsContactOf(req, actor, orgId)); // NOSONAR typescript:S9382 — one check per distinct org
+        if (!plainIn.has(orgId)) plainIn.set(orgId, await showsContact(req, actor, orgId)); // NOSONAR typescript:S9382 — one check per distinct org
       }
       const isPlain = (row: Coordinator) => plainIn.get(row.parentOrgId ?? null) === true;
       const plainCount = page.value.rows.filter(isPlain).length;
-      const belowCount = page.value.rows.filter((r) =>
-        isOnlyViewed(actor, r.parentOrgId ?? null),
-      ).length;
-      if (belowCount > 0) {
-        // Coordinators of organisations below the actor's own, listed read-only and masked.
-        req.log.info({
-          operation: 'console.user.search',
-          status: 'success',
-          actor_id: actor.userId,
-          relation: 'below',
-          count: belowCount,
-        });
-      }
       if (plainCount > 0) {
         // Unmasked contacts in a list are audited by count, never values.
         req.log.info({

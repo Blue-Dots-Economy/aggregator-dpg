@@ -204,6 +204,21 @@ describe('aggregator-org-approvals routes', () => {
     expect(res.body).toContain('Wonder Org');
   });
 
+  it('refuses a reason over the cap with its own message (400)', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000b3';
+    orgStore.seed([buildOrganisation({ id: orgId, slug: 'longreason', status: 'pending' })]);
+    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'reject' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/orgs/decision/${orgId}`,
+      payload: { token, decision: 'reject', reason: 'x'.repeat(501) },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('The reason can be at most 500 characters.');
+    const stored = await orgStore.findById(orgId);
+    expect(stored.ok && stored.value?.status).toBe('pending');
+  });
+
   it('GET read page asks for a reason before a rejection', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000a6';
     orgStore.seed([buildOrganisation({ id: orgId, slug: 'rq', status: 'pending' })]);
@@ -213,7 +228,7 @@ describe('aggregator-org-approvals routes', () => {
       url: `/admin/v1/orgs/read/${orgId}?token=${encodeURIComponent(token)}&intent=reject`,
     });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toMatch(/<textarea id="reason-input" name="reason" maxlength="2000" required/);
+    expect(res.body).toMatch(/<textarea id="reason-input" name="reason" maxlength="500" required/);
   });
 
   it('GET read page with an expired token offers inline regenerate (§7)', async () => {
