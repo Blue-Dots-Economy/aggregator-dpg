@@ -86,6 +86,8 @@ export default async function ConsoleOrgPage({
   const canMove =
     hierarchy !== null && aggregatorOrg && (org.status === 'pending' || org.status === 'active');
   const maxChildren = hierarchy?.limits.max_children ?? null;
+  // The child tile links to the list of child orgs when the page shows it.
+  const childTileLink = children ? { showLabel: t('org_home.tile_show'), href: '#children' } : {};
   const childrenSub =
     maxChildren === null
       ? t('org.tile.children_sub')
@@ -230,7 +232,7 @@ export default async function ConsoleOrgPage({
               count={String(data.child_count)}
               sub={childrenSub}
               muted={data.child_count === 0}
-              {...(children ? { showLabel: t('org_home.tile_show'), href: '#children' } : {})}
+              {...childTileLink}
             />
           ) : null}
           <CountTile

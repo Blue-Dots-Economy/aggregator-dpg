@@ -14,7 +14,10 @@
 
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import type { OrgHierarchyResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import type {
+  OrgHierarchyResponse,
+  OrgSearchResponse,
+} from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
 import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
@@ -26,7 +29,6 @@ import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
 import { ORG_FILTERS, type OrgFilter } from '@/lib/org-filters';
 import { ConsoleCollapsible, ConsoleSection, EmptyState } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
-import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
