@@ -9,6 +9,7 @@
  */
 
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type {
   OrgSearchResponse,
@@ -19,7 +20,7 @@ import type {
 type UserSearchOrg = OrgSearchResponse['orgs'][number];
 import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
 import { getConsoleActor } from '@/lib/console-actor';
-import { canInvite } from '@/lib/capabilities';
+import { canInvite, canViewCoordinators } from '@/lib/capabilities';
 import { RoleBadges } from '@/components/console/RoleBadges';
 import { networkDomains, servedDomains } from '@/lib/console-domains.server';
 import { DomainChips } from '@/components/console/DomainChips';
@@ -50,6 +51,9 @@ export default async function ConsoleCoordinatorsPage({
   searchParams: Promise<{ status?: string; org_id?: string; serves?: string; cursor?: string }>;
 }>) {
   const t = await getTranslations('console');
+  // The network admin has no users page.
+  const viewer = await getConsoleActor();
+  if (viewer.ok && !canViewCoordinators(viewer.me)) notFound();
   const params = await searchParams;
   const status = STATUSES.find((s) => s === params.status);
   const orgId = params.org_id && UUID_RE.test(params.org_id) ? params.org_id : undefined;

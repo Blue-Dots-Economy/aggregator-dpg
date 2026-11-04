@@ -17,6 +17,11 @@ import type {
 } from '@aggregator-dpg/shared-primitives/user-org';
 
 vi.mock('@/lib/console-actor', () => ({ getConsoleActor: vi.fn() }));
+vi.mock('next/navigation', () => ({
+  notFound: vi.fn(() => {
+    throw new Error('NOT_FOUND');
+  }),
+}));
 vi.mock('@/lib/console-api.server', () => ({
   consoleRead: vi.fn(),
   consoleReadOptional: vi.fn(),
@@ -88,17 +93,17 @@ describe('console coordinators page — invite button', () => {
     expect(link).toHaveAttribute('href', '/console/invite');
   });
 
-  it('withholds Invite from a network admin with only the read-only view', async () => {
+  it('has no users page for the network admin', async () => {
     vi.mocked(getConsoleActor).mockResolvedValue({
       ok: true,
       me: me({
         is_network_admin: true,
-        capabilities: ['network.administer'],
+        capabilities: ['network.administer', 'org.manage'],
         orgs: [org({ org_type: 'network_facilitator', capabilities: ['network.administer'] })],
       }),
     });
-    show(await renderPage());
-    expect(screen.queryByRole('link', { name: /console\.nav\.invite/ })).not.toBeInTheDocument();
+    await expect(renderPage()).rejects.toThrow('NOT_FOUND');
+    expect(consoleRead).not.toHaveBeenCalled();
   });
 
   it('offers Invite to everyone when access control is off', async () => {

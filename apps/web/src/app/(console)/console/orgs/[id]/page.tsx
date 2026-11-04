@@ -37,7 +37,7 @@ import { OrgMoveDialog } from '@/components/console/OrgMoveDialog';
 import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
 import { OrgsTable } from '@/components/console/OrgsTable';
 import { OwnerAccessRepair } from '@/components/console/OwnerAccessRepair';
-import { can } from '@/lib/capabilities';
+import { can, canViewCoordinators } from '@/lib/capabilities';
 import { loadOrgSchema } from '@/lib/org-schema.server';
 
 /** How many organisations below this one the page lists. */
@@ -57,6 +57,8 @@ export default async function ConsoleOrgPage({
   const { org, owner } = data;
   // An owner also views, read-only, the orgs directly under its own.
   const own = actor.me.orgs.some((o) => o.id === org.id);
+  // The org's users, for its owner; the network admin has no users page.
+  const showUsers = own && canViewCoordinators(actor.me);
   const editable = org.org_type === 'aggregator' && !org.is_default && own;
   const canRename = actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer');
   const orgSchema = await loadOrgSchema();
@@ -93,7 +95,7 @@ export default async function ConsoleOrgPage({
             org.org_type === 'aggregator' ? (
               <>
                 {canMove && hierarchy ? <OrgMoveDialog orgId={org.id} orgName={org.name} /> : null}
-                {own ? (
+                {showUsers ? (
                   <Link
                     className={buttonClass('soft')}
                     href={`/console/coordinators?org_id=${org.id}`}
@@ -191,7 +193,7 @@ export default async function ConsoleOrgPage({
           </div>
         </section>
         <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
-          {own ? (
+          {showUsers ? (
             <>
               <CountTile
                 icon={<Users size={20} strokeWidth={2} />}
