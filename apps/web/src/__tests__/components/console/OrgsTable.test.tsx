@@ -137,9 +137,7 @@ describe('<OrgsTable />', () => {
     renderTable([pendingOrg]);
     fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.reject }));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'duplicate' } });
-    fireEvent.click(
-      screen.getByRole('button', { name: messages.console.coordinator.reject_confirm }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.reject_confirm }));
     await waitFor(() =>
       expect(screen.getByText(messages.console.status.inactive)).toBeInTheDocument(),
     );
@@ -155,7 +153,7 @@ describe('<OrgsTable />', () => {
     fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.reject }));
     expect(global.fetch).not.toHaveBeenCalled();
     const confirm = screen.getByRole('button', {
-      name: messages.console.coordinator.reject_confirm,
+      name: messages.console.orgs.reject_confirm,
     });
     expect(confirm).toBeDisabled();
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '  ' } });

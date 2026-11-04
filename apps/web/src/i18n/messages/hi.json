@@ -752,6 +752,7 @@
       "approve": "Approve",
       "reject": "Reject",
       "reject_reason": "कारण (आवश्यक, आवेदक को भेजा जाएगा)",
+      "reject_confirm": "संगठन अस्वीकार करें",
       "repair": "Re-grant owner access",
       "repaired": "Owner access: {status}",
       "empty": "No [[orgs]] match.",

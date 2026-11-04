@@ -752,6 +752,7 @@
       "approve": "Approve",
       "reject": "Reject",
       "reject_reason": "Reason (required, sent to the applicant)",
+      "reject_confirm": "Reject organisation",
       "repair": "Re-grant owner access",
       "repaired": "Owner access: {status}",
       "empty": "No [[orgs]] match.",

@@ -752,6 +752,7 @@
       "approve": "Approve",
       "reject": "Reject",
       "reject_reason": "ಕಾರಣ (ಅಗತ್ಯ, ಅರ್ಜಿದಾರರಿಗೆ ಕಳುಹಿಸಲಾಗುತ್ತದೆ)",
+      "reject_confirm": "ಸಂಸ್ಥೆಯನ್ನು ತಿರಸ್ಕರಿಸಿ",
       "repair": "Re-grant owner access",
       "repaired": "Owner access: {status}",
       "empty": "No [[orgs]] match.",

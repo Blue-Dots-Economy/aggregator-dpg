@@ -152,7 +152,7 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
                           disabled={busy === o.id || reason.trim() === ''}
                           onClick={() => void decide(o.id, 'reject')}
                         >
-                          {t('coordinator.reject_confirm')}
+                          {t('orgs.reject_confirm')}
                         </Button>
                         <Button
                           kind="ghost"
