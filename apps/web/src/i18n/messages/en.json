@@ -863,6 +863,8 @@
       "discard": "Discard",
       "save_domains": "Save domains",
       "domains_saved": "Domains saved.",
+      "remove_domains_note": "Removing {domains} stops this coordinator working with those records.",
+      "remove_domains_confirm": "Remove and save",
       "back": "Back to [[users]]",
       "joined": "Joined {date}",
       "copy_email": "Copy email",
