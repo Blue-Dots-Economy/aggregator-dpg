@@ -85,7 +85,6 @@ export const BUILTIN_ROLES: readonly RoleDefinition[] = [
       'campaigns.run',
       'org.manage',
       'contact.unmask',
-      'orgs.onboard',
     ],
   },
   {
