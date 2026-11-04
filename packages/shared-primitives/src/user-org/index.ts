@@ -264,6 +264,13 @@ export const DecisionRequestSchema = z
   .strict();
 export type DecisionRequest = z.infer<typeof DecisionRequestSchema>;
 
+/** `POST /v1/org/decision/:id`: a rejection must give a reason. */
+export const OrgDecisionRequestSchema = DecisionRequestSchema.refine(
+  (d) => d.decision !== 'reject' || d.reason !== undefined,
+  { message: 'Give a reason when rejecting an organisation.', path: ['reason'] },
+);
+export type OrgDecisionRequest = z.infer<typeof OrgDecisionRequestSchema>;
+
 export const DecisionResponseSchema = z.object({
   id: z.string(),
   status: UserOrgStatusSchema,

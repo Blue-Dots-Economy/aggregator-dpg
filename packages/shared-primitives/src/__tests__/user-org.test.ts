@@ -15,6 +15,7 @@ import {
   UserInviteResponseSchema,
   DecisionRequestSchema,
   DecisionResponseSchema,
+  OrgDecisionRequestSchema,
   UserMetadataUpdateRequestSchema,
   OrgSchema,
   OrgReadResponseSchema,
@@ -143,6 +144,12 @@ describe('user-org wire schemas', () => {
     expect(DecisionRequestSchema.parse({ decision: 'approve' })).toBeTruthy();
     expect(DecisionRequestSchema.parse({ decision: 'reject', reason: 'dup' })).toBeTruthy();
     expect(DecisionRequestSchema.safeParse({ decision: 'maybe' }).success).toBe(false);
+    expect(OrgDecisionRequestSchema.parse({ decision: 'approve' })).toBeTruthy();
+    expect(OrgDecisionRequestSchema.parse({ decision: 'reject', reason: 'dup' })).toBeTruthy();
+    expect(OrgDecisionRequestSchema.safeParse({ decision: 'reject' }).success).toBe(false);
+    expect(OrgDecisionRequestSchema.safeParse({ decision: 'reject', reason: '  ' }).success).toBe(
+      false,
+    );
     expect(
       DecisionResponseSchema.parse({ id: 'u1', status: 'active', notified: true }),
     ).toBeTruthy();
