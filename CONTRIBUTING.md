@@ -20,6 +20,8 @@ This installs all workspace dependencies across `apps/*`, `services/*`, and `pac
 | `pnpm -w build`              | Build all packages (topological order, cached) |
 | `pnpm -w test`               | Run all tests                                  |
 | `pnpm -w lint`               | Lint all packages                              |
+| `pnpm -w lint:report`        | Count lint messages per rule and workspace     |
+| `pnpm -w test:scripts`       | Test the root scripts and the ESLint config    |
 | `pnpm -w typecheck`          | Type-check all packages                        |
 | `pnpm -w dev`                | Start all packages in dev/watch mode           |
 | `pnpm --filter <name> <cmd>` | Run a command in one package only              |

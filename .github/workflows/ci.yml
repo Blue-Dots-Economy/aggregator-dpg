@@ -63,6 +63,9 @@ jobs:
       - name: Lint
         run: pnpm -w lint
 
+      - name: Root script tests (stack helpers, ESLint config, workspace lint coverage)
+        run: pnpm -w test:scripts
+
       - name: Type-check
         run: pnpm -w typecheck
 
