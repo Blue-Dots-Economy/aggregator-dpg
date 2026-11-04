@@ -38,6 +38,15 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/components/shell/Topbar', () => ({
   Topbar: ({ title }: { title: string }) => <h1>{title}</h1>,
 }));
+vi.mock('@/components/console/OrgsTable', () => ({
+  OrgsTable: ({ orgs }: { orgs: Array<{ id: string; name: string }> }) => (
+    <ul aria-label="awaiting decision">
+      {orgs.map((o) => (
+        <li key={o.id}>{o.name}</li>
+      ))}
+    </ul>
+  ),
+}));
 
 import ConsoleHomePage from '@/app/(console)/console/page';
 import { getConsoleActor } from '@/lib/console-actor';
@@ -159,16 +168,31 @@ describe('console home — owner', () => {
     });
   });
 
-  it('keeps the summary of the organisations below on the organisation view', async () => {
+  it('lists the child organisations awaiting the owner, and no coordinator counts below', async () => {
     vi.mocked(getConsoleActor).mockResolvedValue({
       ok: true,
       me: me([meOrg('own', 'Zeta Own')]),
     });
-    const below = Array.from({ length: 100 }, (_, i) => row(`b${i}`, `Alpha ${i}`));
-    mockReads([row('own', 'Zeta Own')], below);
+    mockReads(
+      [row('own', 'Zeta Own')],
+      [row('c1', 'Child Pending', { status: 'pending' }), row('c2', 'Child Live')],
+    );
     await show();
     expect(screen.getByText('Zeta Own')).toBeInTheDocument();
-    expect(screen.getByText(/home\.below_summary.*"orgs":100/)).toBeInTheDocument();
+    const awaiting = screen.getByRole('list', { name: 'awaiting decision' });
+    expect(awaiting).toHaveTextContent('Child Pending');
+    expect(awaiting).not.toHaveTextContent('Child Live');
+    expect(screen.queryByText(/home\.below_summary/)).not.toBeInTheDocument();
+  });
+
+  it('says when no child organisation is awaiting the owner', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me([meOrg('own', 'Zeta Own')]),
+    });
+    mockReads([row('own', 'Zeta Own')], [row('c2', 'Child Live')]);
+    await show();
+    expect(screen.getByText(/orgs\.empty_pending/)).toBeInTheDocument();
   });
 
   it('sends an owner of several organisations to the organisations page', async () => {

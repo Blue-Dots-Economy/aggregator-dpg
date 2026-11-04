@@ -43,6 +43,11 @@ vi.mock('@/components/console/ChildOrgsTree', () => ({ ChildOrgsTree: () => null
 vi.mock('@/components/console/RolesPanel', () => ({ RolesPanel: () => null }));
 vi.mock('@/components/console/OwnerAccessRepair', () => ({ OwnerAccessRepair: () => null }));
 vi.mock('@/components/console/CopyButton', () => ({ CopyButton: () => null }));
+vi.mock('@/components/console/OrgsTable', () => ({
+  OrgsTable: ({ orgs }: { orgs: Array<{ id: string }> }) => (
+    <div data-testid="org-decision" data-ids={orgs.map((o) => o.id).join(',')} />
+  ),
+}));
 vi.mock('@/components/console/KnownAsValuesEditor', () => ({
   KnownAsValuesEditor: () => <div data-testid="known-as-values-editor" />,
 }));
@@ -190,6 +195,31 @@ describe('console org detail — "known as" picker', () => {
     expect(screen.getByText('console.org.viewed_from_above_known_as')).toBeInTheDocument();
     expect(screen.queryByText('console.org.viewed_from_above')).toBeNull();
     expect(screen.getByTestId('org-edit-form')).toHaveAttribute('data-known-as-picked', 'true');
+  });
+
+  it("hides a child org's coordinators from the parent owner", async () => {
+    mockPage(org({ depth: 2 }), 'parent-owner', { viewerOrgId: 'parent', parent: PARENT });
+    await show();
+    expect(screen.queryByText('console.org.view_coordinators')).toBeNull();
+    expect(screen.queryByText('console.org.tile.coordinators')).toBeNull();
+    expect(screen.queryByTestId('org-decision')).toBeNull();
+  });
+
+  it('lets the parent owner decide a pending child on its page', async () => {
+    mockPage(org({ depth: 2, status: 'pending' }), 'parent-owner', {
+      viewerOrgId: 'parent',
+      parent: PARENT,
+    });
+    await show();
+    expect(screen.getByTestId('org-decision')).toHaveAttribute('data-ids', ORG_ID);
+  });
+
+  it("shows the owner its own org's coordinators", async () => {
+    mockPage(org());
+    await show();
+    expect(screen.getByText('console.org.view_coordinators')).toBeInTheDocument();
+    expect(screen.getByText('console.org.tile.coordinators')).toBeInTheDocument();
+    expect(screen.queryByTestId('org-decision')).toBeNull();
   });
 
   it('keeps the view-only banner and the value in the form for an ancestor that does not pick', async () => {

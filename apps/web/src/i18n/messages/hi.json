@@ -670,8 +670,7 @@
     "home": {
       "coordinators": "{count} [[users]]",
       "pending": "{count} pending",
-      "below_heading": "[[Orgs]] below yours",
-      "below_summary": "{orgs, plural, one {# [[org]]} other {# [[orgs]]}} with {coordinators, plural, one {# [[user]]} other {# [[users]]}} sit below yours. You can view them; their owners manage them.",
+      "below_heading": "[[Orgs]] directly under yours",
       "below_view": "View [[orgs]]"
     },
     "org": {
@@ -757,6 +756,7 @@
       "all": "All",
       "approve": "Approve",
       "reject": "Reject",
+      "reject_reason": "कारण (आवश्यक, आवेदक को भेजा जाएगा)",
       "repair": "Re-grant owner access",
       "repaired": "Owner access: {status}",
       "empty": "No [[orgs]] match.",
@@ -777,7 +777,7 @@
       "network": "Network",
       "network_tag": "The network",
       "col_parent": "Parent [[org]]",
-      "subtitle_owner": "Your [[orgs]] and every [[org]] below them. Those below are view-only.",
+      "subtitle_owner": "Your [[orgs]] and the [[orgs]] directly under them. Those under yours are view-only.",
       "yours": "Your [[org]]",
       "tile": {
         "all": {

@@ -1,7 +1,7 @@
 /**
- * Console home page: the coordinators of an owner of one organisation, with a
- * summary of the organisations below it. Everyone else is sent to the
- * organisations page.
+ * Console home page: the coordinators of an owner of one organisation, with
+ * the organisations directly under it that wait for the owner's decision.
+ * Everyone else is sent to the organisations page.
  */
 
 import Link from 'next/link';
@@ -21,6 +21,7 @@ import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
 import { ConsoleSection, ConsoleStatusPill } from '@/components/console/ConsoleUi';
 import { OrgCoordinators, type OrgCoordinatorRow } from '@/components/console/OrgCoordinators';
+import { OrgsTable } from '@/components/console/OrgsTable';
 import { I } from '@/icons';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
@@ -101,15 +102,19 @@ async function renderOrgHome(org: OrgRow, below: OrgRow[], showInvite: boolean) 
           complete={page.next_cursor === null}
           allHref={`/console/coordinators?org_id=${org.id}`}
         />
-        {below.length > 0 ? await renderBelowSummary(below) : null}
+        {below.length > 0 ? await renderChildOrgs(below) : null}
       </div>
     </>
   );
 }
 
-/** A summary of the organisations below the owner's own, with a link to them. */
-async function renderBelowSummary(below: OrgRow[]) {
+/**
+ * The organisations directly under the owner's own: those awaiting the owner's
+ * decision, approved or rejected in place, and a link to all of them.
+ */
+async function renderChildOrgs(children: OrgRow[]) {
   const t = await getTranslations('console');
+  const pending = children.filter((o) => o.status === 'pending');
   return (
     <ConsoleSection
       title={t('home.below_heading')}
@@ -118,13 +123,13 @@ async function renderBelowSummary(below: OrgRow[]) {
           {t('home.below_view')}
         </Link>
       }
+      flush={pending.length > 0}
     >
-      <p className="text-[13.5px] text-ink-600">
-        {t('home.below_summary', {
-          orgs: below.length,
-          coordinators: below.reduce((n, o) => n + o.coordinator_count, 0),
-        })}
-      </p>
+      {pending.length > 0 ? (
+        <OrgsTable orgs={pending} />
+      ) : (
+        <p className="text-[13.5px] text-ink-600">{t('orgs.empty_pending')}</p>
+      )}
     </ConsoleSection>
   );
 }

@@ -1,11 +1,12 @@
 /**
  * Organisations page.
  *
- * An org owner sees its own organisations, each as a tree with every
- * organisation below it (read-only below its own); names open each page.
+ * An org owner sees the organisations directly under its own awaiting its
+ * decision (approved or rejected in place), then its own organisations, each
+ * with the organisations directly under it (read-only); names open each page.
  *
- * The network admin sees the whole network: the organisations awaiting
- * approval (approved or rejected in place), status tiles, every organisation
+ * The network admin sees the top-level organisations: those awaiting
+ * approval (approved or rejected in place), status tiles, the organisations
  * as a tree under the network or as a searchable list (each name opens the
  * organisation's page), and, closed by default, the hierarchy settings.
  * `?view=list` and `?status=` open the list with a filter.
@@ -70,8 +71,8 @@ export default async function ConsoleOrgsPage({
 }
 
 /**
- * An owner's view: one tree per topmost owned organisation, with everything
- * below it.
+ * An owner's view: the pending organisations directly under its own, then one
+ * tree per topmost owned organisation with the organisations directly under it.
  *
  * @param ownedIds - The organisations the owner owns.
  */
@@ -80,10 +81,18 @@ async function OwnerOrgs({ ownedIds }: Readonly<{ ownedIds: string[] }>) {
   const orgs = await readReachableOrgs();
   const roots = topmostOwned(ownedIds, orgs);
   if (roots.length === 0) redirect('/console');
+  const pending = orgs.filter((o) => o.status === 'pending' && !ownedIds.includes(o.id));
   return (
     <>
       <Topbar title={t('orgs.heading')} subtitle={t('orgs.subtitle_owner')} />
       <div className="flex flex-col gap-6">
+        {pending.length > 0 ? (
+          <div id="pending" className="scroll-mt-6">
+            <ConsoleSection title={t('orgs.review_heading', { count: pending.length })} flush>
+              <OrgsTable orgs={pending} />
+            </ConsoleSection>
+          </div>
+        ) : null}
         {roots.map((root) => (
           <ConsoleSection key={root.id} title={root.name}>
             <ChildOrgsTree
