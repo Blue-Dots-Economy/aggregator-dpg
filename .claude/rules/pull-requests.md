@@ -8,16 +8,30 @@ Each block is one PR. Listed bottom to top; this is also the stack order.
 
 | # | Block | Holds |
 | --- | --- | --- |
-| 1 | Shared packages | `packages/*` |
-| 2 | API | `apps/api`, including migrations (`apps/api/drizzle`) and the files the API regenerates: `openapi.json`, `policy/rbac/edge/routes.json` and the edge tests that check it |
-| 3 | Worker | `apps/worker` |
-| 4 | Web | `apps/web` — the UI and the BFF (`src/app/api/**`) together |
-| 5 | Infra, config and docs | `infra/`, `config/`, `local-setup/`, `services/`, `scripts/`, hand-written `policy/` files, `docs/`, `.github/`, root files and the root `CLAUDE.md` |
+| 1 | API | `apps/api`, including migrations (`apps/api/drizzle`) and the files the API regenerates: `openapi.json`, `policy/rbac/edge/routes.json` and the edge tests that check it |
+| 2 | Worker | `apps/worker` |
+| 3 | Web | `apps/web` — the UI and the BFF (`src/app/api/**`) together |
+| 4 | Infra and config | `infra/`, `config/`, `local-setup/`, `services/`, `scripts/`, hand-written `policy/` files, `.github/` and root files |
 
 - Open a PR only for the blocks the change touches.
 - A block's own tests and its own `CLAUDE.md` go in that block's PR.
 - A block may depend only on blocks below it. Each PR must typecheck, lint and pass its tests on top of the PRs below it.
-- `pnpm-lock.yaml` goes with the lowest PR whose `package.json` changes.
+
+### Shared packages
+
+Shared packages (`packages/*`) have no PR of their own. A package change goes in the lowest PR of the stack whose block uses it, so every PR above builds on it. For example, a `shared-primitives` change used by both the API and the web goes in the API PR.
+
+- A change that touches only `packages/*` is one PR.
+- `pnpm-lock.yaml` goes with the PR that holds the `package.json` change.
+
+### Docs
+
+Docs have no PR of their own. Each doc change goes in the PR of the block it describes:
+
+- A doc about one block (for example an API runbook in `docs/`) goes in that block's PR.
+- A doc about infra or config goes in the infra and config PR.
+- A doc that spans several blocks, or belongs to none (a cross-cutting design, the root `CLAUDE.md`), goes in the top PR of the stack.
+- A change that touches only docs is one PR.
 
 ## One PR for several blocks
 
