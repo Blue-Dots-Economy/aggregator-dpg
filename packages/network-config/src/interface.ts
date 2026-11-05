@@ -355,7 +355,7 @@ export const AggregatorConfigSchema = AggregatorYamlSchema;
 // ─── Signalstack network.json (the subset the aggregator cares about) ────────
 
 /**
- * Wraps an optional display block so a malformed value reads as absent.
+ * Wraps an optional display field or block so a malformed value reads as absent.
  *
  * Any problem inside the block drops the whole block, e.g. one bad tile drops
  * every tile of that domain. The UI then uses its defaults and the rest of
@@ -455,7 +455,7 @@ export const NetworkDomainSchema = z
         required_error: 'each domain must declare `id`',
         invalid_type_error: 'each domain must declare `id`',
       }),
-      description: z.string().optional(),
+      description: droppedWhenMalformed(z.string()),
       /** Dashboard tile groups. Optional, copied from `network.json`. */
       dashboard_tiles: droppedWhenMalformed(DashboardTilesSchema),
       /** Status rules and their UI labels. Optional, copied from `network.json`. */
@@ -539,8 +539,8 @@ export const SignalstackNetworkSchema = z
           invalid_type_error: 'network.json missing `id`',
         })
         .min(1, 'network.json missing `id`'),
-      display_name: z.string().optional(),
-      description: z.string().optional(),
+      display_name: droppedWhenMalformed(z.string()),
+      description: droppedWhenMalformed(z.string()),
       domains: z
         .array(DomainWithNamedErrorsSchema, {
           required_error: 'network.json must declare at least one domain',

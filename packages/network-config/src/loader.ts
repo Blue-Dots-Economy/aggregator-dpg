@@ -260,11 +260,14 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
       if (!res.ok) {
         return this.recoverFromCache(url, `signalstack network.json fetch returned ${res.status}`);
       }
-      const checked = validateNetwork(await res.json());
+      const payload: unknown = await res.json();
+      const checked = validateNetwork(payload);
       if (!checked.success) {
         return this.recoverFromCache(url, checked.error.message);
       }
-      await this.writeCacheFile(url, 'network', checked.value.network);
+      // The payload is cached as sent and re-checked on read, so a cache-served
+      // load reports the same dropped blocks.
+      await this.writeCacheFile(url, 'network', payload);
       return ok(checked.value);
     } catch (e) {
       return this.recoverFromCache(url, `network fetch transport failure: ${errorMessage(e)}`);
@@ -394,9 +397,12 @@ interface CheckedNetwork {
  * {@link SignalstackNetworkSchema}.
  */
 const RawOptionalBlocksSchema = z.object({
+  display_name: z.unknown(),
+  description: z.unknown(),
   dashboard_buckets: z.unknown(),
   domains: z.array(
     z.object({
+      description: z.unknown(),
       dashboard_tiles: z.unknown(),
       status_rules: z.unknown(),
       guardian_consent_required: z.unknown(),
@@ -450,6 +456,7 @@ function droppedBlocks(payload: unknown, network: SignalstackNetwork): NetworkCo
   raw.data.domains.forEach((sent, i) => {
     const kept = network.domains[i];
     if (!kept) return;
+    dropped(`domains.${i}.description`, sent.description, kept.description);
     dropped(`domains.${i}.dashboard_tiles`, sent.dashboard_tiles, kept.dashboard_tiles);
     dropped(`domains.${i}.status_rules`, sent.status_rules, kept.status_rules);
     dropped(
@@ -466,6 +473,8 @@ function droppedBlocks(payload: unknown, network: SignalstackNetwork): NetworkCo
       warnings.push({ path: `domains.${i}.go_live_required`, code: 'NON_STRING_ENTRIES_DROPPED' });
     }
   });
+  dropped('display_name', raw.data.display_name, network.display_name);
+  dropped('description', raw.data.description, network.description);
   dropped('dashboard_buckets', raw.data.dashboard_buckets, network.dashboard_buckets);
   const sentBuckets = RawBucketMapsSchema.safeParse(raw.data.dashboard_buckets);
   const keptBuckets = network.dashboard_buckets;

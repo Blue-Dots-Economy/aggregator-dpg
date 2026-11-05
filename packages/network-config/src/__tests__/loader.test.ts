@@ -1376,6 +1376,47 @@ describe('FileNetworkConfigLoader — network.json shape checks', () => {
     ]);
   });
 
+  it('still reports dropped blocks when the network is served from the cache', async () => {
+    const cacheDir = path.join(tmpDir, 'cache');
+    const payload = networkWithSeeker({ dashboard_tiles: 'oops' });
+    const first = new FileNetworkConfigLoader({ configPath, cacheDir, fetchImpl: serve(payload) });
+    expect((await first.load()).success).toBe(true);
+
+    const second = new FileNetworkConfigLoader({
+      configPath,
+      cacheDir,
+      fetchImpl: async () => new Response('down', { status: 503 }),
+    });
+    const result = await second.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.warnings).toEqual([
+      { path: 'domains.0.dashboard_tiles', code: 'MALFORMED_BLOCK_DROPPED' },
+    ]);
+  });
+
+  it('drops a malformed display_name or description and reports it', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve({
+        ...networkWithSeeker({ description: null }),
+        display_name: 42,
+        description: { en: 'Blue Dot' },
+      }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.network.display_name).toBeUndefined();
+    expect(result.value.network.description).toBeUndefined();
+    expect(result.value.network.domains[0]?.description).toBeUndefined();
+    expect(result.value.warnings).toEqual([
+      { path: 'domains.0.description', code: 'MALFORMED_BLOCK_DROPPED' },
+      { path: 'display_name', code: 'MALFORMED_BLOCK_DROPPED' },
+      { path: 'description', code: 'MALFORMED_BLOCK_DROPPED' },
+    ]);
+  });
+
   it('keeps only the string tokens of go_live_required and reports the drop', async () => {
     const loader = new FileNetworkConfigLoader({
       configPath,
