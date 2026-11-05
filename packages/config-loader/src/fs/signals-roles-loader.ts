@@ -19,6 +19,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { load as parseYaml } from 'js-yaml';
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
+import { isObjectLike } from '../record.js';
 import { fileExists, findRepoRoot } from './repo-root.js';
 
 /** Config file holding the per-network aggregator settings. */
@@ -34,12 +35,12 @@ const CONFIG_FILE = 'aggregator.config.yaml';
  * @returns Trimmed, non-empty role names; empty when the key is absent.
  */
 function extractRoles(doc: unknown): string[] {
-  if (doc === null || typeof doc !== 'object') return [];
-  const aggregator = (doc as Record<string, unknown>)['aggregator'];
-  if (aggregator === null || typeof aggregator !== 'object') return [];
-  const signals = (aggregator as Record<string, unknown>)['signals'];
-  if (signals === null || typeof signals !== 'object') return [];
-  const roles = (signals as Record<string, unknown>)['realm_roles'];
+  if (!isObjectLike(doc)) return [];
+  const aggregator = doc['aggregator'];
+  if (!isObjectLike(aggregator)) return [];
+  const signals = aggregator['signals'];
+  if (!isObjectLike(signals)) return [];
+  const roles = signals['realm_roles'];
 
   if (Array.isArray(roles)) {
     return roles.map((r) => String(r).trim()).filter((r) => r.length > 0);

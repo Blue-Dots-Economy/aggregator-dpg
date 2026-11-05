@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 import { parseAggregatorConsentConfig, type AggregatorConsentConfig } from '../consent.schema.js';
 import { deepMerge } from '../merge.js';
+import { isRecord } from '../record.js';
 import { fileExists, findRepoRoot } from './repo-root.js';
 
 /** Relative path suffix for consent files inside a config root. */
@@ -47,7 +48,8 @@ async function readJson(filePath: string): Promise<unknown> {
     const text = await readFile(filePath, 'utf8');
     // Replace the placeholder before parsing so every field picks it up.
     const rendered = text.split(SUPPORT_EMAIL_PLACEHOLDER).join(resolveSupportEmail());
-    return JSON.parse(rendered) as unknown;
+    const parsed: unknown = JSON.parse(rendered);
+    return parsed;
   } catch (err) {
     throw new ConfigError(`Failed to read or parse consent config at ${filePath}`, {
       code: 'CONSENT_CONFIG_READ_ERROR',
@@ -108,10 +110,13 @@ export async function loadConsentConfig(
     const brandPath = join(configDir, network, brand, CONSENT_SUFFIX);
     if (await fileExists(brandPath)) {
       const brandRaw = await readJson(brandPath);
-      const merged = deepMerge(
-        JSON.parse(JSON.stringify(config)) as Record<string, unknown>,
-        JSON.parse(JSON.stringify(brandRaw)) as Record<string, unknown>,
-      );
+      if (!isRecord(brandRaw)) {
+        throw new ConfigError(`Brand consent config must be a JSON object: ${brandPath}`, {
+          code: 'CONSENT_CONFIG_INVALID',
+          details: { filePath: brandPath },
+        });
+      }
+      const merged = deepMerge(structuredClone(config), brandRaw);
       config = parseAggregatorConsentConfig(merged);
     }
   }

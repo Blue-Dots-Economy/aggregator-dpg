@@ -17,9 +17,7 @@ import type { RegisteredPackage } from './discovery.js';
  * Duck-typed test fixtures that lack `_def` fall back to z.unknown().
  */
 function isZodSchema(schema: unknown): schema is z.ZodTypeAny {
-  return (
-    schema !== null && typeof schema === 'object' && '_def' in (schema as Record<string, unknown>)
-  );
+  return schema !== null && typeof schema === 'object' && '_def' in schema;
 }
 
 /**
@@ -64,7 +62,7 @@ export function validateConfig(
   const result = schema.safeParse(config);
 
   if (result.success) {
-    return result.data as Record<string, unknown>;
+    return result.data;
   }
 
   const issues = result.error.issues.map((issue) => {

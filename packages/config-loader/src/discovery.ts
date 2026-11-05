@@ -13,16 +13,25 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
+import { isRecord } from './record.js';
+
+/**
+ * Exports read from a config.schema module. Each is checked after import.
+ * `configDefaults` holds optional baseline values merged before env overrides.
+ */
+const ConfigSchemaModuleSchema = z.object({
+  configKey: z.unknown(),
+  configSchema: z.unknown(),
+  configDefaults: z.unknown(),
+});
 
 /** Shape every config.schema module must export. */
-export interface ConfigSchemaModule {
-  configKey: unknown;
-  configSchema: unknown;
-  /** Optional baseline values merged into the config tree before env overrides. */
-  configDefaults?: unknown;
-}
+export type ConfigSchemaModule = z.infer<typeof ConfigSchemaModuleSchema>;
+
+/** The `name` field of a package.json; anything else falls back to the directory name. */
+const PackageJsonNameSchema = z.object({ name: z.string() });
 
 /** One registered package entry after discovery. */
 export interface RegisteredPackage {
@@ -32,8 +41,11 @@ export interface RegisteredPackage {
   packageDir: string;
   /** Top-level key in the merged config tree (e.g. "signalStack"). */
   configKey: string;
-  /** Zod schema validating this package's config slice. */
-  configSchema: z.ZodTypeAny;
+  /**
+   * Zod schema validating this package's config slice. Checked only for
+   * presence here; a value that is not a Zod schema validates as `z.unknown()`.
+   */
+  configSchema: unknown;
   /**
    * Baseline config values for this package's slice.
    * Merged into the tree before env YAML overrides are applied.
@@ -54,13 +66,10 @@ async function importConfigModule(packageDir: string): Promise<ConfigSchemaModul
   const distPath = join(packageDir, 'dist', 'config.schema.js');
   const srcPath = join(packageDir, 'src', 'config.schema.ts');
 
-  if (existsSync(distPath)) {
-    return import(pathToFileURL(distPath).href) as Promise<ConfigSchemaModule>;
-  }
-  if (existsSync(srcPath)) {
-    return import(pathToFileURL(srcPath).href) as Promise<ConfigSchemaModule>;
-  }
-  return null;
+  const modulePath = existsSync(distPath) ? distPath : existsSync(srcPath) ? srcPath : null;
+  if (modulePath === null) return null;
+  const mod: unknown = await import(pathToFileURL(modulePath).href);
+  return ConfigSchemaModuleSchema.parse(mod);
 }
 
 /**
@@ -70,8 +79,8 @@ async function importConfigModule(packageDir: string): Promise<ConfigSchemaModul
 function readPackageName(packageJsonPath: string, fallback: string): string {
   try {
     const raw = readFileSync(packageJsonPath, 'utf8');
-    const parsed = JSON.parse(raw) as { name?: string };
-    return parsed.name ?? fallback;
+    const parsed = PackageJsonNameSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data.name : fallback;
   } catch {
     return fallback;
   }
@@ -140,19 +149,13 @@ export async function discoverPackages(
       );
     }
 
-    const configDefaults =
-      mod.configDefaults !== undefined &&
-      mod.configDefaults !== null &&
-      typeof mod.configDefaults === 'object' &&
-      !Array.isArray(mod.configDefaults)
-        ? (mod.configDefaults as Record<string, unknown>)
-        : undefined;
+    const configDefaults = isRecord(mod.configDefaults) ? mod.configDefaults : undefined;
 
     registry.set(mod.configKey, {
       packageName,
       packageDir,
       configKey: mod.configKey,
-      configSchema: mod.configSchema as z.ZodTypeAny,
+      configSchema: mod.configSchema,
       ...(configDefaults !== undefined && { configDefaults }),
     });
   }

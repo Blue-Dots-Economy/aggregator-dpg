@@ -16,6 +16,7 @@
  */
 
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
+import { isRecord } from './record.js';
 
 /** Matches ${VAR} and ${VAR:-default} — captures the inner expression. */
 const PLACEHOLDER_RE = /\$\{([^}]+)\}/g;
@@ -75,14 +76,28 @@ function interpolateValue(value: unknown, env: NodeJS.ProcessEnv): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => interpolateValue(item, env));
   }
-  if (value !== null && typeof value === 'object') {
-    const result: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      result[k] = interpolateValue(v, env);
-    }
-    return result;
+  if (isRecord(value)) {
+    return interpolateRecord(value, env);
   }
   return value;
+}
+
+/**
+ * Interpolates every value of an object into a new object.
+ *
+ * @param value - Config object.
+ * @param env - Environment variable map.
+ * @returns New object with all string placeholders resolved.
+ */
+function interpolateRecord(
+  value: Record<string, unknown>,
+  env: NodeJS.ProcessEnv,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value)) {
+    result[k] = interpolateValue(v, env);
+  }
+  return result;
 }
 
 /**
@@ -99,5 +114,5 @@ export function interpolateConfig(
   config: Record<string, unknown>,
   env: NodeJS.ProcessEnv = process.env,
 ): Record<string, unknown> {
-  return interpolateValue(config, env) as Record<string, unknown>;
+  return interpolateRecord(config, env);
 }

@@ -185,6 +185,20 @@ describe('discoverPackages', () => {
     expect(result.get('pkgA')?.packageName).toBe('pkg-a');
   });
 
+  it('falls back to the directory name when package.json has a non-string "name"', async () => {
+    makePackage(tmpDir, 'pkg-a', { configKey: 'pkgA' });
+    writeFileSync(join(tmpDir, 'pkg-a', 'package.json'), JSON.stringify({ name: 42 }), 'utf8');
+    const result = await discoverPackages(tmpDir);
+    expect(result.get('pkgA')?.packageName).toBe('pkg-a');
+  });
+
+  it('falls back to the directory name when package.json is JSON null', async () => {
+    makePackage(tmpDir, 'pkg-a', { configKey: 'pkgA' });
+    writeFileSync(join(tmpDir, 'pkg-a', 'package.json'), 'null', 'utf8');
+    const result = await discoverPackages(tmpDir);
+    expect(result.get('pkgA')?.packageName).toBe('pkg-a');
+  });
+
   it('skips entries whose stat() throws (e.g. a broken symlink)', async () => {
     symlinkSync(join(tmpDir, 'nonexistent-target'), join(tmpDir, 'broken-link'));
     makePackage(tmpDir, 'valid-pkg', { configKey: 'valid' });
