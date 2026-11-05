@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readApiError } from '@/lib/api-error';
+import { apiErrorMessage, readApiError } from '@/lib/api-error';
 
 function response(body: string, status = 400): Response {
   return new Response(body, { status, headers: { 'content-type': 'application/json' } });
@@ -30,5 +30,48 @@ describe('readApiError', () => {
   it('keeps the readable fields when another field has the wrong type', async () => {
     const res = response(JSON.stringify({ error: { code: 42, detail: 'Bad input.' } }));
     await expect(readApiError(res)).resolves.toEqual({ detail: 'Bad input.' });
+  });
+
+  it('reads the BFF error shape, where error is a label and code and message sit beside it', async () => {
+    const res = response(
+      JSON.stringify({
+        error: 'Unauthorized',
+        code: 'NO_ACTIVE_SESSION',
+        message: 'Sign in again.',
+      }),
+      401,
+    );
+    await expect(readApiError(res)).resolves.toEqual({
+      code: 'NO_ACTIVE_SESSION',
+      message: 'Sign in again.',
+    });
+  });
+});
+
+describe('apiErrorMessage', () => {
+  it('prefers the detail, then the message', async () => {
+    await expect(
+      apiErrorMessage(
+        response(JSON.stringify({ error: { detail: 'd', message: 'm' } })),
+        'fallback',
+      ),
+    ).resolves.toBe('d');
+    await expect(
+      apiErrorMessage(response(JSON.stringify({ error: { detail: 7, message: 'm' } })), 'fallback'),
+    ).resolves.toBe('m');
+  });
+
+  it('uses the BFF message', async () => {
+    const res = response(
+      JSON.stringify({ error: 'ServiceUnavailable', message: 'Try later.' }),
+      503,
+    );
+    await expect(apiErrorMessage(res, 'fallback')).resolves.toBe('Try later.');
+  });
+
+  it('falls back when the body has no readable text', async () => {
+    await expect(apiErrorMessage(response('<html>', 502), 'export failed: 502')).resolves.toBe(
+      'export failed: 502',
+    );
   });
 });

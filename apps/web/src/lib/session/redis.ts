@@ -14,6 +14,7 @@ import {
   type SessionResult,
 } from './interface';
 import { getRedisClient } from './redis-client';
+import { logger } from '../logger';
 
 const KEY_PREFIX = 'session:';
 
@@ -81,22 +82,34 @@ export class RedisSessionStore extends SessionStoreBase {
     try {
       stored = JSON.parse(raw);
     } catch {
-      return {
-        ok: false,
-        error: { code: 'CORRUPT', message: `session ${sid} unparseable` },
-      };
+      return this.discardCorrupt(sid, 'unparseable');
     }
     const session = SessionDataSchema.safeParse(stored);
-    if (!session.success) {
-      return {
-        ok: false,
-        error: { code: 'CORRUPT', message: `session ${sid} has an unexpected shape` },
-      };
-    }
+    if (!session.success) return this.discardCorrupt(sid, 'unexpected shape');
     const parsed = session.data;
     // Slide the TTL; failure is non-fatal.
     void this.redis.expire(KEY_PREFIX + sid, this.ttlSec);
     return { ok: true, value: parsed };
+  }
+
+  /**
+   * Deletes an unreadable session so it is not read again, and logs why.
+   *
+   * Never log the session id: it works as a login credential.
+   *
+   * @param sid - Session ID.
+   * @param reason - Why the session could not be read.
+   */
+  private discardCorrupt(sid: string, reason: string): SessionResult<never> {
+    logger.warn({ operation: 'session.get', status: 'failure', code: 'CORRUPT', reason });
+    this.redis.del(KEY_PREFIX + sid).catch((err: unknown) => {
+      logger.warn({
+        operation: 'session.discard',
+        status: 'failure',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+    return { ok: false, error: { code: 'CORRUPT', message: `session ${reason}` } };
   }
 
   /**

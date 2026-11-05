@@ -27,4 +27,11 @@ describe('parseJsonSchema', () => {
   it('throws when the text is not an object', () => {
     expect(() => parseJsonSchema('[]')).toThrow(/JSON object/);
   });
+
+  it.each([
+    ['{"type":5}', 'a numeric type'],
+    ['{"properties":[]}', 'properties as a list'],
+  ])('throws for %s (%s), which is not a JSON Schema', (text) => {
+    expect(() => parseJsonSchema(text)).toThrow(/JSON Schema/);
+  });
 });

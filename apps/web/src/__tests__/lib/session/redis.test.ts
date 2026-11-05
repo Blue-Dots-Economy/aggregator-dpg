@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RedisSessionStore } from '@/lib/session/redis';
 import { buildSessionData } from '@/lib/session/testing';
+import { logger } from '@/lib/logger';
 
 interface FakeRedis {
   store: Map<string, string>;
@@ -85,6 +86,19 @@ describe('RedisSessionStore', () => {
     const got = await s.get('sid-partial');
     expect(got.ok).toBe(false);
     if (!got.ok) expect(got.error.code).toBe('CORRUPT');
+  });
+
+  it('deletes an unreadable session and logs the code without the session id', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    fake.store.set('session:sid-secret-1', '{not-json');
+    const got = await s.get('sid-secret-1');
+    expect(got.ok).toBe(false);
+    expect(fake.del).toHaveBeenCalledWith('session:sid-secret-1');
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: 'session.get', status: 'failure', code: 'CORRUPT' }),
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('sid-secret-1');
+    warn.mockRestore();
   });
 
   it('drops a malformed console actor cache but keeps the session', async () => {

@@ -22,9 +22,18 @@ export function parseJsonObject(text: string): Record<string, unknown> {
   return parsed.data;
 }
 
-/** Narrows a JSON object to a JSON Schema; RJSF checks the keywords when it renders. */
+/**
+ * The JSON Schema keywords this app reads from a form schema file: `type` and
+ * `properties`. Other keywords are left to RJSF.
+ */
+const JsonSchemaKeywordsSchema = z.object({
+  type: z.union([z.string(), z.array(z.string())]).optional(),
+  properties: z.record(z.unknown()).optional(),
+});
+
+/** Narrows a JSON object to a JSON Schema once its `type` and `properties` have the right form. */
 function isJsonSchema(value: Record<string, unknown>): value is RJSFSchema {
-  return !Array.isArray(value);
+  return JsonSchemaKeywordsSchema.safeParse(value).success;
 }
 
 /**
@@ -33,10 +42,10 @@ function isJsonSchema(value: Record<string, unknown>): value is RJSFSchema {
  * @param text - The JSON text.
  * @returns The schema.
  * @throws {SyntaxError} When the text is not JSON.
- * @throws {Error} When the JSON value is not an object.
+ * @throws {Error} When the JSON value is not an object, or its `type` or `properties` has the wrong form.
  */
 export function parseJsonSchema(text: string): RJSFSchema {
   const value = parseJsonObject(text);
-  if (!isJsonSchema(value)) throw new Error('expected a JSON object');
+  if (!isJsonSchema(value)) throw new Error('expected a JSON Schema object');
   return value;
 }
