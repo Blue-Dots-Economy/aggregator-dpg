@@ -235,7 +235,7 @@ export function registerAggregatorOrgRoutes(base: FastifyInstance): void {
       const idp = getIdpAdmin();
       const ownerEmail = body.owner.email.toLowerCase();
       // Looked up before any write, so a failure here leaves nothing half created.
-      const reviewers = await orgReviewRecipients(body.parent_id ?? null);
+      const reviewers = await orgReviewRecipients(body.parent_id ?? null, log);
 
       // Re-sends the review link for an existing pending or revived org.
       // The row, the Keycloak owner and the group are reused unchanged.

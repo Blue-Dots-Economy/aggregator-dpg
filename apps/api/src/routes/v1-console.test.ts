@@ -1157,6 +1157,7 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(res.statusCode).toBe(200);
       expect(await knownAsOf(ORG_B)).toEqual(['block', 'Block']);
       expect(await knownAsOf(ORG_P)).toEqual(['ward', 'Ward']);
+      expect(res.json()).toMatchObject({ reset_count: 1 });
       expect(mailer.outbox).toHaveLength(0);
     });
 
