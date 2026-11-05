@@ -79,6 +79,28 @@ describe('RedisSessionStore', () => {
     if (!got.ok) expect(got.error.code).toBe('CORRUPT');
   });
 
+  it('returns CORRUPT when a stored session lacks its tokens', async () => {
+    const { accessToken: _missing, ...partial } = buildSessionData();
+    fake.store.set('session:sid-partial', JSON.stringify(partial));
+    const got = await s.get('sid-partial');
+    expect(got.ok).toBe(false);
+    if (!got.ok) expect(got.error.code).toBe('CORRUPT');
+  });
+
+  it('drops a malformed console actor cache but keeps the session', async () => {
+    const session = {
+      ...buildSessionData({ sub: 'kc-user-2' }),
+      consoleActor: { me: 'stale', at: 'x' },
+    };
+    fake.store.set('session:sid-actor', JSON.stringify(session));
+    const got = await s.get('sid-actor');
+    expect(got.ok).toBe(true);
+    if (got.ok) {
+      expect(got.value.sub).toBe('kc-user-2');
+      expect(got.value.consoleActor).toBeUndefined();
+    }
+  });
+
   it('returns STORE_UNAVAILABLE on Redis failure', async () => {
     fake.get.mockRejectedValueOnce(new Error('connection refused'));
     const got = await s.get('any');

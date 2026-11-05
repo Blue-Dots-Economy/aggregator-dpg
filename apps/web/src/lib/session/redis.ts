@@ -7,7 +7,12 @@
 
 import { randomUUID } from 'node:crypto';
 import type Redis from 'ioredis';
-import { SessionStoreBase, type SessionData, type SessionResult } from './interface';
+import {
+  SessionDataSchema,
+  SessionStoreBase,
+  type SessionData,
+  type SessionResult,
+} from './interface';
 import { getRedisClient } from './redis-client';
 
 const KEY_PREFIX = 'session:';
@@ -72,15 +77,23 @@ export class RedisSessionStore extends SessionStoreBase {
         error: { code: 'NOT_FOUND', message: `session ${sid} not found` },
       };
     }
-    let parsed: SessionData;
+    let stored: unknown;
     try {
-      parsed = JSON.parse(raw) as SessionData;
+      stored = JSON.parse(raw);
     } catch {
       return {
         ok: false,
         error: { code: 'CORRUPT', message: `session ${sid} unparseable` },
       };
     }
+    const session = SessionDataSchema.safeParse(stored);
+    if (!session.success) {
+      return {
+        ok: false,
+        error: { code: 'CORRUPT', message: `session ${sid} has an unexpected shape` },
+      };
+    }
+    const parsed = session.data;
     // Slide the TTL; failure is non-fatal.
     void this.redis.expire(KEY_PREFIX + sid, this.ttlSec);
     return { ok: true, value: parsed };

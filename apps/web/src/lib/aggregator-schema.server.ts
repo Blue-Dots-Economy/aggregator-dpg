@@ -8,6 +8,7 @@
  */
 
 import 'server-only';
+import { parseJsonObject, parseJsonSchema } from './json-object';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -91,8 +92,8 @@ export async function loadRegistrationSchema(): Promise<AggregatorSchemaPair> {
     readFile(resolveAggregatorSchemaPath('registration.v1.json'), 'utf8'),
     readFile(resolveAggregatorSchemaPath('registration.v1.ui.json'), 'utf8'),
   ]);
-  const schema = JSON.parse(schemaRaw) as RJSFSchema;
-  const uiSchema = JSON.parse(uiSchemaRaw) as Record<string, unknown>;
+  const schema = parseJsonSchema(schemaRaw);
+  const uiSchema = parseJsonObject(uiSchemaRaw);
   await patchTypeFromNetwork(schema, uiSchema);
   return { schema, uiSchema };
 }

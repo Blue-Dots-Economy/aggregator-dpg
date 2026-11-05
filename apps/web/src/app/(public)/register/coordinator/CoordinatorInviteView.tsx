@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, type JSX } from 'react';
+import { z } from 'zod';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
@@ -20,11 +21,13 @@ export interface CoordinatorInviteViewProps {
   aggregatorConsentContent?: ConsentDocContent | null;
 }
 
-interface InviteClaims {
-  org: string;
-  email: string;
-  exp: number;
-}
+/** The invite claims this page shows. `exp` is 0 when missing or not a number. */
+const InviteClaimsSchema = z.object({
+  org: z.string(),
+  email: z.string(),
+  exp: z.unknown().transform((exp) => Number(exp) || 0),
+});
+type InviteClaims = z.infer<typeof InviteClaimsSchema>;
 
 /**
  * Decodes a JWT payload without verifying it, for display only.
@@ -40,9 +43,8 @@ function decodeInviteClaims(token: string): InviteClaims | null {
     if (!part) return null;
     const b64 = part.replaceAll('-', '+').replaceAll('_', '/');
     const json = atob(b64.padEnd(Math.ceil(b64.length / 4) * 4, '='));
-    const claims = JSON.parse(json) as Partial<InviteClaims>;
-    if (typeof claims.org !== 'string' || typeof claims.email !== 'string') return null;
-    return { org: claims.org, email: claims.email, exp: Number(claims.exp) || 0 };
+    const claims = InviteClaimsSchema.safeParse(JSON.parse(json));
+    return claims.success ? claims.data : null;
   } catch {
     return null;
   }
