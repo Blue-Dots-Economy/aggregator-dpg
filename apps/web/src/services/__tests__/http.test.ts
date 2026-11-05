@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { jsonFetch } from '../http';
+import { z } from 'zod';
+import { ResponseShapeError, jsonFetch } from '../http';
+
+const HelloSchema = z.object({ hello: z.string() });
+const AnySchema = z.unknown();
 
 describe('jsonFetch', () => {
   const origFetch = globalThis.fetch;
@@ -31,7 +35,7 @@ describe('jsonFetch', () => {
     );
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const data = await jsonFetch<{ hello: string }>('/api/thing');
+    const data = await jsonFetch('/api/thing', HelloSchema);
     expect(data).toEqual({ hello: 'world' });
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(init.credentials).toBe('include');
@@ -43,7 +47,7 @@ describe('jsonFetch', () => {
   it('preserves caller-supplied headers alongside the defaults', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
-    await jsonFetch('/api/thing', { headers: { 'X-Custom': 'abc' } });
+    await jsonFetch('/api/thing', AnySchema, { headers: { 'X-Custom': 'abc' } });
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const headers = init.headers as Record<string, string>;
     expect(headers['X-Custom']).toBe('abc');
@@ -57,7 +61,7 @@ describe('jsonFetch', () => {
       ) as unknown as typeof fetch;
     // CI on Node 24 / JSDOM 25 sometimes empties template-string error
     // messages; assert that the call throws rather than match the text.
-    await expect(jsonFetch('/api/thing')).rejects.toThrow();
+    await expect(jsonFetch('/api/thing', AnySchema)).rejects.toThrow();
   });
 
   it('force-logs-out on a 401 NO_ACTIVE_SESSION body and throws session expired', async () => {
@@ -66,7 +70,7 @@ describe('jsonFetch', () => {
       .mockResolvedValue(
         new Response(JSON.stringify({ code: 'NO_ACTIVE_SESSION' }), { status: 401 }),
       ) as unknown as typeof fetch;
-    await expect(jsonFetch('/api/thing')).rejects.toThrow();
+    await expect(jsonFetch('/api/thing', AnySchema)).rejects.toThrow();
     expect(window.location.href).toContain('/api/auth/logout?reason=expired');
   });
 
@@ -76,7 +80,7 @@ describe('jsonFetch', () => {
       .mockResolvedValue(
         new Response(JSON.stringify({ error: 'nope' }), { status: 401 }),
       ) as unknown as typeof fetch;
-    await expect(jsonFetch('/api/thing')).rejects.toThrow();
+    await expect(jsonFetch('/api/thing', AnySchema)).rejects.toThrow();
     expect(window.location.href).toBe('');
   });
 
@@ -84,7 +88,7 @@ describe('jsonFetch', () => {
     globalThis.fetch = vi
       .fn()
       .mockResolvedValue(new Response('not json', { status: 401 })) as unknown as typeof fetch;
-    await expect(jsonFetch('/api/thing')).rejects.toThrow();
+    await expect(jsonFetch('/api/thing', AnySchema)).rejects.toThrow();
   });
 
   it('skips the forced logout when already on the login/auth flow', async () => {
@@ -98,7 +102,35 @@ describe('jsonFetch', () => {
       .mockResolvedValue(
         new Response(JSON.stringify({ code: 'NO_ACTIVE_SESSION' }), { status: 401 }),
       ) as unknown as typeof fetch;
-    await expect(jsonFetch('/api/thing')).rejects.toThrow();
+    await expect(jsonFetch('/api/thing', AnySchema)).rejects.toThrow();
     expect(window.location.href).toBe('');
+  });
+
+  it('drops fields the schema does not declare', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ hello: 'world', extra: 1 }), { status: 200 }),
+      ) as unknown as typeof fetch;
+    await expect(jsonFetch('/api/thing', HelloSchema)).resolves.toEqual({ hello: 'world' });
+  });
+
+  it('throws ResponseShapeError when a required field is missing', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ other: 1 }), { status: 200 }),
+      ) as unknown as typeof fetch;
+    const err = await jsonFetch('/api/thing', HelloSchema).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ResponseShapeError);
+    expect(err).toMatchObject({ url: '/api/thing' });
+    expect(err instanceof ResponseShapeError && err.issues[0]?.path).toEqual(['hello']);
+  });
+
+  it('throws ResponseShapeError when an OK body is not JSON', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response('<html>', { status: 200 })) as unknown as typeof fetch;
+    await expect(jsonFetch('/api/thing', HelloSchema)).rejects.toBeInstanceOf(ResponseShapeError);
   });
 });

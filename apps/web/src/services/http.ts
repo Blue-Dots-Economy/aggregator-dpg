@@ -5,21 +5,31 @@
  * user out on a 401 `NO_ACTIVE_SESSION` response (see `lib/bff-errors.ts`).
  */
 
+import { z } from 'zod';
+
 let redirecting = false;
 
-interface UnauthorizedBody {
-  error?: unknown;
-  code?: unknown;
-}
+/** The 401 body that `bff-errors.ts` sends when the session has expired. */
+const SessionExpiredBodySchema = z.object({ code: z.literal('NO_ACTIVE_SESSION') });
 
 /**
- * Returns true when the response body matches the standard
- * `NO_ACTIVE_SESSION` shape from `bff-errors.ts`.
+ * Thrown when an OK response body is not JSON or does not match the expected schema.
+ *
+ * TanStack Query surfaces it as the query's error state.
  */
-function isSessionExpired(body: unknown): body is UnauthorizedBody {
-  if (!body || typeof body !== 'object') return false;
-  const code = (body as UnauthorizedBody).code;
-  return code === 'NO_ACTIVE_SESSION';
+export class ResponseShapeError extends Error {
+  override readonly name = 'ResponseShapeError';
+
+  /**
+   * @param url - The request URL.
+   * @param issues - The schema issues; empty when the body was not JSON.
+   */
+  constructor(
+    readonly url: string,
+    readonly issues: z.ZodIssue[],
+  ) {
+    super(`unexpected response shape from ${url}`);
+  }
 }
 
 /** Redirects to logout. Runs once per page, even with concurrent 401s. */
@@ -38,16 +48,23 @@ function forceLogout(): void {
 }
 
 /**
- * Fetches a BFF endpoint and parses the JSON response.
+ * Fetches a BFF endpoint and parses the JSON response with `schema`.
  *
- * Redirects to logout when the server reports `NO_ACTIVE_SESSION`.
+ * Redirects to logout when the server reports `NO_ACTIVE_SESSION`. Fields the
+ * schema does not declare are dropped.
  *
  * @param input - The request URL or object.
+ * @param schema - The expected shape of an OK response body.
  * @param init - Extra fetch options; headers are merged.
- * @returns The parsed JSON body.
+ * @returns The parsed body.
  * @throws {Error} When the response is not OK, with the status and body text.
+ * @throws {ResponseShapeError} When an OK body is not JSON or does not match `schema`.
  */
-export async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+export async function jsonFetch<S extends z.ZodTypeAny>(
+  input: RequestInfo,
+  schema: S,
+  init?: RequestInit,
+): Promise<z.output<S>> {
   const res = await fetch(input, {
     ...init,
     headers: {
@@ -60,11 +77,11 @@ export async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Prom
 
   if (res.status === 401) {
     // Log out only for the session-expired body; other 401s fall through as errors.
-    const body = (await res
+    const body: unknown = await res
       .clone()
       .json()
-      .catch(() => null)) as unknown;
-    if (isSessionExpired(body)) {
+      .catch(() => null);
+    if (SessionExpiredBodySchema.safeParse(body).success) {
       forceLogout();
       throw new Error('session expired');
     }
@@ -75,5 +92,14 @@ export async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Prom
     throw new Error(`request failed (${res.status}): ${text || res.statusText}`);
   }
 
-  return (await res.json()) as T;
+  const url = typeof input === 'string' ? input : input.url;
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    throw new ResponseShapeError(url, []);
+  }
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new ResponseShapeError(url, parsed.error.issues);
+  return parsed.data;
 }
