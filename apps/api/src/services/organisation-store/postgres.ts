@@ -76,7 +76,7 @@ import {
   type TreeNode,
   type TreeRefusal,
 } from './tree.js';
-import { toError } from '@aggregator-dpg/shared-primitives/errors';
+import { errorType, toError } from '@aggregator-dpg/shared-primitives/errors';
 
 /** Wraps a failure of the caller's `recordConsent` hook so `create` can tell it apart. */
 class ConsentHookError extends Error {
@@ -175,7 +175,7 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
           operation: 'orgStore.create',
           status: 'failure',
           error: 'CONSENT_WRITE_FAILED',
-          error_type: e.cause instanceof Error ? e.cause.name : 'unknown',
+          error_type: errorType(e.cause),
           latency_ms: Date.now() - start,
         });
         return errResult('CONSENT_WRITE_FAILED', 'consent could not be recorded');
