@@ -777,7 +777,6 @@
       "col_status": "Status",
       "col_counts": "[[Users]]",
       "col_actions": "Actions",
-      "depth": "Depth {depth}",
       "hierarchy": "Hierarchy settings",
       "col_parent": "Parent [[org]]",
       "subtitle_owner": "Your [[orgs]] and the [[orgs]] directly under them, and registrations waiting for your approval.",
@@ -788,7 +787,7 @@
       "tile": {
         "all": {
           "label": "ಎಲ್ಲಾ [[org]]ಗಳು",
-          "sub": "ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ, ಡೀಫಾಲ್ಟ್ ಎಣಿಸಿಲ್ಲ"
+          "sub": "ನೇರವಾಗಿ ನೆಟ್‌ವರ್ಕ್‌ನ ಅಡಿಯಲ್ಲಿ, ಡೀಫಾಲ್ಟ್ ಎಣಿಸಿಲ್ಲ"
         },
         "active": {
           "label": "ಸಕ್ರಿಯ",
