@@ -46,7 +46,9 @@ vi.mock('@/components/console/KnownAsPicker', () => ({
 vi.mock('@/components/console/OrgMoveDialog', () => ({ OrgMoveDialog: () => null }));
 vi.mock('@/components/console/ChildOrgsTree', () => ({ ChildOrgsTree: () => null }));
 vi.mock('@/components/console/RolesPanel', () => ({ RolesPanel: () => null }));
-vi.mock('@/components/console/OwnerAccessRepair', () => ({ OwnerAccessRepair: () => null }));
+vi.mock('@/components/console/OwnerAccessRepair', () => ({
+  OwnerAccessRepair: () => <div data-testid="owner-access-repair" />,
+}));
 vi.mock('@/components/console/CopyButton', () => ({ CopyButton: () => null }));
 vi.mock('@/components/console/OrgsTable', () => ({
   OrgsTable: ({ orgs }: { orgs: Array<{ id: string }> }) => (
@@ -109,8 +111,6 @@ interface PageOptions {
   viewerOrgId?: string;
   /** The parent block; null when the viewer does not own the parent. */
   parent?: OrgReadResponse['org']['parent'];
-  /** The org's own list; null when it cannot have child orgs. */
-  knownAsValues?: OrgReadResponse['org']['known_as_values'];
 }
 
 function mockPage(target: OrgReadResponse['org'], viewerId = 'owner', opts: PageOptions = {}) {
@@ -119,15 +119,10 @@ function mockPage(target: OrgReadResponse['org'], viewerId = 'owner', opts: Page
     me: me(viewerId, opts.viewerOrgId),
   } as never);
   vi.mocked(consoleRead).mockImplementation(async (path: string) => {
-    // The page asks for both lists in its one read.
-    if (path === `/v1/org/read/${ORG_ID}?fields=known_as_values,parent.known_as_values`) {
+    if (path === `/v1/org/read/${ORG_ID}?fields=parent.known_as_values`) {
       return {
         org: {
           ...target,
-          known_as_values:
-            opts.knownAsValues === undefined
-              ? [{ key: 'block', name: 'Block' }]
-              : opts.knownAsValues,
           parent: opts.parent ?? null,
         },
         owner: { id: 'owner', contact: { name: null, email: 'owner@a.org', phone: null } },
@@ -150,34 +145,15 @@ const show = async () =>
     </NextIntlClientProvider>,
   );
 
-describe('console org detail — child "known as" editor', () => {
+describe('console org detail — child organisations', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('shows the editor to the owner of an active organisation', async () => {
+  it('leaves the "known as" values editor and the child list to the organisations page', async () => {
     mockPage(org());
     await show();
-    expect(screen.getByTestId('known-as-values-editor')).toBeInTheDocument();
-  });
-
-  it.each(['pending', 'inactive'] as const)(
-    'hides the editor on a %s organisation',
-    async (status) => {
-      mockPage(org({ status }));
-      await show();
-      expect(screen.queryByTestId('known-as-values-editor')).toBeNull();
-    },
-  );
-
-  it('hides the editor from a viewer who is not the owner', async () => {
-    mockPage(org(), 'someone-else');
-    await show();
     expect(screen.queryByTestId('known-as-values-editor')).toBeNull();
-  });
-
-  it('hides the editor when the organisation cannot have child organisations', async () => {
-    mockPage(org(), 'owner', { knownAsValues: null });
-    await show();
-    expect(screen.queryByTestId('known-as-values-editor')).toBeNull();
+    expect(screen.queryByRole('heading', { name: /child/i })).toBeNull();
+    expect(consoleRead).not.toHaveBeenCalledWith('/v1/org/search', expect.anything());
   });
 });
 
@@ -257,5 +233,32 @@ describe('console org detail — "known as" picker', () => {
     await show();
     expect(screen.queryByTestId('known-as-picker')).toBeNull();
     expect(screen.getByTestId('org-edit-form')).toHaveAttribute('data-known-as-picked', 'false');
+  });
+});
+
+describe('console org detail — repair owner access', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const PARENT = { id: 'parent', name: 'Parent', known_as_values: [] };
+
+  it("offers repair to the parent's owner on an active child", async () => {
+    mockPage(org({ depth: 2 }), 'parent-owner', { viewerOrgId: 'parent', parent: PARENT });
+    await show();
+    expect(screen.getByTestId('owner-access-repair')).toBeInTheDocument();
+  });
+
+  it("does not offer repair to the org's own owner", async () => {
+    mockPage(org());
+    await show();
+    expect(screen.queryByTestId('owner-access-repair')).not.toBeInTheDocument();
+  });
+
+  it('does not offer repair on a pending child', async () => {
+    mockPage(org({ depth: 2, status: 'pending' }), 'parent-owner', {
+      viewerOrgId: 'parent',
+      parent: PARENT,
+    });
+    await show();
+    expect(screen.queryByTestId('owner-access-repair')).not.toBeInTheDocument();
   });
 });

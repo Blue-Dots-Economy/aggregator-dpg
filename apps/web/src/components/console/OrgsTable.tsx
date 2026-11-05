@@ -4,8 +4,7 @@
  * A list of organisations awaiting their parent's decision, for the network
  * admin and for org owners. Each name opens the organisation, and a pending
  * org is approved or rejected in place; a rejection asks for a reason, which
- * is sent to the applicant. The page then refreshes so the hierarchy settings
- * and the tree follow. A 409 ALREADY_DECIDED response updates the row in
+ * is sent to the applicant. The page then refreshes so the lists follow. A 409 ALREADY_DECIDED response updates the row in
  * place. Owner access is repaired on the organisation's page.
  */
 
