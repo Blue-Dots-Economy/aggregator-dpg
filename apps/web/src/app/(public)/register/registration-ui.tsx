@@ -38,19 +38,32 @@ export interface RegistrationFormState {
 /**
  * Holds the submit state, the validity flag, and the error banner ref.
  *
- * On failure the error banner is scrolled into view and focused.
+ * On failure the first field with an error is scrolled into view and focused;
+ * an error with no field (a server error, a parent not chosen) goes to the
+ * error banner instead.
  *
  * @returns The form state handles.
  */
+/**
+ * The input of the first field the form marked with an error, in page order.
+ * RJSF gives a field's error list the field's id plus `__error`.
+ */
+function firstInvalidField(): HTMLElement | null {
+  const error = document.querySelector<HTMLElement>('[id$="__error"]');
+  if (!error) return null;
+  return document.getElementById(error.id.slice(0, -'__error'.length)) ?? error;
+}
+
 export function useRegistrationFormState(): RegistrationFormState {
   const [state, setState] = useState<SubmitState>({ status: 'idle' });
   const [canSubmit, setCanSubmit] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (state.status === 'error' && errorRef.current) {
-      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      errorRef.current.focus();
-    }
+    if (state.status !== 'error') return;
+    const target = (state.code === 'CLIENT_VALIDATION' && firstInvalidField()) || errorRef.current;
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.focus({ preventScroll: true });
   }, [state]);
   return { state, setState, canSubmit, setCanSubmit, errorRef };
 }

@@ -49,6 +49,31 @@ describe('useRegistrationFormState', () => {
     rerender();
     expect(result.current.state.status).toBe('error');
   });
+
+  it('moves to the first field with an error on a form check, not to the banner', () => {
+    document.body.innerHTML = `
+      <input id="root_name" /><ul id="root_name__error"></ul>
+      <input id="root_email" /><ul id="root_email__error"></ul>`;
+    const scrolled: string[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.id);
+    };
+    const { result } = renderHook(() => useRegistrationFormState());
+    const banner = document.createElement('div');
+    Object.defineProperty(result.current.errorRef, 'current', { value: banner, writable: true });
+    act(() => {
+      result.current.setState({
+        status: 'error',
+        title: 'Please fix the highlighted fields',
+        detail: '',
+        code: 'CLIENT_VALIDATION',
+        requestId: '',
+      });
+    });
+    expect(scrolled).toEqual(['root_name']);
+    expect(document.activeElement?.id).toBe('root_name');
+    document.body.innerHTML = '';
+  });
 });
 
 describe('RegistrationSubmitButton', () => {
