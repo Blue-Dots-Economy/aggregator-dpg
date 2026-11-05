@@ -101,15 +101,16 @@ export const BulkUploadCreateResponseSchema = z.object({
 });
 export type BulkUploadCreateResponse = z.infer<typeof BulkUploadCreateResponseSchema>;
 
-export const BulkUploadStatusSchema = z.object({
+/** Row outcome counts of a bulk upload; `total_rows` is null until the file is parsed. */
+const UploadRowCountsSchema = OutcomeCountsSchema.omit({ total: true }).extend({
+  total_rows: z.number().nullable(),
+});
+
+export const BulkUploadStatusSchema = UploadRowCountsSchema.extend({
   upload_id: z.string(),
   status: z.string(),
   status_reason: z.string().nullable(),
   participant_type: z.string(),
-  total_rows: z.number().nullable(),
-  passed: z.number(),
-  failed: z.number(),
-  skipped: z.number(),
   errors_csv_s3_key: z.string().nullable(),
   schema_id: z.string(),
   schema_version: z.string(),
@@ -139,9 +140,15 @@ export const BulkUploadErrorsResponseSchema = z.object({
   s3_key: z.string(),
   expires_at: z.string(),
   content_type: z.string(),
-  counts: OutcomeCountsSchema.omit({ total: true }).extend({ total_rows: z.number().nullable() }),
+  counts: UploadRowCountsSchema,
 });
 export type BulkUploadErrorsResponse = z.infer<typeof BulkUploadErrorsResponseSchema>;
+
+/** Appends `params` as a query string when there are any. */
+function withQuery(path: string, params: URLSearchParams): string {
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
+}
 
 export const onboardingService = {
   async listLinks(
@@ -156,8 +163,7 @@ export const onboardingService = {
     if (opts.status) params.set('status', opts.status);
     if (opts.limit) params.set('limit', String(opts.limit));
     if (opts.offset) params.set('offset', String(opts.offset));
-    const qs = params.toString();
-    const data = await jsonFetch(`/api/links${qs ? `?${qs}` : ''}`, ListLinksResponseSchema);
+    const data = await jsonFetch(withQuery('/api/links', params), ListLinksResponseSchema);
     if (opts.domain) {
       return { ...data, items: data.items.filter((it) => it.domain === opts.domain) };
     }
@@ -194,16 +200,14 @@ export const onboardingService = {
     const params = new URLSearchParams();
     if (opts.from) params.set('from', opts.from);
     if (opts.to) params.set('to', opts.to);
-    const qs = params.toString();
-    return jsonFetch(`/api/onboarding/summary${qs ? `?${qs}` : ''}`, OnboardingSummarySchema);
+    return jsonFetch(withQuery('/api/onboarding/summary', params), OnboardingSummarySchema);
   },
 
   async bySource(opts: { from?: string; to?: string } = {}): Promise<OnboardingBySource> {
     const params = new URLSearchParams();
     if (opts.from) params.set('from', opts.from);
     if (opts.to) params.set('to', opts.to);
-    const qs = params.toString();
-    return jsonFetch(`/api/onboarding/by-source${qs ? `?${qs}` : ''}`, OnboardingBySourceSchema);
+    return jsonFetch(withQuery('/api/onboarding/by-source', params), OnboardingBySourceSchema);
   },
 
   async createBulkUpload(participantType: string): Promise<BulkUploadCreateResponse> {
@@ -233,8 +237,7 @@ export const onboardingService = {
     const params = new URLSearchParams();
     if (opts.limit) params.set('limit', String(opts.limit));
     if (opts.offset) params.set('offset', String(opts.offset));
-    const qs = params.toString();
-    return jsonFetch(`/api/bulk-uploads/list${qs ? `?${qs}` : ''}`, BulkUploadListSchema);
+    return jsonFetch(withQuery('/api/bulk-uploads/list', params), BulkUploadListSchema);
   },
 
   async errorsCsvUrl(uploadId: string): Promise<BulkUploadErrorsResponse> {
