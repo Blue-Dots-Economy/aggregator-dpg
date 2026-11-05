@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PRE_TRAIN_WHEN, type JournalEntry } from '../../db/migrate-core.js';
-import { upgradeLevel } from '../instance-upgrade-logic.js';
+import { errorField, upgradeLevel } from '../instance-upgrade-logic.js';
 
 const LATEST = 1791500000000;
 const journal: JournalEntry[] = [
@@ -51,5 +51,29 @@ describe('upgradeLevel', () => {
 
   it('decides by the high-water mark, not the order of the rows', () => {
     expect(upgradeLevel(journal, [row(PRE_TRAIN_WHEN), row(1700000000000)]).state).toBe('start');
+  });
+});
+
+describe('errorField', () => {
+  it('reads a string field of a driver error', () => {
+    const err = Object.assign(new Error('boom'), { code: '23505', constraint: 'users_pk' });
+    expect(errorField(err, 'code')).toBe('23505');
+    expect(errorField(err, 'constraint')).toBe('users_pk');
+    expect(errorField(err, 'message')).toBe('boom');
+  });
+
+  it('reads the inherited name of an Error', () => {
+    expect(errorField(new TypeError('x'), 'name')).toBe('TypeError');
+  });
+
+  it('answers undefined for a missing or non-string field', () => {
+    expect(errorField(new Error('x'), 'table')).toBeUndefined();
+    expect(errorField({ code: 42 }, 'code')).toBeUndefined();
+  });
+
+  it('answers undefined for a value that is not an object', () => {
+    expect(errorField('boom', 'code')).toBeUndefined();
+    expect(errorField(null, 'code')).toBeUndefined();
+    expect(errorField(undefined, 'name')).toBeUndefined();
   });
 });

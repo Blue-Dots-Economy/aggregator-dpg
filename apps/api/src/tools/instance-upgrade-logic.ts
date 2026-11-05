@@ -50,3 +50,21 @@ export function upgradeLevel(
   else if (appliedTag !== null && highWater > PRE_TRAIN_WHEN) state = 'partial';
   return { state, appliedTag, pending };
 }
+
+/** Fields of a caught error that the upgrade tool prints or logs. */
+export type ErrorFieldName = 'code' | 'constraint' | 'table' | 'message' | 'name';
+
+/**
+ * String field of a caught error, such as a pg driver error's SQLSTATE `code`.
+ *
+ * Reads only the error itself, not its `cause` chain.
+ *
+ * @param err - Any value from a `catch` clause.
+ * @param key - The field to read.
+ * @returns The field when it is a string; otherwise `undefined`.
+ */
+export function errorField(err: unknown, key: ErrorFieldName): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const value: unknown = Reflect.get(err, key);
+  return typeof value === 'string' ? value : undefined;
+}
