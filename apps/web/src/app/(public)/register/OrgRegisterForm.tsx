@@ -266,6 +266,10 @@ export function OrgRegisterForm({
           consentContent,
           onLocationResolved: setResolvedPlace,
           validationErrorTitle: t('validation_error_title'),
+          personName: {
+            path: 'owner.name',
+            message: (symbols) => t('name_symbols', { symbols }),
+          },
         })}
         customValidate={customValidate}
         transformErrors={(errors) => readableFormErrors(errors, formSchema)}
@@ -274,7 +278,8 @@ export function OrgRegisterForm({
             shows each field's message, so the owner sees what to fix. */}
         <RegistrationSubmitButton
           submitting={state.status === 'submitting'}
-          canSubmit={parentReady}
+          // Never disabled for an invalid field: a click shows what to fix.
+          canSubmit={parentsQuery.data !== undefined}
           label={t('org_submit')}
           submittingLabel={t('submitting')}
         />

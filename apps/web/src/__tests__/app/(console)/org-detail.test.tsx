@@ -65,7 +65,7 @@ import { consoleRead } from '@/lib/console-api.server';
 
 type Org = OrgReadResponse['org'];
 
-const ORG_ID = 'o1';
+const ORG_ID = '00000000-0000-4000-8000-000000000001';
 
 const org = (over: Partial<Org> = {}): Org =>
   ({
@@ -144,6 +144,17 @@ const show = async () =>
       {await ConsoleOrgPage({ params: Promise.resolve({ id: ORG_ID }) })}
     </NextIntlClientProvider>,
   );
+
+describe('console org detail — address', () => {
+  it('answers not found for an id that is not a UUID, without reading the org', async () => {
+    vi.mocked(getConsoleActor).mockResolvedValue({ ok: true, me: me('owner') } as never);
+    vi.mocked(consoleRead).mockClear();
+    await expect(
+      ConsoleOrgPage({ params: Promise.resolve({ id: 'not-an-id' }) }),
+    ).rejects.toThrow();
+    expect(consoleRead).not.toHaveBeenCalled();
+  });
+});
 
 describe('console org detail — child organisations', () => {
   beforeEach(() => vi.clearAllMocks());

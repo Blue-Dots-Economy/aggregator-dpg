@@ -14,6 +14,7 @@
  */
 
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import { getFormatter, getTranslations } from 'next-intl/server';
 import { Building2, CalendarDays, Clock, Layers, Network, Users } from 'lucide-react';
 import type {
@@ -22,6 +23,7 @@ import type {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
+import { isUuid } from '@/lib/console-proxy';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
 import { BackLink, ConsoleSection, ConsoleStatusPill } from '@/components/console/ConsoleUi';
@@ -45,6 +47,8 @@ export default async function ConsoleOrgPage({
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   const { id } = await params;
+  // Ids are UUIDs; anything else cannot exist, so it is a missing page, not an error.
+  if (!isUuid(id)) notFound();
   const data = await consoleRead<OrgReadResponse>(
     `/v1/org/read/${encodeURIComponent(id)}?fields=parent.known_as_values`,
   );
@@ -80,7 +84,9 @@ export default async function ConsoleOrgPage({
           right={
             org.org_type === 'aggregator' ? (
               <>
-                {canMove && hierarchy ? <OrgMoveDialog orgId={org.id} orgName={org.name} /> : null}
+                {canMove && hierarchy ? (
+                  <OrgMoveDialog orgId={org.id} orgName={org.name} parentId={org.parent_id} />
+                ) : null}
                 {showUsers ? (
                   <Link
                     className={buttonClass('soft')}

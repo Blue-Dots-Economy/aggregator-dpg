@@ -365,12 +365,12 @@ describe('<OrgRegisterForm />', () => {
       expect(screen.queryByText(/will be known as/)).toBeNull();
     });
 
-    it('keeps submit disabled until a parent is picked', () => {
+    it('keeps submit clickable before a parent is picked, so a click can say what is missing', () => {
       originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn() as unknown as typeof fetch;
       renderForm();
       const submit = screen.getByRole('button', { name: messages.register.org_submit });
-      expect(submit).toBeDisabled();
+      expect(submit).toBeEnabled();
     });
 
     it('refuses a submit without a parent: error shown, no gate, nothing posted', async () => {
