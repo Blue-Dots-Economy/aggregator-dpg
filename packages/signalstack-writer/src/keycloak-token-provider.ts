@@ -13,6 +13,7 @@ import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import { SignalStackTokenProviderBase } from './interface.js';
 import { responseIssues } from './signals-responses.js';
+import { isTimeout } from './thrown.js';
 
 const REFRESH_LEAD_MS = 30_000;
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -43,29 +44,6 @@ const TokenResponseSchema = z.object({
 interface CachedToken {
   accessToken: string;
   expiresAt: number;
-}
-
-/**
- * True when a thrown fetch error is a timeout or abort, not a connection failure.
- *
- * Matches `TimeoutError` (from `AbortSignal.timeout()`) and `AbortError`
- * (from `AbortController.abort()`), on the error or its `cause`.
- *
- * @param e - The value thrown by `fetch`.
- * @returns `true` when the failure was a timeout/abort.
- */
-function _isTimeout(e: unknown): boolean {
-  const names = new Set(['TimeoutError', 'AbortError']);
-  const outer = _nameOf(e);
-  const inner = typeof e === 'object' && e !== null && 'cause' in e ? _nameOf(e.cause) : undefined;
-  return (!!outer && names.has(outer)) || (!!inner && names.has(inner));
-}
-
-/** Reads a string `name` from a thrown value, if it has one. */
-function _nameOf(v: unknown): string | undefined {
-  return typeof v === 'object' && v !== null && 'name' in v && typeof v.name === 'string'
-    ? v.name
-    : undefined;
 }
 
 export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProviderBase {
@@ -167,7 +145,7 @@ export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProv
       return ok(this.cached.accessToken);
     } catch (e) {
       const cause = toError(e);
-      const timedOut = _isTimeout(e);
+      const timedOut = isTimeout(e);
       return err(
         new UpstreamError(
           timedOut

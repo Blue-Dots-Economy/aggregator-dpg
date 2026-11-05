@@ -12,8 +12,8 @@
 import { z } from 'zod';
 
 /**
- * One item in the onboard and probe responses. Each field is optional
- * because the writer checks the one item it picks and ignores the rest.
+ * One item in the probe response. Each field is optional because the writer
+ * checks the one item it picks and ignores the rest.
  */
 const ParticipantItemSchema = z.object({
   item_id: z.string().optional(),
@@ -23,13 +23,32 @@ const ParticipantItemSchema = z.object({
   lifecycle_status: z.string().nullish(),
 });
 
-/** Response from `POST /api/v1/admin/participant` (onboard). */
+/**
+ * Response from `POST /api/v1/admin/participant` (onboard).
+ *
+ * Items are not checked here. Signals has already written the participant
+ * when this reply arrives, and onboard is not safe to retry, so only the
+ * item chosen for the request is checked, with {@link OnboardItemSchema}.
+ */
 export const OnboardResponseSchema = z.object({
   user_id: z.string(),
   user_existed: z.boolean().optional(),
   owned_elsewhere: z.boolean().optional(),
   onboarded_at: z.string().nullish(),
-  items: z.array(ParticipantItemSchema).optional(),
+  items: z.array(z.unknown()).optional(),
+});
+
+/** The fields used to pick the onboard item that matches the request. */
+export const OnboardItemIdentitySchema = z.object({
+  item_network: z.string(),
+  item_domain: z.string(),
+  item_type: z.string(),
+});
+
+/** The onboard item chosen for the request. Other fields are ignored. */
+export const OnboardItemSchema = z.object({
+  item_id: z.string().min(1),
+  lifecycle_status: z.string().nullish(),
 });
 
 /** Response from `GET /api/v1/admin/participant` (identity probe). */
@@ -134,10 +153,12 @@ const MAX_REPORTED_ISSUES = 10;
  * Zod issue messages can quote the received value, and these responses hold
  * participant data, so the messages are dropped. Never add values here.
  *
+ * @param pathPrefix - Path of the parsed value inside the response, e.g. `items.1`.
  * @returns At most {@link MAX_REPORTED_ISSUES} issues.
  */
-export function responseIssues(error: z.ZodError): ResponseIssue[] {
-  return error.issues
-    .slice(0, MAX_REPORTED_ISSUES)
-    .map((issue) => ({ path: issue.path.join('.'), code: issue.code }));
+export function responseIssues(error: z.ZodError, pathPrefix: string = ''): ResponseIssue[] {
+  return error.issues.slice(0, MAX_REPORTED_ISSUES).map((issue) => ({
+    path: (pathPrefix ? [pathPrefix, ...issue.path] : issue.path).join('.'),
+    code: issue.code,
+  }));
 }
