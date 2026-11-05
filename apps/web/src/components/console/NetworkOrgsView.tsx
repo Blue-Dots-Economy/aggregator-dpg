@@ -35,9 +35,6 @@ type OrgRow = OrgSearchResponse['orgs'][number];
 /** How the organisations are shown. */
 export type OrgsView = 'tree' | 'list';
 
-/** Usage at or above this share of the maximum shows in amber. */
-const NEAR_LIMIT = 0.8;
-
 const FILTER_TILE: Record<OrgFilter, { icon: LucideIcon; tone: TileTone }> = {
   all: { icon: Building2, tone: 'primary' },
   active: { icon: CircleCheck, tone: 'green' },
@@ -59,8 +56,6 @@ export function NetworkOrgsView({
   rootName,
   orgs,
   more,
-  totalOrgs,
-  maxOrgs,
   initialView = 'tree',
   initialFilter = 'all',
 }: Readonly<{
@@ -68,10 +63,6 @@ export function NetworkOrgsView({
   orgs: OrgRow[];
   /** More organisations exist than were loaded. */
   more: boolean;
-  /** Organisations counted against the limit, from the hierarchy settings. */
-  totalOrgs: number;
-  /** The most organisations the network may hold. */
-  maxOrgs: number;
   initialView?: OrgsView;
   initialFilter?: OrgFilter;
 }>) {
@@ -89,7 +80,6 @@ export function NetworkOrgsView({
     view === 'tree'
       ? orgsInTreeOrder(orgs).filter((e) => keep(e.org))
       : orgs.filter(keep).map((org) => ({ org, level: 0, last: false, continues: [] }));
-  const used = maxOrgs > 0 ? Math.min(totalOrgs / maxOrgs, 1) : 0;
   const filterLabel = (f: OrgFilter) => t(`orgs.tile.${f}.label`);
 
   return (
@@ -104,27 +94,6 @@ export function NetworkOrgsView({
               {rootName}
             </div>
             <div className="text-[12.5px] text-ink-500">{t('orgs.network_note')}</div>
-          </div>
-          <div className="flex w-full min-w-[180px] flex-col gap-1.5 sm:ml-auto sm:w-auto">
-            <div className="flex justify-between gap-4 text-[12.5px] text-ink-500">
-              <span>{t('orgs.capacity')}</span>
-              <span>
-                <b className="text-ink-900">{totalOrgs}</b> / {maxOrgs}
-              </span>
-            </div>
-            <div
-              role="progressbar"
-              aria-label={t('orgs.capacity')}
-              aria-valuemin={0}
-              aria-valuemax={maxOrgs}
-              aria-valuenow={totalOrgs}
-              className="h-1.5 overflow-hidden rounded-full bg-(--bd-border-soft)"
-            >
-              <div
-                className={used >= NEAR_LIMIT ? 'h-full bg-amber-500' : 'h-full bg-(--bd-primary)'}
-                style={{ width: `${used * 100}%` }}
-              />
-            </div>
           </div>
         </div>
       </section>
