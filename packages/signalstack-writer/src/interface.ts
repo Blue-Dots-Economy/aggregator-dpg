@@ -396,7 +396,7 @@ export interface SignalStackProbeUserInput {
  * user both read as `owned_elsewhere`. The probe is only a UX hint; the
  * `onboard` response decides the real outcome.
  */
-export interface SignalStackProbeUserResult {
+export type SignalStackProbeUserResult = {
   user_exists: boolean;
   owned_elsewhere: boolean;
   lifecycle_summary: {
@@ -405,7 +405,7 @@ export interface SignalStackProbeUserResult {
       lifecycle_status: 'draft' | 'live' | 'paused';
     };
   } | null;
-}
+};
 
 /**
  * Provides a bearer token for Signals client-credentials auth, used instead

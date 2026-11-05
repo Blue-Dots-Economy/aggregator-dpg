@@ -10,6 +10,7 @@ import type { Redis } from 'ioredis';
 import { createRedisConnection } from '@aggregator-dpg/queue';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 let instance: Redis | null = null;
 
@@ -113,7 +114,7 @@ export async function consume(options: RateLimitOptions): Promise<RateLimitResul
     logger.warn({
       operation: 'rateLimiter.consume',
       status: 'failure',
-      error: (err as Error).message,
+      error: errorMessage(err),
       namespace: options.namespace,
       fail_closed: options.failClosed ?? false,
     });

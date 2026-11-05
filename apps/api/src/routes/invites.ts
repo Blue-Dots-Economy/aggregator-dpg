@@ -12,7 +12,8 @@
  * Mint logic is in `services/invites/mint.ts`, shared with `POST /v1/user/create`.
  */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { getOrganisationStore } from '../services/organisation-store/index.js';
@@ -52,7 +53,8 @@ const MintResponseSchema = z.object({
  *
  * @param app - Fastify instance to attach the route to.
  */
-export async function registerInviteRoutes(app: FastifyInstance): Promise<void> {
+export async function registerInviteRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/admin/v1/invites',
     {
@@ -66,9 +68,9 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
         response: { 200: MintResponseSchema, ...errorResponses(400, 409, 429, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const log = req.log.child({ operation: 'invites.mint' });
-      const body = req.body as z.infer<typeof MintBodySchema>;
+      const body = req.body;
 
       // Per-IP throttle, fail-open.
       const ipRl = await checkInviteIpRate(req.ip);

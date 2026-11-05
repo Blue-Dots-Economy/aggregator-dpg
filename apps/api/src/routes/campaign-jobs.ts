@@ -9,6 +9,7 @@
  * campaign-manager Bearer token. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { getCampaignJobStore } from '../services/campaign-job-store/index.js';
 import { requireCampaignAuth, requireOrgId } from '../campaign/auth.js';
@@ -61,9 +62,10 @@ export type CampaignRouteChannel = z.infer<typeof channelSchema>;
  *   `/v1/campaign/export/{id}` never returns an email or voice job.
  */
 export async function registerCampaignJobRoutes(
-  app: FastifyInstance,
+  base: FastifyInstance,
   channel: CampaignRouteChannel,
 ): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     `/v1/campaign/${channel}/:job_id`,
     {
@@ -98,7 +100,7 @@ export async function registerCampaignJobRoutes(
     async (req) => {
       const auth = await requireCampaignAuth(req);
       const orgId = requireOrgId(auth);
-      const { job_id: jobId } = req.params as { job_id: string };
+      const { job_id: jobId } = req.params;
 
       const store = getCampaignJobStore();
       const job = await store.getJob(jobId, orgId);
@@ -156,7 +158,7 @@ export async function registerCampaignJobRoutes(
     async (req) => {
       const auth = await requireCampaignAuth(req);
       const orgId = requireOrgId(auth);
-      const query = req.query as { limit?: number; cursor?: string };
+      const query = req.query;
 
       const store = getCampaignJobStore();
       const result = await store.listJobs(orgId, {

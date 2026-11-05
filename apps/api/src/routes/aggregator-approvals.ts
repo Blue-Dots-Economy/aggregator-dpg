@@ -17,6 +17,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { ERR } from '../errors/codes.js';
@@ -25,7 +26,13 @@ import { getUserStore } from '../services/user-store/index.js';
 import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { renderConfirmPage, renderResultPage } from '../views/approval-pages.js';
 import { mintReviewToken } from '../services/registration-notify.js';
-import { sendHtml, sendPage, missingTokenPage, verifyTokenForId } from './approval-shared.js';
+import {
+  sendHtml,
+  sendPage,
+  missingTokenPage,
+  renewToken,
+  verifyTokenForId,
+} from './approval-shared.js';
 import { checkApprovalVerifyRate } from '../services/approval-verify-rate.js';
 import { decideCoordinator, LINK_DECIDER } from '../services/decisions/coordinator.js';
 import type { Coordinator } from '../services/user-store/index.js';
@@ -115,7 +122,8 @@ function logApprovalAudit(
   );
 }
 
-export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Promise<void> {
+export async function registerAggregatorApprovalRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/admin/v1/aggregator-registrations/read/:id',
     {
@@ -129,13 +137,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         querystring: ReadQuerySchema,
       },
     },
-    async (
-      req: FastifyRequest<{
-        Params: { id: string };
-        Querystring: { token?: string; intent?: string };
-      }>,
-      reply: FastifyReply,
-    ) => {
+    async (req, reply) => {
       if (await approvalVerifyRateLimited(req, reply)) return;
 
       const aggregatorId = req.params.id;
@@ -215,7 +217,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         params: ApprovalParamsSchema,
       },
     },
-    async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    async (req, reply) => {
       if (await approvalVerifyRateLimited(req, reply)) return;
 
       const aggregatorId = req.params.id;
@@ -342,12 +344,11 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         params: ApprovalParamsSchema,
       },
     },
-    async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    async (req, reply) => {
       if (await approvalVerifyRateLimited(req, reply)) return;
 
       const aggregatorId = req.params.id;
-      const body = (req.body ?? {}) as { token?: string };
-      const token = typeof body.token === 'string' ? body.token : '';
+      const token = renewToken(req.body);
 
       const verified = await verifyTokenForId(token, aggregatorId, 'aggregator', {
         allowExpired: true,

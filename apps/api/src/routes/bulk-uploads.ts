@@ -17,6 +17,7 @@
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { JsonSchema } from '@aggregator-dpg/schema-loader/interface';
 import { z } from 'zod';
 import { and, eq, inArray } from 'drizzle-orm';
@@ -43,6 +44,7 @@ import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getRedis } from '../services/redis/index.js';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 /**
  * Returns the valid participant types for the active network.
@@ -203,8 +205,10 @@ const ErrorsCsvResponseSchema = z
   })
   .passthrough();
 
-export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<void> {
-  app.get(
+export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
+  // The 200 reply is a file, so it has no response schema; `Reply` types it instead.
+  app.get<{ Querystring: z.output<typeof TemplateQuerySchema>; Reply: string | Buffer }>(
     '/v1/bulk-uploads/template',
     {
       config: { rbac: { capability: 'profiles.onboard' } },
@@ -232,10 +236,10 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         });
       }
 
-      const format = (req.query as { format?: 'csv' | 'xlsx' }).format ?? 'csv';
+      const format = req.query.format ?? 'csv';
       const validTypes = await getValidParticipantTypes();
 
-      const query = req.query as { participant_type?: string };
+      const query = req.query;
       const participantType = query.participant_type;
       if (!participantType || !validTypes.has(participantType)) {
         throw httpError('SCHEMA_VALIDATION', {
@@ -243,19 +247,19 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
           fields: { participant_type: 'invalid' },
         });
       }
-      enforceAggregatorType(auth, participantType as string);
+      enforceAggregatorType(auth, participantType);
 
       // Both formats are generated from the live participant schema, one
       // participant type per file.
       if (format === 'xlsx') {
         const cfgForXlsx = await getNetworkConfig();
         const workbook = await buildXlsxTemplate(
-          await loadParticipantSchema(participantType as string),
-          participantType as string,
+          await loadParticipantSchema(participantType),
+          participantType,
           {
             arrayDelimiter: cfgForXlsx.aggregator.network.csv_array_delimiter,
             // Names the phone and email columns so their samples are realistic.
-            identity: cfgForXlsx.domains[participantType as string]?.identity,
+            identity: cfgForXlsx.domains[participantType]?.identity,
           },
         );
         return reply
@@ -267,12 +271,12 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
           .send(workbook);
       }
 
-      const csvSchema = await loadParticipantSchema(participantType as string);
+      const csvSchema = await loadParticipantSchema(participantType);
       const cfg = await getNetworkConfig();
       const csv = buildCsvTemplate(csvSchema, {
         arrayDelimiter: cfg.aggregator.network.csv_array_delimiter,
         // Without these, the phone sample would fail row validation.
-        identity: cfg.domains[participantType as string]?.identity,
+        identity: cfg.domains[participantType]?.identity,
       });
       return reply
         .header('Content-Type', 'text/csv; charset=utf-8')
@@ -314,9 +318,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
       const start = Date.now();
 
       // Check the type against the network config.
-      const { participant_type: participantType } = req.body as z.infer<
-        typeof CreateBulkUploadBodySchema
-      >;
+      const { participant_type: participantType } = req.body;
       const validTypes = await getValidParticipantTypes();
       if (!validTypes.has(participantType)) {
         throw httpError('SCHEMA_VALIDATION', {
@@ -406,8 +408,8 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     async (req, reply) => {
       const auth = await requireAuth(req);
       // Params are already validated by the route schema (id: non-empty string).
-      const { id: uploadId } = req.params as z.infer<typeof BulkUploadParamsSchema>;
-      const body = req.body as z.infer<typeof StartBulkUploadBodySchema>;
+      const { id: uploadId } = req.params;
+      const body = req.body;
       const log = req.log.child({
         operation: 'bulkUploads.start',
         actor: auth.userId,
@@ -508,7 +510,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         log.error({
           status: 'failure',
           sub_operation: 'enqueue.bulk-file-process',
-          error: (err as Error).message,
+          error: errorMessage(err),
         });
         throw httpError('INTERNAL', { cause: err });
       }
@@ -543,7 +545,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     },
     async (req, reply) => {
       const auth = await requireAuth(req);
-      const { limit, offset } = req.query as z.infer<typeof ListBulkUploadsQuerySchema>;
+      const { limit, offset } = req.query;
 
       const store = getBulkUploadsStore();
       const result = await store.list(auth.aggregatorId, { limit, offset });
@@ -582,7 +584,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     async (req, reply) => {
       const auth = await requireAuth(req);
       // Params are already validated by the route schema (id: non-empty string).
-      const { id: uploadId } = req.params as z.infer<typeof BulkUploadParamsSchema>;
+      const { id: uploadId } = req.params;
 
       const store = getBulkUploadsStore();
       const found = await store.findById(uploadId, auth.aggregatorId);
@@ -619,7 +621,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
     async (req, reply) => {
       const auth = await requireAuth(req);
       // Params are already validated by the route schema (id: non-empty string).
-      const { id: uploadId } = req.params as z.infer<typeof BulkUploadParamsSchema>;
+      const { id: uploadId } = req.params;
       const log = req.log.child({
         operation: 'bulkUploads.errorsCsv',
         actor: auth.userId,
@@ -696,7 +698,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
   );
 }
 
-interface BulkUploadResponseShape {
+type BulkUploadResponseShape = {
   upload_id: string;
   status: string;
   status_reason: string | null;
@@ -710,7 +712,7 @@ interface BulkUploadResponseShape {
   schema_version: string;
   created_at: string;
   completed_at: string | null;
-}
+};
 
 interface UploadCounts {
   totalRows: number | null;

@@ -14,7 +14,8 @@
  * Belongs to `@aggregator-dpg/api`.
  */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { DecisionReasonSchema } from '@aggregator-dpg/shared-primitives/user-org';
 import { config } from '../config.js';
@@ -31,6 +32,7 @@ import {
   missingTokenPage,
   notFoundPage,
   serviceUnavailablePage,
+  renewToken,
   verifyTokenForId,
   type HtmlPage,
 } from './approval-shared.js';
@@ -81,7 +83,8 @@ const orgUnavailablePage = (): HtmlPage =>
  *
  * @param app - Fastify instance to attach the routes to.
  */
-export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance): Promise<void> {
+export async function registerAggregatorOrgApprovalRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/admin/v1/orgs/read/:id',
     {
@@ -95,13 +98,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         querystring: OrgReadQuerySchema,
       },
     },
-    async (
-      req: FastifyRequest<{
-        Params: { id: string };
-        Querystring: { token?: string; intent?: string };
-      }>,
-      reply: FastifyReply,
-    ) => {
+    async (req, reply) => {
       const orgId = req.params.id;
       const { token } = req.query;
 
@@ -170,7 +167,7 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         params: OrgApprovalParamsSchema,
       },
     },
-    async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    async (req, reply) => {
       const orgId = req.params.id;
 
       const parsed = OrgDecisionBodySchema.safeParse(req.body);
@@ -253,11 +250,9 @@ export async function registerAggregatorOrgApprovalRoutes(app: FastifyInstance):
         params: OrgApprovalParamsSchema,
       },
     },
-    async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    async (req, reply) => {
       const orgId = req.params.id;
-      const body = (req.body ?? {}) as { token?: string };
-
-      const verified = await verifyTokenForId(body.token ?? '', orgId, ORG_NOUN, {
+      const verified = await verifyTokenForId(renewToken(req.body), orgId, ORG_NOUN, {
         allowExpired: true,
       });
       if (!verified.ok) return sendPage(reply, verified.page);

@@ -43,6 +43,7 @@ import {
   sqlStatements,
   type CheckRow,
 } from './instance-upgrade-db.js';
+import { toError } from '@aggregator-dpg/shared-primitives/errors';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const log = pino({ base: { service: 'train' } });
@@ -213,7 +214,7 @@ async function keycloakCheck(): Promise<boolean> {
   try {
     return await keycloakRoles(base, realm, clientId, secret);
   } catch (err) {
-    out(`  F19 keycloak: unreachable (${(err as Error).name})`);
+    out(`  F19 keycloak: unreachable (${toError(err).name})`);
     return false;
   }
 }

@@ -128,7 +128,7 @@
         "tags": [
           "aggregator-registrations"
         ],
-        "description": "Validates submission against config/schemas/aggregator/registration.v1.json, creates a disabled user (login enabled on admin approval), and pushes the org to signalstack. Reached via a non-aggregator Bearer token from Keycloak.",
+        "description": "Validates submission against config/schemas/aggregator/registration.v1.json, creates a disabled user (login enabled on admin approval), and pushes the org to signalstack. Reached via a non-aggregator Bearer token from Keycloak. 200 instead of 201 when a pending registration is submitted again: a fresh approval link is sent.",
         "requestBody": {
           "required": true,
           "content": {
@@ -309,6 +309,37 @@
           }
         },
         "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "aggregator_id": {
+                      "type": "string"
+                    },
+                    "org_slug": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "aggregator_id",
+                    "org_slug",
+                    "status",
+                    "message"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
           "201": {
             "description": "Default Response",
             "content": {
@@ -812,7 +843,7 @@
         "tags": [
           "aggregator-orgs"
         ],
-        "description": "Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link. A rejected org registering again is set back to pending under the parent in this request, with the same checks. 409 ORG_DEPTH_LIMIT or ORG_CHILD_LIMIT (with fields.parent_id) when the parent cannot take the org; 409 ORG_TOTAL_LIMIT when the instance is full.",
+        "description": "Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link. A rejected org registering again is set back to pending under the parent in this request, with the same checks. 409 ORG_DEPTH_LIMIT or ORG_CHILD_LIMIT (with fields.parent_id) when the parent cannot take the org; 409 ORG_TOTAL_LIMIT when the instance is full. 200 instead of 201 when the org already exists: a pending org gets a fresh review link, the owner of an active org gets a sign-in link.",
         "requestBody": {
           "required": true,
           "content": {
@@ -939,6 +970,37 @@
           }
         },
         "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "org_id": {
+                      "type": "string"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "org_id",
+                    "slug",
+                    "status",
+                    "message"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
           "201": {
             "description": "Default Response",
             "content": {
@@ -19461,6 +19523,16 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "The signalstack dashboard payload, unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "The signalstack dashboard payload, unchanged."
+                }
+              }
+            }
+          },
           "400": {
             "description": "Default Response",
             "content": {

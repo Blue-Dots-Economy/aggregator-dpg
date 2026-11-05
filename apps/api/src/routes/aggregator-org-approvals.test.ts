@@ -414,6 +414,19 @@ describe('aggregator-org-approvals routes', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it.each([
+    ['a repeated token field', ['a', 'b']],
+    ['a non-string token', 42],
+  ])('POST renew with %s shows the invalid-token page', async (_label, token) => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/admin/v1/orgs/renew/some-id',
+      payload: { token },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.headers['content-type']).toContain('text/html');
+  });
+
   it('POST renew returns 503 when the org store is unavailable', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000f1';
     orgStore.seed([buildOrganisation({ id: orgId, slug: 'f1', status: 'pending' })]);

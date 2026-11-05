@@ -18,6 +18,7 @@ import {
   type StoreResult,
   type UpdateDraftInput,
 } from './interface.js';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 const PG_UNIQUE_VIOLATION = '23505';
 
@@ -76,11 +77,11 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.create',
         status: 'failure',
-        error: (err as Error).message,
-        error_type: (err as Error).constructor.name,
+        error: errorMessage(err),
+        error_type: errorType(err),
         latency_ms: Date.now() - start,
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -97,9 +98,9 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.findBySlug',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -120,9 +121,9 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.findByOrgAndSlug',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -139,9 +140,9 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.findById',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -178,9 +179,9 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.list',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -234,10 +235,10 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.updateDraft',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
         latency_ms: Date.now() - start,
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -261,9 +262,9 @@ export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
       logger.error({
         operation: 'registrationLinksStore.updateStatus',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 }

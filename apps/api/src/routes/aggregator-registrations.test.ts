@@ -409,9 +409,12 @@ describe('POST /v1/aggregator-registrations/create', () => {
       payload: validBody,
     });
     expect(res.statusCode).toBe(200);
-    const body = res.json() as { aggregator_id: string; status: string };
-    expect(body.aggregator_id).toBe(id);
-    expect(body.status).toBe('pending');
+    expect(res.json()).toEqual({
+      aggregator_id: id,
+      org_slug: expect.any(String),
+      status: 'pending',
+      message: expect.stringContaining('re-submitted'),
+    });
     // A fresh admin-review email was re-sent.
     expect(mailer.outbox.length).toBe(1);
     expect(mailer.outbox[0]?.html).toContain('/admin/v1/aggregator-registrations/read/');

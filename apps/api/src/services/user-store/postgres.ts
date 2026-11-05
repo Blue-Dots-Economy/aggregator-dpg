@@ -56,6 +56,7 @@ import {
   type StoreResult,
   type UpdateCoordinatorPatch,
 } from './interface.js';
+import { errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 /** Ledger sources that record a registration consent (the others are attestations). */
 const REGISTRATION_CONSENT_SOURCES = sql`('registration', 'registration-backfill')`;
@@ -113,7 +114,7 @@ export class PostgresUserStore extends UserStoreBase {
           operation: 'userStore.create',
           status: 'failure',
           error: 'CONSENT_WRITE_FAILED',
-          error_type: (err.cause as Error | undefined)?.name ?? 'unknown',
+          error_type: err.cause instanceof Error ? err.cause.name : 'unknown',
           latency_ms: Date.now() - start,
         });
         return {
@@ -573,18 +574,18 @@ export class PostgresUserStore extends UserStoreBase {
    */
   private mapReadError(op: string, err: unknown, start?: number): StoreResult<never> {
     const code = pgErrorCode(err);
-    const errorType = (err as Error | undefined)?.constructor?.name ?? 'unknown';
+    const errType = errorType(err);
     logger.error({
       operation: op,
       status: 'failure',
-      error: code ? `database error ${code}` : errorType,
-      error_type: errorType,
+      error: code ? `database error ${code}` : errType,
+      error_type: errType,
       sqlstate: code,
       ...(start !== undefined ? { latency_ms: Date.now() - start } : {}),
     });
     return {
       ok: false,
-      error: { code: 'DB_UNAVAILABLE', message: code ? `database error ${code}` : errorType },
+      error: { code: 'DB_UNAVAILABLE', message: code ? `database error ${code}` : errType },
     };
   }
 }

@@ -8,6 +8,7 @@
  */
 
 import type { FastifyReply } from 'fastify';
+import { z } from 'zod';
 import { renderResultPage } from '../views/approval-pages.js';
 import { verifyApprovalToken } from '../services/approval-token.js';
 
@@ -128,6 +129,19 @@ export interface VerifiedToken {
   aggregatorId: string;
   /** Org id claim, when the token carries one. */
   org?: string;
+}
+
+const RenewBodySchema = z.object({ token: z.string() });
+
+/**
+ * Token posted by the "Regenerate & review" form.
+ *
+ * @param body - The raw request body.
+ * @returns The token, or `''` when the body has no string `token`.
+ */
+export function renewToken(body: unknown): string {
+  const parsed = RenewBodySchema.safeParse(body);
+  return parsed.success ? parsed.data.token : '';
 }
 
 /**

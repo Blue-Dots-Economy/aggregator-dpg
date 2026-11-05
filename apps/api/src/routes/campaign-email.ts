@@ -16,6 +16,7 @@
  * PII. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { requiredContactFields } from '@aggregator-dpg/campaign-template';
 import { campaignEnvelopeSchema } from '../campaign/envelope.js';
 import { parseEmailContent } from '../campaign/email-content.js';
@@ -28,7 +29,8 @@ import { config } from '../config.js';
  *
  * @param app - The Fastify instance to attach the route to.
  */
-export async function registerCampaignEmailRoutes(app: FastifyInstance): Promise<void> {
+export async function registerCampaignEmailRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/v1/campaign/email',
     {

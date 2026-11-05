@@ -15,6 +15,7 @@ import {
 import type { Redis } from 'ioredis';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 let connection: Redis | null = null;
 let fileProcessQueue: Queue<BulkFileProcessJob> | null = null;
@@ -61,7 +62,7 @@ export async function enqueueBulkFileProcess(payload: BulkFileProcessJob): Promi
     logger.error({
       operation: 'bulkQueue.enqueueBulkFileProcess',
       status: 'failure',
-      error: (err as Error).message,
+      error: errorMessage(err),
       latency_ms: Date.now() - start,
       upload_id: payload.uploadId,
     });

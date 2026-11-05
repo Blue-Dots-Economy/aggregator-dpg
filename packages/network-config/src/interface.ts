@@ -386,11 +386,11 @@ export interface DashboardTiles {
  * labels are split into initiated and received. All optional; the UI uses
  * English defaults.
  */
-export interface DashboardBuckets {
+export type DashboardBuckets = {
   by_status?: Partial<Record<'new' | 'active' | 'at_risk' | 'inactive', string>>;
   by_initiated_action_status?: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', string>>;
   by_received_action_status?: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', string>>;
-}
+};
 
 /**
  * One entry of a domain's `status_rules` array from `network.json`.
