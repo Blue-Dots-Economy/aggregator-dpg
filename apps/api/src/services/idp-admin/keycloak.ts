@@ -9,6 +9,7 @@
  * Each method maps to one or two REST calls; no SDK is used.
  */
 
+import { z } from 'zod';
 import {
   IdpAdminAdapter,
   type CreateUserInput,
@@ -121,8 +122,9 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         },
       };
     }
-    const list = (await res.value.json()) as KcUserPayload[];
-    const u = list[0];
+    const list = await readJson(res.value, z.array(KcUserSchema), 'findByEmail');
+    if (!list.ok) return list;
+    const u = list.value[0];
     if (!u) return { ok: true, value: null };
     return { ok: true, value: toIdpUser(u, { fallbackEmail: email }) };
   }
@@ -143,8 +145,9 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         error: { code: 'IDP_UNAVAILABLE', message: `findById HTTP ${res.value.status}` },
       };
     }
-    const u = (await res.value.json()) as KcUserPayload;
-    return { ok: true, value: toIdpUser(u) };
+    const u = await readJson(res.value, KcUserSchema, 'findById');
+    if (!u.ok) return u;
+    return { ok: true, value: toIdpUser(u.value) };
   }
 
   async findByAttribute(name: string, value: string): Promise<IdpResult<IdpUser | null>> {
@@ -167,9 +170,10 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         error: { code: 'IDP_UNAVAILABLE', message: `findByAttribute HTTP ${res.value.status}` },
       };
     }
-    const list = (await res.value.json()) as KcUserPayload[];
+    const list = await readJson(res.value, z.array(KcUserSchema), 'findByAttribute');
+    if (!list.ok) return list;
     // Some Keycloak versions match `q` partially; keep exact matches only.
-    const exact = list.find((u) => {
+    const exact = list.value.find((u) => {
       const vals = u.attributes?.[name];
       return Array.isArray(vals) && vals.includes(value);
     });
@@ -387,12 +391,13 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         error: { code: 'IDP_UNAVAILABLE', message: `findGroupByName HTTP ${res.value.status}` },
       };
     }
-    const groups = (await res.value.json().catch(() => [])) as Array<{
-      id?: string;
-      name?: string;
-      attributes?: Record<string, string[]>;
-    }>;
-    const match = Array.isArray(groups) ? groups.find((g) => g.name === name && g.id) : undefined;
+    // A body that is not JSON or not a list reads as no match.
+    const body: unknown = await res.value.json().catch(() => []);
+    const groups = Array.isArray(body) ? body : [];
+    const match = groups
+      .map((g) => KcGroupSchema.safeParse(g))
+      .flatMap((g) => (g.success ? [g.data] : []))
+      .find((g) => g.name === name && g.id);
     return {
       ok: true,
       value: match?.id ? { id: match.id, attributes: match.attributes ?? {} } : null,
@@ -458,7 +463,8 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         },
       };
     }
-    const roleRep = (await roleRes.value.json()) as { id: string; name: string };
+    const roleRep = await readJson(roleRes.value, KcRoleSchema, 'assignRealmRole');
+    if (!roleRep.ok) return roleRep;
 
     const mapRes = await this.safeFetch(
       `${this.opts.baseUrl}/admin/realms/${this.opts.realm}/users/${userId}/role-mappings/realm`,
@@ -468,7 +474,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
           Authorization: `Bearer ${tokenResult.value}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify([{ id: roleRep.id, name: roleRep.name }]),
+        body: JSON.stringify([{ id: roleRep.value.id, name: roleRep.value.name }]),
       },
     );
     if (!mapRes.ok) return mapRes;
@@ -501,10 +507,11 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         },
       };
     }
-    const roles = (await res.value.json()) as Array<{ name?: unknown }>;
+    const roles = await readJson(res.value, z.array(KcRoleNameSchema), 'listRealmRoles');
+    if (!roles.ok) return roles;
     return {
       ok: true,
-      value: roles.map((r) => r.name).filter((n): n is string => typeof n === 'string'),
+      value: roles.value.map((r) => r.name).filter((n): n is string => typeof n === 'string'),
     };
   }
 
@@ -526,7 +533,8 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         },
       };
     }
-    const roleRep = (await roleRes.value.json()) as { id: string; name: string };
+    const roleRep = await readJson(roleRes.value, KcRoleSchema, 'removeRealmRole');
+    if (!roleRep.ok) return roleRep;
 
     // DELETE on role-mappings is a no-op for a role the user does not hold.
     const mapRes = await this.safeFetch(
@@ -537,7 +545,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
           Authorization: `Bearer ${tokenResult.value}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify([{ id: roleRep.id, name: roleRep.name }]),
+        body: JSON.stringify([{ id: roleRep.value.id, name: roleRep.value.name }]),
       },
     );
     if (!mapRes.ok) return mapRes;
@@ -619,8 +627,9 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         error: { code: 'IDP_UNAVAILABLE', message: `readUser HTTP ${res.value.status}` },
       };
     }
-    const u = (await res.value.json()) as KcUserPayload;
-    return { ok: true, value: toIdpUser(u) };
+    const u = await readJson(res.value, KcUserSchema, 'readUser');
+    if (!u.ok) return u;
+    return { ok: true, value: toIdpUser(u.value) };
   }
 
   private async getToken(): Promise<IdpResult<string>> {
@@ -647,12 +656,13 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         error: { code: 'AUTH_FAILED', message: `token HTTP ${res.value.status}` },
       };
     }
-    const body = (await res.value.json()) as { access_token: string; expires_in: number };
+    const body = await readJson(res.value, KcTokenSchema, 'getToken');
+    if (!body.ok) return body;
     this.cachedToken = {
-      accessToken: body.access_token,
-      expiresAt: Date.now() + body.expires_in * 1000,
+      accessToken: body.value.access_token,
+      expiresAt: Date.now() + body.value.expires_in * 1000,
     };
-    return { ok: true, value: body.access_token };
+    return { ok: true, value: body.value.access_token };
   }
 
   /** Wraps `fetch` with a timeout and converts thrown errors to Result. */
@@ -684,14 +694,61 @@ function buildAttributes(input: CreateUserInput): Record<string, string[]> {
   return attrs;
 }
 
-interface KcUserPayload {
-  id: string;
-  username: string;
-  email?: string;
-  enabled?: boolean;
-  firstName?: string;
-  lastName?: string;
-  attributes?: Record<string, string[]>;
+/** The fields of a Keycloak user representation the adapter reads. */
+const KcUserSchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  email: z.string().nullish(),
+  enabled: z.boolean().nullish(),
+  firstName: z.string().nullish(),
+  lastName: z.string().nullish(),
+  attributes: z.record(z.array(z.string())).nullish(),
+});
+type KcUserPayload = z.infer<typeof KcUserSchema>;
+
+/** A realm role, as the role-mappings endpoint needs it. */
+const KcRoleSchema = z.object({ id: z.string(), name: z.string() });
+
+/** An entry of a user's realm role mappings; entries without a string name are skipped. */
+const KcRoleNameSchema = z.object({ name: z.unknown() });
+
+/** A group from the group search. */
+const KcGroupSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  attributes: z.record(z.array(z.string())).optional(),
+});
+
+/** The client_credentials token response. */
+const KcTokenSchema = z.object({ access_token: z.string().min(1), expires_in: z.number() });
+
+/**
+ * Reads a Keycloak response body and checks its shape.
+ *
+ * The error message names the operation only; the body may hold personal data.
+ *
+ * @param res - A 2xx response.
+ * @param schema - The expected shape.
+ * @param op - Operation name for the error message.
+ * @returns The parsed body, or `IDP_UNAVAILABLE` when it is not JSON or not that shape.
+ */
+async function readJson<T>(
+  res: Response,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+  op: string,
+): Promise<IdpResult<T>> {
+  const invalid: IdpResult<T> = {
+    ok: false,
+    error: { code: 'IDP_UNAVAILABLE', message: `${op}: unexpected response body` },
+  };
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return invalid;
+  }
+  const parsed = schema.safeParse(body);
+  return parsed.success ? { ok: true, value: parsed.data } : invalid;
 }
 
 function toIdpUser(u: KcUserPayload, opts: { fallbackEmail?: string } = {}): IdpUser {
