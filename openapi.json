@@ -20799,57 +20799,21 @@
                       "properties": {
                         "by_status": {
                           "type": "object",
-                          "properties": {
-                            "new": {
-                              "type": "string"
-                            },
-                            "active": {
-                              "type": "string"
-                            },
-                            "at_risk": {
-                              "type": "string"
-                            },
-                            "inactive": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
+                          "additionalProperties": {
+                            "type": "string"
+                          }
                         },
                         "by_initiated_action_status": {
                           "type": "object",
-                          "properties": {
-                            "create": {
-                              "type": "string"
-                            },
-                            "accept": {
-                              "type": "string"
-                            },
-                            "reject": {
-                              "type": "string"
-                            },
-                            "cancel": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
+                          "additionalProperties": {
+                            "type": "string"
+                          }
                         },
                         "by_received_action_status": {
                           "type": "object",
-                          "properties": {
-                            "create": {
-                              "type": "string"
-                            },
-                            "accept": {
-                              "type": "string"
-                            },
-                            "reject": {
-                              "type": "string"
-                            },
-                            "cancel": {
-                              "type": "string"
-                            }
-                          },
-                          "additionalProperties": false
+                          "additionalProperties": {
+                            "type": "string"
+                          }
                         }
                       },
                       "additionalProperties": false

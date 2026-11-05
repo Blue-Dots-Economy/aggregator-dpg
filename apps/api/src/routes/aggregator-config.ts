@@ -18,57 +18,37 @@ import {
   BrandLogoSchema,
   BrandPaletteSchema,
   BrandTypographySchema,
+  DashboardTileDefSchema,
+  DashboardTilesSchema,
   RegistrationModeSchema,
+  StatusRuleSchema,
 } from '@aggregator-dpg/network-config/interface';
 import { errorResponses } from '../errors/openapi.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { config, enabledRegistrationModes, signalsUiUrls } from '../config.js';
 import { signalsCtaEnabled } from '../services/registration-mode/index.js';
 
-// The tile, status rule and bucket objects come from network.json and follow the
-// network-config types. Keys these schemas do not declare are not sent.
-
-/** One dashboard tile: the rollup key to read and its label. */
-const DashboardTileDefSchema = z.object({ field: z.string(), label: z.string() });
+// The tile and status-rule schemas come from network-config, which keeps unknown
+// keys. The reply strips them, so it carries only the documented fields.
 
 /** Profile and user tile groups for one domain's dashboard. */
-const DashboardTilesSchema = z.object({
-  profile: z.array(DashboardTileDefSchema).optional(),
-  user: z.array(DashboardTileDefSchema).optional(),
-  profile_title: z.string().optional(),
-  user_title: z.string().optional(),
-});
+const DashboardTilesReplySchema = DashboardTilesSchema.extend({
+  profile: z.array(DashboardTileDefSchema.strip()).optional(),
+  user: z.array(DashboardTileDefSchema.strip()).optional(),
+}).strip();
 
-/** One status a domain's items can be in, with its dashboard label. */
-const StatusRuleSchema = z.object({
-  status: z.string(),
-  label: z.string().optional(),
-  description: z.string().optional(),
-  /** Metrics-service condition, sent unchanged. */
-  when: z.unknown().optional(),
-});
+/**
+ * Bucket labels keyed by Signals value.
+ *
+ * Open to any key, so a status the web does not know yet still reaches it.
+ */
+const BucketLabelsSchema = z.record(z.string(), z.string());
 
-/** Labels for the participant status buckets, keyed by Signals status. */
-const StatusBucketLabelsSchema = z.object({
-  new: z.string().optional(),
-  active: z.string().optional(),
-  at_risk: z.string().optional(),
-  inactive: z.string().optional(),
-});
-
-/** Labels for the action buckets, keyed by Signals action status. */
-const ActionBucketLabelsSchema = z.object({
-  create: z.string().optional(),
-  accept: z.string().optional(),
-  reject: z.string().optional(),
-  cancel: z.string().optional(),
-});
-
-/** Network-wide label overrides for the dashboard buckets. */
-const DashboardBucketsSchema = z.object({
-  by_status: StatusBucketLabelsSchema.optional(),
-  by_initiated_action_status: ActionBucketLabelsSchema.optional(),
-  by_received_action_status: ActionBucketLabelsSchema.optional(),
+/** Network-wide label overrides for the dashboard status and action buckets. */
+const DashboardBucketsReplySchema = z.object({
+  by_status: BucketLabelsSchema.optional(),
+  by_initiated_action_status: BucketLabelsSchema.optional(),
+  by_received_action_status: BucketLabelsSchema.optional(),
 });
 
 /**
@@ -113,11 +93,11 @@ const AggregatorConfigResponseSchema = z.object({
       guardian_consent_required: z.boolean(),
       /** From network.json; drives the registration consent step. */
       go_live_required: z.array(z.string()),
-      dashboardTiles: DashboardTilesSchema.optional(),
-      status_rules: z.array(StatusRuleSchema).optional(),
+      dashboardTiles: DashboardTilesReplySchema.optional(),
+      status_rules: z.array(StatusRuleSchema.strip()).optional(),
     }),
   ),
-  dashboardBuckets: DashboardBucketsSchema.optional(),
+  dashboardBuckets: DashboardBucketsReplySchema.optional(),
   /** Registration modes this deployment offers; the create-link dropdown uses these keys. */
   registration_modes: z.record(
     z.string(),

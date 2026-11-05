@@ -1,8 +1,9 @@
 /**
  * Contract tests for GET /v1/aggregator-config (api app).
  *
- * Loads each network in `config/` with the real config loader, serves the
- * route, and checks the body equals the web fixture for that network. The
+ * Loads each network and brand in `config/` with the real config loader,
+ * serves the route, and checks the body equals the web fixture for that
+ * network and carries each brand's `brand.json` tokens. The
  * response schema validates and serialises the reply, so this catches a
  * schema that drops or rejects a field the web reads. The OpenAPI checks
  * cover the documented shape of the same response.
@@ -19,10 +20,19 @@ import { z } from 'zod';
 import { FileNetworkConfigLoader } from '@aggregator-dpg/network-config/loader';
 import { buildApp } from '../app.js';
 import { _setNetworkConfig } from '../services/network-config.js';
+import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 
 const CONFIG_ROOT = fileURLToPath(new URL('../../../../config', import.meta.url));
 const WEB_FIXTURES = fileURLToPath(new URL('../../../web/src/__tests__/fixtures', import.meta.url));
 const NETWORKS = ['blue_dot', 'purple_dot', 'orange_dot'] as const;
+/** Brand directories under `config/`; each has its own `brand.json`. */
+const BRANDS = [
+  'blue_dot/ka-dhwd',
+  'blue_dot/up-gzb',
+  'blue_dot/upsdm',
+  'orange_dot/onetac',
+  'purple_dot/alimco',
+] as const;
 
 /** The parts of a fixture that come from `network.json`. */
 const FixtureNetworkPartsSchema = z.object({
@@ -63,12 +73,65 @@ function networkJsonFromFixture(fixture: unknown): Record<string, unknown> {
   };
 }
 
-/** Reads the web fixture for a network as untyped JSON. */
-async function readFixture(network: string): Promise<unknown> {
-  const raw = await readFile(join(WEB_FIXTURES, `aggregator-config.${network}.json`), 'utf8');
-  const parsed: unknown = JSON.parse(raw);
+/** Reads a JSON file as untyped data. */
+async function readJson(path: string): Promise<unknown> {
+  const parsed: unknown = JSON.parse(await readFile(path, 'utf8'));
   return parsed;
 }
+
+/** Reads the web fixture for a network. */
+function readFixture(network: string): Promise<unknown> {
+  return readJson(join(WEB_FIXTURES, `aggregator-config.${network}.json`));
+}
+
+/**
+ * Loads a config directory with the real loader and makes it the active config.
+ *
+ * `network.json` is served from `networkJson`; the consent fetch answers 404,
+ * since consent is not part of this route.
+ *
+ * @param configDir - Directory under `config/`, e.g. `purple_dot/alimco`.
+ * @throws {Error} If the loader rejects the config.
+ */
+async function useConfig(configDir: string, networkJson: Record<string, unknown>): Promise<void> {
+  const loader = new FileNetworkConfigLoader({
+    configPath: join(CONFIG_ROOT, configDir, 'aggregator.config.yaml'),
+    networkSourceOverride: 'https://network.example.invalid/network.json',
+    consentSourceOverride: 'https://network.example.invalid/consent.json',
+    fetchImpl: async (input) =>
+      String(input).endsWith('/network.json')
+        ? new Response(JSON.stringify(networkJson), { status: 200 })
+        : new Response('not found', { status: 404 }),
+  });
+  const loaded = await loader.load();
+  if (!loaded.success) throw new Error(`config load failed: ${loaded.error.message}`);
+  _setNetworkConfig(loaded.value);
+}
+
+/** The brand.json keys the route copies into `brand`. */
+const BrandJsonPartsSchema = z.object({
+  colours: z.unknown().optional(),
+  typography: z.unknown().optional(),
+  logo: z.unknown().optional(),
+  attribution: z.unknown().optional(),
+});
+
+/** The response slice the brand and domain checks read. */
+const ReplySliceSchema = z.object({
+  brand: z.object({
+    palette: z.unknown().optional(),
+    typography: z.unknown().optional(),
+    logo: z.unknown().optional(),
+    attribution: z.unknown().optional(),
+  }),
+  domains: z.array(
+    z.object({
+      id: z.string(),
+      dashboardTiles: z.unknown().optional(),
+      status_rules: z.unknown().optional(),
+    }),
+  ),
+});
 
 describe('GET /v1/aggregator-config — payloads for the networks in config/', () => {
   let app: FastifyInstance;
@@ -84,25 +147,81 @@ describe('GET /v1/aggregator-config — payloads for the networks in config/', (
 
   it.each(NETWORKS)('sends the full payload for %s', async (network) => {
     const fixture = await readFixture(network);
-    const networkJson = networkJsonFromFixture(fixture);
-    const loader = new FileNetworkConfigLoader({
-      configPath: join(CONFIG_ROOT, network, 'aggregator.config.yaml'),
-      networkSourceOverride: 'https://network.example.invalid/network.json',
-      consentSourceOverride: 'https://network.example.invalid/consent.json',
-      // network.json is served from the fixture; consent is not part of this route.
-      fetchImpl: async (input) =>
-        String(input).endsWith('/network.json')
-          ? new Response(JSON.stringify(networkJson), { status: 200 })
-          : new Response('not found', { status: 404 }),
-    });
-    const loaded = await loader.load();
-    if (!loaded.success) throw new Error(`config load failed: ${loaded.error.message}`);
-    _setNetworkConfig(loaded.value);
+    await useConfig(network, networkJsonFromFixture(fixture));
 
     const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual(fixture);
+  });
+
+  it.each(BRANDS)('sends the brand.json tokens for %s', async (configDir) => {
+    const network = configDir.split('/')[0] ?? '';
+    await useConfig(configDir, networkJsonFromFixture(await readFixture(network)));
+    const brandJson = BrandJsonPartsSchema.parse(
+      await readJson(join(CONFIG_ROOT, configDir, 'brand.json')),
+    );
+
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+
+    expect(res.statusCode).toBe(200);
+    const { brand } = ReplySliceSchema.parse(res.json());
+    expect(brand.palette).toEqual(brandJson.colours);
+    expect(brand.typography).toEqual(brandJson.typography);
+    expect(brand.logo).toEqual(brandJson.logo);
+    expect(brand.attribution).toEqual(brandJson.attribution);
+  });
+
+  it('sends the alimco attribution rows', async () => {
+    await useConfig('purple_dot/alimco', networkJsonFromFixture(await readFixture('purple_dot')));
+
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+
+    const { brand } = ReplySliceSchema.parse(res.json());
+    expect(brand.attribution).toEqual([
+      { label: 'Owned by', name: 'Swavlamban', logo: '/brand/alimco/swavlamban-mark.png' },
+      { label: 'Managed by', name: 'ALIMCO', logo: '/brand/alimco/alimco-mark.png' },
+    ]);
+  });
+
+  it('answers 200 without the tiles when a network.json tile has no label', async () => {
+    const networkJson = networkJsonFromFixture(await readFixture('blue_dot'));
+    const malformed = {
+      ...networkJson,
+      domains: [
+        {
+          id: 'seeker',
+          item_schemas: { 'profile_1.0': {} },
+          dashboard_tiles: { profile: [{ field: 'total_items' }] },
+          status_rules: [{ status: 'active', label: 'Active' }],
+        },
+      ],
+    };
+    await useConfig('blue_dot', malformed);
+
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+
+    expect(res.statusCode).toBe(200);
+    const [seeker] = ReplySliceSchema.parse(res.json()).domains;
+    expect(seeker?.dashboardTiles).toBeUndefined();
+    expect(seeker?.status_rules).toEqual([{ status: 'active', label: 'Active' }]);
+  });
+
+  it('keeps bucket label keys beyond the known Signals values', async () => {
+    const base = buildBlueDotConfig();
+    const buckets = {
+      by_status: { new: 'New', paused: 'On hold' },
+      by_initiated_action_status: { create: 'Applied', expire: 'Lapsed' },
+      by_received_action_status: { accept: 'Shortlisted', expire: 'Lapsed' },
+    };
+    _setNetworkConfig({ ...base, dashboardBuckets: buckets });
+
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+
+    expect(res.statusCode).toBe(200);
+    expect(z.object({ dashboardBuckets: z.unknown() }).parse(res.json()).dashboardBuckets).toEqual(
+      buckets,
+    );
   });
 });
 
