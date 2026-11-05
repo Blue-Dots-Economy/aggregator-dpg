@@ -170,7 +170,8 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         error: { code: 'IDP_UNAVAILABLE', message: `findByAttribute HTTP ${res.value.status}` },
       };
     }
-    const list = await readJson(res.value, validEntries(KcUserSchema), 'findByAttribute');
+    // Every entry must parse: a skipped entry could be the match, and "not found" would fail open.
+    const list = await readJson(res.value, z.array(KcUserSchema), 'findByAttribute');
     if (!list.ok) return list;
     // Some Keycloak versions match `q` partially; keep exact matches only.
     const exact = list.value.find((u) => {

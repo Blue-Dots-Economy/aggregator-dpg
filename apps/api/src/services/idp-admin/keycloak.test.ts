@@ -837,7 +837,7 @@ describe('KeycloakIdpAdmin', () => {
   });
 
   describe('response validation per entry', () => {
-    it('finds a match by attribute when another entry is malformed', async () => {
+    it('returns IDP_UNAVAILABLE when any attribute-search entry is malformed', async () => {
       fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(
         jsonResponse([
           { username: 'broken', attributes: { aggregator_id: ['a-1'] } },
@@ -846,7 +846,11 @@ describe('KeycloakIdpAdmin', () => {
       );
       const admin = makeAdmin(fetchMock as unknown as typeof fetch);
       const r = await admin.findByAttribute('aggregator_id', 'a-1');
-      expect(r.ok && r.value?.id).toBe('u-2');
+      // A skipped entry could be the real match; reading it as "not found" would fail open.
+      expect(r).toEqual({
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: 'findByAttribute: unexpected response body' },
+      });
     });
 
     it('keeps an exact-name group whose attributes are malformed, with no attributes', async () => {
