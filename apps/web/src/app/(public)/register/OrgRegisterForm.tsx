@@ -36,6 +36,7 @@ import {
 } from './registration-ui';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
 import { gstinCustomValidate } from '../../../lib/org-schema';
+import { withPhoneWidget } from '../../../lib/phone-ui-schema';
 import { readableFormErrors } from '../../../lib/readable-form-errors';
 
 /** One org a new org can register under (`GET /api/orgs/parents`). */
@@ -134,6 +135,10 @@ export function OrgRegisterForm({
   );
 
   const formSchema = useMemo(() => stripConsentBlock(stripFormChrome(schema)), [schema]);
+  const formUiSchema = useMemo(
+    () => withPhoneWidget(uiSchema, formSchema as Record<string, unknown>),
+    [uiSchema, formSchema],
+  );
   const customValidate = useMemo(() => gstinCustomValidate(formSchema), [formSchema]);
 
   const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
@@ -256,7 +261,7 @@ export function OrgRegisterForm({
 
       <RjsfThemedForm
         schema={formSchema}
-        uiSchema={uiSchema as unknown as UiSchema<Record<string, unknown>>}
+        uiSchema={formUiSchema as unknown as UiSchema<Record<string, unknown>>}
         {...sharedRegistrationFormProps({
           formData,
           setFormData,

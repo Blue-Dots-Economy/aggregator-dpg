@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from '../../../components/ui/Select';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { withPhoneWidget } from '../../../lib/phone-ui-schema';
 import { jsonFetch } from '../../../services/http';
 import {
   stampConsent,
@@ -176,13 +177,14 @@ export function CoordinatorRegisterForm({
 
   // For a real org, hide the `name` field; the name comes from the org.
   const formUiSchema = useMemo<Record<string, unknown>>(() => {
-    if (!inheritsFromOrg) return uiSchema;
+    const withPhone = withPhoneWidget(uiSchema, formSchema as Record<string, unknown>);
+    if (!inheritsFromOrg) return withPhone;
     // The invite email stays editable; the owner sees any mismatch at approval.
     return {
-      ...uiSchema,
-      name: { ...((uiSchema['name'] as Record<string, unknown>) ?? {}), 'ui:widget': 'hidden' },
+      ...withPhone,
+      name: { ...((withPhone['name'] as Record<string, unknown>) ?? {}), 'ui:widget': 'hidden' },
     };
-  }, [uiSchema, inheritsFromOrg]);
+  }, [uiSchema, formSchema, inheritsFromOrg]);
 
   /** Opens the consent gate, or says that an organisation must be chosen first. */
   const submitWithOrg = (e: IChangeEvent<Record<string, unknown>>): void => {
