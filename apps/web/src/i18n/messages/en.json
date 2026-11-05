@@ -194,7 +194,8 @@
       "loading": "Loading…",
       "failedToLoad": "Failed to load. Please try again.",
       "refreshedJustNow": "Refreshed just now",
-      "refreshFailed": "Refresh failed"
+      "refreshFailed": "Refresh failed",
+      "refreshUnreadable": "The refreshed numbers couldn't be read. Try again in a few minutes."
     },
     "ministat": {
       "completeProfiles": "Complete Profiles",
@@ -340,7 +341,9 @@
         "col_reason": "Reason / errors",
         "all_rows_passed": "All rows passed",
         "signing": "Signing…"
-      }
+      },
+      "start_unconfirmed": "Your file was received, but we couldn't confirm it started. Check Recent uploads on the Onboarding page before uploading it again.",
+      "reply_unreadable": "The server's reply couldn't be read. Try again in a few minutes."
     },
     "create_link": {
       "title": "Share a registration link",

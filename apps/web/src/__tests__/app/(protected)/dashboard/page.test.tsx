@@ -31,6 +31,7 @@ import { useSyncExternalStore } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { ThemeModeProvider } from '@/lib/theme-mode';
 import messages from '@/i18n/messages/en.json';
+import { ResponseShapeError } from '@/lib/response-shape-error';
 
 // ---------------------------------------------------------------------------
 // next/navigation — locally overridden (not the global setup.ts stub) so the
@@ -665,6 +666,17 @@ describe('<DashboardPageRoot />', () => {
       await userEvent.click(refreshBtn);
       expect(await screen.findByText('Refresh failed')).toBeInTheDocument();
     });
+
+    it('keeps the raw text of an unreadable refresh reply out of the banner', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      mockDashboardServiceDashboard.mockRejectedValueOnce(
+        new ResponseShapeError('/api/dashboard/items', []),
+      );
+      renderPage();
+      await userEvent.click(screen.getByRole('button', { name: /Refresh dashboard/i }));
+      const hint = await screen.findByText('Refresh failed');
+      expect(hint).toHaveAttribute('title', messages.dashboard.state.refreshUnreadable);
+    });
   });
 
   describe('bulk selection + actions', () => {
@@ -694,6 +706,17 @@ describe('<DashboardPageRoot />', () => {
       await userEvent.click(within(aliceRow!).getByRole('checkbox'));
       await userEvent.click(screen.getByRole('button', { name: 'Export selected CSV' }));
       expect(await screen.findByText('export failed')).toBeInTheDocument();
+    });
+
+    it('shows the plain failure notice when the bulk action reply is unreadable', async () => {
+      runExportSelected.mockRejectedValueOnce(new ResponseShapeError('/api/campaign/export', []));
+      renderPage();
+      const rows = screen.getAllByRole('row');
+      const aliceRow = rows.find((r) => within(r).queryByText('Alice Seeker'));
+      await userEvent.click(within(aliceRow!).getByRole('checkbox'));
+      await userEvent.click(screen.getByRole('button', { name: 'Export selected CSV' }));
+      expect(await screen.findByText(messages.dashboard.bulk.failed)).toBeInTheDocument();
+      expect(screen.queryByText(/unexpected response shape/)).toBeNull();
     });
 
     it('clears the selection via the bulk bar clear control', async () => {

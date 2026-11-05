@@ -27,6 +27,7 @@ import { dashboardService, type LifecycleFilter } from '../../../services/dashbo
 import { mapDirectional } from '../../../services/row-mapping';
 import { resolveTiles } from '../../../services/tiles';
 import { DASHBOARD_BULK_ACTIONS, type BulkAction } from '../../../services/bulk-actions';
+import { ResponseShapeError } from '@/lib/response-shape-error';
 import { useCan } from '../../../lib/auth-context';
 import type { DashboardTileDef, StatusRule } from '../../../hooks/useAggregatorConfig';
 import { useProfileRaw } from '../../../hooks/useProfile';
@@ -197,6 +198,19 @@ function MiniStat({ label, value, icon, sub, delta, deltaTone = 'flat' }: MiniSt
       </div>
     </div>
   );
+}
+
+/**
+ * Text to show for a failed dashboard call.
+ *
+ * @param err - The failure.
+ * @param unreadable - The message for a reply that could not be read.
+ * @param fallback - The message when the failure is not an `Error`.
+ * @returns A plain message for an unreadable reply, else the error's own message.
+ */
+function failureText(err: unknown, unreadable: string, fallback: string): string {
+  if (err instanceof ResponseShapeError) return unreadable;
+  return err instanceof Error ? err.message : fallback;
 }
 
 /**
@@ -700,7 +714,7 @@ function BulkActionBar({
     } catch (err) {
       setNotice({
         kind: 'error',
-        text: err instanceof Error ? err.message : t('bulk.failed'),
+        text: failureText(err, t('bulk.failed'), t('bulk.failed')),
       });
     } finally {
       setRunningId(null);
@@ -1522,7 +1536,7 @@ function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
       setLastRefreshedAt(Date.now());
     } catch (err) {
       console.error('Dashboard refresh failed', err);
-      setRefreshError(err instanceof Error ? err.message : 'Refresh failed');
+      setRefreshError(failureText(err, t('state.refreshUnreadable'), t('state.refreshFailed')));
     } finally {
       setRefreshing(false);
     }
@@ -1866,7 +1880,7 @@ function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
       setLastRefreshedAt(Date.now());
     } catch (err) {
       console.error('Dashboard refresh failed', err);
-      setRefreshError(err instanceof Error ? err.message : 'Refresh failed');
+      setRefreshError(failureText(err, t('state.refreshUnreadable'), t('state.refreshFailed')));
     } finally {
       setRefreshing(false);
     }

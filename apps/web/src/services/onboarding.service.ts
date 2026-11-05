@@ -5,7 +5,8 @@
  */
 
 import { z } from 'zod';
-import { jsonFetch } from './http';
+import { BulkUploadStartUnreadError } from './bulk-upload-start-error';
+import { jsonFetch, ResponseShapeError } from './http';
 
 /** Submitted, passed, failed and skipped counts. */
 const OutcomeCountsSchema = z.object({
@@ -248,14 +249,32 @@ export const onboardingService = {
   },
 
   /**
+   * Reads the status of an upload that `/start` accepted.
+   *
+   * @param uploadId - The started upload.
+   * @returns The upload's status.
+   * @throws {BulkUploadStartUnreadError} If the status cannot be read.
+   */
+  async rereadStarted(uploadId: string): Promise<BulkUploadStatus> {
+    try {
+      return await this.readBulkUpload(uploadId);
+    } catch (err) {
+      throw new BulkUploadStartUnreadError(uploadId, { cause: err });
+    }
+  },
+
+  /**
    * Runs a bulk upload: presign, PUT to S3, then start.
    *
    * `duplicate` is true when the file matches a prior upload; the existing run is returned.
+   * When `/start` accepts the upload but its reply cannot be read, the status
+   * is read again, so the caller does not upload the same file twice.
    *
    * @param file - The CSV file.
    * @param participantType - Domain of the rows.
    * @param attestation - Whether the coordinator accepted the attestation.
    * @returns The upload id and status.
+   * @throws {BulkUploadStartUnreadError} If `/start` accepted the upload and its status could not be read.
    * @throws {Error} If the S3 upload or an API call fails.
    */
   async uploadCsv(
@@ -277,7 +296,20 @@ export const onboardingService = {
     if (!put.ok) {
       throw new Error(`S3 PUT failed (${put.status}): ${await put.text().catch(() => '')}`);
     }
-    const status = await this.startBulkUpload(presigned.upload_id, attestation);
+    let status: BulkUploadStartResult;
+    try {
+      status = await this.startBulkUpload(presigned.upload_id, attestation);
+    } catch (err) {
+      if (!(err instanceof ResponseShapeError)) throw err;
+      console.error('[bulk-upload] unexpected /start reply; reading the status again', {
+        url: err.url,
+        issues: err.issueSummary(),
+      });
+      return {
+        uploadId: presigned.upload_id,
+        status: await this.rereadStarted(presigned.upload_id),
+      };
+    }
     const out: {
       uploadId: string;
       status: BulkUploadStatus;

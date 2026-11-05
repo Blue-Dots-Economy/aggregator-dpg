@@ -17,6 +17,8 @@ import type { BulkUploadStatus } from '../../../../services/onboarding.service';
 import { onboardingService } from '../../../../services/onboarding.service';
 import type { BulkAttestationContent } from '../../../../lib/bulk-attestation.server';
 import { useCan } from '../../../../lib/auth-context';
+import { BulkUploadStartUnreadError } from '@/services/bulk-upload-start-error';
+import { ResponseShapeError } from '@/lib/response-shape-error';
 
 // Defined at module level so re-renders of CSVUpload do not remount the toast.
 function UploadToast({ message, onDone }: { message: string; onDone: () => void }) {
@@ -124,7 +126,15 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
       // Return to the onboarding overview after the toast has been shown.
       setTimeout(() => router.push('/onboarding'), 2500);
     } catch (err) {
-      setUploadError((err as Error).message);
+      if (err instanceof BulkUploadStartUnreadError) {
+        // The upload started: clear the file so it is not uploaded twice.
+        setPickedFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        setUploadNotice(t('csv.start_unconfirmed'));
+        recent.refetch();
+        return;
+      }
+      setUploadError(uploadErrorText(err, t('csv.reply_unreadable')));
     }
   };
 
@@ -259,7 +269,7 @@ export function RecentUploadsBody() {
   const t = useTranslations('onboarding');
   const recent = useRecentBulkUploads(10);
   const items = recent.data?.items ?? [];
-  const error = recent.error as Error | null;
+  const error = recent.error;
   const loading = recent.isLoading;
 
   return (
@@ -297,7 +307,7 @@ export function RecentUploadsBody() {
             {error && (
               <tr>
                 <td colSpan={8} className="text-rose-600 text-[13px] py-6 text-center">
-                  {error.message}
+                  {uploadErrorText(error, t('csv.reply_unreadable'))}
                 </td>
               </tr>
             )}
@@ -407,6 +417,18 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
       </td>
     </tr>
   );
+}
+
+/**
+ * Text to show for a failed upload call.
+ *
+ * @param err - The failure.
+ * @param unreadable - The message for a reply that could not be read.
+ * @returns The plain message for an unreadable reply, else the error's own message.
+ */
+function uploadErrorText(err: unknown, unreadable: string): string {
+  if (err instanceof ResponseShapeError) return unreadable;
+  return err instanceof Error ? err.message : String(err);
 }
 
 function formatRelative(iso: string): string {
