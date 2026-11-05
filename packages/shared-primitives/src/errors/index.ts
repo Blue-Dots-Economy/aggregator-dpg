@@ -143,10 +143,15 @@ export class DomainError extends BaseError {
  * Narrows a caught value to an `Error`.
  *
  * @param e - Any value from a `catch` clause or a rejected promise.
- * @returns `e` when it is an `Error`; otherwise a new `Error` whose message is `String(e)` and whose `cause` is `e`.
+ * @returns `e` when it is an `Error`; otherwise a new `Error` with `e` as its `cause`. Its message is the string `message` field of `e` when there is one, else `String(e)`.
  */
 export function toError(e: unknown): Error {
-  return e instanceof Error ? e : new Error(String(e), { cause: e });
+  if (e instanceof Error) return e;
+  const message =
+    typeof e === 'object' && e !== null && 'message' in e && typeof e.message === 'string'
+      ? e.message
+      : String(e);
+  return new Error(message, { cause: e });
 }
 
 /**

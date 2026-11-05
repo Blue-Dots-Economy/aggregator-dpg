@@ -120,6 +120,17 @@ describe('toError', () => {
     expect(e.cause).toBe(thrown);
   });
 
+  it('keeps the message of a thrown error-like object', () => {
+    const thrown = { message: 'socket hang up', code: 'ECONNRESET' };
+    const e = toError(thrown);
+    expect(e.message).toBe('socket hang up');
+    expect(e.cause).toBe(thrown);
+  });
+
+  it('ignores a message that is not a string', () => {
+    expect(toError({ message: 42 }).message).toBe('[object Object]');
+  });
+
   it('wraps undefined and null', () => {
     expect(toError(undefined).message).toBe('undefined');
     expect(toError(null).message).toBe('null');
@@ -134,6 +145,10 @@ describe('errorMessage', () => {
   it('stringifies anything else', () => {
     expect(errorMessage('plain')).toBe('plain');
     expect(errorMessage(42)).toBe('42');
+  });
+
+  it('reads the message of an error-like object', () => {
+    expect(errorMessage({ message: 'db down' })).toBe('db down');
   });
 });
 
