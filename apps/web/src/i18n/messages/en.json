@@ -811,7 +811,6 @@
         "generic": "That didn't work. Please try again."
       },
       "network_note": "The network · you're the network admin",
-      "capacity": "[[Orgs]] used",
       "clear_filter": "Clear filter",
       "empty_pending": "No [[orgs]] waiting for review.",
       "review_hint": "When an [[org]] registers under yours, its request appears here for you to approve or reject.",
