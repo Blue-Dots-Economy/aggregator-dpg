@@ -49,6 +49,7 @@ import {
   runChecks,
   sqlStatements,
   type CheckRow,
+  type SessionClient,
 } from './instance-upgrade-db.js';
 import { toError } from '@aggregator-dpg/shared-primitives/errors';
 
@@ -103,14 +104,22 @@ function required(name: string): string {
   return v;
 }
 
+/** Pool options whose `onConnect` sets the session up on a fresh connection. */
+export interface UpgradePoolConfig extends pg.PoolConfig {
+  onConnect: (client: SessionClient) => Promise<void>;
+}
+
 /**
- * Creates a pool whose connections carry the backfill network and brand as
- * session settings, set on connect before any query.
+ * Builds the pool options. Every connection carries the backfill network and
+ * brand as session settings, set on connect before any query.
+ *
+ * @returns The pool options.
+ * @throws {Refusal} When `DATABASE_URL` is not set.
  */
-function openPool(): pg.Pool {
+export function upgradePoolConfig(): UpgradePoolConfig {
   const network = env('AGGREGATOR_NETWORK') ?? '';
   const brand = env('AGGREGATOR_BRAND') ?? '';
-  return new pg.Pool({
+  return {
     connectionString: required('DATABASE_URL'),
     max: 2,
     application_name: 'train',
@@ -119,7 +128,12 @@ function openPool(): pg.Pool {
     connectionTimeoutMillis: 10_000,
     // pg-pool awaits this before it hands the connection out, and discards the connection when it fails.
     onConnect: (client) => applySessionSettings(client, { network, brand }),
-  });
+  };
+}
+
+/** Creates the tool's pool from {@link upgradePoolConfig}. */
+function openPool(): pg.Pool {
+  return new pg.Pool(upgradePoolConfig());
 }
 
 /** Reads the upgrade level. Refuses when an applied migration is not shipped. */
