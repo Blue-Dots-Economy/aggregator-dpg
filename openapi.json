@@ -20424,7 +20424,7 @@
                       "required": [
                         "name"
                       ],
-                      "additionalProperties": true
+                      "additionalProperties": false
                     },
                     "brand": {
                       "type": "object",
@@ -20456,22 +20456,202 @@
                         "favicon_url": {
                           "type": "string"
                         },
+                        "palette": {
+                          "type": "object",
+                          "properties": {
+                            "primary": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "hex": {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "hex"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "secondary": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "hex": {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "hex"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "accent": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "hex": {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "hex"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "gradients": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "from": {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  },
+                                  "to": {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  }
+                                },
+                                "required": [
+                                  "name",
+                                  "from",
+                                  "to"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "typography": {
+                          "type": "object",
+                          "properties": {
+                            "primaryFont": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "headings": {
+                              "type": "object",
+                              "properties": {
+                                "family": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "weight": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "sampleCopy": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "family",
+                                "weight"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "body": {
+                              "type": "object",
+                              "properties": {
+                                "family": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "weight": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "sampleCopy": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "family",
+                                "weight"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "primaryFont"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "logo": {
+                          "type": "object",
+                          "properties": {
+                            "default": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "light": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "withStrapline": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "withStraplineLight": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "onBrand": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "additionalProperties": false
+                        },
                         "attribution": {
                           "type": "array",
                           "items": {
                             "type": "object",
                             "properties": {
                               "label": {
-                                "type": "string"
+                                "type": "string",
+                                "minLength": 1
                               },
                               "name": {
-                                "type": "string"
+                                "type": "string",
+                                "minLength": 1
                               },
                               "logo": {
-                                "type": "string"
+                                "type": "string",
+                                "minLength": 1
                               },
                               "logoLight": {
-                                "type": "string"
+                                "type": "string",
+                                "minLength": 1
                               }
                             },
                             "required": [
@@ -20487,7 +20667,7 @@
                         "long_name",
                         "url_slug"
                       ],
-                      "additionalProperties": true
+                      "additionalProperties": false
                     },
                     "network": {
                       "type": "object",
@@ -20502,7 +20682,7 @@
                       "required": [
                         "id"
                       ],
-                      "additionalProperties": true
+                      "additionalProperties": false
                     },
                     "domains": {
                       "type": "array",
@@ -20529,6 +20709,78 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "dashboardTiles": {
+                            "type": "object",
+                            "properties": {
+                              "profile": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "field": {
+                                      "type": "string"
+                                    },
+                                    "label": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "field",
+                                    "label"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "user": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "field": {
+                                      "type": "string"
+                                    },
+                                    "label": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "field",
+                                    "label"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "profile_title": {
+                                "type": "string"
+                              },
+                              "user_title": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "status_rules": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "description": {
+                                  "type": "string"
+                                },
+                                "when": {}
+                              },
+                              "required": [
+                                "status"
+                              ],
+                              "additionalProperties": false
+                            }
                           }
                         },
                         "required": [
@@ -20539,7 +20791,7 @@
                           "guardian_consent_required",
                           "go_live_required"
                         ],
-                        "additionalProperties": true
+                        "additionalProperties": false
                       }
                     },
                     "dashboardBuckets": {
@@ -20547,35 +20799,93 @@
                       "properties": {
                         "by_status": {
                           "type": "object",
-                          "additionalProperties": {
-                            "type": "string"
-                          }
+                          "properties": {
+                            "new": {
+                              "type": "string"
+                            },
+                            "active": {
+                              "type": "string"
+                            },
+                            "at_risk": {
+                              "type": "string"
+                            },
+                            "inactive": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
                         },
-                        "by_action_status": {
+                        "by_initiated_action_status": {
                           "type": "object",
-                          "additionalProperties": {
-                            "type": "string"
-                          }
+                          "properties": {
+                            "create": {
+                              "type": "string"
+                            },
+                            "accept": {
+                              "type": "string"
+                            },
+                            "reject": {
+                              "type": "string"
+                            },
+                            "cancel": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "by_received_action_status": {
+                          "type": "object",
+                          "properties": {
+                            "create": {
+                              "type": "string"
+                            },
+                            "accept": {
+                              "type": "string"
+                            },
+                            "reject": {
+                              "type": "string"
+                            },
+                            "cancel": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
                         }
                       },
-                      "additionalProperties": true
+                      "additionalProperties": false
                     },
                     "registration_modes": {
                       "type": "object",
                       "additionalProperties": {
                         "type": "object",
                         "properties": {
-                          "label": {
-                            "type": "string"
+                          "label_i18n_key": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "submission_shape": {
+                            "type": "string",
+                            "enum": [
+                              "account_only",
+                              "account_and_profile"
+                            ]
+                          },
+                          "public_hint_i18n_key": {
+                            "type": "string",
+                            "minLength": 1,
+                            "nullable": true
                           },
                           "signals_cta": {
                             "type": "boolean"
                           }
                         },
                         "required": [
+                          "label_i18n_key",
+                          "submission_shape",
+                          "public_hint_i18n_key",
                           "signals_cta"
                         ],
-                        "additionalProperties": true
+                        "additionalProperties": false
                       }
                     },
                     "signals_ui_urls": {
@@ -20594,7 +20904,7 @@
                       "required": [
                         "custom_roles"
                       ],
-                      "additionalProperties": true
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -20606,7 +20916,7 @@
                     "signals_ui_urls",
                     "features"
                   ],
-                  "additionalProperties": true
+                  "additionalProperties": false
                 }
               }
             }

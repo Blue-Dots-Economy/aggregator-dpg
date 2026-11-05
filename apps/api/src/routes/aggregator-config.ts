@@ -13,141 +13,129 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import type {
-  BrandLogo,
-  BrandPalette,
-  BrandTypography,
-  DashboardBuckets,
-  DashboardTiles,
-  RegistrationMode,
-  StatusRule,
+import {
+  BrandAttributionSchema,
+  BrandLogoSchema,
+  BrandPaletteSchema,
+  BrandTypographySchema,
+  RegistrationModeSchema,
 } from '@aggregator-dpg/network-config/interface';
 import { errorResponses } from '../errors/openapi.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { config, enabledRegistrationModes, signalsUiUrls } from '../config.js';
 import { signalsCtaEnabled } from '../services/registration-mode/index.js';
 
-/**
- * Wire shape of a `registration_modes` entry, with `signals_cta` always resolved to a boolean.
- */
-type PublicRegistrationMode = RegistrationMode & { signals_cta: boolean };
+// The tile, status rule and bucket objects come from network.json and follow the
+// network-config types. Keys these schemas do not declare are not sent.
+
+/** One dashboard tile: the rollup key to read and its label. */
+const DashboardTileDefSchema = z.object({ field: z.string(), label: z.string() });
+
+/** Profile and user tile groups for one domain's dashboard. */
+const DashboardTilesSchema = z.object({
+  profile: z.array(DashboardTileDefSchema).optional(),
+  user: z.array(DashboardTileDefSchema).optional(),
+  profile_title: z.string().optional(),
+  user_title: z.string().optional(),
+});
+
+/** One status a domain's items can be in, with its dashboard label. */
+const StatusRuleSchema = z.object({
+  status: z.string(),
+  label: z.string().optional(),
+  description: z.string().optional(),
+  /** Metrics-service condition, sent unchanged. */
+  when: z.unknown().optional(),
+});
+
+/** Labels for the participant status buckets, keyed by Signals status. */
+const StatusBucketLabelsSchema = z.object({
+  new: z.string().optional(),
+  active: z.string().optional(),
+  at_risk: z.string().optional(),
+  inactive: z.string().optional(),
+});
+
+/** Labels for the action buckets, keyed by Signals action status. */
+const ActionBucketLabelsSchema = z.object({
+  create: z.string().optional(),
+  accept: z.string().optional(),
+  reject: z.string().optional(),
+  cancel: z.string().optional(),
+});
+
+/** Network-wide label overrides for the dashboard buckets. */
+const DashboardBucketsSchema = z.object({
+  by_status: StatusBucketLabelsSchema.optional(),
+  by_initiated_action_status: ActionBucketLabelsSchema.optional(),
+  by_received_action_status: ActionBucketLabelsSchema.optional(),
+});
 
 /**
  * Public part of the resolved network config. Leaves out JSON Schemas and the full `network.json`.
+ *
+ * Fastify validates and serialises the reply with this schema, so a key it does
+ * not declare is dropped from the reply.
  */
-type PublicAggregatorConfig = {
-  aggregator: {
-    name: string;
-    legal_name?: string;
-    contact_email?: string;
-  };
-  brand: {
-    short_name: string;
-    long_name: string;
-    tagline?: string;
-    strapline?: string;
-    url_slug: string;
-    primary_color?: string;
-    accent_color?: string;
-    logo_url?: string;
-    favicon_url?: string;
-    palette?: BrandPalette;
-    typography?: BrandTypography;
-    logo?: BrandLogo;
-  };
-  network: {
-    id: string;
-    display_name?: string;
-  };
-  domains: Array<{
-    id: string;
-    label: string;
-    plural_label: string;
-    item_type: string;
-    /** From network.json; drives the registration birth-year field. */
-    guardian_consent_required: boolean;
-    /** From network.json; drives the registration consent step. */
-    go_live_required: string[];
-    dashboardTiles?: DashboardTiles;
-    status_rules?: StatusRule[];
-  }>;
-  dashboardBuckets?: DashboardBuckets;
+const AggregatorConfigResponseSchema = z.object({
+  aggregator: z.object({
+    name: z.string(),
+    legal_name: z.string().optional(),
+    contact_email: z.string().optional(),
+  }),
+  brand: z.object({
+    short_name: z.string(),
+    long_name: z.string(),
+    tagline: z.string().optional(),
+    strapline: z.string().optional(),
+    url_slug: z.string(),
+    primary_color: z.string().optional(),
+    accent_color: z.string().optional(),
+    logo_url: z.string().optional(),
+    favicon_url: z.string().optional(),
+    palette: BrandPaletteSchema.optional(),
+    typography: BrandTypographySchema.optional(),
+    logo: BrandLogoSchema.optional(),
+    /** Sent only when the brand declares `attribution`. */
+    attribution: z.array(BrandAttributionSchema).optional(),
+  }),
+  network: z.object({
+    id: z.string(),
+    display_name: z.string().optional(),
+  }),
+  domains: z.array(
+    z.object({
+      id: z.string(),
+      label: z.string(),
+      plural_label: z.string(),
+      item_type: z.string(),
+      /** From network.json; drives the registration birth-year field. */
+      guardian_consent_required: z.boolean(),
+      /** From network.json; drives the registration consent step. */
+      go_live_required: z.array(z.string()),
+      dashboardTiles: DashboardTilesSchema.optional(),
+      status_rules: z.array(StatusRuleSchema).optional(),
+    }),
+  ),
+  dashboardBuckets: DashboardBucketsSchema.optional(),
   /** Registration modes this deployment offers; the create-link dropdown uses these keys. */
-  registration_modes: Record<string, PublicRegistrationMode>;
-  /** Per-domain Signals UI login URLs from `SIGNALS_UI_URLS`. Empty when unset. */
-  signals_ui_urls: Readonly<Record<string, string>>;
+  registration_modes: z.record(
+    z.string(),
+    RegistrationModeSchema.extend({ signals_cta: z.boolean() }),
+  ),
+  /**
+   * Per-domain Signals UI login URLs from `SIGNALS_UI_URLS`. Empty when unset.
+   *
+   * Checked at boot with `new URL()`. A plain string here, since `z.string().url()`
+   * could reject a value that boot accepted and cause a 500.
+   */
+  signals_ui_urls: z.record(z.string(), z.string()),
   /** Feature flags, always present. `custom_roles` is `RBAC_CUSTOM_ROLES_ENABLED`. */
-  features: { custom_roles: boolean };
-};
+  features: z.object({ custom_roles: z.boolean() }),
+});
 
-const AggregatorConfigResponseSchema = z
-  .object({
-    aggregator: z
-      .object({
-        name: z.string(),
-        legal_name: z.string().optional(),
-        contact_email: z.string().optional(),
-      })
-      .passthrough(),
-    brand: z
-      .object({
-        short_name: z.string(),
-        long_name: z.string(),
-        tagline: z.string().optional(),
-        strapline: z.string().optional(),
-        url_slug: z.string(),
-        primary_color: z.string().optional(),
-        accent_color: z.string().optional(),
-        logo_url: z.string().optional(),
-        favicon_url: z.string().optional(),
-        attribution: z
-          .array(
-            z.object({
-              label: z.string(),
-              name: z.string(),
-              logo: z.string().optional(),
-              logoLight: z.string().optional(),
-            }),
-          )
-          .optional(),
-      })
-      .passthrough(),
-    network: z
-      .object({
-        id: z.string(),
-        display_name: z.string().optional(),
-      })
-      .passthrough(),
-    domains: z.array(
-      z
-        .object({
-          id: z.string(),
-          label: z.string(),
-          plural_label: z.string(),
-          item_type: z.string(),
-          guardian_consent_required: z.boolean(),
-          go_live_required: z.array(z.string()),
-        })
-        .passthrough(),
-    ),
-    dashboardBuckets: z
-      .object({
-        by_status: z.record(z.string(), z.string()).optional(),
-        by_action_status: z.record(z.string(), z.string()).optional(),
-      })
-      .passthrough()
-      .optional(),
-    registration_modes: z.record(
-      z.string(),
-      z.object({ label: z.string().optional(), signals_cta: z.boolean() }).passthrough(),
-    ),
-    // Checked at boot with `new URL()`. A plain string here, since `z.string().url()`
-    // could reject a value that boot accepted and cause a 500.
-    signals_ui_urls: z.record(z.string(), z.string()),
-    // Always present.
-    features: z.object({ custom_roles: z.boolean() }).passthrough(),
-  })
-  .passthrough();
+/** Wire shape of `GET /v1/aggregator-config`. */
+type PublicAggregatorConfig = z.infer<typeof AggregatorConfigResponseSchema>;
 
 export async function registerAggregatorConfigRoutes(base: FastifyInstance): Promise<void> {
   const app = base.withTypeProvider<ZodTypeProvider>();
@@ -196,7 +184,6 @@ export async function registerAggregatorConfigRoutes(base: FastifyInstance): Pro
             ? { typography: cfg.aggregator.brand.typography }
             : {}),
           ...(cfg.aggregator.brand.logo ? { logo: cfg.aggregator.brand.logo } : {}),
-          // Sent only when the brand declares `attribution`.
           ...(cfg.aggregator.brand.attribution?.length
             ? { attribution: cfg.aggregator.brand.attribution }
             : {}),
