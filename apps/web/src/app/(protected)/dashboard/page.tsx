@@ -28,7 +28,7 @@ import { mapDirectional } from '../../../services/row-mapping';
 import { resolveTiles } from '../../../services/tiles';
 import { DASHBOARD_BULK_ACTIONS, type BulkAction } from '../../../services/bulk-actions';
 import { useCan } from '../../../lib/auth-context';
-import type { DashboardTileDef } from '../../../hooks/useAggregatorConfig';
+import type { DashboardTileDef, StatusRule } from '../../../hooks/useAggregatorConfig';
 import { useProfileRaw } from '../../../hooks/useProfile';
 import { useThemeMode } from '../../../lib/theme-mode';
 import type {
@@ -47,7 +47,7 @@ import type {
  * @returns Map of status key to its optional label/description copy.
  */
 function indexStatusRules(
-  rules: { status: string; label?: string; description?: string }[] | undefined,
+  rules: StatusRule[] | undefined,
 ): Record<string, { label?: string; description?: string }> {
   const out: Record<string, { label?: string; description?: string }> = {};
   for (const r of rules ?? []) {

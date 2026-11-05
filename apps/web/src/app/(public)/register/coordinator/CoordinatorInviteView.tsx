@@ -8,6 +8,7 @@ import type { RJSFSchema } from '@rjsf/utils';
 import { RegisterPageShell } from '../RegisterPageShell';
 import { CoordinatorRegisterForm } from '../CoordinatorRegisterForm';
 import { jsonFetch } from '../../../../services/http';
+import { OrgListResponseSchema } from '../registration-shared';
 import type { ConsentDocContent } from '../../../../components/consent/consent-types';
 
 export interface CoordinatorInviteViewProps {
@@ -23,12 +24,6 @@ interface InviteClaims {
   org: string;
   email: string;
   exp: number;
-}
-
-interface OrgOption {
-  id: string;
-  slug: string;
-  display_name: string;
 }
 
 /**
@@ -76,7 +71,7 @@ export function CoordinatorInviteView({
 
   const orgsQuery = useQuery({
     queryKey: ['active-orgs'],
-    queryFn: () => jsonFetch<{ orgs: OrgOption[] }>('/api/orgs'),
+    queryFn: () => jsonFetch('/api/orgs', OrgListResponseSchema),
     enabled: claims !== null && !expired,
     staleTime: 30_000,
   });

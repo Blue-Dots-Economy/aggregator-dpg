@@ -1,12 +1,16 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import type * as Http from '@/services/http';
 import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { jsonFetch } from '@/services/http';
+import { ResponseShapeError, jsonFetch } from '@/services/http';
 
-vi.mock('@/services/http', () => ({ jsonFetch: vi.fn() }));
+vi.mock('@/services/http', async (importOriginal) => ({
+  ...(await importOriginal<typeof Http>()),
+  jsonFetch: vi.fn(),
+}));
 
-const { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } =
+const { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG, AggregatorConfigPayloadSchema } =
   await import('@/hooks/useAggregatorConfig');
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -38,7 +42,7 @@ describe('useAggregatorConfig', () => {
     const { result } = renderHook(() => useAggregatorConfig(), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(payload);
-    expect(jsonFetch).toHaveBeenCalledWith('/api/aggregator-config');
+    expect(jsonFetch).toHaveBeenCalledWith('/api/aggregator-config', AggregatorConfigPayloadSchema);
   });
 
   it('surfaces a fetch failure as an error state', async () => {
@@ -65,6 +69,32 @@ describe('useAggregatorConfig', () => {
         operation: 'aggregator-config.fetch',
         status: 'failure',
         error: 'network down',
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('logs which fields broke when the config has an unexpected shape', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      vi.mocked(jsonFetch).mockRejectedValue(
+        new ResponseShapeError('/api/aggregator-config', [
+          {
+            code: 'invalid_type',
+            expected: 'boolean',
+            received: 'undefined',
+            path: ['registration_modes', 'form', 'signals_cta'],
+            message: 'Required',
+          },
+        ]),
+      );
+      const { result } = renderHook(() => useAggregatorConfig(), { wrapper });
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      await waitFor(() => expect(spy).toHaveBeenCalled());
+      const [, meta] = spy.mock.calls.at(-1)!;
+      expect(meta).toMatchObject({
+        issues: [{ path: 'registration_modes.form.signals_cta', code: 'invalid_type' }],
       });
     } finally {
       spy.mockRestore();

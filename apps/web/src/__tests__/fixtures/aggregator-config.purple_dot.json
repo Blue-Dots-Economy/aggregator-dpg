@@ -1,0 +1,366 @@
+{
+  "aggregator": {
+    "name": "Purple Dots Aggregator",
+    "contact_email": "ops@purpledots.local"
+  },
+  "brand": {
+    "short_name": "Purple Dots",
+    "long_name": "Purple Dot Aggregator Portal",
+    "tagline": "Discovery & services network for People with Disabilities",
+    "strapline": "Seeded by EkStep Foundation",
+    "url_slug": "purple-dots",
+    "primary_color": "#4c29c3",
+    "accent_color": "#a176e4",
+    "palette": {
+      "primary": [
+        {
+          "name": "Charcoal",
+          "hex": "#333333"
+        },
+        {
+          "name": "Off White",
+          "hex": "#f4f4f4"
+        },
+        {
+          "name": "Purple 500",
+          "hex": "#8d3add"
+        },
+        {
+          "name": "Purple 400",
+          "hex": "#a176e4"
+        },
+        {
+          "name": "Purple 700",
+          "hex": "#4c29c3"
+        }
+      ],
+      "secondary": [
+        {
+          "name": "Teal",
+          "hex": "#00bfa6"
+        },
+        {
+          "name": "Mint",
+          "hex": "#6ee7c1"
+        },
+        {
+          "name": "Lavender",
+          "hex": "#7c5cff"
+        },
+        {
+          "name": "Lilac",
+          "hex": "#b8a7ff"
+        },
+        {
+          "name": "Coral",
+          "hex": "#ff6b6b"
+        },
+        {
+          "name": "Peach",
+          "hex": "#ffb86b"
+        },
+        {
+          "name": "Sand",
+          "hex": "#ffd166"
+        }
+      ],
+      "accent": [
+        {
+          "name": "Ink",
+          "hex": "#1e2a38"
+        },
+        {
+          "name": "Slate",
+          "hex": "#4a5568"
+        },
+        {
+          "name": "Mist",
+          "hex": "#cbd5e1"
+        },
+        {
+          "name": "Pale Lilac",
+          "hex": "#e6f0ff"
+        },
+        {
+          "name": "Blush",
+          "hex": "#ffe1e6"
+        },
+        {
+          "name": "Cream",
+          "hex": "#fff4e5"
+        },
+        {
+          "name": "Pale Mint",
+          "hex": "#e6fff5"
+        }
+      ],
+      "gradients": [
+        {
+          "name": "Sky",
+          "from": "#0074ff",
+          "to": "#a4daff"
+        },
+        {
+          "name": "Aqua",
+          "from": "#00bfa6",
+          "to": "#6ee7c1"
+        },
+        {
+          "name": "Purple",
+          "from": "#7c5cff",
+          "to": "#b8a7ff"
+        },
+        {
+          "name": "Sunset",
+          "from": "#ff6b6b",
+          "to": "#ffb86b"
+        },
+        {
+          "name": "Frost",
+          "from": "#e6f0ff",
+          "to": "#ffffff"
+        }
+      ]
+    },
+    "typography": {
+      "primaryFont": "Arial",
+      "headings": {
+        "family": "Arial",
+        "weight": "Bold",
+        "sampleCopy": "India's districts suffer from a local discovery crisis"
+      },
+      "body": {
+        "family": "Arial",
+        "weight": "Regular",
+        "sampleCopy": "Individuals, jobs, services and schemes exist in close proximity, but can't digitally discover each other. This 'paradox of proximity' is rooted in digital darkness, which prevents individuals, enterprises and entire districts from unlocking potential."
+      }
+    },
+    "logo": {
+      "default": "/brand/purple-dot/logo.png",
+      "light": "/brand/purple-dot/logo-light.png",
+      "withStrapline": "/brand/purple-dot/logo-with-strapline.png",
+      "withStraplineLight": "/brand/purple-dot/logo-with-strapline-light.png",
+      "onBrand": "/brand/purple-dot/logo-on-brand.png"
+    }
+  },
+  "network": {
+    "id": "purple_dot",
+    "display_name": "Purple Dot"
+  },
+  "domains": [
+    {
+      "id": "seeker",
+      "label": "Seekers",
+      "plural_label": "Seekers",
+      "item_type": "profile_1.0",
+      "guardian_consent_required": true,
+      "go_live_required": ["schema_required", "consent_required"],
+      "dashboardTiles": {
+        "profile": [
+          {
+            "field": "total_items",
+            "label": "Profiles Registered"
+          },
+          {
+            "field": "complete_profiles",
+            "label": "Profiles Complete"
+          },
+          {
+            "field": "has_applications",
+            "label": "Made Connections"
+          }
+        ],
+        "user": [
+          {
+            "field": "total_users",
+            "label": "Total Seekers"
+          },
+          {
+            "field": "avg_items_per_user",
+            "label": "Avg Profiles per User"
+          },
+          {
+            "field": "avg_actions_per_user",
+            "label": "Avg Actions per User"
+          }
+        ]
+      },
+      "status_rules": [
+        {
+          "status": "new",
+          "label": "New",
+          "description": "Joined within the last 7 days",
+          "when": {
+            "item_age_days": {
+              "lte": 7
+            }
+          }
+        },
+        {
+          "status": "active",
+          "label": "Active",
+          "description": "Connected with a provider in the last 30 days",
+          "when": {
+            "days_since_last": {
+              "buckets": ["create", "accept"],
+              "lte": 30
+            }
+          }
+        },
+        {
+          "status": "at_risk",
+          "label": "At Risk",
+          "description": "No activity for 30\u201390 days",
+          "when": {
+            "days_since_last": {
+              "buckets": ["create", "accept", "reject"],
+              "between": [31, 90]
+            }
+          }
+        },
+        {
+          "status": "inactive",
+          "label": "Inactive",
+          "description": "No activity 90+ days",
+          "when": "default"
+        }
+      ]
+    },
+    {
+      "id": "provider",
+      "label": "Service Providers",
+      "plural_label": "Service Providers",
+      "item_type": "profile_1.0",
+      "guardian_consent_required": false,
+      "go_live_required": ["schema_required", "consent_required"],
+      "dashboardTiles": {
+        "profile": [
+          {
+            "field": "total_items",
+            "label": "Profiles Registered"
+          },
+          {
+            "field": "complete_profiles",
+            "label": "Profiles Complete"
+          },
+          {
+            "field": "has_applications",
+            "label": "Received Connections"
+          }
+        ],
+        "user": [
+          {
+            "field": "total_users",
+            "label": "Total Service Providers"
+          },
+          {
+            "field": "avg_items_per_user",
+            "label": "Avg Profiles per User"
+          },
+          {
+            "field": "avg_actions_per_user",
+            "label": "Avg Actions per User"
+          }
+        ]
+      },
+      "status_rules": [
+        {
+          "status": "new",
+          "label": "New",
+          "description": "Service posted within the last 7 days",
+          "when": {
+            "item_age_days": {
+              "lte": 7
+            }
+          }
+        },
+        {
+          "status": "active",
+          "label": "Active",
+          "description": "Accepted or rejected a request in the last 30 days",
+          "when": {
+            "all": [
+              {
+                "count": {
+                  "buckets": ["create"],
+                  "gt": 0
+                }
+              },
+              {
+                "days_since_last": {
+                  "buckets": ["accept", "reject"],
+                  "lte": 30
+                }
+              }
+            ]
+          }
+        },
+        {
+          "status": "at_risk",
+          "label": "At Risk",
+          "description": "No responses for 30\u201390 days",
+          "when": {
+            "all": [
+              {
+                "count": {
+                  "buckets": ["create"],
+                  "gt": 0
+                }
+              },
+              {
+                "days_since_last": {
+                  "buckets": ["accept", "reject"],
+                  "between": [31, 90]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "status": "inactive",
+          "label": "Inactive",
+          "description": "No activity for 90+ days",
+          "when": "default"
+        }
+      ]
+    }
+  ],
+  "dashboardBuckets": {
+    "by_status": {
+      "new": "New",
+      "active": "Active",
+      "at_risk": "At Risk",
+      "inactive": "Inactive"
+    },
+    "by_initiated_action_status": {
+      "create": "Requested",
+      "accept": "Accepted",
+      "reject": "Declined",
+      "cancel": "Cancelled"
+    },
+    "by_received_action_status": {
+      "create": "Requests",
+      "accept": "Connected",
+      "reject": "Declined",
+      "cancel": "Cancelled"
+    }
+  },
+  "registration_modes": {
+    "voice": {
+      "signals_cta": false,
+      "label_i18n_key": "registration_mode.voice.label",
+      "submission_shape": "account_only",
+      "public_hint_i18n_key": "registration_mode.voice.hint"
+    },
+    "form": {
+      "signals_cta": true,
+      "label_i18n_key": "registration_mode.form.label",
+      "submission_shape": "account_and_profile",
+      "public_hint_i18n_key": null
+    }
+  },
+  "signals_ui_urls": {},
+  "features": {
+    "custom_roles": false
+  }
+}

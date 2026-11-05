@@ -8,6 +8,18 @@
  */
 
 import type { RJSFSchema } from '@rjsf/utils';
+import { z } from 'zod';
+
+/** One active-org option for the coordinator dropdown (`GET /api/orgs`). */
+export const OrgOptionSchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  display_name: z.string(),
+});
+export type OrgOption = z.infer<typeof OrgOptionSchema>;
+
+/** `GET /api/orgs`: the active orgs a coordinator can register under. */
+export const OrgListResponseSchema = z.object({ orgs: z.array(OrgOptionSchema) });
 
 /** Discriminated submit lifecycle shared by both registration forms. */
 export type SubmitState =

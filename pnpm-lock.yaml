@@ -302,6 +302,9 @@ importers:
       tailwind-merge:
         specifier: ^3.7.0
         version: 3.7.0
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
     devDependencies:
       '@aggregator-dpg/tsconfig':
         specifier: workspace:*

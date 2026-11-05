@@ -4,41 +4,47 @@
  * Runs in the browser and calls the BFF, which attaches the bearer token.
  */
 
+import { z } from 'zod';
 import { jsonFetch } from './http';
 
-export interface ApiRegistrationLink {
-  link_id: string;
-  slug: string;
-  domain: string;
-  status: 'draft' | 'live' | 'retired';
+/** Submitted, passed, failed and skipped counts. */
+const OutcomeCountsSchema = z.object({
+  total: z.number(),
+  passed: z.number(),
+  failed: z.number(),
+  skipped: z.number(),
+});
+
+export const ApiRegistrationLinkSchema = z.object({
+  link_id: z.string(),
+  slug: z.string(),
+  domain: z.string(),
+  status: z.enum(['draft', 'live', 'retired']),
   /**
    * Registration mode key (e.g. `voice`, `form`), set at creation and
    * immutable. The network config maps modes to form shapes.
    */
-  registration_mode?: string;
-  context: Record<string, unknown>;
-  expires_at: string | null;
+  registration_mode: z.string().optional(),
+  context: z.record(z.unknown()),
+  expires_at: z.string().nullable(),
   /** Set only while the link is live; `null` for drafts and retired links. */
-  public_url: string | null;
-  qr_url: string | null;
-  qr_expires_at: string | null;
+  public_url: z.string().nullable(),
+  qr_url: z.string().nullable(),
+  qr_expires_at: z.string().nullable(),
   /** Submission counters from the listing endpoint. Zero when there are none. */
-  metrics?: {
-    total: number;
-    passed: number;
-    failed: number;
-    skipped: number;
-  };
-  created_at: string;
-  updated_at: string;
-}
+  metrics: OutcomeCountsSchema.optional(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type ApiRegistrationLink = z.infer<typeof ApiRegistrationLinkSchema>;
 
-export interface ListLinksResponse {
-  items: ApiRegistrationLink[];
-  total: number;
-  limit: number;
-  offset: number;
-}
+export const ListLinksResponseSchema = z.object({
+  items: z.array(ApiRegistrationLinkSchema),
+  total: z.number(),
+  limit: z.number(),
+  offset: z.number(),
+});
+export type ListLinksResponse = z.infer<typeof ListLinksResponseSchema>;
 
 export interface CreateLinkInput {
   domain: string;
@@ -63,72 +69,85 @@ export interface UpdateLinkInput {
   expires_at?: string | null;
 }
 
-export interface OnboardingSummary {
-  aggregator_id: string;
-  from: string | null;
-  to: string | null;
-  total: number;
-  passed: number;
-  failed: number;
-  skipped: number;
-}
+export const OnboardingSummarySchema = OutcomeCountsSchema.extend({
+  aggregator_id: z.string(),
+  from: z.string().nullable(),
+  to: z.string().nullable(),
+});
+export type OnboardingSummary = z.infer<typeof OnboardingSummarySchema>;
 
 /** One entry-source slice of the onboarding rollup (`source` is `bulk` or `link`). */
-export interface OnboardingSourceSlice {
-  source: string;
-  total: number;
-  passed: number;
-  failed: number;
-  skipped: number;
-}
+export const OnboardingSourceSliceSchema = OutcomeCountsSchema.extend({ source: z.string() });
+export type OnboardingSourceSlice = z.infer<typeof OnboardingSourceSliceSchema>;
 
-export interface OnboardingBySource {
-  aggregator_id: string;
-  from: string | null;
-  to: string | null;
-  by_source: OnboardingSourceSlice[];
-}
+export const OnboardingBySourceSchema = z.object({
+  aggregator_id: z.string(),
+  from: z.string().nullable(),
+  to: z.string().nullable(),
+  by_source: z.array(OnboardingSourceSliceSchema),
+});
+export type OnboardingBySource = z.infer<typeof OnboardingBySourceSchema>;
 
-export interface BulkUploadCreateResponse {
-  upload_id: string;
-  upload_url: string;
-  s3_key: string;
-  expires_at: string;
-  content_type: string;
-  max_bytes: number;
-  schema_id: string;
-  schema_version: string;
-  status: string;
-}
+export const BulkUploadCreateResponseSchema = z.object({
+  upload_id: z.string(),
+  upload_url: z.string(),
+  s3_key: z.string(),
+  expires_at: z.string(),
+  content_type: z.string(),
+  max_bytes: z.number(),
+  schema_id: z.string(),
+  schema_version: z.string(),
+  status: z.string(),
+});
+export type BulkUploadCreateResponse = z.infer<typeof BulkUploadCreateResponseSchema>;
 
-export interface BulkUploadStatus {
-  upload_id: string;
-  status: string;
-  status_reason: string | null;
-  participant_type: string;
-  total_rows: number | null;
-  passed: number;
-  failed: number;
-  skipped: number;
-  errors_csv_s3_key: string | null;
-  schema_id: string;
-  schema_version: string;
-  created_at: string;
-  completed_at: string | null;
-}
+/** Row outcome counts of a bulk upload; `total_rows` is null until the file is parsed. */
+const UploadRowCountsSchema = OutcomeCountsSchema.omit({ total: true }).extend({
+  total_rows: z.number().nullable(),
+});
 
-export interface BulkUploadErrorsResponse {
-  upload_id: string;
-  url: string;
-  s3_key: string;
-  expires_at: string;
-  content_type: string;
-  counts: {
-    total_rows: number | null;
-    passed: number;
-    failed: number;
-    skipped: number;
-  };
+export const BulkUploadStatusSchema = UploadRowCountsSchema.extend({
+  upload_id: z.string(),
+  status: z.string(),
+  status_reason: z.string().nullable(),
+  participant_type: z.string(),
+  errors_csv_s3_key: z.string().nullable(),
+  schema_id: z.string(),
+  schema_version: z.string(),
+  created_at: z.string(),
+  completed_at: z.string().nullable(),
+});
+export type BulkUploadStatus = z.infer<typeof BulkUploadStatusSchema>;
+
+/** Response of `POST /api/bulk-uploads/:id/start`; `duplicate` and `message` are set for a repeat upload. */
+export const BulkUploadStartResultSchema = BulkUploadStatusSchema.extend({
+  duplicate: z.boolean().optional(),
+  message: z.string().optional(),
+});
+export type BulkUploadStartResult = z.infer<typeof BulkUploadStartResultSchema>;
+
+export const BulkUploadListSchema = z.object({
+  items: z.array(BulkUploadStatusSchema),
+  total: z.number(),
+  limit: z.number(),
+  offset: z.number(),
+});
+export type BulkUploadList = z.infer<typeof BulkUploadListSchema>;
+
+export const BulkUploadErrorsResponseSchema = z.object({
+  upload_id: z.string(),
+  url: z.string(),
+  s3_key: z.string(),
+  expires_at: z.string(),
+  content_type: z.string(),
+  counts: UploadRowCountsSchema,
+});
+export type BulkUploadErrorsResponse = z.infer<typeof BulkUploadErrorsResponseSchema>;
+
+/** Appends `params` as a query string when there are any. */
+function withQuery(path: string, params: URLSearchParams): string {
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
 }
 
 export const onboardingService = {
@@ -144,8 +163,7 @@ export const onboardingService = {
     if (opts.status) params.set('status', opts.status);
     if (opts.limit) params.set('limit', String(opts.limit));
     if (opts.offset) params.set('offset', String(opts.offset));
-    const qs = params.toString();
-    const data = await jsonFetch<ListLinksResponse>(`/api/links${qs ? `?${qs}` : ''}`);
+    const data = await jsonFetch(withQuery('/api/links', params), ListLinksResponseSchema);
     if (opts.domain) {
       return { ...data, items: data.items.filter((it) => it.domain === opts.domain) };
     }
@@ -153,27 +171,27 @@ export const onboardingService = {
   },
 
   async createLink(input: CreateLinkInput): Promise<ApiRegistrationLink> {
-    return jsonFetch<ApiRegistrationLink>('/api/links', {
+    return jsonFetch('/api/links', ApiRegistrationLinkSchema, {
       method: 'POST',
       body: JSON.stringify(input),
     });
   },
 
   async updateLink(id: string, patch: UpdateLinkInput): Promise<ApiRegistrationLink> {
-    return jsonFetch<ApiRegistrationLink>(`/api/links/${encodeURIComponent(id)}`, {
+    return jsonFetch(`/api/links/${encodeURIComponent(id)}`, ApiRegistrationLinkSchema, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     });
   },
 
   async activateLink(id: string): Promise<ApiRegistrationLink> {
-    return jsonFetch<ApiRegistrationLink>(`/api/links/${encodeURIComponent(id)}/activate`, {
+    return jsonFetch(`/api/links/${encodeURIComponent(id)}/activate`, ApiRegistrationLinkSchema, {
       method: 'POST',
     });
   },
 
   async deactivateLink(id: string): Promise<ApiRegistrationLink> {
-    return jsonFetch<ApiRegistrationLink>(`/api/links/${encodeURIComponent(id)}/deactivate`, {
+    return jsonFetch(`/api/links/${encodeURIComponent(id)}/deactivate`, ApiRegistrationLinkSchema, {
       method: 'POST',
     });
   },
@@ -182,53 +200,50 @@ export const onboardingService = {
     const params = new URLSearchParams();
     if (opts.from) params.set('from', opts.from);
     if (opts.to) params.set('to', opts.to);
-    const qs = params.toString();
-    return jsonFetch<OnboardingSummary>(`/api/onboarding/summary${qs ? `?${qs}` : ''}`);
+    return jsonFetch(withQuery('/api/onboarding/summary', params), OnboardingSummarySchema);
   },
 
   async bySource(opts: { from?: string; to?: string } = {}): Promise<OnboardingBySource> {
     const params = new URLSearchParams();
     if (opts.from) params.set('from', opts.from);
     if (opts.to) params.set('to', opts.to);
-    const qs = params.toString();
-    return jsonFetch<OnboardingBySource>(`/api/onboarding/by-source${qs ? `?${qs}` : ''}`);
+    return jsonFetch(withQuery('/api/onboarding/by-source', params), OnboardingBySourceSchema);
   },
 
   async createBulkUpload(participantType: string): Promise<BulkUploadCreateResponse> {
-    return jsonFetch<BulkUploadCreateResponse>('/api/bulk-uploads', {
+    return jsonFetch('/api/bulk-uploads', BulkUploadCreateResponseSchema, {
       method: 'POST',
       body: JSON.stringify({ participant_type: participantType }),
     });
   },
 
-  async startBulkUpload(uploadId: string, attestation: boolean): Promise<BulkUploadStatus> {
-    return jsonFetch<BulkUploadStatus>(`/api/bulk-uploads/${encodeURIComponent(uploadId)}/start`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ attestation }),
-    });
+  async startBulkUpload(uploadId: string, attestation: boolean): Promise<BulkUploadStartResult> {
+    return jsonFetch(
+      `/api/bulk-uploads/${encodeURIComponent(uploadId)}/start`,
+      BulkUploadStartResultSchema,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attestation }),
+      },
+    );
   },
 
   async readBulkUpload(uploadId: string): Promise<BulkUploadStatus> {
-    return jsonFetch<BulkUploadStatus>(`/api/bulk-uploads/${encodeURIComponent(uploadId)}`);
+    return jsonFetch(`/api/bulk-uploads/${encodeURIComponent(uploadId)}`, BulkUploadStatusSchema);
   },
 
-  async listBulkUploads(opts: { limit?: number; offset?: number } = {}): Promise<{
-    items: BulkUploadStatus[];
-    total: number;
-    limit: number;
-    offset: number;
-  }> {
+  async listBulkUploads(opts: { limit?: number; offset?: number } = {}): Promise<BulkUploadList> {
     const params = new URLSearchParams();
     if (opts.limit) params.set('limit', String(opts.limit));
     if (opts.offset) params.set('offset', String(opts.offset));
-    const qs = params.toString();
-    return jsonFetch(`/api/bulk-uploads/list${qs ? `?${qs}` : ''}`);
+    return jsonFetch(withQuery('/api/bulk-uploads/list', params), BulkUploadListSchema);
   },
 
   async errorsCsvUrl(uploadId: string): Promise<BulkUploadErrorsResponse> {
-    return jsonFetch<BulkUploadErrorsResponse>(
+    return jsonFetch(
       `/api/bulk-uploads/${encodeURIComponent(uploadId)}/errors`,
+      BulkUploadErrorsResponseSchema,
     );
   },
 
@@ -262,13 +277,7 @@ export const onboardingService = {
     if (!put.ok) {
       throw new Error(`S3 PUT failed (${put.status}): ${await put.text().catch(() => '')}`);
     }
-    const status = (await this.startBulkUpload(
-      presigned.upload_id,
-      attestation,
-    )) as BulkUploadStatus & {
-      duplicate?: boolean;
-      message?: string;
-    };
+    const status = await this.startBulkUpload(presigned.upload_id, attestation);
     const out: {
       uploadId: string;
       status: BulkUploadStatus;

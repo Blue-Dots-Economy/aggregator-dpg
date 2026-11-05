@@ -1,6 +1,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { onboardingService } from '../../services/onboarding.service';
 
+/** A complete bulk-upload status body, as the API sends it. */
+function uploadStatus(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    upload_id: 'u1',
+    status: 'pending',
+    status_reason: null,
+    participant_type: 'seeker',
+    total_rows: null,
+    passed: 0,
+    failed: 0,
+    skipped: 0,
+    errors_csv_s3_key: null,
+    schema_id: 's',
+    schema_version: '1',
+    created_at: '2026-01-01T00:00:00Z',
+    completed_at: null,
+    ...overrides,
+  };
+}
+
 describe('onboardingService', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -200,7 +220,7 @@ describe('onboardingService', () => {
 
   it('startBulkUpload posts the attestation flag', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(JSON.stringify({ upload_id: 'u1', status: 'row_processing' }), {
+      new Response(JSON.stringify(uploadStatus({ upload_id: 'u1', status: 'row_processing' })), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       }),
@@ -215,7 +235,7 @@ describe('onboardingService', () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ upload_id: 'u1', status: 'completed' }), {
+        new Response(JSON.stringify(uploadStatus({ upload_id: 'u1', status: 'completed' })), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         }),
@@ -281,10 +301,13 @@ describe('onboardingService', () => {
         )
         .mockResolvedValueOnce(new Response(null, { status: 200 }))
         .mockResolvedValueOnce(
-          new Response(JSON.stringify({ upload_id: 'u1', status: 'row_processing' }), {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-          }),
+          new Response(
+            JSON.stringify(uploadStatus({ upload_id: 'u1', status: 'row_processing' })),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          ),
         );
       const result = await onboardingService.uploadCsv(file, 'seeker', true);
       expect(result.uploadId).toBe('u1');
@@ -318,12 +341,14 @@ describe('onboardingService', () => {
         .mockResolvedValueOnce(new Response(null, { status: 200 }))
         .mockResolvedValueOnce(
           new Response(
-            JSON.stringify({
-              upload_id: 'u2',
-              status: 'completed',
-              duplicate: true,
-              message: 'Matches a prior upload',
-            }),
+            JSON.stringify(
+              uploadStatus({
+                upload_id: 'u2',
+                status: 'completed',
+                duplicate: true,
+                message: 'Matches a prior upload',
+              }),
+            ),
             { status: 200, headers: { 'content-type': 'application/json' } },
           ),
         );
