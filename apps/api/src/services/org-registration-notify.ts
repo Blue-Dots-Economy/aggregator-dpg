@@ -33,10 +33,14 @@ export interface OrgReviewNotifyInput {
  * network admins when the parent is the network.
  *
  * @param parentId - The parent organisation's id, or `null`.
+ * @param log - Logs a parent that is neither an aggregator org nor the root.
  * @returns The recipient emails.
- * @throws {HttpError} `DB_UNAVAILABLE` when the parent cannot be read.
+ * @throws {HttpError} `DB_UNAVAILABLE` when the parent or the root cannot be read.
  */
-export async function orgReviewRecipients(parentId: string | null): Promise<string[]> {
+export async function orgReviewRecipients(
+  parentId: string | null,
+  log?: FastifyBaseLogger,
+): Promise<string[]> {
   if (parentId === null) return parseAdminEmails();
   const parent = await getOrganisationStore().findById(parentId);
   if (!parent.ok) {
@@ -45,8 +49,22 @@ export async function orgReviewRecipients(parentId: string | null): Promise<stri
       fields: { sub_operation: 'orgStore.findById.parent' },
     });
   }
-  // findById returns aggregator orgs only, so the root (or a missing parent) falls back.
-  return parent.value ? [parent.value.ownerEmail] : parseAdminEmails();
+  if (parent.value) return [parent.value.ownerEmail];
+  // findById sees aggregator orgs only, so the root lands here; anything else is unexpected.
+  const root = await getOrganisationStore().findRoot();
+  if (!root.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(root.error.message),
+      fields: { sub_operation: 'orgStore.findRoot' },
+    });
+  }
+  if (root.value?.id !== parentId) {
+    log?.warn(
+      { operation: 'org-registration-notify.orgReviewRecipients', parent_id: parentId },
+      'parent is neither an aggregator org nor the root; sending the review to the network admins',
+    );
+  }
+  return parseAdminEmails();
 }
 
 /**
@@ -68,7 +86,7 @@ export async function sendOrgReviewEmail(
       applicantName: input.displayName,
       applicantEmail: input.ownerEmail,
       applicantPhone: input.ownerPhone,
-      recipients: input.recipients ?? (await orgReviewRecipients(input.parentId)),
+      recipients: input.recipients ?? (await orgReviewRecipients(input.parentId, log)),
       entityLabel: 'organisation',
       ...(input.parentName ? { parentName: input.parentName } : {}),
       logOperation: 'org-registration-notify.sendOrgReviewEmail',
