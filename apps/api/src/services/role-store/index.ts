@@ -16,11 +16,16 @@ let instance: RoleStoreBase | null = null;
  * An injected store wins; under unit tests, the per-test in-memory store is used.
  *
  * @returns The role store.
+ * @throws {TypeError} When the test hook holds a value of another class.
  */
 export function getRoleStore(): RoleStoreBase {
   if (instance) return instance;
   const testStore: unknown = Reflect.get(globalThis, TEST_ROLE_STORE_KEY);
   if (testStore instanceof RoleStoreBase) return testStore;
+  if (testStore !== undefined) {
+    // Another module copy (for example after `vi.resetModules()`) fails `instanceof`.
+    throw new TypeError('role store test hook holds a value that is not a RoleStoreBase');
+  }
   instance = new PostgresRoleStore();
   return instance;
 }
