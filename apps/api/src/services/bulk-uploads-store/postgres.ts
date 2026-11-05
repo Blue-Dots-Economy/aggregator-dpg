@@ -9,6 +9,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
 import { bulkUploads, type BulkUploadRow } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
+import { PG_UNIQUE_VIOLATION, pgErrorCode } from '../../db/pg-error.js';
 import {
   BulkUploadsStoreBase,
   type BulkUpload,
@@ -18,8 +19,6 @@ import {
   type StoreResult,
 } from './interface.js';
 import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
-
-const PG_UNIQUE_VIOLATION = '23505';
 
 export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
   async create(input: CreateBulkUploadInput): Promise<StoreResult<BulkUpload>> {
@@ -212,8 +211,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       });
       return { ok: true, value: toDomain(row) };
     } catch (err: unknown) {
-      const code = (err as { code?: string }).code;
-      if (code === PG_UNIQUE_VIOLATION) {
+      if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) {
         return {
           ok: false,
           error: {
