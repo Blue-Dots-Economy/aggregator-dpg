@@ -394,44 +394,22 @@ export const DashboardTilesSchema = z
   .passthrough();
 export type DashboardTiles = z.infer<typeof DashboardTilesSchema>;
 
-const STATUS_BUCKETS = ['new', 'active', 'at_risk', 'inactive'] as const;
-const ACTION_BUCKETS = ['create', 'accept', 'reject', 'cancel'] as const;
-
 /**
- * Removes the keys whose label is absent, so the result is a plain partial map.
+ * Labels for some or all buckets of one kind, keyed by bucket.
  *
- * @param keys - The bucket keys to copy.
+ * Signals fixes the usual keys (`new`, `active`, `at_risk`, `inactive`;
+ * `create`, `accept`, `reject`, `cancel`), but any key is kept. Entries whose
+ * value is not a string are dropped.
  */
-function presentLabels<K extends string>(keys: readonly K[]) {
-  return (labels: Partial<Record<K, string | undefined>>): Partial<Record<K, string>> => {
-    const out: Partial<Record<K, string>> = {};
-    for (const key of keys) {
-      const label = labels[key];
-      if (label !== undefined) out[key] = label;
+const BucketLabelsSchema = z
+  .record(z.string(), z.unknown())
+  .transform((labels): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const [key, label] of Object.entries(labels)) {
+      if (typeof label === 'string') out[key] = label;
     }
     return out;
-  };
-}
-
-/** Labels for some or all status buckets. Unknown keys are ignored. */
-const StatusBucketLabelsSchema = z
-  .object({
-    new: z.string().optional(),
-    active: z.string().optional(),
-    at_risk: z.string().optional(),
-    inactive: z.string().optional(),
-  })
-  .transform(presentLabels(STATUS_BUCKETS));
-
-/** Labels for some or all action buckets. Unknown keys are ignored. */
-const ActionBucketLabelsSchema = z
-  .object({
-    create: z.string().optional(),
-    accept: z.string().optional(),
-    reject: z.string().optional(),
-    cancel: z.string().optional(),
-  })
-  .transform(presentLabels(ACTION_BUCKETS));
+  });
 
 /**
  * Network-wide label overrides for the dashboard status and action buckets.
@@ -442,9 +420,9 @@ const ActionBucketLabelsSchema = z
  */
 export const DashboardBucketsSchema = z
   .object({
-    by_status: StatusBucketLabelsSchema.optional(),
-    by_initiated_action_status: ActionBucketLabelsSchema.optional(),
-    by_received_action_status: ActionBucketLabelsSchema.optional(),
+    by_status: BucketLabelsSchema.optional(),
+    by_initiated_action_status: BucketLabelsSchema.optional(),
+    by_received_action_status: BucketLabelsSchema.optional(),
   })
   .passthrough();
 export type DashboardBuckets = z.infer<typeof DashboardBucketsSchema>;

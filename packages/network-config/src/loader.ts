@@ -405,6 +405,13 @@ const RawOptionalBlocksSchema = z.object({
   ),
 });
 
+/** The bucket label maps as sent, used to count dropped labels. */
+const RawBucketMapsSchema = z.object({
+  by_status: z.record(z.string(), z.unknown()).optional().catch(undefined),
+  by_initiated_action_status: z.record(z.string(), z.unknown()).optional().catch(undefined),
+  by_received_action_status: z.record(z.string(), z.unknown()).optional().catch(undefined),
+});
+
 /**
  * Checks a `network.json` payload against {@link SignalstackNetworkSchema}.
  *
@@ -460,6 +467,21 @@ function droppedBlocks(payload: unknown, network: SignalstackNetwork): NetworkCo
     }
   });
   dropped('dashboard_buckets', raw.data.dashboard_buckets, network.dashboard_buckets);
+  const sentBuckets = RawBucketMapsSchema.safeParse(raw.data.dashboard_buckets);
+  const keptBuckets = network.dashboard_buckets;
+  if (sentBuckets.success && keptBuckets) {
+    for (const key of [
+      'by_status',
+      'by_initiated_action_status',
+      'by_received_action_status',
+    ] as const) {
+      const sent = sentBuckets.data[key];
+      const kept = keptBuckets[key];
+      if (sent && kept && Object.keys(kept).length < Object.keys(sent).length) {
+        warnings.push({ path: `dashboard_buckets.${key}`, code: 'NON_STRING_ENTRIES_DROPPED' });
+      }
+    }
+  }
   return warnings;
 }
 

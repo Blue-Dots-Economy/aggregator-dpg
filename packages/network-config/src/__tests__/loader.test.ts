@@ -1336,6 +1336,46 @@ describe('FileNetworkConfigLoader — network.json shape checks', () => {
     expect(result.value.warnings).toBeUndefined();
   });
 
+  it('keeps every string label in the bucket maps, including keys Signals does not fix', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve({
+        ...BLUE_DOT_NETWORK,
+        dashboard_buckets: {
+          by_status: { new: 'New', dormant: 'Dormant' },
+          by_initiated_action_status: { create: 'Requested', escalate: 'Escalated' },
+          by_received_action_status: { hold: 'On hold' },
+        },
+      }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.dashboardBuckets).toEqual({
+      by_status: { new: 'New', dormant: 'Dormant' },
+      by_initiated_action_status: { create: 'Requested', escalate: 'Escalated' },
+      by_received_action_status: { hold: 'On hold' },
+    });
+    expect(result.value.warnings).toBeUndefined();
+  });
+
+  it('drops non-string bucket labels and reports the drop', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve({
+        ...BLUE_DOT_NETWORK,
+        dashboard_buckets: { by_status: { new: 'New', active: 3 } },
+      }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.dashboardBuckets).toEqual({ by_status: { new: 'New' } });
+    expect(result.value.warnings).toEqual([
+      { path: 'dashboard_buckets.by_status', code: 'NON_STRING_ENTRIES_DROPPED' },
+    ]);
+  });
+
   it('keeps only the string tokens of go_live_required and reports the drop', async () => {
     const loader = new FileNetworkConfigLoader({
       configPath,
