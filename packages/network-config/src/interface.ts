@@ -355,16 +355,26 @@ export const AggregatorConfigSchema = AggregatorYamlSchema;
 // ─── Signalstack network.json (the subset the aggregator cares about) ────────
 
 /**
+ * Wraps an optional display block so a malformed value reads as absent.
+ *
+ * The block is dropped and the UI uses its defaults; the rest of
+ * `network.json` still loads.
+ */
+function droppedWhenMalformed<T extends z.ZodTypeAny>(schema: T) {
+  return schema.optional().catch(undefined);
+}
+
+/**
  * One dashboard tile: the rollup key to read and its label.
  *
  * `field` is a key on the signalstack rollup (e.g. `total_users`). The
  * aggregator reads the precomputed value. An unknown `field` skips the tile
  * and logs a warning.
  */
-export interface DashboardTileDef {
-  field: string;
-  label: string;
-}
+export const DashboardTileDefSchema = z
+  .object({ field: z.string(), label: z.string() })
+  .passthrough();
+export type DashboardTileDef = z.infer<typeof DashboardTileDefSchema>;
 
 /**
  * Per-domain dashboard tiles, split into profile and user groups.
@@ -372,12 +382,25 @@ export interface DashboardTileDef {
  * Copied from `network.json`. All fields are optional; the UI uses defaults
  * for missing groups and titles.
  */
-export interface DashboardTiles {
-  profile?: DashboardTileDef[];
-  user?: DashboardTileDef[];
-  profile_title?: string;
-  user_title?: string;
-}
+export const DashboardTilesSchema = z
+  .object({
+    profile: z.array(DashboardTileDefSchema).optional(),
+    user: z.array(DashboardTileDefSchema).optional(),
+    profile_title: z.string().optional(),
+    user_title: z.string().optional(),
+  })
+  .passthrough();
+export type DashboardTiles = z.infer<typeof DashboardTilesSchema>;
+
+const StatusBucketLabelsSchema = z.record(
+  z.enum(['new', 'active', 'at_risk', 'inactive']),
+  z.string(),
+);
+
+const ActionBucketLabelsSchema = z.record(
+  z.enum(['create', 'accept', 'reject', 'cancel']),
+  z.string(),
+);
 
 /**
  * Network-wide label overrides for the dashboard status and action buckets.
@@ -386,11 +409,14 @@ export interface DashboardTiles {
  * labels are split into initiated and received. All optional; the UI uses
  * English defaults.
  */
-export type DashboardBuckets = {
-  by_status?: Partial<Record<'new' | 'active' | 'at_risk' | 'inactive', string>>;
-  by_initiated_action_status?: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', string>>;
-  by_received_action_status?: Partial<Record<'create' | 'accept' | 'reject' | 'cancel', string>>;
-};
+export const DashboardBucketsSchema = z
+  .object({
+    by_status: StatusBucketLabelsSchema.optional(),
+    by_initiated_action_status: ActionBucketLabelsSchema.optional(),
+    by_received_action_status: ActionBucketLabelsSchema.optional(),
+  })
+  .passthrough();
+export type DashboardBuckets = z.infer<typeof DashboardBucketsSchema>;
 
 /**
  * One entry of a domain's `status_rules` array from `network.json`.
@@ -398,56 +424,99 @@ export type DashboardBuckets = {
  * `when` is the metrics-service condition, passed through unchanged.
  * `label` and `description` are shown on the dashboard status cards.
  */
-export interface StatusRule {
-  status: string;
-  label?: string;
-  description?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  when?: any;
-}
+export const StatusRuleSchema = z
+  .object({
+    status: z.string(),
+    label: z.string().optional(),
+    description: z.string().optional(),
+    when: z.unknown().optional(),
+  })
+  .passthrough();
+export type StatusRule = z.infer<typeof StatusRuleSchema>;
 
 /**
  * One domain inside a signalstack network.
  *
- * Holds the JSON Schemas keyed by `item_type`.
+ * Holds the JSON Schemas keyed by `item_type`. Unknown keys are kept unchanged.
  */
-export interface NetworkDomain {
-  id: string;
-  description?: string;
-  /** Dashboard tile groups. Optional, copied from `network.json`. */
-  dashboard_tiles?: DashboardTiles;
-  /** Status rules and their UI labels. Optional, copied from `network.json`. */
-  status_rules?: StatusRule[];
-  /**
-   * When true, minors need guardian consent, so the form collects a birth year.
-   *
-   * Absent means `false`.
-   */
-  guardian_consent_required?: boolean;
-  /**
-   * Go-live gate tokens, e.g. `schema_required`, `consent_required`.
-   *
-   * Decides whether the form shows the profile-creation consent step. Absent means `[]`.
-   */
-  go_live_required?: string[];
-  item_schemas: Record<string, Record<string, unknown>>;
-}
+export const NetworkDomainSchema = z
+  .object(
+    {
+      id: z.string({
+        required_error: 'each domain must declare `id`',
+        invalid_type_error: 'each domain must declare `id`',
+      }),
+      description: z.string().optional(),
+      /** Dashboard tile groups. Optional, copied from `network.json`. */
+      dashboard_tiles: droppedWhenMalformed(DashboardTilesSchema),
+      /** Status rules and their UI labels. Optional, copied from `network.json`. */
+      status_rules: droppedWhenMalformed(z.array(StatusRuleSchema)),
+      /**
+       * When true, minors need guardian consent, so the form collects a birth year.
+       *
+       * Absent means `false`.
+       */
+      guardian_consent_required: droppedWhenMalformed(z.boolean()),
+      /**
+       * Go-live gate tokens, e.g. `schema_required`, `consent_required`.
+       *
+       * Decides whether the form shows the profile-creation consent step. Absent
+       * means `[]`. Entries that are not strings are dropped.
+       */
+      go_live_required: droppedWhenMalformed(
+        z
+          .array(z.unknown())
+          .transform((tokens) => tokens.filter((t): t is string => typeof t === 'string')),
+      ),
+      item_schemas: z.record(
+        z.string(),
+        z.record(z.string(), z.unknown(), {
+          invalid_type_error: 'each item schema must be a JSON object',
+        }),
+        {
+          required_error: 'domain is missing item_schemas',
+          invalid_type_error: 'domain is missing item_schemas',
+        },
+      ),
+    },
+    { invalid_type_error: 'each domain must declare `id`' },
+  )
+  .passthrough();
+export type NetworkDomain = z.infer<typeof NetworkDomainSchema>;
 
 /**
  * Parsed signalstack `network.json`.
  *
- * Unknown keys are kept unchanged.
+ * Only the fields the aggregator reads are checked. Unknown keys are kept
+ * unchanged. Malformed dashboard blocks are dropped.
  */
-export interface SignalstackNetwork {
-  id: string;
-  display_name?: string;
-  description?: string;
-  domains: NetworkDomain[];
-  /** Shared dashboard bucket labels. Optional, copied from `network.json`. */
-  dashboard_buckets?: DashboardBuckets;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
-}
+export const SignalstackNetworkSchema = z
+  .object(
+    {
+      id: z
+        .string({
+          required_error: 'network.json missing `id`',
+          invalid_type_error: 'network.json missing `id`',
+        })
+        .min(1, 'network.json missing `id`'),
+      display_name: z.string().optional(),
+      description: z.string().optional(),
+      domains: z
+        .array(NetworkDomainSchema, {
+          required_error: 'network.json must declare at least one domain',
+          invalid_type_error: 'network.json must declare at least one domain',
+        })
+        .min(1, 'network.json must declare at least one domain'),
+      /** Shared dashboard bucket labels. Optional, copied from `network.json`. */
+      dashboard_buckets: droppedWhenMalformed(DashboardBucketsSchema),
+    },
+    {
+      required_error: 'network.json must be an object',
+      invalid_type_error: 'network.json must be an object',
+    },
+  )
+  .passthrough();
+export type SignalstackNetwork = z.infer<typeof SignalstackNetworkSchema>;
 
 // ─── Resolved config (what callers read) ─────────────────────────────────────
 

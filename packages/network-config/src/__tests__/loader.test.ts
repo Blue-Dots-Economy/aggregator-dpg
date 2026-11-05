@@ -1165,3 +1165,121 @@ aggregator:
     });
   });
 });
+
+describe('FileNetworkConfigLoader — network.json shape checks', () => {
+  let tmpDir: string;
+  let configPath: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agg-cfg-shape-'));
+    configPath = path.join(tmpDir, 'aggregator.config.yaml');
+    await fs.writeFile(configPath, BLUE_DOT_YAML, 'utf8');
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  /** Blue dot network with extra keys merged into the seeker domain. */
+  function networkWithSeeker(extra: Record<string, unknown>): Record<string, unknown> {
+    const [seeker, provider] = BLUE_DOT_NETWORK.domains;
+    return { ...BLUE_DOT_NETWORK, domains: [{ ...seeker, ...extra }, provider] };
+  }
+
+  function serve(payload: unknown): typeof fetch {
+    return async () => new Response(JSON.stringify(payload), { status: 200 });
+  }
+
+  it('returns NETWORK_FETCH_FAILED when the cached network.json has the wrong shape', async () => {
+    const cacheDir = path.join(tmpDir, 'cache');
+    const first = new FileNetworkConfigLoader({
+      configPath,
+      cacheDir,
+      fetchImpl: serve(BLUE_DOT_NETWORK),
+    });
+    expect((await first.load()).success).toBe(true);
+    const [cacheFile] = await fs.readdir(cacheDir);
+    expect(cacheFile).toBeDefined();
+    await fs.writeFile(path.join(cacheDir, cacheFile ?? ''), JSON.stringify({ id: 'x' }), 'utf8');
+
+    const second = new FileNetworkConfigLoader({
+      configPath,
+      cacheDir,
+      fetchImpl: async () => new Response('down', { status: 503 }),
+    });
+    const result = await second.load();
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect((result.error as { code: string }).code).toBe('NETWORK_FETCH_FAILED');
+    expect((result.error as { message: string }).message).toContain('cached network.json');
+  });
+
+  it('reports the thrown value when the fetch rejects with a non-Error', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: async () => {
+        throw 'socket hang up';
+      },
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect((result.error as { message: string }).message).toContain('socket hang up');
+  });
+
+  it('rejects a domain whose item schema is not an object', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve(networkWithSeeker({ item_schemas: { 'profile_1.0': 'oops' } })),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect((result.error as { code: string }).code).toBe('NETWORK_FETCH_FAILED');
+    expect((result.error as { message: string }).message).toContain('item schema');
+  });
+
+  it('drops malformed dashboard blocks instead of passing them through', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve({
+        ...networkWithSeeker({ dashboard_tiles: 'oops', status_rules: [{ label: 'No status' }] }),
+        dashboard_buckets: ['oops'],
+      }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.domains['seeker']?.dashboardTiles).toBeUndefined();
+    expect(result.value.domains['seeker']?.statusRules).toBeUndefined();
+    expect(result.value.dashboardBuckets).toBeUndefined();
+  });
+
+  it('keeps only the string tokens of go_live_required', async () => {
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve(networkWithSeeker({ go_live_required: ['consent_required', 7] })),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.domains['seeker']?.goLiveRequired).toEqual(['consent_required']);
+  });
+
+  it('keeps unknown network keys and the status rule condition unchanged', async () => {
+    const when = { metric: 'days_since_update', op: '<=', value: 7 };
+    const loader = new FileNetworkConfigLoader({
+      configPath,
+      fetchImpl: serve({
+        ...networkWithSeeker({ status_rules: [{ status: 'new', when }], owner: 'ops' }),
+        version: 3,
+      }),
+    });
+    const result = await loader.load();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.network['version']).toBe(3);
+    expect(result.value.network.domains[0]?.['owner']).toBe('ops');
+    expect(result.value.domains['seeker']?.statusRules).toEqual([{ status: 'new', when }]);
+  });
+});

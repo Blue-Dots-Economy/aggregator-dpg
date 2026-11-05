@@ -54,17 +54,21 @@ function schemaTrail(schema: unknown, segments: string[]): JsonRecord[] {
   const trail: JsonRecord[] = [];
   let node: unknown = schema;
   for (const seg of segments) {
-    if (!isPlainObject(node)) break;
-    if (/^\d+$/.test(seg) && isPlainObject(node.items)) {
-      node = node.items;
-    } else if (isPlainObject(node.properties) && isPlainObject(node.properties[seg])) {
-      node = node.properties[seg];
-    } else {
-      break;
-    }
-    trail.push(node as JsonRecord);
+    const next = childSchema(node, seg);
+    if (!next) break;
+    trail.push(next);
+    node = next;
   }
   return trail;
+}
+
+/** The schema one path segment below `node`, or undefined when there is none. */
+function childSchema(node: unknown, seg: string): JsonRecord | undefined {
+  if (!isPlainObject(node)) return undefined;
+  if (/^\d+$/.test(seg) && isPlainObject(node.items)) return node.items;
+  if (!isPlainObject(node.properties)) return undefined;
+  const prop = node.properties[seg];
+  return isPlainObject(prop) ? prop : undefined;
 }
 
 /** The nearest schema on the trail with a title: an array item has none, its list does. */
