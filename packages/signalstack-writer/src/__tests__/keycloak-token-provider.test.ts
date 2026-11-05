@@ -246,3 +246,27 @@ describe('KeycloakClientCredentialsTokenProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('KeycloakClientCredentialsTokenProvider — token response contract', () => {
+  it('returns SIGNALSTACK_BAD_RESPONSE when the token body is JSON null', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => null,
+      text: async () => 'null',
+    });
+    const provider = new KeycloakClientCredentialsTokenProvider({
+      baseUrl: 'http://keycloak.test',
+      realm: 'bluedots',
+      clientId: 'aggregator-dpg',
+      clientSecret: 'shh',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    const result = await provider.getToken();
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+  });
+});

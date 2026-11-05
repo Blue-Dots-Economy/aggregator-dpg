@@ -6,11 +6,13 @@
  * cached in process and refreshed about 30s before expiry.
  */
 
-import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { z } from 'zod';
+import { UpstreamError, toError } from '@aggregator-dpg/shared-primitives/errors';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import { SignalStackTokenProviderBase } from './interface.js';
+import { responseIssues } from './signals-responses.js';
 
 const REFRESH_LEAD_MS = 30_000;
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -32,6 +34,12 @@ export interface KeycloakTokenProviderConfig {
   timeoutMs?: number;
 }
 
+/** The fields of the OAuth token response that the provider reads. */
+const TokenResponseSchema = z.object({
+  access_token: z.string(),
+  expires_in: z.number(),
+});
+
 interface CachedToken {
   accessToken: string;
   expiresAt: number;
@@ -48,9 +56,16 @@ interface CachedToken {
  */
 function _isTimeout(e: unknown): boolean {
   const names = new Set(['TimeoutError', 'AbortError']);
-  const outer = (e as Error | undefined)?.name;
-  const inner = ((e as { cause?: unknown } | undefined)?.cause as Error | undefined)?.name;
+  const outer = _nameOf(e);
+  const inner = typeof e === 'object' && e !== null && 'cause' in e ? _nameOf(e.cause) : undefined;
   return (!!outer && names.has(outer)) || (!!inner && names.has(inner));
+}
+
+/** Reads a string `name` from a thrown value, if it has one. */
+function _nameOf(v: unknown): string | undefined {
+  return typeof v === 'object' && v !== null && 'name' in v && typeof v.name === 'string'
+    ? v.name
+    : undefined;
 }
 
 export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProviderBase {
@@ -135,21 +150,23 @@ export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProv
         );
       }
 
-      const body = (await res.json()) as { access_token?: unknown; expires_in?: unknown };
-      if (typeof body.access_token !== 'string' || typeof body.expires_in !== 'number') {
+      const parsed = TokenResponseSchema.safeParse(await res.json());
+      if (!parsed.success) {
+        // Paths and codes only: the body can carry the access token.
         return err(
           new UpstreamError('signalstack token grant returned an unexpected payload', {
             code: 'SIGNALSTACK_BAD_RESPONSE',
+            details: { issues: responseIssues(parsed.error) },
           }),
         );
       }
       this.cached = {
-        accessToken: body.access_token,
-        expiresAt: Date.now() + body.expires_in * 1000,
+        accessToken: parsed.data.access_token,
+        expiresAt: Date.now() + parsed.data.expires_in * 1000,
       };
       return ok(this.cached.accessToken);
     } catch (e) {
-      const cause = e as Error;
+      const cause = toError(e);
       const timedOut = _isTimeout(e);
       return err(
         new UpstreamError(

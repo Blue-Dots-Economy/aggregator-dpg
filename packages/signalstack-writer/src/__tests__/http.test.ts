@@ -1150,7 +1150,7 @@ describe('HttpSignalStackWriter.fetchDashboard — malformed payload', () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
-    expect(result.error.message).toContain('is not an object');
+    expect(result.error.message).toContain('by_domain.seeker (invalid_type)');
   });
 
   it('returns SIGNALSTACK_BAD_RESPONSE when rollup is missing by_received_action_status', async () => {
@@ -2161,5 +2161,276 @@ describe('HttpSignalStackWriter correlation-id forwarding', () => {
       profile: { occupation: 'carpenter' },
     });
     expect('x-request-id' in headersOf()).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Response contract: the shapes Signals sends, and what a bad response carries
+// ---------------------------------------------------------------------------
+
+describe('HttpSignalStackWriter — Signals response contract', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let writer: HttpSignalStackWriter;
+
+  /** A participant value that must never reach an error's details. */
+  const PARTICIPANT_PHONE = '+919800000001';
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    writer = new HttpSignalStackWriter({
+      baseUrl: 'http://signalstack.test',
+      apiKey: 'test-key',
+      actingOrgId: 'platform-org-1',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      maxRetries: 0,
+    });
+  });
+
+  const onboardInput = {
+    actingOrgId: 'org-abc',
+    name: 'Asha',
+    phoneNumber: PARTICIPANT_PHONE,
+    channel: 'bulk' as const,
+    source_id: 'src-1',
+    network: 'blue_dot',
+    domain: 'seeker',
+    item_type: 'profile_1.0',
+    profile: { name: 'Asha' },
+  };
+
+  it('upsertAggregator builds the aggregator from the input when Signals returns { org_id, created }', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ org_id: 'org_1', created: true }));
+
+    const result = await writer.upsertAggregator({
+      external_id: 'ext-abc',
+      name: 'Test Aggregator',
+      slug: 'test-aggregator',
+      metadata: { region: 'south' },
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value).toEqual({
+      org_id: 'org_1',
+      external_id: 'ext-abc',
+      name: 'Test Aggregator',
+      slug: 'test-aggregator',
+      metadata: { region: 'south' },
+    });
+  });
+
+  it('onboard accepts the full Signals response, including a null onboarded_at', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'user-1',
+        user_existed: false,
+        owned_elsewhere: false,
+        onboarded_at: null,
+        consent_recorded: 2,
+        onboarded_by_org_id: 'org_1',
+        onboarded_by_default: false,
+        items: [
+          {
+            item_id: '0b8c2f7e-1d3a-4c1e-9a4e-6f1b2c3d4e5f',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            item_type: 'profile_1.0',
+            lifecycle_status: 'draft',
+            item_state: { phone: PARTICIPANT_PHONE },
+            item_locations: [],
+            created_at: '2026-01-01T00:00:00.000Z',
+            updated_at: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.onboard(onboardInput);
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value).toEqual({
+      user_id: 'user-1',
+      profile_item_id: '0b8c2f7e-1d3a-4c1e-9a4e-6f1b2c3d4e5f',
+      onboarded_at: '',
+      owned_elsewhere: false,
+      lifecycle_status: 'draft',
+    });
+  });
+
+  it('onboard reports the field path and code of a malformed response, never its values', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({ items: [{ item_id: 'item-1', item_state: { phone: PARTICIPANT_PHONE } }] }),
+    );
+
+    const result = await writer.onboard(onboardInput);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(result.error.details).toEqual({ issues: [{ path: 'user_id', code: 'invalid_type' }] });
+    expect(JSON.stringify(result.error.toJSON())).not.toContain(PARTICIPANT_PHONE);
+  });
+
+  it('onboard does not put participant data on the "no item" error', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'user-1',
+        items: [{ item_network: 'blue_dot', item_state: { phone: PARTICIPANT_PHONE } }],
+      }),
+    );
+
+    const result = await writer.onboard(onboardInput);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(JSON.stringify(result.error.toJSON())).not.toContain(PARTICIPANT_PHONE);
+  });
+
+  it('probeUser does not put participant data on a bad-response error', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'user-1',
+        compliance: [],
+        items: [
+          {
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            item_state: { phone: PARTICIPANT_PHONE },
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.probeUser({
+      actingOrgId: 'org-abc',
+      phoneNumber: PARTICIPANT_PHONE,
+      network: 'blue_dot',
+      domain: 'seeker',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(JSON.stringify(result.error.toJSON())).not.toContain(PARTICIPANT_PHONE);
+  });
+
+  it('probeUser reports the field path of a non-array items field', async () => {
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ user_id: 'user-1', items: 'nope' }));
+
+    const result = await writer.probeUser({
+      actingOrgId: 'org-abc',
+      email: 'asha@example.com',
+      network: 'blue_dot',
+      domain: 'seeker',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(result.error.details).toEqual({ issues: [{ path: 'items', code: 'invalid_type' }] });
+  });
+
+  it('fetchDashboard accepts a null last_computed_at and keeps fields it does not model', async () => {
+    const payload = {
+      ...CANONICAL_DASHBOARD_PAYLOAD,
+      by_domain: {
+        seeker: {
+          ...CANONICAL_DASHBOARD_PAYLOAD.by_domain.seeker,
+          rollup: { ...CANONICAL_DASHBOARD_PAYLOAD.by_domain.seeker.rollup, extra_metric: 7 },
+          extra_slice_field: 'kept',
+        },
+      },
+      metadata: { last_computed_at: null, ttl_seconds: 3600, refreshed: true },
+      extra_top_field: { kept: true },
+    };
+    fetchMock.mockResolvedValueOnce(okJsonResponse(payload));
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value).toEqual(payload);
+  });
+
+  it('fetchDashboard rejects a rollup without total_users and names the path', async () => {
+    const { total_users: _omitted, ...rollup } =
+      CANONICAL_DASHBOARD_PAYLOAD.by_domain.seeker.rollup;
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        ...CANONICAL_DASHBOARD_PAYLOAD,
+        by_domain: { seeker: { ...CANONICAL_DASHBOARD_PAYLOAD.by_domain.seeker, rollup } },
+      }),
+    );
+
+    const result = await writer.fetchDashboard({ actingOrgId: 'org-abc' });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(result.error.details).toEqual({
+      issues: [{ path: 'by_domain.seeker.rollup.total_users', code: 'invalid_type' }],
+    });
+  });
+
+  it('fetchDecryptedProfiles keeps the contact block and locations Signals returns', async () => {
+    const row = {
+      item_id: 'item-1',
+      item_network: 'blue_dot',
+      item_domain: 'seeker',
+      item_type: 'profile_1.0',
+      item_state: {},
+      contact: {
+        name: { value: 'Asha', source: 'item' },
+        phone: { value: null, source: null },
+      },
+      locations: [{ lat: 12.9, lng: 77.6 }],
+      created_at: '2026-06-26T12:03:04.686Z',
+      updated_at: '2026-06-26T12:03:04.686Z',
+    };
+    fetchMock.mockResolvedValueOnce(okJsonResponse({ profiles: [row], skipped: [] }));
+
+    const result = await writer.fetchDecryptedProfiles({
+      actingOrgId: 'org-abc',
+      itemIds: ['item-1'],
+      contact: true,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value).toEqual({ profiles: [row], skipped: [] });
+  });
+
+  it('fetchDecryptedProfiles rejects a row whose item_state is not an object, without its values', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        profiles: [
+          {
+            item_id: 'item-1',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            item_type: 'profile_1.0',
+            item_state: PARTICIPANT_PHONE,
+            created_at: '2026-06-26T12:03:04.686Z',
+            updated_at: '2026-06-26T12:03:04.686Z',
+          },
+        ],
+        skipped: [],
+      }),
+    );
+
+    const result = await writer.fetchDecryptedProfiles({
+      actingOrgId: 'org-abc',
+      itemIds: ['item-1'],
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('SIGNALSTACK_BAD_RESPONSE');
+    expect(result.error.details).toEqual({
+      issues: [{ path: 'profiles.0.item_state', code: 'invalid_type' }],
+    });
+    expect(JSON.stringify(result.error.toJSON())).not.toContain(PARTICIPANT_PHONE);
   });
 });
