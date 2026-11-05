@@ -46,7 +46,7 @@ export async function registerCampaignVoiceRoutes(base: FastifyInstance): Promis
       },
     },
     async (req, reply) => {
-      await submitCampaignJob(req, reply, {
+      await submitCampaignJob(req, reply, req.body, {
         channel: 'voice',
         parseContent: (rawContent) => {
           const contentParsed = voiceContentSchema.safeParse(rawContent);
@@ -63,7 +63,7 @@ export async function registerCampaignVoiceRoutes(base: FastifyInstance): Promis
         piiFields: (content) => [
           'name',
           'phone',
-          ...auditFieldNameEntries((content.variables as string[] | undefined) ?? []),
+          ...auditFieldNameEntries(content.variables ?? []),
         ],
         buildItem: (itemId) => ({ itemId, action: 'voice_call' }),
         maxItems: config.CAMPAIGN_VOICE_MAX_ITEMS,
