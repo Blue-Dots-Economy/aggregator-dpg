@@ -21,7 +21,7 @@ import {
   type GradientSchema,
   type PaletteSwatchSchema,
 } from '@aggregator-dpg/network-config/interface';
-import { jsonFetch } from '../services/http';
+import { ResponseShapeError, jsonFetch } from '../services/http';
 
 /** One dashboard tile: the rollup key to read and its label. Mirrors network-config `DashboardTileDef`. */
 const DashboardTileDefSchema = z.object({ field: z.string(), label: z.string() });
@@ -67,10 +67,8 @@ const AggregatorConfigDomainSchema = z.object({
 });
 export type AggregatorConfigDomain = z.infer<typeof AggregatorConfigDomainSchema>;
 
-/** A registration mode as the API serves it: `signals_cta` is always resolved. */
-const RegistrationModeConfigSchema = RegistrationModeSchema.extend({
-  signals_cta: z.boolean().optional(),
-});
+/** A registration mode as the API serves it, with `signals_cta` resolved to a boolean. */
+const RegistrationModeConfigSchema = RegistrationModeSchema.extend({ signals_cta: z.boolean() });
 export type RegistrationModeConfig = z.infer<typeof RegistrationModeConfigSchema>;
 
 export type BrandPaletteSwatch = z.infer<typeof PaletteSwatchSchema>;
@@ -156,6 +154,7 @@ export function useAggregatorConfig() {
         operation: 'aggregator-config.fetch',
         status: 'failure',
         error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof ResponseShapeError ? { issues: error.issueSummary() } : {}),
       },
     );
   }, [error]);

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
+import type * as Http from '@/services/http';
 import { render, screen } from '@testing-library/react';
 
-vi.mock('@/services/http', () => ({
+vi.mock('@/services/http', async (importOriginal) => ({
+  ...(await importOriginal<typeof Http>()),
   jsonFetch: vi.fn().mockResolvedValue({
     aggregator: { name: 'Aggregator' },
     brand: { short_name: 'Blue Dots', long_name: 'Blue Dots Aggregator Portal', url_slug: 'x' },

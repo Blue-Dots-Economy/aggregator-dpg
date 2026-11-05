@@ -30,6 +30,26 @@ export class ResponseShapeError extends Error {
   ) {
     super(`unexpected response shape from ${url}`);
   }
+
+  /**
+   * Field path and issue code of each problem, for logs.
+   *
+   * Leaves out the received values, which can be personal data.
+   */
+  issueSummary(): { path: string; code: string }[] {
+    return this.issues.map((issue) => ({ path: issue.path.join('.'), code: issue.code }));
+  }
+}
+
+/**
+ * TanStack Query `retry` rule: one retry, but none for a `ResponseShapeError`,
+ * which would fail the same way again.
+ *
+ * @param failureCount - Failures so far for this query.
+ * @param error - The latest failure.
+ */
+export function retryUnlessShapeError(failureCount: number, error: unknown): boolean {
+  return !(error instanceof ResponseShapeError) && failureCount < 1;
 }
 
 /** Redirects to logout. Runs once per page, even with concurrent 401s. */
@@ -51,7 +71,7 @@ function forceLogout(): void {
  * Fetches a BFF endpoint and parses the JSON response with `schema`.
  *
  * Redirects to logout when the server reports `NO_ACTIVE_SESSION`. Fields the
- * schema does not declare are dropped.
+ * schema does not declare are dropped, unless the schema keeps them (`.passthrough()`).
  *
  * @param input - The request URL or object.
  * @param schema - The expected shape of an OK response body.

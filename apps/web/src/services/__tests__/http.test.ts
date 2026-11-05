@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
-import { ResponseShapeError, jsonFetch } from '../http';
+import { ResponseShapeError, jsonFetch, retryUnlessShapeError } from '../http';
 
 const HelloSchema = z.object({ hello: z.string() });
 const AnySchema = z.unknown();
@@ -132,5 +132,33 @@ describe('jsonFetch', () => {
       .fn()
       .mockResolvedValue(new Response('<html>', { status: 200 })) as unknown as typeof fetch;
     await expect(jsonFetch('/api/thing', HelloSchema)).rejects.toBeInstanceOf(ResponseShapeError);
+  });
+
+  it('summarises shape issues by field path and code, without the received values', async () => {
+    const StatusSchema = z.object({ status: z.enum(['draft', 'live']), count: z.number() });
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ status: 'secret-value', count: 'x' }), { status: 200 }),
+      ) as unknown as typeof fetch;
+    const err = await jsonFetch('/api/thing', StatusSchema).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ResponseShapeError);
+    const summary = err instanceof ResponseShapeError ? err.issueSummary() : [];
+    expect(summary).toEqual([
+      { path: 'status', code: 'invalid_enum_value' },
+      { path: 'count', code: 'invalid_type' },
+    ]);
+    expect(JSON.stringify(summary)).not.toContain('secret-value');
+  });
+});
+
+describe('retryUnlessShapeError', () => {
+  it('retries a failed request once', () => {
+    expect(retryUnlessShapeError(0, new Error('network down'))).toBe(true);
+    expect(retryUnlessShapeError(1, new Error('network down'))).toBe(false);
+  });
+
+  it('never retries a shape error, which would fail again', () => {
+    expect(retryUnlessShapeError(0, new ResponseShapeError('/api/thing', []))).toBe(false);
   });
 });
