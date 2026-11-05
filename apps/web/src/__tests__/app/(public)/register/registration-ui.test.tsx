@@ -9,6 +9,8 @@ import { RjsfThemedForm } from '@/components/forms/RjsfThemed';
 import {
   sharedRegistrationFormProps,
   useRegistrationFormState,
+  FIELD_ERRORS,
+  showsErrorBanner,
   RegistrationSubmitButton,
   RegistrationErrorBanner,
   RegistrationSuccessPanel,
@@ -66,7 +68,7 @@ describe('useRegistrationFormState', () => {
         status: 'error',
         title: 'Please fix the highlighted fields',
         detail: '',
-        code: 'CLIENT_VALIDATION',
+        code: FIELD_ERRORS,
         requestId: '',
       });
     });
@@ -133,18 +135,20 @@ describe('RegistrationErrorBanner', () => {
     expect(screen.getByText('Failed')).toBeInTheDocument();
     expect(screen.queryByRole('list')).toBeNull();
   });
+});
 
-  it('renders the raw-errors details block when rawErrors is provided', () => {
-    render(
-      <RegistrationErrorBanner
-        title="Failed"
-        detail="bad"
-        errorRef={{ current: null }}
-        rawErrors={'[{"message":"bad"}]'}
-      />,
-    );
-    expect(screen.getByText('Show raw validation errors')).toBeInTheDocument();
-    expect(screen.getByText(/"message":"bad"/)).toBeInTheDocument();
+describe('showsErrorBanner', () => {
+  const error = (code: string) =>
+    ({ status: 'error', title: 't', detail: '', code, requestId: '' }) as const;
+
+  it('hides the banner for field errors, which show on the fields', () => {
+    expect(showsErrorBanner(error(FIELD_ERRORS))).toBe(false);
+  });
+
+  it('shows it for errors with no field', () => {
+    expect(showsErrorBanner(error('USER_EXISTS'))).toBe(true);
+    expect(showsErrorBanner(error('CLIENT_VALIDATION'))).toBe(true);
+    expect(showsErrorBanner({ status: 'idle' })).toBe(false);
   });
 });
 

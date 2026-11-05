@@ -44,6 +44,20 @@ export interface RegistrationFormState {
  *
  * @returns The form state handles.
  */
+/** Error code for failed field checks; each field shows its own message, so no banner. */
+export const FIELD_ERRORS = 'FIELD_VALIDATION';
+
+/**
+ * Whether a state needs the error banner: an error that is not a field check.
+ *
+ * @param state - The form's submit state.
+ */
+export function showsErrorBanner(
+  state: SubmitState,
+): state is Extract<SubmitState, { status: 'error' }> {
+  return state.status === 'error' && state.code !== FIELD_ERRORS;
+}
+
 /**
  * The input of the first field the form marked with an error, in page order.
  * RJSF gives a field's error list the field's id plus `__error`.
@@ -60,7 +74,7 @@ export function useRegistrationFormState(): RegistrationFormState {
   const errorRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (state.status !== 'error') return;
-    const target = (state.code === 'CLIENT_VALIDATION' && firstInvalidField()) || errorRef.current;
+    const target = (state.code === FIELD_ERRORS && firstInvalidField()) || errorRef.current;
     if (!target) return;
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
     target.focus({ preventScroll: true });
@@ -215,9 +229,8 @@ export function sharedRegistrationFormProps(wiring: SharedFormWiring): {
         status: 'error',
         title: wiring.validationErrorTitle,
         detail: humaniseValidationErrors(errs, wiring.formSchema).join('\n'),
-        code: 'CLIENT_VALIDATION',
-        // Client-side failures have no request id; carry the raw errors instead.
-        requestId: JSON.stringify(errs, null, 2),
+        code: FIELD_ERRORS,
+        requestId: '',
       });
     },
     ...(validate ? { customValidate: validate } : {}),
@@ -279,21 +292,18 @@ export interface RegistrationErrorBannerProps {
   detail: string;
   /** Focus/scroll target so the banner can be pulled into view on submit. */
   errorRef: RefObject<HTMLDivElement | null>;
-  /** Raw Ajv dump shown behind a `<details>` for client-validation errors. */
-  rawErrors?: string;
 }
 
 /**
- * Red alert banner shown on submit failure (server or client validation).
+ * Red alert banner shown on a submit failure that is not a field check.
  *
- * @param props - Title, detail lines, focus ref, optional raw-error dump.
+ * @param props - Title, detail lines and focus ref.
  * @returns The error banner element.
  */
 export function RegistrationErrorBanner({
   title,
   detail,
   errorRef,
-  rawErrors,
 }: RegistrationErrorBannerProps): JSX.Element {
   return (
     <div
@@ -312,14 +322,6 @@ export function RegistrationErrorBanner({
               <li key={i}>{line}</li>
             ))}
         </ul>
-      ) : null}
-      {rawErrors ? (
-        <details className="mt-2 text-[11px] text-red-500/80">
-          <summary className="cursor-pointer">Show raw validation errors</summary>
-          <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] bg-red-100/40 rounded-sm p-2 max-h-[200px] overflow-auto">
-            {rawErrors}
-          </pre>
-        </details>
       ) : null}
     </div>
   );

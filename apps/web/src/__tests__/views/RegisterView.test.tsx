@@ -328,7 +328,7 @@ describe('RegisterView coordinator flow', () => {
     expect(await screen.findByTestId('org-select')).toBeInTheDocument();
   });
 
-  it('coordinator form: surfaces a client-validation error via onError', async () => {
+  it('coordinator form: leaves field errors to the fields, with no banner', async () => {
     globalThis.fetch = vi.fn(
       async () => new Response('{}', { status: 200 }),
     ) as unknown as typeof fetch;
@@ -338,8 +338,8 @@ describe('RegisterView coordinator flow', () => {
       capturedOnError?.([{ property: '.name', message: 'is required', name: 'required' }]);
     });
 
-    expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect(screen.getByText(messages.register.validation_error_title)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(messages.register.validation_error_title)).toBeNull();
   });
 });
 

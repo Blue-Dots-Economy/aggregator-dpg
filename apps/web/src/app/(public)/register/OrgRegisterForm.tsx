@@ -27,6 +27,7 @@ import {
 } from './registration-shared';
 import {
   RegistrationErrorBanner,
+  showsErrorBanner,
   RegistrationSubmitButton,
   RegistrationSuccessPanel,
   sharedRegistrationFormProps,
@@ -211,7 +212,7 @@ export function OrgRegisterForm({
 
   return (
     <div className="mt-7">
-      {state.status === 'error' ? (
+      {showsErrorBanner(state) ? (
         <RegistrationErrorBanner title={state.title} detail={state.detail} errorRef={errorRef} />
       ) : null}
 

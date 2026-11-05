@@ -27,6 +27,7 @@ import {
 } from './registration-shared';
 import {
   RegistrationErrorBanner,
+  showsErrorBanner,
   RegistrationSubmitButton,
   RegistrationSuccessPanel,
   sharedRegistrationFormProps,
@@ -242,13 +243,8 @@ export function CoordinatorRegisterForm({
 
   return (
     <div className="mt-7">
-      {state.status === 'error' ? (
-        <RegistrationErrorBanner
-          title={state.title}
-          detail={state.detail}
-          errorRef={errorRef}
-          {...(state.code === 'CLIENT_VALIDATION' ? { rawErrors: state.requestId } : {})}
-        />
+      {showsErrorBanner(state) ? (
+        <RegistrationErrorBanner title={state.title} detail={state.detail} errorRef={errorRef} />
       ) : null}
 
       {inviteMode ? (
