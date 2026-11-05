@@ -68,8 +68,6 @@ export default async function ConsoleOrgsPage({
           rootName={hierarchy.network.name}
           orgs={network.orgs}
           more={network.more}
-          totalOrgs={hierarchy.total_orgs}
-          maxOrgs={hierarchy.limits.max_total_orgs}
           initialFilter={initialFilter}
         />
         <HierarchySettings

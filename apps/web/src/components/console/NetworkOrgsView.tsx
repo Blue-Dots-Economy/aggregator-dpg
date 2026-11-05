@@ -1,8 +1,8 @@
 'use client';
 
 /**
- * The network admin's organisations: a summary of the network with how many
- * organisations it may hold and status filters, then the organisations directly
+ * The network admin's organisations: a summary of the network with status
+ * filters, then the organisations directly
  * under the network as a list. Search and the status filter run in the browser
  * over the loaded organisations.
  */
@@ -29,9 +29,6 @@ import { CountTile, type TileTone } from './CountTile';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
-/** Usage at or above this share of the maximum shows in amber. */
-const NEAR_LIMIT = 0.8;
-
 const FILTER_TILE: Record<OrgFilter, { icon: LucideIcon; tone: TileTone }> = {
   all: { icon: Building2, tone: 'primary' },
   active: { icon: CircleCheck, tone: 'green' },
@@ -53,18 +50,12 @@ export function NetworkOrgsView({
   rootName,
   orgs,
   more,
-  totalOrgs,
-  maxOrgs,
   initialFilter = 'all',
 }: Readonly<{
   rootName: string;
   orgs: OrgRow[];
   /** More organisations exist than were loaded. */
   more: boolean;
-  /** Organisations counted against the limit, from the hierarchy settings. */
-  totalOrgs: number;
-  /** The most organisations the network may hold. */
-  maxOrgs: number;
   initialFilter?: OrgFilter;
 }>) {
   const t = useTranslations('console');
@@ -76,7 +67,6 @@ export function NetworkOrgsView({
   const keep = (o: OrgRow) => matchesFilter(o, filter) && matchesQuery(o, q);
   // Default goes last: it holds sign-ups that came in without an organisation.
   const rows = orgs.filter(keep).sort((a, b) => Number(a.is_default) - Number(b.is_default));
-  const used = maxOrgs > 0 ? Math.min(totalOrgs / maxOrgs, 1) : 0;
   const filterLabel = (f: OrgFilter) => t(`orgs.tile.${f}.label`);
 
   return (
@@ -91,27 +81,6 @@ export function NetworkOrgsView({
               {rootName}
             </div>
             <div className="text-[12.5px] text-ink-500">{t('orgs.network_note')}</div>
-          </div>
-          <div className="flex w-full min-w-[180px] flex-col gap-1.5 sm:ml-auto sm:w-auto">
-            <div className="flex justify-between gap-4 text-[12.5px] text-ink-500">
-              <span>{t('orgs.capacity')}</span>
-              <span>
-                <b className="text-ink-900">{totalOrgs}</b> / {maxOrgs}
-              </span>
-            </div>
-            <div
-              role="progressbar"
-              aria-label={t('orgs.capacity')}
-              aria-valuemin={0}
-              aria-valuemax={maxOrgs}
-              aria-valuenow={totalOrgs}
-              className="h-1.5 overflow-hidden rounded-full bg-(--bd-border-soft)"
-            >
-              <div
-                className={used >= NEAR_LIMIT ? 'h-full bg-amber-500' : 'h-full bg-(--bd-primary)'}
-                style={{ width: `${used * 100}%` }}
-              />
-            </div>
           </div>
         </div>
       </section>
