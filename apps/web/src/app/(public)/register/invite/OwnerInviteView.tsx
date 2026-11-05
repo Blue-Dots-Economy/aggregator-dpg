@@ -4,6 +4,7 @@ import { useMemo, useState, type JSX, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { RegisterPageShell } from '../RegisterPageShell';
 import { DEFAULT_MAX_INVITES } from '../../../../lib/invite-limit';
+import { readApiError } from '../../../../lib/api-error';
 
 export interface OwnerInviteViewProps {
   /** The owner grant token from the deep-link query string. */
@@ -297,10 +298,5 @@ function Banner({
 
 /** Reads the error code from the response body, or `null` for a non-JSON body. */
 async function readErrorCode(res: Response): Promise<string | null> {
-  try {
-    const body = (await res.json()) as { error?: { code?: string } };
-    return body.error?.code ?? null;
-  } catch {
-    return null;
-  }
+  return (await readApiError(res))?.code ?? null;
 }

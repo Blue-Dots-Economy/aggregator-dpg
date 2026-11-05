@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { apiErrorMessage } from '../lib/api-error';
 import { jsonFetch } from './http';
 
 /**
@@ -199,16 +200,7 @@ class HttpDashboardService implements DashboardService {
       credentials: 'same-origin',
     });
     if (!res.ok) {
-      // Use the upstream error message when the body has one.
-      let message = `dashboard export failed: ${res.status}`;
-      try {
-        const body = (await res.json()) as { error?: { detail?: string; message?: string } };
-        const detail = body?.error?.detail ?? body?.error?.message;
-        if (detail) message = detail;
-      } catch {
-        // non-JSON body — keep the default message.
-      }
-      throw new Error(message);
+      throw new Error(await apiErrorMessage(res, `dashboard export failed: ${res.status}`));
     }
     const blob = await res.blob();
     const disposition = res.headers.get('content-disposition') ?? '';
@@ -231,16 +223,7 @@ class HttpDashboardService implements DashboardService {
       body: JSON.stringify({ item_ids: input.itemIds, domain: input.domain }),
     });
     if (!res.ok) {
-      // Use the upstream error message when the body has one.
-      let message = `profile export failed: ${res.status}`;
-      try {
-        const errBody = (await res.json()) as { error?: { detail?: string; message?: string } };
-        const detail = errBody?.error?.detail ?? errBody?.error?.message;
-        if (detail) message = detail;
-      } catch {
-        // non-JSON body — keep the default message.
-      }
-      throw new Error(message);
+      throw new Error(await apiErrorMessage(res, `profile export failed: ${res.status}`));
     }
     const blob = await res.blob();
     const disposition = res.headers.get('content-disposition') ?? '';
@@ -265,15 +248,7 @@ class HttpDashboardService implements DashboardService {
       body: JSON.stringify(input),
     });
     if (!res.ok) {
-      let message = `bulk action failed: ${res.status}`;
-      try {
-        const body = (await res.json()) as { error?: { detail?: string; message?: string } };
-        const detail = body?.error?.detail ?? body?.error?.message;
-        if (detail) message = detail;
-      } catch {
-        // non-JSON body — keep the default message.
-      }
-      throw new Error(message);
+      throw new Error(await apiErrorMessage(res, `bulk action failed: ${res.status}`));
     }
     return (await res.json()) as DashboardBulkActionResult;
   }

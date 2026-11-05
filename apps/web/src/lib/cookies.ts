@@ -9,6 +9,7 @@
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { z } from 'zod';
 
 export const SESSION_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid';
 export const OIDC_FLOW_COOKIE = 'oidc_flow';
@@ -79,12 +80,14 @@ export function clearCookieOptions(): {
   };
 }
 
-export interface OidcFlowState {
-  state: string;
-  nonce: string;
-  codeVerifier: string;
-  returnTo: string;
-}
+/** State kept in the signed cookie between the login redirect and the OIDC callback. */
+const OidcFlowStateSchema = z.object({
+  state: z.string(),
+  nonce: z.string(),
+  codeVerifier: z.string(),
+  returnTo: z.string(),
+});
+export type OidcFlowState = z.infer<typeof OidcFlowStateSchema>;
 
 function getSigningKey(): string {
   const key = process.env.SESSION_KEY;
@@ -112,7 +115,7 @@ export function signFlowState(state: OidcFlowState): string {
 /**
  * Verifies signature and decodes flow state from a cookie value.
  *
- * @returns Parsed state, or `null` if signature invalid / payload corrupt.
+ * @returns Parsed state, or `null` if the signature is invalid or the payload is not a flow state.
  */
 export function verifyFlowState(raw: string | undefined): OidcFlowState | null {
   if (!raw) return null;
@@ -133,7 +136,8 @@ export function verifyFlowState(raw: string | undefined): OidcFlowState | null {
   if (!timingSafeEqual(provBuf, expBuf)) return null;
   try {
     const json = Buffer.from(payload, 'base64url').toString('utf8');
-    return JSON.parse(json) as OidcFlowState;
+    const parsed = OidcFlowStateSchema.safeParse(JSON.parse(json));
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }

@@ -26,7 +26,7 @@ const NO_SESSION_MESSAGE = 'no active session';
 export async function passthrough(upstream: Response): Promise<NextResponse> {
   const contentType = upstream.headers.get('content-type') ?? '';
   if (contentType.includes('application/json')) {
-    const data = (await upstream.json()) as unknown;
+    const data: unknown = await upstream.json();
     return NextResponse.json(data, { status: upstream.status });
   }
   const text = await upstream.text();
@@ -69,7 +69,8 @@ export type JsonBodyResult = { ok: true; body: unknown } | { ok: false; response
  */
 export async function readJsonBody(req: NextRequest): Promise<JsonBodyResult> {
   try {
-    return { ok: true, body: (await req.json()) as unknown };
+    const body: unknown = await req.json();
+    return { ok: true, body };
   } catch {
     return {
       ok: false,

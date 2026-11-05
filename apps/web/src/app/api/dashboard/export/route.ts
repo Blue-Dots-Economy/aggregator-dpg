@@ -9,7 +9,7 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { callApi } from '../../../../lib/upstream-client';
-import { unauthorizedResponse, serviceUnavailableResponse } from '../../../../lib/bff-errors';
+import { passthrough, proxyFailureResponse } from '../../../../lib/bff-proxy';
 
 export const runtime = 'nodejs';
 
@@ -24,17 +24,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
     const ct = upstream.headers.get('content-type') ?? '';
     // Errors come back as JSON so the client can show a toast.
-    if (!upstream.ok) {
-      if (ct.includes('application/json')) {
-        const data = (await upstream.json()) as unknown;
-        return NextResponse.json(data, { status: upstream.status });
-      }
-      const text = await upstream.text();
-      return new NextResponse(text, {
-        status: upstream.status,
-        headers: { 'Content-Type': ct || 'text/plain' },
-      });
-    }
+    if (!upstream.ok) return await passthrough(upstream);
     // Success: relay the CSV and keep the filename and charset.
     const body = await upstream.text();
     const headers: Record<string, string> = {
@@ -44,12 +34,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (disposition) headers['Content-Disposition'] = disposition;
     return new NextResponse(body, { status: upstream.status, headers });
   } catch (err) {
-    if (err instanceof Error && err.message === 'no active session') {
-      return unauthorizedResponse();
-    }
-    return serviceUnavailableResponse(
-      'dashboard-export',
-      err instanceof Error ? err.message : undefined,
-    );
+    return proxyFailureResponse(err, 'dashboard-export');
   }
 }

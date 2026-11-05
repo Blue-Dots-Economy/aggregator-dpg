@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createHmac } from 'node:crypto';
 import {
   signFlowState,
   verifyFlowState,
@@ -66,6 +67,12 @@ describe('flow state signing', () => {
     expect(() =>
       signFlowState({ state: 's', nonce: 'n', codeVerifier: 'v', returnTo: '/' }),
     ).toThrow(/SESSION_KEY/);
+  });
+
+  it('rejects a correctly signed payload that lacks flow-state fields', () => {
+    const payload = Buffer.from(JSON.stringify({ state: 's' })).toString('base64url');
+    const signature = createHmac('sha256', 'a'.repeat(48)).update(payload).digest('hex');
+    expect(verifyFlowState(`${payload}.${signature}`)).toBeNull();
   });
 
   it('rejects a payload with no separating dot', () => {

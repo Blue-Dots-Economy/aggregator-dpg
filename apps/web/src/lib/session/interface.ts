@@ -5,34 +5,41 @@
  * only on this abstract class.
  */
 
-import type { MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import { z } from 'zod';
+import { MeResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
 
 /**
  * The signed-in actor (`GET /v1/user/read/me`), cached briefly in the session.
  *
  * The database stays the authority; the cache saves one call per page.
  */
-export interface CachedActor {
-  me: MeResponse;
+export const CachedActorSchema = z.object({
+  me: MeResponseSchema,
   /** Epoch ms when it was read. */
-  at: number;
-}
+  at: z.number(),
+});
+export type CachedActor = z.infer<typeof CachedActorSchema>;
 
-export interface SessionData {
-  sub: string;
-  email?: string;
-  phone?: string;
-  name?: string;
-  accessToken: string;
-  refreshToken: string;
-  idToken: string;
-  accessTokenExp: number;
-  refreshTokenExp: number;
-  createdAt: number;
-  lastSeenAt: number;
+/**
+ * A stored session. An unreadable `consoleActor` cache is dropped, because the
+ * console reads the actor again when the cache is absent.
+ */
+export const SessionDataSchema = z.object({
+  sub: z.string(),
+  email: z.string().optional(),
+  phone: z.string().optional(),
+  name: z.string().optional(),
+  accessToken: z.string(),
+  refreshToken: z.string(),
+  idToken: z.string(),
+  accessTokenExp: z.number(),
+  refreshTokenExp: z.number(),
+  createdAt: z.number(),
+  lastSeenAt: z.number(),
   /** Console actor cache; absent until the console reads it. */
-  consoleActor?: CachedActor;
-}
+  consoleActor: CachedActorSchema.optional().catch(undefined),
+});
+export type SessionData = z.infer<typeof SessionDataSchema>;
 
 export type SessionResult<T> = { ok: true; value: T } | { ok: false; error: SessionError };
 

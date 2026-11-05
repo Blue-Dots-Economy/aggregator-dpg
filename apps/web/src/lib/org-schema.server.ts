@@ -8,6 +8,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import { parseJsonObject, parseJsonSchema } from './json-object';
 import type { RJSFSchema } from '@rjsf/utils';
 import { resolveAggregatorSchemaPath } from './aggregator-schema.server';
 import { networkDomains } from './console-domains.server';
@@ -33,8 +34,8 @@ export async function loadOrgSchema(): Promise<LoadedOrgSchema | null> {
       readFile(resolveAggregatorSchemaPath('org-registration.v1.ui.json'), 'utf8'),
     ]);
     raw = {
-      schema: JSON.parse(rawSchema) as RJSFSchema,
-      uiSchema: JSON.parse(rawUi) as Record<string, unknown>,
+      schema: parseJsonSchema(rawSchema),
+      uiSchema: parseJsonObject(rawUi),
     };
   } catch {
     return null;

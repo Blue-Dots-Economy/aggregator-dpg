@@ -9,7 +9,8 @@
  */
 
 import { cookies } from 'next/headers';
-import type { MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import { MeResponseSchema, type MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import { readApiError } from './api-error';
 import { SESSION_COOKIE } from './cookies';
 import { getSessionStore } from './session';
 import { getSession } from './server-session';
@@ -36,6 +37,9 @@ function reasonOf(code: unknown): ConsoleActorFailure {
 /**
  * Returns the signed-in actor, from the session cache when fresh.
  *
+ * A `/me` response that does not match `MeResponseSchema` is not cached and
+ * answers `unavailable`, so the cache only holds what the session store accepts.
+ *
  * @returns The actor, or why there is none.
  */
 export async function getConsoleActor(): Promise<ConsoleActorResult> {
@@ -55,11 +59,12 @@ export async function getConsoleActor(): Promise<ConsoleActorResult> {
   }
   if (res.status === 401) return { ok: false, reason: 'no_session' };
   if (res.status === 403) {
-    const body = (await res.json().catch(() => null)) as { error?: { code?: unknown } } | null;
-    return { ok: false, reason: reasonOf(body?.error?.code) };
+    return { ok: false, reason: reasonOf((await readApiError(res))?.code) };
   }
   if (!res.ok) return { ok: false, reason: 'unavailable' };
-  const me = (await res.json()) as MeResponse;
+  const parsed = MeResponseSchema.safeParse(await res.json().catch(() => null));
+  if (!parsed.success) return { ok: false, reason: 'unavailable' };
+  const me = parsed.data;
 
   const sid = (await cookies()).get(SESSION_COOKIE)?.value;
   if (sid) await getSessionStore().update(sid, { consoleActor: { me, at: Date.now() } });

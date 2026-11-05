@@ -16,6 +16,7 @@ import { useTranslations } from 'next-intl';
 import { I } from '../../icons';
 import { Button } from '../ui/Button';
 import { useAuth } from '../../lib/auth-context';
+import { readApiError } from '../../lib/api-error';
 import {
   SUPPORT_CONFIG_FALLBACK,
   encodeAttachments,
@@ -44,22 +45,6 @@ type Status =
   | 'rate_limited'
   | 'attachment_rejected';
 type SupportType = 'complaint' | 'support_request';
-
-/**
- * Reads the API's `{ error: { code, detail } }` envelope from a failed
- * response. Handles a non-JSON body.
- *
- * @param res - The failed response.
- * @returns The error code and detail, or null when unreadable.
- */
-async function readErrorCode(res: Response): Promise<{ code?: string; detail?: string } | null> {
-  try {
-    const body = (await res.json()) as { error?: { code?: string; detail?: string } };
-    return body.error ?? null;
-  } catch {
-    return null;
-  }
-}
 
 /** What the dialog should show after a submit response. */
 interface SubmitOutcome {
@@ -95,7 +80,7 @@ async function resolveSubmitOutcome(
     };
   }
   // A server-side attachment rejection names the file, so show it.
-  const error = await readErrorCode(res);
+  const error = await readApiError(res);
   if (error?.code?.startsWith('ATTACHMENT_')) {
     return { status: 'attachment_rejected', serverDetail: error.detail ?? null };
   }

@@ -7,8 +7,14 @@
 
 import { randomUUID } from 'node:crypto';
 import type Redis from 'ioredis';
-import { SessionStoreBase, type SessionData, type SessionResult } from './interface';
+import {
+  SessionDataSchema,
+  SessionStoreBase,
+  type SessionData,
+  type SessionResult,
+} from './interface';
 import { getRedisClient } from './redis-client';
+import { logger } from '../logger';
 
 const KEY_PREFIX = 'session:';
 
@@ -72,18 +78,38 @@ export class RedisSessionStore extends SessionStoreBase {
         error: { code: 'NOT_FOUND', message: `session ${sid} not found` },
       };
     }
-    let parsed: SessionData;
+    let stored: unknown;
     try {
-      parsed = JSON.parse(raw) as SessionData;
+      stored = JSON.parse(raw);
     } catch {
-      return {
-        ok: false,
-        error: { code: 'CORRUPT', message: `session ${sid} unparseable` },
-      };
+      return this.discardCorrupt(sid, 'unparseable');
     }
+    const session = SessionDataSchema.safeParse(stored);
+    if (!session.success) return this.discardCorrupt(sid, 'unexpected shape');
+    const parsed = session.data;
     // Slide the TTL; failure is non-fatal.
     void this.redis.expire(KEY_PREFIX + sid, this.ttlSec);
     return { ok: true, value: parsed };
+  }
+
+  /**
+   * Deletes an unreadable session so it is not read again, and logs why.
+   *
+   * Never log the session id: it works as a login credential.
+   *
+   * @param sid - Session ID.
+   * @param reason - Why the session could not be read.
+   */
+  private discardCorrupt(sid: string, reason: string): SessionResult<never> {
+    logger.warn({ operation: 'session.get', status: 'failure', code: 'CORRUPT', reason });
+    this.redis.del(KEY_PREFIX + sid).catch((err: unknown) => {
+      logger.warn({
+        operation: 'session.discard',
+        status: 'failure',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+    return { ok: false, error: { code: 'CORRUPT', message: `session ${reason}` } };
   }
 
   /**
