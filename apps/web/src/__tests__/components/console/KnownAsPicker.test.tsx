@@ -75,10 +75,10 @@ describe('<KnownAsPicker />', () => {
     expect(screen.queryByText(/Blue Dots has set/)).toBeNull();
   });
 
-  it('keeps the current value when it is not among the choices', () => {
+  it('keeps the current value when it is not among the choices, marked as such', () => {
     render(picker({ ...ORG, known_as: 'aggregator', known_as_name: 'Aggregator' }, OPTIONS));
     expect(select()).toHaveValue('aggregator');
-    expect(optionNames()).toEqual(['Aggregator', 'District', 'Block']);
+    expect(optionNames()).toEqual(['Aggregator (no longer offered)', 'District', 'Block']);
   });
 
   it('offers only Aggregator when the parent has no values', () => {
@@ -90,12 +90,12 @@ describe('<KnownAsPicker />', () => {
   it('keeps a current value that is not Aggregator when the parent has no values', () => {
     render(picker(ORG, []));
     expect(select()).toHaveValue('district');
-    expect(optionNames()).toEqual(['District', 'Aggregator']);
+    expect(optionNames()).toEqual(['District (no longer offered)', 'Aggregator']);
   });
 
   it('shows the key when the current value has no name', () => {
     render(picker({ ...ORG, known_as: 'old_key', known_as_name: null }, OPTIONS));
-    expect(optionNames()[0]).toBe('old_key');
+    expect(optionNames()[0]).toBe('old_key (no longer offered)');
   });
 
   it('sends the chosen key and refreshes the page', async () => {

@@ -45,6 +45,24 @@ const COUNT_LIMIT = 100;
 const COUNTED = ['all', 'active', 'pending', 'inactive'] as const;
 type Counted = (typeof COUNTED)[number];
 
+/** One active filter, shown as a removable chip. */
+interface FilterChip {
+  key: string;
+  label: string;
+  value: string;
+}
+
+/** The coordinators list URL with these filters. */
+function listHref(filters: Readonly<Record<string, string>>): string {
+  const q = new URLSearchParams(filters).toString();
+  return q ? `/console/coordinators?${q}` : '/console/coordinators';
+}
+
+/** The filters without one of them. */
+function omit(filters: Readonly<Record<string, string>>, key: string): Record<string, string> {
+  return Object.fromEntries(Object.entries(filters).filter(([k]) => k !== key));
+}
+
 export default async function ConsoleCoordinatorsPage({
   searchParams,
 }: Readonly<{
@@ -88,35 +106,22 @@ export default async function ConsoleCoordinatorsPage({
     ...(status ? { status } : {}),
     ...(serves ? { serves } : {}),
   };
-  /** The list URL without one filter. */
-  const without = (key: string) => {
-    const rest = Object.fromEntries(Object.entries(keep).filter(([k]) => k !== key));
-    const q = new URLSearchParams(rest).toString();
-    return `/console/coordinators${q ? `?${q}` : ''}`;
-  };
-  const chips = [
-    ...(orgId
-      ? [
-          {
-            key: 'org_id',
-            label: t('coordinators.org_filter'),
-            value: orgById.get(orgId)?.name ?? orgId,
-          },
-        ]
-      : []),
-    ...(status
-      ? [{ key: 'status', label: t('coordinators.status_filter'), value: t(`status.${status}`) }]
-      : []),
-    ...(serves
-      ? [
-          {
-            key: 'serves',
-            label: t('coordinators.serves_filter'),
-            value: domains.find((d) => d.id === serves)?.label ?? serves,
-          },
-        ]
-      : []),
-  ];
+  const chips: FilterChip[] = [];
+  if (orgId) {
+    const value = orgById.get(orgId)?.name ?? orgId;
+    chips.push({ key: 'org_id', label: t('coordinators.org_filter'), value });
+  }
+  if (status) {
+    chips.push({
+      key: 'status',
+      label: t('coordinators.status_filter'),
+      value: t(`status.${status}`),
+    });
+  }
+  if (serves) {
+    const value = domains.find((d) => d.id === serves)?.label ?? serves;
+    chips.push({ key: 'serves', label: t('coordinators.serves_filter'), value });
+  }
   // Roles are null when access control is off: no Access column then.
   const showAccess = page.users.some((u) => Array.isArray(u.roles));
   const catalogue = showAccess ? await consoleReadOptional<RolesResponse>('/v1/roles') : null;
@@ -128,8 +133,7 @@ export default async function ConsoleCoordinatorsPage({
         <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
           {COUNTED.map((f) => {
             const c = counts[f];
-            const rest = Object.fromEntries(Object.entries(keep).filter(([k]) => k !== 'status'));
-            const q = new URLSearchParams(f === 'all' ? rest : { ...rest, status: f }).toString();
+            const rest = omit(keep, 'status');
             const { icon: Icon, tone } = COUNT_TILE[f];
             const selected = (status ?? 'all') === f;
             return (
@@ -148,7 +152,7 @@ export default async function ConsoleCoordinatorsPage({
                 selected={selected}
                 showLabel={t('org_home.tile_show')}
                 showingLabel={t('org_home.tile_showing')}
-                href={`/console/coordinators${q ? `?${q}` : ''}`}
+                href={listHref(f === 'all' ? rest : { ...rest, status: f })}
               />
             );
           })}
@@ -181,7 +185,7 @@ export default async function ConsoleCoordinatorsPage({
               {chips.map((c) => (
                 <Link
                   key={c.key}
-                  href={without(c.key)}
+                  href={listHref(omit(keep, c.key))}
                   aria-label={t('coordinators.clear_filter', { label: c.label })}
                   className="inline-flex items-center gap-1.5 rounded-full bg-[var(--bd-tint-primary)] px-3 py-1 text-[12.5px] text-primary-600 hover:underline"
                 >

@@ -77,10 +77,11 @@ export function orgsInTreeOrder(orgs: readonly OrgRow[]): OrgTreeEntry[] {
 export function orgOptionsInTreeOrder(orgs: readonly OrgRow[]): OrgOption[] {
   return orgsInTreeOrder(orgs).map(({ org, path }) => {
     const knownAs = org.known_as_name ?? org.known_as;
+    const suffix = knownAs ? ` (${knownAs})` : '';
     return {
       id: org.id,
       name: org.name,
-      label: `${path.join(' › ')}${knownAs ? ` (${knownAs})` : ''}`,
+      label: `${path.join(' › ')}${suffix}`,
     };
   });
 }

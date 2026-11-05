@@ -2,7 +2,8 @@
  * Unit tests for KnownAsValuesEditor: the "known as" values an organisation
  * defines for the organisations under it.
  *
- * Covers: the empty state, saved rows with their default, adding, renaming
+ * Covers: the empty state and notes, the status line and discard, the first
+ * value becoming the default, saved rows with their default, adding, renaming
  * and removing rows (saved keys sent back, new rows without a key), the
  * default choice, the row limit, name checks before sending, the saved list
  * from the API, an error, a changed list from the page, the same list in a
@@ -43,7 +44,14 @@ function renderIt(values: KnownAsValues = SAVED) {
   );
 }
 
-const save = () => screen.getByRole('button', { name: m.save });
+const save = () => screen.getByRole('button', { name: m.known_as_values_save });
+const newValue = () => screen.getByLabelText(m.known_as_values_new);
+const addBtn = () => screen.getByRole('button', { name: m.known_as_values_add });
+
+function addValue(name: string) {
+  fireEvent.change(newValue(), { target: { value: name } });
+  fireEvent.click(addBtn());
+}
 const nameField = (n: number) => screen.getByLabelText(`Name of value ${n}`);
 const defaults = () => screen.getAllByRole('radio', { name: /^Make .+ the default$/ });
 
@@ -66,9 +74,27 @@ describe('<KnownAsValuesEditor />', () => {
   it('shows the empty state and the notes when there are no values', () => {
     renderIt([]);
     expect(screen.getByText(m.known_as_values_empty)).toBeInTheDocument();
-    expect(screen.getByText(m.known_as_values_default_note)).toBeInTheDocument();
+    expect(screen.getByText(m.known_as_values_note_default)).toBeInTheDocument();
     expect(screen.getByText(m.known_as_values_remove_note)).toBeInTheDocument();
+    expect(screen.getByText(m.known_as_values_unchanged)).toBeInTheDocument();
     expect(save()).toBeDisabled();
+  });
+
+  it('makes the first value added to an empty list the default', () => {
+    renderIt([]);
+    addValue('District');
+    expect(nameField(1)).toHaveValue('District');
+    expect(defaults()[0]).toBeChecked();
+    expect(screen.getByText(m.known_as_values_unsaved)).toBeInTheDocument();
+  });
+
+  it('discards unsaved changes', () => {
+    renderIt();
+    fireEvent.change(nameField(1), { target: { value: 'Zone' } });
+    fireEvent.click(screen.getByRole('button', { name: m.known_as_values_discard }));
+    expect(nameField(1)).toHaveValue('District');
+    expect(save()).toBeDisabled();
+    expect(screen.queryByRole('button', { name: m.known_as_values_discard })).toBeNull();
   });
 
   it('shows the saved values with their default, and no key field', () => {
@@ -78,7 +104,7 @@ describe('<KnownAsValuesEditor />', () => {
     expect(nameField(2)).toHaveValue('Block');
     expect(defaults()[0]).toBeChecked();
     expect(defaults()[1]).not.toBeChecked();
-    expect(screen.getAllByRole('textbox')).toHaveLength(2);
+    expect(screen.getAllByRole('textbox')).toHaveLength(3);
     expect(save()).toBeDisabled();
   });
 
@@ -91,8 +117,8 @@ describe('<KnownAsValuesEditor />', () => {
     vi.mocked(global.fetch).mockResolvedValue(json({ id: ORG, known_as_values: after }));
     renderIt();
     fireEvent.change(nameField(1), { target: { value: 'Zone' } });
-    fireEvent.click(screen.getByRole('button', { name: m.known_as_values_add }));
-    fireEvent.change(nameField(3), { target: { value: '  Ward ' } });
+    addValue('  Ward ');
+    expect(newValue()).toHaveValue('');
     fireEvent.click(defaults()[2]!);
     fireEvent.click(save());
     await waitFor(() => expect(refresh).toHaveBeenCalled());
@@ -115,34 +141,58 @@ describe('<KnownAsValuesEditor />', () => {
     vi.mocked(global.fetch).mockResolvedValue(json({ id: ORG, known_as_values: [SAVED[1]] }));
     renderIt();
     fireEvent.click(screen.getByRole('button', { name: 'Remove District' }));
-    expect(screen.getByRole('radio', { name: m.known_as_values_no_default })).toBeChecked();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'After the removal, organisations known as District will be known as Aggregator when you save.',
+    );
+    expect(nameField(1)).toHaveValue('District');
+    fireEvent.click(screen.getByRole('button', { name: m.known_as_values_remove_confirm }));
+    for (const radio of defaults()) expect(radio).not.toBeChecked();
     fireEvent.click(save());
     await waitFor(() => expect(global.fetch).toHaveBeenCalled());
     expect(sentBody()).toEqual({ known_as_values: [{ key: 'block', name: 'Block' }] });
   });
 
-  it('sends no default when "No default" is chosen', async () => {
-    vi.mocked(global.fetch).mockResolvedValue(json({ id: ORG, known_as_values: [] }));
+  it('says how many organisations moved to the default after a save', async () => {
+    vi.mocked(global.fetch).mockResolvedValue(
+      json({ id: ORG, known_as_values: [SAVED[0]], reset_count: 3 }),
+    );
     renderIt();
-    fireEvent.click(screen.getByRole('radio', { name: m.known_as_values_no_default }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Block' }));
+    fireEvent.click(screen.getByRole('button', { name: m.known_as_values_remove_confirm }));
     fireEvent.click(save());
-    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
-    expect(sentBody()).toEqual({
-      known_as_values: [
-        { key: 'district', name: 'District' },
-        { key: 'block', name: 'Block' },
-      ],
-    });
+    expect(
+      await screen.findByText('Saved. 3 organisations changed to the default value.'),
+    ).toBeInTheDocument();
   });
 
-  it('refuses an empty or repeated name before sending', () => {
+  it('warns before removing a saved value, naming where its organisations go', () => {
     renderIt();
-    fireEvent.click(screen.getByRole('button', { name: m.known_as_values_add }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Block' }));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'After the removal, organisations known as Block will be known as District when you save.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: m.known_as_values_cancel }));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(nameField(2)).toHaveValue('Block');
+    expect(save()).toBeDisabled();
+  });
+
+  it('removes a value added since the last save without asking', () => {
+    renderIt();
+    addValue('Ward');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Ward' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByDisplayValue('Ward')).toBeNull();
+  });
+
+  it('refuses an empty name before sending, and a repeated name when adding', () => {
+    renderIt();
+    fireEvent.change(nameField(2), { target: { value: ' ' } });
     fireEvent.click(save());
     expect(screen.getByText(m.known_as_values_name_required)).toBeInTheDocument();
-    fireEvent.change(nameField(3), { target: { value: 'district ' } });
-    fireEvent.click(save());
-    expect(screen.getByText(m.known_as_values_name_repeated)).toBeInTheDocument();
+    addValue('district ');
+    expect(screen.getByText('\u201cdistrict\u201d is already in the list.')).toBeInTheDocument();
+    expect(newValue()).toHaveValue('district ');
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -152,7 +202,8 @@ describe('<KnownAsValuesEditor />', () => {
       name: `Value ${i}`,
     }));
     renderIt(full);
-    expect(screen.getByRole('button', { name: m.known_as_values_add })).toBeDisabled();
+    expect(newValue()).toBeDisabled();
+    expect(addBtn()).toBeDisabled();
     expect(
       screen.getByText(`You can have up to ${KNOWN_AS_MAX_VALUES} values.`),
     ).toBeInTheDocument();
@@ -175,16 +226,16 @@ describe('<KnownAsValuesEditor />', () => {
       </NextIntlClientProvider>,
     );
     expect(nameField(1)).toHaveValue('Ward');
-    expect(screen.getAllByRole('textbox')).toHaveLength(1);
+    expect(screen.getAllByRole('textbox')).toHaveLength(2);
   });
 
   it("names each row's default and remove controls after the row", () => {
     renderIt();
-    fireEvent.click(screen.getByRole('button', { name: m.known_as_values_add }));
     expect(screen.getByRole('radio', { name: 'Make District the default' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'Make Block the default' })).not.toBeChecked();
-    expect(screen.getByRole('radio', { name: 'Make value 3 the default' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Remove value 3' })).toBeInTheDocument();
+    fireEvent.change(nameField(2), { target: { value: '' } });
+    expect(screen.getByRole('radio', { name: 'Make value 2 the default' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove value 2' })).toBeInTheDocument();
   });
 
   it('locks every control while the save is in flight', async () => {
@@ -201,7 +252,7 @@ describe('<KnownAsValuesEditor />', () => {
     expect(nameField(2)).toBeDisabled();
     for (const radio of screen.getAllByRole('radio')) expect(radio).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Remove District' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: m.known_as_values_add })).toBeDisabled();
+    expect(newValue()).toBeDisabled();
     finish(
       json({
         id: ORG,

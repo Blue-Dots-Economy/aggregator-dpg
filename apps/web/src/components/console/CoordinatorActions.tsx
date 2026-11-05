@@ -25,7 +25,7 @@ import { I } from '../../icons';
 import { cn } from '../../lib/cn';
 import { ConsoleStatusPill } from './ConsoleUi';
 import { DomainChips } from './DomainChips';
-import { sendConsole, type ConsoleError } from '../../lib/console-client';
+import { sendConsole, type ConsoleError, type ConsoleSendResult } from '../../lib/console-client';
 import { plainErrorKey } from '../../lib/console-errors';
 
 /** API error codes with their own message on this page. */
@@ -39,6 +39,44 @@ function actionErrorKey(r: { status: number; error: ConsoleError }): string {
 /** Whether two id lists hold the same ids, in any order. */
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((x) => b.includes(x));
+}
+
+/** What a decision call means for the page. */
+interface DecisionView {
+  /** The coordinator's status now; null when unchanged. */
+  status: User['status'] | null;
+  /** The message to show. */
+  note: string;
+  /** The decision is settled: close the reject step and refresh the page. */
+  settled: boolean;
+}
+
+/**
+ * Turns a decision response into the status and message to show. A 409
+ * ALREADY_DECIDED carries the current status, so the page updates in place.
+ *
+ * @param r - The decision response.
+ * @param t - The console translator.
+ * @returns The view of the outcome.
+ */
+function decisionView(
+  r: ConsoleSendResult<DecisionResponse>,
+  t: ReturnType<typeof useTranslations<'console'>>,
+): DecisionView {
+  if (r.ok) {
+    const approved = r.data.status === 'active';
+    return {
+      status: r.data.status,
+      note: approved ? t('coordinator.approved_note') : t('coordinator.rejected_note'),
+      settled: true,
+    };
+  }
+  if (r.error.code === 'ALREADY_DECIDED') {
+    const now = (r.error.fields?.['status'] as User['status'] | undefined) ?? null;
+    const label = now ? t(`status.${now}`) : '';
+    return { status: now, note: t('coordinator.already', { status: label }), settled: true };
+  }
+  return { status: null, note: t(actionErrorKey(r)), settled: false };
 }
 
 export function CoordinatorActions({
@@ -75,23 +113,12 @@ export function CoordinatorActions({
       body,
     );
     setBusy(false);
-    if (r.ok) {
-      setStatus(r.data.status);
+    const view = decisionView(r, t);
+    if (view.status) setStatus(view.status);
+    setDecisionNote(view.note);
+    if (view.settled) {
       setRejecting(false);
-      setDecisionNote(
-        r.data.status === 'active'
-          ? t('coordinator.approved_note')
-          : t('coordinator.rejected_note'),
-      );
       router.refresh();
-    } else if (r.error.code === 'ALREADY_DECIDED') {
-      const now = r.error.fields?.['status'] as User['status'] | undefined;
-      if (now) setStatus(now);
-      setRejecting(false);
-      setDecisionNote(t('coordinator.already', { status: now ? t(`status.${now}`) : '' }));
-      router.refresh();
-    } else {
-      setDecisionNote(t(actionErrorKey(r)));
     }
   }
 
@@ -114,11 +141,13 @@ export function CoordinatorActions({
       serves: chosen,
     });
     setBusy(false);
-    if (r.ok) {
-      setSaved(ticked(r.data.serves));
-      setChosen(ticked(r.data.serves));
+    if (!r.ok) {
+      setServesNote(t(actionErrorKey(r)));
+      return;
     }
-    setServesNote(r.ok ? t('coordinator.domains_saved') : t(actionErrorKey(r)));
+    setSaved(ticked(r.data.serves));
+    setChosen(ticked(r.data.serves));
+    setServesNote(t('coordinator.domains_saved'));
   }
 
   return (
@@ -157,10 +186,9 @@ export function CoordinatorActions({
               <DomainChips domains={domains.filter((d) => saved.includes(d.id))} />
             ) : (
               <>
-                <div
-                  role="group"
+                <fieldset
                   aria-label={t('coordinator.domains')}
-                  className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2.5"
+                  className="m-0 min-w-0 border-0 p-0 grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2.5"
                 >
                   {domains.map((d) => {
                     const on = chosen.includes(d.id);
@@ -197,7 +225,7 @@ export function CoordinatorActions({
                       </label>
                     );
                   })}
-                </div>
+                </fieldset>
 
                 {dirty ? (
                   <div className="flex flex-wrap items-center gap-2.5 rounded-[12px] border border-(--bd-border-soft) bg-(--bd-bg) px-3 py-2.5">

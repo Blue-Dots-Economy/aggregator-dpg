@@ -350,9 +350,11 @@ async function setKnownAsValues(
     value_count: updated.value.values.length,
     reset_count: updated.value.resetCount,
   });
-  return reply
-    .status(200)
-    .send({ ...toWireOrg(updated.value.org, orgType), known_as_values: updated.value.values });
+  return reply.status(200).send({
+    ...toWireOrg(updated.value.org, orgType),
+    known_as_values: updated.value.values,
+    reset_count: updated.value.resetCount,
+  });
 }
 
 /**
@@ -633,7 +635,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         await notifyOwnerOfAdminAction(
           actor,
           org,
-          `moved the organisation under ${org.parentName ?? 'the network'}`,
+          `moved it under ${org.parentName ?? 'the network'}`,
           req.log,
         );
       }

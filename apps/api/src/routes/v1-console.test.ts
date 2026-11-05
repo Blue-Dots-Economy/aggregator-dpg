@@ -1027,7 +1027,7 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(res.json()).toMatchObject({ known_as: 'state', known_as_name: 'State' });
       const notice = mailer.outbox.find((m) => m.to === 'a@a.org');
       expect(notice?.html).toContain(
-        'network administrator changed what the organisation is known as for <strong>Alpha</strong>',
+        'network administrator made this change to <strong>Alpha</strong>: changed what the organisation is known as.',
       );
       expect(notice?.html).not.toContain('The owner of');
       expect(notice?.html).not.toContain('State');
@@ -1157,6 +1157,7 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(res.statusCode).toBe(200);
       expect(await knownAsOf(ORG_B)).toEqual(['block', 'Block']);
       expect(await knownAsOf(ORG_P)).toEqual(['ward', 'Ward']);
+      expect(res.json()).toMatchObject({ reset_count: 1 });
       expect(mailer.outbox).toHaveLength(0);
     });
 
@@ -1279,7 +1280,7 @@ describe('console routes /v1/user, /v1/org', () => {
         depth: 2,
       });
       const notice = mailer.outbox.find((m) => m.to === 'a@a.org');
-      expect(notice?.html).toContain('moved the organisation under Beta');
+      expect(notice?.html).toContain('moved it under Beta');
     });
 
     it('keeps a key the new parent has and takes the default for one it lacks', async () => {

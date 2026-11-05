@@ -142,6 +142,17 @@ const orgDetailSchema = {
 };
 
 /** The registration POSTs a fetch spy saw (the org-list fetch is not one). */
+/** Answers the organisation list with the single Default org, which the form preselects. */
+function withDefaultOrg(spy: (input: unknown, init?: { body?: string }) => Promise<Response>) {
+  return (async (input: unknown, init?: { body?: string }) =>
+    String(input).includes('/api/orgs')
+      ? new Response(
+          JSON.stringify({ orgs: [{ id: 'd', slug: 'default', display_name: 'Default' }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      : spy(input, init)) as unknown as typeof fetch;
+}
+
 function registerPosts(spy: { mock: { calls: unknown[][] } }): unknown[][] {
   return spy.mock.calls.filter((c) => String(c[0]).includes('/api/aggregator/register'));
 }
@@ -317,7 +328,7 @@ describe('RegisterView coordinator flow', () => {
     expect(await screen.findByTestId('org-select')).toBeInTheDocument();
   });
 
-  it('coordinator form: surfaces a client-validation error via onError', async () => {
+  it('coordinator form: leaves field errors to the fields, with no banner', async () => {
     globalThis.fetch = vi.fn(
       async () => new Response('{}', { status: 200 }),
     ) as unknown as typeof fetch;
@@ -327,8 +338,8 @@ describe('RegisterView coordinator flow', () => {
       capturedOnError?.([{ property: '.name', message: 'is required', name: 'required' }]);
     });
 
-    expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect(screen.getByText(messages.register.validation_error_title)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(messages.register.validation_error_title)).toBeNull();
   });
 });
 
@@ -380,9 +391,11 @@ describe('RegisterView consent gate', () => {
           headers: { 'content-type': 'application/json' },
         }),
     );
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    globalThis.fetch = withDefaultOrg(fetchSpy);
 
     renderView({});
+    // The only org (Default) is preselected once the list loads.
+    await screen.findByText('Default');
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
@@ -391,9 +404,11 @@ describe('RegisterView consent gate', () => {
 
   it('coordinator: cancelling the gate closes it without posting, leaving the form in place', async () => {
     const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    globalThis.fetch = withDefaultOrg(fetchSpy);
 
     renderView({});
+    // The only org (Default) is preselected once the list loads.
+    await screen.findByText('Default');
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
 
@@ -410,10 +425,13 @@ describe('RegisterView consent gate', () => {
     const calls: { url: string; body: string }[] = [];
     const fetchSpy = vi.fn(async (input: unknown, init?: { body?: string }) => {
       if (String(input).includes('/api/orgs')) {
-        return new Response(JSON.stringify({ orgs: [] }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
+        return new Response(
+          JSON.stringify({ orgs: [{ id: 'd', slug: 'default', display_name: 'Default' }] }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
       }
       calls.push({ url: String(input), body: init?.body ?? '' });
       return new Response(JSON.stringify({ aggregator_id: 'agg-1' }), {
@@ -421,9 +439,11 @@ describe('RegisterView consent gate', () => {
         headers: { 'content-type': 'application/json' },
       });
     });
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    globalThis.fetch = withDefaultOrg(fetchSpy);
 
     renderView({});
+    // The only org (Default) is preselected once the list loads.
+    await screen.findByText('Default');
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
     await screen.findByRole('dialog');
 
@@ -441,9 +461,10 @@ describe('RegisterView consent gate', () => {
 
   it('coordinator: when the consent copy failed to load, submitting shows a visible error and posts nothing', async () => {
     const fetchSpy = vi.fn();
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    globalThis.fetch = withDefaultOrg(fetchSpy);
 
     renderView({ aggregatorConsentContent: null });
+    await screen.findByText('Default');
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
 
     expect(await screen.findByRole('alert')).toBeInTheDocument();
