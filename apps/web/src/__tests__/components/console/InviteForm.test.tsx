@@ -14,6 +14,7 @@ import messages from '@/i18n/messages/en.json';
 import hiMessages from '@/i18n/messages/hi.json';
 import { fillTerms } from '@/i18n/terms';
 import { InviteForm, parseRecipients } from '@/components/console/InviteForm';
+import { chooseOption } from '@/__tests__/test-utils';
 
 const term = (key: string): string => fillTerms(`[[${key}]]`, 'en');
 
@@ -71,10 +72,11 @@ describe('<InviteForm />', () => {
     expect(screen.getByText('First Org')).toBeInTheDocument();
   });
 
-  it('shows a select defaulting to the first organisation when there are several', () => {
+  it('shows a select defaulting to the first organisation when there are several', async () => {
     renderForm();
-    expect(screen.getByRole('combobox')).toHaveValue('org-1');
-    expect(screen.getByRole('option', { name: 'Second Org' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox')).toHaveTextContent('First Org');
+    fireEvent.click(screen.getByRole('combobox'));
+    expect(await screen.findByRole('option', { name: 'Second Org' })).toBeInTheDocument();
   });
 
   it('turns typed text into chips, flags invalid ones and lets a chip be removed', () => {
@@ -365,7 +367,7 @@ describe('<InviteForm />', () => {
   it('posts to the chosen organisation after switching the select', async () => {
     global.fetch = respond({ sent: 1, resent: 0, invalid: [], existing: [] }, 200) as never;
     renderForm();
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'org-2' } });
+    await chooseOption(screen.getByRole('combobox'), 'Second Org');
     typeAddresses('a@x.org');
     fireEvent.click(sendButton());
     await waitFor(() =>

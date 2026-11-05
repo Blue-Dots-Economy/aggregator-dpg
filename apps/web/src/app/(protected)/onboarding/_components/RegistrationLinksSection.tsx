@@ -18,6 +18,7 @@ import {
 import { useProfile, useProfileRaw } from '../../../../hooks/useProfile';
 import { useAggregatorConfig } from '../../../../hooks/useAggregatorConfig';
 import type { ApiRegistrationLink } from '../../../../services/onboarding.service';
+import { SelectField } from '@/components/ui/SelectField';
 
 interface CreateLinkFormState {
   /** Domain id from the network config (e.g. `seeker`), set to the aggregator's registered type. */
@@ -414,17 +415,14 @@ export function CreateLinkSection() {
            * `public_hint_i18n_key` is for the public form, so it is not shown here.
            */}
           <Field label={t('create_link.field_registration_mode')} required>
-            <select
-              className="bd-input"
+            <SelectField
               value={form.registration_mode}
-              onChange={(e) => setForm((f) => ({ ...f, registration_mode: e.target.value }))}
-            >
-              {Object.entries(cfg?.registration_modes ?? {}).map(([key, mode]) => (
-                <option key={key} value={key}>
-                  {tRoot(mode.label_i18n_key)}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setForm((f) => ({ ...f, registration_mode: v }))}
+              options={Object.entries(cfg?.registration_modes ?? {}).map(([key, mode]) => ({
+                value: key,
+                label: tRoot(mode.label_i18n_key),
+              }))}
+            />
           </Field>
           {/* Optional free-form tags (comma-separated). Stored on context.tags. */}
           <Field label={t('create_link.field_tags')}>

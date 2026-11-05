@@ -12,6 +12,7 @@ import type { Permission, Role } from '@aggregator-dpg/shared-primitives/user-or
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { errorKey, sendConsole } from '../../lib/console-client';
+import { SelectField } from '@/components/ui/SelectField';
 
 const ORG_TYPES = ['aggregator', 'network_facilitator'] as const;
 const ASSIGNERS = ['org.manage', 'network.administer'] as const;
@@ -195,17 +196,17 @@ export function RolesAdmin({
             </label>
             <label className="flex flex-col gap-1">
               <span className="bd-label">{t('roles_admin.account_type')}</span>
-              <select
-                className="bd-input"
+              <SelectField
                 value={draft.account_type}
                 disabled={editing !== ''}
-                onChange={(e) =>
-                  setDraft({ ...draft, account_type: e.target.value as Draft['account_type'] })
+                onChange={(v) =>
+                  setDraft({ ...draft, account_type: v === 'admin' ? 'admin' : 'coordinator' })
                 }
-              >
-                <option value="coordinator">{t('roles_admin.account_coordinator')}</option>
-                <option value="admin">{t('roles_admin.account_admin')}</option>
-              </select>
+                options={[
+                  { value: 'coordinator', label: t('roles_admin.account_coordinator') },
+                  { value: 'admin', label: t('roles_admin.account_admin') },
+                ]}
+              />
             </label>
             <fieldset className="flex flex-col gap-1">
               <legend className="bd-label">{t('roles_admin.org_types')}</legend>
@@ -227,17 +228,11 @@ export function RolesAdmin({
             </fieldset>
             <label className="flex flex-col gap-1">
               <span className="bd-label">{t('roles_admin.assigned_by')}</span>
-              <select
-                className="bd-input"
+              <SelectField
                 value={draft.assigned_by}
-                onChange={(e) => setDraft({ ...draft, assigned_by: e.target.value })}
-              >
-                {ASSIGNERS.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => setDraft({ ...draft, assigned_by: v })}
+                options={ASSIGNERS.map((a) => ({ value: a, label: a }))}
+              />
             </label>
             <label className="flex flex-col gap-1">
               <span className="bd-label">{t('roles_admin.max_days')}</span>

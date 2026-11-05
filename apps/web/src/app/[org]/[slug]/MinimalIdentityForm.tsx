@@ -10,6 +10,7 @@
 import { useState, type JSX } from 'react';
 import { useTranslations } from 'next-intl';
 import { SubmitBlockers } from '../../../components/ui/SubmitBlockers';
+import { SelectField } from '@/components/ui/SelectField';
 
 export interface MinimalIdentityPayload {
   /** Name field. Key is the network's `identity.name` selector. */
@@ -187,20 +188,17 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
               {t('year_of_birth_label')}
               <span className="text-rose-500 ml-0.5">*</span>
             </span>
-            <select
-              className="bd-input"
+            <SelectField
               name="year_of_birth"
               value={yearOfBirth}
-              onChange={(e) => setYearOfBirth(e.target.value)}
+              onChange={setYearOfBirth}
               required
-            >
-              <option value="">{t('year_of_birth_placeholder')}</option>
-              {Array.from({ length: 101 }, (_, i) => currentYear - i).map((y) => (
-                <option key={y} value={String(y)}>
-                  {y}
-                </option>
-              ))}
-            </select>
+              placeholder={t('year_of_birth_placeholder')}
+              options={Array.from({ length: 101 }, (_, i) => currentYear - i).map((y) => ({
+                value: String(y),
+                label: y,
+              }))}
+            />
           </label>
         )}
 

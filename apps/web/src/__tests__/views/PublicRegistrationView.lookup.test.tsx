@@ -12,6 +12,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import messages from '@/i18n/messages/en.json';
 import type * as UseAggregatorConfigModule from '@/hooks/useAggregatorConfig';
+import { chooseOption } from '@/__tests__/test-utils';
 
 // jsdom does not implement scrollIntoView; the error banner's focus effect
 // calls it whenever state transitions to 'error'.
@@ -541,9 +542,7 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     renderView();
-    fireEvent.change(screen.getByLabelText(/Year of birth/), {
-      target: { value: String(currentYear - 10) },
-    });
+    await chooseOption(screen.getByLabelText(/Year of birth/), String(currentYear - 10));
     expect(screen.getByText(messages.profile.public_reg.u18_notice)).toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).toBeNull();
 
@@ -604,9 +603,7 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
         </NextIntlClientProvider>
       </QueryClientProvider>,
     );
-    fireEvent.change(screen.getByLabelText(/Year of birth/), {
-      target: { value: String(currentYear - 30) },
-    });
+    await chooseOption(screen.getByLabelText(/Year of birth/), String(currentYear - 30));
     // No inline checkbox before the gate opens.
     expect(screen.queryByRole('checkbox')).toBeNull();
 
@@ -660,9 +657,7 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
 
     const currentYear = new Date().getFullYear();
     fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'Quick Signup' } });
-    fireEvent.change(screen.getByLabelText(/Year of birth/), {
-      target: { value: String(currentYear - 22) },
-    });
+    await chooseOption(screen.getByLabelText(/Year of birth/), String(currentYear - 22));
     fireEvent.change(screen.getByLabelText(/Phone/), { target: { value: '9876543210' } });
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: /Submit/ }));
