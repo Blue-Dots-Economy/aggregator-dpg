@@ -487,6 +487,35 @@ describe('RayaVoiceProvider', () => {
     expect(result.error.message).toContain('unexpected payload');
   });
 
+  it('keeps the create payload PII out of the error when batchId is missing', async () => {
+    const { batchId: _omitted, ...withoutBatchId } = CREATE_OK_BODY;
+    const body = {
+      ...withoutBatchId,
+      errors: [{ row: 1, field: 'contact_phone', value: '9000000099', message: 'invalid' }],
+    };
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse(200, body));
+
+    const provider = new RayaVoiceProvider({
+      baseUrl: 'https://raya.example.com/api',
+      apiKey: 'key-abc',
+      acquireSlot: vi.fn().mockResolvedValue(undefined),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const result = await provider.dispatch(baseInput());
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('RAYA_BAD_RESPONSE');
+    const serialised = JSON.stringify({
+      message: result.error.message,
+      details: result.error.details,
+    });
+    expect(serialised).not.toContain('9000000099');
+    expect(serialised).not.toContain('9000000001');
+    expect(serialised).not.toContain('Asha');
+  });
+
   it('includes country_code in the create body when a contact supplies one', async () => {
     const fetchImpl = vi
       .fn()

@@ -272,7 +272,7 @@ export class RayaVoiceProvider extends VoiceProviderBase {
         return err(
           new UpstreamError('raya batch create returned unexpected payload', {
             code: 'RAYA_BAD_RESPONSE',
-            details: { payload: createPayload },
+            details: { payload: curateCreateResponse(createPayload) },
           }),
         );
       }
