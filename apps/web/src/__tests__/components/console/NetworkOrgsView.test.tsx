@@ -1,9 +1,9 @@
 /**
  * `NetworkOrgsView`: the network summary with its organisation limit, the
- * status filters, and the organisations as a tree or a list with search.
+ * status filters, and the organisations as a list with search.
  */
 import { describe, it, expect } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
@@ -80,10 +80,13 @@ describe('countOrgs', () => {
 });
 
 describe('NetworkOrgsView', () => {
-  it('lists the Default organisation under All without counting it', () => {
-    renderView({ orgs: [...orgs, defaultOrg] });
+  it('lists the Default organisation last, counted in the list but not the tile', () => {
+    renderView({ orgs: [defaultOrg, ...orgs] });
     expect(filter(/^All organisations\s*4/)).toHaveTextContent('Default not counted');
-    expect(screen.getByRole('heading', { level: 2, name: /^Network\s*4$/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 2, name: /^Organisations\s*5$/ }),
+    ).toBeInTheDocument();
+    expect(orgLinks().at(-1)).toHaveTextContent('Default');
     expect(orgLinks().map((a) => a.textContent)).toEqual(
       expect.arrayContaining([expect.stringContaining('Default')]),
     );
@@ -99,16 +102,30 @@ describe('NetworkOrgsView', () => {
     expect(bar).toHaveAttribute('aria-valuemax', '50');
   });
 
-  it('starts as a tree under the network, with each organisation opening its page', () => {
+  it('lists each organisation with its status, opening its page, and no counts', () => {
     renderView();
-    expect(screen.getByText(messages.console.orgs.network_tag)).toBeInTheDocument();
     expect(orgLinks().map((a) => a.getAttribute('href'))).toEqual([
-      '/console/orgs/c',
-      '/console/orgs/d',
       '/console/orgs/a',
       '/console/orgs/b',
+      '/console/orgs/c',
+      '/console/orgs/d',
     ]);
-    expect(screen.getByRole('link', { name: /Edge Org A/ })).toHaveTextContent('8 pending');
+    expect(screen.getByRole('link', { name: /Cotton Co/ })).toHaveTextContent('Cluster');
+    expect(screen.getByText(messages.console.orgs.col_joined)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Cotton Co/ })).toHaveTextContent('Jan 1, 2026');
+    expect(screen.getByRole('link', { name: /Edge Org A/ })).not.toHaveTextContent('8 pending');
+    expect(screen.queryByText(messages.console.orgs.col_counts)).toBeNull();
+    expect(screen.queryByText(/^Under /)).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Show as' })).toBeNull();
+  });
+
+  it('shows no "known as" value for the Default organisation', () => {
+    renderView({
+      orgs: [...orgs, { ...defaultOrg, known_as: 'aggregator', known_as_name: 'Aggregator' }],
+    });
+    const row = screen.getByRole('link', { name: /^Default/ });
+    expect(row).toHaveTextContent('—');
+    expect(row).not.toHaveTextContent('Aggregator');
   });
 
   it('filters by status from the summary and clears the filter from its chip', () => {
@@ -121,12 +138,12 @@ describe('NetworkOrgsView', () => {
   });
 
   it('searches names and "known as" in the list', () => {
-    renderView({ initialView: 'list' });
+    renderView();
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search organisations' }), {
       target: { value: 'cluster' },
     });
     expect(orgLinks()).toHaveLength(1);
-    expect(screen.getByRole('link', { name: /Cotton Co/ })).toHaveTextContent('Under Blue Dots');
+    expect(screen.getByRole('link', { name: /Cotton Co/ })).toBeInTheDocument();
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'nothing here' } });
     expect(screen.getByText(messages.console.orgs.empty)).toBeInTheDocument();
   });
@@ -134,14 +151,5 @@ describe('NetworkOrgsView', () => {
   it('says when nothing is waiting for review', () => {
     renderView({ initialFilter: 'pending', orgs: orgs.filter((o) => o.status !== 'pending') });
     expect(screen.getByText(messages.console.orgs.empty_pending)).toBeInTheDocument();
-  });
-
-  it('switches between tree and list', () => {
-    renderView();
-    const view = screen.getByRole('group', { name: 'Show as' });
-    fireEvent.click(within(view).getByRole('button', { name: /List/ }));
-    expect(screen.queryByText(messages.console.orgs.network_tag)).toBeNull();
-    fireEvent.click(within(view).getByRole('button', { name: /Tree/ }));
-    expect(screen.getByText(messages.console.orgs.network_tag)).toBeInTheDocument();
   });
 });
