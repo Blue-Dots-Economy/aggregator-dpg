@@ -21,6 +21,15 @@ describe('withStableKeys', () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
+  it('skips a suffix that another item already has as its own key', () => {
+    const keys = withStableKeys(['Unit', 'Unit', 'Unit#2'], (s) => s).map((k) => k.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys.slice(0, 2)).toEqual(['Unit', 'Unit#2']);
+
+    const reversed = withStableKeys(['Unit#2', 'Unit', 'Unit'], (s) => s).map((k) => k.key);
+    expect(reversed).toEqual(['Unit#2', 'Unit', 'Unit#3']);
+  });
+
   it('keeps an item key when an item before it is removed', () => {
     const before = withStableKeys(['a', 'b', 'c'], (s) => s);
     const after = withStableKeys(['b', 'c'], (s) => s);

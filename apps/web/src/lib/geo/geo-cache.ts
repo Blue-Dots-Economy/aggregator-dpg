@@ -19,6 +19,18 @@ export function normalizeGeoKey(query: string): string {
 }
 
 /**
+ * Calls `fn` at once and returns its result as a promise, so a synchronous
+ * throw arrives as a rejection.
+ */
+async function callNow<T>(
+  fn: (query: string, signal?: AbortSignal) => Promise<T>,
+  query: string,
+  signal: AbortSignal,
+): Promise<T> {
+  return fn(query, signal);
+}
+
+/**
  * Runs `cleanup` once `promise` settles, and never rejects.
  *
  * The lookup's caller receives any rejection; this side task must not raise a
@@ -62,7 +74,9 @@ export function memoizeGeoLookup<T>(
   /** Runs one lookup, stores a cacheable result, and clears its in-flight entry. */
   async function lookup(key: string, query: string, signal: AbortSignal): Promise<T> {
     try {
-      const value = await fn(query, signal);
+      // `callNow` turns a synchronous throw into a rejection, so the `finally`
+      // below runs after the caller has stored this entry and removes it.
+      const value = await callNow(fn, query, signal);
       if (shouldCache(value)) {
         resolved.set(key, value);
         if (resolved.size > cap) {
