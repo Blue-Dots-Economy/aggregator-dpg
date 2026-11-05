@@ -95,11 +95,17 @@ export function ConsoleSection({
  */
 export function ConsoleCollapsible({
   title,
+  description,
   hint,
+  flush = false,
   children,
 }: {
   title: ReactNode;
+  /** A line under the title. */
+  description?: ReactNode;
   hint?: ReactNode;
+  /** Drop the body padding, for content that lays out its own. */
+  flush?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -108,14 +114,17 @@ export function ConsoleCollapsible({
         <span className="flex items-center gap-2">
           <I.chevR
             size={16}
-            className="text-ink-400 transition-transform group-open:rotate-90"
+            className="shrink-0 text-ink-400 transition-transform group-open:rotate-90"
             aria-hidden
           />
-          <h2 className="font-display font-bold text-[16px] text-ink-900">{title}</h2>
+          <span>
+            <h2 className="font-display font-bold text-[16px] text-ink-900">{title}</h2>
+            {description ? <p className="text-[13px] text-ink-500">{description}</p> : null}
+          </span>
         </span>
         {hint ? <span className="text-[12.5px] text-ink-500">{hint}</span> : null}
       </summary>
-      <div className="border-t border-(--bd-border-soft) p-5">{children}</div>
+      <div className={cn('border-t border-(--bd-border-soft)', flush ? '' : 'p-5')}>{children}</div>
     </details>
   );
 }

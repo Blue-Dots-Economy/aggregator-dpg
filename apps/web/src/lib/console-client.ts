@@ -76,9 +76,9 @@ export function setOrgKnownAs(orgId: string, knownAs: string): Promise<ConsoleSe
 export function setOrgKnownAsValues(
   orgId: string,
   values: KnownAsValuesRequest,
-): Promise<ConsoleSendResult<Org & { known_as_values: KnownAsValues }>> {
+): Promise<ConsoleSendResult<Org & { known_as_values: KnownAsValues; reset_count?: number }>> {
   const body: OrgKnownAsUpdateRequest = { known_as_values: values };
-  return sendConsole<Org & { known_as_values: KnownAsValues }>(
+  return sendConsole<Org & { known_as_values: KnownAsValues; reset_count?: number }>(
     `/api/console/org/known-as/${orgId}`,
     'PATCH',
     body,
