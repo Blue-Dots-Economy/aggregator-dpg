@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isFailing, sqlStatements } from '../instance-upgrade-db.js';
+import { applySessionSettings, isFailing, sqlStatements } from '../instance-upgrade-db.js';
 
 describe('sqlStatements', () => {
   it('drops psql meta lines and comments and splits on line-ending semicolons', () => {
@@ -67,5 +67,34 @@ describe('VERIFY_FILES', () => {
     );
     const { VERIFY_FILES } = await import('../instance-upgrade.js');
     expect([...VERIFY_FILES].sort()).toEqual(onDisk.sort());
+  });
+});
+
+describe('applySessionSettings', () => {
+  it('sets the network, the brand and UTC for the session in one query', async () => {
+    const calls: Array<{ text: string; values: unknown[] | undefined }> = [];
+    const client = {
+      query: async (text: string, values?: unknown[]) => {
+        calls.push({ text, values });
+        return { rows: [] };
+      },
+    };
+    await applySessionSettings(client, { network: 'blue_dot', brand: 'up-gzb' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.text).toContain("set_config('aggregator_dpg.network', $1, false)");
+    expect(calls[0]?.text).toContain("set_config('aggregator_dpg.brand', $2, false)");
+    expect(calls[0]?.text).toContain("set_config('TimeZone', 'UTC', false)");
+    expect(calls[0]?.values).toEqual(['blue_dot', 'up-gzb']);
+  });
+
+  it('rejects when the query fails, so the connection is not handed out', async () => {
+    const client = {
+      query: async () => {
+        throw new Error('connection reset');
+      },
+    };
+    await expect(applySessionSettings(client, { network: '', brand: '' })).rejects.toThrow(
+      'connection reset',
+    );
   });
 });
