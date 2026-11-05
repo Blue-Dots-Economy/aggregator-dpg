@@ -323,7 +323,7 @@ services:
       # value falls through to.
       ENABLED_LANGUAGES: ${ENABLED_LANGUAGES:-}
       # Max invites an org owner can send per submission. Keep in step with the
-      # api's INVITE_MINT_MAX_RECIPIENTS. Empty → the app's default of 10.
+      # api's INVITE_MINT_MAX_RECIPIENTS. Empty → the app's default.
       INVITE_MAX_RECIPIENTS: ${INVITE_MAX_RECIPIENTS:-}
       # Registration-form address autocomplete + institute picker. All four are
       # runtime values read per request by the root layout, so a change needs a
