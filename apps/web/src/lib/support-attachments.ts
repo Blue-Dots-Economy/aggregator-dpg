@@ -8,18 +8,23 @@
  * @module apps/web/src/lib/support-attachments
  */
 
-/** What the instance allows, as served by `GET /api/support/config`. */
-export interface SupportConfig {
-  enabled: boolean;
-  maxTotalBytes: number;
-  maxFiles: number;
-  allowedTypes: string[];
+import { z } from 'zod';
+
+/** What the instance allows, as served by `GET /api/support/config` (the API's `openapi.json` contract). */
+export const SupportConfigSchema = z.object({
+  enabled: z.boolean(),
+  maxTotalBytes: z.number().int().positive(),
+  maxFiles: z.number().int().positive(),
+  allowedTypes: z.array(z.string()),
   /**
    * Extensions for the picker's `accept`, since macOS does not match some
-   * extensions (e.g. `.m4a`) to their MIME type. Optional.
+   * extensions (e.g. `.m4a`) to their MIME type. Empty when the reply leaves it out.
    */
-  allowedExtensions?: string[];
-}
+  allowedExtensions: z.array(z.string()).default([]),
+});
+
+/** What the instance allows, as parsed by {@link SupportConfigSchema}. */
+export type SupportConfig = z.infer<typeof SupportConfigSchema>;
 
 /** One attachment in the request payload. */
 export interface SupportAttachmentPayload {

@@ -10,20 +10,14 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { z } from 'zod';
 import { ResponseShapeError, jsonFetch } from '@/services/http';
-import { SUPPORT_CONFIG_FALLBACK, type SupportConfig } from '@/lib/support-attachments';
+import {
+  SUPPORT_CONFIG_FALLBACK,
+  SupportConfigSchema,
+  type SupportConfig,
+} from '@/lib/support-attachments';
 
 const SUPPORT_CONFIG_URL = '/api/support/config';
-
-/** The `GET /v1/support/config` reply, as in the API's `openapi.json`. */
-const SupportConfigSchema = z.object({
-  enabled: z.boolean(),
-  maxTotalBytes: z.number().int().positive(),
-  maxFiles: z.number().int().positive(),
-  allowedTypes: z.array(z.string()),
-  allowedExtensions: z.array(z.string()).default([]),
-});
 
 /**
  * Fetches the limits and logs a failure before passing it on.
@@ -39,7 +33,8 @@ async function fetchSupportConfig(signal: AbortSignal): Promise<SupportConfig> {
       console.warn('[support-config] fetch failed; the default attachment limits apply', {
         operation: 'support-config.fetch',
         status: 'failure',
-        error: err instanceof Error ? err.message : String(err),
+        // Never log the message: for a failed reply it holds the response body.
+        error_type: err instanceof Error ? err.name : typeof err,
         ...(err instanceof ResponseShapeError ? { issues: err.issueSummary() } : {}),
       });
     }

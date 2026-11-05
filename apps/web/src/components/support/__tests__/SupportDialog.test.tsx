@@ -226,6 +226,16 @@ describe('SupportDialog attachments (#551)', () => {
     expect(screen.getByText(/Up to 3 files, 5.0 MB in total/)).toBeTruthy();
   });
 
+  it('logs a failed config read without the reply body', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response('upstream said: private detail', { status: 500 }),
+    );
+    renderDialog();
+    await waitFor(() => expect(warn).toHaveBeenCalled());
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('private detail');
+  });
+
   it('cancels the config request when the dialog unmounts', async () => {
     let signal: AbortSignal | undefined;
     vi.spyOn(global, 'fetch').mockImplementation((_url, init) => {

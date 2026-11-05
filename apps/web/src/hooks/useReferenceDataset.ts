@@ -69,7 +69,7 @@ async function fetchDataset<T>(
  *
  * @param id - Resolved dataset file id, or `null` for a field with no source.
  * @param referenceBaseUrl - Optional base URL override from the form runtime config.
- * @param parse - Turns the parsed JSON into options.
+ * @param parse - Turns the parsed JSON into options. The query key leaves it out, so use one parser per dataset id.
  * @returns The options to search.
  */
 export function useReferenceDataset<T>(
