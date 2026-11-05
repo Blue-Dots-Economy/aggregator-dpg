@@ -505,6 +505,11 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
               fields: { email: contact.email, rolled_back: true },
             });
           }
+          if (kcResult.error.code === 'INVALID_NAME') {
+            throw httpError('NAME_INVALID_CHARACTERS', {
+              fields: { name: 'contact.name', rolled_back: true },
+            });
+          }
           throw httpError('IDP_UNAVAILABLE', {
             cause: kcResult.error,
             fields: { sub_operation: 'idp.createUser', rolled_back: true },
