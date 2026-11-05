@@ -47,8 +47,9 @@ export function startHealthServer(port: number, redis: Redis): Server {
         error: errorMessage(err),
         error_type: errorType(err),
       });
-      // Close the request so the probe does not wait for its own timeout.
-      if (!res.writableEnded) res.end();
+      // Answer a failure as non-200 so it never reads as healthy.
+      if (!res.headersSent) res.writeHead(500);
+      res.end();
     });
   });
 

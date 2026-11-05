@@ -457,6 +457,25 @@ describe('processBulkRow — signalstack push outcomes', () => {
     expect(result.reasons).toEqual(['Invalid item_state: gender: must be one of: Male, Female']);
   });
 
+  it('keeps the string messages from a per-field map that also holds non-string values', async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_BAD_REQUEST',
+        'signalstack onboard returned 400: INVALID_ITEM_STATE: …',
+        'Invalid item_state',
+        {
+          code: 'INVALID_ITEM_STATE',
+          fields: {
+            mobile_number: 'Enter a 10-digit mobile number',
+            gender: { enum: ['Male', 'Female'] },
+          },
+        },
+      ),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.reasons).toEqual(['mobile_number: Enter a 10-digit mobile number']);
+  });
+
   it("uses Signals' sentence for a duplicate, not the transport prefix", async () => {
     _setSignalStackWriter(
       new FailingSignalStackWriter(

@@ -29,7 +29,7 @@ import { getSchemaLoader } from '../services/schema-loader.js';
 import { getRedis } from '../services/redis.js';
 import { enqueueFinalise } from '../services/bulk-queue.js';
 import { normalisePhone, normaliseEmail } from '@aggregator-dpg/shared-primitives/phone';
-import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { config } from '../config.js';
@@ -269,7 +269,12 @@ async function commit(
   // detect stalled jobs. Counters live in Redis only.
   if (result.processed % PROGRESS_FLUSH_EVERY === 0 || result.processed === result.total) {
     await bumpHeartbeat(job.uploadId).catch((err) => {
-      log.warn({ status: 'warn', sub: 'heartbeat', error: errorMessage(err) });
+      log.warn({
+        status: 'warn',
+        sub: 'heartbeat',
+        error: errorMessage(err),
+        error_type: errorType(err),
+      });
     });
   }
 
@@ -406,6 +411,18 @@ function deriveAgeAndConsent(
 }
 
 /**
+ * Signals' per-field messages. Entries whose message is not a string are
+ * dropped, as the writer does; an empty result is treated as absent.
+ */
+const SignalsFieldsSchema = z.record(z.unknown()).transform((fields) => {
+  const out: Record<string, string> = {};
+  for (const [field, msg] of Object.entries(fields)) {
+    if (typeof msg === 'string') out[field] = msg;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+});
+
+/**
  * The Signals details the writer attaches to a failed onboard.
  *
  * Each field is dropped on its own when it has the wrong shape, so one bad
@@ -414,7 +431,7 @@ function deriveAgeAndConsent(
 const SignalsFailureDetailsSchema = z.object({
   signalsMessage: z.string().optional().catch(undefined),
   upstreamCode: z.string().optional().catch(undefined),
-  signalsFields: z.record(z.string()).optional().catch(undefined),
+  signalsFields: SignalsFieldsSchema.optional().catch(undefined),
 });
 
 /**

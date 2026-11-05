@@ -122,8 +122,8 @@ describe('processBulkFile — success path', () => {
   });
 
   it('processes chunks strictly in order, each writing :lines before its enqueue', async () => {
-    // 2,001 rows → three chunks (ENQUEUE_CHUNK = 1000). The promise chain must keep them
-    // serial: lines, enqueue, lines, enqueue, lines, enqueue.
+    // 2,001 rows → three chunks (ENQUEUE_CHUNK = 1000). Each chunk is awaited before
+    // the next starts: lines, enqueue, lines, enqueue, lines, enqueue.
     const body = ['name,email', ...Array.from({ length: 2001 }, (_, i) => `P${i},p${i}@x.io`)];
     const { getCsvStream } = await import('../object-storage.js');
     vi.mocked(getCsvStream).mockResolvedValueOnce(
@@ -132,6 +132,30 @@ describe('processBulkFile — success path', () => {
     await processBulkFile(JOB);
     const order = calls.filter((c) => c === 'lines' || c === 'enqueue');
     expect(order).toEqual(['lines', 'enqueue', 'lines', 'enqueue', 'lines', 'enqueue']);
+  });
+
+  it('stops at a failed chunk: later chunks never run and the row total is never published', async () => {
+    const body = ['name,email', ...Array.from({ length: 2001 }, (_, i) => `P${i},p${i}@x.io`)];
+    const { getCsvStream } = await import('../object-storage.js');
+    vi.mocked(getCsvStream).mockResolvedValueOnce(
+      Readable.from([Buffer.from(body.join('\n'), 'utf8')]),
+    );
+    enqueueRowProcessBulk
+      .mockImplementationOnce(async () => {
+        calls.push('enqueue');
+      })
+      .mockImplementationOnce(async () => {
+        throw new Error('queue down');
+      });
+
+    await expect(processBulkFile(JOB)).rejects.toThrow(/queue down/);
+
+    const order = calls.filter((c) => c === 'lines' || c === 'enqueue');
+    expect(order).toEqual(['lines', 'enqueue', 'lines']);
+    expect(enqueueRowProcessBulk).toHaveBeenCalledTimes(2);
+    const metaWrites = hset.mock.calls.filter(([key]) => String(key).endsWith(':meta'));
+    expect(metaWrites.flat()).not.toContain('reader_done');
+    expect(metaWrites.flat()).not.toContain('total_rows');
   });
 
   it('transitions the upload to row_processing', async () => {
