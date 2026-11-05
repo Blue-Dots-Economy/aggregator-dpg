@@ -14,7 +14,7 @@
  * Belongs to `@aggregator-dpg/api`.
  */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { DecisionReasonSchema } from '@aggregator-dpg/shared-primitives/user-org';
@@ -32,6 +32,7 @@ import {
   missingTokenPage,
   notFoundPage,
   serviceUnavailablePage,
+  renewToken,
   verifyTokenForId,
   type HtmlPage,
 } from './approval-shared.js';
@@ -97,13 +98,7 @@ export async function registerAggregatorOrgApprovalRoutes(base: FastifyInstance)
         querystring: OrgReadQuerySchema,
       },
     },
-    async (
-      req: FastifyRequest<{
-        Params: { id: string };
-        Querystring: { token?: string; intent?: string };
-      }>,
-      reply: FastifyReply,
-    ) => {
+    async (req, reply) => {
       const orgId = req.params.id;
       const { token } = req.query;
 
@@ -257,9 +252,7 @@ export async function registerAggregatorOrgApprovalRoutes(base: FastifyInstance)
     },
     async (req, reply) => {
       const orgId = req.params.id;
-      const body = (req.body ?? {}) as { token?: string };
-
-      const verified = await verifyTokenForId(body.token ?? '', orgId, ORG_NOUN, {
+      const verified = await verifyTokenForId(renewToken(req.body), orgId, ORG_NOUN, {
         allowExpired: true,
       });
       if (!verified.ok) return sendPage(reply, verified.page);

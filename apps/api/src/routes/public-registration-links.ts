@@ -45,6 +45,17 @@ import { consume } from '../services/rate-limiter/index.js';
 import { config } from '../config.js';
 import { buildSignalStackItemState } from '@aggregator-dpg/signalstack-writer/item-state';
 
+/**
+ * String value of a body field.
+ *
+ * @returns The value when `key` is set and the field is a string; otherwise `undefined`.
+ */
+function readString(body: Record<string, unknown>, key: string | undefined): string | undefined {
+  if (!key) return undefined;
+  const value = body[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
 const LinkParamsSchema = z.object({
   orgSlug: z.string().min(1).describe('Aggregator organisation slug.'),
   slug: z.string().min(1).describe('Registration link slug.'),
@@ -147,9 +158,6 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
     },
     async (req, reply) => {
       const { orgSlug, slug } = req.params;
-      if (!orgSlug || !slug) {
-        throw httpError('SCHEMA_VALIDATION', { detail: 'orgSlug and slug are required.' });
-      }
       const log = req.log.child({ operation: 'public.linkResolve', org_slug: orgSlug, slug });
       const start = Date.now();
 
@@ -219,9 +227,6 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
     },
     async (req, reply) => {
       const { orgSlug, slug } = req.params;
-      if (!orgSlug || !slug) {
-        throw httpError('SCHEMA_VALIDATION', { detail: 'orgSlug and slug are required.' });
-      }
       const log = req.log.child({
         operation: 'public.registrationSubmit',
         org_slug: orgSlug,
@@ -248,7 +253,7 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
 
       const link = await loadLiveLinkByOrgAndSlug(orgSlug, slug, log);
 
-      const rawBody = (req.body ?? {}) as Record<string, unknown>;
+      const rawBody = req.body;
 
       // Identity selectors from the network config, shared by the account_only
       // key guard and the normaliser.
@@ -294,18 +299,9 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
         const nameKey = linkDomainCfgEarly.identity.name;
         const phoneKey = linkDomainCfgEarly.identity.phone;
         const emailKey = linkDomainCfgEarly.identity.email;
-        const hasName =
-          nameKey &&
-          typeof rawBody[nameKey] === 'string' &&
-          (rawBody[nameKey] as string).length > 0;
-        const hasPhone =
-          phoneKey &&
-          typeof rawBody[phoneKey] === 'string' &&
-          (rawBody[phoneKey] as string).length > 0;
-        const hasEmail =
-          emailKey &&
-          typeof rawBody[emailKey] === 'string' &&
-          (rawBody[emailKey] as string).length > 0;
+        const hasName = Boolean(readString(rawBody, nameKey));
+        const hasPhone = Boolean(readString(rawBody, phoneKey));
+        const hasEmail = Boolean(readString(rawBody, emailKey));
         if (!hasName || (!hasPhone && !hasEmail)) {
           throw httpError('SCHEMA_VALIDATION', {
             detail: 'account_only requires name and at least one of phone or email',
@@ -424,8 +420,7 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
         // Name and at least one contact are required even on a partial profile;
         // Ajv below ignores `required`. Same rule as the account_only guard.
         {
-          const present = (k?: string): boolean =>
-            !!k && typeof body[k] === 'string' && (body[k] as string).length > 0;
+          const present = (k?: string): boolean => Boolean(readString(body, k));
           const nameKey = linkDomainCfg.identity.name;
           const emailKey = linkDomainCfg.identity.email;
           const hasName = present(nameKey);
@@ -471,10 +466,9 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
 
       // 2. Normalise the phone and email. Any client-supplied `participant_id` is
       // dropped, so an anonymous caller cannot choose it.
-      delete (body as Record<string, unknown>)['participant_id'];
+      delete body['participant_id'];
       const emailSourceKey = linkDomainCfg.identity.email;
-      const phoneRaw =
-        typeof body[phoneSourceKey] === 'string' ? (body[phoneSourceKey] as string) : '';
+      const phoneRaw = readString(body, phoneSourceKey) ?? '';
       let phoneNormalised: string | null = null;
       if (phoneRaw) {
         const phone = normalisePhone(phoneRaw);
@@ -484,10 +478,7 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
         phoneNormalised = phone.value;
       }
       // Email is optional.
-      const emailRaw =
-        emailSourceKey && typeof body[emailSourceKey] === 'string'
-          ? (body[emailSourceKey] as string)
-          : '';
+      const emailRaw = readString(body, emailSourceKey) ?? '';
       const emailNormalised = emailRaw ? emailRaw.trim().toLowerCase() : null;
 
       // 2a. Read the signalstack org id from `users.signalstack_org_id` before the
@@ -538,12 +529,8 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
         if (ss && signalstackOrgId) {
           const nameSourceKey = linkDomainCfg.identity.name;
           // Fallback only; the guard above rejects a blank name. The link id is an opaque UUID.
-          const name =
-            typeof body[nameSourceKey] === 'string' ? (body[nameSourceKey] as string) : link.id;
-          const phoneFromBody =
-            typeof body[phoneSourceKey] === 'string'
-              ? (body[phoneSourceKey] as string)
-              : phoneNormalised;
+          const name = readString(body, nameSourceKey) ?? link.id;
+          const phoneFromBody = readString(body, phoneSourceKey) ?? phoneNormalised;
           const pushPhone = phoneNormalised ?? phoneFromBody;
           const result = await ss.onboard({
             actingOrgId: signalstackOrgId,
@@ -574,9 +561,7 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
               link_id: link.id,
             });
             // Show signals' profile-limit message as is; other failures get a generic message.
-            const signalsMessage = (
-              result.error.details as { signalsMessage?: unknown } | undefined
-            )?.signalsMessage;
+            const signalsMessage = result.error.details?.signalsMessage;
             // A client that skips the minor check gets `U18_NOT_ALLOWED` from Signals;
             // map it to the finish-in-the-app response.
             if (result.error.message.includes('U18_NOT_ALLOWED')) {
@@ -589,8 +574,7 @@ export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance
             // participant's input, not a server fault: answer 400 with Signals'
             // per-field messages so the form names the field, instead of the
             // generic 502 below.
-            const details = result.error.details as
-              { upstreamCode?: unknown; signalsFields?: unknown } | undefined;
+            const details = result.error.details;
             if (
               details?.upstreamCode === 'INVALID_ITEM_STATE' &&
               isStringMap(details.signalsFields) &&

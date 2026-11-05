@@ -187,7 +187,7 @@ export async function registerAggregatorRegistrationRoutes(base: FastifyInstance
         }
 
         // `org_id` and `invite` are not form fields; strip them before Ajv.
-        const { org_id: _orgIdField, invite: _inviteField, ...formBody } = req.body;
+        const { org_id: _orgIdField, invite: _inviteField, ...formBody } = body;
 
         const validate = await getRegistrationValidator();
         if (!validate(formBody)) {
@@ -241,7 +241,7 @@ export async function registerAggregatorRegistrationRoutes(base: FastifyInstance
         let inviteEmailClaim: string | null = null;
         {
           const orgStore = getOrganisationStore();
-          const reqInvite = req.body.invite;
+          const reqInvite = body.invite;
 
           // Invite path: the org comes from the token claim, re-checked against
           // the database, and the invite is claimed before anything is created.
@@ -286,7 +286,7 @@ export async function registerAggregatorRegistrationRoutes(base: FastifyInstance
             parentOrgId = verified.org;
           } else {
             // Selector path: the coordinator picks an active org. `org_id` is required.
-            const reqOrgId = req.body.org_id;
+            const reqOrgId = body.org_id;
             if (!reqOrgId) {
               throw httpError('SCHEMA_VALIDATION', {
                 detail: 'org_id is required.',
@@ -459,7 +459,7 @@ export async function registerAggregatorRegistrationRoutes(base: FastifyInstance
           legacyOrgDetails:
             orgIsDefault && Object.keys(ownOrgDetails).length > 0 ? ownOrgDetails : null,
           inviteId: inviteJti,
-          profile: buildAggregatorProfile(body as unknown as Record<string, unknown>),
+          profile: buildAggregatorProfile(body),
           profileRef: resolveProfileRef('registration.v1.json'),
         });
         if (!aggregator.ok) {

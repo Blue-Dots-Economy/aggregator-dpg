@@ -93,7 +93,7 @@ export async function registerDashboardRoutes(base: FastifyInstance): Promise<vo
           "Proxies signalstack's pre-computed dashboard payload (rollup + paginated participants + cursor + metadata) for the caller aggregator. by_domain[<id>] contains seeker/provider slices; refresh=true bypasses the TTL cache. The 200 payload is proxied verbatim from signalstack, so no response schema is pinned (avoids a deep zod re-parse of the rollup on every reply).",
         security: [{ bearerAuth: [] }],
         querystring: DashboardQuerySchema,
-        // `z.unknown()` so the proxied payload is not re-parsed; see description.
+        // `z.unknown()` accepts any payload, so the proxied body is sent unchanged.
         response: {
           200: z.unknown().describe('The signalstack dashboard payload, unchanged.'),
           ...errorResponses(400, 401, 403, 500, 503),
