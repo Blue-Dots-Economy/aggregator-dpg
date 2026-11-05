@@ -691,7 +691,6 @@
       "view_coordinators": "View [[users]]",
       "child_count": "Child [[orgs]]",
       "children_of_max": "{count} of {max}",
-      "children": "Child [[orgs]]",
       "children_empty": "No [[orgs]] sit under this one.",
       "children_more": "More [[orgs]] exist than are shown here.",
       "children_this": "This [[org]]",
@@ -775,6 +774,7 @@
       "col_parent": "Parent [[org]]",
       "subtitle_owner": "Your [[orgs]] and the [[orgs]] directly under them. Those under yours are view-only.",
       "yours": "Your [[org]]",
+      "manage": "Manage [[org]]",
       "tile": {
         "all": {
           "label": "ಎಲ್ಲಾ [[org]]ಗಳು",
