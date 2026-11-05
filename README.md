@@ -61,11 +61,11 @@ This document translates the Aggregator Product Note (Draft 2) into an engineeri
 
 ### 2.2 External systems
 
-| System                      | Role                                                                                    | API reference                                        |
-| --------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Signals Stack (UBI backend) | Source of truth for orgs, members, seeker profiles, registration-mode attribution       | https://ubi-backend.onest.dhiway.net/api/reference/  |
-| Jobs Stack                  | Source of truth for job postings and applications (provider-side + seeker applications) | https://jobs-demo.onest.dhiway.net/api/v1/reference/ |
-| Ecosystem Manager platform  | Future consumer of the Signal Processing Service                                        | —                                                    |
+| System                      | Role                                                                                    | API reference                                                                                         |
+| --------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Signals Stack (UBI backend) | Source of truth for orgs, members, seeker profiles, registration-mode attribution       | [Signals-DPG `openapi.json`](https://github.com/Blue-Dots-Economy/signals-dpg/blob/main/openapi.json) |
+| Jobs Stack                  | Source of truth for job postings and applications (provider-side + seeker applications) | —                                                                                                     |
+| Ecosystem Manager platform  | Future consumer of the Signal Processing Service                                        | —                                                                                                     |
 
 Per the PRD: **the Aggregator platform has no write access to the Signals Stack in MVP.** All transactional writes (registrations, applications) originate upstream. The Aggregator app is a read-and-display surface plus outbound orchestration (generating onboarding links, running bulk uploads that hit upstream APIs, exporting reports).
 

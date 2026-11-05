@@ -9,7 +9,7 @@ No domain-specific or environment-specific value may be hardcoded in source code
 
 ```typescript
 // Wrong
-const SIGNALS_STACK_URL = 'https://ubi-backend.onest.dhiway.net';
+const SIGNALS_STACK_URL = 'https://signals.example.com';
 const OTP_EXPIRY_SECONDS = 300;
 
 // Correct
