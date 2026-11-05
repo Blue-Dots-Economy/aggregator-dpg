@@ -33,7 +33,12 @@ import {
   shippedFileHashes,
   type Queryable,
 } from '../db/migrate-core.js';
-import { upgradeLevel, type UpgradeLevel, type UpgradeState } from './instance-upgrade-logic.js';
+import {
+  tokenRealmRoles,
+  upgradeLevel,
+  type UpgradeLevel,
+  type UpgradeState,
+} from './instance-upgrade-logic.js';
 import { errorField } from '../db/pg-error.js';
 import {
   canActAsOwner,
@@ -248,13 +253,7 @@ async function keycloakRoles(
     out(`  F19 keycloak: token request failed (${tokenRes.status})`);
     return false;
   }
-  const token = ((await tokenRes.json()) as { access_token?: string }).access_token ?? '';
-  const claims = JSON.parse(
-    Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8'),
-  ) as {
-    resource_access?: Record<string, { roles?: string[] }>;
-  };
-  const roles = claims.resource_access?.['realm-management']?.roles ?? [];
+  const { token, roles } = tokenRealmRoles(await tokenRes.json());
   const role = await call(`${base}/admin/realms/${realm}/roles/org_owner`, {
     headers: { authorization: `Bearer ${token}` },
   });
