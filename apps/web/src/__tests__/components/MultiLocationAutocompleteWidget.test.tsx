@@ -95,6 +95,23 @@ describe('MultiLocationAutocompleteWidget', () => {
     expect(screen.getAllByRole('combobox')).toHaveLength(1);
   });
 
+  it('keeps a suggestion row when a newer search drops the rows before it', async () => {
+    suggestMock.mockResolvedValueOnce([MYSURU, BENGALURU]).mockResolvedValueOnce([BENGALURU]);
+    render(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...(makeProps() as never)} />
+      </Wrapper>,
+    );
+
+    await typeInRow(0, 'karnataka');
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2));
+    const rowBefore = screen.getByRole('option', { name: BENGALURU.label });
+
+    await typeInRow(0, 'bengaluru');
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(1));
+    expect(screen.getByRole('option', { name: BENGALURU.label })).toBe(rowBefore);
+  });
+
   it('renders one row per existing value', () => {
     render(
       <Wrapper>

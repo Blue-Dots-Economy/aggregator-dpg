@@ -204,6 +204,42 @@ describe('ReferenceAutocompleteWidget', () => {
     expect(option).toHaveTextContent('Bengaluru');
   });
 
+  it('keeps an option row when a longer query filters out the rows before it', async () => {
+    render(
+      <Wrapper>
+        <ReferenceAutocompleteWidget {...(makeProps() as never)} />
+      </Wrapper>,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'government' } });
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2));
+    const rowBefore = screen.getByText('Government Polytechnic Mysuru').closest('li');
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'government p' } });
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(1));
+    expect(screen.getByText('Government Polytechnic Mysuru').closest('li')).toBe(rowBefore);
+  });
+
+  it('lists two options that share a name', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { name: 'Government ITI', district: 'Mysuru' },
+        { name: 'Government ITI', district: 'Mysuru' },
+      ],
+    });
+    render(
+      <Wrapper>
+        <ReferenceAutocompleteWidget {...(makeProps() as never)} />
+      </Wrapper>,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'government' } });
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2));
+  });
+
   it('stores the plain option name, so the field stays a simple string', async () => {
     const onChange = vi.fn();
     render(
@@ -260,6 +296,29 @@ describe('ReferenceAutocompleteWidget', () => {
 
     expect(screen.queryByRole('option')).not.toBeInTheDocument();
     expect(onChange).toHaveBeenLastCalledWith('anything typed');
+  });
+
+  it('fetches again on a later mount after a failed load', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) });
+    const props = makeProps();
+    const first = render(
+      <Wrapper>
+        <ReferenceAutocompleteWidget {...(props as never)} />
+      </Wrapper>,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    // Let the rejection settle so the failed entry leaves the cache.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    first.unmount();
+
+    render(
+      <Wrapper>
+        <ReferenceAutocompleteWidget {...(props as never)} />
+      </Wrapper>,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'jayanagar' } });
+    expect(await screen.findByRole('option')).toHaveTextContent('Government ITI Jayanagar');
   });
 
   it('degrades to a plain text input when the dataset fails to load', async () => {

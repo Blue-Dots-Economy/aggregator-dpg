@@ -31,6 +31,7 @@ import { RjsfThemedForm } from '../forms/RjsfThemed';
 import { errorKey, sendConsole } from '../../lib/console-client';
 import { consoleOrgSchema, gstinCustomValidate, orgFieldText } from '../../lib/org-schema';
 import { readableFormErrors } from '../../lib/readable-form-errors';
+import { withStableKeys } from '@/lib/list-keys';
 
 /** Longest description the API accepts. */
 const DESCRIPTION_MAX = 1000;
@@ -307,8 +308,8 @@ export function OrgEditForm({
           <span className="bd-label">{t('org.locations')}</span>
           {addresses.length ? (
             <ul className="flex flex-col gap-1">
-              {addresses.map((a, i) => (
-                <li key={`${a}-${i}`} className="flex items-start gap-2 text-ink-700">
+              {withStableKeys(addresses, (a) => a).map(({ item: a, key }) => (
+                <li key={key} className="flex items-start gap-2 text-ink-700">
                   <I.globe size={14} className="mt-0.5 shrink-0 text-ink-400" />
                   {a}
                 </li>

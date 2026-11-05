@@ -159,7 +159,7 @@ function SidebarPanel({
       if (
         e instanceof KeyboardEvent
           ? e.key === 'Escape'
-          : !accountRef.current?.contains(e.target as Node)
+          : e.target instanceof Node && !accountRef.current?.contains(e.target)
       ) {
         setDetailsOpen(false);
       }

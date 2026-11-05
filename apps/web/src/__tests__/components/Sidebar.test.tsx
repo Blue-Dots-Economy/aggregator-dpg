@@ -391,6 +391,19 @@ describe('<AppSidebar /> account card', () => {
     expect(within(popup).getByText('AD')).toBeInTheDocument();
   });
 
+  it('closes on a click outside the card and stays open on a click inside it', () => {
+    renderCard({
+      title: 'Asha Rao',
+      subtitle: 'Organisation owner',
+      details: [{ label: 'Email', value: 'asha@a.org', icon: 'mail' }],
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: /Asha Rao/ })[0]!);
+    fireEvent.mouseDown(within(screen.getByRole('dialog')).getByText('Organisation owner'));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('keeps the name and the role in the header when there is a name', () => {
     renderCard({
       title: 'Asha Rao',

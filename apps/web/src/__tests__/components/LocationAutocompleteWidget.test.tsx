@@ -229,6 +229,28 @@ describe('LocationAutocompleteWidget', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 
+  it('keeps a suggestion row when a newer search drops the rows before it', async () => {
+    const BASAVANAGUDI: GeoSuggestion = {
+      label: 'Basavanagudi, Bengaluru, Karnataka, India',
+      lat: 12.9416,
+      lng: 77.5737,
+    };
+    suggestMock.mockResolvedValueOnce([BASAVANAGUDI, JAYANAGAR]).mockResolvedValueOnce([JAYANAGAR]);
+    render(
+      <Wrapper>
+        <LocationAutocompleteWidget {...(makeProps() as never)} />
+      </Wrapper>,
+    );
+
+    await typeAndAwaitSuggestions('bengaluru');
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2));
+    const rowBefore = screen.getByRole('option', { name: JAYANAGAR.label });
+
+    await typeAndAwaitSuggestions('jayanagar');
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(1));
+    expect(screen.getByRole('option', { name: JAYANAGAR.label })).toBe(rowBefore);
+  });
+
   it('commits the keyboard-highlighted option on Enter', async () => {
     const onChange = vi.fn();
     render(

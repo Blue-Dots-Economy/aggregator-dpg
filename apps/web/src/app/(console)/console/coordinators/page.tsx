@@ -57,7 +57,10 @@ export default async function ConsoleCoordinatorsPage({
   const params = await searchParams;
   const status = STATUSES.find((s) => s === params.status);
   const orgId = params.org_id && UUID_RE.test(params.org_id) ? params.org_id : undefined;
-  const searchAfterDomains = networkDomains().then(async (domains) => {
+  // The search needs the network's domains to check `serves`; it still runs
+  // alongside the organisation and actor reads.
+  const searchAfterDomains = async () => {
+    const domains = await networkDomains();
     const serves = domains.find((d) => d.id === params.serves)?.id;
     const page = await consoleRead<UserSearchResponse>('/v1/user/search', {
       filter: {
@@ -69,9 +72,9 @@ export default async function ConsoleCoordinatorsPage({
       ...(params.cursor ? { cursor: params.cursor } : {}),
     });
     return { domains, serves, page };
-  });
+  };
   const [{ domains, serves, page }, orgs, actor] = await Promise.all([
-    searchAfterDomains,
+    searchAfterDomains(),
     readReachableOrgs(),
     getConsoleActor(),
   ]);

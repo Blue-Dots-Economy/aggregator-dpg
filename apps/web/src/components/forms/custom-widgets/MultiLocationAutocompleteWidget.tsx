@@ -19,6 +19,8 @@ import { cn } from '../../../lib/cn';
 import { getGeoProvider } from '../../../lib/geo/provider';
 import { useFormRuntimeConfig } from '../../../lib/FormRuntimeConfigProvider';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
+import { geoSuggestionKey } from './geo-suggestion-key';
+import { withStableKeys } from '@/lib/list-keys';
 import type { GeoSuggestion } from '../../../lib/geo/types';
 
 export interface ResolvedCoord {
@@ -133,9 +135,9 @@ function RowCombobox({
           role="listbox"
           className="absolute z-50 mt-1 max-h-[280px] w-full overflow-y-auto rounded-[10px] border border-(--bd-border) bg-(--bd-card) p-1 shadow-lg"
         >
-          {suggestions.map((s, si) => (
+          {withStableKeys(suggestions, geoSuggestionKey).map(({ item: s, key }, si) => (
             <li
-              key={`${s.lat},${s.lng},${si}`}
+              key={key}
               id={optionId(si)}
               role="option"
               aria-selected={si === activeIndex}
@@ -299,11 +301,15 @@ export function MultiLocationAutocompleteWidget({
     ref.debounce = window.setTimeout(() => {
       const controller = new AbortController();
       ref.abort = controller;
-      void provider.suggest(q, controller.signal).then((results) => {
-        if (controller.signal.aborted) return;
-        updateSearch(index, { suggestions: results, open: results.length > 0 });
-      });
+      void search(index, q, controller.signal);
     }, DEBOUNCE_MS);
+  }
+
+  /** Asks the geocoder for `q` and shows the results in row `index`, unless aborted. */
+  async function search(index: number, q: string, signal: AbortSignal) {
+    const results = await provider.suggest(q, signal);
+    if (signal.aborted) return;
+    updateSearch(index, { suggestions: results, open: results.length > 0 });
   }
 
   function handleInput(index: number, next: string) {

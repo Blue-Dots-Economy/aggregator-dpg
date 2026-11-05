@@ -43,6 +43,23 @@ export function memoizeGeoLookup<T>(
   }
   const inFlight = new Map<string, InFlight>();
 
+  /** Runs one lookup, stores a cacheable result, and clears its in-flight entry. */
+  async function lookup(key: string, query: string, signal: AbortSignal): Promise<T> {
+    try {
+      const value = await fn(query, signal);
+      if (shouldCache(value)) {
+        resolved.set(key, value);
+        if (resolved.size > cap) {
+          const oldest = resolved.keys().next();
+          if (!oldest.done) resolved.delete(oldest.value);
+        }
+      }
+      return value;
+    } finally {
+      inFlight.delete(key);
+    }
+  }
+
   return (query: string, signal?: AbortSignal): Promise<T> => {
     const key = normalizeGeoKey(query);
 
@@ -59,20 +76,7 @@ export function memoizeGeoLookup<T>(
       const created: InFlight = {
         controller,
         waiters: new Set<object>(),
-        promise: fn(query, controller.signal)
-          .then((value) => {
-            if (shouldCache(value)) {
-              resolved.set(key, value);
-              if (resolved.size > cap) {
-                const oldest = resolved.keys().next().value as string;
-                resolved.delete(oldest);
-              }
-            }
-            return value;
-          })
-          .finally(() => {
-            inFlight.delete(key);
-          }),
+        promise: lookup(key, query, controller.signal),
       };
       inFlight.set(key, created);
       entry = created;

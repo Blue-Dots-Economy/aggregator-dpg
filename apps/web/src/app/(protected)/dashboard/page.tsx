@@ -827,7 +827,7 @@ function ParticipantTable<R extends ParticipantBase>({
   useEffect(() => {
     if (!filterOpen) return;
     const handler = (e: MouseEvent) => {
-      if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
+      if (filterRef.current && e.target instanceof Node && !filterRef.current.contains(e.target)) {
         setFilterOpen(false);
       }
     };
