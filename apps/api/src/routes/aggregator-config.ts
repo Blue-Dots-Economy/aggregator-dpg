@@ -11,6 +11,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import type {
   BrandLogo,
@@ -34,7 +35,7 @@ type PublicRegistrationMode = RegistrationMode & { signals_cta: boolean };
 /**
  * Public part of the resolved network config. Leaves out JSON Schemas and the full `network.json`.
  */
-interface PublicAggregatorConfig {
+type PublicAggregatorConfig = {
   aggregator: {
     name: string;
     legal_name?: string;
@@ -77,7 +78,7 @@ interface PublicAggregatorConfig {
   signals_ui_urls: Readonly<Record<string, string>>;
   /** Feature flags, always present. `custom_roles` is `RBAC_CUSTOM_ROLES_ENABLED`. */
   features: { custom_roles: boolean };
-}
+};
 
 const AggregatorConfigResponseSchema = z
   .object({
@@ -148,7 +149,8 @@ const AggregatorConfigResponseSchema = z
   })
   .passthrough();
 
-export async function registerAggregatorConfigRoutes(app: FastifyInstance): Promise<void> {
+export async function registerAggregatorConfigRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/aggregator-config',
     {

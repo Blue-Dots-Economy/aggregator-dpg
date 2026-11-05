@@ -85,6 +85,13 @@ describe('OpenAPI spec generation', () => {
     }
   });
 
+  it('documents 200 and 201 on the registration routes that answer a re-submit with 200', () => {
+    for (const path of ['/v1/aggregator-registrations/create', '/v1/orgs/create']) {
+      const codes = Object.keys(spec.paths[path]?.['post']?.responses ?? {});
+      expect(codes, `POST ${path}`).toEqual(expect.arrayContaining(['200', '201']));
+    }
+  });
+
   it('documents error envelopes on the dashboard + config routes', () => {
     for (const path of ['/v1/dashboard', '/v1/aggregator-config']) {
       const op = spec.paths[path]?.['get'];

@@ -15,6 +15,7 @@
  */
 
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { coolingRetryAfter } from '../services/registration-cooling.js';
 import { getOrganisationStore } from '../services/organisation-store/index.js';
@@ -176,7 +177,8 @@ const OrgListResponseSchema = z
  *
  * @param app - Fastify instance to attach the routes to.
  */
-export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
+export function registerAggregatorOrgRoutes(base: FastifyInstance): void {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/v1/orgs/create',
     {
@@ -185,12 +187,16 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         tags: ['aggregator-orgs'],
         summary: 'Submit a new parent-org registration',
         description:
-          'Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link. A rejected org registering again is set back to pending under the parent in this request, with the same checks. 409 ORG_DEPTH_LIMIT or ORG_CHILD_LIMIT (with fields.parent_id) when the parent cannot take the org; 409 ORG_TOTAL_LIMIT when the instance is full.',
+          'Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link. A rejected org registering again is set back to pending under the parent in this request, with the same checks. 409 ORG_DEPTH_LIMIT or ORG_CHILD_LIMIT (with fields.parent_id) when the parent cannot take the org; 409 ORG_TOTAL_LIMIT when the instance is full. 200 instead of 201 when the org already exists: a pending org gets a fresh review link, the owner of an active org gets a sign-in link.',
         body: OrgCreateBodySchema,
-        response: { 201: OrgCreatedResponseSchema, ...errorResponses(400, 401, 409, 500, 503) },
+        response: {
+          200: OrgCreatedResponseSchema,
+          201: OrgCreatedResponseSchema,
+          ...errorResponses(400, 401, 409, 500, 503),
+        },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const log = req.log.child({ operation: 'org-registration.create' });
       const start = Date.now();
 
@@ -203,7 +209,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
       }
       await recordRouteCaller(req, callerFromAny(auth.context));
 
-      const body = req.body as z.infer<typeof OrgCreateBodySchema>;
+      const body = req.body;
 
       // The deployment's org-registration schema decides the other fields.
       const schemaCheck = await validateOrgRegistration(body);
@@ -594,7 +600,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         response: { 200: OrgParentsResponseSchema, ...errorResponses(401, 500, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const auth = await authenticateAny(req);
       if (!auth.ok) {
         throw httpError('UNAUTHORIZED', {
@@ -680,7 +686,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         response: { 200: OrgListResponseSchema, ...errorResponses(401, 500, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const auth = await authenticateAny(req);
       if (!auth.ok) {
         throw httpError('UNAUTHORIZED', {

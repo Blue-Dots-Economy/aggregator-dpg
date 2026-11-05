@@ -15,6 +15,7 @@
  * for the audit trail. The route never returns PII. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { campaignEnvelopeSchema } from '../campaign/envelope.js';
 import { voiceContentSchema } from '../campaign/voice-content.js';
 import { auditFieldNameEntries } from '../campaign/audit-field-names.js';
@@ -28,7 +29,8 @@ import { httpError } from '../errors/http-error.js';
  *
  * @param app - The Fastify instance to attach the route to.
  */
-export async function registerCampaignVoiceRoutes(app: FastifyInstance): Promise<void> {
+export async function registerCampaignVoiceRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/v1/campaign/voice',
     {

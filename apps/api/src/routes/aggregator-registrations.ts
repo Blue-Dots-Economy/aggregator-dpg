@@ -19,6 +19,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { RegistrationPayloadSchema } from '@aggregator-dpg/shared-primitives/aggregator';
 import type { BecknContact, BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
@@ -101,7 +102,8 @@ const RegistrationCreatedResponseSchema = z
   })
   .passthrough();
 
-export async function registerAggregatorRegistrationRoutes(app: FastifyInstance): Promise<void> {
+export async function registerAggregatorRegistrationRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/v1/aggregator-registrations/create',
     {
@@ -110,15 +112,16 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         tags: ['aggregator-registrations'],
         summary: 'Submit a new aggregator registration',
         description:
-          'Validates submission against config/schemas/aggregator/registration.v1.json, creates a disabled user (login enabled on admin approval), and pushes the org to signalstack. Reached via a non-aggregator Bearer token from Keycloak.',
+          'Validates submission against config/schemas/aggregator/registration.v1.json, creates a disabled user (login enabled on admin approval), and pushes the org to signalstack. Reached via a non-aggregator Bearer token from Keycloak. 200 instead of 201 when a pending registration is submitted again: a fresh approval link is sent.',
         body: CoordinatorRegistrationBodySchema,
         response: {
+          200: RegistrationCreatedResponseSchema,
           201: RegistrationCreatedResponseSchema,
           ...errorResponses(400, 401, 409, 500, 503),
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const log = req.log.child({ operation: 'aggregator-registration.create' });
       const start = Date.now();
 
@@ -172,7 +175,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         await recordRouteCaller(req, callerFromAny(auth.context));
 
         // Already validated and parsed by the route schema.
-        const body = req.body as z.infer<typeof RegistrationPayloadSchema>;
+        const body = req.body;
 
         // `type` must be one of the network's domain ids.
         const networkCfg = await getNetworkConfig();
@@ -184,11 +187,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         }
 
         // `org_id` and `invite` are not form fields; strip them before Ajv.
-        const {
-          org_id: _orgIdField,
-          invite: _inviteField,
-          ...formBody
-        } = req.body as Record<string, unknown>;
+        const { org_id: _orgIdField, invite: _inviteField, ...formBody } = req.body;
 
         const validate = await getRegistrationValidator();
         if (!validate(formBody)) {
@@ -242,7 +241,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         let inviteEmailClaim: string | null = null;
         {
           const orgStore = getOrganisationStore();
-          const reqInvite = (req.body as { invite?: string }).invite;
+          const reqInvite = req.body.invite;
 
           // Invite path: the org comes from the token claim, re-checked against
           // the database, and the invite is claimed before anything is created.
@@ -287,7 +286,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             parentOrgId = verified.org;
           } else {
             // Selector path: the coordinator picks an active org. `org_id` is required.
-            const reqOrgId = (req.body as { org_id?: string }).org_id;
+            const reqOrgId = req.body.org_id;
             if (!reqOrgId) {
               throw httpError('SCHEMA_VALIDATION', {
                 detail: 'org_id is required.',

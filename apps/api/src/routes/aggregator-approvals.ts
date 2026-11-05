@@ -17,6 +17,7 @@
  */
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { ERR } from '../errors/codes.js';
@@ -115,7 +116,8 @@ function logApprovalAudit(
   );
 }
 
-export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Promise<void> {
+export async function registerAggregatorApprovalRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/admin/v1/aggregator-registrations/read/:id',
     {
@@ -215,7 +217,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         params: ApprovalParamsSchema,
       },
     },
-    async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    async (req, reply) => {
       if (await approvalVerifyRateLimited(req, reply)) return;
 
       const aggregatorId = req.params.id;
@@ -342,7 +344,7 @@ export async function registerAggregatorApprovalRoutes(app: FastifyInstance): Pr
         params: ApprovalParamsSchema,
       },
     },
-    async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    async (req, reply) => {
       if (await approvalVerifyRateLimited(req, reply)) return;
 
       const aggregatorId = req.params.id;

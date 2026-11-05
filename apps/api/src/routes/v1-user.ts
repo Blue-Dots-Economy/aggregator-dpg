@@ -14,7 +14,8 @@
  * Single reads are audit-logged.
  */
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import {
   DecisionRequestSchema,
@@ -72,7 +73,6 @@ import { getRbacRuntime } from '../services/authz/runtime.js';
 import { getRoleStore } from '../services/role-store/index.js';
 
 const IdParamsSchema = z.object({ id: z.string().uuid() });
-type IdParams = z.infer<typeof IdParamsSchema>;
 
 /** Throws `DB_UNAVAILABLE` naming the failed store call. */
 function dbDown(subOperation: string, message: string): never {
@@ -266,7 +266,8 @@ async function meOf(/* NOSONAR */ req: FastifyRequest, actor: Actor): Promise<Me
  *
  * @param app - Fastify instance to attach the routes to.
  */
-export function registerV1UserRoutes(app: FastifyInstance): void {
+export function registerV1UserRoutes(base: FastifyInstance): void {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/user/read/me',
     {
@@ -277,7 +278,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         response: { 200: MeResponseSchema, ...errorResponses(401, 403, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req, { allowCoordinator: true });
       return reply.status(200).send(await meOf(req, actor));
     },
@@ -294,9 +295,9 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         response: { 200: UserSchema, ...errorResponses(401, 403, 404, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
+      const { id } = req.params;
       const row = await coordinatorInReach(req, actor, id, 'view');
       const plain = await showsContact(req, actor, row.parentOrgId ?? null);
       // Audit the contact read: ids only.
@@ -324,9 +325,9 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         response: { 200: UserSearchResponseSchema, ...errorResponses(400, 401, 403, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const body = req.body as z.infer<typeof UserSearchRequestSchema>;
+      const body = req.body;
       const page = await getUserStore().search({
         orgIds: narrowOrgFilter(await manageScope(req, actor, 'view'), body.filter.org_id),
         ...(body.filter.status ? { status: body.filter.status } : {}),
@@ -381,9 +382,9 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const body = req.body as z.infer<typeof UserInviteRequestSchema>;
+      const body = req.body;
       if (!inManageScope(await manageScope(req, actor), body.org_id)) throw httpError('NOT_FOUND');
       if (body.recipients.length > config.INVITE_MINT_MAX_RECIPIENTS) {
         throw httpError('SCHEMA_VALIDATION', {
@@ -441,10 +442,10 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof DecisionRequestSchema>;
+      const { id } = req.params;
+      const body = req.body;
       const row = await coordinatorInReach(req, actor, id);
       await guardWriteRate(actor, reply);
 
@@ -491,10 +492,10 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         response: { 200: UserSchema, ...errorResponses(400, 401, 403, 404, 429, 502, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof UserMetadataUpdateRequestSchema>;
+      const { id } = req.params;
+      const body = req.body;
       const row = await coordinatorInReach(req, actor, id);
       await guardWriteRate(actor, reply);
 

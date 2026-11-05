@@ -19,6 +19,7 @@
  */
 
 import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { ConsentRecordSchema } from '@aggregator-dpg/shared-primitives/aggregator';
 import type { BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
@@ -96,7 +97,8 @@ const ProfileUpdateResponseSchema = z
   })
   .passthrough();
 
-export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
+export function registerAggregatorProfileRoutes(base: FastifyInstance): void {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/aggregators/profile/me',
     {
@@ -190,7 +192,7 @@ export function registerAggregatorProfileRoutes(app: FastifyInstance): void {
       const start = Date.now();
 
       // Already validated and parsed by the route schema.
-      const body = req.body as z.infer<typeof ProfileUpdateBodySchema>;
+      const body = req.body;
 
       const userStore = getUserStore();
 

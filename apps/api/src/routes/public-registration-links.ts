@@ -14,6 +14,7 @@
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
@@ -43,11 +44,6 @@ import { errorResponses } from '../errors/openapi.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { config } from '../config.js';
 import { buildSignalStackItemState } from '@aggregator-dpg/signalstack-writer/item-state';
-
-interface OrgSlugParams {
-  orgSlug?: string;
-  slug?: string;
-}
 
 const LinkParamsSchema = z.object({
   orgSlug: z.string().min(1).describe('Aggregator organisation slug.'),
@@ -131,7 +127,8 @@ const SubmitSkippedResponseSchema = SubmitAcceptedResponseSchema.extend({
   message: z.string(),
 }).passthrough();
 
-export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance): Promise<void> {
+export async function registerPublicRegistrationLinkRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/public/v1/aggregators/:orgSlug/links/:slug',
     {
@@ -149,7 +146,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       },
     },
     async (req, reply) => {
-      const { orgSlug, slug } = req.params as OrgSlugParams;
+      const { orgSlug, slug } = req.params;
       if (!orgSlug || !slug) {
         throw httpError('SCHEMA_VALIDATION', { detail: 'orgSlug and slug are required.' });
       }
@@ -221,7 +218,7 @@ export async function registerPublicRegistrationLinkRoutes(app: FastifyInstance)
       },
     },
     async (req, reply) => {
-      const { orgSlug, slug } = req.params as OrgSlugParams;
+      const { orgSlug, slug } = req.params;
       if (!orgSlug || !slug) {
         throw httpError('SCHEMA_VALIDATION', { detail: 'orgSlug and slug are required.' });
       }

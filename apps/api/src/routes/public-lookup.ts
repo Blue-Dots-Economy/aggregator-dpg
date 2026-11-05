@@ -10,6 +10,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { getUserStore } from '../services/user-store/index.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
@@ -18,10 +19,6 @@ import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { config } from '../config.js';
-
-interface OrgSlugParams {
-  orgSlug?: string;
-}
 
 const ParamsSchema = z.object({
   orgSlug: z.string().min(1).describe('Aggregator organisation slug.'),
@@ -66,7 +63,8 @@ const LookupResponseSchema = z
  *
  * @param app - Fastify instance.
  */
-export async function registerPublicLookupRoute(app: FastifyInstance): Promise<void> {
+export async function registerPublicLookupRoute(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/public/v1/aggregators/:orgSlug/lookup',
     {
@@ -85,7 +83,7 @@ export async function registerPublicLookupRoute(app: FastifyInstance): Promise<v
       },
     },
     async (req, reply) => {
-      const { orgSlug } = req.params as OrgSlugParams;
+      const { orgSlug } = req.params;
       if (!orgSlug) {
         throw httpError('SCHEMA_VALIDATION', { detail: 'orgSlug is required.' });
       }
@@ -109,7 +107,7 @@ export async function registerPublicLookupRoute(app: FastifyInstance): Promise<v
       }
 
       // Validated by the route's `querystring` schema, including email-or-phone.
-      const q = req.query as z.infer<typeof QuerySchema>;
+      const q = req.query;
 
       // Unknown slug and missing signalstack org both answer 404, so slugs
       // cannot be enumerated.

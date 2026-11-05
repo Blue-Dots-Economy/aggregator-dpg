@@ -20,6 +20,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import {
   OrgDecisionRequestSchema,
   OrgDecisionResponseSchema,
@@ -39,10 +40,8 @@ import {
   type KnownAsValues,
   type KnownAsValuesRequest,
   type OrgReadParent,
-  type OrgKnownAsUpdateRequest,
   type OrgHierarchyQuery,
   type OrgHierarchyResponse,
-  type OrgReadQuery,
   type OrgReadResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { httpError } from '../errors/http-error.js';
@@ -81,7 +80,6 @@ import {
 } from './console-shared.js';
 
 const IdParamsSchema = z.object({ id: z.string().uuid() });
-type IdParams = z.infer<typeof IdParamsSchema>;
 
 /** Throws `DB_UNAVAILABLE` naming the failed store call. */
 function dbDown(subOperation: string, message: string): never {
@@ -360,7 +358,8 @@ async function setKnownAsValues(
  *
  * @param app - Fastify instance to attach the routes to.
  */
-export function registerV1OrgRoutes(app: FastifyInstance): void {
+export function registerV1OrgRoutes(base: FastifyInstance): void {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/org/read/:id',
     {
@@ -375,10 +374,10 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         response: { 200: OrgReadResponseSchema, ...errorResponses(401, 403, 404, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
-      const { fields } = req.query as OrgReadQuery;
+      const { id } = req.params;
+      const { fields } = req.query;
       const { org, orgType } = await orgInReach(actor, id, 'view');
       const below = orgType === 'aggregator' && isOnlyViewed(actor, org.id);
       const counts = await getUserStore().countByOrg([org.id]);
@@ -433,9 +432,9 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         response: { 200: OrgSearchResponseSchema, ...errorResponses(400, 401, 403, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const body = req.body as z.infer<typeof OrgSearchRequestSchema>;
+      const body = req.body;
       const { descendants_of: below, parent_id: parentId } = body.filter;
       // The result is always limited to the caller's view reach; a filter only
       // narrows it. A filter on an org out of reach gives an empty page.
@@ -480,10 +479,10 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof OrgMetadataUpdateRequestSchema>;
+      const { id } = req.params;
+      const body = req.body;
       // A direct child is visible, so editing it answers 403 rather than 404.
       const { org, orgType } = await orgInReach(actor, id, 'view');
       if (orgType !== 'aggregator' || org.isDefault) {
@@ -551,10 +550,10 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
-      const body = req.body as OrgKnownAsUpdateRequest;
+      const { id } = req.params;
+      const body = req.body;
       const { org, orgType } = await orgInReach(actor, id, 'view');
       if ('known_as_values' in body) {
         return setKnownAsValues(req, reply, actor, { org, orgType }, body.known_as_values);
@@ -602,11 +601,11 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         response: { 200: OrgSchema, ...errorResponses(400, 401, 403, 404, 409, 429, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
       requireNetworkAdmin(actor);
-      const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof OrgParentUpdateRequestSchema>;
+      const { id } = req.params;
+      const body = req.body;
       // The org and its new parent must both be within the admin's view reach.
       const view = await viewable(actor);
       if (!view.includes(id) || !view.includes(body.parent_id)) throw httpError('NOT_FOUND');
@@ -654,10 +653,10 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         response: { 200: OrgParentOptionsResponseSchema, ...errorResponses(401, 403, 404, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
       requireNetworkAdmin(actor);
-      const { id } = req.params as IdParams;
+      const { id } = req.params;
       // Only orgs within the admin's view reach are moved or offered as parents.
       const view = await viewable(actor);
       if (!view.includes(id)) throw httpError('NOT_FOUND');
@@ -697,10 +696,10 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof OrgDecisionRequestSchema>;
+      const { id } = req.params;
+      const body = req.body;
       const found = await getOrganisationStore().findById(id);
       if (!found.ok) dbDown('orgStore.findById', found.error.message);
       if (!found.value || !(await decidesFor(req, actor, found.value))) {
@@ -755,9 +754,9 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
+      const { id } = req.params;
       const { org, orgType } = await orgInReach(actor, id, 'view');
       if (orgType === 'aggregator' && !(await decidesFor(req, actor, org))) {
         throw httpError('NOT_FOUND');
@@ -790,10 +789,10 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         response: { 200: OrgHierarchyResponseSchema, ...errorResponses(401, 403, 503) },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
+    async (req, reply) => {
       const { actor } = await requireActor(req);
       requireNetworkAdmin(actor);
-      const { fields } = req.query as OrgHierarchyQuery;
+      const { fields } = req.query;
       return reply.status(200).send(await readHierarchy(fields));
     },
   );

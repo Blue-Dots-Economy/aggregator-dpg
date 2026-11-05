@@ -10,6 +10,7 @@
  */
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { authenticate, type AuthContext } from '../services/auth/access-token.js';
 import { getMailer } from '@aggregator-dpg/mailer';
@@ -64,7 +65,8 @@ const SupportRequestSchema = z
  *
  * @param app - The Fastify instance to attach routes to.
  */
-export async function registerSupportRoutes(app: FastifyInstance): Promise<void> {
+export async function registerSupportRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.get(
     '/v1/support/config',
     {
@@ -134,9 +136,7 @@ export async function registerSupportRoutes(app: FastifyInstance): Promise<void>
 
       // Validated by the route's `body` schema. Use the submitted name, email and
       // phone; the coordinator may have edited the prefilled values.
-      const { name, email, phone, type, details, attachments } = req.body as z.infer<
-        typeof SupportRequestSchema
-      >;
+      const { name, email, phone, type, details, attachments } = req.body;
 
       // Count against the per-coordinator cap before validating the body, so
       // rejected submissions also use a slot. Runs after the 503 check. Fails open

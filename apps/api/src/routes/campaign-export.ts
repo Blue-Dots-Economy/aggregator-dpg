@@ -13,6 +13,7 @@
  * returns only `{ job_id }`. Belongs to `@aggregator-dpg/api`.
  */
 import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { campaignEnvelopeSchema } from '../campaign/envelope.js';
 import { submitCampaignJob } from '../campaign/submit-job.js';
 import { campaignSubmitResponses } from '../campaign/route-schema.js';
@@ -23,7 +24,8 @@ import { config } from '../config.js';
  *
  * @param app - The Fastify instance to attach the route to.
  */
-export async function registerCampaignExportRoutes(app: FastifyInstance): Promise<void> {
+export async function registerCampaignExportRoutes(base: FastifyInstance): Promise<void> {
+  const app = base.withTypeProvider<ZodTypeProvider>();
   app.post(
     '/v1/campaign/export',
     {
