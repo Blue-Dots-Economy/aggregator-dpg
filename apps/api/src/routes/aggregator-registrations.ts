@@ -748,6 +748,6 @@ async function resolveOwnerRouting(
 function hasLocationContent(loc: BecknLocation): boolean {
   const a = loc.address;
   if (a?.streetAddress?.trim() || a?.addressLocality?.trim()) return true;
-  const c = (loc.geo as { coordinates?: unknown }).coordinates;
+  const c = loc.geo.coordinates;
   return Array.isArray(c) && c.length === 2 && (c[0] !== 0 || c[1] !== 0);
 }
