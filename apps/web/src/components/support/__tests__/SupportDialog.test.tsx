@@ -4,7 +4,9 @@
  * Covers: prefill from the session user, the submit gating (details + at
  * least one contact + consent) that blocks a network call, the happy-path
  * POST + inline success message, and the inline "unavailable" notice shown
- * when the BFF responds 503 (SUPPORT_EMAIL not configured).
+ * when the BFF responds 503 (SUPPORT_EMAIL not configured). The attachment
+ * limits come from `GET /api/support/config`; a failed or malformed reply
+ * keeps the defaults, and the request is cancelled when the dialog unmounts.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -14,6 +16,8 @@ import en from '@/i18n/messages/en.json';
 import { SupportDialog } from '@/components/support/SupportDialog';
 import { AuthProvider } from '@/lib/auth-context';
 import type { User } from '@/types';
+import { makeQueryClient } from '@/__tests__/test-utils';
+import { QueryClientProvider } from '@tanstack/react-query';
 
 const prefilledUser: User = {
   id: 'u1',
@@ -24,12 +28,14 @@ const prefilledUser: User = {
 };
 
 function renderDialog(user: User | null = prefilledUser) {
-  render(
-    <NextIntlClientProvider locale="en" messages={en}>
-      <AuthProvider initialUser={user} supportEnabled>
-        <SupportDialog open onOpenChange={() => {}} />
-      </AuthProvider>
-    </NextIntlClientProvider>,
+  return render(
+    <QueryClientProvider client={makeQueryClient()}>
+      <NextIntlClientProvider locale="en" messages={en}>
+        <AuthProvider initialUser={user} supportEnabled>
+          <SupportDialog open onOpenChange={() => {}} />
+        </AuthProvider>
+      </NextIntlClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -168,6 +174,30 @@ describe('SupportDialog attachments (#551)', () => {
     renderDialog();
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     expect(screen.getByText(/Up to 3 files, 5.0 MB in total/)).toBeTruthy();
+  });
+
+  it('keeps the default limits when the config reply has the wrong shape', async () => {
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ enabled: true }), { status: 200 }));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    renderDialog();
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    // Let the reply settle before checking the hint.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByText(/Up to 3 files, 5.0 MB in total/)).toBeTruthy();
+  });
+
+  it('cancels the config request when the dialog unmounts', async () => {
+    let signal: AbortSignal | undefined;
+    vi.spyOn(global, 'fetch').mockImplementation((_url, init) => {
+      signal = init?.signal ?? undefined;
+      return new Promise<Response>(() => {});
+    });
+    const { unmount } = renderDialog();
+    await waitFor(() => expect(signal).toBeDefined());
+    unmount();
+    expect(signal?.aborted).toBe(true);
   });
 
   it('keeps the default limits when the config request cannot be sent', async () => {

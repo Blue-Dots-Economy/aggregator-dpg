@@ -18,7 +18,6 @@ import { Button } from '../ui/Button';
 import { useAuth } from '../../lib/auth-context';
 import { readApiError } from '../../lib/api-error';
 import {
-  SUPPORT_CONFIG_FALLBACK,
   encodeAttachments,
   formatBytes,
   pickerAccept,
@@ -27,6 +26,7 @@ import {
   type SupportConfig,
 } from '../../lib/support-attachments';
 import { withStableKeys } from '@/lib/list-keys';
+import { useSupportConfig } from '@/hooks/useSupportConfig';
 
 /** Props for {@link SupportDialog}. */
 export interface SupportDialogProps {
@@ -143,7 +143,8 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   /** Server-side attachment rejection message; it names the file. */
   const [serverDetail, setServerDetail] = useState<string | null>(null);
-  const [config, setConfig] = useState<SupportConfig>(SUPPORT_CONFIG_FALLBACK);
+  // Attachment limits come from the API. If the read fails, defaults stay.
+  const config = useSupportConfig(open);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Render the portal only after mount, since `document` is client-only.
   const [mounted, setMounted] = useState(false);
@@ -164,26 +165,6 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
       setServerDetail(null);
     }
   }, [open, user]);
-
-  // Attachment limits come from the API. If the fetch fails, defaults stay.
-  useEffect(() => {
-    if (!open) return;
-    let active = true;
-    const load = async () => {
-      try {
-        const res = await fetch('/api/support/config');
-        if (!res.ok) return;
-        const data: SupportConfig = await res.json();
-        if (active) setConfig(data);
-      } catch {
-        // The defaults stay in place.
-      }
-    };
-    void load();
-    return () => {
-      active = false;
-    };
-  }, [open]);
 
   // Dismiss on ESC.
   useEffect(() => {

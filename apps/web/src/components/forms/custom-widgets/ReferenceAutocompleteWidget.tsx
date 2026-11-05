@@ -23,6 +23,7 @@ import { cn } from '../../../lib/cn';
 import { useFormRuntimeConfig } from '../../../lib/FormRuntimeConfigProvider';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
 import { withStableKeys } from '@/lib/list-keys';
+import { useReferenceDataset } from '@/hooks/useReferenceDataset';
 
 interface ReferenceOption {
   name: string;
@@ -50,14 +51,6 @@ const MAX_SUGGESTIONS = 50;
 /** Shortest query that shows matches. */
 const MIN_QUERY_LENGTH = 2;
 const BLUR_CLOSE_MS = 150;
-
-/** Where reference datasets are served from when no override is configured. */
-const DEFAULT_REFERENCE_BASE = '/reference/';
-
-/**
- * Dataset fetch promises by dataset id, shared across mounts so each loads once.
- */
-const datasetCache = new Map<string, Promise<ReferenceOption[]>>();
 
 /** Reads `field` off an unverified record, or `undefined` if it is not a string. */
 function stringField(source: Record<string, unknown>, field: string): string | undefined {
@@ -144,61 +137,6 @@ export function resolveDatasetId(source: string, collegeDataset: string): string
   return source === 'colleges' ? `colleges-${collegeDataset}` : source;
 }
 
-/**
- * Builds the URL a dataset is fetched from.
- *
- * Defaults to `/reference/`, where a deployment mounts its ConfigMap. The
- * datasets are not in this repo; for local dev set `referenceBaseUrl` (see
- * `infra/env.template`). A relative value resolves against the app origin.
- * A remote host must allow CORS, since the browser fetches it directly.
- *
- * @param id - Resolved dataset file id.
- * @param referenceBaseUrl - Optional base URL override.
- * @returns An absolute URL to the dataset JSON.
- */
-function referenceUrl(id: string, referenceBaseUrl: string = DEFAULT_REFERENCE_BASE): string {
-  // Treat a blank value as unset too.
-  const raw = referenceBaseUrl.trim() || DEFAULT_REFERENCE_BASE;
-  const base = raw.endsWith('/') ? raw : `${raw}/`;
-  return new URL(`${id}.json`, new URL(base, window.location.origin)).toString();
-}
-
-/**
- * Fetches and flattens one dataset.
- *
- * @throws {Error} When the response is not OK or the body is not JSON.
- */
-async function fetchDataset(
-  id: string,
-  referenceBaseUrl: string | undefined,
-): Promise<ReferenceOption[]> {
-  const res = await fetch(referenceUrl(id, referenceBaseUrl));
-  if (!res.ok) throw new Error(`reference dataset ${id} → ${res.status}`);
-  return flattenReferenceDataset(await res.json());
-}
-
-/**
- * Drops a failed load from the cache so a later mount can retry.
- *
- * The caller of `loadDataset` handles the error; this only clears the entry.
- */
-async function forgetOnFailure(id: string, pending: Promise<ReferenceOption[]>): Promise<void> {
-  try {
-    await pending;
-  } catch {
-    if (datasetCache.get(id) === pending) datasetCache.delete(id);
-  }
-}
-
-function loadDataset(id: string, referenceBaseUrl: string | undefined): Promise<ReferenceOption[]> {
-  const cached = datasetCache.get(id);
-  if (cached) return cached;
-  const pending = fetchDataset(id, referenceBaseUrl);
-  datasetCache.set(id, pending);
-  void forgetOnFailure(id, pending);
-  return pending;
-}
-
 /** Identifies an option by the fields it shows. */
 function optionKey(option: ReferenceOption): string {
   return `${option.name}|${option.district ?? ''}|${option.state ?? ''}`;
@@ -223,9 +161,14 @@ export function ReferenceAutocompleteWidget({
     : DEFAULT_SUBTITLE;
 
   const { collegeDataset, referenceBaseUrl } = useFormRuntimeConfig();
+  // On a failed load the list is empty and the field works as plain text input.
+  const dataset = useReferenceDataset(
+    source ? resolveDatasetId(source, collegeDataset) : null,
+    referenceBaseUrl,
+    flattenReferenceDataset,
+  );
 
   const [text, setText] = React.useState<string>((value as string) ?? '');
-  const [dataset, setDataset] = React.useState<ReferenceOption[]>([]);
   const [open, setOpen] = React.useState(false);
   const blurRef = React.useRef<number | undefined>(undefined);
 
@@ -233,27 +176,6 @@ export function ReferenceAutocompleteWidget({
   React.useEffect(() => {
     setText((value as string) ?? '');
   }, [value]);
-
-  React.useEffect(() => {
-    if (!source) return undefined;
-    let live = true;
-    const load = async () => {
-      try {
-        const loaded = await loadDataset(
-          resolveDatasetId(source, collegeDataset),
-          referenceBaseUrl,
-        );
-        if (live) setDataset(loaded);
-      } catch {
-        // On failure the field works as plain text input.
-        if (live) setDataset([]);
-      }
-    };
-    void load();
-    return () => {
-      live = false;
-    };
-  }, [source, collegeDataset, referenceBaseUrl]);
 
   React.useEffect(() => () => window.clearTimeout(blurRef.current), []);
 

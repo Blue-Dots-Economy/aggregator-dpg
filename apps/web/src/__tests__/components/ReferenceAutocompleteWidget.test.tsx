@@ -11,7 +11,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
+import { type QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { FormRuntimeConfigProvider } from '@/lib/FormRuntimeConfigProvider';
+import { makeQueryClient } from '@/__tests__/test-utils';
 import {
   ReferenceAutocompleteWidget,
   flattenReferenceDataset,
@@ -84,24 +86,26 @@ const DATASET = [
   { name: 'Government Polytechnic Mysuru', district: 'Mysuru', state: 'Karnataka' },
 ];
 
+/** The query client for the current test; mounts in one test share it. */
+let queryClient: QueryClient;
+
 function Wrapper({ children }: { children: ReactNode }) {
   return (
-    <FormRuntimeConfigProvider value={{ collegeDataset: 'ka' }}>
-      {children}
-    </FormRuntimeConfigProvider>
+    <QueryClientProvider client={queryClient}>
+      <FormRuntimeConfigProvider value={{ collegeDataset: 'ka' }}>
+        {children}
+      </FormRuntimeConfigProvider>
+    </QueryClientProvider>
   );
 }
 
 /**
  * A source id unique to each test.
  *
- * The widget caches loaded datasets at module scope, keyed by dataset id, so
- * that switching fields or re-mounting the form does not refetch a list that
- * runs to megabytes. That cache is deliberate and survives between tests in the
- * same file — so tests share a source id at the cost of the second one silently
- * observing the first one's fetch. Giving each its own id keeps them isolated
- * without reaching in to clear production state; the cache itself is covered by
- * its own test below.
+ * Loaded datasets are cached in the query client, keyed by dataset id, so
+ * re-mounting the form does not refetch a list that runs to megabytes. Each
+ * test gets a fresh client, and a distinct id keeps the fetch URLs apart in
+ * assertions. The cache itself is covered by its own test below.
  */
 let sourceCounter = 0;
 function uniqueSource(): string {
@@ -131,6 +135,7 @@ describe('ReferenceAutocompleteWidget', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    queryClient = makeQueryClient();
     fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => DATASET });
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -154,20 +159,22 @@ describe('ReferenceAutocompleteWidget', () => {
 
   it('fetches from an absolute REFERENCE_BASE_URL when one is configured', async () => {
     render(
-      <FormRuntimeConfigProvider
-        value={{ collegeDataset: 'up', referenceBaseUrl: 'https://cdn.example/lists' }}
-      >
-        <ReferenceAutocompleteWidget
-          {...(makeProps({ options: { source: 'colleges' } }) as never)}
-        />
-      </FormRuntimeConfigProvider>,
+      <QueryClientProvider client={queryClient}>
+        <FormRuntimeConfigProvider
+          value={{ collegeDataset: 'up', referenceBaseUrl: 'https://cdn.example/lists' }}
+        >
+          <ReferenceAutocompleteWidget
+            {...(makeProps({ options: { source: 'colleges' } }) as never)}
+          />
+        </FormRuntimeConfigProvider>
+      </QueryClientProvider>,
     );
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe('https://cdn.example/lists/colleges-up.json');
   });
 
-  it('reuses the module-level cache instead of refetching a multi-megabyte list', async () => {
+  it('reuses the loaded list on a later mount instead of refetching a multi-megabyte list', async () => {
     const source = uniqueSource();
     const props = makeProps({ options: { source } });
 
@@ -307,7 +314,7 @@ describe('ReferenceAutocompleteWidget', () => {
       </Wrapper>,
     );
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    // Let the rejection settle so the failed entry leaves the cache.
+    // Let the failed load settle before unmounting.
     await new Promise((resolve) => setTimeout(resolve, 0));
     first.unmount();
 
@@ -319,6 +326,22 @@ describe('ReferenceAutocompleteWidget', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'jayanagar' } });
     expect(await screen.findByRole('option')).toHaveTextContent('Government ITI Jayanagar');
+  });
+
+  it('cancels the dataset request when the field unmounts before it loads', async () => {
+    let signal: AbortSignal | undefined;
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+      signal = init?.signal ?? undefined;
+      return new Promise(() => {});
+    });
+    const { unmount } = render(
+      <Wrapper>
+        <ReferenceAutocompleteWidget {...(makeProps() as never)} />
+      </Wrapper>,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    unmount();
+    expect(signal?.aborted).toBe(true);
   });
 
   it('degrades to a plain text input when the dataset fails to load', async () => {
