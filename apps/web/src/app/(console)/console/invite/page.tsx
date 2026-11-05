@@ -6,7 +6,6 @@
  */
 
 import { getTranslations } from 'next-intl/server';
-import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { consoleRead } from '@/lib/console-api.server';
 import { InviteForm } from '@/components/console/InviteForm';
 import { ConsoleSection } from '@/components/console/ConsoleUi';
@@ -21,6 +20,7 @@ import {
 import { resolveMaxInvites } from '@/lib/invite-limit';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { OrgSearchResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
 
 export default async function ConsoleInvitePage() {
   const t = await getTranslations('console');
@@ -28,7 +28,7 @@ export default async function ConsoleInvitePage() {
   // The API also checks it.
   const actor = await getConsoleActor();
   if (actor.ok && !canInvite(actor.me)) redirect('/console');
-  const page = await consoleRead<OrgSearchResponse>('/v1/org/search', {
+  const page = await consoleRead('/v1/org/search', OrgSearchResponseSchema, {
     filter: { status: 'active' },
     limit: 100,
   });

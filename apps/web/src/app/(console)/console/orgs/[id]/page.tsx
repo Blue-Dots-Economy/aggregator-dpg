@@ -16,11 +16,6 @@
 import Link from 'next/link';
 import { getFormatter, getTranslations } from 'next-intl/server';
 import { Building2, CalendarDays, Clock, Layers, Network, Users } from 'lucide-react';
-import type {
-  OrgHierarchyResponse,
-  OrgReadResponse,
-  OrgSearchResponse,
-} from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
 import { Topbar } from '@/components/shell/Topbar';
@@ -39,6 +34,11 @@ import { OrgsTable } from '@/components/console/OrgsTable';
 import { OwnerAccessRepair } from '@/components/console/OwnerAccessRepair';
 import { can, canViewCoordinators } from '@/lib/capabilities';
 import { loadOrgSchema } from '@/lib/org-schema.server';
+import {
+  OrgHierarchyResponseSchema,
+  OrgReadResponseSchema,
+  OrgSearchResponseSchema,
+} from '@aggregator-dpg/shared-primitives/user-org';
 
 /** How many organisations below this one the page lists. */
 const CHILD_LIMIT = 100;
@@ -51,8 +51,9 @@ export default async function ConsoleOrgPage({
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   const { id } = await params;
-  const data = await consoleRead<OrgReadResponse>(
+  const data = await consoleRead(
     `/v1/org/read/${encodeURIComponent(id)}?fields=known_as_values,parent.known_as_values`,
+    OrgReadResponseSchema,
   );
   const { org, owner } = data;
   // An owner also views, read-only, the orgs directly under its own.
@@ -68,13 +69,15 @@ export default async function ConsoleOrgPage({
   // A child org's own children are not visible to the parent's owner.
   const children =
     org.org_type === 'aggregator' && !org.is_default && own
-      ? await consoleRead<OrgSearchResponse>('/v1/org/search', {
+      ? await consoleRead('/v1/org/search', OrgSearchResponseSchema, {
           filter: { parent_id: org.id },
           limit: CHILD_LIMIT,
         })
       : null;
   // Tree limits; only the network admin can read them.
-  const hierarchy = canRename ? await consoleRead<OrgHierarchyResponse>('/v1/org/hierarchy') : null;
+  const hierarchy = canRename
+    ? await consoleRead('/v1/org/hierarchy', OrgHierarchyResponseSchema)
+    : null;
   const isOwner = owner.id === actor.me.user.id;
   // The parent and its list; null when the viewer cannot set this org's value.
   const parent = aggregatorOrg ? (org.parent ?? null) : null;

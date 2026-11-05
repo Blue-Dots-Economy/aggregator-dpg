@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { sendConsole, errorKey, setOrgKnownAs, setOrgKnownAsValues } from '@/lib/console-client';
+import { z } from 'zod';
+import {
+  errorKey,
+  getConsole,
+  sendConsole,
+  setOrgKnownAs,
+  setOrgKnownAsValues,
+} from '@/lib/console-client';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -46,6 +53,72 @@ describe('sendConsole (console-client)', () => {
     );
     const res = await sendConsole('/api/console/org/x', 'POST', {});
     expect(res).toEqual({ ok: false, status: 500, error: {} });
+  });
+});
+
+describe('console error bodies (console-client)', () => {
+  beforeEach(() => {
+    global.fetch = vi.fn();
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('keeps the code and fields of an error', async () => {
+    vi.mocked(global.fetch).mockResolvedValue(
+      json({ error: { code: 'CONFLICT', fields: { reason: 'busy' }, message: 'x' } }, 409),
+    );
+    const res = await sendConsole('/api/console/org/x', 'POST', {});
+    expect(res).toEqual({
+      ok: false,
+      status: 409,
+      error: { code: 'CONFLICT', fields: { reason: 'busy' } },
+    });
+  });
+
+  it('drops a code or fields of the wrong type', async () => {
+    vi.mocked(global.fetch).mockResolvedValue(
+      json({ error: { code: 42, fields: ['reason'] } }, 400),
+    );
+    const res = await sendConsole('/api/console/org/x', 'POST', {});
+    expect(res).toEqual({ ok: false, status: 400, error: {} });
+  });
+});
+
+describe('getConsole (console-client)', () => {
+  const OptionsSchema = z.object({ options: z.array(z.object({ id: z.string() })) });
+
+  beforeEach(() => {
+    global.fetch = vi.fn();
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('reads same-origin and returns the parsed body', async () => {
+    vi.mocked(global.fetch).mockResolvedValue(json({ options: [{ id: 'o1', extra: 1 }] }));
+    const res = await getConsole('/api/console/org/parent/options/x', OptionsSchema);
+    expect(res).toEqual({ ok: true, status: 200, data: { options: [{ id: 'o1' }] } });
+    expect(global.fetch).toHaveBeenCalledWith('/api/console/org/parent/options/x', {
+      credentials: 'same-origin',
+    });
+  });
+
+  it('returns RESPONSE_SHAPE and logs paths only when an OK body does not match', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(global.fetch).mockResolvedValue(json({ options: [{ id: 7, name: 'Private' }] }));
+    const res = await getConsole('/api/console/org/parent/options/x', OptionsSchema);
+    expect(res).toEqual({ ok: false, status: 200, error: { code: 'RESPONSE_SHAPE' } });
+    expect(JSON.stringify(logged.mock.calls)).toContain('options.0.id');
+    expect(JSON.stringify(logged.mock.calls)).not.toContain('Private');
+  });
+
+  it('returns the error of a failed read', async () => {
+    vi.mocked(global.fetch).mockResolvedValue(json({ error: { code: 'NOT_FOUND' } }, 404));
+    const res = await getConsole('/api/console/org/parent/options/x', OptionsSchema);
+    expect(res).toEqual({ ok: false, status: 404, error: { code: 'NOT_FOUND' } });
+  });
+
+  it('returns status 0 when fetch throws', async () => {
+    vi.mocked(global.fetch).mockRejectedValue(new TypeError('network down'));
+    const res = await getConsole('/api/console/org/parent/options/x', OptionsSchema);
+    expect(res).toEqual({ ok: false, status: 0, error: {} });
   });
 });
 

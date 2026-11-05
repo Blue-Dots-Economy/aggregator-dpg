@@ -14,10 +14,7 @@
 
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import type {
-  OrgHierarchyResponse,
-  OrgSearchResponse,
-} from '@aggregator-dpg/shared-primitives/user-org';
+import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
 import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
@@ -29,6 +26,7 @@ import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
 import { ORG_FILTERS, type OrgFilter } from '@/lib/org-filters';
 import { ConsoleCollapsible, ConsoleSection, EmptyState } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
+import { OrgHierarchyResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
@@ -42,8 +40,9 @@ export default async function ConsoleOrgsPage({
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   if (!actor.me.is_network_admin) return <OwnerOrgs ownedIds={actor.me.orgs.map((o) => o.id)} />;
-  const hierarchy = await consoleRead<OrgHierarchyResponse>(
+  const hierarchy = await consoleRead(
     '/v1/org/hierarchy?fields=known_as_values',
+    OrgHierarchyResponseSchema,
   );
   const network = await readNetworkOrgs(hierarchy.network.id);
   const pending = network.orgs.filter((o) => o.status === 'pending');

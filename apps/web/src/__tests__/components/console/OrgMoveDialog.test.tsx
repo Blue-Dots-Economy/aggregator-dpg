@@ -160,4 +160,11 @@ describe('<OrgMoveDialog />', () => {
     renderIt();
     expect(await screen.findByText(messages.console.errors.server)).toBeInTheDocument();
   });
+
+  it('shows the plain message when the candidates have the wrong shape', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    global.fetch = vi.fn(async () => json({ subtree_size: 3, options: 'none' })) as never;
+    renderIt();
+    expect(await screen.findByText(messages.console.errors.generic)).toBeInTheDocument();
+  });
 });

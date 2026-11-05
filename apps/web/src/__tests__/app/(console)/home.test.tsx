@@ -42,6 +42,7 @@ import ConsoleHomePage from '@/app/(console)/console/page';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
 import { readReachableOrgs } from '@/lib/console-hierarchy.server';
+import { UserSearchResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
 
 type Row = OrgSearchResponse['orgs'][number];
 
@@ -152,7 +153,7 @@ describe('console home — owner', () => {
     );
     expect(screen.getByText('Coord One')).toBeInTheDocument();
     expect(screen.getByText('cp@edge.test')).toBeInTheDocument();
-    expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', {
+    expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', UserSearchResponseSchema, {
       filter: { org_id: 'org-1' },
       limit: 100,
     });
