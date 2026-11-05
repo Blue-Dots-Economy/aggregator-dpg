@@ -40,6 +40,27 @@ describe('dashboardService.dashboard', () => {
     globalThis.fetch = origFetch;
   });
 
+  it('keeps keys of the Signals payload it does not declare', async () => {
+    const payload = {
+      by_domain: {
+        seeker: {
+          rollup: { total_items: 2, complete_profiles: 1, by_status: { new: 2 }, extra_count: 7 },
+          items: [{ item_id: 'i1' }],
+          total_matching: 2,
+          next_cursor: null,
+          facets: { city: 3 },
+        },
+      },
+      metadata: { refreshed: true, source: 'cache' },
+    };
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      ) as unknown as typeof fetch;
+    await expect(dashboardService.dashboard({ domain: 'seeker' })).resolves.toEqual(payload);
+  });
+
   it('throws when domain is missing', async () => {
     await expect(dashboardService.dashboard()).rejects.toThrow();
   });

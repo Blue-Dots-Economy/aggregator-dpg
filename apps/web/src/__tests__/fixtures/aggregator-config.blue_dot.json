@@ -1,0 +1,366 @@
+{
+  "aggregator": {
+    "name": "Blue Dots Aggregator",
+    "contact_email": "ops@bluedots.local"
+  },
+  "brand": {
+    "short_name": "Blue Dots",
+    "long_name": "Blue Dots Aggregator Portal",
+    "tagline": "Track every participant in your network \u2014 at a glance.",
+    "strapline": "Seeded by EkStep Foundation",
+    "url_slug": "blue-dots",
+    "primary_color": "#0074ff",
+    "accent_color": "#57abff",
+    "palette": {
+      "primary": [
+        {
+          "name": "Charcoal",
+          "hex": "#333333"
+        },
+        {
+          "name": "Off White",
+          "hex": "#f4f4f4"
+        },
+        {
+          "name": "Blue 500",
+          "hex": "#0074ff"
+        },
+        {
+          "name": "Blue 300",
+          "hex": "#57abff"
+        },
+        {
+          "name": "Blue 100",
+          "hex": "#a4daff"
+        }
+      ],
+      "secondary": [
+        {
+          "name": "Teal",
+          "hex": "#00bfa6"
+        },
+        {
+          "name": "Mint",
+          "hex": "#6ee7c1"
+        },
+        {
+          "name": "Lavender",
+          "hex": "#7c5cff"
+        },
+        {
+          "name": "Lilac",
+          "hex": "#b8a7ff"
+        },
+        {
+          "name": "Coral",
+          "hex": "#ff6b6b"
+        },
+        {
+          "name": "Peach",
+          "hex": "#ffb86b"
+        },
+        {
+          "name": "Sand",
+          "hex": "#ffd166"
+        }
+      ],
+      "accent": [
+        {
+          "name": "Ink",
+          "hex": "#1e2a38"
+        },
+        {
+          "name": "Slate",
+          "hex": "#4a5568"
+        },
+        {
+          "name": "Mist",
+          "hex": "#cbd5e1"
+        },
+        {
+          "name": "Pale Lilac",
+          "hex": "#e6f0ff"
+        },
+        {
+          "name": "Blush",
+          "hex": "#ffe1e6"
+        },
+        {
+          "name": "Cream",
+          "hex": "#fff4e5"
+        },
+        {
+          "name": "Pale Mint",
+          "hex": "#e6fff5"
+        }
+      ],
+      "gradients": [
+        {
+          "name": "Sky",
+          "from": "#0074ff",
+          "to": "#a4daff"
+        },
+        {
+          "name": "Aqua",
+          "from": "#00bfa6",
+          "to": "#6ee7c1"
+        },
+        {
+          "name": "Purple",
+          "from": "#7c5cff",
+          "to": "#b8a7ff"
+        },
+        {
+          "name": "Sunset",
+          "from": "#ff6b6b",
+          "to": "#ffb86b"
+        },
+        {
+          "name": "Frost",
+          "from": "#e6f0ff",
+          "to": "#ffffff"
+        }
+      ]
+    },
+    "typography": {
+      "primaryFont": "Arial",
+      "headings": {
+        "family": "Arial",
+        "weight": "Bold",
+        "sampleCopy": "India's districts suffer from a local discovery crisis"
+      },
+      "body": {
+        "family": "Arial",
+        "weight": "Regular",
+        "sampleCopy": "Individuals, jobs, services and schemes exist in close proximity, but can't digitally discover each other. This 'paradox of proximity' is rooted in digital darkness, which prevents individuals, enterprises and entire districts from unlocking potential."
+      }
+    },
+    "logo": {
+      "default": "/brand/blue-dot/logo.png",
+      "light": "/brand/blue-dot/logo-light.png",
+      "withStrapline": "/brand/blue-dot/logo-with-strapline.png",
+      "withStraplineLight": "/brand/blue-dot/logo-with-strapline-light.png",
+      "onBrand": "/brand/blue-dot/logo-on-brand.png"
+    }
+  },
+  "network": {
+    "id": "blue_dot",
+    "display_name": "Blue Dot"
+  },
+  "domains": [
+    {
+      "id": "seeker",
+      "label": "Seekers",
+      "plural_label": "Seekers",
+      "item_type": "profile_1.0",
+      "guardian_consent_required": true,
+      "go_live_required": ["schema_required", "consent_required"],
+      "dashboardTiles": {
+        "profile": [
+          {
+            "field": "total_items",
+            "label": "Profiles Registered"
+          },
+          {
+            "field": "complete_profiles",
+            "label": "Profiles Complete"
+          },
+          {
+            "field": "has_applications",
+            "label": "Applied for Jobs"
+          }
+        ],
+        "user": [
+          {
+            "field": "total_users",
+            "label": "Total Job Seekers"
+          },
+          {
+            "field": "avg_items_per_user",
+            "label": "Avg Profiles per User"
+          },
+          {
+            "field": "avg_actions_per_user",
+            "label": "Avg Actions per User"
+          }
+        ]
+      },
+      "status_rules": [
+        {
+          "status": "new",
+          "label": "New",
+          "description": "Joined within the last 7 days",
+          "when": {
+            "item_age_days": {
+              "lte": 7
+            }
+          }
+        },
+        {
+          "status": "active",
+          "label": "Active",
+          "description": "Applied to a job in the last 30 days",
+          "when": {
+            "days_since_last": {
+              "buckets": ["create", "accept"],
+              "lte": 30
+            }
+          }
+        },
+        {
+          "status": "at_risk",
+          "label": "At Risk",
+          "description": "No applications for 30\u201390 days",
+          "when": {
+            "days_since_last": {
+              "buckets": ["create", "accept", "reject"],
+              "between": [31, 90]
+            }
+          }
+        },
+        {
+          "status": "inactive",
+          "label": "Inactive",
+          "description": "No activity 90+ days",
+          "when": "default"
+        }
+      ]
+    },
+    {
+      "id": "provider",
+      "label": "Providers",
+      "plural_label": "Providers",
+      "item_type": "job_posting_1.0",
+      "guardian_consent_required": false,
+      "go_live_required": ["schema_required", "consent_required"],
+      "dashboardTiles": {
+        "profile": [
+          {
+            "field": "total_items",
+            "label": "Postings Registered"
+          },
+          {
+            "field": "complete_profiles",
+            "label": "Postings Complete"
+          },
+          {
+            "field": "has_applications",
+            "label": "Received Applications"
+          }
+        ],
+        "user": [
+          {
+            "field": "total_users",
+            "label": "Total Employers"
+          },
+          {
+            "field": "avg_items_per_user",
+            "label": "Avg Profiles per User"
+          },
+          {
+            "field": "avg_actions_per_user",
+            "label": "Avg Actions per User"
+          }
+        ]
+      },
+      "status_rules": [
+        {
+          "status": "new",
+          "label": "New",
+          "description": "Job posted within the last 7 days",
+          "when": {
+            "item_age_days": {
+              "lte": 7
+            }
+          }
+        },
+        {
+          "status": "active",
+          "label": "Active",
+          "description": "Received applications and shortlisted or rejected in last 30 days",
+          "when": {
+            "all": [
+              {
+                "count": {
+                  "buckets": ["create"],
+                  "gt": 0
+                }
+              },
+              {
+                "days_since_last": {
+                  "buckets": ["accept", "reject"],
+                  "lte": 30
+                }
+              }
+            ]
+          }
+        },
+        {
+          "status": "at_risk",
+          "label": "At Risk",
+          "description": "No applications shortlisted or rejected for 30\u201390 days",
+          "when": {
+            "all": [
+              {
+                "count": {
+                  "buckets": ["create"],
+                  "gt": 0
+                }
+              },
+              {
+                "days_since_last": {
+                  "buckets": ["accept", "reject"],
+                  "between": [31, 90]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "status": "inactive",
+          "label": "Inactive",
+          "description": "No activity for 90+ days",
+          "when": "default"
+        }
+      ]
+    }
+  ],
+  "dashboardBuckets": {
+    "by_status": {
+      "new": "New",
+      "active": "Active",
+      "at_risk": "At Risk",
+      "inactive": "Inactive"
+    },
+    "by_initiated_action_status": {
+      "create": "Applied",
+      "accept": "Accepted",
+      "reject": "Rejected",
+      "cancel": "Withdrawn"
+    },
+    "by_received_action_status": {
+      "create": "Applications",
+      "accept": "Shortlisted",
+      "reject": "Rejected",
+      "cancel": "Cancelled"
+    }
+  },
+  "registration_modes": {
+    "voice": {
+      "signals_cta": false,
+      "label_i18n_key": "registration_mode.voice.label",
+      "submission_shape": "account_only",
+      "public_hint_i18n_key": "registration_mode.voice.hint"
+    },
+    "form": {
+      "signals_cta": true,
+      "label_i18n_key": "registration_mode.form.label",
+      "submission_shape": "account_and_profile",
+      "public_hint_i18n_key": null
+    }
+  },
+  "signals_ui_urls": {},
+  "features": {
+    "custom_roles": false
+  }
+}

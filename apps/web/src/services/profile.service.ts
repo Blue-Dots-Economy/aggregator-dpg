@@ -1,5 +1,9 @@
 import type { AggregatorProfile } from '../types';
 import { z } from 'zod';
+import {
+  ActorTypeSchema,
+  AggregatorStatusSchema,
+} from '@aggregator-dpg/shared-primitives/aggregator';
 import { jsonFetch } from './http';
 
 export interface ProfileService {
@@ -35,7 +39,7 @@ export const ProfileApiResponseSchema = z.object({
   aggregator_id: z.string(),
   org_slug: z.string(),
   org_name: z.string(),
-  actor_type: z.enum(['aggregator', 'seeker', 'provider']),
+  actor_type: ActorTypeSchema,
   // Domain id from the network config; any network domain is possible.
   type: z.string().nullable(),
   url: z.string().nullable(),
@@ -45,7 +49,7 @@ export const ProfileApiResponseSchema = z.object({
   consent: z
     .object({ value: z.boolean(), given_at: z.string(), valid_till: z.string() })
     .nullable(),
-  status: z.enum(['pending', 'active', 'inactive', 'retired']),
+  status: AggregatorStatusSchema,
   identity: z
     .object({
       first_name: z.string().nullable(),
