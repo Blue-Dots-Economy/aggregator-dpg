@@ -21,7 +21,8 @@ import {
   type GradientSchema,
   type PaletteSwatchSchema,
 } from '@aggregator-dpg/network-config/interface';
-import { ResponseShapeError, jsonFetch } from '../services/http';
+import { ResponseShapeError } from '@/lib/response-shape-error';
+import { jsonFetch } from '../services/http';
 
 /** One dashboard tile: the rollup key to read and its label. Mirrors network-config `DashboardTileDef`. */
 const DashboardTileDefSchema = z.object({ field: z.string(), label: z.string() });

@@ -20,7 +20,7 @@ import type { User } from '../../types';
 import { getConsoleActor } from '../../lib/console-actor';
 import { z } from 'zod';
 import { logger } from '@/lib/logger';
-import { ResponseShapeError } from '@/lib/response-shape-error';
+import { summariseIssues } from '@/lib/response-shape-error';
 
 /** The body of `GET /v1/support/config`. */
 const SupportConfigSchema = z.object({ enabled: z.boolean() });
@@ -42,7 +42,7 @@ async function fetchSupportEnabled(): Promise<boolean> {
       operation: 'protectedLayout.fetchSupportEnabled',
       status: 'failure',
       error: 'unexpected response shape',
-      issues: new ResponseShapeError('/v1/support/config', parsed.error.issues).issueSummary(),
+      issues: summariseIssues(parsed.error.issues),
     });
     return false;
   } catch {

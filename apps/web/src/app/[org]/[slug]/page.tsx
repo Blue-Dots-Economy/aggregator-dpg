@@ -8,7 +8,7 @@ import { resolveSchemaRoot } from '@/lib/config-paths';
 import { parseJsonObject, readJsonSchema } from '@/lib/json-object';
 import { logger } from '@/lib/logger';
 import { loadParticipantConsent } from '@/lib/participant-consent.server';
-import { ResponseShapeError } from '@/lib/response-shape-error';
+import { summariseIssues } from '@/lib/response-shape-error';
 import { ResolveResponseSchema } from '@/lib/registration-link';
 import { PublicRegistrationView } from './PublicRegistrationView';
 
@@ -79,7 +79,7 @@ export default async function PublicRegistrationPage({ params }: PageProps) {
       operation: 'publicRegistrationPage.resolve',
       status: 'failure',
       error: 'unexpected response shape',
-      issues: new ResponseShapeError('link resolve', parsedLink.error.issues).issueSummary(),
+      issues: summariseIssues(parsedLink.error.issues),
     });
     return <ErrorShell title="Link unavailable" message="Malformed response." />;
   }

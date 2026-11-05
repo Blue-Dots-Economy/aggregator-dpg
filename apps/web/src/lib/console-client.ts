@@ -14,19 +14,12 @@ import {
   type OrgKnownAsUpdateRequest,
   type OrgKnownAsUpdateResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
-import { z } from 'zod';
+import { type z } from 'zod';
+import { readErrorEnvelope, type ErrorEnvelope } from './api-error';
 import { parseResponseBody, ResponseShapeError } from './response-shape-error';
 
-/** The fields of the API's error envelope that the console reads. A field of the wrong type is dropped. */
-const ConsoleErrorSchema = z.object({
-  code: z.string().optional().catch(undefined),
-  fields: z.record(z.unknown()).optional().catch(undefined),
-});
-
 /** The API's error envelope, as far as the console reads it. */
-export type ConsoleError = z.infer<typeof ConsoleErrorSchema>;
-
-const ConsoleErrorBodySchema = z.object({ error: ConsoleErrorSchema });
+export type ConsoleError = Pick<ErrorEnvelope, 'code' | 'fields'>;
 
 /** The error code a view gets when an OK body does not match its schema. */
 export const RESPONSE_SHAPE_CODE = 'RESPONSE_SHAPE';
@@ -41,9 +34,7 @@ export type ConsoleSendResult<T> =
  * @returns The code and fields; empty when the body has no error object.
  */
 function readConsoleError(body: unknown): ConsoleError {
-  const parsed = ConsoleErrorBodySchema.safeParse(body);
-  if (!parsed.success) return {};
-  const { code, fields } = parsed.data.error;
+  const { code, fields } = readErrorEnvelope(body);
   return { ...(code !== undefined ? { code } : {}), ...(fields !== undefined ? { fields } : {}) };
 }
 

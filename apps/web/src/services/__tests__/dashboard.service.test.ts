@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { dashboardService, triggerCsvDownload } from '../dashboard.service';
-import { ResponseShapeError } from '../http';
+import { ResponseShapeError } from '@/lib/response-shape-error';
 
 /** Captures a rejected promise's Error and returns its message, for
  * environments where `.rejects.toThrow(/regex/)` loses the message text. */

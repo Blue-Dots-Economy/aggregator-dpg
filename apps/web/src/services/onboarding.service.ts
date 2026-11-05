@@ -5,7 +5,8 @@
  */
 
 import { z } from 'zod';
-import { jsonFetch, ResponseShapeError } from './http';
+import { ResponseShapeError } from '@/lib/response-shape-error';
+import { jsonFetch } from './http';
 
 /** Submitted, passed, failed and skipped counts. */
 const OutcomeCountsSchema = z.object({

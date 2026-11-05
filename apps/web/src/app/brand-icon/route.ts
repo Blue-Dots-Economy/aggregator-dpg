@@ -9,7 +9,7 @@ import { BrandConfigSchema } from '@aggregator-dpg/network-config/interface';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { logger } from '@/lib/logger';
-import { ResponseShapeError } from '@/lib/response-shape-error';
+import { summariseIssues } from '@/lib/response-shape-error';
 
 export const runtime = 'nodejs';
 
@@ -54,7 +54,7 @@ async function loadPrimary(): Promise<string> {
         operation: 'brandIcon.loadPrimary',
         status: 'failure',
         error: 'unexpected response shape',
-        issues: new ResponseShapeError('aggregator-config', parsed.error.issues).issueSummary(),
+        issues: summariseIssues(parsed.error.issues),
       });
       return FALLBACK_PRIMARY;
     }
