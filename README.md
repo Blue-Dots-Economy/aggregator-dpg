@@ -390,8 +390,6 @@ Engineering controls required regardless of how these resolve:
 
 It is a **true runtime** setting: the root layout is a server component, so it reads the value per request and publishes it to client components via `EnabledLocalesProvider`. Changing the language set is an env edit plus a container restart — **no image rebuild**. The same value also gates the server side, so a stale `NEXT_LOCALE` cookie or an `Accept-Language` header naming a disabled language falls back to `en` rather than pinning the UI to it.
 
-`NEXT_PUBLIC_ENABLED_LANGUAGES` is still read as a fallback so deployments can migrate without a flag day; prefer the unprefixed name, and note the prefixed one is build-time only (see the note below).
-
 **Adding a new language:**
 
 1. Add `apps/web/src/i18n/messages/<code>.json` with every key present in `en.json`.
