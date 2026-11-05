@@ -1,5 +1,11 @@
 import type { ReactElement, ReactNode } from 'react';
-import { render, type RenderOptions, type RenderResult } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  type RenderOptions,
+  type RenderResult,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '../lib/auth-context';
 
@@ -42,4 +48,15 @@ export function renderWithProviders(
     ),
     ...rest,
   });
+}
+
+/**
+ * Opens a styled `Select` dropdown and picks the option with the given name.
+ *
+ * @param trigger - The dropdown's combobox button.
+ * @param name - The option's accessible name.
+ */
+export async function chooseOption(trigger: HTMLElement, name: string | RegExp): Promise<void> {
+  fireEvent.click(trigger);
+  fireEvent.click(await screen.findByRole('option', { name }));
 }

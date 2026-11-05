@@ -25,6 +25,7 @@ import {
   type AttachmentRejection,
   type SupportConfig,
 } from '../../lib/support-attachments';
+import { SelectField } from '@/components/ui/SelectField';
 
 /** Props for {@link SupportDialog}. */
 export interface SupportDialogProps {
@@ -335,15 +336,15 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
               <label htmlFor="support-type" className="block text-[13px] font-medium mb-1">
                 {t('label_type')}
               </label>
-              <select
+              <SelectField
                 id="support-type"
                 value={type}
-                onChange={(e) => setType(e.target.value as SupportType)}
-                className={inputClass}
-              >
-                <option value="complaint">{t('type_complaint')}</option>
-                <option value="support_request">{t('type_support_request')}</option>
-              </select>
+                onChange={(v) => setType(v === 'complaint' ? 'complaint' : 'support_request')}
+                options={[
+                  { value: 'complaint', label: t('type_complaint') },
+                  { value: 'support_request', label: t('type_support_request') },
+                ]}
+              />
             </div>
             <div>
               <label htmlFor="support-details" className="block text-[13px] font-medium mb-1">

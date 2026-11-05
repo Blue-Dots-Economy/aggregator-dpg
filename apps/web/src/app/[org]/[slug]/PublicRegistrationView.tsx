@@ -18,6 +18,7 @@ import { LanguageSwitcher } from '../../../components/shell/LanguageSwitcher';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
 import type { ParticipantConsent } from '../../../components/consent/consent-types';
+import { SelectField } from '@/components/ui/SelectField';
 
 /** Page background used by every state of the public registration page. */
 const PAGE_BACKGROUND =
@@ -1097,19 +1098,16 @@ export function PublicRegistrationView({
                             {t('year_of_birth_label')}
                             <span className="text-rose-500 ml-0.5">*</span>
                           </span>
-                          <select
+                          <SelectField
                             value={yearOfBirth}
-                            onChange={(e) => setYearOfBirth(e.target.value)}
-                            className="mt-1 w-full rounded-[10px] border border-(--bd-border) px-3 py-2 text-[14px]"
+                            onChange={setYearOfBirth}
+                            className="mt-1"
                             required
-                          >
-                            <option value="">{t('year_of_birth_placeholder')}</option>
-                            {Array.from({ length: 101 }, (_, i) => currentYear - i).map((y) => (
-                              <option key={y} value={String(y)}>
-                                {y}
-                              </option>
-                            ))}
-                          </select>
+                            placeholder={t('year_of_birth_placeholder')}
+                            options={Array.from({ length: 101 }, (_, i) => currentYear - i).map(
+                              (y) => ({ value: String(y), label: y }),
+                            )}
+                          />
                         </label>
                       )}
                       {showConsent && isMinor && (

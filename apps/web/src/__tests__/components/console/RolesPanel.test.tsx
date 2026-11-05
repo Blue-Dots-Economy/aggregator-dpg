@@ -8,6 +8,7 @@ import type {
   UserRolesResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { RolesPanel } from '@/components/console/RolesPanel';
+import { chooseOption } from '@/__tests__/test-utils';
 
 const userId = '00000000-0000-4000-8000-0000000000c1';
 const orgId = '00000000-0000-4000-8000-00000000000a';
@@ -67,7 +68,7 @@ describe('<RolesPanel />', () => {
     global.fetch = original;
   });
 
-  it('shows the base role and the assignable roles', () => {
+  it('shows the base role and the assignable roles', async () => {
     renderIt(initial());
     const base = screen.getByTestId('role-base-coordinator');
     expect(base).toHaveTextContent('Coordinator');
@@ -76,12 +77,11 @@ describe('<RolesPanel />', () => {
     expect(screen.getByTestId('role-pii_access')).toHaveTextContent(messages.console.roles.none);
     expect(screen.getByText(messages.console.roles.personal_data)).toBeInTheDocument();
     const duration = screen.getByRole('combobox', { name: 'Duration for PII Access' });
-    expect(duration).toHaveValue('90');
-    expect(Array.from((duration as HTMLSelectElement).options).map((o) => o.value)).toEqual([
-      '30',
-      '60',
-      '90',
-    ]);
+    expect(duration).toHaveTextContent('90 days');
+    fireEvent.click(duration);
+    const options = await screen.findAllByRole('option');
+    expect(options.map((o) => o.textContent)).toEqual(['30 days', '60 days', '90 days']);
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
     expect(screen.getAllByRole('button', { name: messages.console.roles.assign })).toHaveLength(2);
   });
 
@@ -93,9 +93,10 @@ describe('<RolesPanel />', () => {
   it('asks before giving personal-data access, then assigns for the chosen days', async () => {
     global.fetch = respond(live('pii_access', '2026-12-30T00:00:00Z'), 200) as never;
     renderIt(initial());
-    fireEvent.change(screen.getByRole('combobox', { name: 'Duration for PII Access' }), {
-      target: { value: '30' },
-    });
+    await chooseOption(
+      screen.getByRole('combobox', { name: 'Duration for PII Access' }),
+      '30 days',
+    );
     const [, piiAssign] = screen.getAllByRole('button', { name: messages.console.roles.assign });
     fireEvent.click(piiAssign!);
     const dialog = screen.getByRole('dialog', { name: 'Give PII Access?' });

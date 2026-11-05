@@ -17,6 +17,7 @@ import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { ApiRegistrationLink } from '@/services/onboarding.service';
+import { chooseOption } from '@/__tests__/test-utils';
 
 const { pushMock, searchParamsRef } = vi.hoisted(() => ({
   pushMock: vi.fn(),
@@ -267,7 +268,7 @@ describe('<CreateLinkSection />', () => {
     await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
     await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
     await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Drive');
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'voice' } });
+    await chooseOption(screen.getByRole('combobox'), 'Voice');
     await user.click(screen.getByRole('button', { name: 'Create link' }));
 
     expect(createMutateAsync.mock.calls[0]![0].registration_mode).toBe('voice');

@@ -10,6 +10,7 @@ import { StrictMode } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import { chooseOption } from '@/__tests__/test-utils';
 
 const refresh = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
@@ -114,21 +115,24 @@ describe('<OrgMoveDialog />', () => {
   it('loads the candidates, disables a refused one with its reason, and shows the count', async () => {
     global.fetch = fetchWith(json({})) as never;
     renderIt();
-    await parentSelect();
+    fireEvent.click(await parentSelect());
     expect(global.fetch).toHaveBeenCalledWith(
       `/api/console/org/parent/options/${ORG}`,
       expect.objectContaining({ credentials: 'same-origin' }),
     );
-    const refused = screen.getByRole('option', {
+    const refused = await screen.findByRole('option', {
       name: `District Two (District) — ${messages.console.org.move_reason_depth}`,
     });
-    expect(refused).toBeDisabled();
+    expect(refused).toHaveAttribute('aria-disabled', 'true');
     expect(
       screen.getByRole('option', {
         name: `State Three (State) — ${messages.console.org.move_reason_other}`,
       }),
-    ).toBeDisabled();
-    expect(screen.getByRole('option', { name: 'State One (State)' })).not.toBeDisabled();
+    ).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('option', { name: 'State One (State)' })).not.toHaveAttribute(
+      'aria-disabled',
+    );
+    fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
     expect(screen.getByText('3 organisations will move.')).toBeInTheDocument();
     expect(screen.getByText(messages.console.org.move_hint_known_as)).toBeInTheDocument();
     expect(submit()).toBeDisabled();
@@ -137,7 +141,7 @@ describe('<OrgMoveDialog />', () => {
   it('moves under the chosen parent, sending only the parent', async () => {
     global.fetch = fetchWith(json({ id: ORG })) as never;
     renderIt();
-    fireEvent.change(await parentSelect(), { target: { value: 's1' } });
+    await chooseOption(await parentSelect(), 'State One (State)');
     fireEvent.click(submit());
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(global.fetch).toHaveBeenCalledWith(
@@ -149,7 +153,7 @@ describe('<OrgMoveDialog />', () => {
   it('shows the error message when the move is refused', async () => {
     global.fetch = fetchWith(json({ error: { code: 'ORG_CHILD_LIMIT' } }, 409)) as never;
     renderIt();
-    fireEvent.change(await parentSelect(), { target: { value: 's1' } });
+    await chooseOption(await parentSelect(), 'State One (State)');
     fireEvent.click(submit());
     expect(await screen.findByText(messages.console.errors.child_limit)).toBeInTheDocument();
     expect(refresh).not.toHaveBeenCalled();

@@ -18,6 +18,7 @@ import type { OrgParentOptionsResponse } from '@aggregator-dpg/shared-primitives
 import { Button } from '../ui/Button';
 import { Label } from '../ui/Label';
 import { errorKey, sendConsole, type ConsoleError } from '../../lib/console-client';
+import { SelectField } from '@/components/ui/SelectField';
 
 type ParentOption = OrgParentOptionsResponse['options'][number];
 
@@ -152,23 +153,21 @@ function MoveDialog({
           <>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="move-parent">{t('org.move_parent')}</Label>
-              <select
+              <SelectField
                 id="move-parent"
-                className="bd-input"
                 value={parentId}
                 aria-required
-                onChange={(e) => {
-                  setParentId(e.target.value);
+                placeholder={t('org.move_parent_placeholder')}
+                onChange={(v) => {
+                  setParentId(v);
                   setMessage(null);
                 }}
-              >
-                <option value="">{t('org.move_parent_placeholder')}</option>
-                {data.options.map((o) => (
-                  <option key={o.id} value={o.id} disabled={!o.ok}>
-                    {optionText(o)}
-                  </option>
-                ))}
-              </select>
+                options={data.options.map((o) => ({
+                  value: o.id,
+                  label: optionText(o),
+                  disabled: !o.ok,
+                }))}
+              />
             </div>
             <p className="text-[12px] text-ink-500">{t('org.move_hint_known_as')}</p>
             <p className="text-[13px] text-ink-600">
