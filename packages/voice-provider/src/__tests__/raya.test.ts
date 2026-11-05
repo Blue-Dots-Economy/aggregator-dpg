@@ -799,7 +799,7 @@ describe('RayaVoiceProvider', () => {
     expect(sleep).not.toHaveBeenCalled();
   });
 
-  it('maps a 401 to AuthError with an empty body even when reading the response body fails', async () => {
+  it('maps a 401 to AuthError with only the status even when reading the response body fails', async () => {
     const throwingTextResponse = {
       ok: false,
       status: 401,
@@ -823,7 +823,63 @@ describe('RayaVoiceProvider', () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error.name).toBe('AuthError');
-    expect(result.error.details?.['body']).toBe('');
+    expect(result.error.details).toEqual({ status: 401 });
+  });
+
+  describe('error details keep only the status and the top-level message, never the raw body', () => {
+    /** Raya 400 body that echoes contact PII back in errors[] and data[]. */
+    const PII_BODY = {
+      status: 'error',
+      message: 'max_concurrent_calls is required',
+      errors: [{ row: 1, field: 'contact_phone', value: '+910000000001', message: 'invalid' }],
+      data: [{ ref: 'i1', contact_name: 'Asha', contact_phone: '+910000000001' }],
+    };
+
+    function provider(fetchImpl: ReturnType<typeof vi.fn>, maxAttempts = 1) {
+      return new RayaVoiceProvider({
+        baseUrl: 'https://raya.example.com/api',
+        apiKey: 'key-abc',
+        maxAttempts,
+        acquireSlot: vi.fn().mockResolvedValue(undefined),
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      });
+    }
+
+    it.each([
+      [401, 'RAYA_UNAUTHORIZED'],
+      [400, 'RAYA_BAD_REQUEST'],
+      [503, 'RAYA_UPSTREAM_ERROR'],
+    ])('a %i keeps only status and message in details', async (status, code) => {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(status, PII_BODY));
+      const result = await provider(fetchImpl).dispatch(baseInput());
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.code).toBe(code);
+      expect(result.error.details).toEqual({ status, message: 'max_concurrent_calls is required' });
+      expect(JSON.stringify(result.error.details)).not.toContain('+910000000001');
+    });
+
+    it('omits message when the body is not JSON', async () => {
+      const notJson = {
+        ok: false,
+        status: 400,
+        headers: new Headers(),
+        json: async () => ({}),
+        text: async () => 'phone +910000000001 rejected',
+      } as unknown as Response;
+      const result = await provider(vi.fn().mockResolvedValueOnce(notJson)).dispatch(baseInput());
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.details).toEqual({ status: 400 });
+    });
+
+    it('omits message when the JSON body has no string message', async () => {
+      const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse(400, { error: 'bad_request' }));
+      const result = await provider(fetchImpl).dispatch(baseInput());
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.details).toEqual({ status: 400 });
+    });
   });
 
   it('I4 (retry only): reuses an existing batch by deterministic name instead of creating a duplicate', async () => {

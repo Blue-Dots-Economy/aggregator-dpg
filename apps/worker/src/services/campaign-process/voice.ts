@@ -124,24 +124,16 @@ function flattenVariables(itemState: Record<string, unknown>): Record<string, st
 /**
  * Builds the item failure reason for a rejected dispatch.
  *
- * Adds the top-level `message` from Raya's JSON body when present. Never
- * includes the raw body, which can contain contact PII.
+ * Adds the provider's `message` from the error details when present. Never
+ * reads any other detail, which can contain contact PII.
  *
  * @param error - The typed error from `VoiceProviderBase.dispatch`.
  * @returns A reason string for `campaign_job_item.error_reason`, bounded by {@link truncateReason}.
  */
 function describeDispatchFailure(error: BaseError): string {
-  const body = error.details?.['body'];
-  if (typeof body === 'string' && body.length > 0) {
-    try {
-      const parsed = JSON.parse(body) as Record<string, unknown>;
-      const parsedMessage = parsed['message'];
-      if (typeof parsedMessage === 'string' && parsedMessage.length > 0) {
-        return truncateReason(`${error.message}: ${parsedMessage}`);
-      }
-    } catch {
-      // Not JSON. Do not store the raw body; it can contain PII.
-    }
+  const providerMessage = error.details?.['message'];
+  if (typeof providerMessage === 'string' && providerMessage.length > 0) {
+    return truncateReason(`${error.message}: ${providerMessage}`);
   }
   return truncateReason(error.message);
 }

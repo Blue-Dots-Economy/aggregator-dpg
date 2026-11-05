@@ -101,6 +101,9 @@ const RayaListBatchesResponseSchema = z.object({
   batches: z.array(z.unknown()).catch([]),
 });
 
+/** The top-level `message` of a Raya error body. Kept in error details instead of the raw body. */
+const RayaErrorBodySchema = z.object({ message: z.string().min(1) });
+
 /** The `retry_after` field of a Raya `429` body, in seconds. */
 const RayaRateLimitBodySchema = z.object({ retry_after: z.unknown() });
 
@@ -550,26 +553,24 @@ async function classifyResponse<T>(
   }
 
   if (res.status === 401) {
-    const bodyText = await safeReadText(res);
     return {
       kind: 'result',
       result: err(
         new AuthError(`raya ${path} returned 401`, {
           code: 'RAYA_UNAUTHORIZED',
-          details: { status: res.status, body: bodyText },
+          details: await errorDetails(res),
         }),
       ),
     };
   }
 
   if (res.status !== 429 && res.status < 500) {
-    const bodyText = await safeReadText(res);
     return {
       kind: 'result',
       result: err(
         new ValidationError(`raya ${path} returned ${res.status}`, {
           code: 'RAYA_BAD_REQUEST',
-          details: { status: res.status, body: bodyText },
+          details: await errorDetails(res),
         }),
       ),
     };
@@ -607,11 +608,36 @@ function transportFailureError(
  * @param res - The final failed response.
  */
 async function exhaustedRetryError(path: string, res: Response): Promise<UpstreamError> {
-  const bodyText = await safeReadText(res);
   return new UpstreamError(`raya ${path} returned ${res.status}`, {
     code: 'RAYA_UPSTREAM_ERROR',
-    details: { status: res.status, body: bodyText },
+    details: await errorDetails(res),
   });
+}
+
+/**
+ * Builds the details of a Raya error: the status and, when the body is JSON
+ * with a top-level string `message`, that message.
+ *
+ * The raw body is never kept, because Raya echoes contact PII in
+ * `errors[].value` and `data[]`.
+ *
+ * Consumes the response body.
+ *
+ * @param res - The failed response.
+ * @returns `{ status }`, plus `message` when the body has one.
+ */
+async function errorDetails(res: Response): Promise<{ status: number; message?: string }> {
+  const bodyText = await safeReadText(res);
+  let body: unknown;
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    return { status: res.status };
+  }
+  const parsed = RayaErrorBodySchema.safeParse(body);
+  return parsed.success
+    ? { status: res.status, message: parsed.data.message }
+    : { status: res.status };
 }
 
 /**
