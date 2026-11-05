@@ -30,6 +30,15 @@ const ConfigSchemaModuleSchema = z.object({
 /** Shape every config.schema module must export. */
 export type ConfigSchemaModule = z.infer<typeof ConfigSchemaModuleSchema>;
 
+/**
+ * True when `value` is a Zod schema. Every Zod schema carries a `_def`.
+ *
+ * @param value - The `configSchema` export of a config.schema module.
+ */
+function isZodSchema(value: unknown): value is z.ZodTypeAny {
+  return value !== null && typeof value === 'object' && '_def' in value;
+}
+
 /** The `name` field of a package.json; anything else falls back to the directory name. */
 const PackageJsonNameSchema = z.object({ name: z.string() });
 
@@ -41,11 +50,8 @@ export interface RegisteredPackage {
   packageDir: string;
   /** Top-level key in the merged config tree (e.g. "signalStack"). */
   configKey: string;
-  /**
-   * Zod schema validating this package's config slice. Checked only for
-   * presence here; a value that is not a Zod schema validates as `z.unknown()`.
-   */
-  configSchema: unknown;
+  /** Zod schema validating this package's config slice. */
+  configSchema: z.ZodTypeAny;
   /**
    * Baseline config values for this package's slice.
    * Merged into the tree before env YAML overrides are applied.
@@ -61,6 +67,7 @@ export interface RegisteredPackage {
  * Returns null if neither file exists.
  *
  * @param packageDir - Absolute path to the package directory.
+ * @throws {ConfigError} With code CONFIG_SCHEMA_MODULE_INVALID if the import is not a module object.
  */
 async function importConfigModule(packageDir: string): Promise<ConfigSchemaModule | null> {
   const distPath = join(packageDir, 'dist', 'config.schema.js');
@@ -69,7 +76,14 @@ async function importConfigModule(packageDir: string): Promise<ConfigSchemaModul
   const modulePath = existsSync(distPath) ? distPath : existsSync(srcPath) ? srcPath : null;
   if (modulePath === null) return null;
   const mod: unknown = await import(pathToFileURL(modulePath).href);
-  return ConfigSchemaModuleSchema.parse(mod);
+  const parsed = ConfigSchemaModuleSchema.safeParse(mod);
+  if (!parsed.success) {
+    throw new ConfigError(`Config schema module did not load as an ES module: ${modulePath}`, {
+      code: 'CONFIG_SCHEMA_MODULE_INVALID',
+      details: { modulePath },
+    });
+  }
+  return parsed.data;
 }
 
 /**
@@ -91,8 +105,8 @@ function readPackageName(packageJsonPath: string, fallback: string): string {
  *
  * @param packagesDir - Absolute path to the packages/ directory.
  * @returns Map from configKey to RegisteredPackage.
- * @throws {ConfigError} If any package is missing configKey, configSchema, or if
- *   two packages declare the same configKey.
+ * @throws {ConfigError} If any package is missing configKey, has a configSchema that
+ *   is missing or not a Zod schema, or if two packages declare the same configKey.
  */
 export async function discoverPackages(
   packagesDir: string,
@@ -134,6 +148,13 @@ export async function discoverPackages(
       throw new ConfigError(
         `Package "${packageName}" exports config.schema but is missing configSchema export.`,
         { code: 'CONFIG_MISSING_SCHEMA', details: { package: packageName } },
+      );
+    }
+
+    if (!isZodSchema(mod.configSchema)) {
+      throw new ConfigError(
+        `Package "${packageName}" exports a configSchema that is not a Zod schema.`,
+        { code: 'CONFIG_INVALID_SCHEMA', details: { package: packageName } },
       );
     }
 

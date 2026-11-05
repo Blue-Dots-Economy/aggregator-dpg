@@ -48,8 +48,7 @@ async function readJson(filePath: string): Promise<unknown> {
     const text = await readFile(filePath, 'utf8');
     // Replace the placeholder before parsing so every field picks it up.
     const rendered = text.split(SUPPORT_EMAIL_PLACEHOLDER).join(resolveSupportEmail());
-    const parsed: unknown = JSON.parse(rendered);
-    return parsed;
+    return JSON.parse(rendered);
   } catch (err) {
     throw new ConfigError(`Failed to read or parse consent config at ${filePath}`, {
       code: 'CONSENT_CONFIG_READ_ERROR',
