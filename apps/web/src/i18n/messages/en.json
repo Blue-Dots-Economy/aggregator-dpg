@@ -1162,8 +1162,8 @@
   },
   "page_error": {
     "title": "This page couldn't load",
-    "body": "Something went wrong on our side. Try again, or go back to the home page.",
+    "body": "Something went wrong on our side. Try again, or go back to the overview.",
     "retry": "Try again",
-    "home": "Go to the home page"
+    "home": "Go to the overview"
   }
 }

@@ -3,6 +3,7 @@
 /**
  * Shown when a coordinator portal page fails to render: a plain message with
  * a retry and a link to the dashboard, inside the portal layout.
+ * It covers the pages under this group, not the group's layout.
  *
  * The error's message and digest are never shown or logged here, because
  * they can carry upstream details. Next.js logs server errors on the server.
