@@ -7,9 +7,9 @@
  * access token. Without `status`, the upstream returns the full rollup.
  */
 
-import { type NextRequest, NextResponse } from 'next/server';
+import { type NextRequest, type NextResponse } from 'next/server';
 import { callApi } from '../../../lib/upstream-client';
-import { unauthorizedResponse, serviceUnavailableResponse } from '../../../lib/bff-errors';
+import { passthrough, proxyFailureResponse } from '../../../lib/bff-proxy';
 
 export const runtime = 'nodejs';
 
@@ -18,20 +18,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const path = `/v1/dashboard${search ? `?${search}` : ''}`;
   try {
     const upstream = await callApi(path, { method: 'GET' });
-    const ct = upstream.headers.get('content-type') ?? '';
-    if (ct.includes('application/json')) {
-      const data: unknown = await upstream.json();
-      return NextResponse.json(data, { status: upstream.status });
-    }
-    const text = await upstream.text();
-    return new NextResponse(text, {
-      status: upstream.status,
-      headers: { 'Content-Type': ct || 'text/plain' },
-    });
+    return await passthrough(upstream);
   } catch (err) {
-    if (err instanceof Error && err.message === 'no active session') {
-      return unauthorizedResponse();
-    }
-    return serviceUnavailableResponse('dashboard', err instanceof Error ? err.message : undefined);
+    return proxyFailureResponse(err, 'dashboard');
   }
 }
