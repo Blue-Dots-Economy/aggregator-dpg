@@ -26,10 +26,18 @@ export function errorField(err: unknown, key: ErrorFieldName): string | undefine
   return typeof value === 'string' ? value : undefined;
 }
 
-/** Walks the `.cause` chain (bounded) and returns the first string field found. */
+/**
+ * Most `.cause` levels {@link pgErrorCode} and {@link pgConstraint} read.
+ *
+ * Drizzle puts the driver error one level down; the rest is room for further
+ * wrapping. The limit also stops a `cause` chain that loops back on itself.
+ */
+const MAX_CAUSE_DEPTH = 5;
+
+/** Walks the `.cause` chain up to {@link MAX_CAUSE_DEPTH} levels and returns the first string field found. */
 function walkString(err: unknown, key: 'code' | 'constraint'): string | undefined {
   let cur: unknown = err;
-  for (let depth = 0; typeof cur === 'object' && cur !== null && depth < 5; depth++) {
+  for (let depth = 0; typeof cur === 'object' && cur !== null && depth < MAX_CAUSE_DEPTH; depth++) {
     const value = errorField(cur, key);
     if (value !== undefined) return value;
     cur = Reflect.get(cur, 'cause');

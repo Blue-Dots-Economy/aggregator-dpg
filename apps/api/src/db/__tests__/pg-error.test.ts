@@ -47,10 +47,18 @@ describe('pgErrorCode and pgConstraint', () => {
     expect(pgConstraint(err)).toBe('contact_email_unique');
   });
 
-  it('stop after five levels', () => {
+  it('stop after MAX_CAUSE_DEPTH (5) levels', () => {
     let err: unknown = { code: '23505' };
     for (let i = 0; i < 5; i++) err = wrapped(err);
     expect(pgErrorCode(err)).toBeUndefined();
+  });
+
+  it('stop on a cause chain that loops back on itself', () => {
+    const a: { cause?: unknown } = {};
+    const b = { cause: a };
+    a.cause = b;
+    expect(pgErrorCode(a)).toBeUndefined();
+    expect(pgConstraint(b)).toBeUndefined();
   });
 
   it('answer undefined for non-errors and non-string codes', () => {
