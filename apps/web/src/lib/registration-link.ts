@@ -3,14 +3,11 @@
  * public registration). Used by the `[org]/[slug]` page and its view.
  */
 
+import { IdentitySelectorsSchema } from '@aggregator-dpg/network-config/interface';
 import { z } from 'zod';
 
 /** Identity field names for a link's domain, used by the account-only form. */
-export const LinkIdentitySchema = z.object({
-  name: z.string().optional(),
-  phone: z.string().optional(),
-  email: z.string().optional(),
-});
+export const LinkIdentitySchema = IdentitySelectorsSchema.partial();
 
 /** Identity field names for a link's domain. */
 export type LinkIdentity = z.infer<typeof LinkIdentitySchema>;

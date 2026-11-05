@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { ResponseShapeError } from '../lib/response-shape-error';
+import { parseResponseBody, ResponseShapeError } from '../lib/response-shape-error';
 
 export { ResponseShapeError };
 
@@ -86,14 +86,5 @@ export async function jsonFetch<S extends z.ZodTypeAny>(
     throw new Error(`request failed (${res.status}): ${text || res.statusText}`);
   }
 
-  const url = typeof input === 'string' ? input : input.url;
-  let body: unknown;
-  try {
-    body = await res.json();
-  } catch {
-    throw new ResponseShapeError(url, []);
-  }
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) throw new ResponseShapeError(url, parsed.error.issues);
-  return parsed.data;
+  return parseResponseBody(res, typeof input === 'string' ? input : input.url, schema);
 }

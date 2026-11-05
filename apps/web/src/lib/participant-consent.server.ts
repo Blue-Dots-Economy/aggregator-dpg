@@ -22,6 +22,7 @@ import {
 import { z } from 'zod';
 import { resolveSchemaRoot } from './config-paths';
 import { logger } from './logger';
+import { ResponseShapeError } from './response-shape-error';
 import type { ConsentDocContent, ParticipantConsent } from '../components/consent/consent-types';
 
 export type { ParticipantConsent };
@@ -63,13 +64,22 @@ type ParticipantConsentFile = z.infer<typeof ParticipantConsentFileSchema>;
 const ParticipantConsentResponseSchema = z.object({ participant_consent: z.unknown() });
 
 /**
- * Reads a participant consent document.
+ * Reads a participant consent document, logging the field paths of a wrong shape.
  *
- * @returns The document, or `null` when it is missing or has the wrong shape.
+ * @param value - The parsed document.
+ * @param operation - The log operation name.
+ * @returns The document, or `null` when it has the wrong shape.
  */
-function readConsentFile(value: unknown): ParticipantConsentFile | null {
+function readConsentFile(value: unknown, operation: string): ParticipantConsentFile | null {
   const parsed = ParticipantConsentFileSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
+  if (parsed.success) return parsed.data;
+  logger.warn({
+    operation,
+    status: 'failure',
+    error: 'unexpected consent document shape',
+    issues: new ResponseShapeError(operation, parsed.error.issues).issueSummary(),
+  });
+  return null;
 }
 
 /**
@@ -152,7 +162,8 @@ async function loadFromApi(): Promise<ParticipantConsentFile | null> {
       return null;
     }
     const body = ParticipantConsentResponseSchema.safeParse(await res.json());
-    return body.success ? readConsentFile(body.data.participant_consent) : null;
+    if (!body.success || body.data.participant_consent === null) return null;
+    return readConsentFile(body.data.participant_consent, 'participantConsent.loadFromApi');
   } catch (err) {
     logger.warn({
       operation: 'participantConsent.loadFromApi',
@@ -171,7 +182,10 @@ async function loadFromDisk(): Promise<ParticipantConsentFile | null> {
   const file = resolveParticipantConsentPath();
   if (!file) return null;
   try {
-    return readConsentFile(JSON.parse(await readFile(file, 'utf8')));
+    return readConsentFile(
+      JSON.parse(await readFile(file, 'utf8')),
+      'participantConsent.loadFromDisk',
+    );
   } catch {
     return null;
   }
@@ -188,7 +202,7 @@ async function loadFromDisk(): Promise<ParticipantConsentFile | null> {
  */
 export async function loadParticipantConsent(): Promise<ParticipantConsent | null> {
   const supportEmail = process.env.CONSENT_SUPPORT_EMAIL?.trim() || DEFAULT_SUPPORT_EMAIL;
-  // Shaping an unvalidated document must never throw to the page.
+  // Consent problems must never throw to the page.
   try {
     const fromApi = await loadFromApi();
     const shapedApi = fromApi ? shapeParticipantConsent(fromApi, supportEmail) : null;

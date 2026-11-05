@@ -8,37 +8,13 @@
  * @module apps/web/src/lib/console-api.server
  */
 
+import 'server-only';
 import { notFound, redirect } from 'next/navigation';
 import type { z } from 'zod';
 import { readApiError } from './api-error';
 import { logger } from './logger';
-import { ResponseShapeError } from './response-shape-error';
+import { parseResponseBody, ResponseShapeError } from './response-shape-error';
 import { callApi } from './upstream-client';
-
-/**
- * Parses an OK console response with its schema.
- *
- * @param res - The OK response. Its body is consumed.
- * @param path - Upstream path, for the error.
- * @param schema - The expected body.
- * @returns The schema's output.
- * @throws {ResponseShapeError} When the body is not JSON or does not match.
- */
-async function parseBody<S extends z.ZodTypeAny>(
-  res: Response,
-  path: string,
-  schema: S,
-): Promise<z.output<S>> {
-  let body: unknown;
-  try {
-    body = await res.json();
-  } catch {
-    throw new ResponseShapeError(path, []);
-  }
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) throw new ResponseShapeError(path, parsed.error.issues);
-  return parsed.data;
-}
 
 /**
  * Reads one console API resource, or navigates away.
@@ -73,7 +49,7 @@ export async function consoleRead<S extends z.ZodTypeAny>(
   }
   if (!res.ok) throw new Error(`console read failed (${res.status})`);
   try {
-    return await parseBody(res, path, schema);
+    return await parseResponseBody(res, path, schema);
   } catch (err) {
     if (err instanceof ResponseShapeError) {
       logger.error({
@@ -105,7 +81,7 @@ export async function consoleReadOptional<S extends z.ZodTypeAny>(
   try {
     const res = await callApi(path, { method: 'GET' });
     if (!res.ok) return null;
-    return await parseBody(res, path, schema);
+    return await parseResponseBody(res, path, schema);
   } catch (err) {
     if (err instanceof ResponseShapeError) {
       logger.warn({

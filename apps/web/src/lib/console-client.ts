@@ -14,7 +14,7 @@ import type {
   OrgKnownAsUpdateRequest,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { z } from 'zod';
-import { ResponseShapeError } from './response-shape-error';
+import { parseResponseBody, ResponseShapeError } from './response-shape-error';
 
 /** The fields of the API's error envelope that the console reads. A field of the wrong type is dropped. */
 const ConsoleErrorSchema = z.object({
@@ -105,16 +105,15 @@ export async function getConsole<S extends z.ZodTypeAny>(
   } catch {
     return { ok: false, status: 0, error: {} };
   }
-  const json = await readJson(res);
-  if (!res.ok) return { ok: false, status: res.status, error: readConsoleError(json) };
-  const parsed = schema.safeParse(json);
-  if (parsed.success) return { ok: true, status: res.status, data: parsed.data };
-  const shapeError = new ResponseShapeError(url, json === null ? [] : parsed.error.issues);
-  console.error('[console] unexpected response shape', {
-    url,
-    issues: shapeError.issueSummary(),
-  });
-  return { ok: false, status: res.status, error: { code: RESPONSE_SHAPE_CODE } };
+  if (!res.ok)
+    return { ok: false, status: res.status, error: readConsoleError(await readJson(res)) };
+  try {
+    return { ok: true, status: res.status, data: await parseResponseBody(res, url, schema) };
+  } catch (err) {
+    if (!(err instanceof ResponseShapeError)) throw err;
+    console.error('[console] unexpected response shape', { url, issues: err.issueSummary() });
+    return { ok: false, status: res.status, error: { code: RESPONSE_SHAPE_CODE } };
+  }
 }
 
 /**

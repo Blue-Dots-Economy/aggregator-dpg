@@ -25,6 +25,8 @@ vi.mock('next/navigation', () => ({ notFound }));
 vi.mock('node:fs/promises', () => ({ readFile, default: { readFile } }));
 vi.mock('@/lib/config-paths', () => ({ resolveSchemaRoot }));
 vi.mock('@/lib/participant-consent.server', () => ({ loadParticipantConsent }));
+const { logError } = vi.hoisted(() => ({ logError: vi.fn() }));
+vi.mock('@/lib/logger', () => ({ logger: { error: logError, warn: vi.fn(), info: vi.fn() } }));
 
 import PublicRegistrationPage from '@/app/[org]/[slug]/page';
 
@@ -259,9 +261,17 @@ describe('PublicRegistrationPage (server component)', () => {
       const el = await PublicRegistrationPage({
         params: Promise.resolve({ org: 'acme', slug: 'winter25' }),
       });
-      expect(el.props.title).toBe('Cannot reach registration service');
+      expect(el.props.title).toBe('Link unavailable');
       expect(el.props.message).toBe('Malformed response.');
       expect(readFile).not.toHaveBeenCalled();
+      expect(logError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'publicRegistrationPage.resolve',
+          status: 'failure',
+          issues: expect.any(Array),
+        }),
+      );
+      expect(JSON.stringify(logError.mock.calls)).not.toContain('winter');
     });
 
     it('renders "Form unavailable" when a profile link has an array schema', async () => {

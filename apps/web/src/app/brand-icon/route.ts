@@ -8,6 +8,10 @@
 import { BrandConfigSchema } from '@aggregator-dpg/network-config/interface';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { logger } from '@/lib/logger';
+import { ResponseShapeError } from '@/lib/response-shape-error';
+
+export const runtime = 'nodejs';
 
 const FALLBACK_PRIMARY = '#2563EB';
 const FALLBACK_PRIMARY_DARK = '#1D4ED8';
@@ -45,7 +49,16 @@ async function loadPrimary(): Promise<string> {
     if (!res.ok) return FALLBACK_PRIMARY;
     const body: unknown = await res.json();
     const parsed = BrandColourSchema.safeParse(body);
-    return (parsed.success ? parsed.data.brand.primary_color : undefined) ?? FALLBACK_PRIMARY;
+    if (!parsed.success) {
+      logger.warn({
+        operation: 'brandIcon.loadPrimary',
+        status: 'failure',
+        error: 'unexpected response shape',
+        issues: new ResponseShapeError('aggregator-config', parsed.error.issues).issueSummary(),
+      });
+      return FALLBACK_PRIMARY;
+    }
+    return parsed.data.brand.primary_color ?? FALLBACK_PRIMARY;
   } catch {
     return FALLBACK_PRIMARY;
   }

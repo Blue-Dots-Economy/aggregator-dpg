@@ -8,7 +8,8 @@
 
 import { z } from 'zod';
 import { apiErrorMessage } from '../lib/api-error';
-import { jsonFetch, ResponseShapeError } from './http';
+import { parseResponseBody } from '../lib/response-shape-error';
+import { jsonFetch } from './http';
 
 /**
  * Query for the aggregator dashboard.
@@ -123,7 +124,6 @@ export interface DashboardBulkActionInput {
   ids: string[];
 }
 
-/** Acknowledgement from the bulk-action endpoint (202 envelope). */
 /** The ack of `POST /api/dashboard/actions`: how many ids were accepted. */
 const DashboardBulkActionResultSchema = z.object({ accepted: z.number().int().nonnegative() });
 
@@ -252,15 +252,7 @@ class HttpDashboardService implements DashboardService {
     if (!res.ok) {
       throw new Error(await apiErrorMessage(res, `bulk action failed: ${res.status}`));
     }
-    const body: unknown = await res.json().catch(() => undefined);
-    const parsed = DashboardBulkActionResultSchema.safeParse(body);
-    if (!parsed.success) {
-      throw new ResponseShapeError(
-        '/api/dashboard/actions',
-        body === undefined ? [] : parsed.error.issues,
-      );
-    }
-    return parsed.data;
+    return parseResponseBody(res, '/api/dashboard/actions', DashboardBulkActionResultSchema);
   }
 }
 export const dashboardService: DashboardService = new HttpDashboardService();

@@ -63,6 +63,14 @@ function readPhotonFeatures(json: unknown): PhotonFeature[] {
   });
 }
 
+/**
+ * Combines the caller's cancellation signal with a request deadline.
+ *
+ * Does not use `AbortSignal.any`, which some target browsers lack.
+ *
+ * @param signal - The caller's cancel signal, if any.
+ * @returns The combined signal, and `clear` to call once the request settles.
+ */
 function withDeadline(signal?: AbortSignal): { signal: AbortSignal; clear: () => void } {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
