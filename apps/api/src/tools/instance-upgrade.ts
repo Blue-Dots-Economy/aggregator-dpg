@@ -106,7 +106,8 @@ function required(name: string): string {
 
 /** Pool options whose `onConnect` sets the session up on a fresh connection. */
 export interface UpgradePoolConfig extends pg.PoolConfig {
-  onConnect: (client: SessionClient) => Promise<void>;
+  // pg-pool awaits the returned promise; @types/pg types the return as void.
+  onConnect: (client: SessionClient) => Promise<void>; // NOSONAR typescript:S6544
 }
 
 /**
