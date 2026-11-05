@@ -23,6 +23,31 @@ const ApiErrorBodySchema = z.union([
   ErrorFieldsSchema.extend({ error: z.string() }),
 ]);
 
+/** The fields of the API error envelope the registration forms read. A field of the wrong type is dropped. */
+const ErrorEnvelopeFieldsSchema = z.object({
+  code: optionalText,
+  title: optionalText,
+  detail: optionalText,
+  requestId: optionalText,
+  fields: z.record(z.unknown()).optional().catch(undefined),
+});
+
+/** The API error envelope, as far as the registration forms read it. */
+export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeFieldsSchema>;
+
+const ErrorEnvelopeSchema = z.object({ error: ErrorEnvelopeFieldsSchema });
+
+/**
+ * Reads the error object of a parsed error body (`{ error: { code, title, detail, requestId, fields } }`).
+ *
+ * @param body - The parsed body; any value is accepted.
+ * @returns The fields that have the right type; empty when the body has no error object.
+ */
+export function readErrorEnvelope(body: unknown): ErrorEnvelope {
+  const parsed = ErrorEnvelopeSchema.safeParse(body);
+  return parsed.success ? parsed.data.error : {};
+}
+
 /** The readable parts of an API error body. */
 export interface ApiError {
   code?: string;

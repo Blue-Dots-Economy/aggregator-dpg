@@ -2,9 +2,13 @@
 
 import { useMemo, useState, type JSX, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
+import { z } from 'zod';
 import { RegisterPageShell } from '../RegisterPageShell';
 import { DEFAULT_MAX_INVITES } from '../../../../lib/invite-limit';
 import { readApiError } from '../../../../lib/api-error';
+import { ResponseShapeError } from '@/lib/response-shape-error';
+
+const MINT_URL = '/api/invites';
 
 export interface OwnerInviteViewProps {
   /** The owner grant token from the deep-link query string. */
@@ -16,13 +20,15 @@ export interface OwnerInviteViewProps {
   maxInvites?: number;
 }
 
-interface MintSummary {
+/** `POST /api/invites`: the fields of the mint summary this view reads. */
+const MintSummarySchema = z.object({
   /** True when the grant was expired and a fresh link was re-mailed (nothing minted). */
-  recovered: boolean;
-  sent: number;
-  resent: number;
-  invalid: Array<{ email: string; reason: string }>;
-}
+  recovered: z.boolean(),
+  sent: z.number().int(),
+  resent: z.number().int(),
+  invalid: z.array(z.object({ email: z.string(), reason: z.string() })),
+});
+type MintSummary = z.infer<typeof MintSummarySchema>;
 
 type ViewState =
   | { status: 'idle' }
@@ -94,7 +100,7 @@ export function OwnerInviteView({
     setState({ status: 'submitting' });
     let res: Response;
     try {
-      res = await fetch('/api/invites', {
+      res = await fetch(MINT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ grant, recipients }),
@@ -104,7 +110,15 @@ export function OwnerInviteView({
       return;
     }
     if (res.ok) {
-      const summary = (await res.json()) as MintSummary;
+      const summary = await readMintSummary(res);
+      if (!summary) {
+        setState({
+          status: 'error',
+          message:
+            'Your request was received, but the reply could not be read. Some invites may have been sent; sending again re-sends them.',
+        });
+        return;
+      }
       // An expired grant emails a fresh link and sends no invites.
       setState(summary.recovered ? { status: 'recovery_sent' } : { status: 'result', summary });
       if (!summary.recovered) setRows([newRow()]);
@@ -294,6 +308,24 @@ function Banner({
       {children}
     </output>
   );
+}
+
+/**
+ * Reads the mint summary of an OK response.
+ *
+ * @param res - The OK response. Its body is consumed.
+ * @returns The summary, or `null` when the body is not JSON or does not match. Logs field paths only.
+ */
+async function readMintSummary(res: Response): Promise<MintSummary | null> {
+  const body: unknown = await res.json().catch(() => null);
+  const parsed = MintSummarySchema.safeParse(body);
+  if (parsed.success) return parsed.data;
+  const shapeError = new ResponseShapeError(MINT_URL, body === null ? [] : parsed.error.issues);
+  console.error('[owner-invite] unexpected response shape', {
+    url: MINT_URL,
+    issues: shapeError.issueSummary(),
+  });
+  return null;
 }
 
 /** Reads the error code from the response body, or `null` for a non-JSON body. */

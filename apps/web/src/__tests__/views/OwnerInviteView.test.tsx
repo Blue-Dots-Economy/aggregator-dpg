@@ -137,4 +137,27 @@ describe('<OwnerInviteView />', () => {
     await waitFor(() => expect(screen.getByText(/couldn.t be invited/i)).toBeInTheDocument());
     expect(screen.getByText(/bad — invalid email/i)).toBeInTheDocument();
   });
+
+  it('shows a could-not-read message when an OK body lacks the summary fields', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { recovered: false })));
+    renderView();
+    typeEmail('a@x.org');
+    clickSend();
+    await waitFor(() => expect(screen.getByText(/reply could not be read/i)).toBeInTheDocument());
+  });
+
+  it('shows a could-not-read message when an OK body is not JSON', async () => {
+    const notJson = {
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new SyntaxError('Unexpected token <');
+      },
+    } as unknown as Response;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(notJson));
+    renderView();
+    typeEmail('a@x.org');
+    clickSend();
+    await waitFor(() => expect(screen.getByText(/reply could not be read/i)).toBeInTheDocument());
+  });
 });

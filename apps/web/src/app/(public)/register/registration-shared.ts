@@ -9,6 +9,8 @@
 
 import type { RJSFSchema } from '@rjsf/utils';
 import { z } from 'zod';
+import { readErrorEnvelope } from '@/lib/api-error';
+import { readJsonObject } from '@/lib/json-object';
 
 /** One active-org option for the coordinator dropdown (`GET /api/orgs`). */
 export const OrgOptionSchema = z.object({
@@ -36,17 +38,6 @@ export type SubmitState =
       mailSent?: boolean;
     }
   | { status: 'error'; title: string; detail: string; code: string; requestId: string };
-
-/** Canonical API error envelope (partial — every field optional on the wire). */
-export interface ApiErrorEnvelope {
-  error?: {
-    code?: string;
-    title?: string;
-    detail?: string;
-    requestId?: string;
-    fields?: Record<string, unknown>;
-  };
-}
 
 /** Ajv-shaped validation error as surfaced by RJSF's `onError`. */
 export interface AjvLikeError {
@@ -157,13 +148,13 @@ export function parseError(
   fallbackStatus: number,
   fallbackReqId: string,
 ): SubmitError {
-  const env = body as ApiErrorEnvelope;
+  const error = readErrorEnvelope(body);
   return {
-    title: env?.error?.title ?? 'Submission failed',
-    detail: env?.error?.detail ?? `The server returned HTTP ${fallbackStatus}.`,
-    code: env?.error?.code ?? 'UNKNOWN',
-    requestId: env?.error?.requestId ?? fallbackReqId,
-    ...(env?.error?.fields ? { fields: env.error.fields } : {}),
+    title: error.title ?? 'Submission failed',
+    detail: error.detail ?? `The server returned HTTP ${fallbackStatus}.`,
+    code: error.code ?? 'UNKNOWN',
+    requestId: error.requestId ?? fallbackReqId,
+    ...(error.fields ? { fields: error.fields } : {}),
   };
 }
 
@@ -196,6 +187,25 @@ export type SubmitResult =
   { ok: true; body: Record<string, unknown> } | { ok: false; error: SubmitError };
 
 /**
+ * Reads the body of an accepted registration.
+ *
+ * The server has accepted the registration, so a body that is not a JSON
+ * object gives an empty body rather than an error: an error would invite a
+ * second submission.
+ *
+ * @param res - The 2xx response. Its body is consumed.
+ * @param endpoint - The BFF route, for the log line.
+ * @returns The body, or `{}` when it is not a JSON object.
+ */
+async function readSuccessBody(res: Response, endpoint: string): Promise<Record<string, unknown>> {
+  const body: unknown = await res.json().catch(() => null);
+  const object = readJsonObject(body);
+  if (object) return object;
+  console.error('[register] unexpected response shape', { endpoint });
+  return {};
+}
+
+/**
  * POSTs a registration payload to a BFF endpoint and normalises the outcome.
  *
  * @param endpoint - BFF route, e.g. `/api/aggregator/register`.
@@ -217,7 +227,7 @@ export async function submitRegistration(
       const body = await res.json().catch(() => ({}));
       return { ok: false, error: parseError(body, res.status, reqId) };
     }
-    return { ok: true, body: (await res.json()) as Record<string, unknown> };
+    return { ok: true, body: await readSuccessBody(res, endpoint) };
   } catch (err) {
     return {
       ok: false,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { apiErrorMessage, readApiError } from '@/lib/api-error';
+import { apiErrorMessage, readApiError, readErrorEnvelope } from '@/lib/api-error';
 
 function response(body: string, status = 400): Response {
   return new Response(body, { status, headers: { 'content-type': 'application/json' } });
@@ -73,5 +73,26 @@ describe('apiErrorMessage', () => {
     await expect(apiErrorMessage(response('<html>', 502), 'export failed: 502')).resolves.toBe(
       'export failed: 502',
     );
+  });
+});
+
+describe('readErrorEnvelope', () => {
+  it('reads the string fields and the fields object', () => {
+    expect(
+      readErrorEnvelope({
+        error: { code: 'X', title: 'T', detail: 'D', requestId: 'r', fields: { a: 'b' } },
+      }),
+    ).toEqual({ code: 'X', title: 'T', detail: 'D', requestId: 'r', fields: { a: 'b' } });
+  });
+
+  it('drops a field of the wrong type and keeps the rest', () => {
+    expect(readErrorEnvelope({ error: { code: 7, title: 'T', fields: [] } })).toEqual({
+      title: 'T',
+    });
+  });
+
+  it('returns an empty object when there is no error object', () => {
+    expect(readErrorEnvelope(null)).toEqual({});
+    expect(readErrorEnvelope({ error: 'Bad Request' })).toEqual({});
   });
 });
