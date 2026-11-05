@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { readApiError } from '../lib/api-error';
 import { jsonFetch } from './http';
 
 /**
@@ -201,13 +202,9 @@ class HttpDashboardService implements DashboardService {
     if (!res.ok) {
       // Use the upstream error message when the body has one.
       let message = `dashboard export failed: ${res.status}`;
-      try {
-        const body = (await res.json()) as { error?: { detail?: string; message?: string } };
-        const detail = body?.error?.detail ?? body?.error?.message;
-        if (detail) message = detail;
-      } catch {
-        // non-JSON body — keep the default message.
-      }
+      const apiError = await readApiError(res);
+      const detail = apiError?.detail ?? apiError?.message;
+      if (detail) message = detail;
       throw new Error(message);
     }
     const blob = await res.blob();
@@ -233,13 +230,9 @@ class HttpDashboardService implements DashboardService {
     if (!res.ok) {
       // Use the upstream error message when the body has one.
       let message = `profile export failed: ${res.status}`;
-      try {
-        const errBody = (await res.json()) as { error?: { detail?: string; message?: string } };
-        const detail = errBody?.error?.detail ?? errBody?.error?.message;
-        if (detail) message = detail;
-      } catch {
-        // non-JSON body — keep the default message.
-      }
+      const apiError = await readApiError(res);
+      const detail = apiError?.detail ?? apiError?.message;
+      if (detail) message = detail;
       throw new Error(message);
     }
     const blob = await res.blob();
@@ -266,13 +259,9 @@ class HttpDashboardService implements DashboardService {
     });
     if (!res.ok) {
       let message = `bulk action failed: ${res.status}`;
-      try {
-        const body = (await res.json()) as { error?: { detail?: string; message?: string } };
-        const detail = body?.error?.detail ?? body?.error?.message;
-        if (detail) message = detail;
-      } catch {
-        // non-JSON body — keep the default message.
-      }
+      const apiError = await readApiError(res);
+      const detail = apiError?.detail ?? apiError?.message;
+      if (detail) message = detail;
       throw new Error(message);
     }
     return (await res.json()) as DashboardBulkActionResult;
