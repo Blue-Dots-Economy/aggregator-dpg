@@ -19,6 +19,22 @@ export function normalizeGeoKey(query: string): string {
 }
 
 /**
+ * Runs `cleanup` once `promise` settles, and never rejects.
+ *
+ * The lookup's caller receives any rejection; this side task must not raise a
+ * second, unhandled one.
+ */
+async function afterSettled(promise: Promise<unknown>, cleanup: () => void): Promise<void> {
+  try {
+    await promise;
+  } catch {
+    // The caller of the lookup handles the error.
+  } finally {
+    cleanup();
+  }
+}
+
+/**
  * Wraps an async geo lookup with a session LRU cache and in-flight dedup.
  *
  * Only results where `shouldCache(value)` is true are stored. The shared call
@@ -96,10 +112,10 @@ export function memoizeGeoLookup<T>(
         onAbort();
       } else {
         signal.addEventListener('abort', onAbort, { once: true });
-        void current.promise.finally(() => signal.removeEventListener('abort', onAbort));
+        void afterSettled(current.promise, () => signal.removeEventListener('abort', onAbort));
       }
     }
-    void current.promise.finally(() => {
+    void afterSettled(current.promise, () => {
       current.waiters.delete(token);
     });
 
