@@ -59,3 +59,35 @@ describe('GET /api/bulk-uploads/list', () => {
     expect(await res.text()).toBe('oops');
   });
 });
+
+describe('GET /api/bulk-uploads/list query check', () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it.each([
+    ['', ''],
+    ['?limit=1&offset=0', '?limit=1&offset=0'],
+    ['?limit=100&x=y', '?limit=100'],
+  ])('forwards %j as %j', async (query, forwarded) => {
+    mockCallApi.mockResolvedValue(
+      new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+    const res = await GET(new NextRequest(`http://localhost/api/bulk-uploads/list${query}`));
+    expect(res.status).toBe(200);
+    expect(mockCallApi).toHaveBeenCalledWith(
+      `/v1/bulk-uploads${forwarded}`,
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it.each(['?limit=0', '?limit=101', '?offset=-1', '?offset=x'])(
+    'rejects %j with 400 without calling upstream',
+    async (query) => {
+      const res = await GET(new NextRequest(`http://localhost/api/bulk-uploads/list${query}`));
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({
+        error: { code: 'SCHEMA_VALIDATION', title: 'Invalid query parameters' },
+      });
+      expect(mockCallApi).not.toHaveBeenCalled();
+    },
+  );
+});

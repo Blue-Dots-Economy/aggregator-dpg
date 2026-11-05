@@ -74,3 +74,34 @@ describe('GET /api/dashboard/export', () => {
     expect(res.status).toBe(503);
   });
 });
+
+describe('GET /api/dashboard/export query check', () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it.each([
+    ['?domain=seeker&status=at_risk', '?domain=seeker&status=at_risk'],
+    ['?domain=seeker&refresh=1&page=3', '?domain=seeker&refresh=1'],
+  ])('forwards %j as %j', async (query, forwarded) => {
+    mockCallApi.mockResolvedValue(
+      new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+    const res = await GET(new NextRequest(`http://localhost/api/dashboard/export${query}`));
+    expect(res.status).toBe(200);
+    expect(mockCallApi).toHaveBeenCalledWith(
+      `/v1/dashboard/export${forwarded}`,
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it.each(['?domain=', '?status=at-risk', '?status=%20'])(
+    'rejects %j with 400 without calling upstream',
+    async (query) => {
+      const res = await GET(new NextRequest(`http://localhost/api/dashboard/export${query}`));
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({
+        error: { code: 'SCHEMA_VALIDATION', title: 'Invalid query parameters' },
+      });
+      expect(mockCallApi).not.toHaveBeenCalled();
+    },
+  );
+});

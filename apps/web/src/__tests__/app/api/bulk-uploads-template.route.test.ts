@@ -102,3 +102,35 @@ describe('GET /api/bulk-uploads/template', () => {
     expect(res.status).toBe(503);
   });
 });
+
+describe('GET /api/bulk-uploads/template query check', () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it.each([
+    ['', ''],
+    ['?participant_type=seeker&format=xlsx', '?participant_type=seeker&format=xlsx'],
+    ['?participant_type=anything&format=csv&sample=10', '?participant_type=anything&format=csv'],
+  ])('forwards %j as %j', async (query, forwarded) => {
+    mockCallApi.mockResolvedValue(
+      new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+    const res = await GET(new NextRequest(`http://localhost/api/bulk-uploads/template${query}`));
+    expect(res.status).toBe(200);
+    expect(mockCallApi).toHaveBeenCalledWith(
+      `/v1/bulk-uploads/template${forwarded}`,
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it.each(['?format=pdf', '?format='])(
+    'rejects %j with 400 without calling upstream',
+    async (query) => {
+      const res = await GET(new NextRequest(`http://localhost/api/bulk-uploads/template${query}`));
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({
+        error: { code: 'SCHEMA_VALIDATION', title: 'Invalid query parameters' },
+      });
+      expect(mockCallApi).not.toHaveBeenCalled();
+    },
+  );
+});

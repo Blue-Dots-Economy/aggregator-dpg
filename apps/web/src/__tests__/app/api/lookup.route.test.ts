@@ -6,6 +6,7 @@
  * aggregator API, and surfaces a 503 when the upstream fetch fails.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { NextRequest } from 'next/server';
 import { GET } from '@/app/api/[org]/[slug]/lookup/route';
 
 type FetchInput = Parameters<typeof fetch>[0];
@@ -90,5 +91,69 @@ describe('GET /api/[org]/[slug]/lookup', () => {
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error?: { code?: string } };
     expect(body.error?.code).toBe('UPSTREAM_UNAVAILABLE');
+  });
+});
+
+describe('GET /api/[org]/[slug]/lookup query check', () => {
+  let originalFetch: typeof fetch;
+  const fetchMock = vi.fn<typeof fetch>();
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ user_exists: false, owned_elsewhere: false }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    globalThis.fetch = fetchMock;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const params = { params: Promise.resolve({ org: 'acme', slug: 'winter25' }) };
+
+  it.each([
+    [
+      '?email=%20a%40b.com%20&network=blue_dot&domain=seeker',
+      '?email=+a%40b.com+&network=blue_dot&domain=seeker',
+    ],
+    ['?phone_number=%2B91 98&network=n&domain=d', '?phone_number=%2B91+98&network=n&domain=d'],
+    [
+      '?email=a%40b.com&phone_number=1&network=n&domain=d&extra=1',
+      '?email=a%40b.com&phone_number=1&network=n&domain=d',
+    ],
+  ])('forwards %j as %j', async (query, forwarded) => {
+    const res = await GET(
+      new NextRequest(`http://localhost/api/acme/winter25/lookup${query}`),
+      params,
+    );
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(
+      new RegExp(`/public/v1/aggregators/acme/lookup${forwarded.replace(/[?+]/g, '\\$&')}$`),
+    );
+  });
+
+  it.each([
+    '',
+    '?network=n&domain=d',
+    '?email=not-an-email&network=n&domain=d',
+    '?phone_number=%20&network=n&domain=d',
+    '?email=a%40b.com&domain=d',
+    '?email=a%40b.com&network=%20&domain=d',
+    '?email=a%40b.com&network=n',
+  ])('rejects %j with 400 without calling upstream', async (query) => {
+    const res = await GET(
+      new NextRequest(`http://localhost/api/acme/winter25/lookup${query}`),
+      params,
+    );
+    expect(res.status).toBe(400);
+    const body: unknown = await res.json();
+    expect(body).toMatchObject({ error: { code: 'SCHEMA_VALIDATION' } });
+    expect(JSON.stringify(body)).not.toContain('not-an-email');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

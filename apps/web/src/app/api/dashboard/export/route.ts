@@ -5,19 +5,35 @@
  *
  * Forwards to the aggregator API's GET /v1/dashboard/export and returns the
  * CSV with the upstream `Content-Type` and `Content-Disposition` headers.
+ * The query is checked with the API's rules and only its keys are forwarded.
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
-import { callApi } from '../../../../lib/upstream-client';
-import { passthrough, proxyFailureResponse } from '../../../../lib/bff-proxy';
+import { z } from 'zod';
+import { callApi } from '@/lib/upstream-client';
+import { passthrough, proxyFailureResponse } from '@/lib/bff-proxy';
+import { parseQuery } from '@/lib/bff-input';
 
 export const runtime = 'nodejs';
 
+/** Same rules as the API's `DashboardExportQuerySchema`; `refresh` is forwarded as sent. */
+const DashboardExportQuerySchema = z.object({
+  domain: z.string().min(1).optional(),
+  status: z
+    .string()
+    .trim()
+    .min(1)
+    .max(32)
+    .regex(/^[a-z0-9_]+$/i)
+    .optional(),
+  refresh: z.string().optional(),
+});
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const search = req.nextUrl.searchParams.toString();
-  const path = `/v1/dashboard/export${search ? `?${search}` : ''}`;
+  const query = parseQuery(req.nextUrl.searchParams, DashboardExportQuerySchema);
+  if (!query.ok) return query.response;
   try {
-    const upstream = await callApi(path, {
+    const upstream = await callApi(`/v1/dashboard/export${query.search}`, {
       method: 'GET',
       // The API currently ignores this header.
       headers: { accept: 'text/csv' },
