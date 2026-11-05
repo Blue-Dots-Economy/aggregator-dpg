@@ -193,6 +193,13 @@ export const ERR = {
   },
 
   // ── Registration ────────────────────────────────────────────────────────
+  NAME_INVALID_CHARACTERS: {
+    code: 'NAME_INVALID_CHARACTERS',
+    status: 400,
+    title: 'Name has symbols we cannot accept',
+    detail: 'Please remove symbols such as ( ) < > & / # from the name and try again.',
+    hint: 'Keycloak refused the first or last name (error-person-name-invalid-character).',
+  },
   USER_EXISTS: {
     code: 'USER_EXISTS',
     status: 409,

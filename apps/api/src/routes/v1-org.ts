@@ -635,7 +635,7 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         await notifyOwnerOfAdminAction(
           actor,
           org,
-          `moved the organisation under ${org.parentName ?? 'the network'}`,
+          `moved it under ${org.parentName ?? 'the network'}`,
           req.log,
         );
       }

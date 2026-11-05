@@ -393,8 +393,9 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
       // One person per email and per phone across coordinators and org owners.
       // Checked before any write. The phone is the OTP login key.
       const contactClash = await findOwnerContactClash(ownerEmail, phoneE164);
+      // The email belongs to another account; an owner's is handled above.
       if (contactClash === 'email') {
-        throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
+        throw httpError('USER_EXISTS', { fields: { email: body.owner.email } });
       }
       if (contactClash === 'phone') {
         throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
@@ -462,7 +463,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         throwTreeRefusal(created.error, { parent_id: body.parent_id ?? null });
         // A concurrent registration took the email or phone after the pre-check.
         if (created.error.code === 'DUPLICATE_EMAIL') {
-          throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
+          throw httpError('USER_EXISTS', { fields: { email: body.owner.email } });
         }
         if (created.error.code === 'DUPLICATE_PHONE') {
           throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
@@ -514,8 +515,13 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
       if (!ownerUser.ok) {
         await discardHalfCreatedOrg(org.id, group.value.id, log);
         if (ownerUser.error.code === 'USER_EXISTS') {
-          throw httpError('OWNER_ALREADY_REGISTERED', {
+          throw httpError('USER_EXISTS', {
             fields: { email: body.owner.email, rolled_back: true },
+          });
+        }
+        if (ownerUser.error.code === 'INVALID_NAME') {
+          throw httpError('NAME_INVALID_CHARACTERS', {
+            fields: { name: 'owner.name', rolled_back: true },
           });
         }
         throw httpError('IDP_UNAVAILABLE', {
