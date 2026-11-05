@@ -162,6 +162,7 @@ describe('<OrgsTable />', () => {
     renderTable([pendingOrg]);
     fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.approve }));
     expect(await screen.findByText(messages.console.errors.response_shape)).toBeInTheDocument();
+    expect(refresh).toHaveBeenCalled();
   });
 
   it('asks for a reason before a rejection and sends it', async () => {

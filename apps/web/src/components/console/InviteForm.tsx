@@ -18,6 +18,7 @@ import {
 } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Check, FileText, Info, Mail, X } from 'lucide-react';
 import {
   UserInviteResponseSchema,
@@ -158,6 +159,7 @@ export function InviteForm({
   coordinatorsHref?: string | null;
 }>) {
   const t = useTranslations('console');
+  const router = useRouter();
   const [orgId, setOrgId] = useState(orgs[0]?.id ?? '');
   const [draft, setDraft] = useState('');
   const [recipients, setRecipients] = useState<Recipient[]>([]);
@@ -250,6 +252,12 @@ export function InviteForm({
     if (r.ok) {
       setResult({ sent: r.data.sent + r.data.resent, notSent: notSentOf(r.data) });
       update([]);
+    } else if (r.error.code === RESPONSE_SHAPE_CODE) {
+      // The invites may have been sent: clear the list so a second click does not resend them.
+      update([]);
+      setResult(null);
+      setError(t(failureKey(r)));
+      router.refresh();
     } else {
       update(all, next.skipped);
       setResult(null);

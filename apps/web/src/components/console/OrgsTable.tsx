@@ -19,7 +19,7 @@ import {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { ConsoleStatusPill, EmptyState } from './ConsoleUi';
-import { sendConsole } from '../../lib/console-client';
+import { RESPONSE_SHAPE_CODE, sendConsole } from '../../lib/console-client';
 import { plainErrorKey } from '../../lib/console-errors';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
@@ -60,6 +60,8 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
       if (status) setStatus(id, status);
       note(id, t('coordinator.already', { status: status ? t(`status.${status}`) : '' }));
     } else {
+      // The change may have been saved: reload the page's copy.
+      if (r.error.code === RESPONSE_SHAPE_CODE) router.refresh();
       note(id, t(plainErrorKey(r, 'orgs')));
     }
   }

@@ -309,6 +309,18 @@ describe('<OrgEditForm />', () => {
       expect(await screen.findByText(messages.console.errors.name_taken)).toBeInTheDocument();
     });
 
+    it('refreshes the page when the saved org cannot be read', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      global.fetch = respond({ id: baseOrg.id }, 200) as never;
+      renderForm(baseOrg, OWNER);
+      fireEvent.change(screen.getByLabelText(messages.console.org.name), {
+        target: { value: 'New Name' },
+      });
+      save();
+      expect(await screen.findByText(messages.console.errors.response_shape)).toBeInTheDocument();
+      expect(refresh).toHaveBeenCalled();
+    });
+
     it('still renders the fixed fields when the schema cannot be loaded', () => {
       renderForm(baseOrg, { ...OWNER, orgSchema: null });
       expect(screen.getByLabelText(messages.console.org.name)).toBeInTheDocument();

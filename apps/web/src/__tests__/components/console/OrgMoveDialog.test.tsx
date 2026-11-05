@@ -181,6 +181,6 @@ describe('<OrgMoveDialog />', () => {
     fireEvent.change(await parentSelect(), { target: { value: 's1' } });
     fireEvent.click(submit());
     expect(await screen.findByText(messages.console.errors.response_shape)).toBeInTheDocument();
-    expect(refresh).not.toHaveBeenCalled();
+    expect(refresh).toHaveBeenCalled();
   });
 });

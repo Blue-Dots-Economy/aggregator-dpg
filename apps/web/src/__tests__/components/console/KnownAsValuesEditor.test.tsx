@@ -268,6 +268,29 @@ describe('<KnownAsValuesEditor />', () => {
     expect(nameField(2)).toHaveValue('Taluk');
   });
 
+  it('blocks another save until the page reloads the list when the reply is unreadable', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(global.fetch).mockResolvedValue(json(org({ id: ORG })));
+    const { rerender } = renderIt();
+    addValue('Mentor');
+    fireEvent.click(save());
+    expect(await screen.findByText(messages.console.errors.response_shape)).toBeInTheDocument();
+    expect(refresh).toHaveBeenCalled();
+    // The new row may have been saved with a key; sending it again unkeyed would add a copy.
+    fireEvent.change(nameField(3), { target: { value: 'Mentors' } });
+    expect(save()).toBeDisabled();
+    expect(screen.getByText(messages.console.errors.response_shape)).toBeInTheDocument();
+
+    const reloaded: KnownAsValues = [...SAVED, { key: 'mentor', name: 'Mentor' }];
+    rerender(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <KnownAsValuesEditor orgId={ORG} values={reloaded} />
+      </NextIntlClientProvider>,
+    );
+    fireEvent.change(nameField(3), { target: { value: 'Mentors' } });
+    expect(save()).toBeEnabled();
+  });
+
   it('keeps unsaved edits when the page passes the same list in a new object', () => {
     const { rerender } = renderIt();
     fireEvent.change(nameField(2), { target: { value: 'Mandal' } });

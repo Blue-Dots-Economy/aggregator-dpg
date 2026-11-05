@@ -13,6 +13,10 @@ import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import hiMessages from '@/i18n/messages/hi.json';
 import { fillTerms } from '@/i18n/terms';
+
+const refresh = vi.fn();
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
+
 import { InviteForm, parseRecipients } from '@/components/console/InviteForm';
 
 const term = (key: string): string => fillTerms(`[[${key}]]`, 'en');
@@ -361,7 +365,9 @@ describe('<InviteForm />', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       messages.console.invite.error.response_shape,
     );
-    expect(screen.getByLabelText('Name for a@x.org')).toBeInTheDocument();
+    // The invites may have gone out: the list is cleared so a click does not resend them.
+    expect(screen.queryByLabelText('Name for a@x.org')).toBeNull();
+    expect(refresh).toHaveBeenCalled();
   });
 
   it('says the server could not be reached when the request fails', async () => {

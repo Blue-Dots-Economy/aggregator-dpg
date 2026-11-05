@@ -31,7 +31,12 @@ import { I } from '../../icons';
 import { cn } from '../../lib/cn';
 import { ConsoleStatusPill } from './ConsoleUi';
 import { DomainChips } from './DomainChips';
-import { sendConsole, type ConsoleError, type ConsoleSendResult } from '../../lib/console-client';
+import {
+  RESPONSE_SHAPE_CODE,
+  sendConsole,
+  type ConsoleError,
+  type ConsoleSendResult,
+} from '../../lib/console-client';
 import { plainErrorKey } from '../../lib/console-errors';
 
 /** API error codes with their own message on this page. */
@@ -126,6 +131,9 @@ export function CoordinatorActions({
     setDecisionNote(view.note);
     if (view.settled) {
       setRejecting(false);
+      router.refresh();
+    } else if (!r.ok && r.error.code === RESPONSE_SHAPE_CODE) {
+      // The decision may have been saved: reload the page's copy.
       router.refresh();
     }
   }

@@ -28,7 +28,7 @@ import { ConsoleSection, DetailList } from './ConsoleUi';
 import { Input } from '../ui/Input';
 import { Label } from '../ui/Label';
 import { RjsfThemedForm } from '../forms/RjsfThemed';
-import { errorKey, sendConsole } from '../../lib/console-client';
+import { errorKey, RESPONSE_SHAPE_CODE, sendConsole } from '../../lib/console-client';
 import { consoleOrgSchema, gstinCustomValidate, orgFieldText } from '../../lib/org-schema';
 import { readableFormErrors } from '../../lib/readable-form-errors';
 
@@ -166,6 +166,8 @@ export function OrgEditForm({
       router.refresh();
       return;
     }
+    // The change may have been saved: reload the page's copy.
+    if (r.error.code === RESPONSE_SHAPE_CODE) router.refresh();
     const serverErrors = r.error.fields?.['field_errors'];
     if (r.status === 400 && serverErrors && typeof serverErrors === 'object') {
       const mapped: JsonRecord = {};
