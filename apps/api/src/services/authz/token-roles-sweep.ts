@@ -24,6 +24,7 @@ import { getRedis } from '../redis/index.js';
 import { getRoleStore } from '../role-store/index.js';
 import { getRbacRuntime } from './runtime.js';
 import { DIRTY_KEY, syncTokenRoles, type TokenRolesOutcome } from './token-roles.js';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 /** What a sweep or reconcile needs; injectable for tests. */
 export interface SweepDeps {
@@ -120,8 +121,8 @@ async function runJob(
     logger.warn({
       operation: `rbac.token_roles.${name}`,
       status: 'failure',
-      error: e instanceof Error ? e.message : String(e),
-      error_type: e instanceof Error ? e.constructor.name : 'unknown',
+      error: errorMessage(e),
+      error_type: errorType(e),
       latency_ms: deps.now() - start,
     });
     return 'failed';

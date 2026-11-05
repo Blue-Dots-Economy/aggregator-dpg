@@ -53,6 +53,7 @@ import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import type { ErrorCode } from '../errors/codes.js';
 import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 const SLUG_RETRIES = 3;
 
@@ -589,7 +590,7 @@ async function aggregatorConsentWriter({
       {
         operation: 'consentLedger.recordAggregatorConsent',
         status: 'failure',
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
         network,
         brand: brand ?? null,
       },

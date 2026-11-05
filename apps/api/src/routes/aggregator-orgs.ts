@@ -51,6 +51,7 @@ import { getNetworkConfig } from '../services/network-config.js';
 import { SYSTEM_KNOWN_AS } from '@aggregator-dpg/shared-primitives/user-org';
 import { treeRules } from '../services/known-as.js';
 import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 /**
  * The fixed parts of an org-registration body. Every other key is a field of
@@ -742,7 +743,7 @@ async function orgConsentWriter({
       {
         operation: 'consentLedger.recordOrgConsent',
         status: 'failure',
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
         network,
         brand: brand ?? null,
       },

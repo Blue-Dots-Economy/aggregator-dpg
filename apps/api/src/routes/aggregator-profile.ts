@@ -33,6 +33,7 @@ import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 // ─── Body schemas ───────────────────────────────────────────────────────────
 
@@ -352,7 +353,7 @@ async function fetchKcUserSafe(auth: AuthContext, log: FastifyBaseLogger): Promi
     log.warn(
       {
         sub_operation: 'fetchKcUser',
-        cause: err instanceof Error ? err.message : String(err),
+        cause: errorMessage(err),
       },
       'failed to load KC user (threw)',
     );

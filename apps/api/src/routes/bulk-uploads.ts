@@ -926,7 +926,7 @@ async function recordBulkUploadAttestation({
       {
         operation: 'consentLedger.recordBulkUploadAttestation',
         status: 'failure',
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
       },
       'consent config load failed — bulk upload rejected',
     );
