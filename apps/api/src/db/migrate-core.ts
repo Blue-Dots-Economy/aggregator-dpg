@@ -16,6 +16,7 @@ import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Pool, PoolClient } from 'pg';
+import { toError } from '@aggregator-dpg/shared-primitives/errors';
 
 /** Anything that runs a query: a pool or one checked-out connection. */
 export type Queryable = Pick<Pool | PoolClient, 'query'>;
@@ -162,7 +163,7 @@ export async function migrateWithLock<TSchema extends Record<string, unknown>>(
     try {
       await lockClient.query(`SELECT pg_advisory_lock(${MIGRATION_LOCK_SQL_KEY})`);
     } catch (err) {
-      broken = err as Error;
+      broken = toError(err);
       throw err;
     }
     log.info({ waitedMs: Date.now() - started }, 'migration lock acquired');
@@ -173,9 +174,9 @@ export async function migrateWithLock<TSchema extends Record<string, unknown>>(
         await lockClient.query(`SELECT pg_advisory_unlock(${MIGRATION_LOCK_SQL_KEY})`);
       } catch (err) {
         // Discard the connection; the server drops its lock with it.
-        broken = err as Error;
+        broken = toError(err);
         log.warn(
-          { error_type: (err as Error).name },
+          { error_type: toError(err).name },
           'migration lock release failed; discarding the connection',
         );
       }

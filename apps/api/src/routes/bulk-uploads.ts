@@ -43,6 +43,7 @@ import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getRedis } from '../services/redis/index.js';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 /**
  * Returns the valid participant types for the active network.
@@ -508,7 +509,7 @@ export async function registerBulkUploadsRoutes(app: FastifyInstance): Promise<v
         log.error({
           status: 'failure',
           sub_operation: 'enqueue.bulk-file-process',
-          error: (err as Error).message,
+          error: errorMessage(err),
         });
         throw httpError('INTERNAL', { cause: err });
       }

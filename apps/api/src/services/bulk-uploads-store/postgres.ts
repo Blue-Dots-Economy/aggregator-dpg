@@ -17,6 +17,7 @@ import {
   type ListBulkUploadsResult,
   type StoreResult,
 } from './interface.js';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 const PG_UNIQUE_VIOLATION = '23505';
 
@@ -52,11 +53,11 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       logger.error({
         operation: 'bulkUploadsStore.create',
         status: 'failure',
-        error: (err as Error).message,
-        error_type: (err as Error).constructor.name,
+        error: errorMessage(err),
+        error_type: errorType(err),
         latency_ms: Date.now() - start,
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -73,9 +74,9 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       logger.error({
         operation: 'bulkUploadsStore.findById',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -95,9 +96,9 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       logger.error({
         operation: 'bulkUploadsStore.findByAggregatorAndEtag',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -126,9 +127,9 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       logger.error({
         operation: 'bulkUploadsStore.list',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -148,9 +149,9 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       logger.error({
         operation: 'bulkUploadsStore.deletePending',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 
@@ -224,10 +225,10 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       logger.error({
         operation: 'bulkUploadsStore.markUploaded',
         status: 'failure',
-        error: (err as Error).message,
+        error: errorMessage(err),
         latency_ms: Date.now() - start,
       });
-      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: (err as Error).message } };
+      return { ok: false, error: { code: 'DB_UNAVAILABLE', message: errorMessage(err) } };
     }
   }
 }
