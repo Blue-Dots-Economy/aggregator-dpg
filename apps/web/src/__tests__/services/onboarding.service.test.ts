@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { onboardingService } from '../../services/onboarding.service';
-import { BulkUploadStartUnreadError } from '../../services/bulk-upload-start-error';
+import { BulkUploadStartUnreadError, onboardingService } from '../../services/onboarding.service';
 
 /** A complete bulk-upload status body, as the API sends it. */
 function uploadStatus(overrides: Record<string, unknown> = {}): Record<string, unknown> {

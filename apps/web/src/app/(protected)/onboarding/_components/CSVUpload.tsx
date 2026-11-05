@@ -14,10 +14,12 @@ import {
   DEFAULT_AGGREGATOR_CONFIG,
 } from '../../../../hooks/useAggregatorConfig';
 import type { BulkUploadStatus } from '../../../../services/onboarding.service';
-import { onboardingService } from '../../../../services/onboarding.service';
+import {
+  BulkUploadStartUnreadError,
+  onboardingService,
+} from '../../../../services/onboarding.service';
 import type { BulkAttestationContent } from '../../../../lib/bulk-attestation.server';
 import { useCan } from '../../../../lib/auth-context';
-import { BulkUploadStartUnreadError } from '@/services/bulk-upload-start-error';
 import { ResponseShapeError } from '@/lib/response-shape-error';
 
 // Defined at module level so re-renders of CSVUpload do not remount the toast.

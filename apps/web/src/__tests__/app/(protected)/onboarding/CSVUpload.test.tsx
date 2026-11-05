@@ -21,7 +21,8 @@ import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { BulkUploadStatus } from '@/services/onboarding.service';
-import { BulkUploadStartUnreadError } from '@/services/bulk-upload-start-error';
+import { BulkUploadStartUnreadError } from '@/services/onboarding.service';
+import type * as OnboardingServiceModule from '@/services/onboarding.service';
 import { ResponseShapeError } from '@/lib/response-shape-error';
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
@@ -61,7 +62,8 @@ vi.mock('@/lib/auth-context', () => ({
 }));
 
 const { errorsCsvUrl } = vi.hoisted(() => ({ errorsCsvUrl: vi.fn() }));
-vi.mock('@/services/onboarding.service', () => ({
+vi.mock('@/services/onboarding.service', async (importOriginal) => ({
+  ...(await importOriginal<typeof OnboardingServiceModule>()),
   onboardingService: { errorsCsvUrl: (...args: unknown[]) => errorsCsvUrl(...args) },
 }));
 

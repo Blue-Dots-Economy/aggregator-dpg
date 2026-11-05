@@ -348,7 +348,7 @@
         "all_rows_passed": "All rows passed",
         "signing": "Signing…"
       },
-      "start_unconfirmed": "Your file was received, but we couldn't confirm it started. Check Recent uploads on the Onboarding page before uploading it again.",
+      "start_unconfirmed": "Your file was received, but we couldn't confirm that processing started. Check Recent uploads under Bulk Upload on the Onboarding page before uploading it again.",
       "reply_unreadable": "The server's reply couldn't be read. Try again in a few minutes."
     },
     "create_link": {

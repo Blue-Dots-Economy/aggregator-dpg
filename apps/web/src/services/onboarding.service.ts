@@ -5,7 +5,6 @@
  */
 
 import { z } from 'zod';
-import { BulkUploadStartUnreadError } from './bulk-upload-start-error';
 import { jsonFetch, ResponseShapeError } from './http';
 
 /** Submitted, passed, failed and skipped counts. */
@@ -151,6 +150,28 @@ function withQuery(path: string, params: URLSearchParams): string {
   return qs ? `${path}?${qs}` : path;
 }
 
+/**
+ * Thrown when `/start` answered OK with an unreadable body and the upload's
+ * status could not be read again either.
+ *
+ * The upload was started, so the caller must not offer a plain retry: that
+ * would upload the same file twice.
+ */
+export class BulkUploadStartUnreadError extends Error {
+  override readonly name = 'BulkUploadStartUnreadError';
+
+  /**
+   * @param uploadId - The upload that was started.
+   * @param options - The error that stopped the re-read, as `cause`.
+   */
+  constructor(
+    readonly uploadId: string,
+    options?: ErrorOptions,
+  ) {
+    super(`bulk upload ${uploadId} started, but its status could not be read`, options);
+  }
+}
+
 export const onboardingService = {
   async listLinks(
     opts: {
@@ -249,21 +270,6 @@ export const onboardingService = {
   },
 
   /**
-   * Reads the status of an upload that `/start` accepted.
-   *
-   * @param uploadId - The started upload.
-   * @returns The upload's status.
-   * @throws {BulkUploadStartUnreadError} If the status cannot be read.
-   */
-  async rereadStarted(uploadId: string): Promise<BulkUploadStatus> {
-    try {
-      return await this.readBulkUpload(uploadId);
-    } catch (err) {
-      throw new BulkUploadStartUnreadError(uploadId, { cause: err });
-    }
-  },
-
-  /**
    * Runs a bulk upload: presign, PUT to S3, then start.
    *
    * `duplicate` is true when the file matches a prior upload; the existing run is returned.
@@ -307,7 +313,7 @@ export const onboardingService = {
       });
       return {
         uploadId: presigned.upload_id,
-        status: await this.rereadStarted(presigned.upload_id),
+        status: await rereadStarted(presigned.upload_id),
       };
     }
     const out: {
@@ -324,3 +330,18 @@ export const onboardingService = {
     return out;
   },
 };
+
+/**
+ * Reads the status of an upload that `/start` accepted.
+ *
+ * @param uploadId - The started upload.
+ * @returns The upload's status.
+ * @throws {BulkUploadStartUnreadError} If the status cannot be read.
+ */
+async function rereadStarted(uploadId: string): Promise<BulkUploadStatus> {
+  try {
+    return await onboardingService.readBulkUpload(uploadId);
+  } catch (err) {
+    throw new BulkUploadStartUnreadError(uploadId, { cause: err });
+  }
+}
