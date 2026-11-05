@@ -123,6 +123,23 @@ export interface SharedFormWiring {
    * message for symbols the sign-in system refuses, given those symbols.
    */
   personName?: { path: string; message: (symbols: string) => string } | undefined;
+  /** The form's own checks; they run before the name check, not instead of it. */
+  customValidate?: FormValidator | undefined;
+}
+
+type FormValidator = (
+  data: Record<string, unknown> | undefined,
+  errors: FormValidation,
+) => FormValidation;
+
+/** The form's own checks and the name check, run one after the other. */
+function combinedValidator(wiring: SharedFormWiring): FormValidator | null {
+  const checks = [
+    wiring.customValidate,
+    wiring.personName ? personNameValidator(wiring.personName) : undefined,
+  ].filter((c): c is FormValidator => c !== undefined);
+  if (checks.length === 0) return null;
+  return (data, errors) => checks.reduce((acc, check) => check(data, acc), errors);
 }
 
 /**
@@ -164,14 +181,12 @@ export function sharedRegistrationFormProps(wiring: SharedFormWiring): {
   onSubmit: (e: IChangeEvent<Record<string, unknown>>) => void;
   onError: (errs: AjvLikeError[]) => void;
   transformErrors: (errs: RJSFValidationError[]) => RJSFValidationError[];
-  customValidate?: (
-    data: Record<string, unknown> | undefined,
-    errors: FormValidation,
-  ) => FormValidation;
+  customValidate?: FormValidator;
   showErrorList: false;
   focusOnFirstError: true;
   noHtml5Validate: true;
 } {
+  const validate = combinedValidator(wiring);
   return {
     formData: wiring.formData,
     // Widgets read this as `registry.formContext`, not as a prop.
@@ -192,7 +207,7 @@ export function sharedRegistrationFormProps(wiring: SharedFormWiring): {
         requestId: JSON.stringify(errs, null, 2),
       });
     },
-    ...(wiring.personName ? { customValidate: personNameValidator(wiring.personName) } : {}),
+    ...(validate ? { customValidate: validate } : {}),
     // Shared field-error wording: a bad web address reads as a sentence, never a regex.
     transformErrors: (errs) => readableFormErrors(errs, wiring.formSchema),
     showErrorList: false,

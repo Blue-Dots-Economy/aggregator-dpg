@@ -270,8 +270,8 @@ export function OrgRegisterForm({
             path: 'owner.name',
             message: (symbols) => t('name_symbols', { symbols }),
           },
+          customValidate,
         })}
-        customValidate={customValidate}
         transformErrors={(errors) => readableFormErrors(errors, formSchema)}
       >
         {/* Never disabled by a bad field: a click runs the form's checks and

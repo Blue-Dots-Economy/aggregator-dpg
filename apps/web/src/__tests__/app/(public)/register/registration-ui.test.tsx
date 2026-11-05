@@ -155,7 +155,10 @@ describe('person name check', () => {
     },
   } as const;
 
-  function renderWithName(name: string) {
+  function renderWithName(
+    name: string,
+    customValidate?: Parameters<typeof sharedRegistrationFormProps>[0]['customValidate'],
+  ) {
     const onSubmit = vi.fn();
     const setState = vi.fn();
     const props = sharedRegistrationFormProps({
@@ -168,6 +171,7 @@ describe('person name check', () => {
       onLocationResolved: () => {},
       validationErrorTitle: 'Please fix the highlighted fields',
       personName: { path: 'owner.name', message: (s) => `Remove: ${s}` },
+      customValidate,
     });
     render(
       <RjsfThemedForm schema={schema as never} {...props}>
@@ -185,6 +189,13 @@ describe('person name check', () => {
     expect(setState).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'error', detail: expect.stringContaining('Remove: ( )') }),
     );
+  });
+
+  it("runs the form's own check and the name check together", () => {
+    const own = vi.fn((_data: unknown, errors: Parameters<NonNullable<typeof own>>[1]) => errors);
+    renderWithName('Asha / QA', own as never);
+    expect(own).toHaveBeenCalled();
+    expect(screen.getByText('Remove: /')).toBeInTheDocument();
   });
 
   it('submits an ordinary name', () => {
