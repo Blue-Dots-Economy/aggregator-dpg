@@ -10,25 +10,16 @@
  */
 
 import { z } from 'zod';
-
-/**
- * One item in the probe response. Each field is optional because the writer
- * checks the one item it picks and ignores the rest.
- */
-const ParticipantItemSchema = z.object({
-  item_id: z.string().optional(),
-  item_network: z.string().optional(),
-  item_domain: z.string().optional(),
-  item_type: z.string().optional(),
-  lifecycle_status: z.string().nullish(),
-});
+import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { err, ok } from '@aggregator-dpg/shared-primitives/result';
+import type { Result } from '@aggregator-dpg/shared-primitives/result';
 
 /**
  * Response from `POST /api/v1/admin/participant` (onboard).
  *
  * Items are not checked here. Signals has already written the participant
  * when this reply arrives, and onboard is not safe to retry, so only the
- * item chosen for the request is checked, with {@link OnboardItemSchema}.
+ * item chosen for the request is checked, with {@link ChosenItemSchema}.
  */
 export const OnboardResponseSchema = z.object({
   user_id: z.string(),
@@ -38,23 +29,29 @@ export const OnboardResponseSchema = z.object({
   items: z.array(z.unknown()).optional(),
 });
 
-/** The fields used to pick the onboard item that matches the request. */
-export const OnboardItemIdentitySchema = z.object({
+/**
+ * The fields used to pick the item that matches a request. An item without
+ * them is never picked. `item_type` is compared by onboard only.
+ */
+export const ItemIdentitySchema = z.object({
   item_network: z.string(),
   item_domain: z.string(),
-  item_type: z.string(),
+  item_type: z.unknown(),
 });
 
-/** The onboard item chosen for the request. Other fields are ignored. */
-export const OnboardItemSchema = z.object({
+/** The onboard or probe item chosen for the request. Other fields are ignored. */
+export const ChosenItemSchema = z.object({
   item_id: z.string().min(1),
   lifecycle_status: z.string().nullish(),
 });
 
-/** Response from `GET /api/v1/admin/participant` (identity probe). */
+/**
+ * Response from `GET /api/v1/admin/participant` (identity probe). As with
+ * onboard, only the item for the probed domain is checked.
+ */
 export const ProbeUserResponseSchema = z.object({
   user_id: z.string().nullish(),
-  items: z.array(ParticipantItemSchema),
+  items: z.array(z.unknown()),
 });
 
 /**
@@ -161,4 +158,30 @@ export function responseIssues(error: z.ZodError, pathPrefix: string = ''): Resp
     path: (pathPrefix ? [pathPrefix, ...issue.path] : issue.path).join('.'),
     code: issue.code,
   }));
+}
+
+/**
+ * Reads a 2xx body as JSON.
+ *
+ * A parse failure is SIGNALSTACK_BAD_RESPONSE. The SyntaxError is not kept as
+ * the cause, because its message quotes part of the body, which can hold
+ * participant data or a token. Other read errors are rethrown.
+ *
+ * @param operation - Operation name used in the message, e.g. `signalstack onboard`.
+ * @throws The body read error when the body cannot be read at all.
+ */
+export async function readJsonBody(
+  res: Response,
+  operation: string,
+): Promise<Result<unknown, UpstreamError>> {
+  try {
+    return ok(await res.json());
+  } catch (e) {
+    if (!(e instanceof SyntaxError)) throw e;
+    return err(
+      new UpstreamError(`${operation} returned a body that is not JSON`, {
+        code: 'SIGNALSTACK_BAD_RESPONSE',
+      }),
+    );
+  }
 }

@@ -2718,3 +2718,99 @@ describe('HttpSignalStackWriter.exportDashboardCsv — error body', () => {
     expect(result.error.details).toEqual({ status: 400 });
   });
 });
+
+describe('HttpSignalStackWriter — non-JSON error bodies and probe items', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let writer: HttpSignalStackWriter;
+
+  /** A participant value that must never reach an error. */
+  const PARTICIPANT_PHONE = '+919800000004';
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    writer = new HttpSignalStackWriter({
+      baseUrl: 'http://signalstack.test',
+      apiKey: 'test-key',
+      actingOrgId: 'platform-org-1',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      maxRetries: 0,
+    });
+  });
+
+  const calls: Array<[string, (w: HttpSignalStackWriter) => Promise<unknown>]> = [
+    [
+      'onboard',
+      (w) =>
+        w.onboard({
+          actingOrgId: 'org-abc',
+          name: 'Asha',
+          phoneNumber: PARTICIPANT_PHONE,
+          channel: 'bulk',
+          source_id: 'src-1',
+          network: 'blue_dot',
+          domain: 'seeker',
+          item_type: 'profile_1.0',
+          profile: { name: 'Asha' },
+        }),
+    ],
+    ['aggregator upsert', (w) => w.upsertAggregator({ external_id: 'e', name: 'n', slug: 's' })],
+    ['dashboard', (w) => w.fetchDashboard({ actingOrgId: 'org-abc' })],
+    ['dashboard export', (w) => w.exportDashboardCsv({ actingOrgId: 'org-abc' })],
+    ['decrypt', (w) => w.fetchDecryptedProfiles({ actingOrgId: 'org-abc', itemIds: ['i'] })],
+    [
+      'probe',
+      (w) =>
+        w.probeUser({
+          actingOrgId: 'org-abc',
+          phoneNumber: PARTICIPANT_PHONE,
+          network: 'blue_dot',
+          domain: 'seeker',
+        }),
+    ],
+  ];
+
+  it.each(calls)(
+    '%s: a non-JSON error body is not copied into the message',
+    async (operation, call) => {
+      fetchMock.mockResolvedValueOnce(
+        errTextResponse(502, `<html>bad gateway for ${PARTICIPANT_PHONE}</html>`),
+      );
+
+      const result = (await call(writer)) as { success: boolean; error?: Error };
+
+      expect(result.success).toBe(false);
+      expect(result.error?.message).toBe(`signalstack ${operation} returned 502`);
+    },
+  );
+
+  it('probeUser ignores a malformed item that is not the one for the probed domain', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJsonResponse({
+        user_id: 'user-1',
+        compliance: [],
+        items: [
+          { item_id: 9, item_domain: null, item_state: 'x' },
+          {
+            item_id: 'item-ok',
+            item_network: 'blue_dot',
+            item_domain: 'seeker',
+            lifecycle_status: 'draft',
+          },
+        ],
+      }),
+    );
+
+    const result = await writer.probeUser({
+      actingOrgId: 'org-abc',
+      email: 'asha@example.com',
+      network: 'blue_dot',
+      domain: 'seeker',
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.lifecycle_summary).toEqual({
+      primary_item: { item_id: 'item-ok', lifecycle_status: 'draft' },
+    });
+  });
+});

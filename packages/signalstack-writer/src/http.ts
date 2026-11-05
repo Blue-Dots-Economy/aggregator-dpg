@@ -43,11 +43,12 @@ import {
 import {
   DashboardResponseSchema,
   DecryptProfilesResponseSchema,
-  OnboardItemIdentitySchema,
-  OnboardItemSchema,
+  ChosenItemSchema,
+  ItemIdentitySchema,
   OnboardResponseSchema,
   ProbeUserResponseSchema,
   UpsertAggregatorResponseSchema,
+  readJsonBody,
   responseIssues,
 } from './signals-responses.js';
 import { isTimeout } from './thrown.js';
@@ -100,9 +101,6 @@ const DEFAULT_MAX_RETRIES = 2;
 
 /** Default first backoff in ms; it doubles per retry, so the default waits 200 + 400 ms. */
 const DEFAULT_RETRY_BASE_MS = 200;
-
-/** Longest non-JSON error body kept in a message, so an HTML error page does not fill the log line. */
-const MAX_UPSTREAM_TEXT_CHARS = 500;
 
 /** Longest status filter kept in the export filename; longer than any Signals status. */
 const MAX_FILENAME_STATUS_CHARS = 32;
@@ -318,7 +316,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      const json = await readJsonBody(res, 'onboard');
+      const json = await readJsonBody(res, 'signalstack onboard');
       if (!json.success) return json;
       const parsed = OnboardResponseSchema.safeParse(json.value);
       if (!parsed.success) return err(badResponseError('onboard', parsed.error));
@@ -353,7 +351,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       // `profile_item_id` is the item matching network/domain/type, else the
       // first item. Only that item is checked; see OnboardResponseSchema.
       const matchedIndex = items.findIndex((it) => {
-        const identity = OnboardItemIdentitySchema.safeParse(it);
+        const identity = ItemIdentitySchema.safeParse(it);
         return (
           identity.success &&
           identity.data.item_network === input.network &&
@@ -370,7 +368,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
           }),
         );
       }
-      const chosen = OnboardItemSchema.safeParse(items[chosenIndex]);
+      const chosen = ChosenItemSchema.safeParse(items[chosenIndex]);
       if (!chosen.success) {
         return err(badResponseError('onboard', chosen.error, `items.${chosenIndex}`));
       }
@@ -471,7 +469,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         }),
       );
     }
-    const json = await readJsonBody(res, 'aggregator upsert');
+    const json = await readJsonBody(res, 'signalstack aggregator upsert');
     if (!json.success) return json;
     const parsed = UpsertAggregatorResponseSchema.safeParse(json.value);
     if (!parsed.success) return err(badResponseError('aggregator upsert', parsed.error));
@@ -542,7 +540,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      const json = await readJsonBody(res, 'dashboard');
+      const json = await readJsonBody(res, 'signalstack dashboard');
       if (!json.success) return json;
       const parsed = DashboardResponseSchema.safeParse(json.value);
       if (!parsed.success) return err(badResponseError('dashboard', parsed.error));
@@ -674,7 +672,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         );
       }
 
-      const json = await readJsonBody(res, 'decrypt');
+      const json = await readJsonBody(res, 'signalstack decrypt');
       if (!json.success) return json;
       const parsed = DecryptProfilesResponseSchema.safeParse(json.value);
       if (!parsed.success) return err(badResponseError('decrypt', parsed.error));
@@ -774,7 +772,7 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
 
       // `items` holds only this aggregator's items, across all domains. It is
       // required, so a missing list fails instead of reading as owned elsewhere.
-      const json = await readJsonBody(res, 'probe');
+      const json = await readJsonBody(res, 'signalstack probe');
       if (!json.success) return json;
       const parsed = ProbeUserResponseSchema.safeParse(json.value);
       if (!parsed.success) return err(badResponseError('probe', parsed.error));
@@ -799,13 +797,18 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
       }
 
       // The primary item must match the probed network and domain, since
-      // `items` can include other domains.
-      const domainItem = items.find(
-        (it) => it.item_domain === input.domain && it.item_network === input.network,
-      );
+      // `items` can include other domains. Only that item is checked.
+      const domainIndex = items.findIndex((it) => {
+        const identity = ItemIdentitySchema.safeParse(it);
+        return (
+          identity.success &&
+          identity.data.item_domain === input.domain &&
+          identity.data.item_network === input.network
+        );
+      });
 
       // Own user with no item in this domain: no lifecycle summary.
-      if (!domainItem) {
+      if (domainIndex === -1) {
         return ok({
           user_exists: true,
           owned_elsewhere: false,
@@ -813,21 +816,18 @@ export class HttpSignalStackWriter extends SignalStackWriterBase {
         });
       }
 
-      const itemId = domainItem.item_id;
-      if (!itemId) {
-        return err(
-          new UpstreamError('signalstack probe primary item missing item_id', {
-            code: 'SIGNALSTACK_BAD_RESPONSE',
-          }),
-        );
+      const domainItem = ChosenItemSchema.safeParse(items[domainIndex]);
+      if (!domainItem.success) {
+        return err(badResponseError('probe', domainItem.error, `items.${domainIndex}`));
       }
+      const itemId = domainItem.data.item_id;
 
       // lifecycle_status mapping:
       //   - absent/empty      → 'live' (older signals builds omit it).
       //   - draft/live/paused → used as-is.
       //   - retired           → no summary; not resumable.
       //   - anything else     → SIGNALSTACK_BAD_RESPONSE.
-      const rawLifecycle = domainItem.lifecycle_status;
+      const rawLifecycle = domainItem.data.lifecycle_status;
       if (rawLifecycle === 'retired') {
         return ok({
           user_exists: true,
@@ -954,31 +954,6 @@ async function safeReadText(res: Response): Promise<string> {
 }
 
 /**
- * Reads a 2xx body as JSON.
- *
- * A parse failure is SIGNALSTACK_BAD_RESPONSE. The SyntaxError is not kept as
- * the cause, because its message quotes part of the body, which can hold
- * participant data. Other read errors are rethrown as transport failures.
- *
- * @throws The body read error when the body cannot be read at all.
- */
-async function readJsonBody(
-  res: Response,
-  operation: string,
-): Promise<Result<unknown, UpstreamError>> {
-  try {
-    return ok(await res.json());
-  } catch (e) {
-    if (!(e instanceof SyntaxError)) throw e;
-    return err(
-      new UpstreamError(`signalstack ${operation} returned a body that is not JSON`, {
-        code: 'SIGNALSTACK_BAD_RESPONSE',
-      }),
-    );
-  }
-}
-
-/**
  * Builds the error for a 2xx response that does not match its schema.
  *
  * The message and details hold field paths and issue codes only. The
@@ -1059,19 +1034,14 @@ function extractUpstreamMessageText(bodyText: string): string | null {
  *   { "statusCode": 400, "error": "Bad Request", "message": "body/x Invalid …" }
  *   { "error": { "message": "…" } }
  *
- * Returns `"<code>: <message>"` when both exist. A non-JSON body is returned
- * trimmed to {@link MAX_UPSTREAM_TEXT_CHARS} characters. Returns `null` when there is no usable text.
+ * Returns `"<code>: <message>"` when both exist. Returns `null` for a
+ * non-JSON body, such as a proxy error page: its text can echo participant
+ * data, and the message reaches operator logs and errors.csv.
  */
 function extractUpstreamMessage(bodyText: string): string | null {
   if (!bodyText) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(bodyText);
-  } catch {
-    const trimmed = bodyText.trim();
-    return trimmed.length > 0 ? trimmed.slice(0, MAX_UPSTREAM_TEXT_CHARS) : null;
-  }
-  if (!isObject(parsed)) return null;
+  const parsed = parseJsonObject(bodyText);
+  if (!parsed) return null;
   const errField = parsed['error'];
   const errCode =
     typeof errField === 'string'

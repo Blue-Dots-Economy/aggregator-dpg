@@ -12,7 +12,7 @@ import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import { SignalStackTokenProviderBase } from './interface.js';
-import { responseIssues } from './signals-responses.js';
+import { readJsonBody, responseIssues } from './signals-responses.js';
 import { isTimeout } from './thrown.js';
 
 const REFRESH_LEAD_MS = 30_000;
@@ -128,7 +128,9 @@ export class KeycloakClientCredentialsTokenProvider extends SignalStackTokenProv
         );
       }
 
-      const parsed = TokenResponseSchema.safeParse(await res.json());
+      const json = await readJsonBody(res, 'signalstack token grant');
+      if (!json.success) return json;
+      const parsed = TokenResponseSchema.safeParse(json.value);
       if (!parsed.success) {
         // Paths and codes only: the body can carry the access token.
         return err(
