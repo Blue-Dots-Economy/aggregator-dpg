@@ -42,15 +42,10 @@ vi.mock('@/components/console/ConsoleUi', () => ({
 vi.mock('@/components/console/OrgsTable', () => ({ OrgsTable: () => null }));
 vi.mock('@/components/console/NetworkOrgsView', () => ({ NetworkOrgsView: () => null }));
 vi.mock('@/components/console/ChildOrgsTree', () => ({ ChildOrgsTree: () => null }));
-vi.mock('@/components/console/KnownAsValuesEditor', () => ({
-  KnownAsValuesEditor: ({ orgId }: { orgId: string }) => (
-    <div data-testid="known-as-values-editor" data-org-id={orgId} />
-  ),
-}));
 vi.mock('@/components/console/HierarchySettings', () => ({
-  HierarchySettings: ({ hierarchy }: { hierarchy: OrgHierarchyResponse }) => (
-    <div data-testid="hierarchy-settings">
-      {(hierarchy.network.known_as_values ?? []).map((v) => v.name).join(',')}
+  HierarchySettings: ({ orgId, values }: { orgId: string; values: KnownAsValues }) => (
+    <div data-testid="hierarchy-settings" data-org-id={orgId}>
+      {values.map((v) => v.name).join(',')}
     </div>
   ),
 }));
@@ -156,13 +151,13 @@ describe('console orgs page — owner view', () => {
   it('shows the "known as" values editor for an active organisation the viewer owns', async () => {
     mockOwner();
     await showOwner();
-    expect(screen.getByTestId('known-as-values-editor')).toHaveAttribute('data-org-id', 'a');
+    expect(screen.getByTestId('hierarchy-settings')).toHaveAttribute('data-org-id', 'a');
   });
 
   it('hides the editor when the organisation cannot have child organisations', async () => {
     mockOwner({ values: null });
     await showOwner();
-    expect(screen.queryByTestId('known-as-values-editor')).toBeNull();
+    expect(screen.queryByTestId('hierarchy-settings')).toBeNull();
   });
 
   it('hides the editor from a member and on a pending organisation, without reading the values', async () => {
@@ -170,7 +165,7 @@ describe('console orgs page — owner view', () => {
     await showOwner();
     mockOwner({ status: 'pending' });
     await showOwner();
-    expect(screen.queryByTestId('known-as-values-editor')).toBeNull();
+    expect(screen.queryByTestId('hierarchy-settings')).toBeNull();
     expect(consoleRead).not.toHaveBeenCalled();
   });
 });

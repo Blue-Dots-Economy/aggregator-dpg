@@ -2,16 +2,17 @@
  * Organisations page.
  *
  * An org owner sees the organisations directly under its own awaiting its
- * decision (approved or rejected in place), then its own organisations, each
- * with the organisations directly under it (read-only); names open each page.
+ * decision (approved or rejected in place), then each of its organisations
+ * with the ones directly under it and, closed by default, its hierarchy
+ * settings.
  *
- * The network admin sees the top-level organisations: those awaiting
- * approval (approved or rejected in place), status tiles, the organisations
- * as a tree under the network or as a searchable list (each name opens the
- * organisation's page), and, closed by default, the hierarchy settings.
- * `?view=list` and `?status=` open the list with a filter.
+ * The network admin sees the organisations directly under the network: those
+ * awaiting approval, status tiles, a searchable list (each name opens the
+ * organisation's page) and, closed by default, the hierarchy settings.
+ * `?status=` opens the list with a filter.
  */
 
+import { Fragment } from 'react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
@@ -28,10 +29,9 @@ import { orgsBelow, topmostOwned } from '@/lib/console-org-options';
 import { OrgsTable } from '@/components/console/OrgsTable';
 import { HierarchySettings } from '@/components/console/HierarchySettings';
 import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
-import { KnownAsValuesEditor } from '@/components/console/KnownAsValuesEditor';
 import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
 import { ORG_FILTERS, type OrgFilter } from '@/lib/org-filters';
-import { ConsoleCollapsible, ConsoleSection, EmptyState } from '@/components/console/ConsoleUi';
+import { ConsoleSection, EmptyState } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
 import { I } from '@/icons';
@@ -40,11 +40,10 @@ type OrgRow = OrgSearchResponse['orgs'][number];
 
 export default async function ConsoleOrgsPage({
   searchParams,
-}: Readonly<{ searchParams: Promise<{ view?: string; status?: string }> }>) {
+}: Readonly<{ searchParams: Promise<{ status?: string }> }>) {
   const t = await getTranslations('console');
   const params = await searchParams;
   const initialFilter: OrgFilter = ORG_FILTERS.find((f) => f === params.status) ?? 'all';
-  const initialView = params.view === 'list' || params.status ? 'list' : 'tree';
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   if (!actor.me.is_network_admin) {
@@ -71,12 +70,13 @@ export default async function ConsoleOrgsPage({
           more={network.more}
           totalOrgs={hierarchy.total_orgs}
           maxOrgs={hierarchy.limits.max_total_orgs}
-          initialView={initialView}
           initialFilter={initialFilter}
         />
-        <ConsoleCollapsible title={t('orgs.hierarchy')}>
-          <HierarchySettings hierarchy={hierarchy} />
-        </ConsoleCollapsible>
+        <HierarchySettings
+          orgId={hierarchy.network.id}
+          orgName={hierarchy.network.name}
+          values={hierarchy.network.known_as_values ?? []}
+        />
       </div>
     </>
   );
@@ -110,27 +110,34 @@ async function OwnerOrgs({
       <div className="flex flex-col gap-6">
         {pendingReview(pending, t)}
         {roots.map((root) => (
-          <ConsoleSection
-            key={root.id}
-            title={root.name}
-            action={
-              <Link className={buttonClass('soft')} href={`/console/orgs/${root.id}`}>
-                {t('orgs.manage')}
-                <I.arrowR size={15} />
-              </Link>
-            }
-          >
-            <ChildOrgsTree
-              rootId={root.id}
-              rootName={root.name}
-              rootKnownAs={root.known_as_name ?? root.known_as}
-              rootTag={t('orgs.yours')}
-              orgs={orgsBelow(root.id, orgs)}
-              linkRows
-              more={false}
-            />
-            {knownAsSection(root.id, valuesById.get(root.id) ?? null, t)}
-          </ConsoleSection>
+          <Fragment key={root.id}>
+            <ConsoleSection
+              title={root.name}
+              action={
+                <Link className={buttonClass('soft')} href={`/console/orgs/${root.id}`}>
+                  {t('orgs.manage')}
+                  <I.arrowR size={15} />
+                </Link>
+              }
+            >
+              <ChildOrgsTree
+                rootId={root.id}
+                rootName={root.name}
+                rootKnownAs={root.known_as_name ?? root.known_as}
+                rootTag={t('orgs.yours')}
+                orgs={orgsBelow(root.id, orgs)}
+                linkRows
+                more={false}
+              />
+            </ConsoleSection>
+            {valuesById.get(root.id) ? (
+              <HierarchySettings
+                orgId={root.id}
+                orgName={root.name}
+                values={valuesById.get(root.id) ?? []}
+              />
+            ) : null}
+          </Fragment>
         ))}
       </div>
     </>
@@ -154,28 +161,6 @@ async function knownAsValuesToEdit(
     `/v1/org/read/${encodeURIComponent(root.id)}?fields=known_as_values`,
   );
   return read.org.known_as_values ?? null;
-}
-
-/**
- * The editor for an owned organisation's "known as" values; nothing when the
- * viewer cannot edit them.
- *
- * @param orgId - The organisation.
- * @param values - Its values, or null.
- * @param t - The console translator.
- */
-function knownAsSection(
-  orgId: string,
-  values: KnownAsValues | null,
-  t: Awaited<ReturnType<typeof getTranslations<'console'>>>,
-) {
-  if (values === null) return null;
-  return (
-    <section className="mt-6 border-t border-(--bd-border-soft) pt-5">
-      <h3 className="mb-2 text-[13px] font-bold text-ink-900">{t('org.known_as_values_title')}</h3>
-      <KnownAsValuesEditor orgId={orgId} values={values} />
-    </section>
-  );
 }
 
 /**
