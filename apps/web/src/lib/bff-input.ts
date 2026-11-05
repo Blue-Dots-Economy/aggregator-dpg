@@ -30,6 +30,15 @@ export function isPostgresUuid(id: string): boolean {
 }
 
 /**
+ * Builds the 404 response for a malformed id, matching an out-of-reach id upstream.
+ *
+ * @returns A 404 JSON response with code `NOT_FOUND`.
+ */
+export function invalidIdResponse(): NextResponse {
+  return NextResponse.json({ error: { code: 'NOT_FOUND', title: 'Not found' } }, { status: 404 });
+}
+
+/**
  * Builds the 400 response for a query the route's schema rejects.
  *
  * The body names no field and echoes no value.
@@ -52,9 +61,9 @@ export type QueryResult = { ok: true; search: string } | { ok: false; response: 
 /**
  * Checks a request's query against a schema and rebuilds the search string.
  *
- * Only the schema's keys are read, first value of each. They are forwarded
- * with their original text, so the API parses the same input it would get
- * directly. Other keys are dropped.
+ * Only the schema's keys are read, first value of each. Each value is
+ * forwarded as the same decoded string, re-encoded, so the API parses the
+ * same value it would get directly. Other keys are dropped.
  *
  * @param params - The request's search params.
  * @param schema - The query schema; it should match the API route's schema.

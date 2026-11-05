@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { invalidQueryResponse, isPostgresUuid, parseQuery } from '@/lib/bff-input';
+import {
+  invalidIdResponse,
+  invalidQueryResponse,
+  isPostgresUuid,
+  parseQuery,
+} from '@/lib/bff-input';
 
 describe('isPostgresUuid', () => {
   it('accepts the canonical form in either case', () => {
@@ -86,5 +91,13 @@ describe('invalidQueryResponse', () => {
     await expect(res.json()).resolves.toEqual({
       error: { code: 'SCHEMA_VALIDATION', title: 'Invalid query parameters' },
     });
+  });
+});
+
+describe('invalidIdResponse', () => {
+  it('is a 404 NOT_FOUND envelope', async () => {
+    const res = invalidIdResponse();
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({ error: { code: 'NOT_FOUND', title: 'Not found' } });
   });
 });

@@ -9,10 +9,12 @@
  * @module apps/web/src/lib/console-proxy
  */
 
-import { type NextRequest, NextResponse } from 'next/server';
+import { type NextRequest, type NextResponse } from 'next/server';
 import { callApi } from './upstream-client';
 import { passthrough, proxyFailureResponse, readJsonBody } from './bff-proxy';
 import { rejectCrossSite } from './same-origin';
+
+export { invalidIdResponse } from './bff-input';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -68,13 +70,4 @@ export async function consoleMutation(
   } catch (err) {
     return proxyFailureResponse(err, opts.service);
   }
-}
-
-/**
- * Builds the 404 response for a malformed id, matching an out-of-reach id upstream.
- *
- * @returns A 404 JSON response.
- */
-export function invalidIdResponse(): NextResponse {
-  return NextResponse.json({ error: { code: 'NOT_FOUND', title: 'Not found' } }, { status: 404 });
 }

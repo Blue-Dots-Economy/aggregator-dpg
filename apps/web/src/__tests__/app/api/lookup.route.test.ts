@@ -153,7 +153,12 @@ describe('GET /api/[org]/[slug]/lookup query check', () => {
     expect(res.status).toBe(400);
     const body: unknown = await res.json();
     expect(body).toMatchObject({ error: { code: 'SCHEMA_VALIDATION' } });
-    expect(JSON.stringify(body)).not.toContain('not-an-email');
+    const text = JSON.stringify(body);
+    expect(text).not.toContain('not-an-email');
+    for (const field of ['email', 'phone_number', 'network', 'domain']) {
+      expect(text).not.toContain(field);
+    }
+    expect(res.headers.get('x-request-id')).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

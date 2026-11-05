@@ -8,8 +8,7 @@
 import { type NextRequest, type NextResponse } from 'next/server';
 import { callApi } from '@/lib/upstream-client';
 import { passthrough, proxyFailureResponse } from '@/lib/bff-proxy';
-import { isPostgresUuid } from '@/lib/bff-input';
-import { invalidIdResponse } from '@/lib/console-proxy';
+import { invalidIdResponse, isPostgresUuid } from '@/lib/bff-input';
 
 export const runtime = 'nodejs';
 

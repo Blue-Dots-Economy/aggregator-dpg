@@ -75,7 +75,7 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Ne
       envelope(
         'SCHEMA_VALIDATION',
         'Invalid query parameters',
-        'Give network, domain and an email or phone_number.',
+        'The lookup query was not accepted.',
         reqId,
       ),
       reqId,

@@ -13,9 +13,10 @@ Guidance specific to working inside `apps/web`. Read the root `CLAUDE.md` first 
 
 Route Handlers that forward a path id or a query use `lib/bff-input.ts`. Bodies are not checked here; the API validates them.
 
-- **Path ids.** An id the API looks up in a `uuid` column must pass `isPostgresUuid` (every text form Postgres reads, braces and missing hyphens included), else the route returns `invalidIdResponse()` (404 `NOT_FOUND`, the console proxy's shape) without calling the API. The console routes use the stricter `isUuid` for their own ids.
-- **Query.** `parseQuery(searchParams, schema)` checks the query with a Zod schema that copies the API route's `querystring` schema, and returns either a rebuilt search string or a 400 `SCHEMA_VALIDATION` response (no field names or values in it). Only the schema's keys are forwarded, first value of each, with their original text. Never forward `req.nextUrl.search` as-is.
+- **Path ids.** An id the API looks up in a `uuid` column must pass `isPostgresUuid` (every text form Postgres reads, braces and missing hyphens included), else the route returns `invalidIdResponse()` (404 `NOT_FOUND`, also used by the console proxy) without calling the API. The console routes use the stricter `isUuid` for their own ids.
+- **Query.** `parseQuery(searchParams, schema)` checks the query with a Zod schema that copies the API route's `querystring` schema, and returns either a rebuilt search string or a 400 `SCHEMA_VALIDATION` response (no field names or values in it). Only the schema's keys are forwarded, first value of each, as the same decoded value re-encoded. Never forward `req.nextUrl.search` as-is.
 - **Match the API, never stricter.** Copy the rules from the API route (`apps/api/src/routes/**`) and drop its defaults; a value coerced upstream (such as the dashboard's `refresh`) stays a plain string here so it reaches the API unchanged. A rule stricter than the API rejects a request that worked.
+- **The query schemas are copies of the API's.** Change them together with the API route's schema; sharing one schema between the API and the web is a planned follow-up.
 
 ## Session shape and where `auth-context` actually comes from
 
