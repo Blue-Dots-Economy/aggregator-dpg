@@ -14,6 +14,7 @@
  */
 
 import type pg from 'pg';
+import { errorField } from '../db/pg-error.js';
 
 /** One standalone, idempotent, DB-only data migration. */
 export interface DataStep {
@@ -79,7 +80,7 @@ export async function runDataSteps(
     return 0;
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
-    const code = (err as { code?: string }).code;
+    const code = errorField(err, 'code');
     const codeNote = code ? ` (${code})` : '';
     out(`data: FAILED — rolled back${codeNote}`);
     return 1;

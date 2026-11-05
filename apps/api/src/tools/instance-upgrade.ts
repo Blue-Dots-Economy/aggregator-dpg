@@ -33,12 +33,8 @@ import {
   shippedFileHashes,
   type Queryable,
 } from '../db/migrate-core.js';
-import {
-  errorField,
-  upgradeLevel,
-  type UpgradeLevel,
-  type UpgradeState,
-} from './instance-upgrade-logic.js';
+import { upgradeLevel, type UpgradeLevel, type UpgradeState } from './instance-upgrade-logic.js';
+import { errorField } from '../db/pg-error.js';
 import {
   canActAsOwner,
   isFailing,
