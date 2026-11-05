@@ -632,6 +632,12 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     expect(h.jobStatuses).toEqual(['processing']); // never rolled up to terminal
   });
 
+  it('throws when job.content has a field of the wrong type', async () => {
+    const h = harness(job({ content: { agent_id: 'agent-1', variables: 'role' } }));
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow(/variables/);
+    expect(h.jobStatuses).toEqual(['processing']);
+  });
+
   it('flattens item_state into string variables, dropping null/undefined entries', async () => {
     const h = harness(
       job({

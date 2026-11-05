@@ -26,10 +26,7 @@ export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
     const loader = new FileNetworkConfigLoader({ configPath, cacheDir });
     const result = await loader.load();
     if (!result.success) {
-      const message =
-        'error' in result && typeof result.error === 'object' && result.error
-          ? ((result.error as { message?: string }).message ?? 'unknown error')
-          : 'unknown error';
+      const message = loadErrorMessage(result.error);
       logger.error({
         operation: 'network-config.load',
         status: 'failure',
@@ -60,4 +57,18 @@ export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
 /** Test helper. */
 export function _setNetworkConfig(cfg: ResolvedNetworkConfig | null): void {
   cached = cfg;
+}
+
+/**
+ * Message of a failed load, for the log line and the thrown error.
+ *
+ * @returns The error's `message` string, or `'unknown error'` when it has none.
+ */
+function loadErrorMessage(error: unknown): string {
+  return typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof error.message === 'string'
+    ? error.message
+    : 'unknown error';
 }

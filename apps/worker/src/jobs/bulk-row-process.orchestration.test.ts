@@ -155,7 +155,7 @@ class FailingSignalStackWriter extends InMemorySignalStackWriter {
     /** The bare upstream sentence the real writer puts on `details.signalsMessage`. */
     private readonly signalsMessage?: string,
     /** Signals' own error code and per-field map, as the real writer forwards them. */
-    private readonly upstream: { code?: string; fields?: Record<string, string> } = {},
+    private readonly upstream: { code?: string; fields?: Record<string, unknown> } = {},
   ) {
     super();
   }
@@ -441,6 +441,20 @@ describe('processBulkRow — signalstack push outcomes', () => {
       'mobile_number: Enter a 10-digit mobile number',
       'gender: must be one of: Male, Female',
     ]);
+  });
+
+  it("falls back to Signals' sentence when the per-field map holds non-string messages", async () => {
+    _setSignalStackWriter(
+      new FailingSignalStackWriter(
+        'SIGNALSTACK_BAD_REQUEST',
+        'signalstack onboard returned 400: INVALID_ITEM_STATE: …',
+        'Invalid item_state: gender: must be one of: Male, Female',
+        { code: 'INVALID_ITEM_STATE', fields: { gender: { enum: ['Male', 'Female'] } } },
+      ),
+    );
+    const result = await processBulkRow(makeJob());
+    expect(result.category).toBe('validation');
+    expect(result.reasons).toEqual(['Invalid item_state: gender: must be one of: Male, Female']);
   });
 
   it("uses Signals' sentence for a duplicate, not the transport prefix", async () => {
