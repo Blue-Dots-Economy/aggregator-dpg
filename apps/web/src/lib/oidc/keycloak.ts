@@ -20,6 +20,7 @@ import {
   type TokenSet,
 } from './interface';
 import { logger } from '../logger';
+import { decodeJwtClaims } from '../jwt';
 
 export interface KeycloakAdapterOptions {
   issuerUrl: string;
@@ -220,20 +221,22 @@ export const oidcGenerators = {
   codeChallenge: (verifier: string) => generators.codeChallenge(verifier),
 };
 
+/**
+ * Refresh-token lifetime assumed when the token carries no readable `exp`.
+ * Matches the realm's `ssoSessionIdleTimeout` (1800 s).
+ */
+const FALLBACK_REFRESH_TTL_MS = 30 * 60_000;
+
+/**
+ * Reads the refresh token's expiry in epoch ms.
+ *
+ * Reads `exp` without verifying the signature; the token came straight from
+ * the Keycloak token endpoint.
+ */
 function extractRefreshExp(refreshToken: string): number {
-  // Reads `exp` without verifying the signature; the token came straight
-  // from the Keycloak token endpoint.
-  const parts = refreshToken.split('.');
-  if (parts.length !== 3) return Date.now() + 30 * 60_000;
-  try {
-    const payload = JSON.parse(Buffer.from(parts[1] ?? '', 'base64url').toString('utf8')) as {
-      exp?: number;
-    };
-    if (typeof payload.exp === 'number') return payload.exp * 1000;
-  } catch {
-    /* fall through */
-  }
-  return Date.now() + 30 * 60_000;
+  const exp =
+    refreshToken.split('.').length === 3 ? decodeJwtClaims(refreshToken)?.['exp'] : undefined;
+  return typeof exp === 'number' ? exp * 1000 : Date.now() + FALLBACK_REFRESH_TTL_MS;
 }
 
 function mapClaims(claims: Record<string, unknown>): IdClaims {

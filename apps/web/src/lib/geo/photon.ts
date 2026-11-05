@@ -5,6 +5,7 @@
  *
  * @module apps/web/lib/geo/photon
  */
+import { z } from 'zod';
 import type { GeoComponents, GeoProvider, GeoSuggestion } from './types';
 
 const DEFAULT_PHOTON_URL = 'https://photon.komoot.io';
@@ -17,29 +18,51 @@ const DEFAULT_PHOTON_URL = 'https://photon.komoot.io';
  */
 const REQUEST_TIMEOUT_MS = 4_000;
 
-interface PhotonFeature {
-  geometry?: { coordinates?: [number, number] }; // [lng, lat]
-  properties?: {
-    name?: string;
-    city?: string;
-    state?: string;
-    postcode?: string;
-    country?: string;
-    /** ISO 3166-1 alpha-2, e.g. `IN`. */
-    countrycode?: string;
-    /** Feature granularity, e.g. `city`, `district`, `state`, `country`. */
-    type?: string;
-  };
-}
+/** A text property; any other type reads as absent. */
+const PhotonText = z.string().optional().catch(undefined);
+
+/** One Photon GeoJSON feature. A part of the wrong type reads as absent. */
+const PhotonFeatureSchema = z.object({
+  /** `[lng, lat]`. */
+  geometry: z
+    .object({ coordinates: z.tuple([z.number(), z.number()]) })
+    .optional()
+    .catch(undefined),
+  properties: z
+    .object({
+      name: PhotonText,
+      city: PhotonText,
+      state: PhotonText,
+      postcode: PhotonText,
+      country: PhotonText,
+      /** ISO 3166-1 alpha-2, e.g. `IN`. */
+      countrycode: PhotonText,
+      /** Feature granularity, e.g. `city`, `district`, `state`, `country`. */
+      type: PhotonText,
+    })
+    .optional()
+    .catch(undefined),
+});
+
+type PhotonFeature = z.infer<typeof PhotonFeatureSchema>;
+
+const PhotonResponseSchema = z.object({ features: z.array(z.unknown()) });
 
 /**
- * Combines the caller's cancellation signal with a request deadline.
+ * Reads the features of a Photon response, skipping any that is not an object.
  *
- * Does not use `AbortSignal.any`, which some target browsers lack.
- *
- * @param signal - The caller's cancel signal, if any.
- * @returns The combined signal, and `clear` to call once the request settles.
+ * @param json - The parsed response.
+ * @returns The features; empty when the response has no feature list.
  */
+function readPhotonFeatures(json: unknown): PhotonFeature[] {
+  const parsed = PhotonResponseSchema.safeParse(json);
+  if (!parsed.success) return [];
+  return parsed.data.features.flatMap((f) => {
+    const feature = PhotonFeatureSchema.safeParse(f);
+    return feature.success ? [feature.data] : [];
+  });
+}
+
 function withDeadline(signal?: AbortSignal): { signal: AbortSignal; clear: () => void } {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -78,13 +101,10 @@ function isInCountry(f: PhotonFeature, country: string): boolean {
  * @returns The suggestions.
  */
 export function parsePhotonFeatures(json: unknown): GeoSuggestion[] {
-  const features = (json as { features?: PhotonFeature[] })?.features ?? [];
   const out: GeoSuggestion[] = [];
-  for (const f of features) {
-    const coords = f.geometry?.coordinates;
-    if (coords?.length !== 2) continue;
-    const [lng, lat] = coords;
-    if (typeof lat !== 'number' || typeof lng !== 'number') continue;
+  for (const f of readPhotonFeatures(json)) {
+    if (!f.geometry) continue;
+    const [lng, lat] = f.geometry.coordinates;
     const p = f.properties ?? {};
     const label = [p.name, p.city, p.state, p.postcode, p.country]
       .filter((s): s is string => Boolean(s?.trim()))
@@ -123,10 +143,10 @@ export function createPhotonProvider(baseUrl = DEFAULT_PHOTON_URL, country?: str
         const url = country ? `${base}&countrycode=${country}` : base;
         const res = await fetch(url, { signal: deadline.signal });
         if (!res.ok) return [];
-        const json = (await res.json()) as { features?: PhotonFeature[] };
+        const json: unknown = await res.json();
         if (!country) return parsePhotonFeatures(json);
         return parsePhotonFeatures({
-          features: (json.features ?? []).filter((f) => isInCountry(f, country)),
+          features: readPhotonFeatures(json).filter((f) => isInCountry(f, country)),
         });
       } catch {
         return [];
