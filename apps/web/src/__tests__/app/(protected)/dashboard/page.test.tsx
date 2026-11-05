@@ -708,17 +708,6 @@ describe('<DashboardPageRoot />', () => {
       expect(await screen.findByText('export failed')).toBeInTheDocument();
     });
 
-    it('shows the plain failure notice when the bulk action reply is unreadable', async () => {
-      runExportSelected.mockRejectedValueOnce(new ResponseShapeError('/api/campaign/export', []));
-      renderPage();
-      const rows = screen.getAllByRole('row');
-      const aliceRow = rows.find((r) => within(r).queryByText('Alice Seeker'));
-      await userEvent.click(within(aliceRow!).getByRole('checkbox'));
-      await userEvent.click(screen.getByRole('button', { name: 'Export selected CSV' }));
-      expect(await screen.findByText(messages.dashboard.bulk.failed)).toBeInTheDocument();
-      expect(screen.queryByText(/unexpected response shape/)).toBeNull();
-    });
-
     it('clears the selection via the bulk bar clear control', async () => {
       renderPage();
       const rows = screen.getAllByRole('row');

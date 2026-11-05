@@ -714,7 +714,7 @@ function BulkActionBar({
     } catch (err) {
       setNotice({
         kind: 'error',
-        text: failureText(err, t('bulk.failed'), t('bulk.failed')),
+        text: err instanceof Error ? err.message : t('bulk.failed'),
       });
     } finally {
       setRunningId(null);
