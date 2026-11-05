@@ -4,7 +4,7 @@
  * `_setRbacCatalogue`.
  */
 
-import type { RbacCatalogueBase } from './interface.js';
+import { RbacCatalogueBase } from './interface.js';
 import { PostgresRbacCatalogue } from './postgres.js';
 import { TEST_RBAC_CATALOGUE_KEY } from './test-hook.js';
 
@@ -18,8 +18,8 @@ let instance: RbacCatalogueBase | null = null;
  */
 export function getRbacCatalogue(): RbacCatalogueBase {
   if (instance) return instance;
-  const testStore = (globalThis as Record<string, unknown>)[TEST_RBAC_CATALOGUE_KEY];
-  if (testStore) return testStore as RbacCatalogueBase;
+  const testStore: unknown = Reflect.get(globalThis, TEST_RBAC_CATALOGUE_KEY);
+  if (testStore instanceof RbacCatalogueBase) return testStore;
   instance = new PostgresRbacCatalogue();
   return instance;
 }

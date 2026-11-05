@@ -33,7 +33,6 @@ import {
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { organisations, orgKnownAs, contact, userIdentities, users } from '../../db/schema.js';
-import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import {
   SYSTEM_KNOWN_AS,
   knownAsChoices,
@@ -919,7 +918,7 @@ function toDomain(row: JoinedRow): Organisation {
     updatedBy: o.updatedBy,
     rejectedAt: o.rejectedAt,
     isDefault,
-    locations: (o.locations ?? []) as BecknLocation[],
+    locations: o.locations,
     legalName: o.legalName,
     knownAs: o.knownAs,
     knownAsName,
@@ -1182,8 +1181,11 @@ function classifyWriteError(
   return err('DB_UNAVAILABLE', code ? `database error ${code}` : toError(e).name);
 }
 
-function err(code: OrgStoreError['code'], message: string): OrgStoreError {
-  return { code, message } as OrgStoreError;
+/** Error codes that carry only a message. `KNOWN_AS_UNKNOWN_KEY` also carries an `index`. */
+type PlainErrorCode = Exclude<OrgStoreError['code'], 'KNOWN_AS_UNKNOWN_KEY'>;
+
+function err(code: PlainErrorCode, message: string): OrgStoreError {
+  return { code, message };
 }
 
 /** Logs and returns a refused tree write. */
@@ -1192,6 +1194,6 @@ function refusal<T>(op: string, e: TreeRefusalError, start: number): OrgStoreRes
   return errResult(e.code, `refused: ${e.code}`);
 }
 
-function errResult<T>(code: OrgStoreError['code'], message: string): OrgStoreResult<T> {
+function errResult<T>(code: PlainErrorCode, message: string): OrgStoreResult<T> {
   return { ok: false, error: err(code, message) };
 }

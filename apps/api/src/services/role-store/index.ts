@@ -4,7 +4,7 @@
  * Returns a process-wide singleton; tests override it with `_setRoleStore`.
  */
 
-import type { RoleStoreBase } from './interface.js';
+import { RoleStoreBase } from './interface.js';
 import { PostgresRoleStore } from './postgres.js';
 import { TEST_ROLE_STORE_KEY } from './test-hook.js';
 
@@ -19,8 +19,8 @@ let instance: RoleStoreBase | null = null;
  */
 export function getRoleStore(): RoleStoreBase {
   if (instance) return instance;
-  const testStore = (globalThis as Record<string, unknown>)[TEST_ROLE_STORE_KEY];
-  if (testStore) return testStore as RoleStoreBase;
+  const testStore: unknown = Reflect.get(globalThis, TEST_ROLE_STORE_KEY);
+  if (testStore instanceof RoleStoreBase) return testStore;
   instance = new PostgresRoleStore();
   return instance;
 }

@@ -392,5 +392,5 @@ export class InMemoryUserStore extends UserStoreBase {
 }
 
 function errResult<T>(code: StoreError['code'], message: string): StoreResult<T> {
-  return { ok: false, error: { code, message } as StoreError };
+  return { ok: false, error: { code, message } };
 }

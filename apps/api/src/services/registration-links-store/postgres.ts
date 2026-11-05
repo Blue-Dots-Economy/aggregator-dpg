@@ -8,6 +8,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
 import { users, registrationLinks, type RegistrationLinkRow } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
+import { PG_UNIQUE_VIOLATION, pgErrorCode } from '../../db/pg-error.js';
 import {
   RegistrationLinksStoreBase,
   type CreateRegistrationLinkInput,
@@ -19,23 +20,6 @@ import {
   type UpdateDraftInput,
 } from './interface.js';
 import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
-
-const PG_UNIQUE_VIOLATION = '23505';
-
-/**
- * Extracts the Postgres SQLSTATE from a thrown error.
- *
- * Drizzle wraps driver errors, so this walks the `.cause` chain to find `code`.
- */
-function pgErrorCode(err: unknown): string | undefined {
-  let cur: unknown = err;
-  for (let depth = 0; cur && depth < 5; depth++) {
-    const code = (cur as { code?: unknown }).code;
-    if (typeof code === 'string') return code;
-    cur = (cur as { cause?: unknown }).cause;
-  }
-  return undefined;
-}
 
 export class PostgresRegistrationLinksStore extends RegistrationLinksStoreBase {
   async create(input: CreateRegistrationLinkInput): Promise<StoreResult<RegistrationLink>> {

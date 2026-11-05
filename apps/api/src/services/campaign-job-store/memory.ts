@@ -103,12 +103,10 @@ export class InMemoryCampaignJobStore extends CampaignJobStoreBase {
     const dupIds = this.activeDedupIds(input.items);
     this.items.set(
       id,
-      input.items.map((i) => ({
+      input.items.map((i): ItemRow => ({
         itemId: i.itemId,
         action: i.action,
-        status: (i.action !== null && dupIds.has(i.itemId)
-          ? 'duplicate_active'
-          : 'pending') as CampaignJobItemStatus,
+        status: i.action !== null && dupIds.has(i.itemId) ? 'duplicate_active' : 'pending',
         providerRef: null,
         providerBatchRef: null,
         skipReason: null,

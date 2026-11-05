@@ -3,7 +3,7 @@
  * Returns a process-wide singleton; tests override it with `_setIdentityStore`.
  */
 
-import type { IdentityStoreBase } from './interface.js';
+import { IdentityStoreBase } from './interface.js';
 import { PostgresIdentityStore } from './postgres.js';
 import { TEST_IDENTITY_STORE_KEY } from './test-hook.js';
 
@@ -15,8 +15,8 @@ let instance: IdentityStoreBase | null = null;
  */
 export function getIdentityStore(): IdentityStoreBase {
   if (instance) return instance;
-  const testStore = (globalThis as Record<string, unknown>)[TEST_IDENTITY_STORE_KEY];
-  if (testStore) return testStore as IdentityStoreBase;
+  const testStore: unknown = Reflect.get(globalThis, TEST_IDENTITY_STORE_KEY);
+  if (testStore instanceof IdentityStoreBase) return testStore;
   instance = new PostgresIdentityStore();
   return instance;
 }

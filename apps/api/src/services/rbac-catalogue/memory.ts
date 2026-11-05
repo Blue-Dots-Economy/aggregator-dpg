@@ -33,7 +33,7 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
    * @param roles - The new roles.
    */
   setRoles(roles: readonly RoleDefinition[]): void {
-    this.roles = structuredClone(roles) as RoleDefinition[];
+    this.roles = structuredClone(roles).slice();
     this.rev += 1;
   }
 
@@ -43,7 +43,7 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
    * @param permissions - The new permission rows.
    */
   setPermissions(permissions: readonly StoredPermission[]): void {
-    this.permissions = structuredClone(permissions) as StoredPermission[];
+    this.permissions = structuredClone(permissions).slice();
   }
 
   /** Returns a copy of the stored roles. */
