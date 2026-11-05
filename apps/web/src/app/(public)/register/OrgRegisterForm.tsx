@@ -9,13 +9,7 @@ import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../../components/ui/Select';
+import { SearchableSelect, type SearchableOption } from '../../../components/ui/SearchableSelect';
 import { jsonFetch } from '../../../services/http';
 import {
   stampConsent,
@@ -124,10 +118,12 @@ export function OrgRegisterForm({
   const chosen = showPicker ? parents.find((p) => p.id === parentId) : parents[0];
   const childName = chosen?.child_known_as_name ?? null;
   const parentReady = parentsQuery.data !== undefined && (!showPicker || parentId !== '');
-  const parentName = (p: ParentOption): string => {
-    if (p.is_root) return t('parent_top_level', { name: p.name });
-    return p.known_as_name ? `${p.name} (${p.known_as_name})` : p.name;
-  };
+  // The network first, then each org with its own "known as" value on the right.
+  const parentOptions: SearchableOption[] = parents.map((p: ParentOption) => ({
+    value: p.id,
+    label: p.name,
+    hint: p.is_root ? t('parent_top_level') : p.known_as_name,
+  }));
   const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
   const { gateOpen, setGateOpen, pendingRef, handleSubmit } = useConsentGateSubmit(
     consentDocs,
@@ -239,18 +235,15 @@ export function OrgRegisterForm({
             {t('parent_selector_label')}
             <span className="text-rose-500"> *</span>
           </label>
-          <Select {...(parentId ? { value: parentId } : {})} onValueChange={setParentId}>
-            <SelectTrigger id="org-parent" aria-required>
-              <SelectValue placeholder={t('parent_selector_placeholder')} />
-            </SelectTrigger>
-            <SelectContent>
-              {parents.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {parentName(p)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SearchableSelect
+            id="org-parent"
+            options={parentOptions}
+            value={parentId}
+            onValueChange={setParentId}
+            placeholder={t('parent_selector_placeholder')}
+            searchPlaceholder={t('parent_search_placeholder')}
+            emptyText={t('parent_no_match')}
+          />
         </div>
       ) : null}
       {childName ? (
