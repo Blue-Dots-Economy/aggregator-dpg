@@ -41,9 +41,9 @@ export async function registerCampaignExportRoutes(base: FastifyInstance): Promi
       },
     },
     async (req, reply) => {
-      await submitCampaignJob(req, reply, {
+      await submitCampaignJob(req, reply, req.body, {
         channel: 'export',
-        parseContent: (rawContent) => rawContent as Record<string, unknown>,
+        parseContent: (rawContent) => rawContent,
         // From deployment config (CAMPAIGN_EXPORT_FIELDS), not caller input.
         piiFields: () =>
           config.CAMPAIGN_EXPORT_FIELDS === 'full' ? ['full'] : ['name', 'email', 'phone'],

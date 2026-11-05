@@ -11,6 +11,7 @@ import { logger } from '../../logger.js';
 import { registrationInvites, type RegistrationInviteRow } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
 import { PG_UNIQUE_VIOLATION, pgErrorCode } from '../../db/pg-error.js';
+import { errorType } from '@aggregator-dpg/shared-primitives/errors';
 import {
   RegistrationInvitesStoreBase,
   type CreateInviteInput,
@@ -158,13 +159,16 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
     }
   }
 
+  /** Maps a driver error to `DB_UNAVAILABLE`. Never echoes the driver message: it holds query parameters. */
   private mapDbError(op: string, err: unknown, start: number): InviteStoreResult<never> {
-    const message = err instanceof Error ? err.message : 'unknown';
+    const code = pgErrorCode(err);
+    const errType = errorType(err);
+    const message = code ? `database error ${code}` : errType;
     logger.error({
       operation: op,
       status: 'failure',
       error: message,
-      error_type: err instanceof Error ? err.constructor.name : undefined,
+      error_type: errType,
       latency_ms: Date.now() - start,
     });
     return { ok: false, error: { code: 'DB_UNAVAILABLE', message } };

@@ -25,6 +25,7 @@ import { getIdentityStore } from '../identity-store/index.js';
 import { getRedis } from '../redis/index.js';
 import { TEST_TOKEN_ROLES_OFF_KEY } from './edge-test-hook.js';
 import { getRbacRuntime } from './runtime.js';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 /** Keycloak user attribute (and token claim) holding the role keys. */
 export const ROLES_ATTRIBUTE = 'roles';
@@ -139,8 +140,8 @@ export function defaultTokenRolesDeps(): TokenRolesDeps {
           operation: 'rbac.token_roles.mark_dirty',
           status: 'failure',
           user_id: userId,
-          error: e instanceof Error ? e.message : String(e),
-          error_type: e instanceof Error ? e.constructor.name : 'unknown',
+          error: errorMessage(e),
+          error_type: errorType(e),
         });
       }
     },
@@ -175,8 +176,8 @@ async function redisLock<T>(
       operation: 'rbac.token_roles.lock',
       status: 'failure',
       user_id: userId,
-      error: e instanceof Error ? e.message : String(e),
-      error_type: e instanceof Error ? e.constructor.name : 'unknown',
+      error: errorMessage(e),
+      error_type: errorType(e),
     });
     return { acquired: true, value: await fn() };
   }
@@ -256,8 +257,8 @@ async function run(
     return 'deferred';
   } catch (e) {
     return fail('unexpected', {
-      code: e instanceof Error ? e.constructor.name : 'unknown',
-      message: e instanceof Error ? e.message : String(e),
+      code: errorType(e),
+      message: errorMessage(e),
     });
   }
 }

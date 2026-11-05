@@ -218,11 +218,7 @@ export async function registerAggregatorOrgApprovalRoutes(base: FastifyInstance)
           );
         case 'already_decided': {
           const prior = orgDecidedView(outcome.status);
-          return sendHtml(
-            reply,
-            200,
-            renderResultPage((prior ?? orgDecidedView('active')) as ResultView),
-          );
+          return sendHtml(reply, 200, renderResultPage(prior ?? decidedOrgView('active')));
         }
         case 'not_found':
           return sendPage(reply, orgNotFoundPage());
@@ -295,7 +291,15 @@ type ResultView = { status: 'success' | 'error' | 'info'; title: string; message
  * @returns A result-page view for terminal states, else `null`.
  */
 function orgDecidedView(status: Organisation['status']): ResultView | null {
-  if (status === 'pending') return null;
+  return status === 'pending' ? null : decidedOrgView(status);
+}
+
+/**
+ * Already-decided result view for an org that is no longer pending.
+ *
+ * @param status - The org's lifecycle status.
+ */
+function decidedOrgView(status: Exclude<Organisation['status'], 'pending'>): ResultView {
   if (status === 'active' || status === 'retired') {
     return {
       status: 'info',

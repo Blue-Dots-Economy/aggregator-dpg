@@ -46,16 +46,13 @@ export async function registerCampaignEmailRoutes(base: FastifyInstance): Promis
       },
     },
     async (req, reply) => {
-      await submitCampaignJob(req, reply, {
+      await submitCampaignJob(req, reply, req.body, {
         channel: 'email',
         parseContent: parseEmailContent,
         // Every send releases `email`; placeholders may add `name` and `phone`.
         // Keep in sync with `decryptEmailItems` in the worker.
         piiFields: (content) => [
-          ...new Set([
-            'email',
-            ...requiredContactFields(content.subject as string, content.body_markdown as string),
-          ]),
+          ...new Set(['email', ...requiredContactFields(content.subject, content.body_markdown)]),
         ],
         // `action: null`: no active-job dedup for email.
         buildItem: (itemId) => ({ itemId, action: null }),

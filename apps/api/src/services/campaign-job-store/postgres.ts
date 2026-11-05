@@ -33,6 +33,7 @@ import {
   type StoreError,
   type StoreResult,
 } from './interface.js';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 /** Matches the `campaign_job_item_active_dedup` partial unique index predicate. */
 const ACTIVE_DEDUP_WHERE = sql`status IN ('pending','resolved','submitted') AND action IS NOT NULL`;
@@ -560,8 +561,8 @@ function dbError(op: string, err: unknown, start: number): { ok: false; error: S
     operation: `campaignJobStore.${op}`,
     status: 'failure',
     latency_ms: Date.now() - start,
-    error: err instanceof Error ? err.message : String(err),
-    error_type: err instanceof Error ? err.constructor.name : 'unknown',
+    error: errorMessage(err),
+    error_type: errorType(err),
   });
   return {
     ok: false,

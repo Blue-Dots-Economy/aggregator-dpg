@@ -33,7 +33,13 @@ import {
   shippedFileHashes,
   type Queryable,
 } from '../db/migrate-core.js';
-import { upgradeLevel, type UpgradeLevel, type UpgradeState } from './instance-upgrade-logic.js';
+import {
+  tokenRealmRoles,
+  upgradeLevel,
+  type UpgradeLevel,
+  type UpgradeState,
+} from './instance-upgrade-logic.js';
+import { errorField } from '../db/pg-error.js';
 import {
   canActAsOwner,
   isFailing,
@@ -247,13 +253,7 @@ async function keycloakRoles(
     out(`  F19 keycloak: token request failed (${tokenRes.status})`);
     return false;
   }
-  const token = ((await tokenRes.json()) as { access_token?: string }).access_token ?? '';
-  const claims = JSON.parse(
-    Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8'),
-  ) as {
-    resource_access?: Record<string, { roles?: string[] }>;
-  };
-  const roles = claims.resource_access?.['realm-management']?.roles ?? [];
+  const { token, roles } = tokenRealmRoles(await tokenRes.json());
   const role = await call(`${base}/admin/realms/${realm}/roles/org_owner`, {
     headers: { authorization: `Bearer ${token}` },
   });
@@ -326,10 +326,10 @@ async function fix(/* NOSONAR typescript:S3776 */ pool: pg.Pool, args: string[])
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
     if (err instanceof Refusal) throw err;
-    const e = err as { code?: string; message?: string };
+    const code = errorField(err, 'code');
     // Fixes raise their own refusals. Other errors print the code only.
     out(
-      `fix ${name}: FAILED ${e.code === 'P0001' ? (e.message ?? '') : (e.code ?? 'error')} — nothing changed`,
+      `fix ${name}: FAILED ${code === 'P0001' ? (errorField(err, 'message') ?? '') : (code ?? 'error')} — nothing changed`,
     );
     return 1;
   } finally {
@@ -537,19 +537,19 @@ async function run(/* NOSONAR typescript:S3776 */ pool: pg.Pool, args: string[])
   } catch (err) {
     if (!committing) await client.query('ROLLBACK').catch(() => undefined);
     if (err instanceof Refusal) throw err;
-    const e = err as { code?: string; constraint?: string; table?: string; message?: string };
+    const code = errorField(err, 'code');
     log.error({
       operation: 'train.run',
       status: 'failure',
-      code: e.code,
-      constraint: e.constraint,
-      table: e.table,
+      code,
+      constraint: errorField(err, 'constraint'),
+      table: errorField(err, 'table'),
       latency_ms: Date.now() - started,
     });
     if (!committing) {
-      const detail = e.code === 'P0001' ? `: ${e.message ?? ''}` : '';
+      const detail = code === 'P0001' ? `: ${errorField(err, 'message') ?? ''}` : '';
       out(
-        `RUN FAILED (${e.code ?? 'error'}${detail}) — ` +
+        `RUN FAILED (${code ?? 'error'}${detail}) — ` +
           'rolled back: nothing was applied, the database is unchanged',
       );
       return 1;
@@ -682,8 +682,9 @@ async function main(/* NOSONAR typescript:S3776 */ argv: string[]): Promise<numb
           return await main([step.cmd, ...step.args]);
         } catch (err) {
           // A step that throws also stops run-all.
-          const e = err as { code?: string; name?: string };
-          out(`  ${step.cmd} failed: ${e.code ?? e.name ?? 'error'}`);
+          out(
+            `  ${step.cmd} failed: ${errorField(err, 'code') ?? errorField(err, 'name') ?? 'error'}`,
+          );
           return 1;
         }
       },
@@ -755,8 +756,12 @@ if (isEntry()) {
     if (err instanceof Refusal) {
       out(`REFUSED: ${err.message}`);
     } else {
-      const e = err as { code?: string; name?: string };
-      log.error({ operation: 'train', status: 'failure', code: e.code, error_type: e.name });
+      log.error({
+        operation: 'train',
+        status: 'failure',
+        code: errorField(err, 'code'),
+        error_type: errorField(err, 'name'),
+      });
     }
     process.exitCode = 1;
   }

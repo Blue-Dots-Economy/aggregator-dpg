@@ -114,7 +114,7 @@ export class PostgresUserStore extends UserStoreBase {
           operation: 'userStore.create',
           status: 'failure',
           error: 'CONSENT_WRITE_FAILED',
-          error_type: err.cause instanceof Error ? err.cause.name : 'unknown',
+          error_type: errorType(err.cause),
           latency_ms: Date.now() - start,
         });
         return {
@@ -521,18 +521,16 @@ export class PostgresUserStore extends UserStoreBase {
     // Never echo the driver message: it contains query parameters (emails, phones).
     const code = pgErrorCode(err);
     const constraint = pgConstraint(err) ?? '';
-    const message = err instanceof Error ? err.message : '';
-
     // contactId() rejects a non-canonical phone before any SQL runs. Its
     // message is fixed and safe to return.
-    if (err instanceof TypeError && message.startsWith('contactId:')) {
+    if (err instanceof TypeError && err.message.startsWith('contactId:')) {
       logger.warn({
         operation: op,
         status: 'failure',
         error: 'CHECK_VIOLATION',
         latency_ms: Date.now() - start,
       });
-      return { ok: false, error: { code: 'CHECK_VIOLATION', message } };
+      return { ok: false, error: { code: 'CHECK_VIOLATION', message: err.message } };
     }
 
     if (code === PG_UNIQUE_VIOLATION) {

@@ -21,6 +21,7 @@ import type {
   OrgStoreResult,
   SearchOrgsPage,
 } from './organisation-store/interface.js';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 const OPERATION = 'orgTree.bootCheck';
 
@@ -110,7 +111,7 @@ export async function warnOrgTreeOverLimits(
     log.error({
       operation: OPERATION,
       status: 'failure',
-      error: e instanceof Error ? e.message : String(e),
+      error: errorMessage(e),
     });
   }
 }

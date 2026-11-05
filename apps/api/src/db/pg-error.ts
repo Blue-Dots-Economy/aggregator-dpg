@@ -8,15 +8,39 @@
 export const PG_UNIQUE_VIOLATION = '23505';
 export const PG_CHECK_VIOLATION = '23514';
 
-/** Walks the `.cause` chain (bounded) and returns the first string field found. */
+/** Fields of a caught error that callers print or log. */
+export type ErrorFieldName = 'code' | 'constraint' | 'table' | 'message' | 'name';
+
+/**
+ * String field of a caught error, such as a raw pg error's SQLSTATE `code`.
+ *
+ * Reads only the error itself, not its `cause` chain.
+ *
+ * @param err - Any value from a `catch` clause.
+ * @param key - The field to read.
+ * @returns The field when it is a string; otherwise `undefined`.
+ */
+export function errorField(err: unknown, key: ErrorFieldName): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const value: unknown = Reflect.get(err, key);
+  return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * Most `.cause` levels {@link pgErrorCode} and {@link pgConstraint} read.
+ *
+ * Drizzle puts the driver error one level down; the rest is room for further
+ * wrapping. The limit also stops a `cause` chain that loops back on itself.
+ */
+const MAX_CAUSE_DEPTH = 5;
+
+/** Walks the `.cause` chain up to {@link MAX_CAUSE_DEPTH} levels and returns the first string field found. */
 function walkString(err: unknown, key: 'code' | 'constraint'): string | undefined {
   let cur: unknown = err;
-  for (let depth = 0; cur && depth < 5; depth++) {
-    if (typeof cur === 'object') {
-      const v = (cur as Record<string, unknown>)[key];
-      if (typeof v === 'string') return v;
-    }
-    cur = (cur as { cause?: unknown }).cause;
+  for (let depth = 0; typeof cur === 'object' && cur !== null && depth < MAX_CAUSE_DEPTH; depth++) {
+    const value = errorField(cur, key);
+    if (value !== undefined) return value;
+    cur = Reflect.get(cur, 'cause');
   }
   return undefined;
 }

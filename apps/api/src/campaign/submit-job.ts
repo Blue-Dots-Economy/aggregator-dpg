@@ -9,7 +9,6 @@
  * @module @aggregator-dpg/api
  */
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import type { z } from 'zod';
 import { getUserStore } from '../services/user-store/index.js';
 import { getCampaignJobStore } from '../services/campaign-job-store/index.js';
 import type {
@@ -19,19 +18,23 @@ import type {
 } from '../services/campaign-job-store/index.js';
 import { enqueueCampaignProcess } from '../services/campaign-process-queue/index.js';
 import { dedupeItemIds, metadataValue } from './envelope.js';
-import type { campaignEnvelopeSchema } from './envelope.js';
+import type { CampaignEnvelope } from './envelope.js';
 import { requireCampaignAuth, requireOrgId } from './auth.js';
 import { consume } from '../services/rate-limiter/index.js';
 import { httpError } from '../errors/http-error.js';
 import type { ErrorCode } from '../errors/codes.js';
 import { getCampaignAuditWriter, safeAudit } from '../services/campaign-audit/index.js';
 
-/** Channel-specific knobs consumed by {@link submitCampaignJob}. */
-export interface SubmitCampaignJobOptions {
+/**
+ * Channel-specific knobs consumed by {@link submitCampaignJob}.
+ *
+ * `C` is the channel's parsed `content` type, shared by `parseContent` and `piiFields`.
+ */
+export interface SubmitCampaignJobOptions<C extends Record<string, unknown>> {
   /** The campaign channel this submission belongs to. */
   channel: CampaignChannel;
   /** Validates the raw `content` for the job; throw an `httpError` to fail before any row is created. */
-  parseContent: (rawContent: unknown) => Record<string, unknown>;
+  parseContent: (rawContent: CampaignEnvelope['content']) => C;
   /** Builds one job item's `action` column from a deduped item id. */
   buildItem: (itemId: string) => CreateJobItemInput;
   /** Per-request item cap (`CAMPAIGN_<CHANNEL>_MAX_ITEMS`). */
@@ -57,26 +60,27 @@ export interface SubmitCampaignJobOptions {
   /** `message` field of the `202` response body. */
   successMessage: string;
   /** PII field names this channel releases, for the audit `requested` row. Names only, never values. */
-  piiFields: (content: Record<string, unknown>) => string[];
+  piiFields: (content: C) => string[];
 }
 
 /**
  * Runs the campaign-job submission flow for one channel and sends the `202`.
  *
- * @param req - The Fastify request; `req.body` is already validated against `campaignEnvelopeSchema`.
+ * @param req - The Fastify request.
  * @param reply - The Fastify reply; this function sends the response.
+ * @param envelope - The request body, already validated against `campaignEnvelopeSchema`.
  * @param opts - Channel-specific config, see {@link SubmitCampaignJobOptions}.
  */
-export async function submitCampaignJob(
+export async function submitCampaignJob<C extends Record<string, unknown>>(
   req: FastifyRequest,
   reply: FastifyReply,
-  opts: SubmitCampaignJobOptions,
+  envelope: CampaignEnvelope,
+  opts: SubmitCampaignJobOptions<C>,
 ): Promise<void> {
   const auth = await requireCampaignAuth(req);
   const orgId = requireOrgId(auth);
   const requestedBy = await resolveRequestedBy(auth.aggregatorId, auth.email);
 
-  const envelope = req.body as z.infer<typeof campaignEnvelopeSchema>;
   const content = opts.parseContent(envelope.content);
 
   const itemIds = dedupeItemIds(envelope.item_ids);
@@ -127,7 +131,7 @@ export async function submitCampaignJob(
   if (created.value.created) {
     const purpose = metadataValue(envelope.metadata, 'purpose');
     // Caller-supplied header; capped to keep the audit row small.
-    const traceId = (req.headers['x-request-id'] as string | undefined)?.slice(0, 200);
+    const traceId = firstHeader(req, 'x-request-id')?.slice(0, 200);
     await safeAudit(
       () =>
         getCampaignAuditWriter().recordRequested({
@@ -205,7 +209,10 @@ async function resolveRequestedBy(
 async function enqueueWithCompensation(
   job: JobRecord,
   wasCreated: boolean,
-  opts: SubmitCampaignJobOptions,
+  opts: Pick<
+    SubmitCampaignJobOptions<Record<string, unknown>>,
+    'attempts' | 'enqueueFailedErrorCode' | 'enqueueFailedFallbackMessage' | 'logOperation'
+  >,
   req: FastifyRequest,
   store: ReturnType<typeof getCampaignJobStore>,
 ): Promise<void> {
@@ -233,10 +240,14 @@ async function enqueueWithCompensation(
   }
 }
 
-/** Reads the `Idempotency-Key` request header (Fastify lowercases header names). */
+/** Reads the `Idempotency-Key` request header. */
 function readIdempotencyKey(req: FastifyRequest): string | undefined {
-  const raw = req.headers['idempotency-key'];
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  const trimmed = value?.trim();
+  const trimmed = firstHeader(req, 'idempotency-key')?.trim();
   return trimmed || undefined;
+}
+
+/** First value of a request header; `name` is lower case, as Fastify stores it. */
+function firstHeader(req: FastifyRequest, name: string): string | undefined {
+  const raw = req.headers[name];
+  return Array.isArray(raw) ? raw[0] : raw;
 }
