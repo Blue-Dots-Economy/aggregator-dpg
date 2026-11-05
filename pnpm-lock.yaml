@@ -862,6 +862,9 @@ importers:
       ioredis:
         specifier: ^5.11.1
         version: 5.11.1
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
     devDependencies:
       '@aggregator-dpg/tsconfig':
         specifier: workspace:*

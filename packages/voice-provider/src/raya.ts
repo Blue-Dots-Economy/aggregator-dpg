@@ -21,10 +21,12 @@
  * @module @aggregator-dpg/voice-provider
  */
 
+import { z } from 'zod';
 import {
   AuthError,
   UpstreamError,
   ValidationError,
+  toError,
 } from '@aggregator-dpg/shared-primitives/errors';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
@@ -40,41 +42,67 @@ import {
 } from './interface.js';
 
 /**
- * Raya's `POST /batch` response shape (only the fields this adapter reads).
- * `errors[].value` and `data[]` contain PII and are never persisted.
+ * One entry of `errors[]` in Raya's `POST /batch` response. `value` contains
+ * PII and is never persisted.
  */
-interface RayaCreateBatchResponse {
-  status?: unknown;
-  message?: unknown;
-  batchId?: unknown;
-  totalRows?: unknown;
-  validRows?: unknown;
-  invalidRows?: unknown;
-  contactsInserted?: unknown;
-  errors?: Array<{ row?: unknown; field?: unknown; value?: unknown; message?: unknown }>;
-  data?: unknown;
-}
-
-/** Raya's `POST /batch/{id}/start` response shape (only the fields this adapter reads). */
-interface RayaStartBatchResponse {
-  id?: unknown;
-  status?: unknown;
-  total_contacts?: unknown;
-  completed_contacts?: unknown;
-  unanswered_contacts?: unknown;
-  schedule?: unknown;
-  max_retries?: unknown;
-  concurrency?: unknown;
-  retry_after_hrs?: unknown;
-}
+const RayaRowErrorSchema = z.object({
+  row: z.unknown(),
+  field: z.unknown(),
+  value: z.unknown(),
+  message: z.unknown(),
+});
 
 /**
- * Raya's `GET /batch` response shape (only the fields this adapter reads).
- * Used by {@link RayaVoiceProvider.findExistingBatch}.
+ * Raya's `POST /batch` response (only the fields this adapter reads). Field
+ * values are checked where they are used. `errors` that is not an array reads
+ * as empty. `data[]` contains PII and is never persisted.
  */
-interface RayaListBatchesResponse {
-  batches?: Array<{ id?: unknown; name?: unknown; agent_id?: unknown; total_contacts?: unknown }>;
-}
+const RayaCreateBatchResponseSchema = z.object({
+  status: z.unknown(),
+  message: z.unknown(),
+  batchId: z.unknown(),
+  totalRows: z.unknown(),
+  validRows: z.unknown(),
+  invalidRows: z.unknown(),
+  contactsInserted: z.unknown(),
+  errors: z.array(z.unknown()).catch([]),
+  data: z.unknown(),
+});
+type RayaCreateBatchResponse = z.infer<typeof RayaCreateBatchResponseSchema>;
+
+/** Raya's `POST /batch/{id}/start` response (only the fields this adapter reads). */
+const RayaStartBatchResponseSchema = z.object({
+  id: z.unknown(),
+  status: z.unknown(),
+  total_contacts: z.unknown(),
+  completed_contacts: z.unknown(),
+  unanswered_contacts: z.unknown(),
+  schedule: z.unknown(),
+  max_retries: z.unknown(),
+  concurrency: z.unknown(),
+  retry_after_hrs: z.unknown(),
+});
+type RayaStartBatchResponse = z.infer<typeof RayaStartBatchResponseSchema>;
+
+/** One entry of `batches[]` in Raya's `GET /batch` response. */
+const RayaBatchSummarySchema = z.object({
+  id: z.unknown(),
+  name: z.unknown(),
+  agent_id: z.unknown(),
+  total_contacts: z.unknown(),
+});
+
+/**
+ * Raya's `GET /batch` response (only the fields this adapter reads). Used by
+ * {@link RayaVoiceProvider.findExistingBatch}. `batches` that is not an array
+ * reads as empty.
+ */
+const RayaListBatchesResponseSchema = z.object({
+  batches: z.array(z.unknown()).catch([]),
+});
+
+/** The `retry_after` field of a Raya `429` body, in seconds. */
+const RayaRateLimitBodySchema = z.object({ retry_after: z.unknown() });
 
 /**
  * Whitelist of `POST /batch` response fields safe to persist. Excludes
@@ -126,10 +154,10 @@ function curateCreateResponse(payload: RayaCreateBatchResponse): CuratedProvider
  */
 function curateStartResponse(payload: unknown): CuratedProviderResponse {
   const out: Record<string, unknown> = {};
-  if (payload !== null && typeof payload === 'object') {
-    const record = payload as RayaStartBatchResponse;
+  const parsed = RayaStartBatchResponseSchema.safeParse(payload);
+  if (parsed.success) {
     for (const key of START_RESPONSE_PERSIST_KEYS) {
-      if (record[key] !== undefined) out[key] = record[key];
+      if (parsed.data[key] !== undefined) out[key] = parsed.data[key];
     }
   }
   return brandCuratedProviderResponse(out);
@@ -226,7 +254,7 @@ export class RayaVoiceProvider extends VoiceProviderBase {
       });
     } else {
       await this.acquireSlot();
-      const createResult = await this.request<RayaCreateBatchResponse>('POST', '/batch', {
+      const createResult = await this.request(RayaCreateBatchResponseSchema, 'POST', '/batch', {
         agent_id: input.agentRef,
         batch_name: input.batchName,
         contacts: input.contacts.map((c) => ({
@@ -268,7 +296,8 @@ export class RayaVoiceProvider extends VoiceProviderBase {
     for (const [key, value] of Object.entries(input.startOptions)) {
       if (value !== undefined) startBody[key] = value;
     }
-    const startResult = await this.request<unknown>(
+    const startResult = await this.request(
+      z.unknown(),
       'POST',
       `/batch/${providerBatchRef}/start`,
       startBody,
@@ -301,13 +330,17 @@ export class RayaVoiceProvider extends VoiceProviderBase {
     batchName: string,
   ): Promise<{ batchId: number; totalContacts: number } | undefined> {
     await this.acquireSlot();
-    const result = await this.request<RayaListBatchesResponse>(
+    const result = await this.request(
+      RayaListBatchesResponseSchema,
       'GET',
       `/batch?agent_id=${encodeURIComponent(agentRef)}&limit=100&sort=desc`,
       undefined,
     );
     if (!result.success) return undefined;
-    const batches = Array.isArray(result.value.batches) ? result.value.batches : [];
+    const batches = result.value.batches.flatMap((entry) => {
+      const parsed = RayaBatchSummarySchema.safeParse(entry);
+      return parsed.success ? [parsed.data] : [];
+    });
     // The server already filters by `agent_id`; check it again here.
     const match = batches.find((b) => b.name === batchName && b.agent_id === agentRef);
     if (!match || typeof match.id !== 'number') return undefined;
@@ -322,8 +355,9 @@ export class RayaVoiceProvider extends VoiceProviderBase {
    * accepted contacts than Raya confirms:
    *
    *   1. A duplicate row is counted once.
-   *   2. For each error with no usable `row`, one contact from the end of the
-   *      accepted list is rejected with `raya_unmapped_rejection`.
+   *   2. For each error with no usable `row` (or that is not an object), one
+   *      contact from the end of the accepted list is rejected with
+   *      `raya_unmapped_rejection`.
    *   3. Contacts beyond `contactsInserted` (or `validRows`) are rejected with
    *      `raya_short_count`.
    *
@@ -337,9 +371,14 @@ export class RayaVoiceProvider extends VoiceProviderBase {
   ): { accepted: string[]; rejected: { ref: string; error: string }[] } {
     const rejectedRefs = new Set<string>();
     const rejected: { ref: string; error: string }[] = [];
-    const errors = Array.isArray(payload.errors) ? payload.errors : [];
     let unmappedCount = 0;
-    for (const e of errors) {
+    for (const entry of payload.errors) {
+      const parsed = RayaRowErrorSchema.safeParse(entry);
+      if (!parsed.success) {
+        unmappedCount += 1;
+        continue;
+      }
+      const e = parsed.data;
       const row = typeof e.row === 'number' ? e.row : undefined;
       if (row === undefined || row < 1 || row > input.contacts.length) {
         unmappedCount += 1;
@@ -379,12 +418,14 @@ export class RayaVoiceProvider extends VoiceProviderBase {
    * other `4xx` return `ValidationError`, without retry. Exhausted retries
    * return `UpstreamError`.
    *
+   * @param schema - Schema for the 2xx body. A body that does not match is `RAYA_BAD_RESPONSE`.
    * @param method - HTTP method.
    * @param path - Path appended to `baseUrl` (leading slash).
    * @param body - JSON request body.
-   * @returns ok(parsed JSON body) on 2xx; err(BaseError) otherwise.
+   * @returns ok(parsed body) on 2xx; err(BaseError) otherwise.
    */
   private async request<T>(
+    schema: z.ZodType<T, z.ZodTypeDef, unknown>,
     method: string,
     path: string,
     body: unknown,
@@ -404,7 +445,7 @@ export class RayaVoiceProvider extends VoiceProviderBase {
         return err(transportFailureError(path, this.timeoutMs, attempt));
       }
 
-      const outcome = await classifyResponse<T>(attempt.res, path);
+      const outcome = await classifyResponse(attempt.res, path, schema);
       if (outcome.kind === 'result') return outcome.result;
 
       // 429 or 5xx — transient, retry within budget.
@@ -436,7 +477,7 @@ export class RayaVoiceProvider extends VoiceProviderBase {
       });
       return { ok: true, res };
     } catch (e) {
-      const cause = e as Error;
+      const cause = toError(e);
       return { ok: false, aborted: cause.name === 'AbortError', cause };
     } finally {
       if (timer) clearTimeout(timer);
@@ -464,18 +505,24 @@ type ResponseOutcome<T> =
 /**
  * Classifies one Raya response.
  *
- * A 2xx parses to `ok`, a `401` to `AuthError`, and other `4xx` to
- * `ValidationError`. A `429` or `5xx` returns `{ kind: 'retry' }`, with the
- * `429` wait if given.
+ * A 2xx body that matches `schema` parses to `ok`. A `401` maps to
+ * `AuthError`, and other `4xx` to `ValidationError`. A `429` or `5xx` returns
+ * `{ kind: 'retry' }`, with the `429` wait if given.
  *
  * @param res - The response to classify.
  * @param path - The request path, for error messages.
+ * @param schema - Schema for the 2xx body.
  * @returns Either the terminal `Result` to return, or a retry signal.
  */
-async function classifyResponse<T>(res: Response, path: string): Promise<ResponseOutcome<T>> {
+async function classifyResponse<T>(
+  res: Response,
+  path: string,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+): Promise<ResponseOutcome<T>> {
   if (res.ok) {
+    let body: unknown;
     try {
-      return { kind: 'result', result: ok((await res.json()) as T) };
+      body = await res.json();
     } catch (e) {
       return {
         kind: 'result',
@@ -487,6 +534,19 @@ async function classifyResponse<T>(res: Response, path: string): Promise<Respons
         ),
       };
     }
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) {
+      return {
+        kind: 'result',
+        result: err(
+          new UpstreamError(`raya ${path} returned an unexpected body`, {
+            code: 'RAYA_BAD_RESPONSE',
+            details: { issues: parsed.error.issues.map((i) => i.path.join('.') || '(root)') },
+          }),
+        ),
+      };
+    }
+    return { kind: 'result', result: ok(parsed.data) };
   }
 
   if (res.status === 401) {
@@ -628,8 +688,8 @@ async function resolveRetryAfterMs(res: Response): Promise<number | undefined> {
   try {
     const bodyText = await res.text();
     if (bodyText) {
-      const parsed = JSON.parse(bodyText) as Record<string, unknown>;
-      const bodySeconds = parsed?.['retry_after'];
+      const parsed = RayaRateLimitBodySchema.safeParse(JSON.parse(bodyText));
+      const bodySeconds = parsed.success ? parsed.data.retry_after : undefined;
       if (typeof bodySeconds === 'number' && Number.isFinite(bodySeconds) && bodySeconds >= 0) {
         return bodySeconds * 1000;
       }

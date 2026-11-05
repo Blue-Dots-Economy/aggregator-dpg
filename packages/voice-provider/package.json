@@ -26,7 +26,8 @@
   },
   "dependencies": {
     "@aggregator-dpg/shared-primitives": "workspace:*",
-    "ioredis": "^6.0.0"
+    "ioredis": "^6.0.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@aggregator-dpg/tsconfig": "workspace:*",
