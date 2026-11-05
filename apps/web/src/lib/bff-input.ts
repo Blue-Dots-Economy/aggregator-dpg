@@ -11,24 +11,22 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
-/**
- * Every text form Postgres's `uuid` type reads: 32 hex digits, an optional
- * hyphen after any group of four, optionally wrapped in braces.
- */
-const POSTGRES_UUID_RE =
-  /^(?:[0-9a-f]{4}(?:-?[0-9a-f]{4}){7}|\{[0-9a-f]{4}(?:-?[0-9a-f]{4}){7}\})$/i;
+/** 32 hex digits with an optional hyphen after any group of four. */
+const POSTGRES_UUID_BODY_RE = /^[0-9a-f]{4}(?:-?[0-9a-f]{4}){7}$/i;
 
 /**
  * Whether a path segment is a value Postgres accepts as a `uuid`.
  *
- * The API looks these ids up in `uuid` columns, so any other value fails
- * upstream and never returns a row.
+ * Accepts every text form Postgres's `uuid` type reads, optionally wrapped
+ * in braces. The API looks these ids up in `uuid` columns, so any other
+ * value fails upstream and never returns a row.
  *
  * @param id - The raw path segment.
  * @returns True when Postgres would read it as a UUID.
  */
 export function isPostgresUuid(id: string): boolean {
-  return POSTGRES_UUID_RE.test(id);
+  const body = id.startsWith('{') && id.endsWith('}') ? id.slice(1, -1) : id;
+  return POSTGRES_UUID_BODY_RE.test(body);
 }
 
 /**
