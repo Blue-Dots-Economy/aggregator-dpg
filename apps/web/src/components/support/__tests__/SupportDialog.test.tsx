@@ -16,7 +16,7 @@ import en from '@/i18n/messages/en.json';
 import { SupportDialog } from '@/components/support/SupportDialog';
 import { AuthProvider } from '@/lib/auth-context';
 import type { User } from '@/types';
-import { makeQueryClient } from '@/__tests__/test-utils';
+import { chooseOption, makeQueryClient } from '@/__tests__/test-utils';
 import { QueryClientProvider } from '@tanstack/react-query';
 
 const prefilledUser: User = {
@@ -161,7 +161,7 @@ describe('SupportDialog', () => {
   it('sends the type the user picks', async () => {
     const fetchSpy = mockFetch(new Response('{"ok":true}', { status: 201 }));
     renderDialog();
-    await userEvent.selectOptions(screen.getByLabelText('Type'), 'support_request');
+    await chooseOption(screen.getByLabelText('Type'), en.support.type_support_request);
     await userEvent.type(screen.getByLabelText('Details'), 'Need help');
     await userEvent.click(screen.getByRole('checkbox'));
     await userEvent.click(screen.getByRole('button', { name: /send/i }));

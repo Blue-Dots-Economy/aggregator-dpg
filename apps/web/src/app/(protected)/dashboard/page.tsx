@@ -40,6 +40,7 @@ import type {
   Provider,
   Seeker,
 } from '../../../types';
+import { SelectField } from '@/components/ui/SelectField';
 
 /**
  * Indexes a domain's `status_rules` by status key for the status cards.
@@ -980,16 +981,17 @@ function ParticipantTable<R extends ParticipantBase>({
             />
           </div>
           {onLifecycleFilterChange ? (
-            <select
+            <SelectField
               aria-label={t('filters.lifecycle_label')}
-              className="bd-input w-auto max-w-[150px] text-[12.5px] py-1.5 pr-7 flex-1 sm:flex-initial"
+              className="w-auto max-w-[170px] flex-1 px-2.5 py-1.5 text-[12.5px] sm:flex-initial"
               value={lifecycleFilter}
-              onChange={(e) => onLifecycleFilterChange(e.target.value as LifecycleFilterValue)}
-            >
-              <option value="all">{t('filters.lifecycle_all')}</option>
-              <option value="draft">{t('filters.lifecycle_draft')}</option>
-              <option value="live">{t('filters.lifecycle_live')}</option>
-            </select>
+              onChange={(v) => onLifecycleFilterChange(parseLifecycleParam(v))}
+              options={[
+                { value: 'all', label: t('filters.lifecycle_all') },
+                { value: 'draft', label: t('filters.lifecycle_draft') },
+                { value: 'live', label: t('filters.lifecycle_live') },
+              ]}
+            />
           ) : null}
           <div ref={filterRef} className="relative ml-auto sm:ml-0">
             <Button
