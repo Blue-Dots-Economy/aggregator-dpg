@@ -258,10 +258,6 @@ export function CreateLinkSection() {
   const domainCfg = servedDomains.find((d) => d.id === form.domain);
   // Label for the read-only Domain field, from network config.
   const domainLabel = domainCfg?.plural_label ?? domainCfg?.label ?? form.domain;
-  // Caption listing every configured domain, e.g. "Seekers / Providers".
-  const domainsCaption =
-    (cfg?.domains ?? []).map((d) => d.plural_label ?? d.label ?? d.id).join(' / ') ||
-    t('create_link.field_domain');
 
   // Missing required fields, listed under the disabled create button.
   const createBlockers: string[] = [];
@@ -415,13 +411,13 @@ export function CreateLinkSection() {
               placeholder={t('create_link.placeholder_district')}
             />
           </Field>
-          <Field label={domainsCaption} required>
+          <Field label={t('create_link.field_domain')} required>
             {servedDomains.length > 1 ? (
               <DomainSelect
                 domains={servedDomains}
                 value={form.domain}
                 onChange={(id) => setForm((f) => ({ ...f, domain: id }))}
-                className="w-full text-[14px] py-2.5"
+                className="w-full px-3 py-2.5 text-[14px]"
               />
             ) : (
               // Read-only: the coordinator serves one domain.

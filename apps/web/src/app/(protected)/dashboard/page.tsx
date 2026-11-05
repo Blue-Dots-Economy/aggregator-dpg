@@ -31,7 +31,7 @@ import { ResponseShapeError } from '@/lib/response-shape-error';
 import { useCan } from '../../../lib/auth-context';
 import type { DashboardTileDef, StatusRule } from '../../../hooks/useAggregatorConfig';
 import { useActiveDomain, type ActiveDomainState } from '../../../hooks/useActiveDomain';
-import { DomainSelect } from '../../../components/ui/DomainSelect';
+import { DomainTabs } from '../../../components/ui/DomainTabs';
 import { useThemeMode } from '../../../lib/theme-mode';
 import type {
   DirectionalStats,
@@ -2037,6 +2037,15 @@ function DashboardContent({ activeDomain }: { activeDomain: ActiveDomainState })
   // Provider-like when the domain's `item_type` is job postings, not profiles.
   const isProviderLike = (primaryDomainCfg?.item_type ?? '').startsWith('job_posting');
   const canOnboard = useCan()('profiles.onboard');
+  // Same query as the active tab's first unfiltered page, so it shares that
+  // request. The payload carries every domain's rollup, which gives each tab
+  // its count.
+  const { data: dashboard } = useDashboard(
+    primaryDomain ? { domain: primaryDomain, page: 1, limit: PAGE_SIZE } : undefined,
+  );
+  const counts = Object.fromEntries(
+    domains.map((d) => [d.id, dashboard?.by_domain[d.id]?.rollup.total_items]),
+  );
 
   return (
     <div className="fade-up">
@@ -2044,15 +2053,23 @@ function DashboardContent({ activeDomain }: { activeDomain: ActiveDomainState })
         title={`My ${cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
         right={
-          <div className="flex items-center gap-2">
-            <DomainSelect domains={domains} value={active} onChange={setActive} />
-            {canOnboard && (
-              <Button icon={<I.plus size={14} />} onClick={() => router.push('/onboarding')}>
-                {t('buttons.addParticipants')}
-              </Button>
-            )}
-          </div>
+          canOnboard && (
+            <Button
+              className="whitespace-nowrap"
+              icon={<I.plus size={14} />}
+              onClick={() => router.push('/onboarding')}
+            >
+              {t('buttons.addParticipants')}
+            </Button>
+          )
         }
+      />
+      <DomainTabs
+        className="-mt-2 mb-6"
+        domains={domains}
+        value={active}
+        onChange={setActive}
+        counts={counts}
       />
 
       {/* Keyed by domain so a switch resets paging, filters and selection. */}

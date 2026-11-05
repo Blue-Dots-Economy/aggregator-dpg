@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
@@ -21,22 +21,30 @@ function renderSelect(domains: (typeof SEEKER)[], onChange = vi.fn()) {
   return onChange;
 }
 
+// jsdom lacks the pointer-capture and scrollIntoView APIs Radix Select calls.
+beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+  Element.prototype.hasPointerCapture = vi.fn().mockReturnValue(false);
+  Element.prototype.setPointerCapture = vi.fn();
+  Element.prototype.releasePointerCapture = vi.fn();
+});
+
 describe('<DomainSelect />', () => {
   it('renders nothing for a single domain', () => {
     renderSelect([SEEKER]);
     expect(screen.queryByRole('combobox')).toBeNull();
   });
 
-  it('lists every domain by its plural label', () => {
+  it('shows the selected domain on the styled trigger', () => {
     renderSelect([SEEKER, PROVIDER]);
-    const select = screen.getByRole('combobox', { name: 'Domain' });
-    expect(select).toHaveValue('seeker');
-    expect(screen.getByRole('option', { name: 'Providers' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Profile Type' })).toHaveTextContent('Seekers');
   });
 
-  it('reports the chosen domain', () => {
+  it('lists every domain by its plural label and reports the chosen one', async () => {
     const onChange = renderSelect([SEEKER, PROVIDER]);
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'provider' } });
+    fireEvent.click(screen.getByRole('combobox', { name: 'Profile Type' }));
+    expect(await screen.findByRole('option', { name: 'Seekers' })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('option', { name: 'Providers' }));
     expect(onChange).toHaveBeenCalledWith('provider');
   });
 });

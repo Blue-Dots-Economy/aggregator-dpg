@@ -277,9 +277,9 @@ describe('<DashboardPageRoot />', () => {
       expect(mockPush).toHaveBeenCalledWith('/onboarding');
     });
 
-    it('renders no domain dropdown for a single-domain aggregator', () => {
+    it('renders no domain tabs for a single-domain aggregator', () => {
       renderPage();
-      expect(screen.queryByRole('combobox', { name: 'Domain' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('tablist', { name: 'Profile Type' })).not.toBeInTheDocument();
     });
 
     it('renders the Providers tab directly when the aggregator profile type is "provider"', () => {
@@ -302,7 +302,12 @@ describe('<DashboardPageRoot />', () => {
     });
   });
 
-  describe('domain dropdown', () => {
+  describe('domain tabs', () => {
+    const selectedTab = () =>
+      within(screen.getByRole('tablist', { name: 'Profile Type' })).getByRole('tab', {
+        selected: true,
+      });
+
     beforeEach(() => {
       window.localStorage.clear();
       mockUseAggregatorConfig.mockReturnValue({ data: TWO_DOMAIN_CFG_FIXTURE });
@@ -311,19 +316,20 @@ describe('<DashboardPageRoot />', () => {
       });
     });
 
-    it('opens on the first served domain with a dropdown of every served domain', () => {
+    it('opens on the first served domain with a tab for every served domain', () => {
       renderPage();
-      const select = screen.getByRole('combobox', { name: 'Domain' });
-      expect(select).toHaveValue('seeker');
-      expect(
-        within(select)
-          .getAllByRole('option')
-          .map((o) => o.textContent),
-      ).toEqual(['Seekers', 'Providers']);
+      const tabs = within(screen.getByRole('tablist', { name: 'Profile Type' })).getAllByRole(
+        'tab',
+      );
+      expect(tabs.map((tab) => tab.textContent?.replace(/\d+/g, '').trim())).toEqual([
+        'Seekers',
+        'Providers',
+      ]);
+      expect(selectedTab()).toHaveTextContent('Seekers');
       expect(screen.queryByPlaceholderText('Search org, role, ID…')).not.toBeInTheDocument();
     });
 
-    it('switches to the chosen domain and keeps it in the URL', () => {
+    it('switches to the clicked domain and keeps it in the URL', () => {
       // One stable result per domain: a fresh object per render loops the page's effects.
       const results = {
         seeker: { data: dashboardPageFixture(), isLoading: false, isError: false },
@@ -337,25 +343,51 @@ describe('<DashboardPageRoot />', () => {
         q?.domain === 'provider' ? results.provider : results.seeker,
       );
       renderPage();
-      fireEvent.change(screen.getByRole('combobox', { name: 'Domain' }), {
-        target: { value: 'provider' },
-      });
+      fireEvent.click(screen.getByRole('tab', { name: /Providers/ }));
       expect(mockReplace).toHaveBeenCalledWith('/dashboard?domain=provider', { scroll: false });
       expect(screen.getByPlaceholderText('Search org, role, ID…')).toBeInTheDocument();
-      expect(screen.getByRole('combobox', { name: 'Domain' })).toHaveValue('provider');
+      expect(selectedTab()).toHaveTextContent('Providers');
+    });
+
+    it('moves to the next domain with the arrow keys and wraps around', () => {
+      renderPage();
+      fireEvent.keyDown(selectedTab(), { key: 'ArrowRight' });
+      expect(selectedTab()).toHaveTextContent('Providers');
+      expect(selectedTab()).toHaveFocus();
+      fireEvent.keyDown(selectedTab(), { key: 'ArrowRight' });
+      expect(selectedTab()).toHaveTextContent('Seekers');
+    });
+
+    it("shows each domain's participant count from the dashboard rollup", () => {
+      const seeker = dashboardPageFixture({ rollup: { total_items: 128 } });
+      const provider = dashboardPageFixture({ domain: 'provider', rollup: { total_items: 42 } });
+      const both = {
+        data: { ...seeker, by_domain: { ...seeker.by_domain, ...provider.by_domain } },
+        isLoading: false,
+        isError: false,
+      };
+      mockUseDashboard.mockReturnValue(both);
+      renderPage();
+      expect(screen.getByRole('tab', { name: 'Seekers 128' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Providers 42' })).toBeInTheDocument();
+    });
+
+    it('shows no count for a domain missing from the payload', () => {
+      renderPage();
+      expect(screen.getByRole('tab', { name: 'Providers' })).toBeInTheDocument();
     });
 
     it('opens on the domain named in the URL', () => {
       nav.resetSearchParams('domain=provider');
       renderPage();
-      expect(screen.getByRole('combobox', { name: 'Domain' })).toHaveValue('provider');
+      expect(selectedTab()).toHaveTextContent('Providers');
     });
 
     it('renders the dashboard for a coordinator serving every domain', () => {
       mockUseProfileRaw.mockReturnValue({ data: { type: null, serves: [] } });
       renderPage();
       expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      expect(screen.getByRole('combobox', { name: 'Domain' })).toHaveValue('seeker');
+      expect(selectedTab()).toHaveTextContent('Seekers');
     });
   });
 

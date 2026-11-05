@@ -39,7 +39,7 @@
     "cancel": "ರದ್ದುಮಾಡಿ",
     "continue": "ಮುಂದುವರಿಸಿ",
     "loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ…",
-    "domain_label": "ಡೊಮೇನ್"
+    "domain_label": "ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರ"
   },
   "register": {
     "heading_tagline": "ನಿಮ್ಮ [[org]]ಯ ಬಗ್ಗೆ ನಮಗೆ ತಿಳಿಸಿ.",
@@ -361,7 +361,7 @@
       "field_event_date": "ಕಾರ್ಯಕ್ರಮದ ದಿನಾಂಕ",
       "field_event_location": "ಕಾರ್ಯಕ್ರಮದ ಸ್ಥಳ",
       "field_district": "ಜಿಲ್ಲೆ",
-      "field_domain": "ಡೊಮೇನ್",
+      "field_domain": "ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರ",
       "field_registration_mode": "ಅಭಿಯಾನ ಪ್ರಕಾರ",
       "field_tags": "ಟ್ಯಾಗ್‌ಗಳು (ಐಚ್ಛಿಕ)",
       "placeholder_state": "ರಾಜ್ಯ",
@@ -380,7 +380,7 @@
         "state": "ರಾಜ್ಯ ನಮೂದಿಸಿ.",
         "district": "ಜಿಲ್ಲೆ ನಮೂದಿಸಿ.",
         "lever_event": "ಕಾರ್ಯಕ್ರಮ ನಮೂದಿಸಿ.",
-        "domain": "ಡೊಮೇನ್ ಹೊಂದಿಸಿಲ್ಲ.",
+        "domain": "ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರ ಹೊಂದಿಸಿಲ್ಲ.",
         "registration_mode": "ಫಾರ್ಮ್ ಪ್ರಕಾರ ಆಯ್ಕೆಮಾಡಿ."
       }
     },
@@ -845,7 +845,7 @@
       "name": "Name",
       "contact": "Contact",
       "status": "Status",
-      "serves": "Domains",
+      "serves": "Profile Types",
       "open": "Open",
       "coordinator": "[[User]]",
       "organisation": "[[Org]]",
@@ -854,8 +854,8 @@
       "apply": "Apply",
       "org_filter": "[[Org]]",
       "all_orgs": "All [[orgs]]",
-      "serves_filter": "Serves",
-      "all_domains": "All domains",
+      "serves_filter": "Profile type",
+      "all_domains": "All profile types",
       "clear_filter": "Remove the {label} filter",
       "clear_all": "Clear filters"
     },
@@ -865,14 +865,14 @@
       "reason": "ಕಾರಣ (ಐಚ್ಛಿಕ, ಅರ್ಜಿದಾರರಿಗೆ ಕಳುಹಿಸಲಾಗುತ್ತದೆ)",
       "already": "ಬೇರೆಡೆ ಈಗಾಗಲೇ ನಿರ್ಧರಿಸಲಾಗಿದೆ — ಈಗ {status}.",
       "decided": "ನಿರ್ಧಾರ ಉಳಿಸಲಾಗಿದೆ.",
-      "domains": "ಸೇವೆ ನೀಡುವ ಡೊಮೇನ್‌ಗಳು",
-      "domains_sub": "ಈ [[user]]ರು ಯಾವ ದಾಖಲೆಗಳೊಂದಿಗೆ ಕೆಲಸ ಮಾಡಬಹುದು.",
-      "domains_empty": "ಕನಿಷ್ಠ ಒಂದು ಡೊಮೇನ್ ಆರಿಸಿ.",
+      "domains": "ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರಗಳು",
+      "domains_sub": "ಈ [[user]]ರು ಯಾವ ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರಗಳೊಂದಿಗೆ ಕೆಲಸ ಮಾಡಬಹುದು.",
+      "domains_empty": "ಕನಿಷ್ಠ ಒಂದು ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರವನ್ನು ಆರಿಸಿ.",
       "unsaved": "ಉಳಿಸದ ಬದಲಾವಣೆಗಳು",
       "discard": "ರದ್ದುಮಾಡಿ",
-      "save_domains": "ಡೊಮೇನ್‌ಗಳನ್ನು ಉಳಿಸಿ",
-      "domains_saved": "ಡೊಮೇನ್‌ಗಳನ್ನು ಉಳಿಸಲಾಗಿದೆ.",
-      "remove_domains_note": "{domains} ತೆಗೆದುಹಾಕಿದರೆ ಈ ಸಂಯೋಜಕರು ಆ ದಾಖಲೆಗಳೊಂದಿಗೆ ಕೆಲಸ ಮಾಡಲು ಸಾಧ್ಯವಾಗುವುದಿಲ್ಲ.",
+      "save_domains": "ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರಗಳನ್ನು ಉಳಿಸಿ",
+      "domains_saved": "ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರಗಳನ್ನು ಉಳಿಸಲಾಗಿದೆ.",
+      "remove_domains_note": "{domains} ತೆಗೆದುಹಾಕಿದರೆ ಈ [[user]]ರು ಆ ಪ್ರೊಫೈಲ್‌ಗಳೊಂದಿಗೆ ಕೆಲಸ ಮಾಡಲು ಸಾಧ್ಯವಾಗುವುದಿಲ್ಲ.",
       "remove_domains_confirm": "ತೆಗೆದುಹಾಕಿ ಮತ್ತು ಉಳಿಸಿ",
       "back": "[[user]]ರಿಗೆ ಹಿಂತಿರುಗಿ",
       "joined": "{date} ರಂದು ಸೇರಿದರು",
@@ -896,7 +896,7 @@
         "server": "ನಮ್ಮ ಕಡೆಯಿಂದ ಏನೋ ತಪ್ಪಾಗಿದೆ. ಕೆಲವು ನಿಮಿಷಗಳ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
         "generic": "ಅದು ಆಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
       },
-      "save_domains_first": "ನಿರ್ಧರಿಸುವ ಮೊದಲು ಡೊಮೇನ್ ಬದಲಾವಣೆಗಳನ್ನು ಉಳಿಸಿ ಅಥವಾ ರದ್ದುಮಾಡಿ."
+      "save_domains_first": "ನಿರ್ಧರಿಸುವ ಮೊದಲು ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರದ ಬದಲಾವಣೆಗಳನ್ನು ಉಳಿಸಿ ಅಥವಾ ರದ್ದುಮಾಡಿ."
     },
     "invite": {
       "heading": "[[user]]ರನ್ನು ಆಹ್ವಾನಿಸಿ",
@@ -1156,7 +1156,7 @@
       "col_coordinator": "[[user]]",
       "col_organisation": "[[org]]",
       "col_status": "ಸ್ಥಿತಿ",
-      "col_domains": "ಡೊಮೇನ್‌ಗಳು",
+      "col_domains": "ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರಗಳು",
       "col_action": "ಕ್ರಿಯೆ",
       "view": "ನೋಡಿ",
       "view_named": "{name} ನೋಡಿ",
