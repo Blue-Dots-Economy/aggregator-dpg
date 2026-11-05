@@ -7,12 +7,11 @@
  * shows only while pending or just decided. A viewer who cannot manage the
  * coordinator's organisation sees the domains read-only and no actions.
  *
- * Domains can be changed only while the coordinator is pending; after a
- * decision they are shown read-only.
- *
- * Domains are the network's configured domains. A coordinator saved with none
- * serves every domain, so all are shown ticked. A save bar appears once the
- * choice differs from what is saved, and at least one domain must stay ticked.
+ * Domains can be changed at any status. They are the network's configured
+ * domains. A coordinator saved with none serves every domain, including ones
+ * added later, so all are shown ticked; ticking every domain saves it that way
+ * again (`serves: []`). A save bar appears once the choice differs from what is
+ * saved, and at least one domain must stay ticked.
  */
 
 import { useState } from 'react';
@@ -111,7 +110,8 @@ export function CoordinatorActions({
   async function saveServes() {
     setBusy(true);
     const r = await sendConsole<User>(`/api/console/user/metadata/${user.id}`, 'PATCH', {
-      serves: chosen,
+      // Every domain ticked is saved as none, which the API reads as every domain.
+      serves: domains.every((d) => chosen.includes(d.id)) ? [] : chosen,
     });
     setBusy(false);
     if (r.ok) {
@@ -153,7 +153,7 @@ export function CoordinatorActions({
             <p className="mt-0.5 text-[13px] text-ink-500">{t('coordinator.domains_sub')}</p>
           </header>
           <div className="flex flex-col gap-3.5 px-[22px] pt-4 pb-[22px] text-[13.5px]">
-            {readOnly || status !== 'pending' ? (
+            {readOnly ? (
               <DomainChips domains={domains.filter((d) => saved.includes(d.id))} />
             ) : (
               <>

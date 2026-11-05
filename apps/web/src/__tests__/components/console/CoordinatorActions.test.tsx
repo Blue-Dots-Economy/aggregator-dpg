@@ -257,22 +257,53 @@ describe('<CoordinatorActions />', () => {
     ).toBeEnabled();
   });
 
-  it('shows the domains read-only once the coordinator is decided', () => {
-    renderIt({ ...user, status: 'active', serves: ['seeker'] }, [
+  it('lets the domains of an approved coordinator be changed', async () => {
+    const active = { ...user, status: 'active' as const, serves: ['seeker'] };
+    global.fetch = respond({ ...active, serves: ['provider'] }, 200) as never;
+    renderIt(active, [
       { id: 'seeker', label: 'Seekers' },
       { id: 'provider', label: 'Providers' },
     ]);
-    expect(screen.getByText('Seekers')).toBeInTheDocument();
-    expect(screen.queryByText('Providers')).toBeNull();
-    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: /Seekers/ })).toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Providers/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Seekers/ }));
+    fireEvent.click(saveButton());
+    await waitFor(() =>
+      expect(screen.getByText(messages.console.coordinator.domains_saved)).toBeInTheDocument(),
+    );
+    expect(global.fetch).toHaveBeenCalledWith(
+      `/api/console/user/metadata/${user.id}`,
+      expect.objectContaining({ body: JSON.stringify({ serves: ['provider'] }) }),
+    );
   });
 
-  it('stops editing domains right after an approval', async () => {
+  it('keeps the domains editable right after an approval', async () => {
     global.fetch = respond({ id: user.id, status: 'active', notified: true }, 200) as never;
     renderIt();
-    expect(screen.getByRole('checkbox', { name: /Seekers/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
-    await waitFor(() => expect(screen.queryByRole('checkbox')).toBeNull());
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: messages.console.coordinator.approve }),
+      ).toBeNull(),
+    );
+    expect(screen.getByRole('checkbox', { name: /Seekers/ })).toBeInTheDocument();
+  });
+
+  it('saves every domain ticked as "every domain", so domains added later are served too', async () => {
+    global.fetch = respond({ ...user, serves: [] }, 200) as never;
+    renderIt({ ...user, serves: ['seeker'] }, [
+      { id: 'seeker', label: 'Seekers' },
+      { id: 'provider', label: 'Providers' },
+    ]);
+    fireEvent.click(screen.getByRole('checkbox', { name: /Providers/ }));
+    fireEvent.click(saveButton());
+    await waitFor(() =>
+      expect(screen.getByText(messages.console.coordinator.domains_saved)).toBeInTheDocument(),
+    );
+    expect(global.fetch).toHaveBeenCalledWith(
+      `/api/console/user/metadata/${user.id}`,
+      expect.objectContaining({ body: JSON.stringify({ serves: [] }) }),
+    );
   });
 
   it('lists every configured domain when a read-only coordinator has none saved', () => {
