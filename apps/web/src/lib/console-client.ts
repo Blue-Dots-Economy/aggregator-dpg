@@ -7,11 +7,12 @@
  * @module apps/web/src/lib/console-client
  */
 
-import type {
-  KnownAsValues,
-  KnownAsValuesRequest,
-  Org,
-  OrgKnownAsUpdateRequest,
+import {
+  KnownAsValuesSchema,
+  OrgKnownAsUpdateResponseSchema,
+  type KnownAsValuesRequest,
+  type OrgKnownAsUpdateRequest,
+  type OrgKnownAsUpdateResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { z } from 'zod';
 import { parseResponseBody, ResponseShapeError } from './response-shape-error';
@@ -60,18 +61,43 @@ async function readJson(res: Response): Promise<unknown> {
 }
 
 /**
- * Calls a console BFF route.
+ * Checks the body of an OK console response with its schema.
+ *
+ * @param res - The OK response. Its body is consumed.
+ * @param url - The BFF path, for the log line.
+ * @param schema - The expected body.
+ * @returns The parsed body, or the `RESPONSE_SHAPE` error. Logs field paths only.
+ * @throws {Error} Any failure other than a `ResponseShapeError`.
+ */
+async function readOkBody<S extends z.ZodTypeAny>(
+  res: Response,
+  url: string,
+  schema: S,
+): Promise<ConsoleSendResult<z.output<S>>> {
+  try {
+    return { ok: true, status: res.status, data: await parseResponseBody(res, url, schema) };
+  } catch (err) {
+    if (!(err instanceof ResponseShapeError)) throw err;
+    console.error('[console] unexpected response shape', { url, issues: err.issueSummary() });
+    return { ok: false, status: res.status, error: { code: RESPONSE_SHAPE_CODE } };
+  }
+}
+
+/**
+ * Calls a console BFF route and checks the OK body with a schema.
  *
  * @param url - BFF path, e.g. `/api/console/user/decision/<id>`.
  * @param method - `POST` or `PATCH`.
+ * @param schema - The expected OK body.
  * @param body - JSON body.
- * @returns The outcome; never throws on an HTTP error.
+ * @returns The outcome; an OK body that does not match gives the `RESPONSE_SHAPE` error code. Never throws.
  */
-export async function sendConsole<T>(
+export async function sendConsole<S extends z.ZodTypeAny>(
   url: string,
   method: 'POST' | 'PATCH',
+  schema: S,
   body: unknown,
-): Promise<ConsoleSendResult<T>> {
+): Promise<ConsoleSendResult<z.output<S>>> {
   let res: Response;
   try {
     res = await fetch(url, {
@@ -83,9 +109,9 @@ export async function sendConsole<T>(
   } catch {
     return { ok: false, status: 0, error: {} };
   }
-  const json = await readJson(res);
-  if (res.ok) return { ok: true, status: res.status, data: json as T };
-  return { ok: false, status: res.status, error: readConsoleError(json) };
+  if (!res.ok)
+    return { ok: false, status: res.status, error: readConsoleError(await readJson(res)) };
+  return readOkBody(res, url, schema);
 }
 
 /**
@@ -107,13 +133,7 @@ export async function getConsole<S extends z.ZodTypeAny>(
   }
   if (!res.ok)
     return { ok: false, status: res.status, error: readConsoleError(await readJson(res)) };
-  try {
-    return { ok: true, status: res.status, data: await parseResponseBody(res, url, schema) };
-  } catch (err) {
-    if (!(err instanceof ResponseShapeError)) throw err;
-    console.error('[console] unexpected response shape', { url, issues: err.issueSummary() });
-    return { ok: false, status: res.status, error: { code: RESPONSE_SHAPE_CODE } };
-  }
+  return readOkBody(res, url, schema);
 }
 
 /** Message keys for error codes that need no more detail. */
@@ -153,6 +173,11 @@ function statusKey(status: number): string {
   if (status >= 500) return 'errors.server';
   return 'errors.generic';
 }
+/** The reply to a `known_as_values` update: the org and the saved list, with its keys. */
+const OrgKnownAsValuesUpdateResponseSchema = OrgKnownAsUpdateResponseSchema.extend({
+  known_as_values: KnownAsValuesSchema,
+});
+export type OrgKnownAsValuesUpdateResponse = z.infer<typeof OrgKnownAsValuesUpdateResponseSchema>;
 
 /**
  * Sets an organisation's "known as" value (owner of its parent).
@@ -161,9 +186,17 @@ function statusKey(status: number): string {
  * @param knownAs - A key from the choices of the org's parent (`knownAsChoices`).
  * @returns The outcome, with the updated org on success.
  */
-export function setOrgKnownAs(orgId: string, knownAs: string): Promise<ConsoleSendResult<Org>> {
+export function setOrgKnownAs(
+  orgId: string,
+  knownAs: string,
+): Promise<ConsoleSendResult<OrgKnownAsUpdateResponse>> {
   const body: OrgKnownAsUpdateRequest = { known_as: knownAs };
-  return sendConsole<Org>(`/api/console/org/known-as/${orgId}`, 'PATCH', body);
+  return sendConsole(
+    `/api/console/org/known-as/${orgId}`,
+    'PATCH',
+    OrgKnownAsUpdateResponseSchema,
+    body,
+  );
 }
 
 /**
@@ -177,11 +210,12 @@ export function setOrgKnownAs(orgId: string, knownAs: string): Promise<ConsoleSe
 export function setOrgKnownAsValues(
   orgId: string,
   values: KnownAsValuesRequest,
-): Promise<ConsoleSendResult<Org & { known_as_values: KnownAsValues; reset_count?: number }>> {
+): Promise<ConsoleSendResult<OrgKnownAsValuesUpdateResponse>> {
   const body: OrgKnownAsUpdateRequest = { known_as_values: values };
-  return sendConsole<Org & { known_as_values: KnownAsValues; reset_count?: number }>(
+  return sendConsole(
     `/api/console/org/known-as/${orgId}`,
     'PATCH',
+    OrgKnownAsValuesUpdateResponseSchema,
     body,
   );
 }
@@ -193,6 +227,7 @@ export function setOrgKnownAsValues(
  * @returns A key under `console.errors`.
  */
 export function errorKey(r: { status: number; error: ConsoleError }): string {
+  if (r.error.code === RESPONSE_SHAPE_CODE) return 'errors.response_shape';
   if (r.status === 429) return 'errors.rate_limited';
   if (r.status === 404) return 'errors.not_found';
   const code = r.error.code ?? '';

@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import { org } from './fixtures';
 import type { KnownAsEntry, Org } from '@aggregator-dpg/shared-primitives/user-org';
 
 const refresh = vi.fn();
@@ -100,7 +101,7 @@ describe('<KnownAsPicker />', () => {
 
   it('sends the chosen key and refreshes the page', async () => {
     vi.mocked(global.fetch).mockResolvedValue(
-      json({ id: ID, known_as: 'block', known_as_name: 'Block' }),
+      json(org({ id: ID, known_as: 'block', known_as_name: 'Block' })),
     );
     render(picker(ORG, OPTIONS));
     fireEvent.change(select(), { target: { value: 'block' } });

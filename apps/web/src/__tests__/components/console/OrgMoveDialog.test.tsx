@@ -10,6 +10,7 @@ import { StrictMode } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import { org } from './fixtures';
 
 const refresh = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
@@ -140,7 +141,7 @@ describe('<OrgMoveDialog />', () => {
   });
 
   it('moves under the chosen parent, sending only the parent', async () => {
-    global.fetch = fetchWith(json({ id: ORG })) as never;
+    global.fetch = fetchWith(json(org({ id: ORG }))) as never;
     renderIt();
     fireEvent.change(await parentSelect(), { target: { value: 's1' } });
     fireEvent.click(submit());
@@ -166,10 +167,20 @@ describe('<OrgMoveDialog />', () => {
     expect(await screen.findByText(messages.console.errors.server)).toBeInTheDocument();
   });
 
-  it('shows the plain message when the candidates have the wrong shape', async () => {
+  it('says the reply could not be read when the candidates have the wrong shape', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     global.fetch = vi.fn(async () => json({ subtree_size: 3, options: 'none' })) as never;
     renderIt();
-    expect(await screen.findByText(messages.console.errors.generic)).toBeInTheDocument();
+    expect(await screen.findByText(messages.console.errors.response_shape)).toBeInTheDocument();
+  });
+
+  it('says the reply could not be read when the moved org has the wrong shape', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    global.fetch = fetchWith(json({ id: ORG })) as never;
+    renderIt();
+    fireEvent.change(await parentSelect(), { target: { value: 's1' } });
+    fireEvent.click(submit());
+    expect(await screen.findByText(messages.console.errors.response_shape)).toBeInTheDocument();
+    expect(refresh).not.toHaveBeenCalled();
   });
 });

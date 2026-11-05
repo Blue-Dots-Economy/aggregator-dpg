@@ -13,11 +13,12 @@
 import { useState, type ReactNode } from 'react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { Clock, Download, Lock, Shield, type LucideIcon } from 'lucide-react';
-import type {
-  Role,
-  RoleAssignment,
-  RevokeRoleResponse,
-  UserRolesResponse,
+import {
+  RevokeRoleResponseSchema,
+  RoleAssignmentSchema,
+  type Role,
+  type RoleAssignment,
+  type UserRolesResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -105,11 +106,16 @@ export function RolesPanel({
 
   async function assign(key: string, forDays: number | null) {
     setBusy(true);
-    const r = await sendConsole<RoleAssignment>(`/api/console/user/role/assign/${userId}`, 'POST', {
-      role_key: key,
-      org_id: orgId,
-      ...(forDays ? { days: forDays } : {}),
-    });
+    const r = await sendConsole(
+      `/api/console/user/role/assign/${userId}`,
+      'POST',
+      RoleAssignmentSchema,
+      {
+        role_key: key,
+        org_id: orgId,
+        ...(forDays ? { days: forDays } : {}),
+      },
+    );
     setBusy(false);
     setPending(null);
     if (r.ok) {
@@ -125,9 +131,10 @@ export function RolesPanel({
 
   async function revoke(key: string) {
     setBusy(true);
-    const r = await sendConsole<RevokeRoleResponse>(
+    const r = await sendConsole(
       `/api/console/user/role/revoke/${userId}`,
       'POST',
+      RevokeRoleResponseSchema,
       { role_key: key, org_id: orgId },
     );
     setBusy(false);

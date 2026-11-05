@@ -352,6 +352,18 @@ describe('<InviteForm />', () => {
     },
   );
 
+  it('says the reply could not be read when an OK body does not match', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    global.fetch = respond({ sent: 1 }, 200) as never;
+    renderForm();
+    typeAddresses('a@x.org');
+    fireEvent.click(sendButton());
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      messages.console.invite.error.response_shape,
+    );
+    expect(screen.getByLabelText('Name for a@x.org')).toBeInTheDocument();
+  });
+
   it('says the server could not be reached when the request fails', async () => {
     global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch')) as never;
     renderForm();

@@ -16,6 +16,7 @@ import { useTranslations } from 'next-intl';
 import { FolderInput } from 'lucide-react';
 import {
   OrgParentOptionsResponseSchema,
+  OrgSchema,
   type OrgParentOptionsResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
@@ -128,7 +129,7 @@ function MoveDialog({
     e.preventDefault();
     if (!ready) return;
     setBusy(true);
-    const r = await sendConsole(`/api/console/org/parent/${orgId}`, 'PATCH', {
+    const r = await sendConsole(`/api/console/org/parent/${orgId}`, 'PATCH', OrgSchema, {
       parent_id: parentId,
     });
     setBusy(false);

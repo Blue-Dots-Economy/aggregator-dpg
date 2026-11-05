@@ -8,10 +8,14 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import type { Permission, Role } from '@aggregator-dpg/shared-primitives/user-org';
+import { z } from 'zod';
+import { RoleSchema, type Permission, type Role } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { errorKey, sendConsole } from '../../lib/console-client';
+
+/** `POST /v1/roles/delete/:key` response. */
+const RoleDeleteResponseSchema = z.object({ deleted: z.boolean() });
 
 const ORG_TYPES = ['aggregator', 'network_facilitator'] as const;
 const ASSIGNERS = ['org.manage', 'network.administer'] as const;
@@ -86,8 +90,8 @@ export function RolesAdmin({
       permissions: draft.permissions,
     };
     const r = editing
-      ? await sendConsole<Role>(`/api/console/roles/update/${editing}`, 'PATCH', common)
-      : await sendConsole<Role>('/api/console/roles/create', 'POST', {
+      ? await sendConsole(`/api/console/roles/update/${editing}`, 'PATCH', RoleSchema, common)
+      : await sendConsole('/api/console/roles/create', 'POST', RoleSchema, {
           ...common,
           key: draft.key,
           account_type: draft.account_type,
@@ -104,9 +108,10 @@ export function RolesAdmin({
 
   async function remove(key: string) {
     setBusy(true);
-    const r = await sendConsole<{ deleted: boolean }>(
+    const r = await sendConsole(
       `/api/console/roles/delete/${key}`,
       'POST',
+      RoleDeleteResponseSchema,
       {},
     );
     setBusy(false);

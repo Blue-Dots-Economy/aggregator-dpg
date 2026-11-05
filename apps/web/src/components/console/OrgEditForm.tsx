@@ -21,7 +21,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import type Form from '@rjsf/core';
 import type { ErrorSchema, RJSFSchema, UiSchema } from '@rjsf/utils';
-import type { Org } from '@aggregator-dpg/shared-primitives/user-org';
+import { OrgSchema, type Org } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { I } from '../../icons';
 import { ConsoleSection, DetailList } from './ConsoleUi';
@@ -157,7 +157,7 @@ export function OrgEditForm({
       return;
     }
     setBusy(true);
-    const r = await sendConsole<Org>(`/api/console/org/metadata/${org.id}`, 'PATCH', patch);
+    const r = await sendConsole(`/api/console/org/metadata/${org.id}`, 'PATCH', OrgSchema, patch);
     setBusy(false);
     if (r.ok) {
       // The page's copy catches up through the refresh below.

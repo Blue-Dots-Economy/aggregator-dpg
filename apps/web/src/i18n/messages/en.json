@@ -955,7 +955,8 @@
         "org_unavailable": "This [[org]] can't take invites right now. Refresh the page and try again.",
         "rate_limited": "Too many requests in a short time. Wait a minute and try again.",
         "server": "Something went wrong on our side. Your emails are still here, so try again in a few minutes.",
-        "generic": "The invites couldn't be sent. Please try again."
+        "generic": "The invites couldn't be sent. Please try again.",
+        "response_shape": "The invites may have been sent, but the reply couldn't be read. Refresh the page before sending them again."
       }
     },
     "account": {
@@ -995,7 +996,8 @@
       "network": "We couldn't reach the server. Check your internet connection and try again.",
       "signed_out": "You've been signed out. Sign in again, then try once more.",
       "forbidden": "You don't have permission to do this.",
-      "server": "Something went wrong on our side. Try again in a few minutes."
+      "server": "Something went wrong on our side. Try again in a few minutes.",
+      "response_shape": "The server's reply couldn't be read. Reload the page to see the latest state."
     },
     "roles": {
       "title": "Roles",
