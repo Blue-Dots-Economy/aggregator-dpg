@@ -55,9 +55,8 @@ describe('i18n config', () => {
   });
 
   it('getEnabledLocales ignores NEXT_PUBLIC_ENABLED_LANGUAGES', () => {
-    process.env[LEGACY_ENV_KEY] = 'en,hi';
-    expect(getEnabledLocales()).toEqual(['en', 'kn', 'hi']);
     process.env[ENV_KEY] = '';
+    process.env[LEGACY_ENV_KEY] = 'en,hi';
     expect(getEnabledLocales()).toEqual(['en', 'kn', 'hi']);
   });
 

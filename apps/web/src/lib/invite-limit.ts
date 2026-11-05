@@ -24,6 +24,8 @@ function positiveInt(raw: string | undefined, fallback: number): number {
  * @param env - The environment to read; defaults to `process.env`.
  * @returns The configured cap, or `DEFAULT_MAX_INVITES` when unset or invalid.
  */
-export function resolveMaxInvites(env: NodeJS.ProcessEnv = process.env): number {
+export function resolveMaxInvites(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): number {
   return positiveInt(env.INVITE_MAX_RECIPIENTS, DEFAULT_MAX_INVITES);
 }
