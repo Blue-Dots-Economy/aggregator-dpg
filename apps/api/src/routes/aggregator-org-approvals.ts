@@ -1,5 +1,6 @@
 /**
- * Org approval endpoints reached from the network admin's review email.
+ * Org approval endpoints reached from the review email, sent to the parent
+ * org's owner (the network admins for a top-level org).
  *
  *   GET  /admin/v1/orgs/read/:id?token=...&intent=approve|reject
  *     HTML confirmation page.
@@ -10,7 +11,8 @@
  *   POST /admin/v1/orgs/renew/:id   body { token }
  *     Mints a fresh review token for an expired link and shows the confirm page.
  *
- * The org token carries no `org` claim; the network admin is the approver.
+ * The signed link is the authority: whoever holds a valid token decides. It is
+ * not checked against the console's `orgs.onboard`.
  * Belongs to `@aggregator-dpg/api`.
  */
 

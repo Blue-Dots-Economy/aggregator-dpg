@@ -777,7 +777,6 @@
       "col_status": "Status",
       "col_counts": "[[Users]]",
       "col_actions": "Actions",
-      "depth": "Depth {depth}",
       "hierarchy": "Hierarchy settings",
       "col_parent": "Parent [[org]]",
       "subtitle_owner": "Your [[orgs]] and the [[orgs]] directly under them, and registrations waiting for your approval.",
@@ -788,7 +787,7 @@
       "tile": {
         "all": {
           "label": "सभी [[org]]",
-          "sub": "नेटवर्क में, डिफ़ॉल्ट शामिल नहीं"
+          "sub": "सीधे नेटवर्क के अंतर्गत, डिफ़ॉल्ट शामिल नहीं"
         },
         "active": {
           "label": "सक्रिय",

@@ -777,7 +777,6 @@
       "col_status": "Status",
       "col_counts": "[[Users]]",
       "col_actions": "Actions",
-      "depth": "Depth {depth}",
       "hierarchy": "Hierarchy settings",
       "col_parent": "Parent [[org]]",
       "subtitle_owner": "Your [[orgs]] and the [[orgs]] directly under them, and registrations waiting for your approval.",
@@ -788,7 +787,7 @@
       "tile": {
         "all": {
           "label": "All [[orgs]]",
-          "sub": "In the network, Default not counted"
+          "sub": "Directly under the network, Default not counted"
         },
         "active": {
           "label": "Active",

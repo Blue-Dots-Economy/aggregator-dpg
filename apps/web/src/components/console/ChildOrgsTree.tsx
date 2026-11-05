@@ -126,7 +126,7 @@ function Branch({
         {name}
         <KnownAsBadge name={org.known_as_name ?? org.known_as} />
         {org.depth ? (
-          <span className="text-[12px] text-ink-400">{t('orgs.depth', { depth: org.depth })}</span>
+          <span className="text-[12px] text-ink-400">{t('org.level', { depth: org.depth })}</span>
         ) : null}
         <ConsoleStatusPill status={org.status} />
         <span className="text-[12.5px] text-ink-500">
