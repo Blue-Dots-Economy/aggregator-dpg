@@ -170,7 +170,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         error: { code: 'IDP_UNAVAILABLE', message: `findByAttribute HTTP ${res.value.status}` },
       };
     }
-    const list = await readJson(res.value, z.array(KcUserSchema), 'findByAttribute');
+    const list = await readJson(res.value, validEntries(KcUserSchema), 'findByAttribute');
     if (!list.ok) return list;
     // Some Keycloak versions match `q` partially; keep exact matches only.
     const exact = list.value.find((u) => {
@@ -393,14 +393,11 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
     }
     // A body that is not JSON or not a list reads as no match.
     const body: unknown = await res.value.json().catch(() => []);
-    const groups = Array.isArray(body) ? body : [];
-    const match = groups
-      .map((g) => KcGroupSchema.safeParse(g))
-      .flatMap((g) => (g.success ? [g.data] : []))
-      .find((g) => g.name === name && g.id);
+    const groups = validEntries(KcGroupSchema).safeParse(body);
+    const match = groups.success ? groups.data.find((g) => g.name === name && g.id) : undefined;
     return {
       ok: true,
-      value: match?.id ? { id: match.id, attributes: match.attributes ?? {} } : null,
+      value: match ? { id: match.id, attributes: match.attributes ?? {} } : null,
     };
   }
 
@@ -507,12 +504,9 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
         },
       };
     }
-    const roles = await readJson(res.value, z.array(KcRoleNameSchema), 'listRealmRoles');
+    const roles = await readJson(res.value, validEntries(KcRoleNameSchema), 'listRealmRoles');
     if (!roles.ok) return roles;
-    return {
-      ok: true,
-      value: roles.value.map((r) => r.name).filter((n): n is string => typeof n === 'string'),
-    };
+    return { ok: true, value: roles.value.map((r) => r.name) };
   }
 
   async removeRealmRole(userId: string, role: string): Promise<IdpResult<void>> {
@@ -657,7 +651,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
       };
     }
     const body = await readJson(res.value, KcTokenSchema, 'getToken');
-    if (!body.ok) return body;
+    if (!body.ok) return { ok: false, error: { code: 'AUTH_FAILED', message: body.error.message } };
     this.cachedToken = {
       accessToken: body.value.access_token,
       expiresAt: Date.now() + body.value.expires_in * 1000,
@@ -709,15 +703,32 @@ type KcUserPayload = z.infer<typeof KcUserSchema>;
 /** A realm role, as the role-mappings endpoint needs it. */
 const KcRoleSchema = z.object({ id: z.string(), name: z.string() });
 
-/** An entry of a user's realm role mappings; entries without a string name are skipped. */
-const KcRoleNameSchema = z.object({ name: z.unknown() });
+/** An entry of a user's realm role mappings. */
+const KcRoleNameSchema = z.object({ name: z.string() });
 
-/** A group from the group search. */
+/** A group from the group search. Attributes of another shape read as none. */
 const KcGroupSchema = z.object({
-  id: z.string().optional(),
-  name: z.string().optional(),
-  attributes: z.record(z.array(z.string())).optional(),
+  id: z.string(),
+  name: z.string(),
+  attributes: z.record(z.array(z.string())).optional().catch({}),
 });
+
+/**
+ * A list whose entries are parsed one by one; an entry of another shape is skipped.
+ *
+ * One malformed entry then does not hide the valid ones.
+ *
+ * @param entry - Schema of one entry.
+ * @returns A schema for the list of valid entries.
+ */
+function validEntries<T>(entry: z.ZodType<T, z.ZodTypeDef, unknown>) {
+  return z.array(z.unknown()).transform((items) =>
+    items.flatMap((item) => {
+      const parsed = entry.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    }),
+  );
+}
 
 /** The client_credentials token response. */
 const KcTokenSchema = z.object({ access_token: z.string().min(1), expires_in: z.number() });

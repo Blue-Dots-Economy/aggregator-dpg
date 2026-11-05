@@ -739,19 +739,19 @@ describe('KeycloakIdpAdmin', () => {
   });
 
   describe('response validation', () => {
-    it('returns IDP_UNAVAILABLE when the token body has no access_token', async () => {
+    it('returns AUTH_FAILED when the token body has no access_token', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ expires_in: 300 }));
       const admin = makeAdmin(fetchMock as unknown as typeof fetch);
       const r = await admin.findByEmail('a@b.com');
-      expect(r.ok || r.error.code).toBe('IDP_UNAVAILABLE');
+      expect(r.ok || r.error.code).toBe('AUTH_FAILED');
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    it('returns IDP_UNAVAILABLE when the token body is not JSON', async () => {
+    it('returns AUTH_FAILED when the token body is not JSON', async () => {
       fetchMock.mockResolvedValueOnce(textResponse('<html>', 200));
       const admin = makeAdmin(fetchMock as unknown as typeof fetch);
       const r = await admin.findByEmail('a@b.com');
-      expect(r.ok || r.error.code).toBe('IDP_UNAVAILABLE');
+      expect(r.ok || r.error.code).toBe('AUTH_FAILED');
     });
 
     it('returns IDP_UNAVAILABLE when a user record has no id', async () => {
@@ -833,6 +833,41 @@ describe('KeycloakIdpAdmin', () => {
         .mockResolvedValueOnce(textResponse('not json', 200));
       const admin = makeAdmin(fetchMock as unknown as typeof fetch);
       expect(await admin.findGroupByName('org-x')).toEqual({ ok: true, value: null });
+    });
+  });
+
+  describe('response validation per entry', () => {
+    it('finds a match by attribute when another entry is malformed', async () => {
+      fetchMock.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(
+        jsonResponse([
+          { username: 'broken', attributes: { aggregator_id: ['a-1'] } },
+          { id: 'u-2', username: 'good', enabled: true, attributes: { aggregator_id: ['a-1'] } },
+        ]),
+      );
+      const admin = makeAdmin(fetchMock as unknown as typeof fetch);
+      const r = await admin.findByAttribute('aggregator_id', 'a-1');
+      expect(r.ok && r.value?.id).toBe('u-2');
+    });
+
+    it('keeps an exact-name group whose attributes are malformed, with no attributes', async () => {
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse())
+        .mockResolvedValueOnce(
+          jsonResponse([{ id: 'g-1', name: 'org-x', attributes: { org_id: 'not-a-list' } }]),
+        );
+      const admin = makeAdmin(fetchMock as unknown as typeof fetch);
+      expect(await admin.findGroupByName('org-x')).toEqual({
+        ok: true,
+        value: { id: 'g-1', attributes: {} },
+      });
+    });
+
+    it('lists the string role names and skips entries that are not objects', async () => {
+      fetchMock
+        .mockResolvedValueOnce(tokenResponse())
+        .mockResolvedValueOnce(jsonResponse([{ name: 'org_owner' }, 42, null, { name: 7 }]));
+      const admin = makeAdmin(fetchMock as unknown as typeof fetch);
+      expect(await admin.listRealmRoles('u-1')).toEqual({ ok: true, value: ['org_owner'] });
     });
   });
 });
