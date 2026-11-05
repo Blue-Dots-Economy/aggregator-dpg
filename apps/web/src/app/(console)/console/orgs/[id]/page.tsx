@@ -19,7 +19,6 @@ import { Building2, CalendarDays, Clock, Layers, Network, Users } from 'lucide-r
 import type {
   OrgHierarchyResponse,
   OrgReadResponse,
-  OrgSearchResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
@@ -32,16 +31,11 @@ import { initialsOf } from '@/lib/initials';
 import { I } from '@/icons';
 import { OrgEditForm } from '@/components/console/OrgEditForm';
 import { KnownAsPicker } from '@/components/console/KnownAsPicker';
-import { KnownAsValuesEditor } from '@/components/console/KnownAsValuesEditor';
 import { OrgMoveDialog } from '@/components/console/OrgMoveDialog';
-import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
 import { OrgsTable } from '@/components/console/OrgsTable';
 import { OwnerAccessRepair } from '@/components/console/OwnerAccessRepair';
 import { can, canViewCoordinators } from '@/lib/capabilities';
 import { loadOrgSchema } from '@/lib/org-schema.server';
-
-/** How many organisations below this one the page lists. */
-const CHILD_LIMIT = 100;
 
 export default async function ConsoleOrgPage({
   params,
@@ -52,7 +46,7 @@ export default async function ConsoleOrgPage({
   if (!actor.ok) return null;
   const { id } = await params;
   const data = await consoleRead<OrgReadResponse>(
-    `/v1/org/read/${encodeURIComponent(id)}?fields=known_as_values,parent.known_as_values`,
+    `/v1/org/read/${encodeURIComponent(id)}?fields=parent.known_as_values`,
   );
   const { org, owner } = data;
   // An owner also views, read-only, the orgs directly under its own.
@@ -63,31 +57,17 @@ export default async function ConsoleOrgPage({
   const canRename = actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer');
   const orgSchema = await loadOrgSchema();
   const aggregatorOrg = org.org_type === 'aggregator' && !org.is_default;
-  // The network admin repairs and moves the top-level organisations it views.
-  const canRepair = canRename && aggregatorOrg && org.status === 'active';
-  // A child org's own children are not visible to the parent's owner.
-  const children =
-    org.org_type === 'aggregator' && !org.is_default && own
-      ? await consoleRead<OrgSearchResponse>('/v1/org/search', {
-          filter: { parent_id: org.id },
-          limit: CHILD_LIMIT,
-        })
-      : null;
   // Tree limits; only the network admin can read them.
   const hierarchy = canRename ? await consoleRead<OrgHierarchyResponse>('/v1/org/hierarchy') : null;
   const isOwner = owner.id === actor.me.user.id;
   // The parent and its list; null when the viewer cannot set this org's value.
   const parent = aggregatorOrg ? (org.parent ?? null) : null;
-  // Null when the org cannot have child orgs.
-  const knownAsValues = org.known_as_values ?? null;
-  // The API takes list edits only on an active org the viewer owns.
-  const canEditKnownAsValues = aggregatorOrg && isOwner && org.status === 'active';
+  // The API sends `parent` only to the parent's owner, the one who repairs access.
+  const canRepair = parent !== null && org.status === 'active';
   // The Default org and the root never move; only pending and active orgs can.
   const canMove =
     hierarchy !== null && aggregatorOrg && (org.status === 'pending' || org.status === 'active');
   const maxChildren = hierarchy?.limits.max_children ?? null;
-  // The child tile links to the list of child orgs when the page shows it.
-  const childTileLink = children ? { showLabel: t('org_home.tile_show'), href: '#children' } : {};
   const childrenSub =
     maxChildren === null
       ? t('org.tile.children_sub')
@@ -232,7 +212,8 @@ export default async function ConsoleOrgPage({
               count={String(data.child_count)}
               sub={childrenSub}
               muted={data.child_count === 0}
-              {...childTileLink}
+              showLabel={t('org_home.tile_show')}
+              href="/console/orgs"
             />
           ) : null}
           <CountTile
@@ -255,25 +236,6 @@ export default async function ConsoleOrgPage({
           orgSchema={orgSchema}
           knownAsPicked={parent !== null}
         />
-        {canEditKnownAsValues && knownAsValues !== null ? (
-          <ConsoleSection title={t('org.known_as_values_title')}>
-            <KnownAsValuesEditor orgId={org.id} values={knownAsValues} />
-          </ConsoleSection>
-        ) : null}
-        {children ? (
-          <div id="children" className="scroll-mt-6">
-            <ConsoleSection title={t('org.children')}>
-              <ChildOrgsTree
-                rootId={org.id}
-                rootName={org.name}
-                rootKnownAs={org.known_as_name ?? org.known_as}
-                orgs={children.orgs}
-                linkRows
-                more={children.next_cursor !== null}
-              />
-            </ConsoleSection>
-          </div>
-        ) : null}
       </div>
     </>
   );
