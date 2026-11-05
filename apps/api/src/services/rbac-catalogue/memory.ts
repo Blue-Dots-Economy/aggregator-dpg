@@ -17,8 +17,8 @@ import {
 
 /** Array-backed {@link RbacCatalogueBase}. */
 export class InMemoryRbacCatalogue extends RbacCatalogueBase {
-  permissions: StoredPermission[] = [];
-  private roles: RoleDefinition[] = [];
+  permissions: readonly StoredPermission[] = [];
+  private roles: readonly RoleDefinition[] = [];
   private rev = 0;
   private failure: CatalogueStoreError | null = null;
 
@@ -33,7 +33,7 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
    * @param roles - The new roles.
    */
   setRoles(roles: readonly RoleDefinition[]): void {
-    this.roles = structuredClone(roles).slice();
+    this.roles = structuredClone(roles);
     this.rev += 1;
   }
 
@@ -43,12 +43,12 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
    * @param permissions - The new permission rows.
    */
   setPermissions(permissions: readonly StoredPermission[]): void {
-    this.permissions = structuredClone(permissions).slice();
+    this.permissions = structuredClone(permissions);
   }
 
   /** Returns a copy of the stored roles. */
   storedRoles(): RoleDefinition[] {
-    return structuredClone(this.roles);
+    return this.roles.map((r) => structuredClone(r));
   }
 
   private fail(): CatalogueStoreResult<never> | null {
@@ -60,7 +60,7 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
     return (
       this.fail() ?? {
         ok: true,
-        value: { roles: structuredClone(this.roles), revision: `r${this.rev}` },
+        value: { roles: this.roles.map((r) => structuredClone(r)), revision: `r${this.rev}` },
       }
     );
   }
@@ -75,7 +75,9 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
     return Promise.resolve(
       this.fail() ?? {
         ok: true,
-        value: structuredClone(this.permissions).sort((a, b) => a.key.localeCompare(b.key)),
+        value: this.permissions
+          .map((p) => structuredClone(p))
+          .sort((a, b) => a.key.localeCompare(b.key)),
       },
     );
   }
@@ -91,7 +93,7 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
     const failed = this.fail();
     if (failed) return failed;
     if (this.roles.some((r) => r.key === role.key)) return { ok: true, value: { created: false } };
-    this.roles.push(structuredClone(role));
+    this.roles = [...this.roles, structuredClone(role)];
     this.rev += 1;
     return { ok: true, value: { created: true } };
   }
@@ -105,7 +107,7 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
     if (failed) return failed;
     const i = this.roles.findIndex((r) => r.key === role.key && !r.isBuiltin);
     if (i < 0) return { ok: true, value: { updated: false } };
-    this.roles[i] = structuredClone(role);
+    this.roles = this.roles.map((r, j) => (j === i ? structuredClone(role) : r));
     this.rev += 1;
     return { ok: true, value: { updated: true } };
   }
@@ -120,7 +122,7 @@ export class InMemoryRbacCatalogue extends RbacCatalogueBase {
     const i = this.roles.findIndex((r) => r.key === key && !r.isBuiltin);
     if (i < 0) return { ok: true, value: 'not_found' };
     if (this.liveAssignments.has(key)) return { ok: true, value: 'in_use' };
-    this.roles.splice(i, 1);
+    this.roles = this.roles.filter((_, j) => j !== i);
     this.rev += 1;
     return { ok: true, value: 'deleted' };
   }
