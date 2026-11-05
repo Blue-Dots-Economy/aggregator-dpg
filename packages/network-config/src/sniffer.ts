@@ -9,16 +9,13 @@
  */
 
 import type { IdentitySelectors } from './interface.js';
+import { isPlainObject, type JsonRecord } from './json-record.js';
 
 /**
  * One property schema. The sniffer reads `type`, `pattern` and `format`, and
  * checks each one's type before use.
  */
-type SchemaProperty = Record<string, unknown>;
-
-function isPlainObject(value: unknown): value is SchemaProperty {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+type SchemaProperty = JsonRecord;
 
 /**
  * Derives {@link IdentitySelectors} from a JSON Schema's properties.

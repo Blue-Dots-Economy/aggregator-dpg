@@ -357,8 +357,10 @@ export const AggregatorConfigSchema = AggregatorYamlSchema;
 /**
  * Wraps an optional display block so a malformed value reads as absent.
  *
- * The block is dropped and the UI uses its defaults; the rest of
- * `network.json` still loads.
+ * Any problem inside the block drops the whole block, e.g. one bad tile drops
+ * every tile of that domain. The UI then uses its defaults and the rest of
+ * `network.json` still loads. The loader lists each dropped block in
+ * {@link ResolvedNetworkConfig.warnings}.
  */
 function droppedWhenMalformed<T extends z.ZodTypeAny>(schema: T) {
   return schema.optional().catch(undefined);
@@ -392,15 +394,44 @@ export const DashboardTilesSchema = z
   .passthrough();
 export type DashboardTiles = z.infer<typeof DashboardTilesSchema>;
 
-const StatusBucketLabelsSchema = z.record(
-  z.enum(['new', 'active', 'at_risk', 'inactive']),
-  z.string(),
-);
+const STATUS_BUCKETS = ['new', 'active', 'at_risk', 'inactive'] as const;
+const ACTION_BUCKETS = ['create', 'accept', 'reject', 'cancel'] as const;
 
-const ActionBucketLabelsSchema = z.record(
-  z.enum(['create', 'accept', 'reject', 'cancel']),
-  z.string(),
-);
+/**
+ * Removes the keys whose label is absent, so the result is a plain partial map.
+ *
+ * @param keys - The bucket keys to copy.
+ */
+function presentLabels<K extends string>(keys: readonly K[]) {
+  return (labels: Partial<Record<K, string | undefined>>): Partial<Record<K, string>> => {
+    const out: Partial<Record<K, string>> = {};
+    for (const key of keys) {
+      const label = labels[key];
+      if (label !== undefined) out[key] = label;
+    }
+    return out;
+  };
+}
+
+/** Labels for some or all status buckets. Unknown keys are ignored. */
+const StatusBucketLabelsSchema = z
+  .object({
+    new: z.string().optional(),
+    active: z.string().optional(),
+    at_risk: z.string().optional(),
+    inactive: z.string().optional(),
+  })
+  .transform(presentLabels(STATUS_BUCKETS));
+
+/** Labels for some or all action buckets. Unknown keys are ignored. */
+const ActionBucketLabelsSchema = z
+  .object({
+    create: z.string().optional(),
+    accept: z.string().optional(),
+    reject: z.string().optional(),
+    cancel: z.string().optional(),
+  })
+  .transform(presentLabels(ACTION_BUCKETS));
 
 /**
  * Network-wide label overrides for the dashboard status and action buckets.
@@ -468,21 +499,52 @@ export const NetworkDomainSchema = z
           .array(z.unknown())
           .transform((tokens) => tokens.filter((t): t is string => typeof t === 'string')),
       ),
-      item_schemas: z.record(
-        z.string(),
-        z.record(z.string(), z.unknown(), {
-          invalid_type_error: 'each item schema must be a JSON object',
-        }),
-        {
-          required_error: 'domain is missing item_schemas',
-          invalid_type_error: 'domain is missing item_schemas',
-        },
-      ),
+      item_schemas: z.record(z.string(), z.record(z.string(), z.unknown())),
     },
     { invalid_type_error: 'each domain must declare `id`' },
   )
   .passthrough();
 export type NetworkDomain = z.infer<typeof NetworkDomainSchema>;
+
+/** A JSON object; rejects null and arrays. */
+const JsonObjectSchema = z.record(z.string(), z.unknown());
+
+/**
+ * Checks a domain's `id` and `item_schemas` first, so the error names the domain.
+ */
+const DomainWithNamedErrorsSchema = z
+  .object(
+    {
+      id: z.string({
+        required_error: 'each domain must declare `id`',
+        invalid_type_error: 'each domain must declare `id`',
+      }),
+      item_schemas: z.unknown(),
+    },
+    { invalid_type_error: 'each domain must declare `id`' },
+  )
+  .passthrough()
+  .superRefine((domain, ctx) => {
+    const itemSchemas = JsonObjectSchema.safeParse(domain.item_schemas);
+    if (!itemSchemas.success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['item_schemas'],
+        message: `domain ${domain.id} missing item_schemas`,
+      });
+      return;
+    }
+    for (const [itemType, schema] of Object.entries(itemSchemas.data)) {
+      if (!JsonObjectSchema.safeParse(schema).success) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['item_schemas', itemType],
+          message: `domain ${domain.id} item schema ${itemType} must be an object`,
+        });
+      }
+    }
+  })
+  .pipe(NetworkDomainSchema);
 
 /**
  * Parsed signalstack `network.json`.
@@ -502,7 +564,7 @@ export const SignalstackNetworkSchema = z
       display_name: z.string().optional(),
       description: z.string().optional(),
       domains: z
-        .array(NetworkDomainSchema, {
+        .array(DomainWithNamedErrorsSchema, {
           required_error: 'network.json must declare at least one domain',
           invalid_type_error: 'network.json must declare at least one domain',
         })
@@ -576,6 +638,23 @@ export interface ResolvedNetworkConfig {
    * The web app then uses its on-disk participant `consent.json`.
    */
   participantConsent?: ParticipantConsentDoc;
+  /**
+   * Parts of `network.json` the loader dropped as malformed.
+   *
+   * Undefined when nothing was dropped. The package does not log; callers log these.
+   */
+  warnings?: NetworkConfigWarning[];
+}
+
+/** One part of `network.json` the loader dropped. */
+export interface NetworkConfigWarning {
+  /** Dot path in `network.json`, e.g. `domains.0.dashboard_tiles`. */
+  path: string;
+  /**
+   * `MALFORMED_BLOCK_DROPPED`: the whole optional block was ignored.
+   * `NON_STRING_ENTRIES_DROPPED`: entries that are not strings were removed from a list.
+   */
+  code: 'MALFORMED_BLOCK_DROPPED' | 'NON_STRING_ENTRIES_DROPPED';
 }
 
 // ─── Loader port ─────────────────────────────────────────────────────────────

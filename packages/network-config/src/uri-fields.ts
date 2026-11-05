@@ -22,7 +22,7 @@
  * @module @aggregator-dpg/network-config/uri-fields
  */
 
-type JsonRecord = Record<string, unknown>;
+import { isPlainObject, type JsonRecord } from './json-record.js';
 
 /** Signals' field-level URL marker. */
 const URI_FIELD_MARKER = 'x-uri';
@@ -33,10 +33,6 @@ const URI_FIELD_MARKER = 'x-uri';
  * string are accepted (presence is `required[]`'s job).
  */
 export const URL_PATTERN = String.raw`^\s*$|^\s*([hH][tT][tT][pP][sS]?:\/\/)?([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(:\d{1,5})?([\/?#][^\s]*)?\s*$`;
-
-function isPlainObject(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /**
  * Returns a copy of a participant schema with every link field validated by

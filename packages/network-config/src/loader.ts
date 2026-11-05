@@ -29,6 +29,7 @@ import {
   SignalstackNetworkSchema,
   type AggregatorYaml,
   type NetworkConfigError,
+  type NetworkConfigWarning,
   type ParticipantConsentDoc,
   type ResolvedDomain,
   type ResolvedNetworkConfig,
@@ -250,7 +251,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
 
   private async fetchNetwork(
     url: string,
-  ): Promise<Result<SignalstackNetwork, BaseError | NetworkConfigError>> {
+  ): Promise<Result<CheckedNetwork, BaseError | NetworkConfigError>> {
     const fetchImpl = this.opts.fetchImpl ?? fetch;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.opts.fetchTimeoutMs);
@@ -263,7 +264,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
       if (!checked.success) {
         return this.recoverFromCache(url, checked.error.message);
       }
-      await this.writeCacheFile(url, 'network', checked.value);
+      await this.writeCacheFile(url, 'network', checked.value.network);
       return ok(checked.value);
     } catch (e) {
       return this.recoverFromCache(url, `network fetch transport failure: ${errorMessage(e)}`);
@@ -275,7 +276,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
   private async recoverFromCache(
     url: string,
     upstreamReason: string,
-  ): Promise<Result<SignalstackNetwork, BaseError | NetworkConfigError>> {
+  ): Promise<Result<CheckedNetwork, BaseError | NetworkConfigError>> {
     const cachePath = this.cachePath(url);
     if (!cachePath) {
       return err(
@@ -380,26 +381,91 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
 
 // ─── Resolution ──────────────────────────────────────────────────────────────
 
+/** A validated network and the optional parts dropped while validating it. */
+interface CheckedNetwork {
+  network: SignalstackNetwork;
+  warnings: NetworkConfigWarning[];
+}
+
+/**
+ * Reads the optional blocks as sent, before validation drops any of them.
+ *
+ * Every field is `unknown`, so this parse succeeds for any payload that passed
+ * {@link SignalstackNetworkSchema}.
+ */
+const RawOptionalBlocksSchema = z.object({
+  dashboard_buckets: z.unknown(),
+  domains: z.array(
+    z.object({
+      dashboard_tiles: z.unknown(),
+      status_rules: z.unknown(),
+      guardian_consent_required: z.unknown(),
+      go_live_required: z.unknown(),
+    }),
+  ),
+});
+
 /**
  * Checks a `network.json` payload against {@link SignalstackNetworkSchema}.
  *
  * @param payload - The parsed JSON body, from the upstream or the cache.
- * @returns The parsed network, or `NETWORK_PARSE_FAILED` naming the first problem.
+ * @returns The parsed network with warnings for dropped blocks, or
+ *   `NETWORK_PARSE_FAILED` naming the first problem.
  */
-function validateNetwork(payload: unknown): Result<SignalstackNetwork, NetworkConfigError> {
+function validateNetwork(payload: unknown): Result<CheckedNetwork, NetworkConfigError> {
   const parsed = SignalstackNetworkSchema.safeParse(payload);
-  if (parsed.success) return ok(parsed.data);
-  const issue = parsed.error.issues[0];
-  const where = issue && issue.path.length > 0 ? ` (at ${issue.path.join('.')})` : '';
-  return err({
-    code: 'NETWORK_PARSE_FAILED',
-    message: `${issue?.message ?? 'network.json is invalid'}${where}`,
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const where = issue && issue.path.length > 0 ? ` (at ${issue.path.join('.')})` : '';
+    return err({
+      code: 'NETWORK_PARSE_FAILED',
+      message: `${issue?.message ?? 'network.json is invalid'}${where}`,
+    });
+  }
+  return ok({ network: parsed.data, warnings: droppedBlocks(payload, parsed.data) });
+}
+
+/**
+ * Lists the optional blocks present in the payload that validation dropped.
+ *
+ * @param payload - The payload as sent.
+ * @param network - The same payload after validation.
+ */
+function droppedBlocks(payload: unknown, network: SignalstackNetwork): NetworkConfigWarning[] {
+  const raw = RawOptionalBlocksSchema.safeParse(payload);
+  if (!raw.success) return [];
+  const warnings: NetworkConfigWarning[] = [];
+  const dropped = (path: string, sent: unknown, kept: unknown): void => {
+    if (sent !== undefined && kept === undefined) {
+      warnings.push({ path, code: 'MALFORMED_BLOCK_DROPPED' });
+    }
+  };
+  raw.data.domains.forEach((sent, i) => {
+    const kept = network.domains[i];
+    if (!kept) return;
+    dropped(`domains.${i}.dashboard_tiles`, sent.dashboard_tiles, kept.dashboard_tiles);
+    dropped(`domains.${i}.status_rules`, sent.status_rules, kept.status_rules);
+    dropped(
+      `domains.${i}.guardian_consent_required`,
+      sent.guardian_consent_required,
+      kept.guardian_consent_required,
+    );
+    dropped(`domains.${i}.go_live_required`, sent.go_live_required, kept.go_live_required);
+    if (
+      Array.isArray(sent.go_live_required) &&
+      kept.go_live_required !== undefined &&
+      kept.go_live_required.length < sent.go_live_required.length
+    ) {
+      warnings.push({ path: `domains.${i}.go_live_required`, code: 'NON_STRING_ENTRIES_DROPPED' });
+    }
   });
+  dropped('dashboard_buckets', raw.data.dashboard_buckets, network.dashboard_buckets);
+  return warnings;
 }
 
 function resolveDomains(
   yaml: AggregatorYaml,
-  network: SignalstackNetwork,
+  { network, warnings }: CheckedNetwork,
 ): Result<ResolvedNetworkConfig, NetworkConfigError> {
   const overrides = yaml.aggregator.network.field_overrides ?? {};
   const labels = yaml.aggregator.domain_labels ?? {};
@@ -454,6 +520,7 @@ function resolveDomains(
     ...(network.dashboard_buckets !== undefined
       ? { dashboardBuckets: network.dashboard_buckets }
       : {}),
+    ...(warnings.length > 0 ? { warnings } : {}),
   });
 }
 

@@ -15,7 +15,7 @@
  * @module @aggregator-dpg/network-config/field-errors
  */
 
-type JsonRecord = Record<string, unknown>;
+import { isPlainObject, type JsonRecord } from './json-record.js';
 
 /** The subset of an ajv `ErrorObject` this module reads. */
 export interface SchemaIssue {
@@ -41,10 +41,6 @@ const FIELD_ERROR_MESSAGE_MARKER = 'x-error-message';
 
 /** How many allowed values an enum message lists before eliding (matches Signals). */
 const ENUM_VALUES_SHOWN = 10;
-
-function isPlainObject(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /**
  * Walks `schema` along a value path and returns the property schemas visited,
