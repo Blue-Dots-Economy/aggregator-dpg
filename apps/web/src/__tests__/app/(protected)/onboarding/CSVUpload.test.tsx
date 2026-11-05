@@ -67,6 +67,16 @@ vi.mock('@/services/onboarding.service', () => ({
 
 import { CSVUpload, RecentUploadsBody } from '@/app/(protected)/onboarding/_components/CSVUpload';
 
+/** Opens the Radix domain dropdown and picks an option; jsdom needs the pointer stubs. */
+async function pickDomain(name: RegExp): Promise<void> {
+  Element.prototype.scrollIntoView = vi.fn();
+  Element.prototype.hasPointerCapture = vi.fn().mockReturnValue(false);
+  Element.prototype.setPointerCapture = vi.fn();
+  Element.prototype.releasePointerCapture = vi.fn();
+  fireEvent.click(screen.getByRole('combobox', { name: 'Profile Type' }));
+  fireEvent.click(await screen.findByRole('option', { name }));
+}
+
 function renderUpload(props: Parameters<typeof CSVUpload>[0] = {}) {
   return render(
     <NextIntlClientProvider
@@ -332,9 +342,9 @@ describe('<CSVUpload />', () => {
     });
 
     renderUpload();
-    const select = screen.getByRole('combobox', { name: 'Domain' });
-    expect(select).toHaveValue('seeker');
-    fireEvent.change(select, { target: { value: 'provider' } });
+    const select = screen.getByRole('combobox', { name: 'Profile Type' });
+    expect(select).toHaveTextContent(/Seeker/);
+    await pickDomain(/Provider/);
     await user.click(screen.getByText('Download Excel template'));
     expect(window.location.href).toBe(
       '/api/bulk-uploads/template?participant_type=provider&format=xlsx',

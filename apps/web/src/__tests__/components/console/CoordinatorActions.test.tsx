@@ -31,6 +31,10 @@ function renderIt(
   );
 }
 
+/** The removal note as the test renders it, with the raw `[[user]]` placeholder. */
+const removalNote = (domains: string) =>
+  messages.console.coordinator.remove_domains_note.replace('{domains}', domains);
+
 const respond = (body: unknown, status: number) =>
   vi.fn(async () => new Response(JSON.stringify(body), { status }));
 
@@ -179,9 +183,7 @@ describe('<CoordinatorActions />', () => {
     expect(screen.getByText(messages.console.coordinator.unsaved)).toBeInTheDocument();
     fireEvent.click(saveButton());
     expect(global.fetch).not.toHaveBeenCalled();
-    expect(
-      screen.getByText('Removing Providers stops this coordinator working with those records.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText(removalNote('Providers'))).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', { name: messages.console.coordinator.remove_domains_confirm }),
     );
@@ -319,9 +321,7 @@ describe('<CoordinatorActions />', () => {
     ]);
     fireEvent.click(screen.getByRole('checkbox', { name: /Seekers/ }));
     fireEvent.click(saveButton());
-    expect(
-      screen.getByText('Removing Seekers stops this coordinator working with those records.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText(removalNote('Seekers'))).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', { name: messages.console.coordinator.remove_domains_confirm }),
     );

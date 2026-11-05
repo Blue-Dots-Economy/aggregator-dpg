@@ -70,6 +70,16 @@ import {
   YourLinksBody,
 } from '@/app/(protected)/onboarding/_components/RegistrationLinksSection';
 
+/** Opens the Radix domain dropdown and picks an option; jsdom needs the pointer stubs. */
+async function pickDomain(name: RegExp): Promise<void> {
+  Element.prototype.scrollIntoView = vi.fn();
+  Element.prototype.hasPointerCapture = vi.fn().mockReturnValue(false);
+  Element.prototype.setPointerCapture = vi.fn();
+  Element.prototype.releasePointerCapture = vi.fn();
+  fireEvent.click(screen.getByRole('combobox', { name: 'Profile Type' }));
+  fireEvent.click(await screen.findByRole('option', { name }));
+}
+
 const testMessages = {
   common: messages.common,
   onboarding: messages.onboarding,
@@ -278,9 +288,13 @@ describe('<CreateLinkSection />', () => {
     const user = userEvent.setup();
     renderCreate();
 
-    const domainSelect = screen.getByRole('combobox', { name: 'Domain' });
-    expect(domainSelect).toHaveValue('seeker');
-    fireEvent.change(domainSelect, { target: { value: 'provider' } });
+    const domainSelect = screen.getByRole('combobox', { name: 'Profile Type' });
+    expect(domainSelect).toHaveTextContent(/Seeker/);
+    expect(
+      screen.getByText('Profile Type', { selector: '.bd-label *, .bd-label' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Seekers / Providers')).toBeNull();
+    await pickDomain(/Provider/);
     await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
     await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
     await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Drive');
@@ -378,23 +392,21 @@ describe('<YourLinksBody />', () => {
     expect(screen.getByText('No seeker links yet. Create one above.')).toBeInTheDocument();
   });
 
-  it('lists the active domain and switches domain from the header', () => {
+  it('lists the active domain and switches domain from the header', async () => {
     window.localStorage.clear();
     useAggregatorConfig.mockReturnValue({ data: twoDomainCfg });
     useProfileRaw.mockReturnValue({ data: BOTH });
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
     renderLinks();
     expect(useRegistrationLinks).toHaveBeenLastCalledWith('seeker');
-    fireEvent.change(screen.getByRole('combobox', { name: 'Domain' }), {
-      target: { value: 'provider' },
-    });
+    await pickDomain(/Provider/);
     expect(useRegistrationLinks).toHaveBeenLastCalledWith('provider');
   });
 
   it('shows no domain dropdown for a single-domain coordinator', () => {
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
     renderLinks();
-    expect(screen.queryByRole('combobox', { name: 'Domain' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Profile Type' })).not.toBeInTheDocument();
   });
 
   it('renders the active-count and type-pill badges alongside each link card', () => {

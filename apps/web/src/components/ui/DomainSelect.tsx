@@ -4,13 +4,16 @@
  * Domain dropdown for coordinators who serve more than one domain, in `apps/web`.
  *
  * Renders nothing for a coordinator with a single domain, so their screens
- * look the same as before.
+ * look the same as before. Uses the shared `Select`, styled like the language
+ * switcher.
  */
 
 import type { JSX } from 'react';
 import { useTranslations } from 'next-intl';
-import type { AggregatorConfigDomain } from '../../hooks/useAggregatorConfig';
-import { cn } from '../../lib/cn';
+import { Tag } from 'lucide-react';
+import type { AggregatorConfigDomain } from '@/hooks/useAggregatorConfig';
+import { cn } from '@/lib/cn';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './Select';
 
 export interface DomainSelectProps {
   /** The domains to choose from, in display order. */
@@ -19,7 +22,7 @@ export interface DomainSelectProps {
   value: string | undefined;
   /** Called with the chosen domain id. */
   onChange: (id: string) => void;
-  /** Extra classes for the `<select>`. */
+  /** Extra classes for the trigger, such as `w-full` inside a form. */
   className?: string;
 }
 
@@ -37,17 +40,24 @@ export function DomainSelect({
   const t = useTranslations('common');
   if (domains.length < 2) return null;
   return (
-    <select
-      aria-label={t('domain_label')}
-      className={cn('bd-input w-auto text-[13px] py-1.5 pr-7', className)}
-      value={value ?? ''}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      {domains.map((d) => (
-        <option key={d.id} value={d.id}>
-          {d.plural_label || d.label || d.id}
-        </option>
-      ))}
-    </select>
+    <Select value={value ?? ''} onValueChange={onChange}>
+      <SelectTrigger
+        aria-label={t('domain_label')}
+        className={cn('w-auto gap-1.5 px-2.5 py-2', className)}
+      >
+        {/* Keeps the icon and value together on the left; the trigger spreads its children apart. */}
+        <div className="flex min-w-0 items-center gap-2 truncate">
+          <Tag className="h-4 w-4 shrink-0 text-(--bd-primary-600)" aria-hidden="true" />
+          <SelectValue />
+        </div>
+      </SelectTrigger>
+      <SelectContent align="end">
+        {domains.map((d) => (
+          <SelectItem key={d.id} value={d.id}>
+            {d.plural_label || d.label || d.id}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
