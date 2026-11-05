@@ -39,7 +39,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Errors come back as JSON so the client can show a toast.
     if (!upstream.ok) {
       if (ct.includes('application/json')) {
-        const data = (await upstream.json()) as unknown;
+        const data: unknown = await upstream.json();
         return NextResponse.json(data, { status: upstream.status });
       }
       const text = await upstream.text();

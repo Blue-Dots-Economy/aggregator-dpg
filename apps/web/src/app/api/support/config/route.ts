@@ -18,7 +18,7 @@ export async function GET(): Promise<NextResponse> {
     const upstream = await callApi('/v1/support/config', { method: 'GET' });
     const ct = upstream.headers.get('content-type') ?? '';
     if (ct.includes('application/json')) {
-      const data = (await upstream.json()) as unknown;
+      const data: unknown = await upstream.json();
       return NextResponse.json(data, { status: upstream.status });
     }
     const text = await upstream.text();
