@@ -638,6 +638,15 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     expect(h.jobStatuses).toEqual(['processing']);
   });
 
+  it('names the root when job.content is not an object at all', async () => {
+    // A JSONB `null` read back from the row; the column type does not stop it.
+    const content: ProcessingJob['content'] = JSON.parse('null');
+    const h = harness(job({ content }));
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow(
+      'campaign voice job content invalid: (root)',
+    );
+  });
+
   it('flattens item_state into string variables, dropping null/undefined entries', async () => {
     const h = harness(
       job({

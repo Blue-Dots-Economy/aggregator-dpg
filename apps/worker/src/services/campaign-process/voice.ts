@@ -100,7 +100,9 @@ function voiceStartOptions(content: VoiceJobContent): Record<string, unknown> {
 function parseVoiceContent(content: Record<string, unknown>): VoiceJobContent {
   const parsed = VoiceJobContentSchema.safeParse(content);
   if (!parsed.success) {
-    const fields = parsed.error.issues.map((issue) => issue.path.join('.')).join(', ');
+    const fields = parsed.error.issues
+      .map((issue) => (issue.path.length > 0 ? issue.path.join('.') : '(root)'))
+      .join(', ');
     throw new Error(`campaign voice job content invalid: ${fields}`);
   }
   return parsed.data;
