@@ -321,6 +321,7 @@ async function childCountsOf(ids: string[]): Promise<Record<string, number>> {
  *
  * @param found - The org, already in the actor's view reach.
  * @param values - The new list from the request.
+ * @returns The 200 body: the org with the saved list.
  * @throws {HttpError} CONFLICT for the Default org, FORBIDDEN for a non-owner, and the store refusals.
  */
 async function setKnownAsValues(
@@ -329,7 +330,7 @@ async function setKnownAsValues(
   actor: Actor,
   { org, orgType }: FoundOrg,
   values: KnownAsValuesRequest,
-): Promise<FastifyReply> {
+): Promise<z.input<typeof OrgKnownAsUpdateResponseSchema>> {
   if (orgType === 'aggregator') {
     if (org.isDefault) {
       throw httpError('CONFLICT', { detail: "This organisation's details are not editable." });
@@ -348,9 +349,7 @@ async function setKnownAsValues(
     value_count: updated.value.values.length,
     reset_count: updated.value.resetCount,
   });
-  return reply
-    .status(200)
-    .send({ ...toWireOrg(updated.value.org, orgType), known_as_values: updated.value.values });
+  return { ...toWireOrg(updated.value.org, orgType), known_as_values: updated.value.values };
 }
 
 /**
@@ -556,7 +555,14 @@ export function registerV1OrgRoutes(base: FastifyInstance): void {
       const body = req.body;
       const { org, orgType } = await orgInReach(actor, id, 'view');
       if ('known_as_values' in body) {
-        return setKnownAsValues(req, reply, actor, { org, orgType }, body.known_as_values);
+        const saved = await setKnownAsValues(
+          req,
+          reply,
+          actor,
+          { org, orgType },
+          body.known_as_values,
+        );
+        return reply.status(200).send(saved);
       }
       if (orgType !== 'aggregator' || org.isDefault || org.status === 'inactive') {
         throw httpError('CONFLICT', {
