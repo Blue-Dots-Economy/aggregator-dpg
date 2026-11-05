@@ -55,7 +55,13 @@
       "heading": "Invite your [[users]]",
       "email_label": "[[User]] email {n}",
       "name_label": "[[User]] name {n} (optional)",
-      "remove_label": "Remove [[user]] {n}"
+      "remove_label": "Remove [[user]] {n}",
+      "error": {
+        "network": "Network error. Please try again.",
+        "unreadable": "Your request was received, but the reply could not be read. Some invites may have been sent; sending again re-sends them.",
+        "rate_limited": "Too many invites just now. Please try again shortly.",
+        "generic": "Could not send invites. Please try again."
+      }
     },
     "tab_coordinator": "Register as [[User]]",
     "tab_org": "Register [[Org]]",

@@ -106,17 +106,15 @@ export function OwnerInviteView({
         body: JSON.stringify({ grant, recipients }),
       });
     } catch {
-      setState({ status: 'error', message: 'Network error. Please try again.' });
+      setState({ status: 'error', message: t('error.network') });
       return;
     }
     if (res.ok) {
       const summary = await readMintSummary(res);
       if (!summary) {
-        setState({
-          status: 'error',
-          message:
-            'Your request was received, but the reply could not be read. Some invites may have been sent; sending again re-sends them.',
-        });
+        // Some invites may have been sent: clear the rows so they are not sent again by accident.
+        setRows([newRow()]);
+        setState({ status: 'error', message: t('error.unreadable') });
         return;
       }
       // An expired grant emails a fresh link and sends no invites.
@@ -128,12 +126,9 @@ export function OwnerInviteView({
     if (code === 'GRANT_INVALID') {
       setState({ status: 'invalid_grant' });
     } else if (res.status === 429) {
-      setState({
-        status: 'error',
-        message: 'Too many invites just now. Please try again shortly.',
-      });
+      setState({ status: 'error', message: t('error.rate_limited') });
     } else {
-      setState({ status: 'error', message: 'Could not send invites. Please try again.' });
+      setState({ status: 'error', message: t('error.generic') });
     }
   }
 

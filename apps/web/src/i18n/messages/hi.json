@@ -55,7 +55,13 @@
       "heading": "Invite your [[users]]",
       "email_label": "[[User]] email {n}",
       "name_label": "[[User]] name {n} (optional)",
-      "remove_label": "Remove [[user]] {n}"
+      "remove_label": "Remove [[user]] {n}",
+      "error": {
+        "network": "नेटवर्क त्रुटि। कृपया फिर से प्रयास करें।",
+        "unreadable": "आपका अनुरोध मिल गया, लेकिन जवाब पढ़ा नहीं जा सका। कुछ आमंत्रण भेजे जा चुके हो सकते हैं; दोबारा भेजने पर वे फिर से भेजे जाएँगे।",
+        "rate_limited": "अभी बहुत अधिक आमंत्रण भेजे गए हैं। कृपया थोड़ी देर बाद फिर से प्रयास करें।",
+        "generic": "आमंत्रण नहीं भेजे जा सके। कृपया फिर से प्रयास करें।"
+      }
     },
     "tab_coordinator": "[[user]] के रूप में पंजीकरण करें",
     "tab_org": "[[org]] पंजीकृत करें",
