@@ -105,7 +105,9 @@ export async function readJournal(migrationsFolder: string): Promise<JournalEntr
   );
   const journal = JournalSchema.safeParse(raw);
   if (!journal.success) {
-    throw new Error(`migration journal is malformed: ${journal.error.issues[0]?.message ?? ''}`);
+    const issue = journal.error.issues[0];
+    const at = issue?.path.join('.') ?? '';
+    throw new Error(`migration journal is malformed at ${at || '(root)'}: ${issue?.message ?? ''}`);
   }
   return journal.data.entries;
 }

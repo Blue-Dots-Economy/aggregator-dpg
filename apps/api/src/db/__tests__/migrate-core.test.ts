@@ -55,6 +55,6 @@ describe('readJournal', () => {
 
   it('refuses an entry whose when is not a number', async () => {
     await writeJournal({ entries: [{ idx: 0, when: '1700000000000', tag: '0000_init' }] });
-    await expect(readJournal(dir)).rejects.toThrow(/journal/);
+    await expect(readJournal(dir)).rejects.toThrow(/journal.*entries\.0\.when/);
   });
 });
