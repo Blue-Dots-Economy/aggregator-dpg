@@ -32,33 +32,21 @@ permissions:
   contents: read
 
 jobs:
-  ci:
+  # ── Quality gate ───────────────────────────────────────────────────────────
+  # Lint, type-check, build and tests run as parallel jobs. The `CI` job at the
+  # end waits for all of them and is the one check branch protection requires
+  # (docs/ci-required-checks.md). SonarCloud runs after the tests and does not
+  # hold up `CI`.
+  lint:
     permissions:
       contents: read
-    name: CI
+    name: lint
     runs-on: ubuntu-latest
-
-    # Job-level (not step-level) so the SonarCloud step's `if:` can read it —
-    # the `secrets` context is unavailable in a step conditional, and a step's
-    # own `env:` block is not in scope for its own `if:`.
-    env:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Do not leave the job token in .git/config for later steps.
           persist-credentials: false
-          fetch-depth: 0
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          package-manager-cache: false
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: ./.github/actions/setup-workspace
 
       - name: Lint
         run: pnpm -w lint
@@ -66,15 +54,33 @@ jobs:
       - name: Root script tests (stack helpers, ESLint config, workspace lint coverage)
         run: pnpm -w test:scripts
 
+      - name: Dep-cruiser — check interface boundaries
+        run: pnpm dep-check
+
+  typecheck:
+    permissions:
+      contents: read
+    name: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+
       - name: Type-check
         run: pnpm -w typecheck
 
-      - name: Test
-        run: pnpm -w test
-
-      - name: Generate coverage reports (for SonarCloud)
-        run: pnpm -w test:coverage
-        continue-on-error: true
+  build:
+    permissions:
+      contents: read
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
 
       - name: Build
         run: pnpm -w build
@@ -94,9 +100,6 @@ jobs:
           git diff --exit-code policy/rbac/edge/routes.json || {
             echo "::error::policy/rbac/edge/routes.json is stale — run 'pnpm --filter @aggregator-dpg/api routes:dump' and commit"; exit 1; }
 
-      - name: Dep-cruiser — check interface boundaries
-        run: pnpm dep-check
-
       # RBAC policy (policy/rbac): compile in strict mode, then run the Rego
       # tests, including the shared vectors that packages/rbac also runs
       # against its TypeScript mirror. Same image as the compose `opa` service.
@@ -106,22 +109,184 @@ jobs:
           docker run --rm -v "$PWD/policy:/policy:ro" "$OPA" check --strict /policy/rbac
           docker run --rm -v "$PWD/policy:/policy:ro" "$OPA" test -v /policy/rbac
 
-      # Two independent guards, for two different failure modes:
-      #   `if:`               — no token at all. GitHub withholds repo secrets from
-      #                         Dependabot-raised (and fork) pull_request runs, so an
-      #                         ungated scan exits 3 with "Not authorized or project
-      #                         not found" on every dependency PR. Skip, don't run.
-      #   `continue-on-error` — token present but the scan fails (SonarCloud outage,
-      #                         expired token, quality gate). `CI` is the required
-      #                         check, so a scan that fails for reasons unrelated to
-      #                         the code must not redden it; problems surface in the
-      #                         run log and SonarCloud's own commit check instead.
-      # SONAR_TOKEN comes from the job-level `env` above — a step's own `env:` block
-      # is not in scope for its own `if:`.
+  # Unit tests with coverage, in three groups that run at the same time: the
+  # API, the web app (in two shards, below) and every other workspace. Each
+  # group's own vitest coverage thresholds fail the job.
+  test:
+    permissions:
+      contents: read
+    name: test / ${{ matrix.group }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: api
+            filter: --filter=@aggregator-dpg/api
+            coverage: apps/api/coverage/lcov.info
+          - group: packages
+            filter: --filter=!@aggregator-dpg/api --filter=!@aggregator-dpg/web
+            coverage: |
+              apps/*/coverage/lcov.info
+              packages/*/coverage/lcov.info
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Test with coverage
+        env:
+          FILTER: ${{ matrix.filter }}
+        run: |
+          read -ra filters <<< "$FILTER"
+          pnpm -w turbo run test:coverage --continue "${filters[@]}"
+
+      # Kept when the tests fail, so SonarCloud still gets a report.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: coverage-${{ matrix.group }}
+          path: ${{ matrix.coverage }}
+          if-no-files-found: warn
+          retention-days: 1
+
+  # The web suite is the largest, so it runs in two shards. Each shard writes a
+  # vitest blob report with coverage; thresholds are off here because a shard
+  # covers only part of the code. `test-web-merge` checks them on the whole.
+  test-web:
+    permissions:
+      contents: read
+    name: test / web ${{ matrix.shard }}/2
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Build the packages the web app uses
+        run: pnpm -w turbo run build --filter=@aggregator-dpg/web^...
+
+      - name: Test shard ${{ matrix.shard }}/2 with coverage
+        working-directory: apps/web
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: >-
+          pnpm exec vitest run --shard="$SHARD/2" --reporter=blob --coverage
+          --coverage.thresholds.lines=0 --coverage.thresholds.functions=0
+          --coverage.thresholds.branches=0 --coverage.thresholds.statements=0
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: web-blob-${{ matrix.shard }}
+          path: apps/web/.vitest-reports/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  # Merges the two web shards into one result and one coverage report, and
+  # applies the web coverage thresholds to the whole suite.
+  test-web-merge:
+    permissions:
+      contents: read
+    name: test / web
+    needs: test-web
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-workspace
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: web-blob-*
+          path: apps/web/.vitest-reports
+          merge-multiple: true
+
+      - name: Merge shards and check coverage thresholds
+        working-directory: apps/web
+        run: pnpm exec vitest run --merge-reports --coverage
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: coverage-web
+          path: apps/web/coverage/lcov.info
+          if-no-files-found: warn
+          retention-days: 1
+
+  # Advisory, as before: not part of `CI`. Two guards, for two failure modes:
+  #   `if:` on the scan    — no token at all. GitHub withholds repo secrets from
+  #                          Dependabot-raised and fork pull_request runs; an
+  #                          ungated scan exits 3 on every dependency PR.
+  #   `continue-on-error`  — token present but the scan fails (outage, expired
+  #                          token, quality gate). Problems show in the run log
+  #                          and in SonarCloud's own commit check.
+  sonar:
+    permissions:
+      contents: read
+    name: sonar
+    needs: [test, test-web-merge]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    # Job-level so the scan step's `if:` can read it: the `secrets` context is
+    # not available in a step conditional.
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Full history so SonarCloud can attribute new code to its commits.
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-workspace
+
+      # Each artifact keeps paths relative to the folder its files share, so
+      # each one is restored to that folder.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage-api
+          path: apps/api/coverage
+        continue-on-error: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage-web
+          path: apps/web/coverage
+        continue-on-error: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage-packages
+          path: .
+        continue-on-error: true
+
       - name: SonarCloud scan
         if: env.SONAR_TOKEN != ''
         uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
         continue-on-error: true
+
+  # The required check. Passes only when every quality-gate job succeeded; a
+  # failed, cancelled or skipped job fails it.
+  ci:
+    permissions: {}
+    name: CI
+    needs: [lint, typecheck, build, test, test-web-merge]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the quality-gate jobs
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' > /dev/null
 
   # ── Real-Postgres integration tests ────────────────────────────────────────
   # `*.integration.test.ts` skip themselves unless INTEGRATION_DATABASE_URL is
