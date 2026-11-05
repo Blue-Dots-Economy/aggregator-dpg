@@ -247,19 +247,19 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
           fields: { participant_type: 'invalid' },
         });
       }
-      enforceAggregatorType(auth, participantType as string);
+      enforceAggregatorType(auth, participantType);
 
       // Both formats are generated from the live participant schema, one
       // participant type per file.
       if (format === 'xlsx') {
         const cfgForXlsx = await getNetworkConfig();
         const workbook = await buildXlsxTemplate(
-          await loadParticipantSchema(participantType as string),
-          participantType as string,
+          await loadParticipantSchema(participantType),
+          participantType,
           {
             arrayDelimiter: cfgForXlsx.aggregator.network.csv_array_delimiter,
             // Names the phone and email columns so their samples are realistic.
-            identity: cfgForXlsx.domains[participantType as string]?.identity,
+            identity: cfgForXlsx.domains[participantType]?.identity,
           },
         );
         return reply
@@ -271,12 +271,12 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
           .send(workbook);
       }
 
-      const csvSchema = await loadParticipantSchema(participantType as string);
+      const csvSchema = await loadParticipantSchema(participantType);
       const cfg = await getNetworkConfig();
       const csv = buildCsvTemplate(csvSchema, {
         arrayDelimiter: cfg.aggregator.network.csv_array_delimiter,
         // Without these, the phone sample would fail row validation.
-        identity: cfg.domains[participantType as string]?.identity,
+        identity: cfg.domains[participantType]?.identity,
       });
       return reply
         .header('Content-Type', 'text/csv; charset=utf-8')
