@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { parseJsonObject, parseJsonSchema, readJsonSchema } from '@/lib/json-object';
+import {
+  parseJsonObject,
+  parseJsonSchema,
+  readJsonObject,
+  readJsonSchema,
+} from '@/lib/json-object';
 
 describe('parseJsonObject', () => {
   it('returns the object a JSON text holds', () => {
@@ -50,5 +55,20 @@ describe('readJsonSchema', () => {
     ['properties as a list', { properties: [] }],
   ])('returns null for %s', (_label, value) => {
     expect(readJsonSchema(value)).toBeNull();
+  });
+});
+
+describe('readJsonObject', () => {
+  it('returns a value that is an object', () => {
+    expect(readJsonObject({ 'ui:widget': 'radio' })).toEqual({ 'ui:widget': 'radio' });
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['an array', ['radio']],
+    ['a string', 'radio'],
+  ])('returns null for %s', (_label, value) => {
+    expect(readJsonObject(value)).toBeNull();
   });
 });

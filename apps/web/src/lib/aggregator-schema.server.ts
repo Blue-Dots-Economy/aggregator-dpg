@@ -8,7 +8,8 @@
  */
 
 import 'server-only';
-import { parseJsonObject, parseJsonSchema } from './json-object';
+import { readDomainLabels } from './aggregator-config-domains';
+import { parseJsonObject, parseJsonSchema, readJsonObject } from './json-object';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -60,22 +61,19 @@ export async function patchTypeFromNetwork(
   try {
     const res = await fetch(`${apiBase}/v1/aggregator-config`, { cache: 'no-store' });
     if (!res.ok) return;
-    const cfg = (await res.json()) as {
-      domains?: Array<{ id: string; label?: string; plural_label?: string }>;
-    };
-    const domains = cfg?.domains ?? [];
+    const domains = readDomainLabels(await res.json()) ?? [];
     if (domains.length === 0) return;
 
-    const props = schema.properties as Record<string, Record<string, unknown>> | undefined;
-    const typeField = props?.['type'];
-    if (typeField) {
-      typeField['enum'] = domains.map((d) => d.id);
-      typeField['oneOf'] = domains.map((d) => ({ const: d.id, title: d.label ?? d.id }));
+    const typeField = schema.properties?.['type'];
+    if (typeof typeField === 'object') {
+      typeField.enum = domains.map((d) => d.id);
+      typeField.oneOf = domains.map((d) => ({ const: d.id, title: d.label }));
     }
 
-    const typeUi = (uiSchema['type'] as Record<string, unknown> | undefined) ?? {};
-    typeUi['ui:enumNames'] = domains.map((d) => d.label ?? d.id);
-    uiSchema['type'] = typeUi;
+    uiSchema['type'] = {
+      ...readJsonObject(uiSchema['type']),
+      'ui:enumNames': domains.map((d) => d.label),
+    };
   } catch {
     // Best-effort; the static values remain.
   }

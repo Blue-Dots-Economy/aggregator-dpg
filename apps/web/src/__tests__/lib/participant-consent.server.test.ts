@@ -144,6 +144,35 @@ describe('loadParticipantConsent', () => {
       expect(result!.terms.title).toBe('Terms v2');
     });
 
+    it.each([
+      ['versions as text', validDoc({ terms: { current_version: 1, versions: 'v1' } })],
+      [
+        'a numeric title',
+        validDoc({
+          terms: { current_version: 1, versions: [{ version: 1, title: 7, content: 'x' }] },
+        }),
+      ],
+      ['a JSON array', [validDoc()]],
+    ])('falls back to disk when the API document has %s', async (_label, doc) => {
+      existsSyncMock.mockReturnValue(true);
+      readFileMock.mockResolvedValue(JSON.stringify(validDoc()));
+      global.fetch = vi.fn().mockResolvedValue(apiConsent(doc)) as unknown as typeof fetch;
+      const result = await loadParticipantConsent();
+      expect(result!.terms.title).toBe('Terms v2');
+    });
+
+    it('falls back to disk when the API body has no participant_consent object', async () => {
+      existsSyncMock.mockReturnValue(true);
+      readFileMock.mockResolvedValue(JSON.stringify(validDoc()));
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ['not', 'an', 'object'],
+      } as unknown as Response) as unknown as typeof fetch;
+      const result = await loadParticipantConsent();
+      expect(result!.terms.title).toBe('Terms v2');
+    });
+
     it('returns null when neither API nor disk has a document', async () => {
       existsSyncMock.mockReturnValue(false);
       await expect(loadParticipantConsent()).resolves.toBeNull();
