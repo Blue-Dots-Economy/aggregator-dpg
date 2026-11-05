@@ -68,7 +68,8 @@ export type DashboardDomainSlice = z.infer<typeof DashboardDomainSliceSchema>;
 /** Signals metadata about the cached rollup, used for the "last updated" hint. */
 export const DashboardMetadataSchema = z
   .object({
-    last_computed_at: z.string().optional(),
+    /** `null` until Signals has computed the rollup. */
+    last_computed_at: z.string().nullish(),
     ttl_seconds: z.number().optional(),
     refreshed: z.boolean().optional(),
   })

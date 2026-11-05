@@ -62,6 +62,16 @@ describe('dashboardService.dashboard', () => {
     await expect(dashboardService.dashboard({ domain: 'seeker' })).resolves.toEqual(payload);
   });
 
+  it('accepts a dashboard that Signals has not computed yet (last_computed_at null)', async () => {
+    const payload = { by_domain: {}, metadata: { last_computed_at: null, refreshed: false } };
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      ) as unknown as typeof fetch;
+    await expect(dashboardService.dashboard({ domain: 'seeker' })).resolves.toEqual(payload);
+  });
+
   it('throws when domain is missing', async () => {
     await expect(dashboardService.dashboard()).rejects.toThrow();
   });
