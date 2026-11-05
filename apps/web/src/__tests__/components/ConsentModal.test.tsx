@@ -6,7 +6,7 @@
  * re-opening resets the active tab to `initialTab`.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
 import messages from '@/i18n/messages/en.json';
@@ -70,6 +70,32 @@ describe('<ConsentModal />', () => {
       'true',
     );
     expect(screen.getByRole('heading', { name: 'Privacy body' })).toBeInTheDocument();
+  });
+
+  it('starts again at initialTab when it reopens', () => {
+    const modal = (open: boolean) => (
+      <Wrapper>
+        <ConsentModal open={open} onOpenChange={vi.fn()} initialTab="terms" content={content} />
+      </Wrapper>
+    );
+    const { rerender } = render(modal(true));
+    fireEvent.click(screen.getByRole('tab', { name: 'Privacy Policy' }));
+    rerender(modal(false));
+    rerender(modal(true));
+    expect(screen.getByRole('tab', { name: 'Terms of Service' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('moves focus to the close button when it opens', async () => {
+    render(
+      <Wrapper>
+        <ConsentModal open onOpenChange={vi.fn()} initialTab="terms" content={content} />
+      </Wrapper>,
+    );
+    await waitFor(() => expect(document.activeElement?.tagName).toBe('BUTTON'));
+    expect(document.activeElement).not.toBe(screen.getByRole('tab', { name: 'Terms of Service' }));
   });
 
   it('calls onOpenChange(false) when the header close button is clicked', () => {

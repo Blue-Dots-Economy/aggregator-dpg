@@ -168,14 +168,17 @@ export function ReferenceAutocompleteWidget({
     flattenReferenceDataset,
   );
 
-  const [text, setText] = React.useState<string>((value as string) ?? '');
+  const valueText = typeof value === 'string' ? value : '';
+  const [text, setText] = React.useState(valueText);
+  // Take a new value from RJSF (e.g. a prefill) during render. The input keeps
+  // its own text so typing is not held up by the form's update.
+  const [syncedValue, setSyncedValue] = React.useState(valueText);
+  if (valueText !== syncedValue) {
+    setSyncedValue(valueText);
+    setText(valueText);
+  }
   const [open, setOpen] = React.useState(false);
   const blurRef = React.useRef<number | undefined>(undefined);
-
-  // Keep the input in sync when RJSF pushes a new value (e.g. a prefill).
-  React.useEffect(() => {
-    setText((value as string) ?? '');
-  }, [value]);
 
   React.useEffect(() => () => window.clearTimeout(blurRef.current), []);
 

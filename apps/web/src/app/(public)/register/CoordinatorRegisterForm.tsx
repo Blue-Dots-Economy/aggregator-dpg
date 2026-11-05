@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type JSX } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
@@ -118,9 +118,11 @@ export function CoordinatorRegisterForm({
     locations: [{ geo: { type: 'Point', coordinates: [0, 0] }, address: {} }],
     // Prefill the invite email.
     ...(lockedEmail ? { contact: { email: lockedEmail } } : {}),
+    // An invite fixes the org, so the hidden `name` is its name from the start.
+    ...(inviteMode && lockedOrgName ? { name: lockedOrgName } : {}),
   }));
   // Selected org. Empty until picked.
-  const [orgId, setOrgId] = useState<string>('');
+  const [pickedOrgId, setPickedOrgId] = useState<string>('');
   // Coordinate from the address widget; RJSF does not write it into `formData`.
   const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
   const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
@@ -136,31 +138,33 @@ export function CoordinatorRegisterForm({
     enabled: !inviteMode,
     staleTime: 30_000,
   });
-  const orgs = useMemo(() => orgsQuery.data?.orgs ?? [], [orgsQuery.data]);
+  const orgs = orgsQuery.data?.orgs ?? [];
+  // The API lists the Default org only when it is the only active org; it is preselected then.
+  const onlyOrg = orgs.length === 1 ? orgs[0] : undefined;
+  const orgId =
+    pickedOrgId || (!inviteMode && onlyOrg?.slug === DEFAULT_ORG_SLUG ? onlyOrg.id : '');
   const selectedOrg = orgs.find((o) => o.id === orgId);
   // A real org supplies the name and details; Default org coordinators enter their own.
   const inheritsFromOrg =
     inviteMode || (selectedOrg !== undefined && selectedOrg.slug !== DEFAULT_ORG_SLUG);
   const selectedOrgName = inviteMode ? (lockedOrgName ?? '') : (selectedOrg?.display_name ?? '');
 
-  // The API lists the Default org only when it is the only active org; preselect it then.
-  useEffect(() => {
-    if (inviteMode || orgId) return;
-    const only = orgs.length === 1 ? orgs[0] : undefined;
-    if (only?.slug === DEFAULT_ORG_SLUG) setOrgId(only.id);
-  }, [inviteMode, orgId, orgs]);
-
-  // Sync the hidden `name` with the org name; clear it on switching to the Default org.
-  useEffect(() => {
-    if (inheritsFromOrg) {
-      const next = selectedOrgName || undefined;
-      setFormData((prev) => (prev['name'] === next ? prev : { ...prev, name: next }));
+  /**
+   * Takes the picked org. A real org's name fills the hidden `name`; on
+   * switching to the Default org, a name copied from an org is cleared.
+   */
+  function pickOrg(id: string) {
+    setPickedOrgId(id);
+    const org = orgs.find((o) => o.id === id);
+    if (org !== undefined && org.slug !== DEFAULT_ORG_SLUG) {
+      const name = org.display_name || undefined;
+      setFormData((prev) => (prev['name'] === name ? prev : { ...prev, name }));
     } else {
       setFormData((prev) =>
         orgs.some((o) => o.display_name === prev['name']) ? { ...prev, name: undefined } : prev,
       );
     }
-  }, [inheritsFromOrg, selectedOrgName, orgs]);
+  }
 
   const formSchema = useMemo(() => {
     const base = stripConsentBlock(stripFormChrome(schema));
@@ -272,7 +276,7 @@ export function CoordinatorRegisterForm({
           ) : (
             <Select
               {...(orgId ? { value: orgId } : {})}
-              onValueChange={setOrgId}
+              onValueChange={pickOrg}
               disabled={orgsQuery.isLoading}
             >
               <SelectTrigger id="coordinator-org" aria-required>

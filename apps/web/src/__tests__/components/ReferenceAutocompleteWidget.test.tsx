@@ -262,6 +262,39 @@ describe('ReferenceAutocompleteWidget', () => {
     expect(onChange).toHaveBeenLastCalledWith('Government ITI Jayanagar');
   });
 
+  it('shows a value the form sets from outside, such as a prefill', () => {
+    const props = makeProps();
+    const { rerender } = render(
+      <Wrapper>
+        <ReferenceAutocompleteWidget {...(props as never)} />
+      </Wrapper>,
+    );
+    rerender(
+      <Wrapper>
+        <ReferenceAutocompleteWidget
+          {...({ ...props, value: 'Government ITI Jayanagar' } as never)}
+        />
+      </Wrapper>,
+    );
+    expect(screen.getByRole('combobox')).toHaveValue('Government ITI Jayanagar');
+  });
+
+  it('keeps what the user typed while the form value matches it', () => {
+    const props = makeProps();
+    const { rerender } = render(
+      <Wrapper>
+        <ReferenceAutocompleteWidget {...(props as never)} />
+      </Wrapper>,
+    );
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'gov' } });
+    rerender(
+      <Wrapper>
+        <ReferenceAutocompleteWidget {...({ ...props, value: 'gov' } as never)} />
+      </Wrapper>,
+    );
+    expect(screen.getByRole('combobox')).toHaveValue('gov');
+  });
+
   it('lists nothing for a single-character query', async () => {
     // A one-character query matches a large share of a 100k-entry dataset;
     // rendering that is neither useful nor cheap.

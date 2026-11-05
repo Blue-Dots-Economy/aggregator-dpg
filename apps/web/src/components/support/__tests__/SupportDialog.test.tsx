@@ -86,6 +86,44 @@ describe('SupportDialog', () => {
     expect((screen.getByLabelText('Phone') as HTMLInputElement).value).toBe('+919000000000');
   });
 
+  it('starts from the session user again each time it reopens', async () => {
+    mockFetch(new Response('{"ok":true}', { status: 201 }));
+    const client = makeQueryClient();
+    const dialog = (open: boolean) => (
+      <QueryClientProvider client={client}>
+        <NextIntlClientProvider locale="en" messages={en}>
+          <AuthProvider initialUser={prefilledUser} supportEnabled>
+            <SupportDialog open={open} onOpenChange={() => {}} />
+          </AuthProvider>
+        </NextIntlClientProvider>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(dialog(true));
+    await userEvent.clear(screen.getByLabelText('Name'));
+    await userEvent.type(screen.getByLabelText('Details'), 'Half a message');
+    rerender(dialog(false));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    rerender(dialog(true));
+    expect(screen.getByLabelText('Name')).toHaveProperty('value', 'Asha K');
+    expect(screen.getByLabelText('Details')).toHaveProperty('value', '');
+  });
+
+  it('closes on Escape', async () => {
+    mockFetch(new Response('{"ok":true}', { status: 201 }));
+    const onOpenChange = vi.fn();
+    render(
+      <QueryClientProvider client={makeQueryClient()}>
+        <NextIntlClientProvider locale="en" messages={en}>
+          <AuthProvider initialUser={prefilledUser} supportEnabled>
+            <SupportDialog open onOpenChange={onOpenChange} />
+          </AuthProvider>
+        </NextIntlClientProvider>
+      </QueryClientProvider>,
+    );
+    await userEvent.keyboard('{Escape}');
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it('does not submit until details + a contact + consent are provided', async () => {
     const fetchSpy = mockFetch(new Response('{"ok":true}', { status: 201 }));
     renderDialog();

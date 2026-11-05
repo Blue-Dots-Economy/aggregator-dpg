@@ -7,6 +7,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react';
 
@@ -28,6 +29,26 @@ const ThemeModeContext = createContext<ThemeModeContextValue | null>(null);
  */
 export const THEME_STORAGE_KEY = 'bd:theme-mode';
 
+/** No-op subscription for `useSyncExternalStore`; the stored value is read once per render. */
+function subscribeNever(): () => void {
+  return () => {};
+}
+
+/**
+ * Reads the stored theme choice.
+ *
+ * @returns The stored mode, or `null` when none is stored, it is not a mode, or storage is unavailable.
+ */
+function readStoredMode(): ThemeMode | null {
+  try {
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === 'dark' || stored === 'light' ? stored : null;
+  } catch {
+    // Storage may be unavailable; the default applies.
+    return null;
+  }
+}
+
 /**
  * Applies the light/dark mode to `<html>` and saves it to localStorage.
  *
@@ -36,16 +57,10 @@ export const THEME_STORAGE_KEY = 'bd:theme-mode';
  * @param children - Subtree that may call `useThemeMode`.
  */
 export function ThemeModeProvider({ children }: { children: ReactNode }) {
-  const [mode, setModeState] = useState<ThemeMode>('light');
-
-  // Server markup is always light; load the stored choice on the client.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === 'dark' || stored === 'light') {
-      setModeState(stored);
-    }
-  }, []);
+  // Server markup is always light; the client reads the stored choice.
+  const stored = useSyncExternalStore(subscribeNever, readStoredMode, () => null);
+  const [chosen, setChosen] = useState<ThemeMode | null>(null);
+  const mode: ThemeMode = chosen ?? stored ?? 'light';
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -59,10 +74,10 @@ export function ThemeModeProvider({ children }: { children: ReactNode }) {
     }
   }, [mode]);
 
-  const setMode = useCallback((next: ThemeMode) => setModeState(next), []);
+  const setMode = useCallback((next: ThemeMode) => setChosen(next), []);
   const toggle = useCallback(
-    () => setModeState((prev) => (prev === 'light' ? 'dark' : 'light')),
-    [],
+    () => setChosen((prev) => ((prev ?? stored ?? 'light') === 'light' ? 'dark' : 'light')),
+    [stored],
   );
 
   const value = useMemo(() => ({ mode, setMode, toggle }), [mode, setMode, toggle]);

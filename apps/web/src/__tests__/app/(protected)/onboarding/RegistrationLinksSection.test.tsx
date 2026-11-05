@@ -12,7 +12,7 @@
  *   `public_url` defensive branch.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
@@ -367,6 +367,30 @@ describe('<YourLinksBody />', () => {
     expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
     // A toast confirms the draft and points at "Make Live".
     expect(screen.getByText(/created as a draft/i)).toBeInTheDocument();
+  });
+
+  it('closes the draft toast on time even when the list re-renders while it shows', () => {
+    vi.useFakeTimers();
+    try {
+      searchParamsRef.current = new URLSearchParams('new=l2');
+      useRegistrationLinks.mockReturnValue({
+        data: [baseLink({ link_id: 'l2', status: 'draft', context: { title: 'Draft One' } })],
+        isLoading: false,
+        error: null,
+      });
+      const { rerender } = renderLinks();
+      expect(screen.getByText(/created as a draft/i)).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(2000));
+      rerender(
+        <NextIntlClientProvider locale="en" messages={testMessages}>
+          <YourLinksBody />
+        </NextIntlClientProvider>,
+      );
+      act(() => vi.advanceTimersByTime(500));
+      expect(screen.queryByText(/created as a draft/i)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('draft card: shows the draft notice and Edit + Make Live actions, and Make Live activates the link', async () => {

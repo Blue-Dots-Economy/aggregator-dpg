@@ -27,6 +27,7 @@ import {
 } from '../../lib/support-attachments';
 import { withStableKeys } from '@/lib/list-keys';
 import { useSupportConfig } from '@/hooks/useSupportConfig';
+import { useIsClient } from '@/hooks/useIsClient';
 
 /** Props for {@link SupportDialog}. */
 export interface SupportDialogProps {
@@ -123,17 +124,28 @@ function attachmentKey(file: File): string {
 /**
  * Displays a modal contact-support form and relays submissions to the BFF.
  *
- * Returns null when `open` is false, so form state resets between openings.
+ * Returns null when `open` is false. The form mounts on each opening, so its
+ * state starts again from the session user.
  *
  * @param props - Open state and change handler.
  * @returns The modal overlay element, or null when closed.
  */
 export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.Element | null {
+  // Render the portal only on the client, since `document` is client-only.
+  const isClient = useIsClient();
+  if (!open || !isClient) return null;
+  return <SupportForm onOpenChange={onOpenChange} />;
+}
+
+/** The open dialog: form state, submit and the portal. */
+function SupportForm({
+  onOpenChange,
+}: Readonly<Pick<SupportDialogProps, 'onOpenChange'>>): JSX.Element {
   const t = useTranslations('support');
   const { user } = useAuth();
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
+  const [name, setName] = useState(user?.name ?? '');
+  const [email, setEmail] = useState(user?.email ?? '');
+  const [phone, setPhone] = useState(user?.phone ?? '');
   const [type, setType] = useState<SupportType>('complaint');
   const [details, setDetails] = useState('');
   const [consent, setConsent] = useState(false);
@@ -144,39 +156,17 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
   /** Server-side attachment rejection message; it names the file. */
   const [serverDetail, setServerDetail] = useState<string | null>(null);
   // Attachment limits come from the API. If the read fails, defaults stay.
-  const config = useSupportConfig(open);
+  const config = useSupportConfig(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // Render the portal only after mount, since `document` is client-only.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
-  // Reset the form and prefill from the session user each time it opens.
-  useEffect(() => {
-    if (open) {
-      setName(user?.name ?? '');
-      setEmail(user?.email ?? '');
-      setPhone(user?.phone ?? '');
-      setType('complaint');
-      setDetails('');
-      setConsent(false);
-      setStatus('idle');
-      setAttachments([]);
-      setAttachmentError(null);
-      setServerDetail(null);
-    }
-  }, [open, user]);
 
   // Dismiss on ESC.
   useEffect(() => {
-    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onOpenChange(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onOpenChange]);
-
-  if (!open || !mounted) return null;
+  }, [onOpenChange]);
 
   const hasContact = email.trim() !== '' || phone.trim() !== '';
   const canSubmit = details.trim() !== '' && hasContact && consent;

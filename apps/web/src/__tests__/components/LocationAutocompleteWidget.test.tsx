@@ -203,6 +203,21 @@ describe('LocationAutocompleteWidget', () => {
     expect(onLocationResolved).not.toHaveBeenCalled();
   });
 
+  it('shows a value the form sets from outside, such as a prefill', () => {
+    const props = makeProps();
+    const { rerender } = render(
+      <Wrapper>
+        <LocationAutocompleteWidget {...(props as never)} />
+      </Wrapper>,
+    );
+    rerender(
+      <Wrapper>
+        <LocationAutocompleteWidget {...({ ...props, value: JAYANAGAR.label } as never)} />
+      </Wrapper>,
+    );
+    expect(screen.getByRole('combobox')).toHaveValue(JAYANAGAR.label);
+  });
+
   it('does not query the geocoder for a query shorter than three characters', async () => {
     render(
       <Wrapper>
