@@ -142,7 +142,7 @@ describe('<KnownAsValuesEditor />', () => {
     renderIt();
     fireEvent.click(screen.getByRole('button', { name: 'Remove District' }));
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Organisations known as District will move to Aggregator when you save.',
+      'After the removal, organisations known as District will be known as Aggregator when you save.',
     );
     expect(nameField(1)).toHaveValue('District');
     fireEvent.click(screen.getByRole('button', { name: m.known_as_values_remove_confirm }));
@@ -161,7 +161,7 @@ describe('<KnownAsValuesEditor />', () => {
     fireEvent.click(screen.getByRole('button', { name: m.known_as_values_remove_confirm }));
     fireEvent.click(save());
     expect(
-      await screen.findByText('Saved. 3 organisations moved to the default.'),
+      await screen.findByText('Saved. 3 organisations changed to the default value.'),
     ).toBeInTheDocument();
   });
 
@@ -169,7 +169,7 @@ describe('<KnownAsValuesEditor />', () => {
     renderIt();
     fireEvent.click(screen.getByRole('button', { name: 'Remove Block' }));
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Organisations known as Block will move to District when you save.',
+      'After the removal, organisations known as Block will be known as District when you save.',
     );
     fireEvent.click(screen.getByRole('button', { name: m.known_as_values_cancel }));
     expect(screen.queryByRole('alert')).toBeNull();
