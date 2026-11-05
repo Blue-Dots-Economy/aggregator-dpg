@@ -128,10 +128,13 @@ describe('<CoordinatorRegisterForm /> with the real ConsentGate', () => {
     globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
       // The org selector's list (always on since 0028) is not a registration.
       if (String(input).includes('/api/orgs')) {
-        return new Response(JSON.stringify({ orgs: [] }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
+        return new Response(
+          JSON.stringify({ orgs: [{ id: 'd', slug: 'default', display_name: 'Default' }] }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
       }
       calls.push({ url: String(input), body: init?.body ?? '' });
       return new Response(JSON.stringify({ aggregator_id: 'agg-enable-india' }), {
@@ -145,6 +148,8 @@ describe('<CoordinatorRegisterForm /> with the real ConsentGate', () => {
 
       // The gate is mounted CLOSED at first render — no dialog, no reader.
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      // The only org (Default) is preselected once the list loads.
+      await screen.findByText('Default');
 
       // Submitting opens it: false -> true, in the DOM for the first time.
       fireEvent.submit(screen.getByTestId('rjsf-shim'));

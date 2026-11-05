@@ -96,6 +96,14 @@ describe('humaniseValidationErrors', () => {
     expect(out).toEqual(['Owner Email is required']);
   });
 
+  it('uses the schema title when RJSF already ends the path with the missing field', () => {
+    const out = humaniseValidationErrors(
+      [{ name: 'required', property: '.owner.email', params: { missingProperty: 'email' } }],
+      schema,
+    );
+    expect(out).toEqual(['Owner Email is required']);
+  });
+
   it('falls back to a title-cased key when no schema title exists', () => {
     const out = humaniseValidationErrors(
       [{ name: 'required', property: '', params: { missingProperty: 'phone_number' } }],

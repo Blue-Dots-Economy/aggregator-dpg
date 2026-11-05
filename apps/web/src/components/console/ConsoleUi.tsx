@@ -99,7 +99,7 @@ export function ConsoleCollapsible({
   hint,
   flush = false,
   children,
-}: {
+}: Readonly<{
   title: ReactNode;
   /** A line under the title. */
   description?: ReactNode;
@@ -107,7 +107,7 @@ export function ConsoleCollapsible({
   /** Drop the body padding, for content that lays out its own. */
   flush?: boolean;
   children: ReactNode;
-}) {
+}>) {
   return (
     <details className="group bd-card bd-shadow overflow-hidden">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 select-none hover:bg-ink-50 [&::-webkit-details-marker]:hidden">

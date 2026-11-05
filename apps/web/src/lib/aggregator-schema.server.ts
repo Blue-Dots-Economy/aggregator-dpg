@@ -7,6 +7,7 @@
  * @module apps/web/src/lib/aggregator-schema.server
  */
 
+import { applyUrlRule } from '@aggregator-dpg/network-config/uri-fields';
 import 'server-only';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -91,7 +92,9 @@ export async function loadRegistrationSchema(): Promise<AggregatorSchemaPair> {
     readFile(resolveAggregatorSchemaPath('registration.v1.json'), 'utf8'),
     readFile(resolveAggregatorSchemaPath('registration.v1.ui.json'), 'utf8'),
   ]);
-  const schema = JSON.parse(schemaRaw) as RJSFSchema;
+  // The same web-address rule the API and Signals apply, so the form refuses
+  // what the server would refuse and says why.
+  const schema = applyUrlRule(JSON.parse(schemaRaw) as RJSFSchema);
   const uiSchema = JSON.parse(uiSchemaRaw) as Record<string, unknown>;
   await patchTypeFromNetwork(schema, uiSchema);
   return { schema, uiSchema };

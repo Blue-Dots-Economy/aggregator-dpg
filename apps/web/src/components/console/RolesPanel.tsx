@@ -212,6 +212,12 @@ export function RolesPanel({
           const max = role?.max_days ?? null;
           let tone: 'primary' | 'rose' | 'muted' = 'muted';
           if (live) tone = pii ? 'rose' : 'primary';
+          let status = t('roles.none');
+          if (live) {
+            status = live.expires_at
+              ? t('roles.until', { date: dateOf(live.expires_at) })
+              : t('roles.no_expiry');
+          }
           return (
             <li
               key={key}
@@ -225,26 +231,21 @@ export function RolesPanel({
                   {pii ? <Tag tone="rose">{t('roles.personal_data')}</Tag> : null}
                 </div>
                 <div data-testid={`role-${key}`} className="text-[12.5px] text-ink-500">
-                  {live
-                    ? live.expires_at
-                      ? t('roles.until', { date: dateOf(live.expires_at) })
-                      : t('roles.no_expiry')
-                    : t('roles.none')}
+                  {status}
                   {role?.description ? ` · ${role.description}` : ''}
                 </div>
               </div>
               <div className="col-span-2 flex flex-wrap items-center gap-2 sm:col-span-1 sm:justify-end">
-                {live ? (
-                  assignable.has(key) ? (
-                    <Button
-                      kind="danger"
-                      disabled={busy}
-                      onClick={() => setPending({ kind: 'revoke', key })}
-                    >
-                      {t('roles.revoke')}
-                    </Button>
-                  ) : null
-                ) : (
+                {live && assignable.has(key) ? (
+                  <Button
+                    kind="danger"
+                    disabled={busy}
+                    onClick={() => setPending({ kind: 'revoke', key })}
+                  >
+                    {t('roles.revoke')}
+                  </Button>
+                ) : null}
+                {live ? null : (
                   <>
                     {max ? (
                       <select
@@ -275,11 +276,7 @@ export function RolesPanel({
           <Clock size={14} aria-hidden="true" />
           {t('roles.recorded')}
         </span>
-        {note ? (
-          <p role="status" className="text-[13px] text-ink-700">
-            {note}
-          </p>
-        ) : null}
+        {note ? <output className="text-[13px] text-ink-700">{note}</output> : null}
       </div>
       <ConfirmDialog
         open={dialog !== null}

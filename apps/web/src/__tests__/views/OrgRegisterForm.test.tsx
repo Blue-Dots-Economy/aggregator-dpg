@@ -289,7 +289,7 @@ describe('<OrgRegisterForm />', () => {
     expect(screen.getByText('offline')).toBeInTheDocument();
   });
 
-  it('surfaces client-side validation errors via onError', async () => {
+  it('leaves field errors to the fields, with no banner', async () => {
     originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn() as unknown as typeof fetch;
     renderForm();
@@ -300,8 +300,8 @@ describe('<OrgRegisterForm />', () => {
       capturedOnError?.([{ property: '.display_name', message: 'is required', name: 'required' }]);
     });
 
-    expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect(screen.getByText(messages.register.validation_error_title)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(messages.register.validation_error_title)).toBeNull();
   });
 
   it('passes consentContent through formContext without crashing when omitted', () => {
@@ -365,12 +365,12 @@ describe('<OrgRegisterForm />', () => {
       expect(screen.queryByText(/will be known as/)).toBeNull();
     });
 
-    it('keeps submit disabled until a parent is picked', () => {
+    it('keeps submit clickable before a parent is picked, so a click can say what is missing', () => {
       originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn() as unknown as typeof fetch;
       renderForm();
       const submit = screen.getByRole('button', { name: messages.register.org_submit });
-      expect(submit).toBeDisabled();
+      expect(submit).toBeEnabled();
     });
 
     it('refuses a submit without a parent: error shown, no gate, nothing posted', async () => {
