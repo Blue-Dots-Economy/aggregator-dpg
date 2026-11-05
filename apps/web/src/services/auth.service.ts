@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod';
-import { ResponseShapeError } from '../lib/response-shape-error';
+import { parseResponseBody } from '../lib/response-shape-error';
 import type { User } from '../types';
 
 const ME_URL = '/api/auth/me';
@@ -31,15 +31,7 @@ export async function fetchCurrentUser(): Promise<User | null> {
   const res = await fetch(ME_URL, { credentials: 'include', cache: 'no-store' });
   if (res.status === 401) return null;
   if (!res.ok) throw new Error(`auth/me failed: ${res.status}`);
-  let body: unknown;
-  try {
-    body = await res.json();
-  } catch {
-    throw new ResponseShapeError(ME_URL, []);
-  }
-  const parsed = AuthMeResponseSchema.safeParse(body);
-  if (!parsed.success) throw new ResponseShapeError(ME_URL, parsed.error.issues);
-  const data = parsed.data;
+  const data = await parseResponseBody(res, ME_URL, AuthMeResponseSchema);
   return {
     id: data.user.sub,
     name: data.user.name ?? data.user.email ?? data.user.phone ?? data.user.sub,

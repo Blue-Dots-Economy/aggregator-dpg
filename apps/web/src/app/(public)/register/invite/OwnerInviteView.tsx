@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { RegisterPageShell } from '../RegisterPageShell';
 import { DEFAULT_MAX_INVITES } from '../../../../lib/invite-limit';
 import { readApiError } from '../../../../lib/api-error';
-import { ResponseShapeError } from '@/lib/response-shape-error';
+import { parseResponseBody, ResponseShapeError } from '@/lib/response-shape-error';
 
 const MINT_URL = '/api/invites';
 
@@ -315,17 +315,19 @@ function Banner({
  *
  * @param res - The OK response. Its body is consumed.
  * @returns The summary, or `null` when the body is not JSON or does not match. Logs field paths only.
+ * @throws {Error} Any failure other than a `ResponseShapeError`.
  */
 async function readMintSummary(res: Response): Promise<MintSummary | null> {
-  const body: unknown = await res.json().catch(() => null);
-  const parsed = MintSummarySchema.safeParse(body);
-  if (parsed.success) return parsed.data;
-  const shapeError = new ResponseShapeError(MINT_URL, body === null ? [] : parsed.error.issues);
-  console.error('[owner-invite] unexpected response shape', {
-    url: MINT_URL,
-    issues: shapeError.issueSummary(),
-  });
-  return null;
+  try {
+    return await parseResponseBody(res, MINT_URL, MintSummarySchema);
+  } catch (err) {
+    if (!(err instanceof ResponseShapeError)) throw err;
+    console.error('[owner-invite] unexpected response shape', {
+      url: MINT_URL,
+      issues: err.issueSummary(),
+    });
+    return null;
+  }
 }
 
 /** Reads the error code from the response body, or `null` for a non-JSON body. */
