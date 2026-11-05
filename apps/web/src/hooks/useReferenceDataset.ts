@@ -15,6 +15,9 @@ import { useQuery } from '@tanstack/react-query';
 /** Where reference datasets are served from when no override is configured. */
 const DEFAULT_REFERENCE_BASE = '/reference/';
 
+/** One shared empty list, so the widget's memoised suggestions keep their identity. */
+const EMPTY: never[] = [];
+
 /**
  * Builds the URL a dataset is fetched from.
  *
@@ -78,8 +81,11 @@ export function useReferenceDataset<T>(
     queryKey: ['reference-dataset', id, referenceBaseUrl ?? ''],
     queryFn: ({ signal }) => fetchDataset(referenceUrl(id ?? '', referenceBaseUrl), parse, signal),
     enabled: id !== null,
-    // A dataset only changes with a deployment.
+    // A dataset only changes with a deployment, so it loads once per page.
     staleTime: Infinity,
+    gcTime: Infinity,
+    // A missing dataset stays missing; the field works as plain text.
+    retry: false,
   });
-  return data ?? [];
+  return data ?? EMPTY;
 }

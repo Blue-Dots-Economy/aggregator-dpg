@@ -7,11 +7,7 @@
  */
 
 import { useSyncExternalStore } from 'react';
-
-/** No-op subscription; the value never changes after hydration. */
-function subscribeNever(): () => void {
-  return () => {};
-}
+import { subscribeNever } from '@/lib/subscribe-never';
 
 /**
  * Returns `false` on the server and during hydration, then `true`.

@@ -11,9 +11,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { type QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { FormRuntimeConfigProvider } from '@/lib/FormRuntimeConfigProvider';
 import { makeQueryClient } from '@/__tests__/test-utils';
+import { retryUnlessShapeError } from '@/services/http';
 import {
   ReferenceAutocompleteWidget,
   flattenReferenceDataset,
@@ -375,6 +376,48 @@ describe('ReferenceAutocompleteWidget', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     unmount();
     expect(signal?.aborted).toBe(true);
+  });
+
+  it('asks once for a missing dataset, even under the app-wide retry rule', async () => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: retryUnlessShapeError, retryDelay: 0 } },
+    });
+    fetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
+    render(
+      <Wrapper>
+        <ReferenceAutocompleteWidget {...(makeProps() as never)} />
+      </Wrapper>,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a loaded dataset for the page after every field using it unmounts', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const props = makeProps();
+      const first = render(
+        <Wrapper>
+          <ReferenceAutocompleteWidget {...(props as never)} />
+        </Wrapper>,
+      );
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(0);
+      first.unmount();
+      // Past TanStack's default five-minute garbage-collection time.
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+      render(
+        <Wrapper>
+          <ReferenceAutocompleteWidget {...(props as never)} />
+        </Wrapper>,
+      );
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'jayanagar' } });
+      expect(await screen.findByRole('option')).toHaveTextContent('Government ITI Jayanagar');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('degrades to a plain text input when the dataset fails to load', async () => {

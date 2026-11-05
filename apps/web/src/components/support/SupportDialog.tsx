@@ -156,7 +156,7 @@ function SupportForm({
   /** Server-side attachment rejection message; it names the file. */
   const [serverDetail, setServerDetail] = useState<string | null>(null);
   // Attachment limits come from the API. If the read fails, defaults stay.
-  const config = useSupportConfig(true);
+  const config = useSupportConfig();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Dismiss on ESC.

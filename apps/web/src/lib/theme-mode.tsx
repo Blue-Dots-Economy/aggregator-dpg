@@ -10,6 +10,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
+import { subscribeNever } from '@/lib/subscribe-never';
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -29,11 +30,6 @@ const ThemeModeContext = createContext<ThemeModeContextValue | null>(null);
  */
 export const THEME_STORAGE_KEY = 'bd:theme-mode';
 
-/** No-op subscription for `useSyncExternalStore`; the stored value is read once per render. */
-function subscribeNever(): () => void {
-  return () => {};
-}
-
 /**
  * Reads the stored theme choice.
  *
@@ -50,9 +46,10 @@ function readStoredMode(): ThemeMode | null {
 }
 
 /**
- * Applies the light/dark mode to `<html>` and saves it to localStorage.
+ * Applies the light/dark mode to `<html>` and saves the user's choice to localStorage.
  *
- * Defaults to `light`; loads a stored preference on mount.
+ * Defaults to `light`; reads a stored preference after hydration. Storage is
+ * written only when the user picks a theme.
  *
  * @param children - Subtree that may call `useThemeMode`.
  */
@@ -62,23 +59,25 @@ export function ThemeModeProvider({ children }: { children: ReactNode }) {
   const [chosen, setChosen] = useState<ThemeMode | null>(null);
   const mode: ThemeMode = chosen ?? stored ?? 'light';
 
+  // Mirror the mode onto `<html>`. While neither a choice nor a stored value
+  // is known (the hydration render), leave the class the inline script set.
+  const known = chosen !== null || stored !== null;
   useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const root = document.documentElement;
-    if (mode === 'dark') root.classList.add('dark');
-    else root.classList.remove('dark');
+    if (!known) return;
+    document.documentElement.classList.toggle('dark', mode === 'dark');
+  }, [known, mode]);
+
+  /** Applies and saves a theme the user picked. */
+  const choose = useCallback((next: ThemeMode) => {
+    setChosen(next);
     try {
-      window.localStorage.setItem(THEME_STORAGE_KEY, mode);
+      window.localStorage.setItem(THEME_STORAGE_KEY, next);
     } catch {
       // Storage may be unavailable; the theme still applies for this session.
     }
-  }, [mode]);
-
-  const setMode = useCallback((next: ThemeMode) => setChosen(next), []);
-  const toggle = useCallback(
-    () => setChosen((prev) => ((prev ?? stored ?? 'light') === 'light' ? 'dark' : 'light')),
-    [stored],
-  );
+  }, []);
+  const setMode = choose;
+  const toggle = useCallback(() => choose(mode === 'light' ? 'dark' : 'light'), [choose, mode]);
 
   const value = useMemo(() => ({ mode, setMode, toggle }), [mode, setMode, toggle]);
 

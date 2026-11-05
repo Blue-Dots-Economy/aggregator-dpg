@@ -52,14 +52,12 @@ async function fetchSupportConfig(signal: AbortSignal): Promise<SupportConfig> {
  *
  * Returns `SUPPORT_CONFIG_FALLBACK` while loading and after a failed read.
  *
- * @param enabled - Whether to read now; the dialog passes its open state.
  * @returns The limits to apply.
  */
-export function useSupportConfig(enabled: boolean): SupportConfig {
+export function useSupportConfig(): SupportConfig {
   const { data } = useQuery({
     queryKey: ['support-config'],
     queryFn: ({ signal }) => fetchSupportConfig(signal),
-    enabled,
   });
   return data ?? SUPPORT_CONFIG_FALLBACK;
 }
