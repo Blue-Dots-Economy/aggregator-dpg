@@ -486,6 +486,8 @@ export type OrgKnownAsUpdateRequest = z.infer<typeof OrgKnownAsUpdateRequestSche
  */
 export const OrgKnownAsUpdateResponseSchema = OrgSchema.extend({
   known_as_values: KnownAsValuesSchema.optional(),
+  /** With known_as_values: child orgs moved to the default because their value was removed. */
+  reset_count: z.number().int().nonnegative().optional(),
 });
 export type OrgKnownAsUpdateResponse = z.infer<typeof OrgKnownAsUpdateResponseSchema>;
 

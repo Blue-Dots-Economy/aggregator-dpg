@@ -141,10 +141,48 @@ describe('<KnownAsValuesEditor />', () => {
     vi.mocked(global.fetch).mockResolvedValue(json({ id: ORG, known_as_values: [SAVED[1]] }));
     renderIt();
     fireEvent.click(screen.getByRole('button', { name: 'Remove District' }));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Organisations known as District will move to Aggregator when you save.',
+    );
+    expect(nameField(1)).toHaveValue('District');
+    fireEvent.click(screen.getByRole('button', { name: m.known_as_values_remove_confirm }));
     for (const radio of defaults()) expect(radio).not.toBeChecked();
     fireEvent.click(save());
     await waitFor(() => expect(global.fetch).toHaveBeenCalled());
     expect(sentBody()).toEqual({ known_as_values: [{ key: 'block', name: 'Block' }] });
+  });
+
+  it('says how many organisations moved to the default after a save', async () => {
+    vi.mocked(global.fetch).mockResolvedValue(
+      json({ id: ORG, known_as_values: [SAVED[0]], reset_count: 3 }),
+    );
+    renderIt();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Block' }));
+    fireEvent.click(screen.getByRole('button', { name: m.known_as_values_remove_confirm }));
+    fireEvent.click(save());
+    expect(
+      await screen.findByText('Saved. 3 organisations moved to the default.'),
+    ).toBeInTheDocument();
+  });
+
+  it('warns before removing a saved value, naming where its organisations go', () => {
+    renderIt();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Block' }));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Organisations known as Block will move to District when you save.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: m.known_as_values_cancel }));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(nameField(2)).toHaveValue('Block');
+    expect(save()).toBeDisabled();
+  });
+
+  it('removes a value added since the last save without asking', () => {
+    renderIt();
+    addValue('Ward');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Ward' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByDisplayValue('Ward')).toBeNull();
   });
 
   it('refuses an empty name before sending, and a repeated name when adding', () => {

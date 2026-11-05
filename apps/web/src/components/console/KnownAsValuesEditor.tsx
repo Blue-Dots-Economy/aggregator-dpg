@@ -69,8 +69,12 @@ function sameList(a: KnownAsValues, b: KnownAsValues): boolean {
   return JSON.stringify(requestOfSaved(a)) === JSON.stringify(requestOfSaved(b));
 }
 
+/** Pills shown in the header before the rest collapse into "+N more". */
+const PILLS_SHOWN = 3;
+
 /**
- * The saved values as pills, the default highlighted, for a section header.
+ * The saved values as pills, the default first and highlighted, for a section
+ * header; past {@link PILLS_SHOWN} the rest show as "+N more".
  *
  * @param values - The saved list.
  */
@@ -78,18 +82,29 @@ export function KnownAsPills({ values }: Readonly<{ values: KnownAsValues }>) {
   const t = useTranslations('console');
   const pill = 'rounded-full px-2.5 py-0.5 text-[12px] font-semibold';
   const def = 'bg-(--bd-primary-50) text-(--bd-primary-600)';
+  const ordered = [...values].sort((a, b) => Number(!!b.default) - Number(!!a.default));
+  const shown = ordered.slice(0, PILLS_SHOWN);
+  const hidden = ordered.slice(PILLS_SHOWN);
   return (
     <span className="flex flex-wrap items-center justify-end gap-2 text-[12.5px] text-ink-500">
       <span className="whitespace-nowrap">{t('orgs.known_as_current')}</span>
       {values.length === 0 ? (
         <span className={cn(pill, def)}>{t('org.known_as_values_fallback')}</span>
       ) : (
-        values.map((v) => (
+        shown.map((v) => (
           <span key={v.key} className={cn(pill, v.default ? def : 'bg-ink-100 text-ink-700')}>
             {v.name}
           </span>
         ))
       )}
+      {hidden.length > 0 ? (
+        <span
+          className={cn(pill, 'bg-ink-100 text-ink-700')}
+          title={hidden.map((v) => v.name).join(', ')}
+        >
+          {t('org.known_as_values_more', { count: hidden.length })}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -115,6 +130,7 @@ export function KnownAsValuesEditor({
   const [addError, setAddError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmId, setConfirmId] = useState<number | null>(null);
   const { rows, defaultId } = state;
 
   // A list from the page with different keys, names or default replaces the
@@ -141,7 +157,14 @@ export function KnownAsValuesEditor({
     update({ rows: rows.map((r) => (r.id === id ? { ...r, name } : r)) });
   }
 
+  /** Removes a row; a saved value asks first, since its orgs move on save. */
   function remove(id: number) {
+    const row = rows.find((r) => r.id === id);
+    if (row?.key && confirmId !== id) {
+      setConfirmId(id);
+      return;
+    }
+    setConfirmId(null);
     update({
       rows: rows.filter((r) => r.id !== id),
       defaultId: defaultId === id ? null : defaultId,
@@ -161,6 +184,7 @@ export function KnownAsValuesEditor({
   }
 
   function discard() {
+    setConfirmId(null);
     setState(rowsOf(saved));
     setMessage(null);
     setAddError(null);
@@ -187,7 +211,10 @@ export function KnownAsValuesEditor({
     if (r.ok) {
       setSaved(r.data.known_as_values);
       setState(rowsOf(r.data.known_as_values));
-      setMessage(t('org.saved'));
+      const moved = r.data.reset_count ?? 0;
+      setMessage(
+        moved > 0 ? t('org.known_as_values_saved_reset', { count: moved }) : t('org.saved'),
+      );
       router.refresh();
       return;
     }
@@ -220,11 +247,14 @@ export function KnownAsValuesEditor({
               <div
                 role="radiogroup"
                 aria-label={label}
-                className="overflow-hidden rounded-[12px] border border-(--bd-border)"
+                className="max-h-[420px] overflow-y-auto overscroll-contain rounded-[12px] border border-(--bd-border)"
               >
                 {rows.map((r, i) => {
                   const name = r.name.trim() || t('org.known_as_values_value', { n: i + 1 });
                   const isDefault = defaultId === r.id;
+                  const fallback = isDefault
+                    ? null
+                    : rows.find((x) => x.id === defaultId)?.name.trim() || null;
                   return (
                     <div
                       key={r.id}
@@ -260,6 +290,25 @@ export function KnownAsValuesEditor({
                       >
                         <X size={15} aria-hidden="true" />
                       </button>
+                      {confirmId === r.id ? (
+                        <div
+                          role="alert"
+                          className="col-span-full flex flex-wrap items-center gap-2.5 rounded-lg bg-amber-50 px-3 py-2 text-[13px] text-ink-700"
+                        >
+                          <span className="min-w-[200px] flex-1">
+                            {t('org.known_as_values_remove_warning', {
+                              name,
+                              target: fallback ?? t('org.known_as_values_fallback'),
+                            })}
+                          </span>
+                          <Button kind="ghost" onClick={() => setConfirmId(null)}>
+                            {t('org.known_as_values_cancel')}
+                          </Button>
+                          <Button kind="danger" onClick={() => remove(r.id)}>
+                            {t('org.known_as_values_remove_confirm')}
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}

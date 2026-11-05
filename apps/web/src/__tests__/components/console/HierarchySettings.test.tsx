@@ -47,6 +47,17 @@ describe('<HierarchySettings />', () => {
     expect(screen.getByRole('radio', { name: 'Make State the default' })).toBeChecked();
   });
 
+  it('shows the default first and folds values past three into "+N more"', () => {
+    const many = ['Block', 'Ward', 'Zone', 'Taluk'].map((name) => ({
+      key: name.toLowerCase(),
+      name,
+    }));
+    renderIt([...many, { key: 'district', name: 'District', default: true }]);
+    const more = screen.getByText('+2 more');
+    expect(more).toHaveAttribute('title', 'Zone, Taluk');
+    expect(more.parentElement?.textContent).toBe('Known asDistrictBlockWard+2 more');
+  });
+
   it('shows Aggregator when there are no values', () => {
     renderIt([]);
     expect(screen.getByText(messages.console.org.known_as_values_fallback)).toBeInTheDocument();
