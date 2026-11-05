@@ -146,7 +146,10 @@ function SidebarPanel({
 }: SidebarPanelProps) {
   const t = useTranslations('nav');
   const { signOut, supportEnabled } = useAuth();
-  const initials = initialsOf(account.title);
+  // An email title gives its local part's initials ("admin@x.org" → "AD").
+  const initials = initialsOf(account.title.split('@')[0] ?? account.title);
+  // The title (an email when there is no name) already shows in a detail row.
+  const titleRepeated = account.details?.some((d) => d.value === account.title) ?? false;
 
   const [detailsOpen, setDetailsOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
@@ -242,12 +245,20 @@ function SidebarPanel({
                   {initials}
                 </div>
                 <div className="min-w-0">
-                  <div className="truncate text-[14px] font-bold text-(--bd-fg)">
-                    {account.title}
-                  </div>
-                  <div className="truncate text-[12px] text-(--bd-fg-muted)">
-                    {account.subtitle}
-                  </div>
+                  {titleRepeated ? (
+                    <div className="wrap-break-word text-[14px] font-bold text-(--bd-fg)">
+                      {account.subtitle}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="wrap-break-word text-[14px] font-bold text-(--bd-fg)">
+                        {account.title}
+                      </div>
+                      <div className="truncate text-[12px] text-(--bd-fg-muted)">
+                        {account.subtitle}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
               <dl className="flex flex-col gap-1 p-2">
@@ -287,7 +298,10 @@ function SidebarPanel({
                   {initials}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-semibold text-(--bd-fg) truncate">
+                  <div
+                    className="text-[13px] font-semibold text-(--bd-fg) truncate"
+                    title={account.title}
+                  >
                     {account.title}
                   </div>
                   <div className="text-[11px] text-(--bd-fg-muted) truncate">
@@ -301,7 +315,10 @@ function SidebarPanel({
                   {initials}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-semibold text-(--bd-fg) truncate">
+                  <div
+                    className="text-[13px] font-semibold text-(--bd-fg) truncate"
+                    title={account.title}
+                  >
                     {account.title}
                   </div>
                   <div className="text-[11px] text-(--bd-fg-muted) truncate">

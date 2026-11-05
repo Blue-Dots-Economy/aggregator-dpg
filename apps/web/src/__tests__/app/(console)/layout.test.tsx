@@ -8,8 +8,12 @@ import type { MeResponse } from '@aggregator-dpg/shared-primitives/user-org';
 
 vi.mock('@/lib/server-session', () => ({ getSession: vi.fn() }));
 vi.mock('@/lib/console-actor', () => ({ getConsoleActor: vi.fn() }));
+const sidebarProps = vi.hoisted(() => ({ last: null as Record<string, unknown> | null }));
 vi.mock('@/components/console/ConsoleSidebar', () => ({
-  ConsoleSidebar: () => <nav data-testid="console-nav" />,
+  ConsoleSidebar: (props: Record<string, unknown>) => {
+    sidebarProps.last = props;
+    return <nav data-testid="console-nav" />;
+  },
 }));
 vi.mock('next-intl/server', () => ({
   getTranslations: vi.fn(async () => (key: string) => key),
@@ -58,6 +62,58 @@ describe('<ConsoleLayout />', () => {
     const el = await ConsoleLayout({ children: <p>child</p> });
     expect(el).toBeTruthy();
     expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('gives the network admin no Users link in the sidebar', async () => {
+    vi.mocked(getSession).mockResolvedValue(session);
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me({
+        is_network_admin: true,
+        capabilities: ['network.administer', 'org.manage'],
+        orgs: [
+          {
+            id: 'root',
+            name: 'Network',
+            slug: 'network',
+            org_type: 'network_facilitator',
+            role: 'owner',
+            is_default: false,
+            capabilities: ['network.administer'],
+          },
+        ],
+      }),
+    });
+    const { render } = await import('@testing-library/react');
+    render(await ConsoleLayout({ children: <p>child</p> }));
+    expect(sidebarProps.last).toMatchObject({ canManage: false, homeIsCoordinators: false });
+  });
+
+  it('keeps the email row and drops an empty phone in the account card', async () => {
+    vi.mocked(getSession).mockResolvedValue(session);
+    const { render } = await import('@testing-library/react');
+    vi.mocked(getConsoleActor).mockResolvedValue({ ok: true, me: me({}) });
+    render(await ConsoleLayout({ children: <p>child</p> }));
+    const bare = sidebarProps.last?.['account'] as {
+      title: string;
+      details: Array<{ value: string }>;
+    };
+    expect(bare.title).toBe('a@a.org');
+    expect(bare.details.map((d) => d.value)).toEqual(['a@a.org']);
+
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: me({
+        user: { id: 'u', contact: { name: 'Asha', email: 'a@a.org', phone: '+919000000001' } },
+      }),
+    });
+    render(await ConsoleLayout({ children: <p>child</p> }));
+    const account = sidebarProps.last?.['account'] as {
+      title: string;
+      details: Array<{ value: string }>;
+    };
+    expect(account.title).toBe('Asha');
+    expect(account.details.map((d) => d.value)).toEqual(['a@a.org', '+919000000001']);
   });
 
   it('sends a coordinator to the portal', async () => {

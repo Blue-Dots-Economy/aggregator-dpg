@@ -4,13 +4,21 @@
  * may only read, and that a narrowing is always recorded.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { indexRoles, type RoleIndex } from '@aggregator-dpg/rbac';
 import { AuthorizerFake } from '@aggregator-dpg/rbac/testing';
 import { inManageScope, manageableOrgIds } from '../manage-scope.js';
 import { _setRbacRuntime, type RbacMode } from '../runtime.js';
-import { shippedRoleIndex } from '../testing.js';
+import { shippedRoleIndex, shippedRoles } from '../testing.js';
 import { buildAdminActor, type Actor } from '../../auth/actor/index.js';
 
 const roles = await shippedRoleIndex();
+/** The shipped roles with org.manage taken out, so an owner's scope narrows. */
+const rolesWithoutOrgManage = indexRoles(
+  (await shippedRoles()).map((r) => ({
+    ...r,
+    permissions: r.permissions.filter((p) => p !== 'org.manage'),
+  })),
+);
 
 const ROOT = '00000000-0000-4000-8000-0000000000r1'.replace('r', 'e');
 const OWNED = '00000000-0000-4000-8000-0000000000f1';
@@ -20,8 +28,8 @@ function req() {
   return { log: log as never, method: 'GET', routeOptions: { url: '/v1/user/search' }, spy: log };
 }
 
-function setup(mode: RbacMode extends 'off' ? never : 'log' | 'enforce') {
-  _setRbacRuntime({ mode, roles, authorizer: new AuthorizerFake() });
+function setup(mode: RbacMode extends 'off' ? never : 'log' | 'enforce', index: RoleIndex = roles) {
+  _setRbacRuntime({ mode, roles: index, authorizer: new AuthorizerFake() });
 }
 
 /** The network admin: owns the root plus one aggregator organisation. */
@@ -37,24 +45,23 @@ function networkAdmin(): Actor {
 afterEach(() => _setRbacRuntime(null));
 
 describe('manageableOrgIds', () => {
-  it('narrows the network admin to the organisations it owns, under enforce', async () => {
+  it('keeps the network admin to the aggregator organisations it owns, under enforce', async () => {
     setup('enforce');
     const r = req();
 
     const ids = await manageableOrgIds(r as never, networkAdmin(), ROOT);
 
-    // Network Admin no longer carries org.manage (#873), so the root does not
-    // open every organisation — only the aggregator org it owns does.
+    // The root is never a coordinator's organisation; only the owned aggregator org is.
     expect(ids).toEqual([OWNED]);
     expect(inManageScope(ids, OWNED)).toBe(true);
     expect(inManageScope(ids, 'some-other-org')).toBe(false);
   });
 
   it('records the narrowing in enforce mode, where it actually withholds', async () => {
-    setup('enforce');
+    setup('enforce', rolesWithoutOrgManage);
     const r = req();
 
-    await manageableOrgIds(r as never, networkAdmin(), ROOT);
+    expect(await manageableOrgIds(r as never, networkAdmin(), ROOT)).toEqual([]);
 
     expect(r.spy.warn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -67,25 +74,25 @@ describe('manageableOrgIds', () => {
   });
 
   it('logs but withholds nothing in log mode', async () => {
-    setup('log');
+    setup('log', rolesWithoutOrgManage);
     const r = req();
 
     const ids = await manageableOrgIds(r as never, networkAdmin(), ROOT);
 
-    expect(ids).toBeNull(); // full reach — log mode blocks nothing
+    expect(ids).toEqual([OWNED]); // full reach — log mode blocks nothing
     expect(r.spy.warn).toHaveBeenCalledWith(
       expect.objectContaining({ operation: 'rbac.manage_scope', status: 'skipped', mode: 'log' }),
     );
   });
 
-  it('leaves viewing unrestricted for the network admin', async () => {
+  it("keeps the network admin's view to the organisations it owns", async () => {
     setup('enforce');
     const r = req();
 
     const ids = await manageableOrgIds(r as never, networkAdmin(), ROOT, 'view');
 
-    // network.administer in the root keeps the read-only view network-wide.
-    expect(ids).toBeNull();
+    // network.administer in the root no longer opens other organisations' coordinators.
+    expect(ids).toEqual([OWNED]);
     expect(r.spy.warn).not.toHaveBeenCalled();
   });
 
@@ -93,7 +100,7 @@ describe('manageableOrgIds', () => {
     _setRbacRuntime(null);
     const r = req();
 
-    expect(await manageableOrgIds(r as never, networkAdmin(), ROOT)).toBeNull();
+    expect(await manageableOrgIds(r as never, networkAdmin(), ROOT)).toEqual([OWNED]);
     expect(r.spy.warn).not.toHaveBeenCalled();
   });
 });

@@ -128,7 +128,7 @@ describe('aggregator-org-approvals routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/orgs/decision/${orgId}`,
-      payload: { token, decision: 'reject' },
+      payload: { token, decision: 'reject', reason: 'duplicate' },
     });
     expect(res.statusCode).toBe(200);
     const stored = await orgStore.findById(orgId);
@@ -165,7 +165,7 @@ describe('aggregator-org-approvals routes', () => {
     expect(res.body).toContain('The owner has been notified.');
   });
 
-  it('reject still notifies when no reason is given', async () => {
+  it('refuses a rejection without a reason (400) and leaves the org pending', async () => {
     const orgId = '00000000-0000-0000-0000-0000000000b2';
     orgStore.seed([
       buildOrganisation({
@@ -176,15 +176,18 @@ describe('aggregator-org-approvals routes', () => {
       }),
     ]);
     const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'reject' });
-    const res = await app.inject({
-      method: 'POST',
-      url: `/admin/v1/orgs/decision/${orgId}`,
-      payload: { token, decision: 'reject' },
-    });
-    expect(res.statusCode).toBe(200);
-    expect(mailer.outbox.length).toBe(1);
-    // No reason block, and no stray "Reason:" label with nothing after it.
-    expect(mailer.outbox[0]!.html).not.toContain('Reason:');
+    for (const reason of [undefined, '   ']) {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/admin/v1/orgs/decision/${orgId}`,
+        payload: { token, decision: 'reject', ...(reason === undefined ? {} : { reason }) },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.body).toContain('Give a reason when rejecting an organisation.');
+    }
+    const stored = await orgStore.findById(orgId);
+    expect(stored.ok && stored.value?.status).toBe('pending');
+    expect(mailer.outbox).toHaveLength(0);
   });
 
   it('GET read page renders the confirm page for a pending org', async () => {
@@ -199,6 +202,33 @@ describe('aggregator-org-approvals routes', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('Wonder Org');
+  });
+
+  it('refuses a reason over the cap with its own message (400)', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000b3';
+    orgStore.seed([buildOrganisation({ id: orgId, slug: 'longreason', status: 'pending' })]);
+    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'reject' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/orgs/decision/${orgId}`,
+      payload: { token, decision: 'reject', reason: 'x'.repeat(501) },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toContain('The reason can be at most 500 characters.');
+    const stored = await orgStore.findById(orgId);
+    expect(stored.ok && stored.value?.status).toBe('pending');
+  });
+
+  it('GET read page asks for a reason before a rejection', async () => {
+    const orgId = '00000000-0000-0000-0000-0000000000a6';
+    orgStore.seed([buildOrganisation({ id: orgId, slug: 'rq', status: 'pending' })]);
+    const { token } = await mintApprovalToken({ aggregatorId: orgId, intent: 'reject' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/orgs/read/${orgId}?token=${encodeURIComponent(token)}&intent=reject`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatch(/<textarea id="reason-input" name="reason" maxlength="500" required/);
   });
 
   it('GET read page with an expired token offers inline regenerate (§7)', async () => {
@@ -347,7 +377,7 @@ describe('aggregator-org-approvals routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/admin/v1/orgs/decision/${orgId}`,
-      payload: { token, decision: 'reject' },
+      payload: { token, decision: 'reject', reason: 'duplicate' },
     });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('could not be delivered');

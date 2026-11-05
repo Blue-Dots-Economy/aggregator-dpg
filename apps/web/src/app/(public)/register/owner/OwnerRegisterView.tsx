@@ -34,10 +34,9 @@ export function OwnerRegisterView({
   orgConsentContent,
 }: Readonly<OwnerRegisterViewProps>): JSX.Element {
   const t = useTranslations('register');
-  const headingTitle = (schema.title as string | undefined) ?? t('owner_page_title');
 
   return (
-    <RegisterPageShell heading={headingTitle}>
+    <RegisterPageShell heading={t('org_page_title')}>
       <OrgRegisterForm
         schema={schema}
         uiSchema={uiSchema}

@@ -153,8 +153,8 @@ describe('checkCapability', () => {
     const at = (id: string) => ({
       target: { id, orgType: 'aggregator' as const, ancestorIds: [] },
     });
-    expect((await checkCapability(req(), owner, 'orgs.onboard', at('A'))).allowed).toBe(true);
-    expect((await checkCapability(req(), owner, 'orgs.onboard', at('B'))).allowed).toBe(false);
+    expect((await checkCapability(req(), owner, 'profiles.verify', at('A'))).allowed).toBe(true);
+    expect((await checkCapability(req(), owner, 'profiles.verify', at('B'))).allowed).toBe(false);
   });
 
   it('never allows personal data through the root', async () => {

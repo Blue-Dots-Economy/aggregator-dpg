@@ -73,14 +73,17 @@ export function canInvite(me: ManageScopeSource): boolean {
 
 /**
  * Whether the caller can see coordinators: an organisation's admin
- * (`org.manage`), or the network admin, read-only (`network.administer`)
- * (#873).
+ * (`org.manage`). The network admin has no users page, since it sees the
+ * users of no organisation it does not own.
  *
  * @param me - The caller's `read/me` answer.
  * @returns True when the console should list coordinators.
  */
-export function canViewCoordinators(me: ManageScopeSource): boolean {
-  return can(me.capabilities, 'org.manage') || can(me.capabilities, 'network.administer');
+export function canViewCoordinators(
+  me: ManageScopeSource & { is_network_admin?: boolean | undefined },
+): boolean {
+  if (me.is_network_admin) return false;
+  return can(me.capabilities, 'org.manage');
 }
 
 /** The console home page. */

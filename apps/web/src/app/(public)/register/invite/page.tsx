@@ -1,12 +1,19 @@
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
+import { getTranslations } from 'next-intl/server';
 import { getSession } from '../../../../lib/server-session';
 import { resolveMaxInvites } from '../../../../lib/invite-limit';
 import { OwnerInviteView } from './OwnerInviteView';
 
-export const metadata: Metadata = {
-  title: 'Invite coordinators',
-};
+/**
+ * Sets the page title.
+ *
+ * @returns The page metadata.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations('register.owner_invite');
+  return { title: t('page_title') };
+}
 
 export const dynamic = 'force-dynamic';
 

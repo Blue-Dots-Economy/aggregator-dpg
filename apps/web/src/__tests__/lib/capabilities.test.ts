@@ -91,9 +91,12 @@ describe('canInvite', () => {
 });
 
 describe('canViewCoordinators', () => {
-  it('admits an org admin or the network admin, not others', () => {
+  it('admits an org admin, not the network admin or others', () => {
     expect(canViewCoordinators({ capabilities: ['org.manage'], orgs: [] })).toBe(true);
-    expect(canViewCoordinators({ capabilities: ['network.administer'], orgs: [] })).toBe(true);
+    expect(canViewCoordinators({ capabilities: ['network.administer'], orgs: [] })).toBe(false);
+    expect(
+      canViewCoordinators({ capabilities: ['org.manage'], orgs: [], is_network_admin: true }),
+    ).toBe(false);
     expect(canViewCoordinators({ capabilities: ['profiles.view'], orgs: [] })).toBe(false);
     expect(canViewCoordinators({ capabilities: null, orgs: [] })).toBe(true);
   });

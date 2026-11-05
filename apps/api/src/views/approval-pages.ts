@@ -342,10 +342,16 @@ export interface ConfirmPageVars {
    */
   expiresInText: string;
   brand?: PageBrand;
+  /** A rejection must carry a reason; the reason field becomes required. */
+  reasonRequired?: boolean;
+  /** The longest reason the form takes; 2000 when absent. */
+  reasonMaxLength?: number;
 }
 
 export function renderConfirmPage(v: ConfirmPageVars): string {
   const brand = pickBrand(v.brand);
+  const reasonAttr = v.reasonRequired ? ' required' : '';
+  const reasonMax = String(v.reasonMaxLength ?? 2000);
   const entity = v.entityLabel ?? 'aggregator';
   const invitedRow =
     v.invitedEmail && v.invitedEmail !== v.applicantEmail
@@ -406,7 +412,7 @@ export function renderConfirmPage(v: ConfirmPageVars): string {
             <h2 id="reject-title">Reject this application?</h2>
             <p class="modal-lead">This is final once submitted. The reason below is emailed to the applicant.</p>
             <label for="reason-input">Reason (sent to the applicant)</label>
-            <textarea id="reason-input" name="reason" maxlength="2000"
+            <textarea id="reason-input" name="reason" maxlength="${reasonMax}"${reasonAttr}
               placeholder="A brief explanation helps the applicant understand the decision."></textarea>
             <div class="modal-actions">
               <button type="button" class="btn-secondary" id="reject-cancel">Cancel</button>
@@ -426,7 +432,7 @@ export function renderConfirmPage(v: ConfirmPageVars): string {
             <input type="hidden" name="token" value="${escape(v.token)}" />
             <input type="hidden" name="decision" value="reject" />
             <label for="reason-input-nojs">Reason (sent to the applicant)</label>
-            <textarea id="reason-input-nojs" name="reason" maxlength="2000"
+            <textarea id="reason-input-nojs" name="reason" maxlength="${reasonMax}"${reasonAttr}
               placeholder="A brief explanation helps the applicant understand the decision."></textarea>
             <button type="submit" class="btn-danger" style="margin-top:10px;">Reject</button>
           </form>

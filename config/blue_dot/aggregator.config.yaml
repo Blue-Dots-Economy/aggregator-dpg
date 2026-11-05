@@ -87,24 +87,12 @@ aggregator:
   admin_emails:
     - abhishekg@sanketika.in
 
-  # ── Organisation tree and "known as" values ───────────────────────────────
+  # ── Organisation tree ──────────────────────────────────────────────────────
   # Omit the block for a flat tree: every organisation sits directly under the
-  # network, at most 50 organisations, and every organisation is "Aggregator".
-  # Levels follow Uttar Pradesh: State, then Mandal (division), then District.
+  # network and at most 50 organisations. Every organisation is "Aggregator"
+  # until its parent's owner defines "known as" values in the console.
   organisation:
     hierarchy:
       max_depth: 3 # Deepest allowed aggregator org; 1 is directly under the network.
       max_children: 100 # Direct children of any org, the network included.
       max_total_orgs: 200 # Aggregator orgs in the instance (root and Default org not counted).
-    known_as:
-      # `aggregator` / "Aggregator" is built in and must not be listed here.
-      # `depths` lists where a value is allowed; omit it for any depth.
-      values:
-        - { key: state, name: State, depths: [1] }
-        - { key: mandal, name: Mandal, depths: [2] }
-        - { key: district, name: District, depths: [2, 3] } # 2 when a district sits directly under the state
-      # The value a new organisation gets at each depth; `aggregator` where none is given.
-      suggest:
-        - { depth: 1, key: state }
-        - { depth: 2, key: mandal }
-        - { depth: 3, key: district }

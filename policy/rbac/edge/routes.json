@@ -286,6 +286,16 @@
     },
     {
       "method": "PATCH",
+      "path": "/v1/org/known-as/update/:id",
+      "access": {
+        "anyCapability": [
+          "org.manage",
+          "orgs.onboard"
+        ]
+      }
+    },
+    {
+      "method": "PATCH",
       "path": "/v1/org/metadata/update/:id",
       "access": {
         "anyCapability": [
@@ -439,7 +449,7 @@
       "method": "POST",
       "path": "/v1/org/access/repair/:id",
       "access": {
-        "capability": "network.administer"
+        "capability": "orgs.onboard"
       }
     },
     {

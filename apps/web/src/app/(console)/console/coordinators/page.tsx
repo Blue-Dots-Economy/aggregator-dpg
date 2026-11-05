@@ -9,6 +9,7 @@
  */
 
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type {
   OrgSearchResponse,
@@ -19,7 +20,7 @@ import type {
 type UserSearchOrg = OrgSearchResponse['orgs'][number];
 import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
 import { getConsoleActor } from '@/lib/console-actor';
-import { canInvite } from '@/lib/capabilities';
+import { canInvite, canViewCoordinators } from '@/lib/capabilities';
 import { RoleBadges } from '@/components/console/RoleBadges';
 import { networkDomains, servedDomains } from '@/lib/console-domains.server';
 import { DomainChips } from '@/components/console/DomainChips';
@@ -50,6 +51,9 @@ export default async function ConsoleCoordinatorsPage({
   searchParams: Promise<{ status?: string; org_id?: string; serves?: string; cursor?: string }>;
 }>) {
   const t = await getTranslations('console');
+  // The network admin has no users page.
+  const viewer = await getConsoleActor();
+  if (viewer.ok && !canViewCoordinators(viewer.me)) notFound();
   const params = await searchParams;
   const status = STATUSES.find((s) => s === params.status);
   const orgId = params.org_id && UUID_RE.test(params.org_id) ? params.org_id : undefined;
@@ -71,9 +75,12 @@ export default async function ConsoleCoordinatorsPage({
     readReachableOrgs(),
     getConsoleActor(),
   ]);
-  const counts = await countCoordinators(orgs, orgId, serves);
-  const orgOptions = orgOptionsInTreeOrder(orgs);
-  const orgById = new Map(orgs.map((o) => [o.id, o]));
+  // Users are visible only in the orgs the viewer owns, so filters and counts use those.
+  const ownedIds = new Set(actor.ok ? actor.me.orgs.map((o) => o.id) : []);
+  const ownOrgs = orgs.filter((o) => ownedIds.has(o.id));
+  const counts = await countCoordinators(ownOrgs, orgId, serves);
+  const orgOptions = orgOptionsInTreeOrder(ownOrgs);
+  const orgById = new Map(ownOrgs.map((o) => [o.id, o]));
   // Same gate the sidebar link used to apply, now checked here instead.
   const showInvite = actor.ok && canInvite(actor.me);
   const keep: Record<string, string> = {

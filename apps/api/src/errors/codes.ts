@@ -438,13 +438,6 @@ export const ERR = {
     detail: 'An organisation cannot be moved under itself or an organisation below it.',
     hint: 'Store PARENT_CYCLE: the requested parent is the org or one of its descendants.',
   },
-  KNOWN_AS_DEPTH: {
-    code: 'KNOWN_AS_DEPTH',
-    status: 400,
-    title: 'Name not allowed at this depth',
-    detail: 'The "known as" name is not allowed at the organisation\'s depth.',
-    hint: 'Store KNOWN_AS_DEPTH: knownAsAllowed(key, depth) is false. `fields.org_ids` lists the orgs.',
-  },
   REGISTRATION_COOLING: {
     code: 'REGISTRATION_COOLING',
     status: 409,

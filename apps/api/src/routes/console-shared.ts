@@ -11,8 +11,6 @@
 import type { FastifyBaseLogger, FastifyReply } from 'fastify';
 import { getMailer } from '@aggregator-dpg/mailer';
 import type { Org, User } from '@aggregator-dpg/shared-primitives/user-org';
-import type { KnownAsConfig } from '@aggregator-dpg/network-config/interface';
-import { nameOf } from '../services/known-as.js';
 import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import type { Coordinator } from '../services/user-store/index.js';
@@ -21,7 +19,7 @@ import type { CoordinatorCursor } from '../services/user-store/interface.js';
 import type { OrgCursor } from '../services/organisation-store/interface.js';
 import { isNetworkAdmin, type Actor } from '../services/auth/actor/index.js';
 import { checkConsoleWriteRate } from '../services/console-rate.js';
-import { renderOrgAdminAction } from '../services/email-templates/index.js';
+import { renderOrgAdminAction, renderOrgKnownAs } from '../services/email-templates/index.js';
 import type { DecisionOutcome } from '../services/decisions/coordinator.js';
 
 /** The console's landing URL, used in owner notices. */
@@ -84,17 +82,15 @@ export function toWireUser(a: Coordinator, opts: { masked?: boolean } = {}): Use
 /**
  * Maps an organisation to its wire shape.
  *
- * The root carries no "known as" value. A key no longer in the config list
- * keeps its key with a null name.
+ * The root carries no "known as" value. The name comes from the store,
+ * resolved from the parent's list.
  *
  * @param o - The org.
- * @param knownAs - The instance's "known as" list, for the name.
  * @param orgType - `network_facilitator` for the root, else `aggregator`.
  * @returns The `OrgSchema` shape.
  */
 export function toWireOrg(
   o: Organisation,
-  knownAs: KnownAsConfig,
   orgType: 'network_facilitator' | 'aggregator' = 'aggregator',
 ): Org {
   const isRoot = orgType === 'network_facilitator';
@@ -108,7 +104,7 @@ export function toWireOrg(
     locations: o.locations,
     legal_name: o.legalName,
     known_as: isRoot ? null : o.knownAs,
-    known_as_name: isRoot ? null : nameOf(knownAs, o.knownAs),
+    known_as_name: isRoot ? null : o.knownAsName,
     depth: o.depth,
     parent_id: o.parentId,
     parent_name: o.parentName,
@@ -265,14 +261,48 @@ export async function notifyOwnerOfAdminAction(
 }
 
 /**
- * Joins field names into a phrase: `["url", "locations"]` → "url and locations".
+ * Emails an org's owner that the owner of the parent org changed what the org is known as.
  *
- * @param names - Field labels.
- * @returns The phrase.
+ * For a top-level org the parent is the network, so the email names the
+ * network administrator. Skipped when the actor owns the org. A failed send is
+ * logged and never fails the action.
+ *
+ * @param actor - The acting admin, the parent's owner.
+ * @param org - The org acted on.
+ * @param log - Request logger.
  */
-export function listPhrase(names: string[]): string {
-  if (names.length <= 1) return names[0] ?? '';
-  return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+export async function notifyOwnerOfParentAction(
+  actor: Actor,
+  org: Organisation,
+  log: FastifyBaseLogger,
+): Promise<void> {
+  if (org.ownerUserId === actor.userId) return;
+  const mail =
+    org.depth <= 1 || org.parentName === null
+      ? renderOrgAdminAction({
+          orgName: org.displayName,
+          action: 'changed what the organisation is known as',
+          consoleUrl: consoleUrl(),
+        })
+      : renderOrgKnownAs({
+          orgName: org.displayName,
+          parentName: org.parentName,
+          consoleUrl: consoleUrl(),
+        });
+  const sent = await getMailer().send({
+    to: org.ownerEmail,
+    subject: mail.subject,
+    html: mail.html,
+    text: mail.text,
+  });
+  if (!sent.ok) {
+    log.warn({
+      status: 'failure',
+      sub_operation: 'mailer.send.orgKnownAs',
+      org_id: org.id,
+      code: sent.error.code,
+    });
+  }
 }
 
 /**
@@ -282,7 +312,7 @@ export function listPhrase(names: string[]): string {
  *
  * @param e - The store error.
  * @param fields - Error fields added to `ORG_DEPTH_LIMIT` and `ORG_CHILD_LIMIT`.
- * @throws {HttpError} CONFLICT, SCHEMA_VALIDATION, ORG_PARENT_CYCLE, ORG_DEPTH_LIMIT, ORG_CHILD_LIMIT, ORG_TOTAL_LIMIT or KNOWN_AS_DEPTH.
+ * @throws {HttpError} CONFLICT, SCHEMA_VALIDATION, ORG_PARENT_CYCLE, ORG_DEPTH_LIMIT, ORG_CHILD_LIMIT or ORG_TOTAL_LIMIT.
  */
 export function throwTreeRefusal(e: OrgStoreError, fields?: Record<string, unknown>): void {
   const limitFields = fields ? { fields } : {};
@@ -310,8 +340,6 @@ export function throwTreeRefusal(e: OrgStoreError, fields?: Record<string, unkno
       throw httpError('ORG_CHILD_LIMIT', limitFields);
     case 'TOTAL_LIMIT':
       throw httpError('ORG_TOTAL_LIMIT');
-    case 'KNOWN_AS_DEPTH':
-      throw httpError('KNOWN_AS_DEPTH', { fields: { org_ids: e.orgIds } });
     default:
       return;
   }

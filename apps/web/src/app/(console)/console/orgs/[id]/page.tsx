@@ -2,11 +2,15 @@
  * Organisation detail page: owner, place in the tree, counts and the details form.
  *
  * The Default org and the root are read-only. Only the org's owner edits its
- * details, the name included; the network admin sees them read-only. Only the
- * network admin can change an org's "known as" value, re-grant an active org's
- * owner access, assign roles to its owner, or move it under another parent. An
- * owner also views, read-only, the organisations below its own. The
- * organisations below an aggregator org are listed read-only.
+ * details, the name included; the network admin sees them read-only. The owner
+ * of the parent org sets the org's "known as" value; the org's owner defines
+ * the values for the organisations under it. Only the network admin can
+ * re-grant an active org's owner access or move it under another parent. An
+ * owner approves its child orgs by default, so no role is assigned here. An
+ * owner also views, read-only, the organisations directly under its own, and
+ * approves or rejects one that is pending; the
+ * coordinators of such an organisation stay with its own owner. The
+ * organisations directly under an aggregator org are listed read-only.
  */
 
 import Link from 'next/link';
@@ -16,11 +20,9 @@ import type {
   OrgHierarchyResponse,
   OrgReadResponse,
   OrgSearchResponse,
-  RolesResponse,
-  UserRolesResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
-import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
+import { consoleRead } from '@/lib/console-api.server';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
 import { BackLink, ConsoleSection, ConsoleStatusPill } from '@/components/console/ConsoleUi';
@@ -29,12 +31,13 @@ import { CopyButton } from '@/components/console/CopyButton';
 import { initialsOf } from '@/lib/initials';
 import { I } from '@/icons';
 import { OrgEditForm } from '@/components/console/OrgEditForm';
+import { KnownAsPicker } from '@/components/console/KnownAsPicker';
+import { KnownAsValuesEditor } from '@/components/console/KnownAsValuesEditor';
 import { OrgMoveDialog } from '@/components/console/OrgMoveDialog';
 import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
-import { RolesPanel } from '@/components/console/RolesPanel';
+import { OrgsTable } from '@/components/console/OrgsTable';
 import { OwnerAccessRepair } from '@/components/console/OwnerAccessRepair';
-import { can } from '@/lib/capabilities';
-import { knownAsChoicesAt } from '@/lib/console-org-options';
+import { can, canViewCoordinators } from '@/lib/capabilities';
 import { loadOrgSchema } from '@/lib/org-schema.server';
 
 /** How many organisations below this one the page lists. */
@@ -48,44 +51,68 @@ export default async function ConsoleOrgPage({
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   const { id } = await params;
-  const canAssignOwner =
-    actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer');
-  const data = await consoleRead<OrgReadResponse>(`/v1/org/read/${encodeURIComponent(id)}`);
+  const data = await consoleRead<OrgReadResponse>(
+    `/v1/org/read/${encodeURIComponent(id)}?fields=known_as_values,parent.known_as_values`,
+  );
   const { org, owner } = data;
-  // Owner roles; null when access control is off.
-  const [ownerRoles, catalogue] =
-    canAssignOwner && org.org_type === 'aggregator'
-      ? await Promise.all([
-          consoleReadOptional<UserRolesResponse>(`/v1/user/roles/${encodeURIComponent(owner.id)}`),
-          consoleReadOptional<RolesResponse>('/v1/roles'),
-        ])
-      : [null, null];
-  // An owner also views, read-only, the orgs below its own.
-  const own = actor.me.is_network_admin || actor.me.orgs.some((o) => o.id === org.id);
+  // An owner also views, read-only, the orgs directly under its own.
+  const own = actor.me.orgs.some((o) => o.id === org.id);
+  // The org's users, for its owner; the network admin has no users page.
+  const showUsers = own && canViewCoordinators(actor.me);
   const editable = org.org_type === 'aggregator' && !org.is_default && own;
   const canRename = actor.me.is_network_admin && can(actor.me.capabilities, 'network.administer');
   const orgSchema = await loadOrgSchema();
-  const canRepair = actor.me.is_network_admin && editable && org.status === 'active';
+  const aggregatorOrg = org.org_type === 'aggregator' && !org.is_default;
+  // The network admin repairs and moves the top-level organisations it views.
+  const canRepair = canRename && aggregatorOrg && org.status === 'active';
+  // A child org's own children are not visible to the parent's owner.
   const children =
-    org.org_type === 'aggregator' && !org.is_default
+    org.org_type === 'aggregator' && !org.is_default && own
       ? await consoleRead<OrgSearchResponse>('/v1/org/search', {
-          filter: { descendants_of: org.id },
+          filter: { parent_id: org.id },
           limit: CHILD_LIMIT,
         })
       : null;
-  // Limits and "known as" values; only the network admin can read them.
+  // Tree limits; only the network admin can read them.
   const hierarchy = canRename ? await consoleRead<OrgHierarchyResponse>('/v1/org/hierarchy') : null;
-  const knownAsOptions =
-    hierarchy && editable ? knownAsChoicesAt(hierarchy.known_as.values, org.depth) : [];
+  const isOwner = owner.id === actor.me.user.id;
+  // The parent and its list; null when the viewer cannot set this org's value.
+  const parent = aggregatorOrg ? (org.parent ?? null) : null;
+  // Null when the org cannot have child orgs.
+  const knownAsValues = org.known_as_values ?? null;
+  // The API takes list edits only on an active org the viewer owns.
+  const canEditKnownAsValues = aggregatorOrg && isOwner && org.status === 'active';
   // The Default org and the root never move; only pending and active orgs can.
   const canMove =
-    hierarchy !== null && editable && (org.status === 'pending' || org.status === 'active');
+    hierarchy !== null && aggregatorOrg && (org.status === 'pending' || org.status === 'active');
   const maxChildren = hierarchy?.limits.max_children ?? null;
+  // The child tile links to the list of child orgs when the page shows it.
+  const childTileLink = children ? { showLabel: t('org_home.tile_show'), href: '#children' } : {};
+  const childrenSub =
+    maxChildren === null
+      ? t('org.tile.children_sub')
+      : t('org.children_of_max', { count: data.child_count, max: maxChildren });
   return (
     <>
       <div>
         <BackLink href="/console/orgs">{t('orgs.heading')}</BackLink>
         <Topbar
+          right={
+            org.org_type === 'aggregator' ? (
+              <>
+                {canMove && hierarchy ? <OrgMoveDialog orgId={org.id} orgName={org.name} /> : null}
+                {showUsers ? (
+                  <Link
+                    className={buttonClass('soft')}
+                    href={`/console/coordinators?org_id=${org.id}`}
+                  >
+                    <I.users size={15} />
+                    {t('org.view_coordinators')}
+                  </Link>
+                ) : null}
+              </>
+            ) : null
+          }
           leading={
             <span
               aria-hidden="true"
@@ -130,28 +157,21 @@ export default async function ConsoleOrgPage({
             </span>
           }
         />
-        {own ? null : (
-          <p className="mt-2 rounded-lg bg-[var(--bd-tint-primary)] px-3 py-2 text-[13px] text-ink-600">
-            {t('org.viewed_from_above')}
-          </p>
-        )}
       </div>
       <div className="flex flex-col gap-6">
-        {org.org_type === 'aggregator' ? (
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {canMove && hierarchy ? (
-              <OrgMoveDialog
-                orgId={org.id}
-                orgName={org.name}
-                knownAs={org.known_as}
-                knownAsValues={hierarchy.known_as.values}
-              />
-            ) : null}
-            <Link className={buttonClass('soft')} href={`/console/coordinators?org_id=${org.id}`}>
-              <I.users size={15} />
-              {t('org.view_coordinators')}
-            </Link>
-          </div>
+        {!own && aggregatorOrg && org.status === 'pending' ? (
+          <ConsoleSection title={t('orgs.review_heading', { count: 1 })} flush>
+            <OrgsTable
+              orgs={[
+                {
+                  ...org,
+                  coordinator_count: data.coordinator_count,
+                  child_count: data.child_count,
+                  pending_count: data.pending_count,
+                },
+              ]}
+            />
+          </ConsoleSection>
         ) : null}
         <section className="bd-card bd-shadow overflow-hidden">
           <div className="flex flex-wrap items-center gap-3.5 px-[22px] py-5">
@@ -179,39 +199,42 @@ export default async function ConsoleOrgPage({
           </div>
         </section>
         <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
-          <CountTile
-            icon={<Users size={20} strokeWidth={2} />}
-            tone="primary"
-            label={t('org.tile.coordinators')}
-            count={String(data.coordinator_count)}
-            sub={t('org.tile.coordinators_sub')}
-            muted={data.coordinator_count === 0}
-            showLabel={t('org_home.tile_show')}
-            href={`/console/coordinators?org_id=${org.id}`}
-          />
-          <CountTile
-            icon={<Clock size={20} strokeWidth={2} />}
-            tone="amber"
-            label={t('org.tile.pending')}
-            count={String(data.pending_count)}
-            sub={data.pending_count ? t('org.tile.pending_sub') : t('org.tile.pending_none')}
-            muted={data.pending_count === 0}
-            showLabel={t('org_home.tile_show')}
-            href={`/console/coordinators?org_id=${org.id}&status=pending`}
-          />
-          <CountTile
-            icon={<Network size={20} strokeWidth={2} />}
-            tone="green"
-            label={t('org.child_count')}
-            count={String(data.child_count)}
-            sub={
-              maxChildren === null
-                ? t('org.tile.children_sub')
-                : t('org.children_of_max', { count: data.child_count, max: maxChildren })
-            }
-            muted={data.child_count === 0}
-            {...(children ? { showLabel: t('org_home.tile_show'), href: '#children' } : {})}
-          />
+          {showUsers ? (
+            <>
+              <CountTile
+                icon={<Users size={20} strokeWidth={2} />}
+                tone="primary"
+                label={t('org.tile.coordinators')}
+                count={String(data.coordinator_count)}
+                sub={t('org.tile.coordinators_sub')}
+                muted={data.coordinator_count === 0}
+                showLabel={t('org_home.tile_show')}
+                href={`/console/coordinators?org_id=${org.id}`}
+              />
+              <CountTile
+                icon={<Clock size={20} strokeWidth={2} />}
+                tone="amber"
+                label={t('org.tile.pending')}
+                count={String(data.pending_count)}
+                sub={data.pending_count ? t('org.tile.pending_sub') : t('org.tile.pending_none')}
+                muted={data.pending_count === 0}
+                showLabel={t('org_home.tile_show')}
+                href={`/console/coordinators?org_id=${org.id}&status=pending`}
+              />
+            </>
+          ) : null}
+          {/* The Default org never has child orgs. */}
+          {own && !org.is_default ? (
+            <CountTile
+              icon={<Network size={20} strokeWidth={2} />}
+              tone="green"
+              label={t('org.child_count')}
+              count={String(data.child_count)}
+              sub={childrenSub}
+              muted={data.child_count === 0}
+              {...childTileLink}
+            />
+          ) : null}
           <CountTile
             icon={<Layers size={20} strokeWidth={2} />}
             tone="primary"
@@ -220,14 +243,23 @@ export default async function ConsoleOrgPage({
             sub={t('org.tile.level_sub')}
           />
         </div>
+        {parent ? (
+          <ConsoleSection title={t('org.known_as_pick_title')}>
+            <KnownAsPicker org={org} parentValues={parent.known_as_values} />
+          </ConsoleSection>
+        ) : null}
         <OrgEditForm
           org={org}
           editable={editable}
-          canEdit={owner.id === actor.me.user.id}
-          canSetKnownAs={canRename}
-          knownAsOptions={knownAsOptions}
+          canEdit={isOwner}
           orgSchema={orgSchema}
+          knownAsPicked={parent !== null}
         />
+        {canEditKnownAsValues && knownAsValues !== null ? (
+          <ConsoleSection title={t('org.known_as_values_title')}>
+            <KnownAsValuesEditor orgId={org.id} values={knownAsValues} />
+          </ConsoleSection>
+        ) : null}
         {children ? (
           <div id="children" className="scroll-mt-6">
             <ConsoleSection title={t('org.children')}>
@@ -241,15 +273,6 @@ export default async function ConsoleOrgPage({
               />
             </ConsoleSection>
           </div>
-        ) : null}
-        {ownerRoles && catalogue ? (
-          <RolesPanel
-            userId={owner.id}
-            orgId={org.id}
-            initial={ownerRoles}
-            roles={catalogue.roles}
-            title={t('org.owner_roles')}
-          />
         ) : null}
       </div>
     </>

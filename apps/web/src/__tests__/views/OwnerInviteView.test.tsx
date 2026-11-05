@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import { fillTerms } from '@/i18n/terms';
 
 vi.mock('@/hooks/useAggregatorConfig', () => {
   const cfg = { brand: { short_name: 'Test Aggregator' } };
@@ -19,6 +20,8 @@ vi.mock('@/hooks/useAggregatorConfig', () => {
 });
 
 import { OwnerInviteView } from '@/app/(public)/register/invite/OwnerInviteView';
+
+const term = (key: string): string => fillTerms(`[[${key}]]`, 'en');
 
 function renderView() {
   return render(
@@ -70,7 +73,9 @@ describe('<OwnerInviteView />', () => {
     renderView();
     fireEvent.click(screen.getByRole('button', { name: /add another/i }));
     expect(screen.getAllByPlaceholderText('email@org.in')).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: /remove coordinator 2/i }));
+    fireEvent.click(
+      screen.getByRole('button', { name: new RegExp(`remove ${term('user')} 2`, 'i') }),
+    );
     expect(screen.getAllByPlaceholderText('email@org.in')).toHaveLength(1);
   });
 
