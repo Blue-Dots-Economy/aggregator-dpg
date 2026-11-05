@@ -239,4 +239,22 @@ describe('<ProtectedLayout />', () => {
 
     expect(screen.getByTestId('support-enabled')).toHaveTextContent('false');
   });
+
+  it.each([
+    ['the string "false"', 'false'],
+    ['the number 1', 1],
+  ])('treats `enabled` given as %s as false', async (_label, enabled) => {
+    vi.mocked(getSession).mockResolvedValue(baseSession());
+    vi.mocked(tokenAggregatorId).mockReturnValue('agg-1');
+    vi.mocked(callApi).mockResolvedValue(
+      new Response(JSON.stringify({ enabled }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }) as never,
+    );
+
+    await renderLayout();
+
+    expect(screen.getByTestId('support-enabled')).toHaveTextContent('false');
+  });
 });

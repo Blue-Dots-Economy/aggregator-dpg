@@ -73,4 +73,34 @@ describe('GET /brand-icon', () => {
     const svg = await res.text();
     expect(svg).toContain('#2563EB');
   });
+
+  it.each([
+    ['markup', '#fff"/><script>alert(1)</script>'],
+    ['a colour name', 'red'],
+    ['a number', 255],
+  ])('falls back to the default when primary_color is %s', async (_label, primary) => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ brand: { primary_color: primary } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    ) as unknown as typeof fetch;
+
+    const svg = await (await GET()).text();
+    expect(svg).toContain('#2563EB');
+    expect(svg).not.toContain('script');
+    expect(svg).not.toContain('red');
+  });
+
+  it('falls back to the default when the body is not JSON', async () => {
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response('<html>', { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    const svg = await (await GET()).text();
+    expect(svg).toContain('#2563EB');
+  });
 });

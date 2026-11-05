@@ -236,4 +236,60 @@ describe('PublicRegistrationPage (server component)', () => {
       privacy: { version: 1, title: 'P', content: 'c' },
     });
   });
+
+  describe('resolve response shape', () => {
+    function mockResolved(body: unknown): void {
+      globalThis.fetch = vi.fn(
+        async () =>
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ) as unknown as typeof fetch;
+    }
+
+    it.each([
+      ['no domain', { ...baseResolved, domain: undefined }],
+      ['a numeric domain', { ...baseResolved, domain: 42 }],
+      ['a text context', { ...baseResolved, context: 'winter' }],
+      ['a JSON array', [baseResolved]],
+    ])('renders the service ErrorShell for %s', async (_label, body) => {
+      mockResolved(body);
+
+      const el = await PublicRegistrationPage({
+        params: Promise.resolve({ org: 'acme', slug: 'winter25' }),
+      });
+      expect(el.props.title).toBe('Cannot reach registration service');
+      expect(el.props.message).toBe('Malformed response.');
+      expect(readFile).not.toHaveBeenCalled();
+    });
+
+    it('renders "Form unavailable" when a profile link has an array schema', async () => {
+      mockResolved({ ...baseResolved, schema: [{ type: 'object' }] });
+
+      const el = await PublicRegistrationPage({
+        params: Promise.resolve({ org: 'acme', slug: 'winter25' }),
+      });
+      expect(el.props.title).toBe('Form unavailable');
+    });
+
+    it('treats an unknown submission_shape as a profile link', async () => {
+      mockResolved({ ...baseResolved, submission_shape: 'something_new' });
+
+      const el = await PublicRegistrationPage({
+        params: Promise.resolve({ org: 'acme', slug: 'winter25' }),
+      });
+      expect(el.props.submissionShape).toBe('account_and_profile');
+    });
+
+    it('uses an empty UI schema when the ui.json file holds an array', async () => {
+      mockResolved(baseResolved);
+      readFile.mockResolvedValue(JSON.stringify([{ 'ui:autofocus': true }]));
+
+      const el = await PublicRegistrationPage({
+        params: Promise.resolve({ org: 'acme', slug: 'winter25' }),
+      });
+      expect(el.props.uiSchema).toEqual({});
+    });
+  });
 });

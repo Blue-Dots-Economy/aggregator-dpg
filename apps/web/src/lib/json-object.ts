@@ -37,6 +37,18 @@ function isJsonSchema(value: Record<string, unknown>): value is RJSFSchema {
 }
 
 /**
+ * Reads a parsed value as a JSON Schema for an RJSF form.
+ *
+ * @param value - The parsed value, for example a `schema` field of an API response.
+ * @returns The schema, or `null` when the value is not an object or its `type` or `properties` has the wrong form.
+ */
+export function readJsonSchema(value: unknown): RJSFSchema | null {
+  const parsed = JsonObjectSchema.safeParse(value);
+  if (!parsed.success || !isJsonSchema(parsed.data)) return null;
+  return parsed.data;
+}
+
+/**
  * Parses JSON text that holds a JSON Schema for an RJSF form.
  *
  * @param text - The JSON text.

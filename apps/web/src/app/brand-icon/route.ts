@@ -5,7 +5,9 @@
  * is cached for five minutes.
  */
 
+import { BrandConfigSchema } from '@aggregator-dpg/network-config/interface';
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 
 const FALLBACK_PRIMARY = '#2563EB';
 const FALLBACK_PRIMARY_DARK = '#1D4ED8';
@@ -28,9 +30,10 @@ function rgbaTriple(hex: string): string {
   return `${(num >> 16) & 0xff},${(num >> 8) & 0xff},${num & 0xff}`;
 }
 
-interface BrandShape {
-  primary_color?: string;
-}
+/** The part of `/v1/aggregator-config` this route reads. The colour must be `#RRGGBB`, because it goes into the SVG as-is. */
+const BrandColourSchema = z.object({
+  brand: z.object({ primary_color: BrandConfigSchema.shape.primary_color }),
+});
 
 async function loadPrimary(): Promise<string> {
   const apiBase = process.env.API_BASE_URL ?? 'http://localhost:4000';
@@ -40,8 +43,9 @@ async function loadPrimary(): Promise<string> {
       next: { revalidate: 300 },
     });
     if (!res.ok) return FALLBACK_PRIMARY;
-    const body = (await res.json()) as { brand?: BrandShape };
-    return body?.brand?.primary_color ?? FALLBACK_PRIMARY;
+    const body: unknown = await res.json();
+    const parsed = BrandColourSchema.safeParse(body);
+    return (parsed.success ? parsed.data.brand.primary_color : undefined) ?? FALLBACK_PRIMARY;
   } catch {
     return FALLBACK_PRIMARY;
   }
