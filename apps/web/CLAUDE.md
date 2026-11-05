@@ -54,6 +54,14 @@ Both `/register` and `/profile` call `loadRegistrationSchema()`, which loads `re
 
 `src/services/*` (`profile.service.ts`, `dashboard.service.ts`, etc.) are plain client-side fetch modules, **not** `interface.ts`/abstract-class services — route handlers are the real "service boundary" here. The two places that _do_ follow the repo-wide base-class pattern (`.claude/rules/base-class-pattern.md`) are `lib/oidc/interface.ts` and `lib/session/interface.ts` — treat those two as governed by that rule; everything else under `src/services/` and `src/lib/*-client` files is not.
 
+## Client reads are checked with Zod (`jsonFetch`)
+
+`jsonFetch(url, schema, init?)` (`services/http.ts`) parses every OK body with the schema it is given and returns the schema's output; a body that is not JSON or does not match throws `ResponseShapeError`, which TanStack Query shows as the query's error state. Things that are easy to get wrong:
+
+- **A plain `z.object` drops keys it does not declare.** Declare every field the UI reads. Use `.passthrough()` only for data that is passed on whole (profile `locations` into the read-only form, the Signals dashboard payload).
+- **Match the API's contract, not the UI's wishes.** Copy required / optional / nullable from the API's response schema in `openapi.json`; a schema stricter than the API breaks a screen that worked. The `/api/aggregator-config` schema matters most: if it fails, `useAggregatorConfig` falls back to the default config and config-gated screens turn off. Its brand and registration-mode parts reuse the `@aggregator-dpg/network-config/interface` schemas.
+- **Export the type from the schema** (`z.infer`), not a separate interface: with `exactOptionalPropertyTypes` a schema checked against a hand-written interface fails on every optional field.
+
 ## Mobile layout (#793 / #817)
 
 The logged-in portal is responsive at the Tailwind `lg` (1024px) breakpoint: below it `components/shell/Sidebar.tsx` hides the sidebar behind a slim menu bar and opens it as a slide-in drawer (Escape / backdrop / link / widen-to-desktop close it; scroll-locked, focus-trapped), and pages reflow for phones. From `lg` up the layout is unchanged, so check both widths when touching the shell or the dashboard.

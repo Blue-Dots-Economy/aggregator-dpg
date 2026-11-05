@@ -6,6 +6,7 @@
  * no ownership filtering.
  */
 
+import { z } from 'zod';
 import { jsonFetch } from './http';
 
 /**
@@ -30,41 +31,56 @@ export interface DashboardQuery {
   refresh?: boolean;
 }
 
+// The dashboard payload is Signals' own, forwarded unchanged by the API. The
+// schemas require only the fields this app reads and keep every other key.
+
 /** Pre-computed participant and action counts for one domain. */
-export interface DashboardRollup {
-  total_items: number;
-  complete_profiles: number;
-  has_applications: number;
-  by_status: Record<string, number>;
-  by_initiated_action_status: Record<string, number>;
-  by_received_action_status: Record<string, number>;
-  total_users: number;
-  avg_items_per_user: number;
-  avg_actions_per_user: number;
-  mode_wise_counts: Record<string, number>;
-}
+export const DashboardRollupSchema = z
+  .object({
+    total_items: z.number(),
+    complete_profiles: z.number(),
+    by_status: z.record(z.number()),
+    has_applications: z.number().optional(),
+    by_initiated_action_status: z.record(z.number()).optional(),
+    by_received_action_status: z.record(z.number()).optional(),
+    total_users: z.number().optional(),
+    avg_items_per_user: z.number().optional(),
+    avg_actions_per_user: z.number().optional(),
+    mode_wise_counts: z.record(z.number()).optional(),
+  })
+  .passthrough();
+export type DashboardRollup = z.infer<typeof DashboardRollupSchema>;
 
 /** Per-domain slice of the dashboard payload: rollup and paginated items. */
-export interface DashboardDomainSlice {
-  rollup: DashboardRollup;
-  /** One row per item. */
-  items: Array<Record<string, unknown>>;
-  total_matching: number;
-  next_cursor: string | null;
-}
+export const DashboardDomainSliceSchema = z
+  .object({
+    rollup: DashboardRollupSchema,
+    /** One row per item. */
+    items: z.array(z.record(z.unknown())),
+    total_matching: z.number(),
+    next_cursor: z.string().nullable(),
+  })
+  .passthrough();
+export type DashboardDomainSlice = z.infer<typeof DashboardDomainSliceSchema>;
 
 /** Signals metadata about the cached rollup, used for the "last updated" hint. */
-export interface DashboardMetadata {
-  last_computed_at: string;
-  ttl_seconds: number;
-  refreshed: boolean;
-}
+export const DashboardMetadataSchema = z
+  .object({
+    last_computed_at: z.string().optional(),
+    ttl_seconds: z.number().optional(),
+    refreshed: z.boolean().optional(),
+  })
+  .passthrough();
+export type DashboardMetadata = z.infer<typeof DashboardMetadataSchema>;
 
 /** Full dashboard payload, with every domain keyed by id in `by_domain`. */
-export interface DashboardPage {
-  by_domain: Record<string, DashboardDomainSlice>;
-  metadata: DashboardMetadata;
-}
+export const DashboardPageSchema = z
+  .object({
+    by_domain: z.record(DashboardDomainSliceSchema),
+    metadata: DashboardMetadataSchema,
+  })
+  .passthrough();
+export type DashboardPage = z.infer<typeof DashboardPageSchema>;
 
 /**
  * Lifecycle bucket a dashboard row can be in.
@@ -168,7 +184,7 @@ class HttpDashboardService implements DashboardService {
     if (query?.lifecycle) params.set('lifecycle', query.lifecycle);
     if (query?.refresh) params.set('refresh', 'true');
     const url = `/api/dashboard?${params.toString()}`;
-    return jsonFetch<DashboardPage>(url);
+    return jsonFetch(url, DashboardPageSchema);
   }
 
   async dashboardExport(query?: DashboardExportQuery): Promise<DashboardExportResult> {

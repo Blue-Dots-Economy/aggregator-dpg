@@ -6,7 +6,7 @@ import { jsonFetch } from '@/services/http';
 
 vi.mock('@/services/http', () => ({ jsonFetch: vi.fn() }));
 
-const { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } =
+const { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG, AggregatorConfigPayloadSchema } =
   await import('@/hooks/useAggregatorConfig');
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -38,7 +38,7 @@ describe('useAggregatorConfig', () => {
     const { result } = renderHook(() => useAggregatorConfig(), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(payload);
-    expect(jsonFetch).toHaveBeenCalledWith('/api/aggregator-config');
+    expect(jsonFetch).toHaveBeenCalledWith('/api/aggregator-config', AggregatorConfigPayloadSchema);
   });
 
   it('surfaces a fetch failure as an error state', async () => {

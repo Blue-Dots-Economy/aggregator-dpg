@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../../components/ui/Select';
+import { z } from 'zod';
 import { jsonFetch } from '../../../services/http';
 import {
   stampConsent,
@@ -38,21 +39,22 @@ import { gstinCustomValidate } from '../../../lib/org-schema';
 import { readableFormErrors } from '../../../lib/readable-form-errors';
 
 /** One org a new org can register under (`GET /api/orgs/parents`). */
-interface ParentOption {
-  id: string;
-  name: string;
+const ParentOptionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
   /** True for the network root (a top-level org). */
-  is_root: boolean;
-  known_as_name: string | null;
+  is_root: z.boolean(),
+  known_as_name: z.string().nullable(),
   /** What an organisation registered under this one is known as. */
-  child_known_as_name: string | null;
-}
+  child_known_as_name: z.string().nullable(),
+});
+type ParentOption = z.infer<typeof ParentOptionSchema>;
 
 /** `GET /api/orgs/parents`: whether registration is open, and the parents that can take a child now. */
-interface ParentsResponse {
-  accepting: boolean;
-  parents: ParentOption[];
-}
+const ParentsResponseSchema = z.object({
+  accepting: z.boolean(),
+  parents: z.array(ParentOptionSchema),
+});
 
 /** Message keys for the API's tree refusals on `/v1/orgs/create`. */
 const TREE_ERRORS: Record<string, string> = {
@@ -113,7 +115,7 @@ export function OrgRegisterForm({
   const [parentId, setParentId] = useState<string>('');
   const parentsQuery = useQuery({
     queryKey: ['org-parents'],
-    queryFn: () => jsonFetch<ParentsResponse>('/api/orgs/parents'),
+    queryFn: () => jsonFetch('/api/orgs/parents', ParentsResponseSchema),
     staleTime: 30_000,
   });
   const parents = parentsQuery.data?.parents ?? [];

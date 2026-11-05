@@ -18,6 +18,7 @@ import {
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { jsonFetch } from '../../../services/http';
 import {
+  OrgListResponseSchema,
   stampConsent,
   stripConsentBlock,
   stripFormChrome,
@@ -54,13 +55,6 @@ export interface CoordinatorRegisterFormProps {
   lockedOrgName?: string;
   /** The invite's email (invite mode); prefilled. */
   lockedEmail?: string;
-}
-
-/** One active-org option for the coordinator dropdown (`GET /api/orgs`). */
-interface OrgOption {
-  id: string;
-  slug: string;
-  display_name: string;
 }
 
 /** Slug of the fixed Default org. */
@@ -135,7 +129,7 @@ export function CoordinatorRegisterForm({
   // The active-org list (not needed in invite mode: the org is fixed).
   const orgsQuery = useQuery({
     queryKey: ['active-orgs'],
-    queryFn: () => jsonFetch<{ orgs: OrgOption[] }>('/api/orgs'),
+    queryFn: () => jsonFetch('/api/orgs', OrgListResponseSchema),
     enabled: !inviteMode,
     staleTime: 30_000,
   });
