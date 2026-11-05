@@ -21,7 +21,7 @@ import { toConsentDocs } from '../../../components/consent/consent-docs';
 import type { ParticipantConsent } from '../../../components/consent/consent-types';
 import type { LinkIdentity } from '@/lib/registration-link';
 import { readErrorEnvelope } from '@/lib/api-error';
-import { ResponseShapeError } from '@/lib/response-shape-error';
+import { summariseIssues } from '@/lib/response-shape-error';
 
 /** Page background used by every state of the public registration page. */
 const PAGE_BACKGROUND =
@@ -137,10 +137,9 @@ const SubmitResponseSchema = z.object({
  * @param issues - The schema issues.
  */
 function logShapeError(url: string, body: unknown, issues: z.ZodIssue[]): void {
-  const shapeError = new ResponseShapeError(url, body === null ? [] : issues);
   console.error('[public-registration] unexpected response shape', {
     url,
-    issues: shapeError.issueSummary(),
+    issues: body === null ? [] : summariseIssues(issues),
   });
 }
 

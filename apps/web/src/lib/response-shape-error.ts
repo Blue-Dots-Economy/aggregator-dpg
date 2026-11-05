@@ -6,6 +6,22 @@
 
 import type { z } from 'zod';
 
+/** The field path and issue code of one schema problem. */
+export interface IssueSummary {
+  path: string;
+  code: string;
+}
+
+/**
+ * Field path and issue code of each schema problem, for logs.
+ *
+ * @param issues - The schema issues.
+ * @returns One entry per issue. Leaves out the received values, which can be personal data.
+ */
+export function summariseIssues(issues: readonly z.ZodIssue[]): IssueSummary[] {
+  return issues.map((issue) => ({ path: issue.path.join('.'), code: issue.code }));
+}
+
 /**
  * Thrown when an OK response body is not JSON or does not match the expected schema.
  *
@@ -35,8 +51,8 @@ export class ResponseShapeError extends Error {
    *
    * Leaves out the received values, which can be personal data.
    */
-  issueSummary(): { path: string; code: string }[] {
-    return this.issues.map((issue) => ({ path: issue.path.join('.'), code: issue.code }));
+  issueSummary(): IssueSummary[] {
+    return summariseIssues(this.issues);
   }
 }
 
