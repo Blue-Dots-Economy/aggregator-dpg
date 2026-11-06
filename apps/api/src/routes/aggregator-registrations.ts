@@ -38,7 +38,6 @@ import { getIdpAdmin } from '../services/idp-admin/index.js';
 import { sendAdminReviewEmail } from '../services/registration-notify.js';
 import { defaultOrgOwnerEmail } from '../config.js';
 import { coolingRetryAfter } from '../services/registration-cooling.js';
-import { checkSubmitRate } from '../services/submit-rate.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
@@ -47,13 +46,12 @@ import { resolveProfileRef } from '../services/schema-ref.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
 import { slugFromName } from '../services/slug.js';
-import { authenticateAny } from '../services/auth/access-token.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import type { ErrorCode } from '../errors/codes.js';
-import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
 import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
+import { assertServiceCaller, assertSubmitRate } from './registration-shared.js';
 
 const SLUG_RETRIES = 3;
 
@@ -131,318 +129,25 @@ export async function registerAggregatorRegistrationRoutes(base: FastifyInstance
       let inviteJti: string | null = null;
       let inviteCommitted = false;
       try {
-        // Re-sends the review link for an existing pending or revived record
-        // using stored values. The anonymous submit never changes the record: it
-        // carries no proof of identity, so a stranger must not overwrite it.
-        const reclaimReview = async (row: Coordinator): Promise<FastifyReply> => {
-          await sendAdminReviewEmail(
-            {
-              aggregatorId: row.id,
-              applicantName: row.name,
-              applicantEmail: row.contact.email,
-              applicantPhone: row.contactPhone,
-              ...(row.inviteEmail ? { invitedEmail: row.inviteEmail } : {}),
-              ...(await resolveOwnerRouting(row.parentOrgId)),
-            },
-            log,
-          );
-          log.info(
-            {
-              status: 'success',
-              latency_ms: Date.now() - start,
-              aggregator_id: row.id,
-              reclaim: true,
-            },
-            'registration re-submitted — review link re-sent (no field change)',
-          );
-          // Consent is recorded only on a fresh registration, not here.
-          return reply.status(200).send({
-            aggregator_id: row.id,
-            org_slug: row.orgSlug,
-            status: 'pending',
-            message: 'Registration re-submitted. A fresh approval link has been sent for review.',
-          });
-        };
-
         // The BFF calls this with a service-account token, so no
         // `aggregator_id` claim is required.
-        const auth = await authenticateAny(req);
-        if (!auth.ok) {
-          throw httpError('UNAUTHORIZED', {
-            detail: auth.error.message,
-            fields: { reason: auth.error.code },
-          });
-        }
-        await recordRouteCaller(req, callerFromAny(auth.context));
-
+        await assertServiceCaller(req);
         // Already validated and parsed by the route schema.
         const body = req.body;
+        const { contact, phoneE164, serverConsent } = await checkCoordinatorBody(body);
+        // Fails open so a Redis outage does not block registration.
+        await assertSubmitRate(`${req.ip}|${contact.email}`, reply);
 
-        // `type` must be one of the network's domain ids.
-        const networkCfg = await getNetworkConfig();
-        if (!networkCfg.domainIds.includes(body.type)) {
-          throw httpError('SCHEMA_VALIDATION', {
-            detail: `unknown type '${body.type}' — valid: ${networkCfg.domainIds.join(', ')}`,
-            fields: { type: 'invalid' },
-          });
-        }
-
-        // `org_id` and `invite` are not form fields; strip them before Ajv.
-        const { org_id: _orgIdField, invite: _inviteField, ...formBody } = body;
-
-        const validate = await getRegistrationValidator();
-        if (!validate(formBody)) {
-          throw httpError('SCHEMA_VALIDATION', {
-            detail: 'Payload failed JSON Schema validation.',
-            fields: { issues: validate.errors ?? [] },
-          });
-        }
-        const phoneResult = normalisePhone(body.contact.phone);
-        if (!phoneResult.ok) {
-          throw httpError('INVALID_PHONE', {
-            detail: phoneResult.error.message,
-            // Keyed `phone` so the logger redacts it.
-            fields: { phone: body.contact.phone },
-          });
-        }
-        const phoneE164 = phoneResult.value;
-        // Store the E.164 phone. Zod has already lowercased the email.
-        const contact: BecknContact = {
-          ...body.contact,
-          phone: phoneE164,
-        };
+        const target = body.invite
+          ? await claimInvitedOrg(body.invite, contact.email)
+          : await selectedOrg(body.org_id, contact.email);
+        inviteJti = target.inviteJti;
+        const legacyOrgDetails = ownOrgDetails(body, target.isDefault);
 
         const userStore = getUserStore();
-        const idp = getIdpAdmin();
-
-        // Stamp consent with the server time. `valid_till` is clamped to a maximum.
-        const serverConsent = stampConsent(body.consent);
-        if (!serverConsent) {
-          throw httpError('SCHEMA_VALIDATION', {
-            detail: 'consent.valid_till must be in the future.',
-            fields: { 'consent.valid_till': 'invalid' },
-          });
-        }
-
-        // Rate limit per (ip, email). Fails open so a Redis outage does not block registration.
-        const rl = await checkSubmitRate(`${req.ip}|${contact.email}`);
-        if (!rl.allowed) {
-          void reply.header('Retry-After', String(rl.retryAfterSeconds));
-          throw httpError('RATE_LIMITED', {
-            detail: `Retry in ${rl.retryAfterSeconds}s.`,
-            fields: { retry_after_seconds: rl.retryAfterSeconds },
-          });
-        }
-
-        // The coordinator's org; must be active.
-        let parentOrgId: string;
-        let orgIsDefault = false;
-        // The invited email. The coordinator may register with another one;
-        // this is kept so the approving owner can see it.
-        let inviteEmailClaim: string | null = null;
-        {
-          const orgStore = getOrganisationStore();
-          const reqInvite = body.invite;
-
-          // Invite path: the org comes from the token claim, re-checked against
-          // the database, and the invite is claimed before anything is created.
-          if (reqInvite) {
-            const verified = await verifyInviteToken(reqInvite);
-            if (!verified.ok) {
-              throw httpError(
-                verified.error.code === 'EXPIRED' ? 'INVITE_EXPIRED' : 'INVITE_INVALID',
-              );
-            }
-            // The invited email is recorded, not enforced.
-            inviteEmailClaim = verified.email.trim().toLowerCase();
-            const inviteStore = getRegistrationInvitesStore();
-            const org = await orgStore.findById(verified.org);
-            if (!org.ok) {
-              throw httpError('DB_UNAVAILABLE', {
-                cause: new Error(org.error.message),
-                fields: { sub_operation: 'orgStore.findById' },
-              });
-            }
-            // The Default org takes no invites.
-            if (org.value?.status !== 'active' || org.value.isDefault) {
-              throw httpError('TARGET_ORG_INACTIVE');
-            }
-            const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
-            if (ownerMatch.ok && ownerMatch.value) {
-              throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
-            }
-            // Claim the invite now, before anything is created, so concurrent
-            // submits on one link create at most one registration.
-            const claimed = await inviteStore.consume(verified.jti);
-            if (!claimed.ok) {
-              throw httpError('DB_UNAVAILABLE', {
-                cause: new Error(claimed.error.message),
-                fields: { sub_operation: 'inviteStore.consume' },
-              });
-            }
-            if (claimed.value === null) {
-              throw httpError('INVITE_ALREADY_USED', { fields: { email: contact.email } });
-            }
-            inviteJti = verified.jti;
-            parentOrgId = verified.org;
-          } else {
-            // Selector path: the coordinator picks an active org. `org_id` is required.
-            const reqOrgId = body.org_id;
-            if (!reqOrgId) {
-              throw httpError('SCHEMA_VALIDATION', {
-                detail: 'org_id is required.',
-                fields: { field: 'org_id' },
-              });
-            }
-            const org = await orgStore.findById(reqOrgId);
-            if (!org.ok) {
-              throw httpError('DB_UNAVAILABLE', {
-                cause: new Error(org.error.message),
-                fields: { sub_operation: 'orgStore.findById' },
-              });
-            }
-            if (org.value?.status !== 'active') {
-              throw httpError('TARGET_ORG_INACTIVE');
-            }
-            // An org owner cannot also register as a coordinator.
-            const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
-            if (ownerMatch.ok && ownerMatch.value) {
-              throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
-            }
-            // The Default org is selectable only while it is the only active org.
-            if (org.value.isDefault) {
-              const active = await orgStore.listActive();
-              if (!active.ok) {
-                throw httpError('DB_UNAVAILABLE', {
-                  cause: new Error(active.error.message),
-                  fields: { sub_operation: 'orgStore.listActive' },
-                });
-              }
-              if (active.value.some((o) => !o.isDefault)) {
-                throw httpError('TARGET_ORG_INACTIVE');
-              }
-            }
-            parentOrgId = org.value.id;
-            orgIsDefault = org.value.isDefault;
-          }
-        }
-
-        // A Default-org coordinator names its own organisation, never "Default".
-        if (orgIsDefault && body.name.trim().toLowerCase() === 'default') {
-          throw httpError('SCHEMA_VALIDATION', {
-            detail: 'The organisation name cannot be "Default".',
-            fields: { field: 'name' },
-          });
-        }
-
-        // `url` and `locations` belong to a real org, so sending them is refused.
-        // A Default-org coordinator keeps its own as `legacy_org_details`.
-        const submittedLocations = (body.locations ?? []).filter(hasLocationContent);
-        const ownOrgDetails: LegacyOrgDetails = {
-          ...(body.url?.trim() ? { url: body.url.trim() } : {}),
-          ...(submittedLocations.length > 0 ? { locations: submittedLocations } : {}),
-        };
-        if (!orgIsDefault && Object.keys(ownOrgDetails).length > 0) {
-          throw httpError('ORG_DETAILS_READ_ONLY', {
-            fields: { fields: Object.keys(ownOrgDetails) },
-          });
-        }
-
-        // Check email and phone uniqueness in the database and Keycloak.
-        const dbEmail = await userStore.findByContactEmail(contact.email);
-        if (!dbEmail.ok) {
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(dbEmail.error.message),
-            fields: { sub_operation: 'userStore.findByContactEmail' },
-          });
-        }
-        if (dbEmail.value !== null) {
-          const existing = dbEmail.value;
-          if (existing.status === 'inactive') {
-            // Rejected: refuse until the cooling window from `rejected_at` ends,
-            // then revive the same row to pending and re-send the review link.
-            const retryAfter = coolingRetryAfter(existing.rejectedAt, existing.updatedAt);
-            if (retryAfter) {
-              throw httpError('REGISTRATION_COOLING', {
-                fields: { email: contact.email, retry_after: retryAfter },
-              });
-            }
-            const revived = await userStore.update(existing.id, {
-              status: 'pending',
-              rejectedAt: null,
-              updatedBy: 'self',
-            });
-            if (!revived.ok) {
-              throw httpError('DB_UNAVAILABLE', {
-                cause: new Error(revived.error.message),
-                fields: { sub_operation: 'userStore.reviveRejected' },
-              });
-            }
-            return reclaimReview(existing);
-          }
-          if (existing.status !== 'pending') {
-            // Active or retired: the email is taken.
-            throw httpError('USER_EXISTS', { fields: { email: contact.email } });
-          }
-          // Pending: re-send the review link.
-          return reclaimReview(existing);
-        }
-
-        const dbPhone = await userStore.findByContactPhone(phoneE164);
-        if (!dbPhone.ok) {
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(dbPhone.error.message),
-            fields: { sub_operation: 'userStore.findByContactPhone' },
-          });
-        }
-        if (dbPhone.value !== null) {
-          const existingPhone = dbPhone.value;
-          if (existingPhone.status === 'inactive') {
-            // Same cooling window for a rejected record that owns this phone.
-            const retryAfter = coolingRetryAfter(existingPhone.rejectedAt, existingPhone.updatedAt);
-            if (retryAfter) {
-              throw httpError('REGISTRATION_COOLING', {
-                fields: { phone: phoneE164, retry_after: retryAfter },
-              });
-            }
-            const revived = await userStore.update(existingPhone.id, {
-              status: 'pending',
-              rejectedAt: null,
-              updatedBy: 'self',
-            });
-            if (!revived.ok) {
-              throw httpError('DB_UNAVAILABLE', {
-                cause: new Error(revived.error.message),
-                fields: { sub_operation: 'userStore.reviveRejected' },
-              });
-            }
-            return reclaimReview(existingPhone);
-          }
-          throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
-        }
-
-        const kcEmail = await idp.findByEmail(contact.email);
-        if (!kcEmail.ok) {
-          throw httpError('IDP_UNAVAILABLE', {
-            cause: kcEmail.error,
-            fields: { sub_operation: 'idp.findByEmail' },
-          });
-        }
-        if (kcEmail.value !== null) {
-          throw httpError('USER_EXISTS', { fields: { email: contact.email } });
-        }
-
-        // The phone is the OTP login key, so it must be unique in Keycloak too.
-        const kcPhone = await idp.findByAttribute(KC_ATTR.PHONE_NUMBER, phoneE164);
-        if (!kcPhone.ok) {
-          throw httpError('IDP_UNAVAILABLE', {
-            cause: kcPhone.error,
-            fields: { sub_operation: 'idp.findByAttribute.phoneNumber' },
-          });
-        }
-        if (kcPhone.value !== null) {
-          throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
-        }
+        const resubmitted = await findResubmission(userStore, contact.email, phoneE164);
+        if (resubmitted) return reclaimReview(resubmitted, reply, log, start);
+        await assertNotInIdp(contact.email, phoneE164);
 
         // Consent is written in the same transaction as the coordinator row,
         // before any Keycloak call. No coordinator exists without a consent record.
@@ -456,9 +161,8 @@ export async function registerAggregatorRegistrationRoutes(base: FastifyInstance
           contact,
           consent: serverConsent,
           recordConsent,
-          orgId: parentOrgId,
-          legacyOrgDetails:
-            orgIsDefault && Object.keys(ownOrgDetails).length > 0 ? ownOrgDetails : null,
+          orgId: target.orgId,
+          legacyOrgDetails,
           inviteId: inviteJti,
           profile: buildAggregatorProfile(body),
           profileRef: resolveProfileRef('registration.v1.json'),
@@ -473,48 +177,12 @@ export async function registerAggregatorRegistrationRoutes(base: FastifyInstance
           });
         }
         const { id: aggregatorId, orgSlug } = aggregator.value;
-
-        // Keycloak attributes:
-        //   - aggregator_id    the coordinator's row id
-        //   - aggregator_type  participant focus
-        //   - phoneNumber      OTP login key
-        //   - decision_made    login gate
-        const kcAttributes: Record<string, string> = {
-          [KC_ATTR.AGGREGATOR_ID]: aggregatorId,
-          [KC_ATTR.AGGREGATOR_TYPE]: body.type,
-          [KC_ATTR.PHONE_NUMBER]: phoneE164,
-          [KC_ATTR.DECISION_MADE]: 'pending',
-        };
-
-        // Split the name into first and last for Keycloak.
-        const { firstName, lastName } = splitName(contact.name);
-        const kcResult = await idp.createUser({
-          email: contact.email,
-          username: contact.email,
-          phone: phoneE164,
-          enabled: false,
-          firstName,
-          lastName,
-          attributes: kcAttributes,
-        });
-        if (!kcResult.ok) {
-          await userStore.deleteById(aggregatorId);
-          if (kcResult.error.code === 'USER_EXISTS') {
-            throw httpError('USER_EXISTS', {
-              cause: kcResult.error,
-              fields: { email: contact.email, rolled_back: true },
-            });
-          }
-          if (kcResult.error.code === 'INVALID_NAME') {
-            throw httpError('NAME_INVALID_CHARACTERS', {
-              fields: { name: 'contact.name', rolled_back: true },
-            });
-          }
-          throw httpError('IDP_UNAVAILABLE', {
-            cause: kcResult.error,
-            fields: { sub_operation: 'idp.createUser', rolled_back: true },
-          });
-        }
+        const keycloakUserId = await createCoordinatorLogin(
+          userStore,
+          aggregatorId,
+          body.type,
+          contact,
+        );
 
         // Fully provisioned: keep the invite consumed.
         inviteCommitted = true;
@@ -525,8 +193,8 @@ export async function registerAggregatorRegistrationRoutes(base: FastifyInstance
             applicantName: body.name,
             applicantEmail: contact.email,
             applicantPhone: phoneE164,
-            ...(inviteEmailClaim ? { invitedEmail: inviteEmailClaim } : {}),
-            ...(await resolveOwnerRouting(parentOrgId)),
+            ...(target.inviteEmail ? { invitedEmail: target.inviteEmail } : {}),
+            ...(await resolveOwnerRouting(target.orgId)),
           },
           log,
         );
@@ -537,7 +205,7 @@ export async function registerAggregatorRegistrationRoutes(base: FastifyInstance
             latency_ms: Date.now() - start,
             aggregator_id: aggregatorId,
             org_slug: orgSlug,
-            keycloak_user_id: kcResult.value.id,
+            keycloak_user_id: keycloakUserId,
           },
           'aggregator registration submitted',
         );
@@ -551,18 +219,418 @@ export async function registerAggregatorRegistrationRoutes(base: FastifyInstance
       } finally {
         // Give the invite back on any exit that did not create a registration.
         // Only releases the claim this request took.
-        if (inviteJti && !inviteCommitted) {
-          const released = await getRegistrationInvitesStore().release(inviteJti);
-          if (!released.ok || released.value === null) {
-            log.warn(
-              { status: 'failure', sub_operation: 'inviteStore.release', invite_jti: inviteJti },
-              'invite release after an incomplete registration did not commit',
-            );
-          }
-        }
+        if (inviteJti && !inviteCommitted) await releaseInvite(inviteJti, log);
       }
     },
   );
+}
+
+type Log = ReturnType<FastifyRequest['log']['child']>;
+type CoordinatorBody = z.infer<typeof CoordinatorRegistrationBodySchema>;
+type UserStore = ReturnType<typeof getUserStore>;
+type OrgStore = ReturnType<typeof getOrganisationStore>;
+
+/** The org a coordinator registers under, and the invite claimed for it. */
+interface TargetOrg {
+  orgId: string;
+  isDefault: boolean;
+  // The invited email. The coordinator may register with another one; this is
+  // kept so the approving owner can see it.
+  inviteEmail: string | null;
+  inviteJti: string | null;
+}
+
+/**
+ * Checks the body against the network and the registration schema.
+ *
+ * @returns The contact with its E.164 phone, and the server-stamped consent.
+ * @throws {HttpError} SCHEMA_VALIDATION or INVALID_PHONE
+ */
+async function checkCoordinatorBody(body: CoordinatorBody) {
+  // `type` must be one of the network's domain ids.
+  const networkCfg = await getNetworkConfig();
+  if (!networkCfg.domainIds.includes(body.type)) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: `unknown type '${body.type}' — valid: ${networkCfg.domainIds.join(', ')}`,
+      fields: { type: 'invalid' },
+    });
+  }
+
+  // `org_id` and `invite` are not form fields; strip them before Ajv.
+  const { org_id: _orgIdField, invite: _inviteField, ...formBody } = body;
+  const validate = await getRegistrationValidator();
+  if (!validate(formBody)) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'Payload failed JSON Schema validation.',
+      fields: { issues: validate.errors ?? [] },
+    });
+  }
+  const phoneResult = normalisePhone(body.contact.phone);
+  if (!phoneResult.ok) {
+    throw httpError('INVALID_PHONE', {
+      detail: phoneResult.error.message,
+      // Keyed `phone` so the logger redacts it.
+      fields: { phone: body.contact.phone },
+    });
+  }
+  const phoneE164 = phoneResult.value;
+  // Store the E.164 phone. Zod has already lowercased the email.
+  const contact: BecknContact = { ...body.contact, phone: phoneE164 };
+
+  // Stamp consent with the server time. `valid_till` is clamped to a maximum.
+  const serverConsent = stampConsent(body.consent);
+  if (!serverConsent) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'consent.valid_till must be in the future.',
+      fields: { 'consent.valid_till': 'invalid' },
+    });
+  }
+  return { contact, phoneE164, serverConsent };
+}
+
+/**
+ * Reads an org by id.
+ *
+ * @throws {HttpError} DB_UNAVAILABLE
+ */
+async function findOrg(orgStore: OrgStore, id: string) {
+  const org = await orgStore.findById(id);
+  if (!org.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(org.error.message),
+      fields: { sub_operation: 'orgStore.findById' },
+    });
+  }
+  return org.value;
+}
+
+/**
+ * An org owner cannot also register as a coordinator.
+ *
+ * @throws {HttpError} OWNER_ALREADY_REGISTERED
+ */
+async function assertNotOrgOwner(orgStore: OrgStore, email: string): Promise<void> {
+  const ownerMatch = await orgStore.findByOwnerEmail(email);
+  if (ownerMatch.ok && ownerMatch.value) {
+    throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email } });
+  }
+}
+
+/**
+ * Invite path: the org comes from the token claim, re-checked against the
+ * database, and the invite is claimed before anything is created, so
+ * concurrent submits on one link create at most one registration.
+ *
+ * @throws {HttpError} INVITE_EXPIRED, INVITE_INVALID, TARGET_ORG_INACTIVE,
+ *   OWNER_ALREADY_REGISTERED, INVITE_ALREADY_USED or DB_UNAVAILABLE
+ */
+async function claimInvitedOrg(invite: string, email: string): Promise<TargetOrg> {
+  const verified = await verifyInviteToken(invite);
+  if (!verified.ok) {
+    throw httpError(verified.error.code === 'EXPIRED' ? 'INVITE_EXPIRED' : 'INVITE_INVALID');
+  }
+  const orgStore = getOrganisationStore();
+  const org = await findOrg(orgStore, verified.org);
+  // The Default org takes no invites.
+  if (org?.status !== 'active' || org.isDefault) {
+    throw httpError('TARGET_ORG_INACTIVE');
+  }
+  await assertNotOrgOwner(orgStore, email);
+  const claimed = await getRegistrationInvitesStore().consume(verified.jti);
+  if (!claimed.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(claimed.error.message),
+      fields: { sub_operation: 'inviteStore.consume' },
+    });
+  }
+  if (claimed.value === null) {
+    throw httpError('INVITE_ALREADY_USED', { fields: { email } });
+  }
+  return {
+    orgId: verified.org,
+    isDefault: false,
+    // The invited email is recorded, not enforced.
+    inviteEmail: verified.email.trim().toLowerCase(),
+    inviteJti: verified.jti,
+  };
+}
+
+/**
+ * Selector path: the coordinator picks an active org. `org_id` is required.
+ *
+ * @throws {HttpError} SCHEMA_VALIDATION, TARGET_ORG_INACTIVE,
+ *   OWNER_ALREADY_REGISTERED or DB_UNAVAILABLE
+ */
+async function selectedOrg(orgId: string | undefined, email: string): Promise<TargetOrg> {
+  if (!orgId) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'org_id is required.',
+      fields: { field: 'org_id' },
+    });
+  }
+  const orgStore = getOrganisationStore();
+  const org = await findOrg(orgStore, orgId);
+  if (org?.status !== 'active') {
+    throw httpError('TARGET_ORG_INACTIVE');
+  }
+  await assertNotOrgOwner(orgStore, email);
+  if (org.isDefault) await assertDefaultSelectable(orgStore);
+  return { orgId: org.id, isDefault: org.isDefault, inviteEmail: null, inviteJti: null };
+}
+
+/**
+ * The Default org is selectable only while it is the only active org.
+ *
+ * @throws {HttpError} TARGET_ORG_INACTIVE or DB_UNAVAILABLE
+ */
+async function assertDefaultSelectable(orgStore: OrgStore): Promise<void> {
+  const active = await orgStore.listActive();
+  if (!active.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(active.error.message),
+      fields: { sub_operation: 'orgStore.listActive' },
+    });
+  }
+  if (active.value.some((o) => !o.isDefault)) {
+    throw httpError('TARGET_ORG_INACTIVE');
+  }
+}
+
+/**
+ * The coordinator's own org details, kept only for a Default-org coordinator.
+ *
+ * `url` and `locations` belong to a real org, so sending them is refused. A
+ * Default-org coordinator keeps its own as `legacy_org_details`, and names its
+ * own organisation, never "Default".
+ *
+ * @returns The details to store, or null.
+ * @throws {HttpError} SCHEMA_VALIDATION or ORG_DETAILS_READ_ONLY
+ */
+function ownOrgDetails(body: CoordinatorBody, isDefault: boolean): LegacyOrgDetails | null {
+  if (isDefault && body.name.trim().toLowerCase() === 'default') {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'The organisation name cannot be "Default".',
+      fields: { field: 'name' },
+    });
+  }
+  const submittedLocations = (body.locations ?? []).filter(hasLocationContent);
+  const details: LegacyOrgDetails = {
+    ...(body.url?.trim() ? { url: body.url.trim() } : {}),
+    ...(submittedLocations.length > 0 ? { locations: submittedLocations } : {}),
+  };
+  const sent = Object.keys(details);
+  if (sent.length === 0) return null;
+  if (!isDefault) {
+    throw httpError('ORG_DETAILS_READ_ONLY', { fields: { fields: sent } });
+  }
+  return details;
+}
+
+/**
+ * The existing registration this submit repeats, if any.
+ *
+ * A pending one is returned as is. A rejected one is set back to pending once
+ * its cooling window has passed. Any other owner of the email or phone refuses
+ * the submit.
+ *
+ * @returns The registration to re-send the review link for, or null.
+ * @throws {HttpError} REGISTRATION_COOLING, USER_EXISTS, PHONE_EXISTS or DB_UNAVAILABLE
+ */
+async function findResubmission(
+  userStore: UserStore,
+  email: string,
+  phoneE164: string,
+): Promise<Coordinator | null> {
+  const byEmail = await userStore.findByContactEmail(email);
+  if (!byEmail.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(byEmail.error.message),
+      fields: { sub_operation: 'userStore.findByContactEmail' },
+    });
+  }
+  if (byEmail.value !== null) {
+    const existing = byEmail.value;
+    if (existing.status === 'inactive') return reviveRejected(userStore, existing, { email });
+    // Active or retired: the email is taken.
+    if (existing.status !== 'pending') throw httpError('USER_EXISTS', { fields: { email } });
+    return existing;
+  }
+
+  const byPhone = await userStore.findByContactPhone(phoneE164);
+  if (!byPhone.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(byPhone.error.message),
+      fields: { sub_operation: 'userStore.findByContactPhone' },
+    });
+  }
+  if (byPhone.value === null) return null;
+  if (byPhone.value.status === 'inactive') {
+    return reviveRejected(userStore, byPhone.value, { phone: phoneE164 });
+  }
+  throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+}
+
+/**
+ * Sets a rejected registration back to pending, refusing it until the cooling
+ * window from `rejected_at` ends.
+ *
+ * @param contactField - The matched email or phone, echoed in the cooling error.
+ * @returns The registration as read.
+ * @throws {HttpError} REGISTRATION_COOLING or DB_UNAVAILABLE
+ */
+async function reviveRejected(
+  userStore: UserStore,
+  row: Coordinator,
+  contactField: Readonly<Record<string, string>>,
+): Promise<Coordinator> {
+  const retryAfter = coolingRetryAfter(row.rejectedAt, row.updatedAt);
+  if (retryAfter) {
+    throw httpError('REGISTRATION_COOLING', {
+      fields: { ...contactField, retry_after: retryAfter },
+    });
+  }
+  const revived = await userStore.update(row.id, {
+    status: 'pending',
+    rejectedAt: null,
+    updatedBy: 'self',
+  });
+  if (!revived.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(revived.error.message),
+      fields: { sub_operation: 'userStore.reviveRejected' },
+    });
+  }
+  return row;
+}
+
+/**
+ * The email and phone must be free in Keycloak too; the phone is the OTP login key.
+ *
+ * @throws {HttpError} USER_EXISTS, PHONE_EXISTS or IDP_UNAVAILABLE
+ */
+async function assertNotInIdp(email: string, phoneE164: string): Promise<void> {
+  const idp = getIdpAdmin();
+  const kcEmail = await idp.findByEmail(email);
+  if (!kcEmail.ok) {
+    throw httpError('IDP_UNAVAILABLE', {
+      cause: kcEmail.error,
+      fields: { sub_operation: 'idp.findByEmail' },
+    });
+  }
+  if (kcEmail.value !== null) {
+    throw httpError('USER_EXISTS', { fields: { email } });
+  }
+  const kcPhone = await idp.findByAttribute(KC_ATTR.PHONE_NUMBER, phoneE164);
+  if (!kcPhone.ok) {
+    throw httpError('IDP_UNAVAILABLE', {
+      cause: kcPhone.error,
+      fields: { sub_operation: 'idp.findByAttribute.phoneNumber' },
+    });
+  }
+  if (kcPhone.value !== null) {
+    throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+  }
+}
+
+/**
+ * Creates the coordinator's disabled Keycloak user. On failure the new
+ * coordinator row is deleted.
+ *
+ * Keycloak attributes: `aggregator_id` (the row id), `aggregator_type`
+ * (participant focus), `phoneNumber` (OTP login key), `decision_made` (login gate).
+ *
+ * @returns The Keycloak user id.
+ * @throws {HttpError} USER_EXISTS, NAME_INVALID_CHARACTERS or IDP_UNAVAILABLE
+ */
+async function createCoordinatorLogin(
+  userStore: UserStore,
+  aggregatorId: string,
+  type: string,
+  contact: BecknContact,
+): Promise<string> {
+  const { firstName, lastName } = splitName(contact.name);
+  const kcResult = await getIdpAdmin().createUser({
+    email: contact.email,
+    username: contact.email,
+    phone: contact.phone,
+    enabled: false,
+    firstName,
+    lastName,
+    attributes: {
+      [KC_ATTR.AGGREGATOR_ID]: aggregatorId,
+      [KC_ATTR.AGGREGATOR_TYPE]: type,
+      [KC_ATTR.PHONE_NUMBER]: contact.phone,
+      [KC_ATTR.DECISION_MADE]: 'pending',
+    },
+  });
+  if (kcResult.ok) return kcResult.value.id;
+  await userStore.deleteById(aggregatorId);
+  if (kcResult.error.code === 'USER_EXISTS') {
+    throw httpError('USER_EXISTS', {
+      cause: kcResult.error,
+      fields: { email: contact.email, rolled_back: true },
+    });
+  }
+  if (kcResult.error.code === 'INVALID_NAME') {
+    throw httpError('NAME_INVALID_CHARACTERS', {
+      fields: { name: 'contact.name', rolled_back: true },
+    });
+  }
+  throw httpError('IDP_UNAVAILABLE', {
+    cause: kcResult.error,
+    fields: { sub_operation: 'idp.createUser', rolled_back: true },
+  });
+}
+
+/**
+ * Re-sends the review link for an existing pending or revived record using
+ * stored values. The anonymous submit never changes the record: it carries no
+ * proof of identity, so a stranger must not overwrite it.
+ */
+async function reclaimReview(
+  row: Coordinator,
+  reply: FastifyReply,
+  log: Log,
+  start: number,
+): Promise<FastifyReply> {
+  await sendAdminReviewEmail(
+    {
+      aggregatorId: row.id,
+      applicantName: row.name,
+      applicantEmail: row.contact.email,
+      applicantPhone: row.contactPhone,
+      ...(row.inviteEmail ? { invitedEmail: row.inviteEmail } : {}),
+      ...(await resolveOwnerRouting(row.parentOrgId)),
+    },
+    log,
+  );
+  log.info(
+    {
+      status: 'success',
+      latency_ms: Date.now() - start,
+      aggregator_id: row.id,
+      reclaim: true,
+    },
+    'registration re-submitted — review link re-sent (no field change)',
+  );
+  // Consent is recorded only on a fresh registration, not here.
+  return reply.status(200).send({
+    aggregator_id: row.id,
+    org_slug: row.orgSlug,
+    status: 'pending',
+    message: 'Registration re-submitted. A fresh approval link has been sent for review.',
+  });
+}
+
+/** Gives back an invite claimed by a registration that did not complete. */
+async function releaseInvite(inviteJti: string, log: Log): Promise<void> {
+  const released = await getRegistrationInvitesStore().release(inviteJti);
+  if (!released.ok || released.value === null) {
+    log.warn(
+      { status: 'failure', sub_operation: 'inviteStore.release', invite_jti: inviteJti },
+      'invite release after an incomplete registration did not commit',
+    );
+  }
 }
 
 /**
