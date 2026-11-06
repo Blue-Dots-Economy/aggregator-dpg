@@ -1,11 +1,10 @@
 /**
- * Full-page composition test: `(protected)/dashboard/page.tsx`.
+ * Full-page composition test of the dashboard: `DashboardView`, the client
+ * view that `(protected)/dashboard/page.tsx` renders.
  *
- * The dashboard is a single ~2200-line file with no sub-exports, so every
- * section (loading frame, tab shell, summary bar, stat cards, tile groups,
- * participant table, lifecycle/status filters, bulk selection + actions,
- * pagination, refresh) is exercised through the one default export,
- * `DashboardPageRoot`.
+ * Every section (loading frame, tab shell, summary bar, stat cards, tile
+ * groups, participant table, lifecycle/status filters, bulk selection +
+ * actions, pagination, refresh) is exercised through `DashboardView`.
  *
  * Data + config hooks (`useDashboard`, `useAggregatorConfig`,
  * `useProfileRaw`) and the two service modules the page calls directly
@@ -166,9 +165,10 @@ vi.mock('@/services/bulk-actions', () => ({
   ],
 }));
 
-import DashboardPageRoot from '@/app/(protected)/dashboard/page';
+import DashboardPage from '@/app/(protected)/dashboard/page';
+import { DashboardView } from '@/app/(protected)/dashboard/_components/DashboardView';
 
-function renderPage(ui: ReactElement = <DashboardPageRoot />) {
+function renderPage(ui: ReactElement = <DashboardView />) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
@@ -243,7 +243,11 @@ function dashboardPageFixture(
   };
 }
 
-describe('<DashboardPageRoot />', () => {
+describe('<DashboardView />', () => {
+  it('is what the page renders', () => {
+    expect(DashboardPage().type).toBe(DashboardView);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     nav.resetSearchParams();

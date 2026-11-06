@@ -74,6 +74,10 @@ Both `/register` and `/profile` call `loadRegistrationSchema()`, which loads `re
 - **Server-side console reads** go through `lib/console-api.server.ts`: `consoleRead(path, schema[, body])` (a `POST` when `body` is set) redirects or calls `notFound()` on a failed read and throws `ResponseShapeError` on a bad body; `consoleReadOptional(path, schema)` returns `null` on any failure, for panels that hide when unavailable.
 - **Console calls from the browser** (`lib/console-client.ts`): `sendConsole(url, method, schema, body)` and `getConsole(url, schema)` never throw. A body that does not match returns `{ ok: false, error: { code: RESPONSE_SHAPE } }`; `errorKey` and `plainErrorKey` map it to `errors.response_shape`. A save may have gone through, so a view that refreshes on success also refreshes on `RESPONSE_SHAPE`.
 
+## Dashboard layout
+
+`(protected)/dashboard/page.tsx` is a Server Component that renders the client `DashboardView` (`_components/`), which waits for the profile and picks the coordinator's own domain. `SeekersTab` and `ProvidersTab` are thin wrappers over `DomainTab`; its data, paging and filter state live in `useDomainDashboard`, the table in `ParticipantTable` and its parts. Pure helpers (row mappers, formatters, lifecycle and status filters, page list, query building, select-all paging) are in `_lib/` with unit tests. Data reads and the `?lifecycle=` filter stay on the client, so a filter change is not a server round-trip. "Select all N matching" reads in pages of at most 200, the API's `limit` maximum. Tests render `DashboardView`.
+
 ## Mobile layout (#793 / #817)
 
 The logged-in portal is responsive at the Tailwind `lg` (1024px) breakpoint: below it `components/shell/Sidebar.tsx` hides the sidebar behind a slim menu bar and opens it as a slide-in drawer (Escape / backdrop / link / widen-to-desktop close it; scroll-locked, focus-trapped), and pages reflow for phones. From `lg` up the layout is unchanged, so check both widths when touching the shell or the dashboard.
