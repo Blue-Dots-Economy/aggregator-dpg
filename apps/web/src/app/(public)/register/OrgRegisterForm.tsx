@@ -3,7 +3,7 @@
 import { useMemo, useState, type JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { IChangeEvent } from '@rjsf/core';
-import type { RJSFSchema, UiSchema } from '@rjsf/utils';
+import type { RJSFSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '@/components/forms/RjsfThemed';
 import type { ResolvedPlace } from '@/components/forms/custom-widgets/LocationAutocompleteWidget';
@@ -133,10 +133,7 @@ export function OrgRegisterForm({
   );
 
   const formSchema = useMemo(() => stripConsentBlock(stripFormChrome(schema)), [schema]);
-  const formUiSchema = useMemo(
-    () => withPhoneWidget(uiSchema, formSchema as Record<string, unknown>),
-    [uiSchema, formSchema],
-  );
+  const formUiSchema = useMemo(() => withPhoneWidget(uiSchema, formSchema), [uiSchema, formSchema]);
   const customValidate = useMemo(() => gstinCustomValidate(formSchema), [formSchema]);
 
   const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
@@ -256,7 +253,7 @@ export function OrgRegisterForm({
 
       <RjsfThemedForm
         schema={formSchema}
-        uiSchema={formUiSchema as unknown as UiSchema<Record<string, unknown>>}
+        uiSchema={formUiSchema}
         {...sharedRegistrationFormProps({
           formData,
           setFormData,

@@ -17,6 +17,8 @@
 
 import type { FormValidation, RJSFSchema } from '@rjsf/utils';
 import { isValidGstin } from '@aggregator-dpg/shared-primitives/org-details';
+import { isJsonObject, jsonObjectOr, schemaProperties } from '@/lib/json-object';
+import { addFieldError } from '@/lib/rjsf-field-error';
 
 /** One network domain, as the console and forms show it. */
 export interface OrgDomainOption {
@@ -42,16 +44,6 @@ const GSTIN_MESSAGE = 'Please enter a valid GSTIN.';
 
 type JsonRecord = Record<string, unknown>;
 
-/** Whether `value` is a plain object. */
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** The schema's top-level properties (never `undefined`). */
-function propertiesOf(schema: RJSFSchema): Record<string, JsonRecord> {
-  return (isRecord(schema.properties) ? schema.properties : {}) as Record<string, JsonRecord>;
-}
-
 /**
  * Fills the choices of every `x-network-domains` property with the network's
  * domains: ids in the schema, labels in the UI schema. Returns copies; leaves
@@ -70,9 +62,9 @@ export function applyNetworkDomains(
   if (domains.length === 0) return { schema, uiSchema };
   const ids = domains.map((d) => d.id);
   const labels = domains.map((d) => d.label);
-  const properties: Record<string, JsonRecord> = {};
+  const properties: Record<string, RJSFSchema> = {};
   const ui: JsonRecord = { ...uiSchema };
-  for (const [name, prop] of Object.entries(propertiesOf(schema))) {
+  for (const [name, prop] of Object.entries(schemaProperties(schema))) {
     if (prop['x-network-domains'] !== true) {
       properties[name] = prop;
       continue;
@@ -81,12 +73,16 @@ export function applyNetworkDomains(
       prop['type'] === 'array'
         ? {
             ...prop,
-            items: { ...(isRecord(prop['items']) ? prop['items'] : {}), type: 'string', enum: ids },
+            items: {
+              ...(isJsonObject(prop['items']) ? prop['items'] : {}),
+              type: 'string',
+              enum: ids,
+            },
           }
         : { ...prop, enum: ids };
-    ui[name] = { ...(isRecord(ui[name]) ? ui[name] : {}), 'ui:enumNames': labels };
+    ui[name] = { ...(isJsonObject(ui[name]) ? ui[name] : {}), 'ui:enumNames': labels };
   }
-  return { schema: { ...schema, properties } as RJSFSchema, uiSchema: ui };
+  return { schema: { ...schema, properties }, uiSchema: ui };
 }
 
 /**
@@ -97,17 +93,18 @@ export function applyNetworkDomains(
  * @returns A `customValidate` function.
  */
 export function gstinCustomValidate(schema: RJSFSchema) {
-  const checked = Object.entries(propertiesOf(schema)).filter(([, p]) => p['x-check'] === 'gstin');
+  const checked = Object.entries(schemaProperties(schema)).filter(
+    ([, p]) => p['x-check'] === 'gstin',
+  );
   return <T>(formData: T | undefined, errors: FormValidation<T>): FormValidation<T> => {
-    const data = (isRecord(formData) ? formData : {}) as JsonRecord;
+    const data = jsonObjectOr(formData);
     for (const [name, prop] of checked) {
       const value = data[name];
       if (typeof value !== 'string' || value.trim() === '' || isValidGstin(value)) continue;
       const authored = prop['x-error-message'];
-      const fieldErrors = (errors as unknown as Record<string, { addError(m: string): void }>)[
-        name
-      ];
-      fieldErrors?.addError(
+      addFieldError(
+        errors,
+        [name],
         typeof authored === 'string' && authored.trim() ? authored : GSTIN_MESSAGE,
       );
     }
@@ -124,9 +121,11 @@ export function gstinCustomValidate(schema: RJSFSchema) {
  * @returns Field names.
  */
 export function orgSchemaFields(schema: RJSFSchema, uiSchema: JsonRecord): string[] {
-  const names = Object.keys(propertiesOf(schema)).filter((name) => !FIXED_KEYS.has(name));
-  const order = Array.isArray(uiSchema['ui:order']) ? (uiSchema['ui:order'] as string[]) : [];
-  const ranked = order.filter((name) => names.includes(name));
+  const names = Object.keys(schemaProperties(schema)).filter((name) => !FIXED_KEYS.has(name));
+  const order: unknown[] = Array.isArray(uiSchema['ui:order']) ? uiSchema['ui:order'] : [];
+  const ranked = order.filter(
+    (name): name is string => typeof name === 'string' && names.includes(name),
+  );
   return [...ranked, ...names.filter((name) => !ranked.includes(name))];
 }
 
@@ -145,20 +144,20 @@ export function consoleOrgSchema(
   uiSchema: JsonRecord,
   editable: boolean,
 ): { schema: RJSFSchema; uiSchema: JsonRecord; updatable: string[] } {
-  const props = propertiesOf(schema);
+  const props = schemaProperties(schema);
   const fields = orgSchemaFields(schema, uiSchema);
   const updatable = editable ? fields.filter((name) => props[name]?.['x-updatable'] === true) : [];
   const ui: JsonRecord = { 'ui:order': [...fields, '*'] };
   for (const name of fields) {
-    const own = isRecord(uiSchema[name]) ? uiSchema[name] : {};
+    const own = isJsonObject(uiSchema[name]) ? uiSchema[name] : {};
     ui[name] = updatable.includes(name) ? own : { ...own, 'ui:readonly': true };
   }
   return {
     schema: {
       ...(schema.$schema ? { $schema: schema.$schema } : {}),
       type: 'object',
-      properties: Object.fromEntries(fields.map((name) => [name, props[name]])),
-    } as RJSFSchema,
+      properties: Object.fromEntries(fields.map((name) => [name, props[name] ?? {}])),
+    },
     uiSchema: ui,
     updatable,
   };
@@ -175,9 +174,9 @@ export function consoleOrgSchema(
  */
 export function orgFieldText(prop: JsonRecord, ui: JsonRecord, value: unknown): string | null {
   if (value === undefined || value === null || value === '') return null;
-  const items = isRecord(prop['items']) ? prop['items'] : prop;
-  const choices = Array.isArray(items['enum']) ? (items['enum'] as unknown[]) : [];
-  const names = Array.isArray(ui['ui:enumNames']) ? (ui['ui:enumNames'] as unknown[]) : [];
+  const items = isJsonObject(prop['items']) ? prop['items'] : prop;
+  const choices: unknown[] = Array.isArray(items['enum']) ? items['enum'] : [];
+  const names: unknown[] = Array.isArray(ui['ui:enumNames']) ? ui['ui:enumNames'] : [];
   const label = (v: unknown): string => {
     const i = choices.indexOf(v);
     return i >= 0 && names[i] !== undefined ? String(names[i]) : String(v);

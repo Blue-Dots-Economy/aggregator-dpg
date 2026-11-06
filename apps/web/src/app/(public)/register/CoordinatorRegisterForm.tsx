@@ -2,7 +2,8 @@
 
 import { useMemo, useState, type JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { RJSFSchema, UiSchema } from '@rjsf/utils';
+import type { RJSFSchema } from '@rjsf/utils';
+import { isJsonObject, jsonObjectOr } from '@/lib/json-object';
 import { useTranslations } from 'next-intl';
 import type { IChangeEvent } from '@rjsf/core';
 import { RjsfThemedForm } from '@/components/forms/RjsfThemed';
@@ -72,14 +73,16 @@ const DEFAULT_ORG_SLUG = 'default';
  * @returns The schema without org-detail properties.
  */
 function withoutOrgDetails(schema: RJSFSchema): RJSFSchema {
-  const props = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
-  const orgDetailKeys = Object.keys(props).filter((k) => props[k]?.['x-org-detail'] === true);
+  const props = schema.properties ?? {};
+  const orgDetailKeys = Object.entries(props)
+    .filter(([, def]) => isJsonObject(def) && def['x-org-detail'] === true)
+    .map(([k]) => k);
   if (orgDetailKeys.length === 0) return schema;
   return {
     ...schema,
     properties: Object.fromEntries(
       Object.entries(props).filter(([k]) => !orgDetailKeys.includes(k)),
-    ) as RJSFSchema['properties'],
+    ),
     ...(Array.isArray(schema.required)
       ? { required: schema.required.filter((k) => !orgDetailKeys.includes(k)) }
       : {}),
@@ -175,13 +178,13 @@ export function CoordinatorRegisterForm({
 
   // For a real org, hide the `name` field; the name comes from the org.
   const formUiSchema = useMemo<Record<string, unknown>>(() => {
-    const withPhone = withPhoneWidget(uiSchema, formSchema as Record<string, unknown>);
+    const withPhone = withPhoneWidget(uiSchema, formSchema);
     if (!inheritsFromOrg) return withPhone;
     // The invite email stays editable; the owner sees any mismatch at approval.
     return {
       ...withPhone,
       name: {
-        ...(withPhone['name'] as Record<string, unknown> | undefined),
+        ...jsonObjectOr(withPhone['name']),
         'ui:widget': 'hidden',
       },
     };
@@ -300,7 +303,7 @@ export function CoordinatorRegisterForm({
 
       <RjsfThemedForm
         schema={formSchema}
-        uiSchema={formUiSchema as unknown as UiSchema<Record<string, unknown>>}
+        uiSchema={formUiSchema}
         {...sharedRegistrationFormProps({
           formData,
           setFormData,

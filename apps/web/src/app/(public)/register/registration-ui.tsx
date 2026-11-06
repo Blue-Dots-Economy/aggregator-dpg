@@ -14,6 +14,8 @@ import type { IChangeEvent } from '@rjsf/core';
 import type { FormValidation, RJSFSchema, RJSFValidationError } from '@rjsf/utils';
 import { refusedNameCharacters } from '@aggregator-dpg/shared-primitives/person-name';
 import { readableFormErrors } from '@/app/[org]/[slug]/PublicRegistrationView';
+import { isJsonObject } from '@/lib/json-object';
+import { addFieldError } from '@/lib/rjsf-field-error';
 import { I } from '@/icons';
 import type { ConsentDoc } from '@/components/consent/consent-docs';
 import type { ConsentDocContent } from '@/components/consent/consent-types';
@@ -112,7 +114,7 @@ export function useConsentGateSubmit(
   const pendingRef = useRef<Record<string, unknown> | null>(null);
 
   const handleSubmit = (e: IChangeEvent<Record<string, unknown>>): void => {
-    pendingRef.current = (e.formData ?? {}) as Record<string, unknown>;
+    pendingRef.current = e.formData ?? {};
     if (consentDocs.length === 0) {
       setState({
         status: 'error',
@@ -178,15 +180,9 @@ function personNameValidator(
   return (data, errors) => {
     const keys = personName.path.split('.');
     let value: unknown = data;
-    let field: unknown = errors;
-    for (const k of keys) {
-      value = (value as Record<string, unknown> | undefined)?.[k];
-      field = (field as Record<string, unknown> | undefined)?.[k];
-    }
+    for (const k of keys) value = isJsonObject(value) ? value[k] : undefined;
     const symbols = typeof value === 'string' ? refusedNameCharacters(value) : [];
-    if (symbols.length > 0 && field && typeof (field as FormValidation).addError === 'function') {
-      (field as FormValidation).addError(personName.message(symbols.join(' ')));
-    }
+    if (symbols.length > 0) addFieldError(errors, keys, personName.message(symbols.join(' ')));
     return errors;
   };
 }
@@ -220,7 +216,7 @@ export function sharedRegistrationFormProps(wiring: SharedFormWiring): {
       consentContent: wiring.consentContent,
       onLocationResolved: wiring.onLocationResolved,
     },
-    onChange: (e) => wiring.setFormData(e.formData as Record<string, unknown>),
+    onChange: (e) => wiring.setFormData(e.formData ?? {}),
     onValidityChange: wiring.setCanSubmit,
     onSubmit: wiring.handleSubmit,
     onError: (errs) => {

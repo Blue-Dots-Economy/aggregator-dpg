@@ -10,7 +10,7 @@
 import type { RJSFSchema } from '@rjsf/utils';
 import { z } from 'zod';
 import { readErrorEnvelope } from '@/lib/api-error';
-import { readJsonObject } from '@/lib/json-object';
+import { isJsonObject, jsonObjectOr, readJsonObject } from '@/lib/json-object';
 
 /** One active-org option for the coordinator dropdown (`GET /api/orgs`). */
 export const OrgOptionSchema = z.object({
@@ -78,19 +78,12 @@ export function lookupTitle(schema: RJSFSchema, dottedPath: string): string | un
   const segs = dottedPath.split('.').filter(Boolean);
   let cur: unknown = schema;
   for (const seg of segs) {
-    if (cur && typeof cur === 'object' && 'properties' in cur) {
-      const props = (cur as { properties?: Record<string, unknown> }).properties;
-      const next = props?.[seg];
-      if (!next) return undefined;
-      cur = next;
-    } else {
-      return undefined;
-    }
+    if (!isJsonObject(cur) || !('properties' in cur)) return undefined;
+    const next = jsonObjectOr(cur['properties'])[seg];
+    if (!next) return undefined;
+    cur = next;
   }
-  if (cur && typeof cur === 'object' && 'title' in cur) {
-    return (cur as { title?: string }).title;
-  }
-  return undefined;
+  return isJsonObject(cur) && typeof cur['title'] === 'string' ? cur['title'] : undefined;
 }
 
 /**
@@ -105,7 +98,8 @@ export function humaniseValidationErrors(errs: AjvLikeError[], schema: RJSFSchem
   const out: string[] = [];
   for (const e of errs) {
     const propPath = (e.property ?? '').replace(/^\./, '');
-    const missing = (e.params?.['missingProperty'] as string | undefined) ?? undefined;
+    const missingProperty = e.params?.['missingProperty'];
+    const missing = typeof missingProperty === 'string' ? missingProperty : undefined;
     // RJSF already ends a missing field's path with the field; Ajv gives only the parent.
     const endsWithMissing = missing && (propPath === missing || propPath.endsWith(`.${missing}`));
     const fullPath =
@@ -167,9 +161,7 @@ export function parseError(
  * @returns A shallow clone without `title`/`description`.
  */
 export function stripFormChrome(schema: RJSFSchema): RJSFSchema {
-  const clone: RJSFSchema = { ...schema };
-  delete (clone as { title?: string }).title;
-  delete (clone as { description?: string }).description;
+  const { title: _title, description: _description, ...clone } = schema;
   return clone;
 }
 
@@ -272,10 +264,9 @@ export function stampConsent(
  * @returns A copy without the consent property or its `required` entry.
  */
 export function stripConsentBlock(schema: RJSFSchema): RJSFSchema {
-  const properties = { ...((schema.properties ?? {}) as Record<string, unknown>) };
-  if (!('consent' in properties)) return schema;
-  delete properties['consent'];
-  const clone: RJSFSchema = { ...schema, properties: properties as RJSFSchema['properties'] };
+  if (!schema.properties || !('consent' in schema.properties)) return schema;
+  const { consent: _consent, ...properties } = schema.properties;
+  const clone: RJSFSchema = { ...schema, properties };
   if (Array.isArray(schema.required)) {
     clone.required = schema.required.filter((k) => k !== 'consent');
   }
@@ -328,12 +319,12 @@ export function withResolvedCoordinates(
   if (!place) return payload;
   const locations = payload['locations'];
   if (!Array.isArray(locations) || locations.length === 0) return payload;
-  const [first, ...rest] = locations as Record<string, unknown>[];
+  const [first, ...rest] = locations;
   return {
     ...payload,
     locations: [
       {
-        ...first,
+        ...jsonObjectOr(first),
         // GeoJSON order is [longitude, latitude].
         geo: { type: 'Point', coordinates: [place.lng, place.lat] },
       },

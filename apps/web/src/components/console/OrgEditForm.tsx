@@ -20,7 +20,8 @@ import { useMemo, useRef, useState, type ReactNode, type SubmitEvent } from 'rea
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import type Form from '@rjsf/core';
-import type { ErrorSchema, RJSFSchema, UiSchema } from '@rjsf/utils';
+import { ErrorSchemaBuilder, type ErrorSchema, type RJSFSchema } from '@rjsf/utils';
+import { isJsonObject, jsonObjectOr, schemaProperties } from '@/lib/json-object';
 import { OrgSchema, type Org } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { I } from '@/icons';
@@ -81,7 +82,7 @@ export function OrgEditForm({
     () => (orgSchema ? consoleOrgSchema(orgSchema.schema, orgSchema.uiSchema, editing) : null),
     [orgSchema, editing],
   );
-  const fields = useMemo(() => Object.keys((view?.schema.properties ?? {}) as JsonRecord), [view]);
+  const fields = useMemo(() => Object.keys(view?.schema.properties ?? {}), [view]);
   const customValidate = useMemo(
     () => (view ? gstinCustomValidate(view.schema) : undefined),
     [view],
@@ -170,13 +171,12 @@ export function OrgEditForm({
     // The change may have been saved: reload the page's copy.
     if (r.error.code === RESPONSE_SHAPE_CODE) router.refresh();
     const serverErrors = r.error.fields?.['field_errors'];
-    if (r.status === 400 && serverErrors && typeof serverErrors === 'object') {
-      const mapped: JsonRecord = {};
-      for (const [field, text] of Object.entries(serverErrors as JsonRecord)) {
-        if (fields.includes(field)) mapped[field] = { __errors: [String(text)] };
-      }
-      if (Object.keys(mapped).length > 0) {
-        setExtraErrors(mapped as ErrorSchema);
+    if (r.status === 400 && isJsonObject(serverErrors)) {
+      const mapped = new ErrorSchemaBuilder();
+      const marked = Object.entries(serverErrors).filter(([field]) => fields.includes(field));
+      for (const [field, text] of marked) mapped.setErrors(String(text), [field]);
+      if (marked.length > 0) {
+        setExtraErrors(mapped.ErrorSchema);
         setMessage(t('org.fix_fields'));
         return;
       }
@@ -204,13 +204,12 @@ export function OrgEditForm({
   if (!editing) {
     // Read-only details (the Default org, the root, an org below the viewer's
     // own, or not the owner): plain text, not disabled inputs.
-    const props = (view?.schema.properties ?? {}) as Record<string, JsonRecord>;
+    const props = view ? schemaProperties(view.schema) : {};
     const ui = view?.uiSchema ?? {};
     const schemaItems = fields.map((field) => ({
       label: String(props[field]?.['title'] ?? field),
       value:
-        orgFieldText(props[field] ?? {}, (ui[field] ?? {}) as JsonRecord, current.profile[field]) ??
-        '—',
+        orgFieldText(props[field] ?? {}, jsonObjectOr(ui[field]), current.profile[field]) ?? '—',
     }));
     const items: Array<{ label: string; value: ReactNode }> = [
       { label: t('org.name'), value: current.name },
@@ -272,16 +271,14 @@ export function OrgEditForm({
             ref={schemaForm}
             tagName="div"
             schema={view.schema}
-            uiSchema={
-              {
-                ...view.uiSchema,
-                'ui:layout': 'grid',
-                'ui:submitButtonOptions': { norender: true },
-              } as unknown as UiSchema<JsonRecord>
-            }
+            uiSchema={{
+              ...view.uiSchema,
+              'ui:layout': 'grid',
+              'ui:submitButtonOptions': { norender: true },
+            }}
             formData={profileData}
             onChange={(ev) => {
-              setProfileData((ev.formData ?? {}) as JsonRecord);
+              setProfileData(ev.formData ?? {});
               setExtraErrors(undefined);
             }}
             transformErrors={(errors) => readableFormErrors(errors, view.schema)}

@@ -10,6 +10,7 @@
  */
 
 import type { RJSFSchema } from '@rjsf/utils';
+import { isJsonObject, schemaProperties } from '@/lib/json-object';
 
 /** The custom keyword: control field name → values that reveal the dependent field. */
 type ShowIfMap = Record<string, unknown[]>;
@@ -73,7 +74,7 @@ export function resolveVisibleSchema(
   schema: RJSFSchema,
   formData: Record<string, unknown>,
 ): ResolveResult {
-  const allProps = (schema.properties ?? {}) as Record<string, FieldSchema>;
+  const allProps: Record<string, FieldSchema> = schemaProperties(schema);
   const propNames = Object.keys(allProps);
 
   if (IS_DEV) {
@@ -136,24 +137,29 @@ export function pruneHiddenFields(schema: RJSFSchema, hidden: readonly string[])
   return pruned;
 }
 
+/** Copies an object without its `x-show-if` keys, at every depth. */
+function stripObject(node: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'x-show-if') continue;
+    result[key] = stripShowIf(value);
+  }
+  return result;
+}
+
 /**
  * Recursively removes the custom `x-show-if` keyword from a schema tree.
  *
  * Ajv must not see this keyword; {@link resolveVisibleSchema} handles it
- * first. Does not mutate its input.
+ * first. Does not mutate its input. An object comes back as an object, an
+ * array as an array, and any other value as it is.
  *
  * @param schema - Any JSON Schema node (object, array, or primitive).
  * @returns An equivalent schema with every `x-show-if` removed.
  */
-export function stripShowIf<T>(schema: T): T {
-  if (Array.isArray(schema)) {
-    return schema.map((s) => stripShowIf(s)) as unknown as T;
-  }
-  if (schema === null || typeof schema !== 'object') return schema;
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
-    if (key === 'x-show-if') continue;
-    result[key] = stripShowIf(value);
-  }
-  return result as T;
+export function stripShowIf(schema: RJSFSchema): RJSFSchema;
+export function stripShowIf(schema: unknown): unknown;
+export function stripShowIf(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map((s) => stripShowIf(s));
+  return isJsonObject(schema) ? stripObject(schema) : schema;
 }

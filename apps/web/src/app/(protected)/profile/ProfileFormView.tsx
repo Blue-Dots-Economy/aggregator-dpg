@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, type JSX } from 'react';
-import type { RJSFSchema, UiSchema } from '@rjsf/utils';
+import type { RJSFSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { Topbar } from '@/components/shell/Topbar';
 import { Button } from '@/components/ui/Button';
@@ -9,6 +9,7 @@ import { RjsfThemedForm } from '@/components/forms/RjsfThemed';
 import { useProfileRaw } from '@/hooks/useProfile';
 import { I } from '@/icons';
 import type { ProfileApiResponse } from '@/services/profile.service';
+import { jsonObjectOr, schemaProperties } from '@/lib/json-object';
 
 /**
  * Read-only aggregator profile view.
@@ -67,10 +68,9 @@ interface UpdatableField {
  * @returns The updatable fields, in property order.
  */
 function collectUpdatableFields(schema: RJSFSchema): UpdatableField[] {
-  const props = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
-  return Object.entries(props)
-    .filter(([, def]) => def?.['x-updatable'] === true)
-    .map(([key, def]) => ({ key, label: (def['title'] as string | undefined) ?? key }));
+  return Object.entries(schemaProperties(schema))
+    .filter(([, def]) => def['x-updatable'] === true)
+    .map(([key, def]) => ({ key, label: typeof def.title === 'string' ? def.title : key }));
 }
 
 /**
@@ -97,7 +97,7 @@ function currentValueFor(key: string, api: ProfileApiResponse | undefined): stri
       .filter((p): p is string => Boolean(p && p.length > 0))
       .join(', ');
   }
-  const value = (api as unknown as Record<string, unknown>)[key];
+  const value = jsonObjectOr(api)[key];
   return value == null ? '' : String(value);
 }
 
@@ -125,7 +125,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
       ...uiSchema,
       'ui:submitButtonOptions': { norender: true },
       consent: {
-        ...((uiSchema['consent'] as Record<string, unknown> | undefined) ?? {}),
+        ...jsonObjectOr(uiSchema['consent']),
         'ui:widget': 'hidden',
       },
     }),
@@ -134,10 +134,8 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
 
   // Drop the schema title and description; the page renders its own heading.
   const displaySchema = useMemo<RJSFSchema>(() => {
-    const clone = { ...schema } as RJSFSchema;
-    delete (clone as { title?: string }).title;
-    delete (clone as { description?: string }).description;
-    return clone;
+    const { title: _title, description: _description, ...rest } = schema;
+    return rest;
   }, [schema]);
 
   const formData = useMemo(() => (data ? toFormData(data) : {}), [data]);
@@ -239,7 +237,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
           ) : (
             <RjsfThemedForm
               schema={displaySchema}
-              uiSchema={readonlyUiSchema as unknown as UiSchema<Record<string, unknown>>}
+              uiSchema={readonlyUiSchema}
               formData={formData}
               readonly
             >
