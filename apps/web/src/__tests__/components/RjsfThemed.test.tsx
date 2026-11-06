@@ -308,6 +308,37 @@ describe('<RjsfThemedForm /> widgets', () => {
     expect(lastCall.formData.tags).toBeUndefined();
   });
 
+  it('CommaSeparatedArrayWidget: keeps a trailing comma while typing', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: { tags: { type: 'array', items: { type: 'string' }, title: 'Tags' } },
+    };
+    const uiSchema: UiSchema = { tags: { 'ui:widget': 'CommaSeparatedArrayWidget' } };
+    render(
+      <Wrapper>
+        <ControlledThemedForm schema={schema} uiSchema={uiSchema} />
+      </Wrapper>,
+    );
+    const input = screen.getByLabelText('Tags');
+    fireEvent.change(input, { target: { value: 'red, ' } });
+    expect((input as HTMLInputElement).value).toBe('red, ');
+  });
+
+  it('CommaSeparatedArrayWidget: shows a list the form sets from outside', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: { tags: { type: 'array', items: { type: 'string' }, title: 'Tags' } },
+    };
+    const uiSchema: UiSchema = { tags: { 'ui:widget': 'CommaSeparatedArrayWidget' } };
+    const { rerender } = renderThemed({ schema, uiSchema, formData: { tags: ['a'] } });
+    rerender(
+      <Wrapper>
+        <RjsfThemedForm schema={schema} uiSchema={uiSchema} formData={{ tags: ['x', 'y'] }} />
+      </Wrapper>,
+    );
+    expect((screen.getByLabelText('Tags') as HTMLInputElement).value).toBe('x, y');
+  });
+
   it('CheckboxesWidget: renders a MultiSelect for array-of-enum and reports selections', async () => {
     const schema: RJSFSchema = {
       type: 'object',

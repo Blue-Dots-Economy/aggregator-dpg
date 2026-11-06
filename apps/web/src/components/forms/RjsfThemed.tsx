@@ -33,7 +33,7 @@ import { useTranslations } from 'next-intl';
 import { X } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
 import { MultiSelect } from '../ui/MultiSelect';
-import { resolveVisibleSchema, stripShowIf } from '../../lib/show-if';
+import { pruneHiddenFields, resolveVisibleSchema, stripShowIf } from '../../lib/show-if';
 import { ConsentCheckboxWidget } from './ConsentCheckboxWidget';
 import { LocationAutocompleteWidget } from './custom-widgets/LocationAutocompleteWidget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/MultiLocationAutocompleteWidget';
@@ -169,18 +169,16 @@ function DateWidget(props: WidgetProps) {
 function CommaSeparatedArrayWidget(props: WidgetProps) {
   const { id, value, required, disabled, readonly, onChange, placeholder } = props;
   const t = useTranslations('form');
-  const arrayValue = Array.isArray(value) ? (value as unknown[]).filter(Boolean) : [];
+  const arrayValue: unknown[] = Array.isArray(value) ? value.filter(Boolean) : [];
+  const valueKey = arrayValue.join('|');
   const [text, setText] = useState<string>(arrayValue.join(', '));
-  const lastSyncedRef = useRef<string>(arrayValue.join('|'));
-
-  // Re-sync the text when the array changes from outside (e.g. a reset).
-  useEffect(() => {
-    const next = arrayValue.join('|');
-    if (next !== lastSyncedRef.current) {
-      setText(arrayValue.join(', '));
-      lastSyncedRef.current = next;
-    }
-  }, [arrayValue]);
+  // The list the text last matched. Typing updates it, so only a list set from
+  // outside (e.g. a reset) replaces the text, during render.
+  const [syncedKey, setSyncedKey] = useState(valueKey);
+  if (valueKey !== syncedKey) {
+    setSyncedKey(valueKey);
+    setText(arrayValue.join(', '));
+  }
 
   return (
     <input
@@ -197,7 +195,7 @@ function CommaSeparatedArrayWidget(props: WidgetProps) {
           .split(',')
           .map((s) => s.trim())
           .filter((s) => s.length > 0);
-        lastSyncedRef.current = arr.join('|');
+        setSyncedKey(arr.join('|'));
         onChange(arr.length > 0 ? arr : undefined);
       }}
       onBlur={(e) => {
@@ -207,7 +205,7 @@ function CommaSeparatedArrayWidget(props: WidgetProps) {
           .filter((s) => s.length > 0);
         const canonical = arr.join(', ');
         setText(canonical);
-        lastSyncedRef.current = arr.join('|');
+        setSyncedKey(arr.join('|'));
         onChange(arr.length > 0 ? arr : undefined);
       }}
     />
@@ -627,12 +625,16 @@ export function RjsfThemedForm<T extends GenericObjectType = GenericObjectType>(
   // Apply `x-show-if`: hidden fields are removed and their values cleared.
   const currentData = (formData ?? {}) as Record<string, unknown>;
   const resolved = resolveVisibleSchema(schema as RJSFSchema, currentData);
-  const hiddenKey = resolved.hidden.join('|');
+  // Field names never hold a newline, so it separates them in the memo key.
+  const hiddenKey = resolved.hidden.join('\n');
 
   // Memoised on the schema and the visible-field set so inputs keep focus
   // while typing. `x-show-if` is stripped so Ajv never sees it.
   const renderSchema = useMemo(
-    () => stripShowIf(resolveVisibleSchema(schema as RJSFSchema, currentData).schema),
+    () =>
+      stripShowIf(
+        pruneHiddenFields(schema as RJSFSchema, hiddenKey === '' ? [] : hiddenKey.split('\n')),
+      ),
     [schema, hiddenKey],
   );
 

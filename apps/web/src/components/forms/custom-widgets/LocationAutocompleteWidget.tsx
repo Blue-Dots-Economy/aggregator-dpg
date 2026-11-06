@@ -64,7 +64,15 @@ export function LocationAutocompleteWidget({
   const isPrimary =
     (options as { isPrimaryLocation?: boolean } | undefined)?.isPrimaryLocation === true;
 
-  const [text, setText] = React.useState<string>((value as string) ?? '');
+  const valueText = typeof value === 'string' ? value : '';
+  const [text, setText] = React.useState(valueText);
+  // Take a new value from RJSF (e.g. a prefill) during render. The input keeps
+  // its own text so typing is not held up by the form's update.
+  const [syncedValue, setSyncedValue] = React.useState(valueText);
+  if (valueText !== syncedValue) {
+    setSyncedValue(valueText);
+    setText(valueText);
+  }
   const [suggestions, setSuggestions] = React.useState<GeoSuggestion[]>([]);
   const [open, setOpen] = React.useState(false);
   // Open the list upward when the input is near the viewport bottom.
@@ -85,12 +93,6 @@ export function LocationAutocompleteWidget({
       }),
     [config.googleMapsApiKey, config.photonUrl, config.geoCountry],
   );
-
-  // Sync the text with new values from RJSF. Does not search; only typing
-  // searches, so choosing a suggestion never re-opens the list.
-  React.useEffect(() => {
-    setText((value as string) ?? '');
-  }, [value]);
 
   // Cancel any pending work on unmount.
   React.useEffect(

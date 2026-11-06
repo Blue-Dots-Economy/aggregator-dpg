@@ -209,6 +209,19 @@ describe('suggestion-list keyboard navigation', () => {
     expect(activeLabel()).toBe(SUGGESTIONS[2]!.label);
   });
 
+  it('clears the highlight when new results of the same length arrive', async () => {
+    const { input } = await openList();
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(activeLabel()).toBe(SUGGESTIONS[1]!.label);
+
+    suggestMock.mockResolvedValue([...SUGGESTIONS].reverse());
+    fireEvent.change(input, { target: { value: 'bengaluru k' } });
+    await vi.advanceTimersByTimeAsync(300);
+    await screen.findByRole('option', { name: SUGGESTIONS[2]!.label });
+    expect(activeLabel()).toBeUndefined();
+  });
+
   it('ignores an unrelated key', async () => {
     const { input } = await openList();
 

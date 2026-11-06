@@ -17,6 +17,7 @@ import {
 } from '../../../../hooks/useOnboarding';
 import { useProfile, useProfileRaw } from '../../../../hooks/useProfile';
 import { useAggregatorConfig } from '../../../../hooks/useAggregatorConfig';
+import { useIsClient } from '@/hooks/useIsClient';
 import type { ApiRegistrationLink } from '../../../../services/onboarding.service';
 
 interface CreateLinkFormState {
@@ -114,19 +115,27 @@ function splitPublicUrl(publicUrl: string | null): { host: string; path: string 
   }
 }
 
+/** How long a success toast stays on screen; long enough to read one short sentence. */
+const TOAST_VISIBLE_MS = 2400;
+
 /**
  * Top-right success toast, rendered in a portal on <body>.
  *
- * Closes itself after 2400ms.
+ * Closes itself `TOAST_VISIBLE_MS` after it mounts. A parent re-render does
+ * not restart the timer; give it a new `key` to show a new message.
  */
 function SuccessToast({ message, onDone }: { message: string; onDone: () => void }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const isClient = useIsClient();
+  // The latest callback, so a new function from the parent does not restart the timer.
+  const onDoneRef = useRef(onDone);
   useEffect(() => {
-    const t = setTimeout(onDone, 2400);
-    return () => clearTimeout(t);
-  }, [onDone]);
-  if (!mounted) return null;
+    onDoneRef.current = onDone;
+  });
+  useEffect(() => {
+    const timer = setTimeout(() => onDoneRef.current(), TOAST_VISIBLE_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  if (!isClient) return null;
   return createPortal(
     <output
       aria-live="polite"
@@ -467,7 +476,7 @@ export function CreateLinkSection() {
           </div>
         </div>
       </div>
-      {toast && <SuccessToast message={toast} onDone={() => setToast(null)} />}
+      {toast && <SuccessToast key={toast} message={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }
@@ -818,10 +827,8 @@ export function YourLinksBody() {
   // `?new=<link_id>` is set by the create flow to highlight the new draft.
   const newLinkId = useSearchParams().get('new');
   // Show the create confirmation here, after navigation from the create page.
-  const [toast, setToast] = useState<string | null>(null);
-  useEffect(() => {
-    if (newLinkId) setToast(t('your_links.draft_created'));
-  }, [newLinkId, t]);
+  const [dismissedLinkId, setDismissedLinkId] = useState<string | null>(null);
+  const toast = newLinkId && newLinkId !== dismissedLinkId ? t('your_links.draft_created') : null;
   const rawProfile = useProfileRaw();
   const { data: cfg } = useAggregatorConfig();
   // Aggregator's domain; the network's first domain until the profile loads.
@@ -863,7 +870,13 @@ export function YourLinksBody() {
           ))
         )}
       </div>
-      {toast && <SuccessToast message={toast} onDone={() => setToast(null)} />}
+      {toast && (
+        <SuccessToast
+          key={newLinkId}
+          message={toast}
+          onDone={() => setDismissedLinkId(newLinkId)}
+        />
+      )}
     </div>
   );
 }

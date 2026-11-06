@@ -12,7 +12,20 @@
  * Sidebar's own composition logic is under test here.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, screen, fireEvent, within } from '@testing-library/react';
+import { act, render as rtlRender, screen, fireEvent, within } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import type { ReactElement } from 'react';
+import { makeQueryClient } from '@/__tests__/test-utils';
+
+/** Renders inside a query client, which the shell's support dialog reads through. */
+function render(ui: ReactElement) {
+  const client = makeQueryClient();
+  return rtlRender(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
 
 const {
   useAuth,

@@ -44,30 +44,37 @@ export function ConsentModal({
   initialTab,
   content,
 }: ConsentModalProps): JSX.Element | null {
+  if (!open) return null;
+  return <OpenConsentModal onOpenChange={onOpenChange} initialTab={initialTab} content={content} />;
+}
+
+/**
+ * The open modal. It mounts on each opening, so the tab starts at `initialTab`
+ * and the close button takes focus.
+ */
+function OpenConsentModal({
+  onOpenChange,
+  initialTab,
+  content,
+}: Readonly<Omit<ConsentModalProps, 'open'>>): JSX.Element {
   const t = useTranslations('register');
   const [activeTab, setActiveTab] = useState<ConsentTab>(initialTab);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Reset the active tab each time the modal opens.
+  // Focus the close button once the modal is painted.
   useEffect(() => {
-    if (open) {
-      setActiveTab(initialTab);
-      // Focus the close button when the modal opens.
-      requestAnimationFrame(() => closeButtonRef.current?.focus());
-    }
-  }, [open, initialTab]);
+    const frame = requestAnimationFrame(() => closeButtonRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   // Dismiss on ESC.
   useEffect(() => {
-    if (!open) return;
     const handleKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onOpenChange(false);
     };
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [open, onOpenChange]);
-
-  if (!open) return null;
+  }, [onOpenChange]);
 
   const activeDoc = activeTab === 'terms' ? content.terms : content.privacy;
 

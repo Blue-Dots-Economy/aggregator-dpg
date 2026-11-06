@@ -106,23 +106,34 @@ export function resolveVisibleSchema(
     for (const name of hidden) delete working[name];
   }
 
-  const prunedProps: Record<string, unknown> = {};
-  for (const name of propNames) {
-    if (!hidden.has(name)) prunedProps[name] = allProps[name];
-  }
-  const prunedSchema: RJSFSchema = {
-    ...schema,
-    properties: prunedProps as RJSFSchema['properties'],
-  };
-  if (Array.isArray(schema.required)) {
-    prunedSchema.required = (schema.required as string[]).filter((r) => !hidden.has(r));
-  }
-
   return {
-    schema: prunedSchema,
+    schema: pruneHiddenFields(schema, [...hidden]),
     formData: working,
     hidden: [...hidden].sort((a, b) => a.localeCompare(b)),
   };
+}
+
+/**
+ * Removes the named top-level fields from a schema's `properties` and `required`.
+ *
+ * Does not mutate its input. {@link resolveVisibleSchema} decides which fields
+ * are hidden; this builds the schema for a given hidden set, so a caller can
+ * memoise on that set.
+ *
+ * @param schema - The JSON Schema to prune.
+ * @param hidden - Names of the top-level properties to remove.
+ * @returns The schema without those fields.
+ */
+export function pruneHiddenFields(schema: RJSFSchema, hidden: readonly string[]): RJSFSchema {
+  const hiddenSet = new Set(hidden);
+  const properties = Object.fromEntries(
+    Object.entries(schema.properties ?? {}).filter(([name]) => !hiddenSet.has(name)),
+  );
+  const pruned: RJSFSchema = { ...schema, properties };
+  if (Array.isArray(schema.required)) {
+    pruned.required = schema.required.filter((r) => !hiddenSet.has(r));
+  }
+  return pruned;
 }
 
 /**
