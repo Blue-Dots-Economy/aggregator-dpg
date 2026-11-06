@@ -24,7 +24,7 @@ interface Draft {
   key: string;
   name: string;
   description: string;
-  account_type: 'admin' | 'coordinator';
+  account_type: Role['account_type'];
   assignable_org_types: string[];
   assigned_by: string;
   max_days: string;
@@ -204,9 +204,10 @@ export function RolesAdmin({
                 className="bd-input"
                 value={draft.account_type}
                 disabled={editing !== ''}
-                onChange={(e) =>
-                  setDraft({ ...draft, account_type: e.target.value as Draft['account_type'] })
-                }
+                onChange={(e) => {
+                  const accountType = RoleSchema.shape.account_type.safeParse(e.target.value);
+                  if (accountType.success) setDraft({ ...draft, account_type: accountType.data });
+                }}
               >
                 <option value="coordinator">{t('roles_admin.account_coordinator')}</option>
                 <option value="admin">{t('roles_admin.account_admin')}</option>

@@ -463,6 +463,64 @@ describe('KeycloakAdapter', () => {
     });
   });
 
+  it('logs the IdP error fields of a failed exchange', async () => {
+    const { KeycloakAdapter } = await importAdapter();
+    const { logger } = await import('@/lib/logger');
+    const logged = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    mockCallback.mockRejectedValue(
+      Object.assign(new Error('callback rejected'), {
+        name: 'OPError',
+        error: 'invalid_grant',
+        error_description: 'code expired',
+        response: { statusCode: 400 },
+      }),
+    );
+    const adapter = new KeycloakAdapter({
+      issuerUrl: 'http://kc.fake/realms/aggregator',
+      clientId: 'aggregator-portal',
+    });
+    await adapter.exchangeCode({
+      code: 'c',
+      codeVerifier: 'v',
+      redirectUri: 'http://app/cb',
+      state: 's',
+      expectedState: 's',
+      expectedNonce: 'n',
+    });
+    expect(logged).toHaveBeenCalledWith(
+      expect.objectContaining({
+        err_name: 'OPError',
+        idp_error: 'invalid_grant',
+        idp_error_description: 'code expired',
+        idp_status: 400,
+        cause: 'callback rejected',
+      }),
+      'oidc token exchange failed',
+    );
+    logged.mockRestore();
+  });
+
+  it('reports an unknown error when the rejection is not an object', async () => {
+    const { KeycloakAdapter } = await importAdapter();
+    mockCallback.mockRejectedValue('boom');
+    const adapter = new KeycloakAdapter({
+      issuerUrl: 'http://kc.fake/realms/aggregator',
+      clientId: 'aggregator-portal',
+    });
+    const result = await adapter.exchangeCode({
+      code: 'c',
+      codeVerifier: 'v',
+      redirectUri: 'http://app/cb',
+      state: 's',
+      expectedState: 's',
+      expectedNonce: 'n',
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'TOKEN_EXCHANGE_FAILED', message: 'unknown error' },
+    });
+  });
+
   it('refreshes tokens successfully', async () => {
     const { KeycloakAdapter } = await importAdapter();
     const refreshToken = fakeJwt({ exp: 1_800_000_000 });

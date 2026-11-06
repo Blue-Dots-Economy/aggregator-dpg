@@ -94,6 +94,19 @@ describe('<RolesAdmin />', () => {
     });
   });
 
+  it('sends the account type the admin picks', async () => {
+    global.fetch = respond({ ...role('verifier', false, []), account_type: 'admin' }, 201) as never;
+    renderIt([]);
+    fireEvent.click(screen.getByRole('button', { name: messages.console.roles_admin.create }));
+    fireEvent.change(screen.getByLabelText(messages.console.roles_admin.account_type), {
+      target: { value: 'admin' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: messages.console.roles_admin.save }));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+    const sent = JSON.parse((vi.mocked(global.fetch).mock.calls[0]![1] as { body: string }).body);
+    expect(sent).toMatchObject({ account_type: 'admin' });
+  });
+
   it('explains a refused role', async () => {
     global.fetch = respond(
       { error: { code: 'ROLE_INVALID', fields: { issues: ['x'] } } },

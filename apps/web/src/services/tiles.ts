@@ -6,6 +6,8 @@
  * @module apps/web/services/tiles
  */
 
+import { jsonObjectOr } from '@/lib/json-object';
+
 /** Structural shape of a tile definition (mirrors `DashboardTileDef`). */
 export interface TileDef {
   field: string;
@@ -40,7 +42,7 @@ export function resolveTiles(
     return source.map((d) => ({ field: d.field, label: d.label, value: 0 }));
   }
   // Every read below is type-checked at runtime.
-  const byField = rollup as Record<string, unknown>;
+  const byField = jsonObjectOr(rollup);
   const out: ResolvedTile[] = [];
   for (const d of source) {
     const v = byField[d.field];

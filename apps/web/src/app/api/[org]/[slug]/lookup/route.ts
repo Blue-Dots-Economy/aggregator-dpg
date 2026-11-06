@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { parseQuery } from '@/lib/bff-input';
+import { clientIpOf } from '@/lib/client-ip';
 
 export const runtime = 'nodejs';
 
@@ -86,8 +87,7 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Ne
 
   // Forward the client IP and user-agent so the API rate-limits per caller.
   const incomingXff = req.headers.get('x-forwarded-for');
-  const clientIp =
-    (incomingXff?.split(',')[0]?.trim() ?? '') || ((req as { ip?: string }).ip ?? '');
+  const clientIp = clientIpOf(req);
   const forwardedFor = incomingXff && incomingXff.length > 0 ? incomingXff : clientIp;
   const userAgent = req.headers.get('user-agent') ?? '';
 

@@ -30,7 +30,7 @@ export function BrandAttribution({
           <span className="text-xs font-medium tracking-wide text-ink-400">{row.label}</span>
           {row.logo ? (
             <Image
-              src={(mode === 'dark' ? (row.logoLight ?? row.logo) : row.logo) as string}
+              src={mode === 'dark' ? (row.logoLight ?? row.logo) : row.logo}
               alt={row.name}
               width={352}
               height={160}

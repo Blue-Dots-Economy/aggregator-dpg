@@ -12,6 +12,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/server-session';
 import { logger } from '@/lib/logger';
+import { jsonObjectOr } from '@/lib/json-object';
 import { unauthorizedResponse } from '@/lib/bff-errors';
 
 export const runtime = 'nodejs';
@@ -36,16 +37,15 @@ interface BulkActionBody {
  */
 function parseBody(raw: unknown): BulkActionBody | string {
   if (typeof raw !== 'object' || raw === null) return 'body must be a JSON object';
-  const b = raw as Record<string, unknown>;
+  const b = jsonObjectOr(raw);
   if (typeof b.action !== 'string' || !b.action) return '`action` is required';
   if (!ALLOWED_ACTIONS.has(b.action)) return `unknown action: ${b.action}`;
   if (typeof b.domain !== 'string' || !b.domain) return '`domain` is required';
   if (!Array.isArray(b.ids) || b.ids.length === 0) return '`ids` must be a non-empty array';
   if (b.ids.length > MAX_IDS) return `\`ids\` exceeds the maximum of ${MAX_IDS}`;
-  if (!b.ids.every((id) => typeof id === 'string' && id.length > 0)) {
-    return '`ids` must contain non-empty strings';
-  }
-  return { action: b.action, domain: b.domain, ids: b.ids as string[] };
+  const ids = b.ids.filter((id): id is string => typeof id === 'string' && id.length > 0);
+  if (ids.length !== b.ids.length) return '`ids` must contain non-empty strings';
+  return { action: b.action, domain: b.domain, ids };
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {

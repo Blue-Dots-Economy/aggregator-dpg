@@ -1,12 +1,46 @@
 /**
  * Parses JSON text that must hold an object, such as the form schema files in
- * `config/schemas/` (web app).
+ * `config/schemas/`, and reads unknown values as objects (web app).
  */
 
 import type { RJSFSchema } from '@rjsf/utils';
 import { z } from 'zod';
 
 const JsonObjectSchema = z.record(z.unknown());
+
+/**
+ * Whether a value is a plain object (not `null`, not an array).
+ *
+ * @param value - Any value.
+ */
+export function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Reads a value as a plain object.
+ *
+ * @param value - Any value.
+ * @returns The value when it is a plain object, else an empty object.
+ */
+export function jsonObjectOr(value: unknown): Record<string, unknown> {
+  return isJsonObject(value) ? value : {};
+}
+
+/**
+ * The top-level properties of a JSON Schema whose definition is an object.
+ * Boolean definitions are left out; they carry no keywords to read.
+ *
+ * @param schema - A JSON Schema.
+ * @returns The properties by name; empty when the schema has none.
+ */
+export function schemaProperties(schema: RJSFSchema): Record<string, RJSFSchema> {
+  const out: Record<string, RJSFSchema> = {};
+  for (const [name, definition] of Object.entries(jsonObjectOr(schema.properties))) {
+    if (isJsonObject(definition)) out[name] = definition;
+  }
+  return out;
+}
 
 /**
  * Parses JSON text that holds an object.

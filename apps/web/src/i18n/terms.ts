@@ -8,6 +8,7 @@
  * other string, including one that is only placeholders, takes its locale's
  * words, then the English ones for a term the locale does not define.
  */
+import { isJsonObject } from '../lib/json-object';
 import terms from './terms.json';
 
 type TermMap = Readonly<Record<string, string>>;
@@ -45,17 +46,23 @@ export function fillTerms(text: string, locale: string): string {
 /**
  * Returns a copy of a message catalogue with every term placeholder filled.
  *
+ * Strings are filled, arrays and objects are copied with their values
+ * filled, and any other value is returned as it is.
+ *
  * @param messages - Message catalogue as loaded from `messages/<locale>.json`.
  * @param locale - Locale of the catalogue.
  * @returns The same structure with term placeholders replaced.
  */
-export function applyTerms<T>(messages: T, locale: string): T {
-  if (typeof messages === 'string') return fillTerms(messages, locale) as T;
-  if (Array.isArray(messages)) return messages.map((m) => applyTerms(m, locale)) as T;
-  if (messages !== null && typeof messages === 'object') {
-    return Object.fromEntries(
-      Object.entries(messages).map(([k, v]) => [k, applyTerms(v, locale)]),
-    ) as T;
+export function applyTerms(
+  messages: Record<string, unknown>,
+  locale: string,
+): Record<string, unknown>;
+export function applyTerms(messages: unknown, locale: string): unknown;
+export function applyTerms(messages: unknown, locale: string): unknown {
+  if (typeof messages === 'string') return fillTerms(messages, locale);
+  if (Array.isArray(messages)) return messages.map((m) => applyTerms(m, locale));
+  if (isJsonObject(messages)) {
+    return Object.fromEntries(Object.entries(messages).map(([k, v]) => [k, applyTerms(v, locale)]));
   }
   return messages;
 }

@@ -1,4 +1,5 @@
 import type { DirectionalStats } from '../types';
+import { jsonObjectOr } from '@/lib/json-object';
 
 /**
  * Converts a dashboard item's `initiated` or `received` map into {@link DirectionalStats}.
@@ -9,7 +10,7 @@ import type { DirectionalStats } from '../types';
  * @returns A fully-populated directional stats object.
  */
 export function mapDirectional(raw: unknown): DirectionalStats {
-  const m = (raw ?? {}) as Record<string, unknown>;
+  const m = jsonObjectOr(raw);
   const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
   return {
     create: num(m.create),

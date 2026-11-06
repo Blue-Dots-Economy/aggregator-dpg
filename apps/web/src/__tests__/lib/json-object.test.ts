@@ -1,10 +1,47 @@
 import { describe, it, expect } from 'vitest';
 import {
+  isJsonObject,
+  jsonObjectOr,
   parseJsonObject,
   parseJsonSchema,
   readJsonObject,
   readJsonSchema,
+  schemaProperties,
 } from '@/lib/json-object';
+
+describe('isJsonObject', () => {
+  it('accepts a plain object', () => {
+    expect(isJsonObject({ a: 1 })).toBe(true);
+  });
+
+  it.each([[null], [undefined], [[1]], ['text'], [3], [true]])('rejects %s', (value) => {
+    expect(isJsonObject(value)).toBe(false);
+  });
+});
+
+describe('jsonObjectOr', () => {
+  it('returns an object as it is', () => {
+    const value = { a: 1 };
+    expect(jsonObjectOr(value)).toBe(value);
+  });
+
+  it('returns an empty object for anything else', () => {
+    expect(jsonObjectOr(undefined)).toEqual({});
+    expect(jsonObjectOr([1])).toEqual({});
+  });
+});
+
+describe('schemaProperties', () => {
+  it('returns the object-valued top-level properties', () => {
+    expect(
+      schemaProperties({ type: 'object', properties: { a: { type: 'string' }, b: true } }),
+    ).toEqual({ a: { type: 'string' } });
+  });
+
+  it('returns an empty object when there are no properties', () => {
+    expect(schemaProperties({ type: 'object' })).toEqual({});
+  });
+});
 
 describe('parseJsonObject', () => {
   it('returns the object a JSON text holds', () => {

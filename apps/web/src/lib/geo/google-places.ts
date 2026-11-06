@@ -10,17 +10,48 @@
  */
 import type { GeoComponents, GeoProvider, GeoSuggestion } from './types';
 
-type GoogleNS = {
-  maps: {
-    importLibrary: (name: string) => Promise<Record<string, unknown>>;
+type AddressComponent = { types: string[]; longText: string; shortText: string };
+
+/** The parts of the Places library (`importLibrary('places')`) this provider calls. */
+interface PlacesLibrary {
+  AutocompleteSessionToken: new () => object;
+  AutocompleteSuggestion: {
+    fetchAutocompleteSuggestions: (req: object) => Promise<{
+      suggestions: Array<{
+        placePrediction: {
+          text: { toString: () => string };
+          toPlace: () => {
+            fetchFields: (req: { fields: string[] }) => Promise<void>;
+            location?: { lat: () => number; lng: () => number };
+            addressComponents?: AddressComponent[];
+          };
+        };
+      }>;
+    }>;
   };
-};
+}
+
+/** The parts of the Maps JS API global this provider calls. */
+interface GoogleNS {
+  maps: {
+    importLibrary: (name: 'places') => Promise<PlacesLibrary>;
+  };
+}
+
+declare global {
+  interface Window {
+    /** Set by the Maps JS API script once it has loaded. */
+    google?: GoogleNS;
+    /** The script's `callback`; resolves the load promise. */
+    __dpgGoogleMapsInit?: () => void;
+  }
+}
 
 let scriptPromise: Promise<void> | null = null;
 
 function loadMapsApi(apiKey: string): Promise<void> {
   if (typeof window === 'undefined') return Promise.reject(new Error('no window'));
-  if ((window as unknown as { google?: GoogleNS }).google?.maps?.importLibrary) {
+  if (window.google?.maps?.importLibrary) {
     return Promise.resolve();
   }
   if (scriptPromise) return scriptPromise;
@@ -29,8 +60,7 @@ function loadMapsApi(apiKey: string): Promise<void> {
     const existing = document.querySelector<HTMLScriptElement>(
       'script[data-dpg-google-maps="true"]',
     );
-    (window as unknown as { __dpgGoogleMapsInit?: () => void }).__dpgGoogleMapsInit = () =>
-      resolve();
+    window.__dpgGoogleMapsInit = () => resolve();
     if (existing) {
       existing.addEventListener('load', () => resolve(), { once: true });
       existing.addEventListener('error', () => reject(new Error('maps load failed')), {
@@ -54,8 +84,6 @@ function loadMapsApi(apiKey: string): Promise<void> {
   });
   return scriptPromise;
 }
-
-type AddressComponent = { types: string[]; longText: string; shortText: string };
 
 /**
  * Maps Google's flat address-component list onto our `GeoComponents` shape.
@@ -109,29 +137,9 @@ export function createGooglePlacesProvider(apiKey: string, country?: string): Ge
       if (!q) return [];
       try {
         await loadMapsApi(apiKey);
-        const places = (await (window as unknown as { google: GoogleNS }).google.maps.importLibrary(
-          'places',
-        )) as {
-          AutocompleteSessionToken: new () => object;
-          AutocompleteSuggestion: {
-            fetchAutocompleteSuggestions: (req: object) => Promise<{
-              suggestions: Array<{
-                placePrediction: {
-                  text: { toString: () => string };
-                  toPlace: () => {
-                    fetchFields: (req: { fields: string[] }) => Promise<void>;
-                    location?: { lat: () => number; lng: () => number };
-                    addressComponents?: Array<{
-                      types: string[];
-                      longText: string;
-                      shortText: string;
-                    }>;
-                  };
-                };
-              }>;
-            }>;
-          };
-        };
+        const google = window.google;
+        if (!google) return [];
+        const places = await google.maps.importLibrary('places');
 
         const token = new places.AutocompleteSessionToken();
         const { suggestions } = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({

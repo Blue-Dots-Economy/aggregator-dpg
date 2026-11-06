@@ -29,7 +29,7 @@ export function toConsentDocs(
     { id: 'privacy', cap: 'Privacy', title: content.privacy.title, body: content.privacy.content },
     { id: 'terms', cap: 'Terms', title: content.terms.title, body: content.terms.content },
   ];
-  const profile = (content as ParticipantConsent).profileCreation;
+  const profile = 'profileCreation' in content ? content.profileCreation : undefined;
   if (profile) {
     docs.push({
       id: 'profile',

@@ -10,6 +10,7 @@ import {
   describeSchemaIssue,
   formatFieldErrors,
 } from '@aggregator-dpg/network-config/field-errors';
+import { jsonObjectOr } from '@/lib/json-object';
 
 /**
  * Rewrites RJSF's validation errors into the wording the participant sees.
@@ -29,7 +30,7 @@ export function readableFormErrors(
   schema: unknown,
 ): RJSFValidationError[] {
   return errors.map((e) => {
-    const params = (e.params ?? {}) as Record<string, unknown>;
+    const params = jsonObjectOr(e.params);
     // RJSF's `property` (".address.city") already ends with the missing key
     // for a `required` error; `describeSchemaIssue` appends it again itself.
     const segments = (e.property ?? '').split('.').filter(Boolean);

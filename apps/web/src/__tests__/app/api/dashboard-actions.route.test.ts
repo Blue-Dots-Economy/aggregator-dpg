@@ -135,4 +135,35 @@ describe('POST /api/dashboard/actions', () => {
     const res = await POST(req as never);
     expect(res.status).toBe(400);
   });
+
+  it.each([
+    ['a non-object body', 42, 'body must be a JSON object'],
+    ['an array body', [], '`action` is required'],
+    ['a missing domain', { action: 'trigger_callback', ids: ['a'] }, '`domain` is required'],
+    [
+      'an empty id list',
+      { action: 'trigger_callback', domain: 'seeker', ids: [] },
+      '`ids` must be a non-empty array',
+    ],
+    [
+      'a non-string id',
+      { action: 'trigger_callback', domain: 'seeker', ids: ['a', 7] },
+      '`ids` must contain non-empty strings',
+    ],
+    [
+      'an empty id',
+      { action: 'trigger_callback', domain: 'seeker', ids: [''] },
+      '`ids` must contain non-empty strings',
+    ],
+  ])('rejects %s with a message', async (_name, payload, message) => {
+    mockGetSession.mockResolvedValue(fakeSession());
+    const req = new Request('http://localhost/api/dashboard/actions', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const res = await POST(req as never);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: { message?: string } };
+    expect(body.error?.message).toBe(message);
+  });
 });

@@ -6,6 +6,7 @@
  */
 
 import { Issuer, generators, custom, type Client, type IssuerMetadata } from 'openid-client';
+import { z } from 'zod';
 
 // Timeout for every IdP HTTP call (discovery, token exchange, refresh, userinfo).
 const HTTP_TIMEOUT_MS = 10_000;
@@ -20,6 +21,24 @@ import {
   type TokenSet,
 } from './interface';
 import { logger } from '../logger';
+
+/**
+ * The fields of a token-exchange failure that are logged. openid-client's
+ * `OPError` carries the IdP's `error` and `error_description`. A field of
+ * another type, or a thrown value that is not an object, reads as absent.
+ */
+const TokenExchangeErrorSchema = z
+  .object({
+    message: z.string().optional().catch(undefined),
+    name: z.string().optional().catch(undefined),
+    error: z.string().optional().catch(undefined),
+    error_description: z.string().optional().catch(undefined),
+    response: z
+      .object({ statusCode: z.number().optional().catch(undefined) })
+      .optional()
+      .catch(undefined),
+  })
+  .catch({});
 import { decodeJwtClaims } from '../jwt';
 
 export interface KeycloakAdapterOptions {
@@ -100,13 +119,7 @@ export class KeycloakAdapter extends IdentityProviderAdapter {
       });
     } catch (err) {
       // OPError carries the IdP's `error` and `error_description`; log both.
-      const e = err as {
-        message?: string;
-        name?: string;
-        error?: string;
-        error_description?: string;
-        response?: { statusCode?: number; body?: unknown };
-      };
+      const e = TokenExchangeErrorSchema.parse(err);
       const detail =
         e.error_description || e.error
           ? `${e.error ?? ''}: ${e.error_description ?? ''}`.trim()

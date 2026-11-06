@@ -23,7 +23,7 @@ export const LOCALE_NAMES: Record<Locale, string> = {
 
 /** Type guard: is `v` one of the supported locale codes. */
 export function isSupportedLocale(v: string | undefined | null): v is Locale {
-  return !!v && (SUPPORTED_LOCALES as readonly string[]).includes(v);
+  return !!v && SUPPORTED_LOCALES.some((locale) => locale === v);
 }
 
 /**
