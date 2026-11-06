@@ -175,7 +175,11 @@
       "selectAllMatching": "Select all {count} matching",
       "selectingAll": "Selecting…",
       "allMatchingSelected": "All {count} matching are selected.",
+      "someMatchingSelected": "Selected {count} of {total} matching.",
       "clearSelection": "Clear selection"
+    },
+    "cell": {
+      "total": "Total"
     },
     "tabs": {
       "seekers": "Seekers",

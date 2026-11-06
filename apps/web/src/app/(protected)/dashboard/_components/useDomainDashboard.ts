@@ -12,6 +12,7 @@ import { filterRowsByLifecycle, type LifecycleFilterValue } from '../_lib/lifecy
 import { PAGE_SIZE, pageQuery } from '../_lib/query';
 import { readAllMatching } from '../_lib/select-all';
 import { buildStatusOptions, type StatusFilter } from '../_lib/status';
+import type { SelectAllResult } from './ParticipantTable';
 import { useLifecycleUrlFilter } from './useLifecycleUrlFilter';
 
 /** Maps one Signals dashboard item to a table row. */
@@ -77,18 +78,21 @@ export function useDomainDashboard<R extends ParticipantBase>(
    * Reads every row matching the current filters, for "Select all N matching".
    *
    * Reads in pages within the API's `limit` range.
+   *
+   * @param signal - Stops the read when the filters change.
    */
-  const fetchAllMatching = async (): Promise<R[]> => {
-    if (!filters) return [];
-    const items = await readAllMatching(
+  const fetchAllMatching = async (signal: AbortSignal): Promise<SelectAllResult<R>> => {
+    if (!filters) return { rows: [], complete: true };
+    const read = await readAllMatching(
       async (pageNo, limit) => {
         const res = await dashboardService.dashboard({ ...pageQuery(filters, pageNo), limit });
         return res.by_domain[filters.domain]?.items ?? [];
       },
       slice?.total_matching ?? rollup?.total_items ?? PAGE_SIZE,
+      signal,
     );
-    const all = items.map((p, i) => toRow(p, locale, i));
-    return filterRowsByLifecycle(all, lifecycleFilter);
+    const all = read.items.map((p, i) => toRow(p, locale, i));
+    return { rows: filterRowsByLifecycle(all, lifecycleFilter), complete: read.complete };
   };
 
   return {

@@ -8,29 +8,37 @@ import type { ParticipantBase } from '@/types';
 import { isSelectableRow } from '../_lib/rows';
 
 interface Selection {
+  /** The filters this selection belongs to. */
+  filterKey: string;
   /** Selected rows by id, kept as full row data so bulk actions work across pages. */
   rows: ReadonlyMap<string, ParticipantBase>;
-  /** True after "Select all N matching" selected every matching row. */
-  allMatching: boolean;
+  /**
+   * Set after "Select all N matching". `complete` is false when fewer rows
+   * were read than matched.
+   */
+  matching: { complete: boolean } | null;
+  /** Message of the last failed "Select all N matching". */
+  error: string | null;
 }
 
-const EMPTY_SELECTION: Selection = { rows: new Map(), allMatching: false };
+function emptySelection(filterKey: string): Selection {
+  return { filterKey, rows: new Map(), matching: null, error: null };
+}
 
 /**
  * Selected rows of the dashboard table.
  *
  * The selection is kept across page changes and cleared when `filterKey` changes.
+ * A select-all result or failure for an older `filterKey` is dropped.
  *
  * @param filterKey - Identifies the active filters; a new value clears the selection.
  * @returns The selection and the actions that change it.
  */
 export function useRowSelection(filterKey: string) {
-  const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
-  const [selectionFilterKey, setSelectionFilterKey] = useState(filterKey);
+  const [selection, setSelection] = useState<Selection>(() => emptySelection(filterKey));
   // Clear during render when the filters change, so no stale selection is drawn.
-  if (selectionFilterKey !== filterKey) {
-    setSelectionFilterKey(filterKey);
-    setSelection(EMPTY_SELECTION);
+  if (selection.filterKey !== filterKey) {
+    setSelection(emptySelection(filterKey));
   }
 
   const toggleRow = (row: ParticipantBase) => {
@@ -39,7 +47,7 @@ export function useRowSelection(filterKey: string) {
       if (rows.has(row.id)) rows.delete(row.id);
       else rows.set(row.id, row);
       // Any single change ends "all matching" mode.
-      return { rows, allMatching: false };
+      return { ...prev, rows, matching: null, error: null };
     });
   };
 
@@ -47,24 +55,52 @@ export function useRowSelection(filterKey: string) {
     setSelection((prev) => {
       const rows = new Map(prev.rows);
       for (const r of pageRows) rows.set(r.id, r);
-      return { rows, allMatching: false };
+      return { ...prev, rows, matching: null, error: null };
     });
   };
 
-  const selectAllMatching = (allRows: ParticipantBase[]) => {
+  /**
+   * Replaces the selection with every selectable matching row.
+   *
+   * @param allRows - The rows read for the filters in `forFilterKey`.
+   * @param complete - Whether every matching row was read.
+   * @param forFilterKey - The filters the read was made for.
+   */
+  const selectAllMatching = (
+    allRows: ParticipantBase[],
+    complete: boolean,
+    forFilterKey: string,
+  ) => {
     const rows = new Map<string, ParticipantBase>();
     for (const r of allRows) if (isSelectableRow(r)) rows.set(r.id, r);
-    setSelection({ rows, allMatching: true });
+    setSelection((prev) =>
+      prev.filterKey === forFilterKey
+        ? { filterKey: forFilterKey, rows, matching: { complete }, error: null }
+        : prev,
+    );
   };
 
-  const clear = () => setSelection(EMPTY_SELECTION);
+  /**
+   * Records a failed "Select all N matching"; the selection is unchanged.
+   *
+   * @param message - Text to show.
+   * @param forFilterKey - The filters the read was made for.
+   */
+  const failSelectAll = (message: string, forFilterKey: string) => {
+    setSelection((prev) => (prev.filterKey === forFilterKey ? { ...prev, error: message } : prev));
+  };
+
+  const clear = () => setSelection((prev) => emptySelection(prev.filterKey));
 
   return {
     selected: selection.rows,
-    selectedAllMatching: selection.allMatching,
+    selectedAllMatching: selection.matching !== null,
+    matchingComplete: selection.matching?.complete ?? false,
+    selectAllError: selection.error,
     toggleRow,
     selectRows,
     selectAllMatching,
+    failSelectAll,
     clear,
   };
 }

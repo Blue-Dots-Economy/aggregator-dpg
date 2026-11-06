@@ -7,8 +7,12 @@ import { useTranslations } from 'next-intl';
 
 /** Props for {@link SelectAllBanner}. */
 export interface SelectAllBannerProps {
-  /** True once every matching row is selected. */
+  /** True once "Select all N matching" has run. */
   selectedAllMatching: boolean;
+  /** False when fewer rows were read than matched. */
+  complete: boolean;
+  /** Message of a failed select-all, shown beside the button. */
+  error: string | null;
   /** Number of selected rows, shown once every matching row is selected. */
   selectedCount: number;
   /** Number of selectable rows on this page. */
@@ -20,9 +24,15 @@ export interface SelectAllBannerProps {
   onClear: () => void;
 }
 
-/** Offers "Select all N matching", then confirms the selection with a clear action. */
+/**
+ * Offers "Select all N matching", then confirms the selection with a clear action.
+ *
+ * When fewer rows were read than matched, it says how many were selected.
+ */
 export function SelectAllBanner({
   selectedAllMatching,
+  complete,
+  error,
   selectedCount,
   pageCount,
   total,
@@ -35,7 +45,11 @@ export function SelectAllBanner({
     <div className="px-5 py-2 flex items-center justify-center gap-2 border-b border-(--bd-border) bg-(--bd-primary-50) text-[12.5px] text-ink-600">
       {selectedAllMatching ? (
         <>
-          <span>{t('bulk.allMatchingSelected', { count: selectedCount })}</span>
+          <span>
+            {complete
+              ? t('bulk.allMatchingSelected', { count: selectedCount })
+              : t('bulk.someMatchingSelected', { count: selectedCount, total })}
+          </span>
           <button
             type="button"
             onClick={onClear}
@@ -55,6 +69,11 @@ export function SelectAllBanner({
           >
             {selecting ? t('bulk.selectingAll') : t('bulk.selectAllMatching', { count: total })}
           </button>
+          {error && (
+            <span aria-live="polite" className="text-[12px] font-medium text-rose-600">
+              {error}
+            </span>
+          )}
         </>
       )}
     </div>

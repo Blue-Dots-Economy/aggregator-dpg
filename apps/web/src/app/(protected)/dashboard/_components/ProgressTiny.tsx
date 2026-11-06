@@ -4,6 +4,7 @@
  * Profile-completion cell for the dashboard table (`web` app).
  */
 import { createPortal } from 'react-dom';
+import { useTranslations } from 'next-intl';
 import { useCellPopover } from './useCellPopover';
 
 /** Completion (percent) shown in green and labelled complete. */
@@ -25,7 +26,8 @@ export interface ProgressTinyProps {
  */
 export function ProgressTiny({ pct, title }: ProgressTinyProps) {
   const color = pct >= COMPLETE_PCT ? '#10B981' : pct >= PARTIAL_PCT ? '#F59E0B' : '#EF4444';
-  const label = title ?? (pct >= COMPLETE_PCT ? 'Complete' : 'Incomplete');
+  const t = useTranslations('status_pill');
+  const label = title ?? (pct >= COMPLETE_PCT ? t('complete') : t('incomplete'));
   const { ref, popoverRef, open, pos, triggerProps } = useCellPopover();
   return (
     <>

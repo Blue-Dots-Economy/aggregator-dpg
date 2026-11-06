@@ -4,6 +4,7 @@
  * Initiated / Received action-funnel cell for the dashboard table (`web` app).
  */
 import { createPortal } from 'react-dom';
+import { useTranslations } from 'next-intl';
 import type { FunnelPart } from '../_lib/funnel';
 import { useCellPopover } from './useCellPopover';
 
@@ -15,6 +16,7 @@ export interface FunnelCellProps {
 
 /** Total with a stacked bar; the popover lists each part's count. */
 export function FunnelCell({ total, parts }: FunnelCellProps) {
+  const t = useTranslations('dashboard');
   const sum = parts.reduce((a, b) => a + b.v, 0) || 1;
   const { ref, popoverRef, open, pos, triggerProps } = useCellPopover();
 
@@ -54,7 +56,7 @@ export function FunnelCell({ total, parts }: FunnelCellProps) {
                 </div>
               ))}
               <div className="border-t border-(--bd-border-soft) mt-1 pt-1.5 flex items-center gap-2 text-[12px]">
-                <span className="text-ink-400 flex-1">Total</span>
+                <span className="text-ink-400 flex-1">{t('cell.total')}</span>
                 <span className="font-display font-bold tabular-nums text-ink-900">{total}</span>
               </div>
             </div>

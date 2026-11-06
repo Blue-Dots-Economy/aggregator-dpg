@@ -175,7 +175,11 @@
       "selectAllMatching": "ಹೊಂದುವ ಎಲ್ಲಾ {count} ಆಯ್ಕೆಮಾಡಿ",
       "selectingAll": "ಆಯ್ಕೆ ಮಾಡಲಾಗುತ್ತಿದೆ…",
       "allMatchingSelected": "ಹೊಂದುವ ಎಲ್ಲಾ {count} ಆಯ್ಕೆಯಾಗಿವೆ.",
+      "someMatchingSelected": "{total} ಹೊಂದಾಣಿಕೆಗಳಲ್ಲಿ {count} ಆಯ್ಕೆ ಮಾಡಲಾಗಿದೆ.",
       "clearSelection": "ಆಯ್ಕೆ ತೆರವುಗೊಳಿಸಿ"
+    },
+    "cell": {
+      "total": "ಒಟ್ಟು"
     },
     "tabs": {
       "seekers": "ಅರ್ಜಿದಾರರು",

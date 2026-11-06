@@ -23,7 +23,7 @@
  * `live` are exercised below.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, within, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NextIntlClientProvider } from 'next-intl';
@@ -1175,6 +1175,89 @@ describe('<DashboardPageRoot />', () => {
         [2, 200],
         [3, 200],
       ]);
+    });
+  });
+
+  describe('select all matching: late, failed and partial reads', () => {
+    function fiveMatching() {
+      mockUseDashboard.mockReturnValue({
+        data: dashboardPageFixture({ totalMatching: 5 }),
+        isLoading: false,
+        isError: false,
+      });
+    }
+    const fiveItems = () =>
+      Array.from({ length: 5 }, (_, i) =>
+        rawItem({
+          profile_item_id: `late-${i}`,
+          name: `Late ${i}`,
+          lifecycle_status: 'draft',
+          profile_completion_pct: 40,
+        }),
+      );
+
+    it('drops a result that arrives after the filter changed', async () => {
+      fiveMatching();
+      let resolveRead: (v: unknown) => void = () => undefined;
+      mockDashboardServiceDashboard.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRead = resolve;
+          }),
+      );
+      renderPage();
+      await userEvent.click(screen.getByLabelText('Select all rows on this page'));
+      await userEvent.click(screen.getByRole('button', { name: 'Select all 5 matching' }));
+      await userEvent.selectOptions(screen.getByLabelText('Lifecycle'), 'draft');
+
+      await act(async () => {
+        resolveRead(dashboardPageFixture({ items: fiveItems(), totalMatching: 5 }));
+      });
+
+      expect(screen.queryByText(/matching are selected/)).toBeNull();
+      expect(screen.queryByText(/^\d+ selected$/)).toBeNull();
+    });
+
+    it('shows a notice and keeps the selection when the read fails', async () => {
+      fiveMatching();
+      mockDashboardServiceDashboard.mockRejectedValueOnce(new Error('upstream down'));
+      renderPage();
+      await userEvent.click(screen.getByLabelText('Select all rows on this page'));
+      await userEvent.click(screen.getByRole('button', { name: 'Select all 5 matching' }));
+
+      expect(await screen.findByText('upstream down')).toBeInTheDocument();
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
+      expect(screen.queryByText(/matching are selected/)).toBeNull();
+      expect(screen.getByRole('button', { name: 'Select all 5 matching' })).toBeEnabled();
+    });
+
+    it('says how many were selected when fewer rows came back than matched', async () => {
+      const TOTAL = 450;
+      const SERVED = 250;
+      mockUseDashboard.mockReturnValue({
+        data: dashboardPageFixture({ totalMatching: TOTAL }),
+        isLoading: false,
+        isError: false,
+      });
+      mockDashboardServiceDashboard.mockImplementation(
+        async (q: { page: number; limit: number }) => {
+          const start = (q.page - 1) * q.limit;
+          const count = Math.max(0, Math.min(q.limit, SERVED - start));
+          const items = Array.from({ length: count }, (_, i) =>
+            rawItem({ profile_item_id: `s-${start + i}`, name: `Served ${start + i}` }),
+          );
+          return dashboardPageFixture({ items, totalMatching: TOTAL });
+        },
+      );
+      renderPage();
+      await userEvent.click(screen.getByLabelText('Select all rows on this page'));
+      await userEvent.click(screen.getByRole('button', { name: `Select all ${TOTAL} matching` }));
+
+      expect(
+        await screen.findByText(`Selected ${SERVED} of ${TOTAL} matching.`),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(`All ${TOTAL} matching are selected.`)).toBeNull();
+      expect(screen.getByText(`${SERVED} selected`)).toBeInTheDocument();
     });
   });
 });

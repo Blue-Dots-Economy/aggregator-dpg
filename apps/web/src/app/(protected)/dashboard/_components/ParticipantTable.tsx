@@ -3,13 +3,15 @@
 /**
  * Participant table of the dashboard: toolbar, selection, rows and pagination (`web` app).
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { I } from '@/icons';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '@/hooks/useAggregatorConfig';
 import type { ParticipantBase } from '@/types';
+import { failureText } from '../_lib/format';
 import { parseLifecycleParam, type LifecycleFilterValue } from '../_lib/lifecycle';
 import { isSelectableRow } from '../_lib/rows';
+import { IDENTITY_COLUMN_MIN_WIDTH, SELECT_COLUMN_WIDTH } from '../_lib/table-layout';
 import type { StatusFilter, StatusOption } from '../_lib/status';
 import { BulkActionBar } from './BulkActionBar';
 import { PaginationFooter } from './PaginationFooter';
@@ -27,11 +29,15 @@ const DEFAULT_TABLE_PAGE_SIZE = 25;
 /** Minimum table width (px) before the selection column, by row kind. */
 const TABLE_MIN_WIDTH = { provider: 1500, other: 1400 } as const;
 
-/** Width (px) of the selection column. */
-const SELECT_COLUMN_WIDTH = 44;
-
 /** Height (px) of the scrolling table body. */
 const TABLE_MAX_HEIGHT = 520;
+
+/** Rows read by "Select all N matching". */
+export interface SelectAllResult<R> {
+  rows: R[];
+  /** False when fewer rows were read than matched. */
+  complete: boolean;
+}
 
 /** Props for {@link ParticipantTable}. */
 export interface ParticipantTableProps<R extends ParticipantBase> {
@@ -57,11 +63,11 @@ export interface ParticipantTableProps<R extends ParticipantBase> {
   lifecycleFilter?: LifecycleFilterValue | undefined;
   onLifecycleFilterChange?: ((next: LifecycleFilterValue) => void) | undefined;
   /**
-   * Fetches every row matching the current filter.
+   * Fetches every row matching the current filter; the signal aborts when the filter changes.
    *
    * Omit to hide the "Select all N matching" banner.
    */
-  onSelectAllMatching?: (() => Promise<R[]>) | undefined;
+  onSelectAllMatching?: ((signal: AbortSignal) => Promise<SelectAllResult<R>>) | undefined;
 }
 
 /** Text the search box matches: name, id, city and, for providers, role. */
@@ -124,10 +130,17 @@ export function ParticipantTable<R extends ParticipantBase>({
   // Domain id for bulk actions. Falls back to `kind` when no domain is passed.
   const bulkDomain: string = domain ?? (kind === 'seeker' ? 'seeker' : 'provider');
 
-  const selection = useRowSelection(`${statusFilter}|${lifecycleFilter}`);
+  const filterKey = `${statusFilter}|${lifecycleFilter}`;
+  const selection = useRowSelection(filterKey);
   const { selected, selectedAllMatching } = selection;
   // In-flight guard while the fetch-all-matching call runs.
   const [selectingAll, setSelectingAll] = useState(false);
+  const selectAllAbort = useRef<AbortController | null>(null);
+  // Stop an in-flight select-all when the filters change or the table unmounts.
+  useEffect(() => {
+    const controllers = selectAllAbort;
+    return () => controllers.current?.abort();
+  }, [filterKey]);
 
   const selectablePageRows = visibleRows.filter(isSelectableRow);
   const allPageSelected =
@@ -143,11 +156,20 @@ export function ParticipantTable<R extends ParticipantBase>({
     else selection.selectRows(selectablePageRows);
   };
 
+  /** Reads every matching row and selects it; a failure leaves the selection as it was. */
   const selectAllMatching = async () => {
     if (!onSelectAllMatching || selectingAll) return;
+    const controller = new AbortController();
+    selectAllAbort.current = controller;
+    const requestKey = filterKey;
     setSelectingAll(true);
     try {
-      selection.selectAllMatching(await onSelectAllMatching());
+      const result = await onSelectAllMatching(controller.signal);
+      selection.selectAllMatching(result.rows, result.complete, requestKey);
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        selection.failSelectAll(failureText(err, t('bulk.failed'), t('bulk.failed')), requestKey);
+      }
     } finally {
       setSelectingAll(false);
     }
@@ -231,6 +253,8 @@ export function ParticipantTable<R extends ParticipantBase>({
       {(showSelectAllMatching || selectedAllMatching) && (
         <SelectAllBanner
           selectedAllMatching={selectedAllMatching}
+          complete={selection.matchingComplete}
+          error={selection.selectAllError}
           selectedCount={selected.size}
           pageCount={selectablePageRows.length}
           total={total ?? 0}
@@ -279,7 +303,7 @@ export function ParticipantTable<R extends ParticipantBase>({
                 style={{
                   zIndex: 5,
                   background: 'var(--bd-table-head-bg)',
-                  minWidth: 240,
+                  minWidth: IDENTITY_COLUMN_MIN_WIDTH,
                 }}
               >
                 {kind === 'seeker' ? t('table.participant') : t('table.provider')}

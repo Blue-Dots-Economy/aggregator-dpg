@@ -3,7 +3,7 @@
 /**
  * Bulk action bar for selected dashboard rows (`web` app).
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/Button';
 import { I } from '@/icons';
@@ -31,14 +31,13 @@ export function BulkActionBar({ selectedRows, domain, onClear }: BulkActionBarPr
   const can = useCan();
   const [runningId, setRunningId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
-  const noticeTimer = useRef<number | null>(null);
 
-  useEffect(
-    () => () => {
-      if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
-    },
-    [],
-  );
+  // Each notice hides after NOTICE_DISMISS_MS; the timer is cleared on a new notice or unmount.
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), NOTICE_DISMISS_MS);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   const runAction = async (action: BulkAction) => {
     if (runningId) return;
@@ -54,8 +53,6 @@ export function BulkActionBar({ selectedRows, domain, onClear }: BulkActionBarPr
       });
     } finally {
       setRunningId(null);
-      if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
-      noticeTimer.current = window.setTimeout(() => setNotice(null), NOTICE_DISMISS_MS);
     }
   };
 

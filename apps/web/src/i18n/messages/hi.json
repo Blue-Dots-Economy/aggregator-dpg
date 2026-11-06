@@ -175,7 +175,11 @@
       "selectAllMatching": "सभी {count} मिलान चुनें",
       "selectingAll": "चयन हो रहा है…",
       "allMatchingSelected": "सभी {count} मिलान चयनित हैं।",
+      "someMatchingSelected": "{total} मिलान में से {count} चुने गए।",
       "clearSelection": "चयन हटाएँ"
+    },
+    "cell": {
+      "total": "कुल"
     },
     "tabs": {
       "seekers": "आवेदक",

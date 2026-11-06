@@ -9,6 +9,7 @@ import { StatusPill } from '@/components/ui/StatusPill';
 import { I } from '@/icons';
 import type { ParticipantBase } from '@/types';
 import { actionTotal, buildActionParts } from '../_lib/funnel';
+import { SELECT_COLUMN_WIDTH } from '../_lib/table-layout';
 import { FunnelCell } from './FunnelCell';
 import { ProgressTiny } from './ProgressTiny';
 
@@ -43,7 +44,7 @@ export function ParticipantRow({
           background: 'inherit',
           backgroundColor: 'var(--bd-card)',
           zIndex: 1,
-          width: 44,
+          width: SELECT_COLUMN_WIDTH,
         }}
       >
         {selectable && (
