@@ -78,6 +78,26 @@ export function CountTile({
   href?: string;
 }>) {
   const look = TONE[tone];
+  let hint: ReactNode = null;
+  if (selected && showingLabel) {
+    hint = (
+      <span className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-(--bd-primary-600)">
+        <Check size={13} aria-hidden="true" />
+        {showingLabel}
+      </span>
+    );
+  } else if (showLabel) {
+    hint = (
+      <span className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-(--bd-primary-600) opacity-80 group-hover:opacity-100">
+        {showLabel}
+        <ArrowRight
+          size={13}
+          aria-hidden="true"
+          className="transition-transform group-hover:translate-x-0.5"
+        />
+      </span>
+    );
+  }
   const body: ReactNode = (
     <>
       <span className="flex min-w-0 flex-col gap-0.5">
@@ -91,21 +111,7 @@ export function CountTile({
           {count}
         </span>
         <span className="text-[12px] text-ink-400">{sub}</span>
-        {selected && showingLabel ? (
-          <span className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-(--bd-primary-600)">
-            <Check size={13} aria-hidden="true" />
-            {showingLabel}
-          </span>
-        ) : showLabel ? (
-          <span className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-(--bd-primary-600) opacity-80 group-hover:opacity-100">
-            {showLabel}
-            <ArrowRight
-              size={13}
-              aria-hidden="true"
-              className="transition-transform group-hover:translate-x-0.5"
-            />
-          </span>
-        ) : null}
+        {hint}
       </span>
       <span
         aria-hidden="true"

@@ -116,6 +116,44 @@ export async function getConsole<S extends z.ZodTypeAny>(
   }
 }
 
+/** Message keys for error codes that need no more detail. */
+const CODE_KEYS: Readonly<Record<string, string>> = {
+  ORG_NAME_TAKEN: 'errors.name_taken',
+  ROLE_ASSIGNMENT_NOT_ALLOWED: 'errors.role_not_allowed',
+  ROLE_INVALID: 'errors.role_invalid',
+  ROLE_EXISTS: 'errors.role_exists',
+  ROLE_BUILTIN: 'errors.role_builtin',
+  ROLE_IN_USE: 'errors.role_in_use',
+  ROLE_LIMIT_REACHED: 'errors.role_limit',
+  ORG_DEPTH_LIMIT: 'errors.depth_limit',
+  ORG_CHILD_LIMIT: 'errors.child_limit',
+  ORG_TOTAL_LIMIT: 'errors.total_limit',
+  ORG_PARENT_CYCLE: 'errors.parent_cycle',
+};
+
+/** Message keys for error codes that name the cause in `fields`, as `[field, value, key]`. */
+const FIELD_KEYS: Readonly<Record<string, ReadonlyArray<readonly [string, string, string]>>> = {
+  CONFLICT: [
+    ['reason', 'busy', 'errors.busy'],
+    ['reason', 'not_movable', 'errors.not_movable'],
+    ['reason', 'moved', 'errors.org_moved'],
+  ],
+  SCHEMA_VALIDATION: [
+    ['parent_id', 'invalid', 'errors.parent_invalid'],
+    ['known_as', 'invalid', 'errors.known_as_invalid'],
+    ['known_as_values', 'unknown_key', 'errors.known_as_values_changed'],
+  ],
+};
+
+/** The message key for an HTTP status with no more specific message. */
+function statusKey(status: number): string {
+  if (status === 0) return 'errors.network';
+  if (status === 401) return 'errors.signed_out';
+  if (status === 403) return 'errors.forbidden';
+  if (status >= 500) return 'errors.server';
+  return 'errors.generic';
+}
+
 /**
  * Sets an organisation's "known as" value (owner of its parent).
  *
@@ -139,9 +177,9 @@ export function setOrgKnownAs(orgId: string, knownAs: string): Promise<ConsoleSe
 export function setOrgKnownAsValues(
   orgId: string,
   values: KnownAsValuesRequest,
-): Promise<ConsoleSendResult<Org & { known_as_values: KnownAsValues }>> {
+): Promise<ConsoleSendResult<Org & { known_as_values: KnownAsValues; reset_count?: number }>> {
   const body: OrgKnownAsUpdateRequest = { known_as_values: values };
-  return sendConsole<Org & { known_as_values: KnownAsValues }>(
+  return sendConsole<Org & { known_as_values: KnownAsValues; reset_count?: number }>(
     `/api/console/org/known-as/${orgId}`,
     'PATCH',
     body,
@@ -157,37 +195,11 @@ export function setOrgKnownAsValues(
 export function errorKey(r: { status: number; error: ConsoleError }): string {
   if (r.status === 429) return 'errors.rate_limited';
   if (r.status === 404) return 'errors.not_found';
-  if (r.error.code === 'ORG_NAME_TAKEN') return 'errors.name_taken';
-  if (r.error.code === 'ROLE_ASSIGNMENT_NOT_ALLOWED') return 'errors.role_not_allowed';
-  const roleErrors: Record<string, string> = {
-    ROLE_INVALID: 'errors.role_invalid',
-    ROLE_EXISTS: 'errors.role_exists',
-    ROLE_BUILTIN: 'errors.role_builtin',
-    ROLE_IN_USE: 'errors.role_in_use',
-    ROLE_LIMIT_REACHED: 'errors.role_limit',
-  };
-  if (r.error.code && roleErrors[r.error.code]) return roleErrors[r.error.code]!;
-  const treeErrors: Record<string, string> = {
-    ORG_DEPTH_LIMIT: 'errors.depth_limit',
-    ORG_CHILD_LIMIT: 'errors.child_limit',
-    ORG_TOTAL_LIMIT: 'errors.total_limit',
-    ORG_PARENT_CYCLE: 'errors.parent_cycle',
-  };
-  if (r.error.code && treeErrors[r.error.code]) return treeErrors[r.error.code]!;
+  const code = r.error.code ?? '';
+  const byCode = CODE_KEYS[code];
+  if (byCode) return byCode;
   const fields = r.error.fields ?? {};
-  if (r.error.code === 'CONFLICT') {
-    if (fields['reason'] === 'busy') return 'errors.busy';
-    if (fields['reason'] === 'not_movable') return 'errors.not_movable';
-    if (fields['reason'] === 'moved') return 'errors.org_moved';
-  }
-  if (r.error.code === 'SCHEMA_VALIDATION') {
-    if (fields['parent_id'] === 'invalid') return 'errors.parent_invalid';
-    if (fields['known_as'] === 'invalid') return 'errors.known_as_invalid';
-    if (fields['known_as_values'] === 'unknown_key') return 'errors.known_as_values_changed';
-  }
-  if (r.status === 0) return 'errors.network';
-  if (r.status === 401) return 'errors.signed_out';
-  if (r.status === 403) return 'errors.forbidden';
-  if (r.status >= 500) return 'errors.server';
-  return 'errors.generic';
+  const byField = FIELD_KEYS[code]?.find(([field, value]) => fields[field] === value);
+  if (byField) return byField[2];
+  return statusKey(r.status);
 }

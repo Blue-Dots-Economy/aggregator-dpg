@@ -119,11 +119,11 @@ describe('<ChildOrgsTree />', () => {
     expect(within(districtItem).getAllByText('District')[0]).toBeInTheDocument();
     expect(within(districtItem).getByText(new RegExp(`4 ${term('users')}`))).toBeInTheDocument();
     expect(within(districtItem).getByText('1 organisation below')).toBeInTheDocument();
-    expect(within(districtItem).getAllByText('Depth 1')[0]).toBeInTheDocument();
+    expect(within(districtItem).getAllByText('Level 1')[0]).toBeInTheDocument();
     // A key no longer configured shows the raw key.
     const aggItem = screen.getByText('Agg One').closest('li') as HTMLElement;
     expect(within(aggItem).getByText('old_key')).toBeInTheDocument();
-    expect(within(aggItem).getByText('Depth 2')).toBeInTheDocument();
+    expect(within(aggItem).getByText('Level 2')).toBeInTheDocument();
     expect(within(aggItem).getByTestId('status-pill')).toHaveTextContent('Pending');
   });
 

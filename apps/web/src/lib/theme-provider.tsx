@@ -29,8 +29,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.style.setProperty('--bd-primary', primary);
     root.style.setProperty('--bd-primary-600', mix(primary, '#000000', 0.15));
     root.style.setProperty('--bd-primary-500', accentHex);
-    root.style.setProperty('--bd-primary-100', mix(primary, '#ffffff', 0.85));
-    root.style.setProperty('--bd-primary-50', mix(primary, '#ffffff', 0.92));
     // Brand colour for success-coded surfaces: the accent, else the primary.
     root.style.setProperty('--bd-brand', accentHex);
   }, [primary, accent]);

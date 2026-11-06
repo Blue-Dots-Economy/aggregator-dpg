@@ -4,8 +4,8 @@
  * Picker for an organisation's "known as" value, for the owner of its parent.
  *
  * The choices are the parent's values, or only "Aggregator" when the parent
- * has none. The current value always shows, even when it is not among the
- * choices.
+ * has none. The current value always shows, marked as no longer offered when
+ * it is not among the choices.
  */
 
 import { useState, type SubmitEvent } from 'react';
@@ -85,7 +85,9 @@ export function KnownAsPicker({
           }}
         >
           {currentListed || current.key === null ? null : (
-            <option value={current.key}>{current.name ?? current.key}</option>
+            <option value={current.key}>
+              {t('org.known_as_pick_unlisted', { name: current.name ?? current.key })}
+            </option>
           )}
           {options.map((o) => (
             <option key={o.key} value={o.key}>

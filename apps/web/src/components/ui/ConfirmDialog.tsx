@@ -35,7 +35,7 @@ export function ConfirmDialog({
   const titleId = useId();
   const bodyId = useId();
   const confirmRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
   // The latest cancel handler, so a new function from the parent does not re-run the effect.
   const cancelRef = useRef(onCancel);
   cancelRef.current = onCancel;
@@ -72,13 +72,13 @@ export function ConfirmDialog({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-[rgb(13_21_48/0.35)] p-5">
-      <div
+      <dialog
         ref={dialogRef}
-        role="dialog"
+        open
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={bodyId}
-        className="w-[440px] max-w-full rounded-[16px] bg-(--bd-card) shadow-2xl"
+        className="static m-0 w-[440px] max-w-full rounded-[16px] border-0 bg-(--bd-card) p-0 text-inherit shadow-2xl"
       >
         <div className="p-[22px]">
           <h3 id={titleId} className="font-display text-[17px] font-bold text-ink-900">
@@ -102,7 +102,7 @@ export function ConfirmDialog({
             {confirmLabel}
           </button>
         </div>
-      </div>
+      </dialog>
     </div>
   );
 }

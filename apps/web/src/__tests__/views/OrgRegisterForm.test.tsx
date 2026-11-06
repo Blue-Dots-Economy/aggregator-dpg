@@ -75,35 +75,31 @@ vi.mock('@/components/consent/ConsentGate', () => ({
   },
 }));
 
-// Native-select shim for the shadcn Select so onValueChange is fire-able.
-vi.mock('@/components/ui/Select', () => ({
-  Select: ({
-    children,
+// Native-select shim for the searchable parent picker so onValueChange is fire-able.
+vi.mock('@/components/ui/SearchableSelect', () => ({
+  SearchableSelect: ({
+    options,
     onValueChange,
-    disabled,
     value,
+    placeholder,
   }: {
-    children?: ReactNode;
-    onValueChange?: (v: string) => void;
-    disabled?: boolean;
-    value?: string;
+    options: { value: string; label: string; hint?: string | null }[];
+    onValueChange: (v: string) => void;
+    value: string;
+    placeholder: string;
   }) => (
     <select
       data-testid="parent-select"
-      disabled={disabled}
-      {...(value !== undefined ? { value } : {})}
-      onChange={(e) => onValueChange?.(e.target.value)}
+      value={value}
+      onChange={(e) => onValueChange(e.target.value)}
     >
-      {children}
+      <option value="">{placeholder}</option>
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.hint ? `${o.label} (${o.hint})` : o.label}
+        </option>
+      ))}
     </select>
-  ),
-  SelectTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  SelectValue: ({ placeholder }: { placeholder?: string }) => (
-    <option value="">{placeholder}</option>
-  ),
-  SelectContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  SelectItem: ({ value, children }: { value: string; children?: ReactNode }) => (
-    <option value={value}>{children}</option>
   ),
 }));
 
@@ -289,7 +285,7 @@ describe('<OrgRegisterForm />', () => {
     expect(screen.getByText('offline')).toBeInTheDocument();
   });
 
-  it('surfaces client-side validation errors via onError', async () => {
+  it('leaves field errors to the fields, with no banner', async () => {
     originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn() as unknown as typeof fetch;
     renderForm();
@@ -300,8 +296,8 @@ describe('<OrgRegisterForm />', () => {
       capturedOnError?.([{ property: '.display_name', message: 'is required', name: 'required' }]);
     });
 
-    expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect(screen.getByText(messages.register.validation_error_title)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(messages.register.validation_error_title)).toBeNull();
   });
 
   it('passes consentContent through formContext without crashing when omitted', () => {
@@ -365,12 +361,12 @@ describe('<OrgRegisterForm />', () => {
       expect(screen.queryByText(/will be known as/)).toBeNull();
     });
 
-    it('keeps submit disabled until a parent is picked', () => {
+    it('keeps submit clickable before a parent is picked, so a click can say what is missing', () => {
       originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn() as unknown as typeof fetch;
       renderForm();
       const submit = screen.getByRole('button', { name: messages.register.org_submit });
-      expect(submit).toBeDisabled();
+      expect(submit).toBeEnabled();
     });
 
     it('refuses a submit without a parent: error shown, no gate, nothing posted', async () => {

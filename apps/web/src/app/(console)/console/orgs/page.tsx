@@ -2,19 +2,21 @@
  * Organisations page.
  *
  * An org owner sees the organisations directly under its own awaiting its
- * decision (approved or rejected in place), then its own organisations, each
- * with the organisations directly under it (read-only); names open each page.
+ * decision (approved or rejected in place), then each of its organisations
+ * with the ones directly under it and, closed by default, its hierarchy
+ * settings.
  *
- * The network admin sees the top-level organisations: those awaiting
- * approval (approved or rejected in place), status tiles, the organisations
- * as a tree under the network or as a searchable list (each name opens the
- * organisation's page), and, closed by default, the hierarchy settings.
- * `?view=list` and `?status=` open the list with a filter.
+ * The network admin sees the organisations directly under the network: those
+ * awaiting approval, status tiles, a searchable list (each name opens the
+ * organisation's page) and, closed by default, the hierarchy settings.
+ * `?status=` opens the list with a filter.
  */
 
+import { Fragment } from 'react';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import type { KnownAsValues, OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
 import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
@@ -24,22 +26,33 @@ import { HierarchySettings } from '@/components/console/HierarchySettings';
 import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
 import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
 import { ORG_FILTERS, type OrgFilter } from '@/lib/org-filters';
-import { ConsoleCollapsible, ConsoleSection, EmptyState } from '@/components/console/ConsoleUi';
+import { ConsoleSection, EmptyState } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
-import { OrgHierarchyResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
+import { buttonClass } from '@/components/ui/button-class';
+import { I } from '@/icons';
+import {
+  OrgHierarchyResponseSchema,
+  OrgReadResponseSchema,
+} from '@aggregator-dpg/shared-primitives/user-org';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
 export default async function ConsoleOrgsPage({
   searchParams,
-}: Readonly<{ searchParams: Promise<{ view?: string; status?: string }> }>) {
+}: Readonly<{ searchParams: Promise<{ status?: string }> }>) {
   const t = await getTranslations('console');
   const params = await searchParams;
   const initialFilter: OrgFilter = ORG_FILTERS.find((f) => f === params.status) ?? 'all';
-  const initialView = params.view === 'list' || params.status ? 'list' : 'tree';
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
-  if (!actor.me.is_network_admin) return <OwnerOrgs ownedIds={actor.me.orgs.map((o) => o.id)} />;
+  if (!actor.me.is_network_admin) {
+    return (
+      <OwnerOrgs
+        ownedIds={actor.me.orgs.map((o) => o.id)}
+        ownerIds={actor.me.orgs.filter((o) => o.role === 'owner').map((o) => o.id)}
+      />
+    );
+  }
   const hierarchy = await consoleRead(
     '/v1/org/hierarchy?fields=known_as_values',
     OrgHierarchyResponseSchema,
@@ -55,14 +68,13 @@ export default async function ConsoleOrgsPage({
           rootName={hierarchy.network.name}
           orgs={network.orgs}
           more={network.more}
-          totalOrgs={hierarchy.total_orgs}
-          maxOrgs={hierarchy.limits.max_total_orgs}
-          initialView={initialView}
           initialFilter={initialFilter}
         />
-        <ConsoleCollapsible title={t('orgs.hierarchy')}>
-          <HierarchySettings hierarchy={hierarchy} />
-        </ConsoleCollapsible>
+        <HierarchySettings
+          orgId={hierarchy.network.id}
+          orgName={hierarchy.network.name}
+          values={hierarchy.network.known_as_values ?? []}
+        />
       </div>
     </>
   );
@@ -70,15 +82,25 @@ export default async function ConsoleOrgsPage({
 
 /**
  * An owner's view: the pending organisations directly under its own, then one
- * tree per topmost owned organisation with the organisations directly under it.
+ * section per topmost owned organisation with the organisations directly under
+ * it and the "known as" values it defines for them.
  *
- * @param ownedIds - The organisations the owner owns.
+ * @param ownedIds - The organisations the viewer belongs to.
+ * @param ownerIds - Those it owns, the only ones whose values it can edit.
  */
-async function OwnerOrgs({ ownedIds }: Readonly<{ ownedIds: string[] }>) {
+async function OwnerOrgs({
+  ownedIds,
+  ownerIds,
+}: Readonly<{ ownedIds: string[]; ownerIds: string[] }>) {
   const t = await getTranslations('console');
   const orgs = await readReachableOrgs();
   const roots = topmostOwned(ownedIds, orgs);
   if (roots.length === 0) redirect('/console');
+  const valuesById = new Map(
+    await Promise.all(
+      roots.map(async (root) => [root.id, await knownAsValuesToEdit(root, ownerIds)] as const),
+    ),
+  );
   const pending = orgs.filter((o) => o.status === 'pending' && !ownedIds.includes(o.id));
   return (
     <>
@@ -86,21 +108,58 @@ async function OwnerOrgs({ ownedIds }: Readonly<{ ownedIds: string[] }>) {
       <div className="flex flex-col gap-6">
         {pendingReview(pending, t)}
         {roots.map((root) => (
-          <ConsoleSection key={root.id} title={root.name}>
-            <ChildOrgsTree
-              rootId={root.id}
-              rootName={root.name}
-              rootKnownAs={root.known_as_name ?? root.known_as}
-              rootTag={t('orgs.yours')}
-              orgs={orgsBelow(root.id, orgs)}
-              linkRows
-              more={false}
-            />
-          </ConsoleSection>
+          <Fragment key={root.id}>
+            <ConsoleSection
+              title={root.name}
+              action={
+                <Link className={buttonClass('soft')} href={`/console/orgs/${root.id}`}>
+                  {t('orgs.manage')}
+                  <I.arrowR size={15} />
+                </Link>
+              }
+            >
+              <ChildOrgsTree
+                rootId={root.id}
+                rootName={root.name}
+                rootKnownAs={root.known_as_name ?? root.known_as}
+                rootTag={t('orgs.yours')}
+                orgs={orgsBelow(root.id, orgs)}
+                linkRows
+                more={false}
+              />
+            </ConsoleSection>
+            {valuesById.get(root.id) ? (
+              <HierarchySettings
+                orgId={root.id}
+                orgName={root.name}
+                values={valuesById.get(root.id) ?? []}
+              />
+            ) : null}
+          </Fragment>
         ))}
       </div>
     </>
   );
+}
+
+/**
+ * The "known as" values an owned organisation defines for its children, when
+ * the viewer can edit them: it owns the org, the org is active, and the org can
+ * have child organisations (the API sends null otherwise).
+ *
+ * @param root - The owned organisation.
+ * @param ownerIds - The organisations the viewer owns.
+ */
+async function knownAsValuesToEdit(
+  root: OrgRow,
+  ownerIds: readonly string[],
+): Promise<KnownAsValues | null> {
+  if (!ownerIds.includes(root.id) || root.status !== 'active') return null;
+  const read = await consoleRead(
+    `/v1/org/read/${encodeURIComponent(root.id)}?fields=known_as_values`,
+    OrgReadResponseSchema,
+  );
+  return read.org.known_as_values ?? null;
 }
 
 /**

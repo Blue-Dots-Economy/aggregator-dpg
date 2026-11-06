@@ -34,6 +34,9 @@ interface CachedToken {
   expiresAt: number;
 }
 
+/** Keycloak's error for a first or last name with a character its validator refuses. */
+const KC_INVALID_NAME_ERROR = 'error-person-name-invalid-character';
+
 export class KeycloakIdpAdmin extends IdpAdminAdapter {
   private cachedToken: CachedToken | null = null;
   private readonly fetchImpl: typeof fetch;
@@ -77,6 +80,13 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
     }
     if (res.value.status !== 201) {
       const text = await res.value.text().catch(() => '');
+      // Keycloak's person-name validator refuses symbols such as ( ) < > & /.
+      if (res.value.status === 400 && text.includes(KC_INVALID_NAME_ERROR)) {
+        return {
+          ok: false,
+          error: { code: 'INVALID_NAME', message: 'name has a refused character' },
+        };
+      }
       return {
         ok: false,
         error: {

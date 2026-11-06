@@ -29,7 +29,6 @@ import { renderOrgAlreadyRegistered } from '../services/email-templates/index.js
 import { ownerSignInUrl } from '../services/decisions/org.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
-import { checkSubmitRate } from '../services/submit-rate.js';
 import { checkOrgInviteResendRate } from '../services/org-invite-resend-rate.js';
 import { slugFromName } from '../services/slug.js';
 import { orgLocationsFrom } from '../services/org-location.js';
@@ -52,6 +51,7 @@ import { SYSTEM_KNOWN_AS } from '@aggregator-dpg/shared-primitives/user-org';
 import { treeRules } from '../services/known-as.js';
 import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
 import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
+import { assertServiceCaller, assertSubmitRate } from './registration-shared.js';
 
 /**
  * The fixed parts of an org-registration body. Every other key is a field of
@@ -199,362 +199,42 @@ export function registerAggregatorOrgRoutes(base: FastifyInstance): void {
     },
     async (req, reply) => {
       const log = req.log.child({ operation: 'org-registration.create' });
-      const start = Date.now();
+      const ctx: ReplyContext = { reply, log, start: Date.now() };
 
-      const auth = await authenticateAny(req);
-      if (!auth.ok) {
-        throw httpError('UNAUTHORIZED', {
-          detail: auth.error.message,
-          fields: { reason: auth.error.code },
-        });
-      }
-      await recordRouteCaller(req, callerFromAny(auth.context));
-
+      await assertServiceCaller(req);
       const body = req.body;
-
-      // The deployment's org-registration schema decides the other fields.
-      const schemaCheck = await validateOrgRegistration(body);
-      if (!schemaCheck.ok) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: Object.entries(schemaCheck.errors)
-            .map(([field, message]) => `${field}: ${message}`)
-            .join('; '),
-          fields: { field_errors: schemaCheck.errors },
-        });
-      }
-
-      const phoneResult = normalisePhone(body.owner.phone);
-      if (!phoneResult.ok) {
-        throw httpError('INVALID_PHONE', {
-          detail: phoneResult.error.message,
-          fields: { input: body.owner.phone },
-        });
-      }
-      const phoneE164 = phoneResult.value;
-
-      const orgStore = getOrganisationStore();
-      const idp = getIdpAdmin();
+      const { values, phoneE164 } = await checkOrgBody(body);
       const ownerEmail = body.owner.email.toLowerCase();
       // Looked up before any write, so a failure here leaves nothing half created.
-      const reviewers = await orgReviewRecipients(body.parent_id ?? null);
-
-      // Re-sends the review link for an existing pending or revived org.
-      // The row, the Keycloak owner and the group are reused unchanged.
-      const reclaimOrgReview = async (row: Organisation): Promise<FastifyReply> => {
-        await sendOrgReviewEmail(
-          {
-            orgId: row.id,
-            displayName: row.displayName,
-            ownerEmail: row.ownerEmail,
-            ownerPhone: row.ownerPhone ?? '',
-            parentId: row.parentId,
-            parentName: row.parentName,
-          },
-          log,
-        );
-        log.info(
-          { status: 'success', latency_ms: Date.now() - start, org_id: row.id, reclaim: true },
-          'org re-submitted — review link re-sent (no field change)',
-        );
-        // Consent is recorded only on a fresh registration, not here.
-        return reply.status(200).send({
-          org_id: row.id,
-          slug: row.slug,
-          status: 'pending',
-          message: 'Organisation re-submitted. A fresh approval link has been sent for review.',
-        });
-      };
-
-      // Mails the owner of an approved org a sign-in link. A failed send is
-      // logged, not raised. The row is not changed.
-      const resendOwnerInvite = async (row: Organisation): Promise<FastifyReply> => {
-        // Rate-limited per owner address and fails closed. Not the route's shared
-        // submit limiter: that one is keyed on IP and fails open.
-        const resendRate = await checkOrgInviteResendRate(row.ownerEmail);
-        if (!resendRate.allowed) {
-          void reply.header('Retry-After', String(resendRate.retryAfterSeconds));
-          log.warn(
-            {
-              status: 'skipped',
-              org_id: row.id,
-              reason: 'resend_rate_limited',
-              retry_after_seconds: resendRate.retryAfterSeconds,
-            },
-            'invite-link resend throttled for this owner address',
-          );
-          throw httpError('RATE_LIMITED', {
-            detail: `Retry in ${resendRate.retryAfterSeconds}s.`,
-            fields: { retry_after_seconds: resendRate.retryAfterSeconds },
-          });
-        }
-
-        const mail = renderOrgAlreadyRegistered({
-          orgName: row.displayName,
-          inviteUrl: ownerSignInUrl(),
-        });
-        const send = await getMailer().send({
-          to: row.ownerEmail,
-          subject: mail.subject,
-          html: mail.html,
-          text: mail.text,
-        });
-        if (!send.ok) {
-          log.warn(
-            {
-              status: 'failure',
-              sub_operation: 'mailer.send.orgAlreadyRegistered',
-              org_id: row.id,
-              code: send.error.code,
-              cause: send.error.message,
-            },
-            'already-registered invite link could not be delivered',
-          );
-        }
-        log.info(
-          {
-            status: 'success',
-            latency_ms: Date.now() - start,
-            org_id: row.id,
-            already_registered: true,
-            mail_sent: send.ok,
-          },
-          'org already active — sign-in link sent to the owner on file',
-        );
-        // Report a failed send so the owner knows to contact support.
-        return reply.status(200).send({
-          org_id: row.id,
-          slug: row.slug,
-          status: 'active',
-          mail_sent: send.ok,
-          message: send.ok
-            ? 'This organisation is already registered. The coordinator invitation link has been sent to the owner email on file.'
-            : 'This organisation is already registered, but the coordinator invitation link could not be emailed just now. Please try again shortly, or contact support.',
-        });
-      };
+      const reviewers = await orgReviewRecipients(body.parent_id ?? null, log);
 
       // Rate limit per (ip, owner email), like the coordinator submit.
-      const rl = await checkSubmitRate(`${req.ip}|${ownerEmail}`);
-      if (!rl.allowed) {
-        void reply.header('Retry-After', String(rl.retryAfterSeconds));
-        throw httpError('RATE_LIMITED', {
-          detail: `Retry in ${rl.retryAfterSeconds}s.`,
-          fields: { retry_after_seconds: rl.retryAfterSeconds },
-        });
-      }
+      await assertSubmitRate(`${req.ip}|${ownerEmail}`, reply);
 
       // A resubmit by an owner who already has an org is answered from that
       // org's status; no new org is created.
-      const existing = await orgStore.findByOwnerEmail(ownerEmail);
+      const existing = await getOrganisationStore().findByOwnerEmail(ownerEmail);
       if (!existing.ok) {
         throw httpError('DB_UNAVAILABLE', {
           cause: new Error(existing.error.message),
           fields: { sub_operation: 'orgStore.findByOwnerEmail' },
         });
       }
-      if (existing.value) {
-        const prior = existing.value;
-        // Never write the submitted fields: the submit is anonymous, so an
-        // email match alone must not change the org. Stored values are used.
-        // The parent is the one exception: a rejected org is revived under the
-        // submitted parent, and it stays pending until an admin approves it.
-        if (prior.status === 'inactive') {
-          // Rejected: refuse until the cooling window from `rejected_at` ends,
-          // then revive the same row to pending and re-send the review link.
-          const retryAfter = coolingRetryAfter(prior.rejectedAt, prior.updatedAt);
-          if (retryAfter) {
-            throw httpError('REGISTRATION_COOLING', {
-              fields: { email: body.owner.email, retry_after: retryAfter },
-            });
-          }
-          const rules = treeRules((await getNetworkConfig()).aggregator.organisation);
-          const revived = await orgStore.revive(prior.id, body.parent_id, rules);
-          if (!revived.ok) {
-            throwTreeRefusal(revived.error, { parent_id: body.parent_id ?? null });
-            // The row stopped being a rejected org after it was read.
-            if (revived.error.code === 'NOT_FOUND') {
-              throw httpError('CONFLICT', {
-                detail: 'The organisation changed while it was being registered again. Try again.',
-              });
-            }
-            throw httpError('DB_UNAVAILABLE', {
-              cause: new Error(revived.error.message),
-              fields: { sub_operation: 'orgStore.revive' },
-            });
-          }
-          // The revived row: it may sit under a new parent now.
-          return reclaimOrgReview(revived.value);
-        }
-        if (prior.status === 'active') {
-          // Approved: re-send the sign-in link. Mail goes to the stored owner
-          // email, never the submitted one, since this submit is anonymous.
-          return resendOwnerInvite(prior);
-        }
-        if (prior.status !== 'pending') {
-          // Retired: never send a credential.
-          throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
-        }
-        // Pending: re-send the review link.
-        return reclaimOrgReview(prior);
-      }
+      if (existing.value) return answerResubmit(existing.value, body, ctx);
 
       // One person per email and per phone across coordinators and org owners.
       // Checked before any write. The phone is the OTP login key.
       const contactClash = await findOwnerContactClash(ownerEmail, phoneE164);
+      // The email belongs to another account; an owner's is handled above.
       if (contactClash === 'email') {
-        throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
+        throw httpError('USER_EXISTS', { fields: { email: body.owner.email } });
       }
       if (contactClash === 'phone') {
         throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
       }
 
-      const orgProfileRef = resolveProfileRef('org-registration.v1.json');
-      if (!orgProfileRef) {
-        log.warn(
-          {
-            operation: 'org-registration.create',
-            status: 'skipped',
-            sub_operation: 'resolveProfileRef',
-          },
-          'org-registration schema not found — storing profile without a variant ref',
-        );
-      }
-      // Consent is written in the same transaction as the org, before any
-      // Keycloak call. A ledger failure leaves nothing behind.
-      const orgConsent = stampConsent(body.consent);
-      if (!orgConsent) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: 'consent.valid_till must be in the future.',
-          fields: { 'consent.valid_till': 'invalid' },
-        });
-      }
-      const recordConsent = await orgConsentWriter({ consent: orgConsent, log });
-      const rules = treeRules((await getNetworkConfig()).aggregator.organisation);
-      let slug = slugFromName(body.display_name);
-      const createOnce = (s: string) =>
-        orgStore.create(
-          {
-            slug: s,
-            displayName: body.display_name,
-            // Schemas with an address block collect the state there.
-            state: body.address?.addressRegion ?? body.state ?? null,
-            ownerEmail: ownerEmail,
-            ownerPhone: phoneE164,
-            ownerName: body.owner.name,
-            // The address is also kept in `profile` and `state`.
-            locations: orgLocationsFrom(body.address, body.state, body.coordinates),
-            profile: buildOrgProfile(schemaCheck.values, body.address, body.coordinates),
-            // The schema file that resolved; NULL means unknown.
-            profileRef: orgProfileRef,
-            ...(body.parent_id ? { parentId: body.parent_id } : {}),
-            recordConsent,
-          },
-          rules,
-        );
-      // Each retry depends on the previous outcome, so the attempts are sequential.
-      const createWithRetry = async (attempt: number): ReturnType<typeof createOnce> => {
-        const result = await createOnce(slug);
-        if (result.ok || result.error.code !== 'DUPLICATE_SLUG') return result;
-        if (attempt + 1 >= ORG_SLUG_RETRIES) return result;
-        slug = slugFromName(body.display_name);
-        return createWithRetry(attempt + 1);
-      };
-      const created = await createWithRetry(0);
-      if (!created.ok) {
-        if (created.error.code === 'DUPLICATE_NAME') {
-          throw httpError('ORG_NAME_TAKEN', { fields: { display_name: body.display_name } });
-        }
-        if (created.error.code === 'DUPLICATE_SLUG') {
-          throw httpError('ORG_SLUG_TAKEN', { fields: { slug } });
-        }
-        throwTreeRefusal(created.error, { parent_id: body.parent_id ?? null });
-        // A concurrent registration took the email or phone after the pre-check.
-        if (created.error.code === 'DUPLICATE_EMAIL') {
-          throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
-        }
-        if (created.error.code === 'DUPLICATE_PHONE') {
-          throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
-        }
-        if (created.error.code === 'CONSENT_WRITE_FAILED') {
-          throw httpError('CONSENT_WRITE_FAILED', {
-            cause: new Error(created.error.message),
-            fields: { sub_operation: 'recordOrgConsent', rolled_back: true },
-          });
-        }
-        throw httpError('DB_UNAVAILABLE', {
-          cause: new Error(created.error.message),
-          fields: { sub_operation: 'orgStore.create' },
-        });
-      }
-      const org = created.value;
-
-      // Keycloak group named from the slug; the org name is a `display_name`
-      // attribute. On failure the org is deleted.
-      const group = await idp.createGroup(`org-${slug}`, {
-        org_id: org.id,
-        display_name: body.display_name,
-      });
-      if (!group.ok) {
-        // Delete, not deactivate, so the owner's email and phone are freed for a retry.
-        await discardHalfCreatedOrg(org.id, null, log);
-        throw httpError('IDP_UNAVAILABLE', {
-          cause: new Error(group.error.message),
-          fields: { sub_operation: 'idp.createGroup', rolled_back: true },
-        });
-      }
-
-      // Disabled owner user; enabled at approval.
-      const { firstName, lastName } = splitName(body.owner.name);
-      const ownerUser = await idp.createUser({
-        email: body.owner.email,
-        username: body.owner.email,
-        phone: phoneE164,
-        enabled: false,
-        firstName,
-        lastName,
-        attributes: {
-          [KC_ATTR.PHONE_NUMBER]: phoneE164,
-          [KC_ATTR.DECISION_MADE]: 'pending',
-          // Marks a user this app created; only such a user may be disabled when replaced.
-          [KC_ATTR.CREATED_BY]: OWNER_CREATED_BY,
-        },
-      });
-      if (!ownerUser.ok) {
-        await discardHalfCreatedOrg(org.id, group.value.id, log);
-        if (ownerUser.error.code === 'USER_EXISTS') {
-          throw httpError('OWNER_ALREADY_REGISTERED', {
-            fields: { email: body.owner.email, rolled_back: true },
-          });
-        }
-        throw httpError('IDP_UNAVAILABLE', {
-          cause: new Error(ownerUser.error.message),
-          fields: { sub_operation: 'idp.createUser', rolled_back: true },
-        });
-      }
-
-      const stamped = await orgStore.update(org.id, {
-        kcGroupId: group.value.id,
-        ownerKcSub: ownerUser.value.id,
-      });
-      if (!stamped.ok) {
-        // Roll back the group, the row and the new owner user so a retry can succeed.
-        await discardHalfCreatedOrg(org.id, group.value.id, log);
-        const removed = await idp.deleteUser(ownerUser.value.id);
-        if (!removed.ok) {
-          log.warn(
-            {
-              status: 'failure',
-              sub_operation: 'idp.deleteUser',
-              org_id: org.id,
-              code: removed.error.code,
-            },
-            'could not remove the Keycloak owner user of a half-created org',
-          );
-        }
-        throw httpError('DB_UNAVAILABLE', {
-          cause: new Error(stamped.error.message),
-          fields: { sub_operation: 'orgStore.update.stamp', rolled_back: true },
-        });
-      }
+      const { org, slug } = await createOrgRow(body, values, phoneE164, log);
+      const groupId = await provisionOrgInIdp(org, slug, body, phoneE164, log);
 
       await sendOrgReviewEmail(
         {
@@ -572,10 +252,10 @@ export function registerAggregatorOrgRoutes(base: FastifyInstance): void {
       log.info(
         {
           status: 'success',
-          latency_ms: Date.now() - start,
+          latency_ms: Date.now() - ctx.start,
           org_id: org.id,
           slug,
-          kc_group_id: group.value.id,
+          kc_group_id: groupId,
         },
         'org registration submitted',
       );
@@ -711,6 +391,406 @@ export function registerAggregatorOrgRoutes(base: FastifyInstance): void {
       });
     },
   );
+}
+
+type OrgCreateBody = z.infer<typeof OrgCreateBodySchema>;
+
+/** What a registration answer needs: the reply, the logger and the start time. */
+interface ReplyContext {
+  reply: FastifyReply;
+  log: FastifyBaseLogger;
+  start: number;
+}
+
+/**
+ * Checks the body against the deployment's org-registration schema, which
+ * decides the other fields, and normalises the owner's phone.
+ *
+ * @returns The schema-checked values and the E.164 phone.
+ * @throws {HttpError} SCHEMA_VALIDATION or INVALID_PHONE
+ */
+async function checkOrgBody(body: OrgCreateBody) {
+  const schemaCheck = await validateOrgRegistration(body);
+  if (!schemaCheck.ok) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: Object.entries(schemaCheck.errors)
+        .map(([field, message]) => `${field}: ${message}`)
+        .join('; '),
+      fields: { field_errors: schemaCheck.errors },
+    });
+  }
+  const phoneResult = normalisePhone(body.owner.phone);
+  if (!phoneResult.ok) {
+    throw httpError('INVALID_PHONE', {
+      detail: phoneResult.error.message,
+      fields: { input: body.owner.phone },
+    });
+  }
+  return { values: schemaCheck.values, phoneE164: phoneResult.value };
+}
+
+/**
+ * Answers a submit by an owner who already has an org, from that org's status.
+ *
+ * Never writes the submitted fields: the submit is anonymous, so an email
+ * match alone must not change the org. Stored values are used. The parent is
+ * the one exception: a rejected org is revived under the submitted parent, and
+ * it stays pending until an admin approves it.
+ *
+ * @throws {HttpError} OWNER_ALREADY_REGISTERED for a retired org, and the
+ *   errors of {@link reviveRejectedOrg} and {@link resendOwnerInvite}.
+ */
+async function answerResubmit(
+  prior: Organisation,
+  body: OrgCreateBody,
+  ctx: ReplyContext,
+): Promise<FastifyReply> {
+  if (prior.status === 'inactive') {
+    return reclaimOrgReview(await reviveRejectedOrg(prior, body), ctx);
+  }
+  // Approved: re-send the sign-in link. Mail goes to the stored owner email,
+  // never the submitted one, since this submit is anonymous.
+  if (prior.status === 'active') return resendOwnerInvite(prior, ctx);
+  // Retired: never send a credential.
+  if (prior.status !== 'pending') {
+    throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
+  }
+  return reclaimOrgReview(prior, ctx);
+}
+
+/**
+ * Sets a rejected org back to pending under the submitted parent, refusing it
+ * until the cooling window from `rejected_at` ends.
+ *
+ * @returns The revived row; it may sit under a new parent now.
+ * @throws {HttpError} REGISTRATION_COOLING, a tree refusal, CONFLICT or DB_UNAVAILABLE
+ */
+async function reviveRejectedOrg(prior: Organisation, body: OrgCreateBody): Promise<Organisation> {
+  const retryAfter = coolingRetryAfter(prior.rejectedAt, prior.updatedAt);
+  if (retryAfter) {
+    throw httpError('REGISTRATION_COOLING', {
+      fields: { email: body.owner.email, retry_after: retryAfter },
+    });
+  }
+  const rules = treeRules((await getNetworkConfig()).aggregator.organisation);
+  const revived = await getOrganisationStore().revive(prior.id, body.parent_id, rules);
+  if (revived.ok) return revived.value;
+  throwTreeRefusal(revived.error, { parent_id: body.parent_id ?? null });
+  // The row stopped being a rejected org after it was read.
+  if (revived.error.code === 'NOT_FOUND') {
+    throw httpError('CONFLICT', {
+      detail: 'The organisation changed while it was being registered again. Try again.',
+    });
+  }
+  throw httpError('DB_UNAVAILABLE', {
+    cause: new Error(revived.error.message),
+    fields: { sub_operation: 'orgStore.revive' },
+  });
+}
+
+/**
+ * Re-sends the review link for an existing pending or revived org. The row,
+ * the Keycloak owner and the group are reused unchanged.
+ */
+async function reclaimOrgReview(row: Organisation, ctx: ReplyContext): Promise<FastifyReply> {
+  await sendOrgReviewEmail(
+    {
+      orgId: row.id,
+      displayName: row.displayName,
+      ownerEmail: row.ownerEmail,
+      ownerPhone: row.ownerPhone ?? '',
+      parentId: row.parentId,
+      parentName: row.parentName,
+    },
+    ctx.log,
+  );
+  ctx.log.info(
+    { status: 'success', latency_ms: Date.now() - ctx.start, org_id: row.id, reclaim: true },
+    'org re-submitted — review link re-sent (no field change)',
+  );
+  // Consent is recorded only on a fresh registration, not here.
+  return ctx.reply.status(200).send({
+    org_id: row.id,
+    slug: row.slug,
+    status: 'pending',
+    message: 'Organisation re-submitted. A fresh approval link has been sent for review.',
+  });
+}
+
+/**
+ * Mails the owner of an approved org a sign-in link. A failed send is logged,
+ * not raised. The row is not changed.
+ *
+ * @throws {HttpError} RATE_LIMITED
+ */
+async function resendOwnerInvite(row: Organisation, ctx: ReplyContext): Promise<FastifyReply> {
+  const { reply, log } = ctx;
+  // Rate-limited per owner address and fails closed. Not the route's shared
+  // submit limiter: that one is keyed on IP and fails open.
+  const resendRate = await checkOrgInviteResendRate(row.ownerEmail);
+  if (!resendRate.allowed) {
+    void reply.header('Retry-After', String(resendRate.retryAfterSeconds));
+    log.warn(
+      {
+        status: 'skipped',
+        org_id: row.id,
+        reason: 'resend_rate_limited',
+        retry_after_seconds: resendRate.retryAfterSeconds,
+      },
+      'invite-link resend throttled for this owner address',
+    );
+    throw httpError('RATE_LIMITED', {
+      detail: `Retry in ${resendRate.retryAfterSeconds}s.`,
+      fields: { retry_after_seconds: resendRate.retryAfterSeconds },
+    });
+  }
+
+  const mail = renderOrgAlreadyRegistered({
+    orgName: row.displayName,
+    inviteUrl: ownerSignInUrl(),
+  });
+  const send = await getMailer().send({
+    to: row.ownerEmail,
+    subject: mail.subject,
+    html: mail.html,
+    text: mail.text,
+  });
+  if (!send.ok) {
+    log.warn(
+      {
+        status: 'failure',
+        sub_operation: 'mailer.send.orgAlreadyRegistered',
+        org_id: row.id,
+        code: send.error.code,
+        cause: send.error.message,
+      },
+      'already-registered invite link could not be delivered',
+    );
+  }
+  log.info(
+    {
+      status: 'success',
+      latency_ms: Date.now() - ctx.start,
+      org_id: row.id,
+      already_registered: true,
+      mail_sent: send.ok,
+    },
+    'org already active — sign-in link sent to the owner on file',
+  );
+  // Report a failed send so the owner knows to contact support.
+  return reply.status(200).send({
+    org_id: row.id,
+    slug: row.slug,
+    status: 'active',
+    mail_sent: send.ok,
+    message: send.ok
+      ? 'This organisation is already registered. The coordinator invitation link has been sent to the owner email on file.'
+      : 'This organisation is already registered, but the coordinator invitation link could not be emailed just now. Please try again shortly, or contact support.',
+  });
+}
+
+/**
+ * Creates the pending org row, with its consent in the same transaction and
+ * before any Keycloak call, so a ledger failure leaves nothing behind. A slug
+ * clash is retried with a new slug.
+ *
+ * @returns The new org and the slug it got.
+ * @throws {HttpError} SCHEMA_VALIDATION for an expired consent, and the errors
+ *   of {@link throwOrgCreateError}.
+ */
+async function createOrgRow(
+  body: OrgCreateBody,
+  values: Record<string, unknown>,
+  phoneE164: string,
+  log: FastifyBaseLogger,
+): Promise<{ org: Organisation; slug: string }> {
+  const orgProfileRef = resolveProfileRef('org-registration.v1.json');
+  if (!orgProfileRef) {
+    log.warn(
+      {
+        operation: 'org-registration.create',
+        status: 'skipped',
+        sub_operation: 'resolveProfileRef',
+      },
+      'org-registration schema not found — storing profile without a variant ref',
+    );
+  }
+  const orgConsent = stampConsent(body.consent);
+  if (!orgConsent) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'consent.valid_till must be in the future.',
+      fields: { 'consent.valid_till': 'invalid' },
+    });
+  }
+  const recordConsent = await orgConsentWriter({ consent: orgConsent, log });
+  const rules = treeRules((await getNetworkConfig()).aggregator.organisation);
+  const orgStore = getOrganisationStore();
+  const createOnce = (slug: string) =>
+    orgStore.create(
+      {
+        slug,
+        displayName: body.display_name,
+        // Schemas with an address block collect the state there.
+        state: body.address?.addressRegion ?? body.state ?? null,
+        ownerEmail: body.owner.email.toLowerCase(),
+        ownerPhone: phoneE164,
+        ownerName: body.owner.name,
+        // The address is also kept in `profile` and `state`.
+        locations: orgLocationsFrom(body.address, body.state, body.coordinates),
+        profile: buildOrgProfile(values, body.address, body.coordinates),
+        // The schema file that resolved; NULL means unknown.
+        profileRef: orgProfileRef,
+        ...(body.parent_id ? { parentId: body.parent_id } : {}),
+        recordConsent,
+      },
+      rules,
+    );
+  // Each retry depends on the previous outcome, so the attempts are sequential.
+  const createWithRetry = async (attempt: number, slug: string) => {
+    const result = await createOnce(slug);
+    const retry =
+      !result.ok && result.error.code === 'DUPLICATE_SLUG' && attempt + 1 < ORG_SLUG_RETRIES;
+    if (retry) return createWithRetry(attempt + 1, slugFromName(body.display_name));
+    return { result, slug };
+  };
+  const { result, slug } = await createWithRetry(0, slugFromName(body.display_name));
+  if (!result.ok) throwOrgCreateError(result.error, body, phoneE164, slug);
+  return { org: result.value, slug };
+}
+
+/**
+ * Maps a failed org create to the route's error.
+ *
+ * @throws {HttpError} ORG_NAME_TAKEN, ORG_SLUG_TAKEN, a tree refusal,
+ *   USER_EXISTS, PHONE_EXISTS, CONSENT_WRITE_FAILED or DB_UNAVAILABLE
+ */
+function throwOrgCreateError(
+  error: Parameters<typeof throwTreeRefusal>[0] & { message: string },
+  body: OrgCreateBody,
+  phoneE164: string,
+  slug: string,
+): never {
+  if (error.code === 'DUPLICATE_NAME') {
+    throw httpError('ORG_NAME_TAKEN', { fields: { display_name: body.display_name } });
+  }
+  if (error.code === 'DUPLICATE_SLUG') {
+    throw httpError('ORG_SLUG_TAKEN', { fields: { slug } });
+  }
+  throwTreeRefusal(error, { parent_id: body.parent_id ?? null });
+  // A concurrent registration took the email or phone after the pre-check.
+  if (error.code === 'DUPLICATE_EMAIL') {
+    throw httpError('USER_EXISTS', { fields: { email: body.owner.email } });
+  }
+  if (error.code === 'DUPLICATE_PHONE') {
+    throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+  }
+  if (error.code === 'CONSENT_WRITE_FAILED') {
+    throw httpError('CONSENT_WRITE_FAILED', {
+      cause: new Error(error.message),
+      fields: { sub_operation: 'recordOrgConsent', rolled_back: true },
+    });
+  }
+  throw httpError('DB_UNAVAILABLE', {
+    cause: new Error(error.message),
+    fields: { sub_operation: 'orgStore.create' },
+  });
+}
+
+/**
+ * Creates the org's Keycloak group and its disabled owner user (enabled at
+ * approval), and stamps both on the row. Any failure deletes what was created,
+ * not deactivates it, so the owner's email and phone are freed for a retry.
+ *
+ * The group is named from the slug; the org name is a `display_name` attribute.
+ *
+ * @returns The Keycloak group id.
+ * @throws {HttpError} IDP_UNAVAILABLE, USER_EXISTS, NAME_INVALID_CHARACTERS or DB_UNAVAILABLE
+ */
+async function provisionOrgInIdp(
+  org: Organisation,
+  slug: string,
+  body: OrgCreateBody,
+  phoneE164: string,
+  log: FastifyBaseLogger,
+): Promise<string> {
+  const idp = getIdpAdmin();
+  const group = await idp.createGroup(`org-${slug}`, {
+    org_id: org.id,
+    display_name: body.display_name,
+  });
+  if (!group.ok) {
+    await discardHalfCreatedOrg(org.id, null, log);
+    throw httpError('IDP_UNAVAILABLE', {
+      cause: new Error(group.error.message),
+      fields: { sub_operation: 'idp.createGroup', rolled_back: true },
+    });
+  }
+
+  const { firstName, lastName } = splitName(body.owner.name);
+  const ownerUser = await idp.createUser({
+    email: body.owner.email,
+    username: body.owner.email,
+    phone: phoneE164,
+    enabled: false,
+    firstName,
+    lastName,
+    attributes: {
+      [KC_ATTR.PHONE_NUMBER]: phoneE164,
+      [KC_ATTR.DECISION_MADE]: 'pending',
+      // Marks a user this app created; only such a user may be disabled when replaced.
+      [KC_ATTR.CREATED_BY]: OWNER_CREATED_BY,
+    },
+  });
+  if (!ownerUser.ok) {
+    await discardHalfCreatedOrg(org.id, group.value.id, log);
+    throwOwnerUserError(ownerUser.error, body.owner.email);
+  }
+
+  const stamped = await getOrganisationStore().update(org.id, {
+    kcGroupId: group.value.id,
+    ownerKcSub: ownerUser.value.id,
+  });
+  if (!stamped.ok) {
+    // Roll back the group, the row and the new owner user so a retry can succeed.
+    await discardHalfCreatedOrg(org.id, group.value.id, log);
+    const removed = await idp.deleteUser(ownerUser.value.id);
+    if (!removed.ok) {
+      log.warn(
+        {
+          status: 'failure',
+          sub_operation: 'idp.deleteUser',
+          org_id: org.id,
+          code: removed.error.code,
+        },
+        'could not remove the Keycloak owner user of a half-created org',
+      );
+    }
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(stamped.error.message),
+      fields: { sub_operation: 'orgStore.update.stamp', rolled_back: true },
+    });
+  }
+  return group.value.id;
+}
+
+/**
+ * Maps a failed Keycloak owner-user create to the route's error.
+ *
+ * @throws {HttpError} USER_EXISTS, NAME_INVALID_CHARACTERS or IDP_UNAVAILABLE
+ */
+function throwOwnerUserError(error: { code: string; message: string }, email: string): never {
+  if (error.code === 'USER_EXISTS') {
+    throw httpError('USER_EXISTS', { fields: { email, rolled_back: true } });
+  }
+  if (error.code === 'INVALID_NAME') {
+    throw httpError('NAME_INVALID_CHARACTERS', {
+      fields: { name: 'owner.name', rolled_back: true },
+    });
+  }
+  throw httpError('IDP_UNAVAILABLE', {
+    cause: new Error(error.message),
+    fields: { sub_operation: 'idp.createUser', rolled_back: true },
+  });
 }
 
 /**

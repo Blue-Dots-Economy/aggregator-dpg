@@ -10,6 +10,7 @@ import { notFound } from 'next/navigation';
 import { getFormatter, getTranslations } from 'next-intl/server';
 import { Briefcase, CalendarDays, Mail, Phone } from 'lucide-react';
 import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
+import { isUuid } from '@/lib/console-proxy';
 import { getConsoleActor } from '@/lib/console-actor';
 import { canManageOrg, canViewCoordinators, coordinatorsHref } from '@/lib/capabilities';
 import { RolesPanel } from '@/components/console/RolesPanel';
@@ -33,6 +34,8 @@ export default async function ConsoleCoordinatorPage({
   const t = await getTranslations('console');
   const format = await getFormatter();
   const { id } = await params;
+  // Ids are UUIDs; anything else cannot exist, so it is a missing page, not an error.
+  if (!isUuid(id)) notFound();
   const actor = await getConsoleActor();
   // The network admin has no users page.
   if (actor.ok && !canViewCoordinators(actor.me)) notFound();
