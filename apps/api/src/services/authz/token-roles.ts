@@ -205,7 +205,7 @@ export async function syncTokenRoles(
 ): Promise<TokenRolesOutcome> {
   if (!getRbacRuntime()) return 'off';
   // Unit tests: the default dependencies would reach Redis and Keycloak.
-  if (!deps && (globalThis as Record<string, unknown>)[TEST_TOKEN_ROLES_OFF_KEY]) return 'off';
+  if (!deps && Reflect.get(globalThis, TEST_TOKEN_ROLES_OFF_KEY)) return 'off';
   return run(userId, reason, deps ?? defaultTokenRolesDeps());
 }
 

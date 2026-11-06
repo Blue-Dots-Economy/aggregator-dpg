@@ -9,7 +9,6 @@
  */
 
 import { sql } from 'drizzle-orm';
-import type { FastifyBaseLogger } from 'fastify';
 import { logger } from '../logger.js';
 import { getOrganisationStore, type Organisation } from '../services/organisation-store/index.js';
 import { grantOwnerAccess } from '../services/decisions/org.js';
@@ -286,12 +285,11 @@ export async function enableOwners(
   opts: { dryRun: boolean; ratePerSecond: number },
   out: Out,
 ): Promise<number> {
-  const log = logger as unknown as FastifyBaseLogger;
   const report = await enableOwnersStep(
     {
       idp: getIdpAdmin(),
       listActiveOrgs: activeOrgs,
-      grant: (org) => grantOwnerAccess(org, log),
+      grant: (org) => grantOwnerAccess(org, logger),
     },
     opts,
   );

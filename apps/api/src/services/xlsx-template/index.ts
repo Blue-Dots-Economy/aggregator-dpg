@@ -144,7 +144,7 @@ function parseShowIf(rule: unknown): { clauses: ShowIfClause[]; neverApplies: bo
     return { clauses: [], neverApplies: false };
   }
   const clauses: ShowIfClause[] = [];
-  for (const [field, allowed] of Object.entries(rule as Record<string, unknown>)) {
+  for (const [field, allowed] of Object.entries(rule)) {
     // `isFieldVisible` returns false outright for a non-array `allowed`.
     if (!Array.isArray(allowed)) return { clauses: [], neverApplies: true };
     clauses.push({ field, values: allowed.map(String) });
@@ -161,15 +161,15 @@ function parseShowIf(rule: unknown): { clauses: ShowIfClause[]; neverApplies: bo
  * @returns Plan for one column.
  */
 function planColumn(name: string, prop: Record<string, unknown>, required: boolean): ColumnPlan {
-  const items = prop['items'] as Record<string, unknown> | undefined;
-  const ownEnum = Array.isArray(prop['enum']) ? (prop['enum'] as unknown[]) : undefined;
-  const itemEnum = Array.isArray(items?.['enum']) ? (items?.['enum'] as unknown[]) : undefined;
+  const items = prop['items'];
+  const ownEnum = arrayOrUndefined(prop['enum']);
+  const itemEnum = isRecord(items) ? arrayOrUndefined(items['enum']) : undefined;
   const showIf = parseShowIf(prop['x-show-if']);
 
   const plan: ColumnPlan = {
     name,
     prop,
-    label: typeof prop['title'] === 'string' ? (prop['title'] as string) : name,
+    label: typeof prop['title'] === 'string' ? prop['title'] : name,
     required,
     allowed: (ownEnum ?? itemEnum ?? []).map(String),
     isArray: prop['type'] === 'array',
@@ -177,8 +177,35 @@ function planColumn(name: string, prop: Record<string, unknown>, required: boole
     showIfNeverApplies: showIf.neverApplies,
   };
 
-  if (typeof prop['description'] === 'string') plan.description = prop['description'] as string;
+  const description = prop['description'];
+  if (typeof description === 'string') plan.description = description;
   return plan;
+}
+
+/** Whether a schema value is a plain JSON object. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The value when it is an array, else `undefined`. */
+function arrayOrUndefined(value: unknown): unknown[] | undefined {
+  return Array.isArray(value) ? value : undefined;
+}
+
+/**
+ * The schema's `properties` that are objects. A property of another shape is skipped.
+ *
+ * @param schema - The participant schema.
+ * @returns Property fragments by name.
+ */
+function schemaProperties(schema: JsonSchema): Map<string, Record<string, unknown>> {
+  const properties = schema['properties'];
+  if (!isRecord(properties)) return new Map();
+  return new Map(
+    Object.entries(properties).flatMap(([name, prop]) =>
+      isRecord(prop) ? [[name, prop] as const] : [],
+    ),
+  );
 }
 
 /**
@@ -227,15 +254,15 @@ export async function buildXlsxTemplate(
 ): Promise<Buffer> {
   const { arrayDelimiter = '|', identity } = options;
 
-  const properties = (schema['properties'] as Record<string, Record<string, unknown>>) ?? {};
+  const properties = schemaProperties(schema);
   const required = new Set(
-    Array.isArray(schema['required']) ? (schema['required'] as string[]) : [],
+    (arrayOrUndefined(schema['required']) ?? []).filter((r) => typeof r === 'string'),
   );
   // Well-known columns have no schema fragment; take title and description from shared metadata.
   const plans = orderedColumns(schema).map((name) => {
     const meta = wellKnownColumnMeta(name);
     const prop =
-      properties[name] ?? (meta ? { title: meta.title, description: meta.description } : {});
+      properties.get(name) ?? (meta ? { title: meta.title, description: meta.description } : {});
     return planColumn(name, prop, required.has(name));
   });
   const byName = new Map(plans.map((p) => [p.name, p]));
@@ -268,8 +295,9 @@ export async function buildXlsxTemplate(
     },
   ];
 
-  // exceljs types its own `Buffer`; the value is a Node Buffer.
-  return (await wb.xlsx.writeBuffer()) as unknown as Buffer;
+  // exceljs types its own `Buffer`; under Node the value is a Node Buffer.
+  const out = await wb.xlsx.writeBuffer();
+  return Buffer.isBuffer(out) ? out : Buffer.from(out);
 }
 
 /**
@@ -745,23 +773,34 @@ function writeGridSheet(
   });
 }
 
+/** A sheet's data validations, addressed by range. */
+interface RangeValidations {
+  add: (address: string, validation: ExcelJS.DataValidation) => void;
+}
+
+/** Whether a value has an `add` method, as exceljs's validation collection does. */
+function isRangeValidations(value: unknown): value is RangeValidations {
+  return (
+    typeof value === 'object' && value !== null && typeof Reflect.get(value, 'add') === 'function'
+  );
+}
+
 /**
  * Range-addressable view of a sheet's data validations.
  *
- * exceljs has `worksheet.dataValidations` at runtime but not in its typings,
- * hence the cast. The workbook test checks the emitted ranges.
+ * exceljs has `worksheet.dataValidations` at runtime but not in its typings.
+ * The workbook test checks the emitted ranges.
  *
  * @param sheet - Sheet to add range validations to.
  * @returns The sheet's validation collection.
+ * @throws {Error} When the installed exceljs has no `dataValidations` collection.
  */
-function rangeValidations(sheet: ExcelJS.Worksheet): {
-  add: (address: string, validation: ExcelJS.DataValidation) => void;
-} {
-  return (
-    sheet as unknown as {
-      dataValidations: { add: (address: string, validation: ExcelJS.DataValidation) => void };
-    }
-  ).dataValidations;
+function rangeValidations(sheet: ExcelJS.Worksheet): RangeValidations {
+  const validations: unknown = Reflect.get(sheet, 'dataValidations');
+  if (!isRangeValidations(validations)) {
+    throw new Error('exceljs worksheet has no dataValidations collection');
+  }
+  return validations;
 }
 
 /**

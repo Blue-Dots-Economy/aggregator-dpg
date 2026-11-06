@@ -7,6 +7,32 @@
 import { readFile } from 'node:fs/promises';
 import type { Queryable } from '../db/migrate-core.js';
 
+/** A connection that can run one parameterised query. */
+export interface SessionClient {
+  query(text: string, values?: unknown[]): Promise<unknown>;
+}
+
+/**
+ * Sets the backfill network and brand, and UTC, as settings of the session.
+ *
+ * The migrations read the network and brand through `current_setting`.
+ *
+ * @param client - A freshly opened connection.
+ * @param settings - Network and brand; empty when unset.
+ * @throws {Error} When the query fails; the pool then discards the connection.
+ */
+export async function applySessionSettings(
+  client: SessionClient,
+  settings: { network: string; brand: string },
+): Promise<void> {
+  await client.query(
+    `SELECT set_config('aggregator_dpg.network', $1, false),
+            set_config('aggregator_dpg.brand', $2, false),
+            set_config('TimeZone', 'UTC', false)`,
+    [settings.network, settings.brand],
+  );
+}
+
 /** Instance facts shown to the operator before anything is written. */
 export interface InstanceFacts {
   systemIdentifier: string;

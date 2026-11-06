@@ -41,6 +41,7 @@ import {
 } from './instance-upgrade-logic.js';
 import { errorField } from '../db/pg-error.js';
 import {
+  applySessionSettings,
   canActAsOwner,
   isFailing,
   otherSessions,
@@ -48,6 +49,7 @@ import {
   runChecks,
   sqlStatements,
   type CheckRow,
+  type SessionClient,
 } from './instance-upgrade-db.js';
 import { toError } from '@aggregator-dpg/shared-primitives/errors';
 
@@ -102,45 +104,37 @@ function required(name: string): string {
   return v;
 }
 
+/** Pool options whose `onConnect` sets the session up on a fresh connection. */
+export interface UpgradePoolConfig extends pg.PoolConfig {
+  // pg-pool awaits the returned promise; @types/pg types the return as void.
+  onConnect: (client: SessionClient) => Promise<void>; // NOSONAR typescript:S6544
+}
+
 /**
- * Creates a pool whose connections carry the backfill network and brand as
- * session settings, set on connect before any query.
+ * Builds the pool options. Every connection carries the backfill network and
+ * brand as session settings, set on connect before any query.
+ *
+ * @returns The pool options.
+ * @throws {Refusal} When `DATABASE_URL` is not set.
  */
-function openPool(): pg.Pool {
+export function upgradePoolConfig(): UpgradePoolConfig {
   const network = env('AGGREGATOR_NETWORK') ?? '';
   const brand = env('AGGREGATOR_BRAND') ?? '';
-  class UpgradeClient extends pg.Client {
-    override connect(): Promise<pg.Client>;
-    override connect(callback: ((err: Error) => void) | ((err: null, c: pg.Client) => void)): void;
-    override connect(
-      callback?: ((err: Error) => void) | ((err: null, c: pg.Client) => void),
-    ): Promise<pg.Client> | void {
-      const ready = super.connect().then(async () => {
-        await this.query(
-          `SELECT set_config('aggregator_dpg.network', $1, false),
-                  set_config('aggregator_dpg.brand', $2, false),
-                  set_config('TimeZone', 'UTC', false)`,
-          [network, brand],
-        );
-        return this as pg.Client;
-      });
-      if (!callback) return ready;
-      const cb = callback as (err: Error | null, c?: pg.Client) => void;
-      ready.then(
-        (c) => cb(null, c),
-        (err: Error) => cb(err),
-      );
-    }
-  }
-  return new pg.Pool({
+  return {
     connectionString: required('DATABASE_URL'),
     max: 2,
     application_name: 'train',
     // A dropped connection must surface, not hang with the locks held.
     keepAlive: true,
     connectionTimeoutMillis: 10_000,
-    Client: UpgradeClient,
-  });
+    // pg-pool awaits this before it hands the connection out, and discards the connection when it fails.
+    onConnect: (client) => applySessionSettings(client, { network, brand }),
+  };
+}
+
+/** Creates the tool's pool from {@link upgradePoolConfig}. */
+function openPool(): pg.Pool {
+  return new pg.Pool(upgradePoolConfig());
 }
 
 /** Reads the upgrade level. Refuses when an applied migration is not shipped. */
