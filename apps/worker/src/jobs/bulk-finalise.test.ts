@@ -268,6 +268,33 @@ describe('finaliseBulk — normal completion', () => {
     expect(csv.split('\n')[0]!.trim()).toBe('error_category,error_reason');
   });
 
+  it('skips error entries that are valid JSON but not error records, and keeps the valid ones', async () => {
+    counters = { passed: '0', failed: '1', skipped: '0' };
+    hscanPages = [
+      [
+        '0',
+        [
+          '1',
+          'null',
+          '2',
+          '{"reasons":["no row index"]}',
+          '3',
+          JSON.stringify({ row_index: 3, reasons: ['bad phone'], error_category: null }),
+        ],
+      ],
+    ];
+    headersJson = JSON.stringify(['name']);
+    hmgetReturn = [JSON.stringify(['Asha'])];
+
+    const res = await finaliseBulk(JOB);
+
+    expect(res.status).toBe('completed');
+    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const lines = csv.trim().split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[1]!.trim()).toBe('Asha,,bad phone');
+  });
+
   it('pads a raw CSV line that is shorter than the header (defensive, ragged row)', async () => {
     counters = { passed: '0', failed: '1', skipped: '0' };
     hscanPages = [

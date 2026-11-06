@@ -13,18 +13,26 @@
 
 import { and, eq } from 'drizzle-orm';
 import Papa from 'papaparse';
+import { z } from 'zod';
 import { type BulkFinaliseJob, bulkRedisKeys } from '@aggregator-dpg/queue';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 import { schema, getDb } from '../db.js';
 import { getRedis } from '../services/redis.js';
 import { putObject } from '../object-storage.js';
 import { logger } from '../logger.js';
 import { CSV_FIELD_DELIMITER } from './bulk-file-stream.js';
 
-interface ErrorRecord {
-  row_index: number;
-  reasons: string[];
-  error_category: string;
-}
+/** One row's error entry in `bu:{id}:errors`, as written by the row processor. */
+const ErrorRecordSchema = z.object({
+  row_index: z.number(),
+  reasons: z.array(z.string()).optional(),
+  error_category: z.string().nullable().optional(),
+});
+
+type ErrorRecord = z.infer<typeof ErrorRecordSchema>;
+
+/** Fields per HSCAN page; a size hint to Redis that keeps each reply small. */
+const ERRORS_SCAN_PAGE_SIZE = 200;
 
 export interface FinaliseOutcome {
   status: 'completed' | 'skipped';
@@ -100,8 +108,8 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
     const csvHeader = [...headerCols, 'error_category', 'error_reason'];
     // Fetch stored cells for the failed rows only.
     const indices = errors.map((e) => String(e.row_index));
-    const rawRows =
-      indices.length > 0 ? await redis.hmget(`${ns}:lines`, ...indices) : ([] as (string | null)[]);
+    const rawRows: (string | null)[] =
+      indices.length > 0 ? await redis.hmget(`${ns}:lines`, ...indices) : [];
     const csvRows: string[][] = errors.map((e, i) => {
       const { cells, surplus } = fitToHeader(readStoredRow(rawRows[i] ?? ''), headerCols.length);
       const reasons = [...(e.reasons ?? [])];
@@ -117,7 +125,12 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
     try {
       await putObject(errorsKey, Buffer.from(csvBody, 'utf8'), 'text/csv');
     } catch (err) {
-      log.error({ status: 'failure', sub: 's3.put', error: (err as Error).message });
+      log.error({
+        status: 'failure',
+        sub: 's3.put',
+        error: errorMessage(err),
+        error_type: errorType(err),
+      });
       throw err;
     }
   }
@@ -182,22 +195,20 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
 /**
  * Reads all error records from the errors hash, page by page.
  *
- * Malformed entries are skipped so one bad record does not block the run.
+ * Entries that are not JSON, or not an error record, are skipped so one bad
+ * entry does not block the run.
  */
 async function readErrors(redis: ReturnType<typeof getRedis>, key: string): Promise<ErrorRecord[]> {
   const errors: ErrorRecord[] = [];
   // Recurse on the cursor until it returns to '0'.
   const scanFrom = async (cursor: string): Promise<void> => {
-    const [next, fields] = (await redis.hscan(key, cursor, 'COUNT', 200)) as [string, string[]];
+    const [next, fields] = await redis.hscan(key, cursor, 'COUNT', ERRORS_SCAN_PAGE_SIZE);
     for (let i = 1; i < fields.length; i += 2) {
       const raw = fields[i];
       if (!raw) continue;
-      try {
-        const parsed = JSON.parse(raw) as ErrorRecord;
-        errors.push(parsed);
-      } catch {
-        // Skip malformed entry; the Redis counters still include it.
-      }
+      // A skipped entry is still counted by the Redis counters.
+      const parsed = ErrorRecordSchema.safeParse(parseJson(raw));
+      if (parsed.success) errors.push(parsed.data);
     }
     if (next !== '0') await scanFrom(next);
   };
@@ -249,7 +260,20 @@ function readStoredRow(stored: string): string[] {
     skipEmptyLines: 'greedy',
     delimiter: CSV_FIELD_DELIMITER,
   });
-  return (result.data[0] ?? []) as string[];
+  return result.data[0] ?? [];
+}
+
+/**
+ * Parses a JSON string without throwing.
+ *
+ * @returns The parsed value, or `undefined` when the text is not JSON.
+ */
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

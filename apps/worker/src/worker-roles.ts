@@ -17,7 +17,10 @@ export const WORKER_ROLES = ['file', 'row', 'finalise', 'cron', 'campaign'] as c
 /** A single worker role. */
 export type WorkerRole = (typeof WORKER_ROLES)[number];
 
-const ALL_ROLES: ReadonlySet<WorkerRole> = new Set(WORKER_ROLES);
+/** True when `value` names a known worker role. */
+function isWorkerRole(value: string): value is WorkerRole {
+  return WORKER_ROLES.some((role) => role === value);
+}
 
 /**
  * Parses the `WORKER_ROLES` env value into the set of roles this process runs.
@@ -38,10 +41,10 @@ export function parseWorkerRoles(value?: string): Set<WorkerRole> {
   for (const token of raw.split(',')) {
     const role = token.trim().toLowerCase();
     if (role === '') continue;
-    if (!ALL_ROLES.has(role as WorkerRole)) {
+    if (!isWorkerRole(role)) {
       throw new Error(`Unknown worker role: "${role}". Valid roles: ${WORKER_ROLES.join(', ')}.`);
     }
-    roles.add(role as WorkerRole);
+    roles.add(role);
   }
   return roles.size === 0 ? new Set(WORKER_ROLES) : roles;
 }

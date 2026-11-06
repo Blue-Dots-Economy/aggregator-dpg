@@ -8,6 +8,7 @@
  * @module @aggregator-dpg/worker
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Readable } from 'node:stream';
 
 const s3ClientCtorCalls: Array<Record<string, unknown>> = [];
 const sendMock = vi.fn();
@@ -143,9 +144,16 @@ describe('worker object-storage', () => {
 
   it('getCsvStream returns the object body, and throws when it is empty', async () => {
     const { getCsvStream } = await import('./object-storage.js');
-    sendMock.mockResolvedValue({ Body: 'a-readable-stream' });
-    await expect(getCsvStream('k')).resolves.toBe('a-readable-stream');
+    const body = Readable.from(['a,b\n']);
+    sendMock.mockResolvedValue({ Body: body });
+    await expect(getCsvStream('k')).resolves.toBe(body);
     sendMock.mockResolvedValue({});
     await expect(getCsvStream('k')).rejects.toThrow(/empty body/);
+  });
+
+  it('getCsvStream throws when the object body is not a Node stream', async () => {
+    const { getCsvStream } = await import('./object-storage.js');
+    sendMock.mockResolvedValue({ Body: 'not-a-stream' });
+    await expect(getCsvStream('k')).rejects.toThrow(/not a Node stream/);
   });
 });

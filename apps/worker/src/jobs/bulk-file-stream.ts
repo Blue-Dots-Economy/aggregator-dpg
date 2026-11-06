@@ -14,6 +14,7 @@
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import Papa from 'papaparse';
+import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
 
 /**
  * The bulk CSV field delimiter, used for every parse of an upload.
@@ -202,7 +203,7 @@ export async function streamCsvParse(
         ...(err.detail !== undefined ? { detail: err.detail } : {}),
       };
     }
-    return { status: 'failed', reason: 'system_error', detail: (err as Error).message };
+    return { status: 'failed', reason: 'system_error', detail: errorMessage(err) };
   }
 
   // No header or no data rows means an empty file.

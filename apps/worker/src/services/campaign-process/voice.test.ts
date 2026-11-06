@@ -632,6 +632,21 @@ describe('runVoiceForJob (via runCampaignJob)', () => {
     expect(h.jobStatuses).toEqual(['processing']); // never rolled up to terminal
   });
 
+  it('throws when job.content has a field of the wrong type', async () => {
+    const h = harness(job({ content: { agent_id: 'agent-1', variables: 'role' } }));
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow(/variables/);
+    expect(h.jobStatuses).toEqual(['processing']);
+  });
+
+  it('names the root when job.content is not an object at all', async () => {
+    // A JSONB `null` read back from the row; the column type does not stop it.
+    const content: ProcessingJob['content'] = JSON.parse('null');
+    const h = harness(job({ content }));
+    await expect(runCampaignJob('job-1', h.deps)).rejects.toThrow(
+      'campaign voice job content invalid: (root)',
+    );
+  });
+
   it('flattens item_state into string variables, dropping null/undefined entries', async () => {
     const h = harness(
       job({

@@ -22,6 +22,7 @@
  *
  * Never logs contact PII; only counts and item ids.
  */
+import { z } from 'zod';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import {
   AuthError,
@@ -49,19 +50,21 @@ export interface VoiceCollaborators {
 /**
  * The voice job content fields this handler reads.
  *
- * Copy of the API's `VoiceContent`, since apps do not import each other.
- * The API validates `job.content` when the job is created.
+ * Mirrors the field types of the API's `voiceContentSchema`, since apps do not
+ * import each other. The API applies the full checks when the job is created.
  */
-interface VoiceJobContent {
-  agent_id: string;
-  batch_name?: string;
-  variables?: string[];
-  schedule?: unknown;
-  max_retries?: number;
-  retry_after_hrs?: number;
-  max_concurrent_calls?: number;
-  selected_statuses?: string[];
-}
+const VoiceJobContentSchema = z.object({
+  agent_id: z.string().min(1),
+  batch_name: z.string().optional(),
+  variables: z.array(z.string()).optional(),
+  schedule: z.unknown().optional(),
+  max_retries: z.number().optional(),
+  retry_after_hrs: z.number().optional(),
+  max_concurrent_calls: z.number().optional(),
+  selected_statuses: z.array(z.string()).optional(),
+});
+
+type VoiceJobContent = z.infer<typeof VoiceJobContentSchema>;
 
 /** Raya start-option keys passed through. Matches the API's `START_KEYS`. */
 const START_OPTION_KEYS = [
@@ -88,18 +91,21 @@ function voiceStartOptions(content: VoiceJobContent): Record<string, unknown> {
 }
 
 /**
- * Reads + minimally validates the voice job's `content` JSONB.
+ * Validates the voice job's `content` JSONB.
  *
  * @param content - The job's raw `content` column.
  * @returns The typed voice content.
- * @throws {Error} If `agent_id` is missing.
+ * @throws {Error} If `agent_id` is missing or a field has the wrong type. The message names the fields only.
  */
 function parseVoiceContent(content: Record<string, unknown>): VoiceJobContent {
-  const agentId = content['agent_id'];
-  if (typeof agentId !== 'string' || agentId.length === 0) {
-    throw new Error('campaign voice job content missing agent_id');
+  const parsed = VoiceJobContentSchema.safeParse(content);
+  if (!parsed.success) {
+    const fields = parsed.error.issues
+      .map((issue) => (issue.path.length > 0 ? issue.path.join('.') : '(root)'))
+      .join(', ');
+    throw new Error(`campaign voice job content invalid: ${fields}`);
   }
-  return content as unknown as VoiceJobContent;
+  return parsed.data;
 }
 
 /**
