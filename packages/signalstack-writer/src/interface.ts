@@ -250,9 +250,10 @@ export interface SignalStackDashboardDomainSlice {
 /**
  * Cache metadata for the rollup. `refreshed` is true when signalstack just
  * recomputed, false when it came from cache within `ttl_seconds`.
+ * `last_computed_at` is null when signalstack has not computed the rollup yet.
  */
 export interface SignalStackDashboardMetadata {
-  last_computed_at: string;
+  last_computed_at: string | null;
   ttl_seconds: number;
   refreshed: boolean;
 }
@@ -342,7 +343,8 @@ export interface SignalStackDecryptedProfileRow {
   item_domain: string;
   item_type: string;
   item_state: Record<string, unknown>;
-  contact?: Partial<Record<SignalStackContactCanonical, SignalStackContactValue>>;
+  contact?:
+    Partial<Record<SignalStackContactCanonical, SignalStackContactValue | undefined>> | undefined;
   created_at: string;
   updated_at: string;
 }
