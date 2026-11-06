@@ -7,6 +7,7 @@
 import { createRequire } from 'node:module';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { MailerAdapter, type MailerResult, type SendInput, type SendOk } from './interface.js';
+import { stringProp } from './thrown.js';
 
 // nodemailer's MIME builder. Loaded with createRequire because nodemailer is CJS.
 const require = createRequire(import.meta.url);
@@ -123,16 +124,17 @@ export class SesMailer extends MailerAdapter {
         value: { messageId: out.MessageId ?? '' },
       };
     } catch (err) {
-      const e = err as { name?: string; message?: string; $metadata?: { httpStatusCode?: number } };
+      const name = stringProp(err, 'name');
+      const message = stringProp(err, 'message');
       let code: 'AUTH_FAILED' | 'INVALID_RECIPIENT' | 'TRANSPORT_FAILED' = 'TRANSPORT_FAILED';
-      if (e.name === 'AccessDeniedException' || e.name === 'NotAuthorizedException') {
+      if (name === 'AccessDeniedException' || name === 'NotAuthorizedException') {
         code = 'AUTH_FAILED';
-      } else if (e.name === 'MailFromDomainNotVerifiedException' || e.name === 'MessageRejected') {
+      } else if (name === 'MailFromDomainNotVerifiedException' || name === 'MessageRejected') {
         code = 'INVALID_RECIPIENT';
       }
       return {
         ok: false,
-        error: { code, message: `SES ${e.name ?? 'error'}: ${e.message ?? 'send failed'}` },
+        error: { code, message: `SES ${name ?? 'error'}: ${message ?? 'send failed'}` },
       };
     }
   }

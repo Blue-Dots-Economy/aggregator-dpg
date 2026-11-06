@@ -35,6 +35,8 @@ export interface OpaAuthorizerOptions {
 const DECISION_PATH = '/v1/data/rbac/decision';
 const CAPABILITIES_PATH = '/v1/data/rbac/capabilities';
 const CapabilityListSchema = z.array(CapabilitySchema);
+/** OPA's data API wraps the rule value in `result`; it is absent when the rule is undefined. */
+const OpaResponseSchema = z.object({ result: z.unknown() });
 
 /** Whether a failed attempt is worth retrying. */
 function isTransient(status: number | null): boolean {
@@ -123,7 +125,7 @@ export class OpaAuthorizer extends AuthorizerBase {
           new UpstreamError('OPA returned invalid JSON', { code: 'OPA_BAD_RESPONSE', cause: e }),
         );
       }
-      const parsed = schema.safeParse((body as { result?: unknown } | null)?.result);
+      const parsed = schema.safeParse(OpaResponseSchema.safeParse(body).data?.result);
       if (!parsed.success) {
         return err(
           new UpstreamError('OPA returned no result; is the rbac policy loaded?', {

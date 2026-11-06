@@ -62,9 +62,21 @@ function csvField(value: string): string {
  * @returns The string representation suitable for a CSV cell.
  */
 function renderCell(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'object') return JSON.stringify(value);
-  return String(value as string | number | boolean | bigint | symbol);
+  switch (typeof value) {
+    case 'undefined':
+      return '';
+    case 'object':
+      return value === null ? '' : JSON.stringify(value);
+    case 'string':
+      return value;
+    case 'number':
+    case 'boolean':
+    case 'bigint':
+    case 'symbol':
+      return String(value);
+    case 'function':
+      return Function.prototype.toString.call(value);
+  }
 }
 
 /**

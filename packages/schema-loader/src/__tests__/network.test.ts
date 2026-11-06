@@ -28,7 +28,7 @@ const aggregatorSchema = {
   additionalProperties: false,
 } as const;
 
-function sourceWith(domains: Record<string, { schema: unknown }>): NetworkSchemaSource {
+function sourceWith(domains: NetworkSchemaSource['domains']): NetworkSchemaSource {
   return { domains };
 }
 

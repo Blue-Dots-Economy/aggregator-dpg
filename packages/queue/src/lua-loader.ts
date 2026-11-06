@@ -69,6 +69,28 @@ async function scriptDigest(redis: Redis, script: LuaScript): Promise<string> {
   return pending;
 }
 
+/**
+ * Reads the `message` of a rejection from Redis.
+ *
+ * @param err - The rejected value.
+ * @returns The message when it is a string, else an empty string.
+ */
+function errorMessage(err: unknown): string {
+  if (typeof err !== 'object' || err === null) return '';
+  const message: unknown = Reflect.get(err, 'message');
+  return typeof message === 'string' ? message : '';
+}
+
+/**
+ * Checks the `bulk_row_commit.lua` reply: four integer counters.
+ *
+ * @param raw - The EVAL / EVALSHA reply.
+ * @returns `true` when the reply is an array of four numbers.
+ */
+function isCommitReply(raw: unknown): raw is [number, number, number, number] {
+  return Array.isArray(raw) && raw.length === 4 && raw.every((n) => typeof n === 'number');
+}
+
 export type BulkRowOutcome = 'passed' | 'failed' | 'skipped';
 
 export interface BulkRowCommitResult {
@@ -128,8 +150,7 @@ export async function runBulkRowCommit(
       : await redis.eval(bulkRowCommitScript.source, keys.length, ...keys, ...args);
   } catch (err) {
     // NOSCRIPT: Redis lost its script cache. Drop the digest and use EVAL.
-    const message = (err as Error).message ?? '';
-    if (message.includes('NOSCRIPT')) {
+    if (errorMessage(err).includes('NOSCRIPT')) {
       digestByClient.delete(redis);
       raw = await redis.eval(bulkRowCommitScript.source, keys.length, ...keys, ...args);
     } else {
@@ -137,15 +158,15 @@ export async function runBulkRowCommit(
     }
   }
 
-  if (!Array.isArray(raw) || raw.length !== 4) {
+  if (!isCommitReply(raw)) {
     throw new Error(`bulk_row_commit.lua returned unexpected shape: ${JSON.stringify(raw)}`);
   }
-  const [processed, total, readerDone, wasNew] = raw as [number, number, number, number];
+  const [processed, total, readerDone, wasNew] = raw;
   return {
     processed,
     total,
-    readerDone: (readerDone === 1 ? 1 : 0) as 0 | 1,
-    wasNew: (wasNew === 1 ? 1 : 0) as 0 | 1,
+    readerDone: readerDone === 1 ? 1 : 0,
+    wasNew: wasNew === 1 ? 1 : 0,
   };
 }
 

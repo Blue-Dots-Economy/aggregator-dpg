@@ -8,6 +8,7 @@
 import { createRequire } from 'node:module';
 import type { Transporter, SendMailOptions } from 'nodemailer';
 import { MailerAdapter, type MailerResult, type SendInput, type SendOk } from './interface.js';
+import { numberProp, stringProp } from './thrown.js';
 
 const require = createRequire(import.meta.url);
 type NodemailerCreateTransport = (opts: unknown) => Transporter;
@@ -58,11 +59,10 @@ export class SmtpMailer extends MailerAdapter {
       const info = await this.transporter.sendMail(message);
       return { ok: true, value: { messageId: info.messageId } };
     } catch (err) {
-      const e = err as { code?: string; message?: string; responseCode?: number };
-      const code = mapSmtpError(e);
+      const code = mapSmtpError(err);
       return {
         ok: false,
-        error: { code, message: e.message ?? 'smtp send failed' },
+        error: { code, message: stringProp(err, 'message') ?? 'smtp send failed' },
       };
     }
   }
@@ -73,11 +73,9 @@ export class SmtpMailer extends MailerAdapter {
   }
 }
 
-function mapSmtpError(e: {
-  code?: string;
-  responseCode?: number;
-}): 'AUTH_FAILED' | 'INVALID_RECIPIENT' | 'TRANSPORT_FAILED' {
-  if (e.code === 'EAUTH') return 'AUTH_FAILED';
-  if (e.responseCode === 550 || e.responseCode === 553) return 'INVALID_RECIPIENT';
+function mapSmtpError(err: unknown): 'AUTH_FAILED' | 'INVALID_RECIPIENT' | 'TRANSPORT_FAILED' {
+  if (stringProp(err, 'code') === 'EAUTH') return 'AUTH_FAILED';
+  const responseCode = numberProp(err, 'responseCode');
+  if (responseCode === 550 || responseCode === 553) return 'INVALID_RECIPIENT';
   return 'TRANSPORT_FAILED';
 }

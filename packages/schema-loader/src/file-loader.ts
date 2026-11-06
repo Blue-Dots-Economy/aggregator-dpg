@@ -69,13 +69,17 @@ export class FileSchemaLoader extends SchemaLoaderBase {
       return err(new SchemaNotFoundError(ref));
     }
 
+    let parsed: unknown;
     try {
-      const schema = JSON.parse(raw) as JsonSchema;
-      this.schemaCache.set(cacheKey, schema);
-      return ok(schema);
+      parsed = JSON.parse(raw);
     } catch (parseErr) {
       return err(new SchemaCompileError(ref, parseErr));
     }
+    if (!isJsonSchema(parsed)) {
+      return err(new SchemaCompileError(ref, new Error('schema document is not a JSON object')));
+    }
+    this.schemaCache.set(cacheKey, parsed);
+    return ok(parsed);
   }
 
   async getValidator(ref: SchemaRef): Promise<Result<ValidateFunction, BaseError>> {
@@ -115,6 +119,16 @@ export class FileSchemaLoader extends SchemaLoaderBase {
 //   version   e.g. v1, v2, v10
 const SAFE_ID_RE = /^[a-z][a-z0-9-]{0,63}$/;
 const SAFE_VERSION_RE = /^v\d{1,4}$/;
+
+/**
+ * Checks that a parsed schema document is a JSON object.
+ *
+ * @param value - The result of `JSON.parse`.
+ * @returns `true` for a non-null, non-array object.
+ */
+function isJsonSchema(value: unknown): value is JsonSchema {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 function isSafeRef(ref: SchemaRef): boolean {
   return SAFE_ID_RE.test(ref.id) && SAFE_VERSION_RE.test(ref.version);

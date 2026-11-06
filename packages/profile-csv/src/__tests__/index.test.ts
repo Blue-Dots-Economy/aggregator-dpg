@@ -48,6 +48,15 @@ describe('buildDecryptedProfilesCsv', () => {
     expect(lines[1]).toBe('i1,"Last, First","{""a"":1}","he said ""hi"""');
   });
 
+  it('renders booleans and numbers as text and null as an empty cell', () => {
+    const csv = buildDecryptedProfilesCsv([
+      row({ item_id: 'i1', item_state: { name: 'A', active: true, score: 0.5, city: null } }),
+    ]);
+    const lines = csv.split('\r\n');
+    expect(lines[0]).toBe('item_id,name,active,city,score');
+    expect(lines[1]).toBe('i1,A,true,,0.5');
+  });
+
   it('returns just the item_id header for an empty input', () => {
     expect(buildDecryptedProfilesCsv([])).toBe('item_id');
   });

@@ -128,6 +128,31 @@ describe('SesMailer cc handling', () => {
     }
   });
 
+  it('reads the name and message from an Error instance', async () => {
+    const { mailer } = makeMailer();
+    const error = Object.assign(new Error('denied'), { name: 'AccessDeniedException' });
+    (mailer as unknown as { client: { send: () => Promise<never> } }).client.send = () =>
+      Promise.reject(error);
+    const r = await mailer.send({ to: 'to@org.com', subject: 's', html: '', text: '' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe('AUTH_FAILED');
+      expect(r.error.message).toBe('SES AccessDeniedException: denied');
+    }
+  });
+
+  it('falls back to default error text when a non-object is thrown', async () => {
+    const { mailer } = makeMailer();
+    (mailer as unknown as { client: { send: () => Promise<never> } }).client.send = () =>
+      Promise.reject('boom');
+    const r = await mailer.send({ to: 'to@org.com', subject: 's', html: '', text: '' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe('TRANSPORT_FAILED');
+      expect(r.error.message).toBe('SES error: send failed');
+    }
+  });
+
   it('defaults messageId to empty string when the SDK omits MessageId', async () => {
     const { client, mailer } = makeMailer();
     client.send = async () => ({ MessageId: undefined as unknown as string });

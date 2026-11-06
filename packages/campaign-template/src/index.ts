@@ -17,6 +17,18 @@ export const SUPPORTED_PLACEHOLDERS = [
 
 export type Placeholder = (typeof SUPPORTED_PLACEHOLDERS)[number];
 
+const SUPPORTED_SET: ReadonlySet<string> = new Set<string>(SUPPORTED_PLACEHOLDERS);
+
+/**
+ * Checks whether a token is one of the supported placeholders.
+ *
+ * @param token - A lower-cased token name.
+ * @returns `true` when the token is in {@link SUPPORTED_PLACEHOLDERS}.
+ */
+function isPlaceholder(token: string): token is Placeholder {
+  return SUPPORTED_SET.has(token);
+}
+
 /** Canonical contact fields resolvable from the participant store. */
 export type ContactField = 'name' | 'email' | 'phone';
 
@@ -125,11 +137,10 @@ export function substitute(
   values: PlaceholderValues,
   escape?: (value: string) => string,
 ): string {
-  const supported = new Set<string>(SUPPORTED_PLACEHOLDERS);
   return text.replace(TOKEN_RE, (whole, rawKey: string) => {
     const key = rawKey.toLowerCase();
-    if (!supported.has(key)) return whole;
-    const value = values[key as Placeholder] ?? '';
+    if (!isPlaceholder(key)) return whole;
+    const value = values[key] ?? '';
     return escape ? escape(value) : value;
   });
 }

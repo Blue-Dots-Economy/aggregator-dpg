@@ -121,6 +121,27 @@ describe('runBulkRowCommit', () => {
     expect(result).toEqual({ processed: 1, total: 1, readerDone: 0, wasNew: 1 });
   });
 
+  it('falls back to EVAL when EVALSHA rejects with a NOSCRIPT reply that is not an Error', async () => {
+    const redis = makeRedisStub();
+    (redis.evalsha as ReturnType<typeof vi.fn>).mockRejectedValue({
+      message: 'NOSCRIPT No matching script',
+    });
+    (redis.eval as ReturnType<typeof vi.fn>).mockResolvedValue([2, 5, 1, 0]);
+
+    const result = await runBulkRowCommit(redis, 'up-8', 1, 'passed', '', 60);
+
+    expect(redis.eval).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ processed: 2, total: 5, readerDone: 1, wasNew: 0 });
+  });
+
+  it('rethrows a rejection without a message from EVALSHA', async () => {
+    const redis = makeRedisStub();
+    (redis.evalsha as ReturnType<typeof vi.fn>).mockRejectedValue('boom');
+
+    await expect(runBulkRowCommit(redis, 'up-10', 0, 'passed', '', 60)).rejects.toBe('boom');
+    expect(redis.eval).not.toHaveBeenCalled();
+  });
+
   it('rethrows a non-NOSCRIPT error from EVALSHA without falling back to EVAL', async () => {
     const redis = makeRedisStub();
     (redis.evalsha as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('connection reset'));
@@ -136,6 +157,15 @@ describe('runBulkRowCommit', () => {
     (redis.evalsha as ReturnType<typeof vi.fn>).mockResolvedValue([1, 2, 3]);
 
     await expect(runBulkRowCommit(redis, 'up-5', 0, 'passed', '', 60)).rejects.toThrow(
+      /unexpected shape/,
+    );
+  });
+
+  it('throws a descriptive error when the script returns non-numeric counters', async () => {
+    const redis = makeRedisStub();
+    (redis.evalsha as ReturnType<typeof vi.fn>).mockResolvedValue([1, '2', 0, 1]);
+
+    await expect(runBulkRowCommit(redis, 'up-11', 0, 'passed', '', 60)).rejects.toThrow(
       /unexpected shape/,
     );
   });

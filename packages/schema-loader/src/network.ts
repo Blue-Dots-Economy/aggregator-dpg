@@ -26,7 +26,7 @@ import { createAjv, type AjvLike } from './ajv.js';
  * satisfied by `ResolvedNetworkConfig` from `@aggregator-dpg/network-config`.
  */
 export interface NetworkSchemaSource {
-  domains: Record<string, { schema: unknown } | undefined>;
+  domains: Record<string, { schema: JsonSchema } | undefined>;
 }
 
 /** Supplies the process-wide resolved network config. */
@@ -72,7 +72,7 @@ export class NetworkSchemaLoader extends SchemaLoaderBase {
     const cfg = await this.getNetworkConfig();
     const resolved = cfg.domains[domain];
     if (!resolved) return err(new SchemaNotFoundError(ref));
-    return ok(resolved.schema as JsonSchema);
+    return ok(resolved.schema);
   }
 
   /**

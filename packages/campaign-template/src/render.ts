@@ -63,7 +63,7 @@ export function renderEmail(input: {
   values: PlaceholderValues;
 }): RenderedEmail {
   const { subject, bodyMarkdown, values } = input;
-  const rendered = marked.parse(bodyMarkdown, { async: false }) as string;
+  const rendered = marked.parse(bodyMarkdown, { async: false });
   const htmlTemplate = sanitizeHtml(rendered, SANITIZE_OPTS);
   return {
     subject: substitute(subject, values),

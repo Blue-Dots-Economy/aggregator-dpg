@@ -105,6 +105,20 @@ describe('FileSchemaLoader', () => {
     }
   });
 
+  it('returns SCHEMA_COMPILE_ERROR when the JSON document is not an object', async () => {
+    const dir = path.join(rootDir, 'listy');
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, 'thing.v1.json'), '[1, 2]', 'utf8');
+
+    const loader = new FileSchemaLoader({ rootDir });
+    const result = await loader.getSchema({ id: 'listy-thing', version: 'v1' });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.code).toBe('SCHEMA_COMPILE_ERROR');
+    }
+  });
+
   it('rejects ref ids containing path-traversal characters', async () => {
     const loader = new FileSchemaLoader({ rootDir });
     const traversal = await loader.getSchema({ id: '../etc/passwd', version: 'v1' });

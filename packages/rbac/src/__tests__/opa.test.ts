@@ -66,6 +66,15 @@ describe('OpaAuthorizer', () => {
     expect(!res.success && res.error.code).toBe('OPA_BAD_RESPONSE');
   });
 
+  it.each([null, [], 'allow'])(
+    'returns OPA_BAD_RESPONSE when the JSON body is %j',
+    async (body) => {
+      const { authz } = engine([json(body)]);
+      const res = await authz.decide(input);
+      expect(!res.success && res.error.code).toBe('OPA_BAD_RESPONSE');
+    },
+  );
+
   it('returns OPA_BAD_RESPONSE for a non-JSON body', async () => {
     const { authz } = engine([new Response('not json', { status: 200 })]);
     const res = await authz.decide(input);
