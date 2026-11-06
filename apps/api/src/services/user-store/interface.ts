@@ -114,6 +114,8 @@ export interface CreateCoordinatorInput {
   name: string;
   /** The domain served; `null` = every domain (stored as `serves = '{}'`). */
   type: RoleType | null;
+  /** The domains served (`[]` = every domain); wins over {@link type} when given. */
+  serves?: RoleType[];
   /** `contact.company` / `contact.gstNumber` are not stored (they belong to the org). */
   contact: BecknContact;
   /**

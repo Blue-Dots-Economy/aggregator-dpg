@@ -210,6 +210,32 @@ describe('admin approval routes', () => {
     expect(identities[0]).toMatchObject({ userId: aggregatorId, provider: 'keycloak' });
   });
 
+  /** Opens the review page and returns its HTML. */
+  async function reviewPage(): Promise<string> {
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/admin/v1/aggregator-registrations/read/${aggregatorId}?token=${encodeURIComponent(token)}`,
+    });
+    expect(res.statusCode).toBe(200);
+    return res.body;
+  }
+
+  it('GET /read/:id lists every domain the applicant serves', async () => {
+    const found = await userStore.findById(aggregatorId);
+    if (!found.ok || !found.value) throw new Error('seed missing');
+    userStore.seed([{ ...found.value, type: 'seeker', serves: ['seeker', 'provider'] }]);
+    expect(await reviewPage()).toContain('seeker, provider');
+  });
+
+  it('GET /read/:id shows all domains for an applicant serving every domain', async () => {
+    expect(await reviewPage()).toContain('All domains');
+  });
+
   it('GET /read/:id shows already-approved when aggregator.status=active', async () => {
     await userStore.updateStatus(aggregatorId, 'active', 'admin');
     const { token } = await mintApprovalToken({

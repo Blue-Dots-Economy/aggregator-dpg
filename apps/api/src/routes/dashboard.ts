@@ -13,13 +13,13 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { errorResponses } from '../errors/openapi.js';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
-import { getUserStore } from '../services/user-store/index.js';
-import { getNetworkConfig } from '../services/network-config.js';
+import type { Coordinator } from '../services/user-store/index.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
 import { buildDecryptedProfilesCsv } from '@aggregator-dpg/profile-csv';
 import { httpError } from '../errors/http-error.js';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
+import { resolveRequestedDomain } from './served-domains-shared.js';
 
 /**
  * Lifecycle statuses the dashboard shows. Paused and retired are excluded.
@@ -111,13 +111,7 @@ export async function registerDashboardRoutes(base: FastifyInstance): Promise<vo
       // Validated (and defaulted) by the route's `querystring` zod schema.
       const query = req.query;
       const { page, limit, status, lifecycle, refresh } = query;
-      const networkCfg = await getNetworkConfig();
-      const domain = query.domain ?? networkCfg.domainIds[0]!;
-      if (!networkCfg.domains[domain]) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-        });
-      }
+      const { caller, domain } = await resolveRequestedDomain(auth, query.domain);
 
       const ss = getSignalStackWriter();
       if (!ss) {
@@ -127,7 +121,7 @@ export async function registerDashboardRoutes(base: FastifyInstance): Promise<vo
         });
       }
 
-      const actingOrgId = await resolveActingOrgId(auth, log);
+      const actingOrgId = resolveActingOrgId(auth, caller, log);
 
       const result = await ss.fetchDashboard({
         actingOrgId,
@@ -199,13 +193,7 @@ export async function registerDashboardRoutes(base: FastifyInstance): Promise<vo
       // Validated (and defaulted) by the route's `querystring` zod schema.
       const query = req.query;
       const { status, refresh } = query;
-      const networkCfg = await getNetworkConfig();
-      const domain = query.domain ?? networkCfg.domainIds[0]!;
-      if (!networkCfg.domains[domain]) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-        });
-      }
+      const { caller, domain } = await resolveRequestedDomain(auth, query.domain);
 
       const ss = getSignalStackWriter();
       if (!ss) {
@@ -215,7 +203,7 @@ export async function registerDashboardRoutes(base: FastifyInstance): Promise<vo
         });
       }
 
-      const actingOrgId = await resolveActingOrgId(auth, log);
+      const actingOrgId = resolveActingOrgId(auth, caller, log);
 
       const result = await ss.exportDashboardCsv({
         actingOrgId,
@@ -281,13 +269,7 @@ export async function registerDashboardRoutes(base: FastifyInstance): Promise<vo
       const start = Date.now();
 
       const { item_ids, domain: requestedDomain } = req.body;
-      const networkCfg = await getNetworkConfig();
-      const domain = requestedDomain ?? networkCfg.domainIds[0]!;
-      if (!networkCfg.domains[domain]) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-        });
-      }
+      const { caller, domain } = await resolveRequestedDomain(auth, requestedDomain);
 
       const ss = getSignalStackWriter();
       if (!ss) {
@@ -297,7 +279,7 @@ export async function registerDashboardRoutes(base: FastifyInstance): Promise<vo
         });
       }
 
-      const actingOrgId = await resolveActingOrgId(auth, log);
+      const actingOrgId = resolveActingOrgId(auth, caller, log);
 
       // Deduplicate so repeated ids do not count against EXPORT_MAX_ITEM_IDS.
       // Order is preserved, so CSV rows follow the request.
@@ -369,27 +351,17 @@ export async function registerDashboardRoutes(base: FastifyInstance): Promise<vo
  * before approval).
  *
  * @param auth - The approved caller.
+ * @param caller - The caller's stored row.
  * @param log - Request logger.
  * @returns The signalstack org id.
- * @throws DB_UNAVAILABLE if the store read fails.
  * @throws SIGNALSTACK_ORG_NOT_REGISTERED if neither source has a value.
  */
-async function resolveActingOrgId(auth: AuthContext, log: FastifyRequest['log']): Promise<string> {
-  let actingOrgId: string | null = auth.signalstackOrgId ?? null;
-  if (!actingOrgId) {
-    const row = await getUserStore().findById(auth.aggregatorId);
-    if (!row.ok) {
-      log.error({
-        status: 'failure',
-        sub: 'userStore.findById',
-        code: row.error.code,
-      });
-      throw httpError('DB_UNAVAILABLE', {
-        fields: { sub_operation: 'userStore.findById' },
-      });
-    }
-    actingOrgId = row.value?.signalstackOrgId ?? null;
-  }
+function resolveActingOrgId(
+  auth: AuthContext,
+  caller: Coordinator,
+  log: FastifyRequest['log'],
+): string {
+  const actingOrgId = auth.signalstackOrgId ?? caller.signalstackOrgId ?? null;
   if (!actingOrgId) {
     log.warn({ status: 'failure', sub: 'signalstack.org_not_registered' });
     throw httpError('SIGNALSTACK_ORG_NOT_REGISTERED', {
