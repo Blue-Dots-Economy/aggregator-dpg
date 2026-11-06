@@ -115,7 +115,10 @@ export function humaniseValidationErrors(errs: AjvLikeError[], schema: RJSFSchem
   for (const e of errs) {
     const propPath = (e.property ?? '').replace(/^\./, '');
     const missing = (e.params?.['missingProperty'] as string | undefined) ?? undefined;
-    const fullPath = missing ? [propPath, missing].filter(Boolean).join('.') : propPath;
+    // RJSF already ends a missing field's path with the field; Ajv gives only the parent.
+    const endsWithMissing = missing && (propPath === missing || propPath.endsWith(`.${missing}`));
+    const fullPath =
+      missing && !endsWithMissing ? [propPath, missing].filter(Boolean).join('.') : propPath;
     const titleFromSchema = lookupTitle(schema, fullPath);
     const fallbackKey = missing || fullPath.split('.').pop() || '';
     const resolvedLabel =

@@ -21,7 +21,7 @@ export interface ApplicantRejectedVars {
   reason?: string | undefined;
   /**
    * What was rejected — drives the subject and the opening line. Use
-   * `organisation` for the org flow, `aggregator` (default) for coordinators.
+   * `organisation` for the org flow, `coordinator` for coordinators (`aggregator` when unset).
    */
   entityLabel?: string | undefined;
 }

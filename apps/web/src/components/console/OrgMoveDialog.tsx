@@ -34,13 +34,16 @@ const REASONS: Record<string, string> = {
  *
  * @param orgId - The organisation to move.
  * @param orgName - Its name, for the dialog title.
+ * @param parentId - Its current parent, marked in the list.
  */
 export function OrgMoveDialog({
   orgId,
   orgName,
+  parentId,
 }: Readonly<{
   orgId: string;
   orgName: string;
+  parentId: string | null;
 }>) {
   const t = useTranslations('console');
   const [open, setOpen] = useState(false);
@@ -53,7 +56,14 @@ export function OrgMoveDialog({
       >
         {t('org.move')}
       </Button>
-      {open ? <MoveDialog orgId={orgId} orgName={orgName} onClose={() => setOpen(false)} /> : null}
+      {open ? (
+        <MoveDialog
+          orgId={orgId}
+          orgName={orgName}
+          currentParentId={parentId}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
     </>
   );
 }
@@ -62,10 +72,12 @@ export function OrgMoveDialog({
 function MoveDialog({
   orgId,
   orgName,
+  currentParentId,
   onClose,
 }: Readonly<{
   orgId: string;
   orgName: string;
+  currentParentId: string | null;
   onClose: () => void;
 }>) {
   const t = useTranslations('console');
@@ -113,7 +125,8 @@ function MoveDialog({
   const ready = parent !== undefined;
 
   const optionText = (o: ParentOption) => {
-    const name = o.known_as_name ? `${o.name} (${o.known_as_name})` : o.name;
+    const label = o.known_as_name ? `${o.name} (${o.known_as_name})` : o.name;
+    const name = o.id === currentParentId ? `${label} — ${t('org.move_current')}` : label;
     if (o.ok) return name;
     return `${name} — ${t(REASONS[o.reason ?? ''] ?? 'org.move_reason_other')}`;
   };

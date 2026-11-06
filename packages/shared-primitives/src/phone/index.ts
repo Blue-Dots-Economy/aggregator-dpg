@@ -22,9 +22,14 @@ export interface PhoneNormaliseError {
 /** Outcome of {@link normalisePhone}. */
 export type PhoneNormaliseResult = PhoneNormaliseOk | PhoneNormaliseError;
 
-const MIN_DIGITS = 10;
+/** Digits in a local mobile number (India), without the country code. */
+export const PHONE_LOCAL_DIGITS = 10;
+/** Country calling code assumed for a bare local number, without the `+`. */
+export const PHONE_COUNTRY_CODE = '91';
+
+const MIN_DIGITS = PHONE_LOCAL_DIGITS;
 const MAX_DIGITS = 15;
-const DEFAULT_COUNTRY_CODE = '91';
+const DEFAULT_COUNTRY_CODE = PHONE_COUNTRY_CODE;
 
 /**
  * Normalises a phone number to a canonical `+`-prefixed form. Does not throw.

@@ -355,6 +355,26 @@ describe('POST /v1/aggregator-registrations/create', () => {
     idp.createUser = originalCreate;
   });
 
+  it('400 NAME_INVALID_CHARACTERS, row rolled back, when the IdP refuses the name', async () => {
+    const originalCreate = idp.createUser.bind(idp);
+    idp.createUser = async () => ({
+      ok: false as const,
+      error: { code: 'INVALID_NAME' as const, message: 'name has a refused character' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/aggregator-registrations/create',
+      headers: AUTH_HEADER,
+      payload: {
+        ...validBody,
+        contact: { ...validBody.contact, name: 'Asha (Field)', email: 'asha3@trrain.org' },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('NAME_INVALID_CHARACTERS');
+    idp.createUser = originalCreate;
+  });
+
   async function seedPending(overrides?: {
     status?: 'pending' | 'inactive' | 'active';
     rejectedAt?: Date;

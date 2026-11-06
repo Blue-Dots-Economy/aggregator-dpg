@@ -38,6 +38,7 @@ import { ConsentCheckboxWidget } from './ConsentCheckboxWidget';
 import { LocationAutocompleteWidget } from './custom-widgets/LocationAutocompleteWidget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/MultiLocationAutocompleteWidget';
 import { ReferenceAutocompleteWidget } from './custom-widgets/ReferenceAutocompleteWidget';
+import { PhoneWidget } from './custom-widgets/PhoneWidget';
 
 function TextWidget(props: WidgetProps) {
   const {
@@ -568,6 +569,7 @@ const widgets: RegistryWidgetsType = {
   'location-autocomplete': LocationAutocompleteWidget,
   'location-multi': MultiLocationAutocompleteWidget,
   'reference-autocomplete': ReferenceAutocompleteWidget,
+  phone: PhoneWidget,
   TextareaWidget,
   SelectWidget,
   DateWidget,
