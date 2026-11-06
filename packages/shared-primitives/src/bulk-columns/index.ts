@@ -124,5 +124,5 @@ export function schemaOwnsColumn(
 ): boolean {
   const props = schema?.['properties'];
   if (!props || typeof props !== 'object') return false;
-  return Object.hasOwn(props as Record<string, unknown>, name);
+  return Object.hasOwn(props, name);
 }
