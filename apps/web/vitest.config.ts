@@ -3,8 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { applyTerms } from './src/i18n/terms';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const reactPlugin = react() as any;
+const reactPlugin = react();
 
 // Tests import the message files directly; fill their term placeholders the
 // same way `src/i18n/request.ts` does at runtime.
