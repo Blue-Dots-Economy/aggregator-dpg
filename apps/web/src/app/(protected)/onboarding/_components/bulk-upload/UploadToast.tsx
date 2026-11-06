@@ -1,27 +1,37 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { I } from '@/icons';
 import { useIsClient } from '@/hooks/useIsClient';
 
-/** How long the upload toast stays on screen; long enough to read two sentences. */
-const UPLOAD_TOAST_VISIBLE_MS = 6000;
+/** How long the upload toast stays on screen; long enough to read one short sentence. */
+const UPLOAD_TOAST_VISIBLE_MS = 2500;
 
 /** Props for {@link UploadToast}. */
 export interface UploadToastProps {
   message: string;
-  /** Called `UPLOAD_TOAST_VISIBLE_MS` after the toast mounts or `onDone` changes. */
+  /** Called once the toast has been shown for `UPLOAD_TOAST_VISIBLE_MS`. */
   onDone: () => void;
 }
 
-/** Top-right success toast for an upload, rendered in a portal on <body>. */
+/**
+ * Top-right success toast for an upload, rendered in a portal on <body>.
+ *
+ * Closes itself `UPLOAD_TOAST_VISIBLE_MS` after it mounts. A parent re-render
+ * does not restart the timer, and unmounting cancels it.
+ */
 export function UploadToast({ message, onDone }: Readonly<UploadToastProps>) {
   const isClient = useIsClient();
+  // The latest callback, so a new function from the parent does not restart the timer.
+  const onDoneRef = useRef(onDone);
   useEffect(() => {
-    const timer = setTimeout(onDone, UPLOAD_TOAST_VISIBLE_MS);
+    onDoneRef.current = onDone;
+  });
+  useEffect(() => {
+    const timer = setTimeout(() => onDoneRef.current(), UPLOAD_TOAST_VISIBLE_MS);
     return () => clearTimeout(timer);
-  }, [onDone]);
+  }, []);
   if (!isClient) return null;
   return createPortal(
     <output

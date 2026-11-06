@@ -16,9 +16,6 @@ import { uploadErrorText } from './upload-error-text';
 import { UploadFilePicker } from './UploadFilePicker';
 import { UploadToast } from './UploadToast';
 
-/** Delay before returning to the overview after a successful upload, so the toast is read. */
-const RETURN_TO_OVERVIEW_DELAY_MS = 2500;
-
 /** Props for {@link CSVUpload}. */
 export interface CSVUploadProps {
   /**
@@ -41,9 +38,11 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
   const [attested, setAttested] = useState(false);
   const rawProfile = useProfileRaw();
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Participant type from the `aggregator_type` claim. Uses the network's first
-  // domain while the profile loads; the API checks the type on upload.
-  const participantType: string = rawProfile.data?.type ?? cfg.domains[0]?.id ?? '';
+  // Participant type from the `aggregator_type` claim. The label and hint use the
+  // network's first domain while the profile loads; Upload and the template
+  // download wait for the real type.
+  const profileType = rawProfile.data?.type;
+  const participantType: string = profileType ?? cfg.domains[0]?.id ?? '';
   // Plural label for the scoped domain, sourced from network config.
   const participantTypeLabel =
     cfg.domains.find((d) => d.id === participantType)?.plural_label ?? participantType;
@@ -102,9 +101,9 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
         return;
       }
       // Show the success note and refresh the list. Processing continues in the worker.
+      // The toast returns to the overview when it closes.
       setToast(t('csv.success_note'));
       recent.refetch();
-      setTimeout(() => router.push('/onboarding'), RETURN_TO_OVERVIEW_DELAY_MS);
     } catch (err) {
       if (err instanceof BulkUploadStartUnreadError) {
         // The upload started: clear the file so it is not uploaded twice.
@@ -145,7 +144,8 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
           <button
             type="button"
             onClick={downloadTemplate}
-            className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary-600 hover:underline"
+            disabled={!profileType}
+            className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary-600 hover:underline disabled:opacity-50 disabled:no-underline"
           >
             <I.download size={14} /> {t('csv.download_template_xlsx')}
           </button>
@@ -168,7 +168,10 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
       />
 
       <div className="flex items-center justify-end mt-4">
-        <Button onClick={onUpload} disabled={!pickedFile || upload.isPending || !attested}>
+        <Button
+          onClick={onUpload}
+          disabled={!pickedFile || upload.isPending || !attested || !profileType}
+        >
           {upload.isPending ? t('csv.uploading') : t('csv.upload_button')}
         </Button>
       </div>
@@ -183,7 +186,15 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
           {uploadNotice}
         </div>
       )}
-      {toast && <UploadToast message={toast} onDone={() => setToast(null)} />}
+      {toast && (
+        <UploadToast
+          message={toast}
+          onDone={() => {
+            setToast(null);
+            router.push('/onboarding');
+          }}
+        />
+      )}
     </div>
   );
 }

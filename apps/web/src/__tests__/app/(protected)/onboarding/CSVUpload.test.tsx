@@ -329,21 +329,64 @@ describe('<CSVUpload />', () => {
     expect(mutateAsync.mock.calls[0]![0].participantType).toBe('provider');
   });
 
-  it('hides the success toast after it has been shown', async () => {
-    mutateAsync.mockResolvedValue({ duplicate: false });
-    const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
+  it('keeps Upload and the template download disabled until the profile type is known', async () => {
+    useProfileRaw.mockReturnValue({ data: undefined });
     const user = userEvent.setup();
     renderUpload();
     await pickAndAttest(user);
-    await user.click(screen.getByRole('button', { name: 'Upload' }));
-    const toastText =
-      'Accounts will be live once the user logs in on the platform or via the call.';
-    expect(await screen.findByText(toastText)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Download Excel template/ })).toBeDisabled();
+  });
 
-    const hideCall = setTimeoutSpy.mock.calls.find((c) => c[1] === 6000);
-    expect(hideCall).toBeDefined();
-    act(() => (hideCall![0] as () => void)());
-    expect(screen.queryByText(toastText)).not.toBeInTheDocument();
+  async function uploadWithFakeTimers() {
+    const input = document.getElementById('csv-file-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [makeCsv()] } });
+    fireEvent.click(screen.getByRole('checkbox'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Upload' }));
+    });
+  }
+
+  it('shows the success toast for the full delay across re-renders, then returns to the overview', async () => {
+    vi.useFakeTimers();
+    try {
+      mutateAsync.mockResolvedValue({ duplicate: false });
+      const { rerender } = renderUpload();
+      await uploadWithFakeTimers();
+      const toastText = messages.onboarding.csv.success_note;
+      expect(screen.getByText(toastText)).toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(1000));
+      rerender(
+        <NextIntlClientProvider locale="en" messages={{ onboarding: messages.onboarding }}>
+          <CSVUpload />
+        </NextIntlClientProvider>,
+      );
+      act(() => vi.advanceTimersByTime(1499));
+      expect(screen.getByText(toastText)).toBeInTheDocument();
+      expect(pushMock).not.toHaveBeenCalled();
+
+      act(() => vi.advanceTimersByTime(1));
+      expect(screen.queryByText(toastText)).not.toBeInTheDocument();
+      expect(pushMock).toHaveBeenCalledTimes(1);
+      expect(pushMock).toHaveBeenCalledWith('/onboarding');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not return to the overview after the widget unmounts', async () => {
+    vi.useFakeTimers();
+    try {
+      mutateAsync.mockResolvedValue({ duplicate: false });
+      const { unmount } = renderUpload();
+      await uploadWithFakeTimers();
+      unmount();
+      act(() => vi.advanceTimersByTime(10_000));
+      expect(pushMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('clears the file input when the picked file is removed', async () => {
