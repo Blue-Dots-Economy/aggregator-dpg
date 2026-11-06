@@ -7,7 +7,7 @@
 
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import type { Readable } from 'node:stream';
+import { Readable } from 'node:stream';
 import { config } from './config.js';
 
 // Two clients:
@@ -66,7 +66,7 @@ function getPresignerClient(): S3Client {
  *
  * @param s3Key - Key of the uploaded CSV object.
  * @returns The object body as a Node `Readable`.
- * @throws {Error} If the object has no body.
+ * @throws {Error} If the object has no body, or the body is not a Node stream.
  */
 export async function getCsvStream(s3Key: string): Promise<Readable> {
   const result = await getClient().send(
@@ -77,7 +77,10 @@ export async function getCsvStream(s3Key: string): Promise<Readable> {
     throw new Error(`empty body for s3 key: ${s3Key}`);
   }
   // In the Node runtime the AWS SDK returns a Node.js Readable.
-  return body as Readable;
+  if (!(body instanceof Readable)) {
+    throw new Error(`object body is not a Node stream for s3 key: ${s3Key}`);
+  }
+  return body;
 }
 
 /**

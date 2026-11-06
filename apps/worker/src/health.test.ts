@@ -1,7 +1,7 @@
 /** Tests for the /healthz liveness endpoint (aggregator-dpg#675). */
 
-import { describe, it, expect, afterEach } from 'vitest';
-import type { Server } from 'node:http';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { ServerResponse, type Server } from 'node:http';
 import type { Redis } from 'ioredis';
 import { startHealthServer } from './health.js';
 
@@ -22,6 +22,7 @@ describe('startHealthServer', () => {
   afterEach(async () => {
     await new Promise<void>((resolve) => server?.close(() => resolve()));
     server = undefined;
+    vi.restoreAllMocks();
   });
 
   it('returns 200 when Redis responds PONG', async () => {
@@ -56,6 +57,23 @@ describe('startHealthServer', () => {
     expect(status).toBe(200);
     expect(JSON.parse(body)).toEqual({ status: 'degraded', redis: 'unreachable' });
   }, 5000);
+
+  it('answers 500, not an empty 200, when writing the response fails', async () => {
+    const writeHead = ServerResponse.prototype.writeHead;
+    vi.spyOn(ServerResponse.prototype, 'writeHead')
+      .mockImplementationOnce(() => {
+        throw new Error('write failed');
+      })
+      .mockImplementation(function (this: ServerResponse, ...args) {
+        return writeHead.apply(this, args);
+      });
+    server = startHealthServer(
+      0,
+      fakeRedis(async () => 'PONG'),
+    );
+    const { status } = await get(server, '/healthz');
+    expect(status).toBe(500);
+  });
 
   it('returns 404 for any other path', async () => {
     server = startHealthServer(

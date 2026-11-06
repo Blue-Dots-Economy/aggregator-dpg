@@ -487,6 +487,35 @@ describe('RayaVoiceProvider', () => {
     expect(result.error.message).toContain('unexpected payload');
   });
 
+  it('keeps the create payload PII out of the error when batchId is missing', async () => {
+    const { batchId: _omitted, ...withoutBatchId } = CREATE_OK_BODY;
+    const body = {
+      ...withoutBatchId,
+      errors: [{ row: 1, field: 'contact_phone', value: '9000000099', message: 'invalid' }],
+    };
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse(200, body));
+
+    const provider = new RayaVoiceProvider({
+      baseUrl: 'https://raya.example.com/api',
+      apiKey: 'key-abc',
+      acquireSlot: vi.fn().mockResolvedValue(undefined),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const result = await provider.dispatch(baseInput());
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('RAYA_BAD_RESPONSE');
+    const serialised = JSON.stringify({
+      message: result.error.message,
+      details: result.error.details,
+    });
+    expect(serialised).not.toContain('9000000099');
+    expect(serialised).not.toContain('9000000001');
+    expect(serialised).not.toContain('Asha');
+  });
+
   it('includes country_code in the create body when a contact supplies one', async () => {
     const fetchImpl = vi
       .fn()
@@ -770,7 +799,7 @@ describe('RayaVoiceProvider', () => {
     expect(sleep).not.toHaveBeenCalled();
   });
 
-  it('maps a 401 to AuthError with an empty body even when reading the response body fails', async () => {
+  it('maps a 401 to AuthError with only the status even when reading the response body fails', async () => {
     const throwingTextResponse = {
       ok: false,
       status: 401,
@@ -794,7 +823,63 @@ describe('RayaVoiceProvider', () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error.name).toBe('AuthError');
-    expect(result.error.details?.['body']).toBe('');
+    expect(result.error.details).toEqual({ status: 401 });
+  });
+
+  describe('error details keep only the status and the top-level message, never the raw body', () => {
+    /** Raya 400 body that echoes contact PII back in errors[] and data[]. */
+    const PII_BODY = {
+      status: 'error',
+      message: 'max_concurrent_calls is required',
+      errors: [{ row: 1, field: 'contact_phone', value: '+910000000001', message: 'invalid' }],
+      data: [{ ref: 'i1', contact_name: 'Asha', contact_phone: '+910000000001' }],
+    };
+
+    function provider(fetchImpl: ReturnType<typeof vi.fn>, maxAttempts = 1) {
+      return new RayaVoiceProvider({
+        baseUrl: 'https://raya.example.com/api',
+        apiKey: 'key-abc',
+        maxAttempts,
+        acquireSlot: vi.fn().mockResolvedValue(undefined),
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      });
+    }
+
+    it.each([
+      [401, 'RAYA_UNAUTHORIZED'],
+      [400, 'RAYA_BAD_REQUEST'],
+      [503, 'RAYA_UPSTREAM_ERROR'],
+    ])('a %i keeps only status and message in details', async (status, code) => {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(status, PII_BODY));
+      const result = await provider(fetchImpl).dispatch(baseInput());
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.code).toBe(code);
+      expect(result.error.details).toEqual({ status, message: 'max_concurrent_calls is required' });
+      expect(JSON.stringify(result.error.details)).not.toContain('+910000000001');
+    });
+
+    it('omits message when the body is not JSON', async () => {
+      const notJson = {
+        ok: false,
+        status: 400,
+        headers: new Headers(),
+        json: async () => ({}),
+        text: async () => 'phone +910000000001 rejected',
+      } as unknown as Response;
+      const result = await provider(vi.fn().mockResolvedValueOnce(notJson)).dispatch(baseInput());
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.details).toEqual({ status: 400 });
+    });
+
+    it('omits message when the JSON body has no string message', async () => {
+      const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse(400, { error: 'bad_request' }));
+      const result = await provider(fetchImpl).dispatch(baseInput());
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.details).toEqual({ status: 400 });
+    });
   });
 
   it('I4 (retry only): reuses an existing batch by deterministic name instead of creating a duplicate', async () => {
@@ -924,5 +1009,94 @@ describe('RayaVoiceProvider', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.value.providerBatchRef).toBe('42');
+  });
+});
+
+describe('RayaVoiceProvider — malformed 2xx bodies', () => {
+  function provider(fetchImpl: ReturnType<typeof vi.fn>, maxAttempts = 3) {
+    return new RayaVoiceProvider({
+      baseUrl: 'https://raya.example.com/api',
+      apiKey: 'key-abc',
+      maxAttempts,
+      acquireSlot: vi.fn().mockResolvedValue(undefined),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+  }
+
+  it('maps a null create body to err(RAYA_BAD_RESPONSE) instead of throwing', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse(200, null));
+    const result = await provider(fetchImpl).dispatch(baseInput());
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('RAYA_BAD_RESPONSE');
+  });
+
+  it('treats a non-object errors[] entry as an unmapped rejection instead of throwing', async () => {
+    const input = baseInput({
+      contacts: [
+        { ref: 'i1', name: 'A', phone: '9000000001', variables: {} },
+        { ref: 'i2', name: 'B', phone: '9000000002', variables: {} },
+      ],
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, { ...CREATE_OK_BODY, contactsInserted: 2, validRows: 2, errors: [null] }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, START_OK_BODY));
+    const result = await provider(fetchImpl).dispatch(input);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.accepted).toEqual(['i1']);
+    expect(result.value.rejected).toEqual([{ ref: 'i2', error: 'raya_unmapped_rejection' }]);
+  });
+
+  it('keeps an array start body out of providerResponse.start', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, CREATE_OK_BODY))
+      .mockResolvedValueOnce(jsonResponse(200, [{ id: 7 }]));
+    const result = await provider(fetchImpl).dispatch(baseInput());
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.providerResponse.start).toEqual({});
+  });
+
+  it('falls through to create when the list-batches body is null', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, null))
+      .mockResolvedValueOnce(jsonResponse(200, CREATE_OK_BODY))
+      .mockResolvedValueOnce(jsonResponse(200, START_OK_BODY));
+    const result = await provider(fetchImpl).dispatch(baseInput({ reuseExisting: true }));
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.providerBatchRef).toBe('42');
+  });
+
+  it('skips a null entry in the list-batches body and still finds the match', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          batches: [null, { id: 77, name: 'batch-1', agent_id: 'agent-1', total_contacts: 1 }],
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, START_OK_BODY));
+    const result = await provider(fetchImpl).dispatch(baseInput({ reuseExisting: true }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.providerBatchRef).toBe('77');
+  });
+
+  it('keeps the message of a non-Error fetch rejection', async () => {
+    const fetchImpl = vi.fn().mockRejectedValueOnce('socket hang up');
+    const result = await provider(fetchImpl, 1).dispatch(baseInput());
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.code).toBe('RAYA_TRANSPORT_FAILED');
+    expect(result.error.message).toBe('raya /batch transport failure: socket hang up');
   });
 });

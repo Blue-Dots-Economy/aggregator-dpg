@@ -69,6 +69,8 @@ export type CuratedProviderResponse<T = Record<string, unknown>> = T & {
 export function brandCuratedProviderResponse<T extends Record<string, unknown>>(
   value: T,
 ): CuratedProviderResponse<T> {
+  // The brand has no runtime value, so only an assertion can add it. This is the one place it is added.
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
   return value as CuratedProviderResponse<T>;
 }
 

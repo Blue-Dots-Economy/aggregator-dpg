@@ -23,6 +23,7 @@ import { getRedis } from '../services/redis.js';
 import { enqueueRowProcessBulk } from '../services/bulk-queue.js';
 import { streamCsvParse, type FileFailureReason } from './bulk-file-stream.js';
 import { WELL_KNOWN_COLUMNS } from '@aggregator-dpg/shared-primitives/bulk-columns';
+import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 export type { FileFailureReason };
 
@@ -100,7 +101,12 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
   try {
     stream = await getCsvStream(job.s3Key);
   } catch (err) {
-    log.error({ status: 'failure', sub: 's3.get', error: (err as Error).message });
+    log.error({
+      status: 'failure',
+      sub: 's3.get',
+      error: errorMessage(err),
+      error_type: errorType(err),
+    });
     await markStatus(job.uploadId, 'file_failed', 'system_error');
     return { status: 'failed', reason: 'system_error' };
   }
@@ -174,14 +180,9 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
 
     await enqueueRowProcessBulk(payloads);
   };
-  const chunks: (typeof rows)[] = [];
   for (let off = 0; off < rows.length; off += ENQUEUE_CHUNK) {
-    chunks.push(rows.slice(off, off + ENQUEUE_CHUNK));
+    await writeChunk(rows.slice(off, off + ENQUEUE_CHUNK));
   }
-  await chunks.reduce<Promise<void>>(
-    (prev, slice) => prev.then(() => writeChunk(slice)),
-    Promise.resolve(),
-  );
 
   await redis.hset(`${ns}:meta`, 'total_rows', String(rows.length), 'reader_done', '1');
 
@@ -234,5 +235,5 @@ function extractRequiredFields(s: Record<string, unknown>): string[] {
 function extractAllProperties(s: Record<string, unknown>): string[] {
   const props = s['properties'];
   if (!props || typeof props !== 'object') return [];
-  return Object.keys(props as Record<string, unknown>);
+  return Object.keys(props);
 }
