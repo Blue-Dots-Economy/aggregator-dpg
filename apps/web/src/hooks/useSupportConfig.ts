@@ -10,7 +10,8 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { ResponseShapeError, jsonFetch } from '@/services/http';
+import { ResponseShapeError } from '@/lib/response-shape-error';
+import { jsonFetch } from '@/services/http';
 import {
   SUPPORT_CONFIG_FALLBACK,
   SupportConfigSchema,
