@@ -1140,4 +1140,41 @@ describe('<DashboardPageRoot />', () => {
       });
     });
   });
+
+  // The API and the BFF accept a `limit` of 1–200. "Select all N matching"
+  // reads more rows than that in pages of 200.
+  describe('select all matching above the API page limit', () => {
+    it('reads every matching row in pages of at most 200', async () => {
+      const TOTAL = 450;
+      mockUseDashboard.mockReturnValue({
+        data: dashboardPageFixture({ totalMatching: TOTAL }),
+        isLoading: false,
+        isError: false,
+      });
+      mockDashboardServiceDashboard.mockImplementation(
+        async (q: { page: number; limit: number }) => {
+          const start = (q.page - 1) * q.limit;
+          const count = Math.max(0, Math.min(q.limit, TOTAL - start));
+          const items = Array.from({ length: count }, (_, i) =>
+            rawItem({ profile_item_id: `m-${start + i}`, name: `Matching ${start + i}` }),
+          );
+          return dashboardPageFixture({ items, totalMatching: TOTAL });
+        },
+      );
+      renderPage();
+
+      await userEvent.click(screen.getByLabelText('Select all rows on this page'));
+      await userEvent.click(screen.getByRole('button', { name: `Select all ${TOTAL} matching` }));
+
+      expect(await screen.findByText(`All ${TOTAL} matching are selected.`)).toBeInTheDocument();
+      const calls = mockDashboardServiceDashboard.mock.calls.map(
+        (c) => c[0] as { page: number; limit: number },
+      );
+      expect(calls.map((c) => [c.page, c.limit])).toEqual([
+        [1, 200],
+        [2, 200],
+        [3, 200],
+      ]);
+    });
+  });
 });

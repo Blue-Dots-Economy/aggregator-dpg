@@ -10,6 +10,7 @@ import { dashboardService } from '@/services/dashboard.service';
 import type { ParticipantBase } from '@/types';
 import { filterRowsByLifecycle, type LifecycleFilterValue } from '../_lib/lifecycle';
 import { PAGE_SIZE, pageQuery } from '../_lib/query';
+import { readAllMatching } from '../_lib/select-all';
 import { buildStatusOptions, type StatusFilter } from '../_lib/status';
 import { useLifecycleUrlFilter } from './useLifecycleUrlFilter';
 
@@ -72,14 +73,21 @@ export function useDomainDashboard<R extends ParticipantBase>(
     [rows, lifecycleFilter],
   );
 
-  /** Reads every row matching the current filters, for "Select all N matching". */
+  /**
+   * Reads every row matching the current filters, for "Select all N matching".
+   *
+   * Reads in pages within the API's `limit` range.
+   */
   const fetchAllMatching = async (): Promise<R[]> => {
     if (!filters) return [];
-    const res = await dashboardService.dashboard({
-      ...pageQuery(filters, 1),
-      limit: slice?.total_matching ?? rollup?.total_items ?? PAGE_SIZE,
-    });
-    const all = (res.by_domain[filters.domain]?.items ?? []).map((p, i) => toRow(p, locale, i));
+    const items = await readAllMatching(
+      async (pageNo, limit) => {
+        const res = await dashboardService.dashboard({ ...pageQuery(filters, pageNo), limit });
+        return res.by_domain[filters.domain]?.items ?? [];
+      },
+      slice?.total_matching ?? rollup?.total_items ?? PAGE_SIZE,
+    );
+    const all = items.map((p, i) => toRow(p, locale, i));
     return filterRowsByLifecycle(all, lifecycleFilter);
   };
 
