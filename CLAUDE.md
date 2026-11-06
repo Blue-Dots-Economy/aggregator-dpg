@@ -6,6 +6,71 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Aggregator DPG — the Aggregator-facing app of the Blue Dots / Signal Stack ecosystem. pnpm + Turbo monorepo, TypeScript-only. See `README.md` for the product spec and `SETUP.md` for the local-stack walkthrough.
 
+## Coding principles
+
+Behavioural guidelines to reduce common LLM coding mistakes (from [andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills)). They bias toward caution over speed; for trivial tasks, use judgment.
+
+### 1. Think before coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity first
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+### 3. Surgical changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it — don't delete it.
+
+When your changes create orphans:
+
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: every changed line should trace directly to the user's request.
+
+### 4. Goal-driven execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
 ## Toolchain
 
 Versions and ports are in `package.json` (`engines`, `packageManager`), `turbo.json`, and `docker-compose.yml`. Two things those files don't tell you:
@@ -26,6 +91,11 @@ pnpm --filter <pkg> test --coverage                # ≥ 70% line target
 Stack run modes, env layout, and the VM-deploy checklist live in the `local-stack` skill — including the footgun that `make reset` destroys data volumes. Note `make rebuild-web` is only needed for web **code** changes: the web image takes no `NEXT_PUBLIC_*` build args, so env changes apply on restart (see `apps/web/CLAUDE.md` for the server-resolve-then-pass-down pattern that keeps it that way).
 
 Commits run husky/lint-staged (`prettier --write` + `eslint --fix`) on staged files. Conventional Commits required; **do not bypass with `--no-verify`** (per `CONTRIBUTING.md`).
+
+Commit messages:
+
+- Keep them short: a single Conventional Commits subject line (e.g. `fix(api): reject expired approval tokens`), with a brief body only when the reason isn't obvious.
+- **No AI attribution.** Do not add `Co-Authored-By: Claude`, `Generated with Claude Code`, or any other AI/assistant trailer to commit messages or PR descriptions.
 
 ## Architecture
 
