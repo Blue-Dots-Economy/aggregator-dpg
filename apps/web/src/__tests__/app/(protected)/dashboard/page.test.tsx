@@ -271,6 +271,31 @@ describe('<DashboardView />', () => {
     });
   });
 
+  describe('profile read failure', () => {
+    it('shows an error with a retry instead of loading for good', async () => {
+      const refetch = vi.fn();
+      mockUseProfileRaw.mockReturnValue({ data: undefined, isError: true, refetch });
+      renderPage();
+      expect(screen.queryByText('Loading…')).toBeNull();
+      expect(screen.getByRole('alert')).toHaveTextContent('Failed to load. Please try again.');
+      expect(screen.getByRole('heading', { name: 'My Blue Dots' })).toBeInTheDocument();
+      expect(mockUseDashboard).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+      expect(refetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps showing the dashboard when a later profile read fails', () => {
+      mockUseProfileRaw.mockReturnValue({
+        data: { type: 'seeker' },
+        isError: true,
+        refetch: vi.fn(),
+      });
+      renderPage();
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.getByText('Alice Seeker')).toBeInTheDocument();
+    });
+  });
+
   describe('shell', () => {
     it('renders the Topbar title/subtitle from aggregator config and an Add Participants action', async () => {
       renderPage();

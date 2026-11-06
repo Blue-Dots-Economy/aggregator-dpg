@@ -198,7 +198,8 @@
       "exporting": "निर्यात हो रहा है…",
       "refresh": "रिफ्रेश करें",
       "refreshing": "रिफ्रेश हो रहा है…",
-      "addParticipants": "प्रतिभागी जोड़ें"
+      "addParticipants": "प्रतिभागी जोड़ें",
+      "retry": "पुनः प्रयास करें"
     },
     "state": {
       "loading": "लोड हो रहा है…",

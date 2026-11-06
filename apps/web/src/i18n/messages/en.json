@@ -198,7 +198,8 @@
       "exporting": "Exporting…",
       "refresh": "Refresh",
       "refreshing": "Refreshing…",
-      "addParticipants": "Add Participants"
+      "addParticipants": "Add Participants",
+      "retry": "Try again"
     },
     "state": {
       "loading": "Loading…",

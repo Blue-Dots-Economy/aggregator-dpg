@@ -45,6 +45,34 @@ export function DashboardLoadingFrame() {
   );
 }
 
+/** Props for {@link DashboardErrorFrame}. */
+export interface DashboardErrorFrameProps {
+  /** Reads the profile again. */
+  onRetry: () => void;
+}
+
+/** Top bar with an error and a retry, shown when the profile cannot be read. */
+export function DashboardErrorFrame({ onRetry }: DashboardErrorFrameProps) {
+  const t = useTranslations('dashboard');
+  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
+  return (
+    <div className="fade-up">
+      <Topbar
+        title={dashboardTitle(cfg.brand.short_name)}
+        subtitle={cfg.brand.tagline ?? DEFAULT_SUBTITLE}
+      />
+      <div className="flex flex-col items-center gap-3 py-12">
+        <div role="alert" className="text-[13px] text-rose-600">
+          {t('state.failedToLoad')}
+        </div>
+        <Button kind="ghost" icon={<I.refresh size={14} />} onClick={onRetry}>
+          {t('buttons.retry')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The dashboard for the coordinator's own domain.
  *
