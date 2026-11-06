@@ -401,3 +401,62 @@ describe('<InviteForm />', () => {
     expect(sendButton()).toBeDisabled();
   });
 });
+
+describe('<InviteForm /> edges', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('adds the typed address when the box loses focus', () => {
+    renderForm();
+    fireEvent.change(emailBox(), { target: { value: 'blur@x.org' } });
+    fireEvent.blur(emailBox());
+    expect(screen.getAllByRole('button', { name: 'Remove blur@x.org' })).toHaveLength(2);
+    expect(emailBox()).toHaveValue('');
+  });
+
+  it('removes a person from the names list', () => {
+    renderForm();
+    typeAddresses('a@x.org b@x.org');
+    const [, nameRowRemove] = screen.getAllByRole('button', { name: 'Remove a@x.org' });
+    fireEvent.click(nameRowRemove!);
+    expect(screen.queryByRole('button', { name: 'Remove a@x.org' })).not.toBeInTheDocument();
+    expect(sendButton()).toHaveTextContent('Send 1 invite');
+  });
+
+  it('shows an invalid address in the box as a chip instead of sending it', () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    renderForm();
+    fireEvent.change(emailBox(), { target: { value: 'not-an-email' } });
+    fireEvent.click(sendButton());
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Remove not-an-email' })).toBeInTheDocument();
+    expect(screen.getByText(/1 invalid email/)).toBeInTheDocument();
+  });
+
+  it('words an unknown reason plainly and dismisses the result', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respond(
+        {
+          sent: 0,
+          resent: 0,
+          invalid: [{ email: 'odd@x.org', reason: 'something_new' }],
+          existing: [],
+        },
+        200,
+      ),
+    );
+    renderForm();
+    typeAddresses('odd@x.org');
+    fireEvent.click(sendButton());
+    await waitFor(() =>
+      expect(screen.getByText(/^Not sent:/)).toHaveTextContent(
+        `odd@x.org (${messages.console.invite.reason.other})`,
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: messages.console.invite.dismiss }));
+    expect(screen.queryByText(/^Not sent:/)).not.toBeInTheDocument();
+  });
+});
