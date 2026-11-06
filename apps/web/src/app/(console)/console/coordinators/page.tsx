@@ -63,6 +63,50 @@ function omit(filters: Readonly<Record<string, string>>, key: string): Record<st
   return Object.fromEntries(Object.entries(filters).filter(([k]) => k !== key));
 }
 
+type Translate = Awaited<ReturnType<typeof getTranslations<'console'>>>;
+type Status = (typeof STATUSES)[number];
+
+/** The filters in use, as URL query values. */
+function activeFilters(orgId?: string, status?: Status, serves?: string): Record<string, string> {
+  return {
+    ...(orgId ? { org_id: orgId } : {}),
+    ...(status ? { status } : {}),
+    ...(serves ? { serves } : {}),
+  };
+}
+
+/** One removable chip per filter in use. */
+function filterChips(
+  t: Translate,
+  f: Readonly<{
+    orgId: string | undefined;
+    status: Status | undefined;
+    serves: string | undefined;
+    orgName: string | undefined;
+    servesLabel: string | undefined;
+  }>,
+): FilterChip[] {
+  const chips: FilterChip[] = [];
+  if (f.orgId) {
+    chips.push({ key: 'org_id', label: t('coordinators.org_filter'), value: f.orgName ?? f.orgId });
+  }
+  if (f.status) {
+    chips.push({
+      key: 'status',
+      label: t('coordinators.status_filter'),
+      value: t(`status.${f.status}`),
+    });
+  }
+  if (f.serves) {
+    chips.push({
+      key: 'serves',
+      label: t('coordinators.serves_filter'),
+      value: f.servesLabel ?? f.serves,
+    });
+  }
+  return chips;
+}
+
 export default async function ConsoleCoordinatorsPage({
   searchParams,
 }: Readonly<{
@@ -101,27 +145,14 @@ export default async function ConsoleCoordinatorsPage({
   const orgById = new Map(ownOrgs.map((o) => [o.id, o]));
   // Same gate the sidebar link used to apply, now checked here instead.
   const showInvite = actor.ok && canInvite(actor.me);
-  const keep: Record<string, string> = {
-    ...(orgId ? { org_id: orgId } : {}),
-    ...(status ? { status } : {}),
-    ...(serves ? { serves } : {}),
-  };
-  const chips: FilterChip[] = [];
-  if (orgId) {
-    const value = orgById.get(orgId)?.name ?? orgId;
-    chips.push({ key: 'org_id', label: t('coordinators.org_filter'), value });
-  }
-  if (status) {
-    chips.push({
-      key: 'status',
-      label: t('coordinators.status_filter'),
-      value: t(`status.${status}`),
-    });
-  }
-  if (serves) {
-    const value = domains.find((d) => d.id === serves)?.label ?? serves;
-    chips.push({ key: 'serves', label: t('coordinators.serves_filter'), value });
-  }
+  const keep = activeFilters(orgId, status, serves);
+  const chips = filterChips(t, {
+    orgId,
+    status,
+    serves,
+    orgName: orgId ? orgById.get(orgId)?.name : undefined,
+    servesLabel: domains.find((d) => d.id === serves)?.label,
+  });
   // Roles are null when access control is off: no Access column then.
   const showAccess = page.users.some((u) => Array.isArray(u.roles));
   const catalogue = showAccess ? await consoleReadOptional<RolesResponse>('/v1/roles') : null;

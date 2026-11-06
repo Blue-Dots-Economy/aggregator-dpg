@@ -125,13 +125,13 @@
 /* Bulk dark overrides for Tailwind colour utilities used across the
    app. Avoids per-component `dark:` variant churn. */
 .dark .bg-white {
-  background-color: var(--bd-card) !important;
+  background-color: var(--bd-card);
 }
 .dark .from-white {
-  --tw-gradient-from: var(--bd-card) !important;
+  --tw-gradient-from: var(--bd-card);
 }
 .dark .to-white {
-  --tw-gradient-to: var(--bd-card) !important;
+  --tw-gradient-to: var(--bd-card);
 }
 .dark .border-white {
   border-color: var(--bd-card);
@@ -257,13 +257,13 @@
   color: var(--bd-fg);
 }
 .dark .bd-public-light .bg-white {
-  background-color: #ffffff !important;
+  background-color: #ffffff;
 }
 .dark .bd-public-light .from-white {
-  --tw-gradient-from: #ffffff !important;
+  --tw-gradient-from: #ffffff;
 }
 .dark .bd-public-light .to-white {
-  --tw-gradient-to: #ffffff !important;
+  --tw-gradient-to: #ffffff;
 }
 .dark .bd-public-light .text-ink-900 {
   color: #0b1020;

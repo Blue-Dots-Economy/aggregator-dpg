@@ -34,7 +34,7 @@ export function localDigits(value: unknown): string {
  *
  * @param props - The RJSF widget props.
  */
-export function PhoneWidget(props: WidgetProps) {
+export function PhoneWidget(props: Readonly<WidgetProps>) {
   const { id, value, onChange, onBlur, onFocus, disabled, readonly, placeholder, rawErrors } =
     props;
   const local = localDigits(value);

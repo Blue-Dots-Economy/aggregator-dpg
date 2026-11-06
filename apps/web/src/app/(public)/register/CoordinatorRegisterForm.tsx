@@ -176,7 +176,10 @@ export function CoordinatorRegisterForm({
     // The invite email stays editable; the owner sees any mismatch at approval.
     return {
       ...withPhone,
-      name: { ...((withPhone['name'] as Record<string, unknown>) ?? {}), 'ui:widget': 'hidden' },
+      name: {
+        ...(withPhone['name'] as Record<string, unknown> | undefined),
+        'ui:widget': 'hidden',
+      },
     };
   }, [uiSchema, formSchema, inheritsFromOrg]);
 
