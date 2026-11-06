@@ -3,18 +3,32 @@
  *
  *   GET /api/[org]/[slug]/lookup?email|phone_number+network+domain
  *
- * Anonymous, like the submit route: no token is attached. Forwards the query
- * string to `/public/v1/aggregators/:orgSlug/lookup` and returns the upstream
- * status and body unchanged.
+ * Anonymous, like the submit route: no token is attached. Checks the query
+ * with the API's rules, forwards only its keys to
+ * `/public/v1/aggregators/:orgSlug/lookup`, and returns the upstream status
+ * and body unchanged. A query the rules reject answers 400 without an
+ * upstream call.
  */
 
 import { randomUUID } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import { parseQuery } from '@/lib/bff-input';
 
 export const runtime = 'nodejs';
 
 const UPSTREAM_TIMEOUT_MS = 10_000;
 const REQUEST_ID_HEADER = 'x-request-id';
+
+/** Same rules as the API's public lookup `QuerySchema`. */
+const LookupQuerySchema = z
+  .object({
+    email: z.string().trim().email().optional(),
+    phone_number: z.string().trim().min(1).optional(),
+    network: z.string().trim().min(1),
+    domain: z.string().trim().min(1),
+  })
+  .refine((v) => Boolean(v.email) || Boolean(v.phone_number));
 
 interface BffErrorEnvelope {
   error: {
@@ -46,7 +60,7 @@ interface RouteParams {
  *
  * The upstream endpoint is keyed only on `org`; `slug` is ignored.
  *
- * @param req - The incoming request; the search params are forwarded as-is.
+ * @param req - The incoming request; its checked query keys are forwarded.
  * @param params - Path params; `org` becomes the upstream `:orgSlug`.
  * @returns Upstream response proxied with original status and body.
  */
@@ -54,8 +68,21 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Ne
   const { org } = await params;
   const reqId = req.headers.get(REQUEST_ID_HEADER) ?? `req-${randomUUID()}`;
 
+  const query = parseQuery(new URL(req.url).searchParams, LookupQuerySchema);
+  if (!query.ok) {
+    return jsonError(
+      400,
+      envelope(
+        'SCHEMA_VALIDATION',
+        'Invalid query parameters',
+        'The lookup query was not accepted.',
+        reqId,
+      ),
+      reqId,
+    );
+  }
+
   const base = process.env.API_BASE_URL ?? 'http://localhost:4000';
-  const search = new URL(req.url).searchParams.toString();
 
   // Forward the client IP and user-agent so the API rate-limits per caller.
   const incomingXff = req.headers.get('x-forwarded-for');
@@ -67,7 +94,7 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Ne
   let upstream: Response;
   try {
     upstream = await fetch(
-      `${base}/public/v1/aggregators/${encodeURIComponent(org)}/lookup?${search}`,
+      `${base}/public/v1/aggregators/${encodeURIComponent(org)}/lookup${query.search}`,
       {
         method: 'GET',
         headers: {

@@ -9,6 +9,15 @@ Guidance specific to working inside `apps/web`. Read the root `CLAUDE.md` first 
 
 **This split is convention-enforced only.** A new authenticated data route wired to `proxyServiceRequest`/`getServiceAccessToken` instead of `callApi` would authorize with the aggregator-wide service-account token rather than the caller's own — the concrete cross-aggregator data-leak shape to watch for. When adding a route: if it needs to know _which_ aggregator/coordinator is calling, it must use `callApi`; only genuinely pre-session registration/lookup endpoints should use the service-token path.
 
+## BFF routes check path ids and query before calling the API
+
+Route Handlers that forward a path id or a query use `lib/bff-input.ts`. Bodies are not checked here; the API validates them.
+
+- **Path ids.** An id the API looks up in a `uuid` column must pass `isPostgresUuid` (every text form Postgres reads, braces and missing hyphens included), else the route returns `invalidIdResponse()` (404 `NOT_FOUND`, also used by the console proxy) without calling the API. The console routes use the stricter `isUuid` for their own ids.
+- **Query.** `parseQuery(searchParams, schema)` checks the query with a Zod schema that copies the API route's `querystring` schema, and returns either a rebuilt search string or a 400 `SCHEMA_VALIDATION` response (no field names or values in it). Only the schema's keys are forwarded, first value of each, as the same decoded value re-encoded. Never forward `req.nextUrl.search` as-is.
+- **Match the API, never stricter.** Copy the rules from the API route (`apps/api/src/routes/**`) and drop its defaults; a value coerced upstream (such as the dashboard's `refresh`) stays a plain string here so it reaches the API unchanged. A rule stricter than the API rejects a request that worked.
+- **The query schemas are copies of the API's.** Change them together with the API route's schema; sharing one schema between the API and the web is a planned follow-up.
+
 ## Session shape and where `auth-context` actually comes from
 
 `SessionStoreBase` (abstract class) has `RedisSessionStore` (prod) + `MemorySessionStore` (test), both taking a `ttlSec` — **`SESSION_TTL_SECONDS` env var, defaulting to 12h** (`lib/session/index.ts:24`), sliding (refreshed on every `get`). `SessionData` holds `sub/email/phone/name` + `accessToken/refreshToken/idToken` + their expiries + `createdAt/lastSeenAt`. `server-session.ts` wraps `getSession()` in React's `cache()` so one Redis hit is shared per request tree.

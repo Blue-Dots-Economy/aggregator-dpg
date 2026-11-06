@@ -59,3 +59,44 @@ describe('GET /api/dashboard', () => {
     expect(await res.text()).toBe('oops');
   });
 });
+
+describe('GET /api/dashboard query check', () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it.each([
+    ['?domain=seeker', '?domain=seeker'],
+    [
+      '?domain=seeker&page=2&limit=200&status=At_Risk_2&lifecycle=draft&refresh=true',
+      '?domain=seeker&page=2&limit=200&status=At_Risk_2&lifecycle=draft&refresh=true',
+    ],
+    ['?domain=seeker&refresh=false', '?domain=seeker&refresh=false'],
+    ['?domain=seeker&lifecycle=live&other=1', '?domain=seeker&lifecycle=live'],
+  ])('forwards %j as %j', async (query, forwarded) => {
+    mockCallApi.mockResolvedValue(
+      new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+    const res = await GET(new NextRequest(`http://localhost/api/dashboard${query}`));
+    expect(res.status).toBe(200);
+    expect(mockCallApi).toHaveBeenCalledWith(
+      `/v1/dashboard${forwarded}`,
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it.each([
+    '?domain=',
+    '?page=0',
+    '?limit=201',
+    '?status=at-risk',
+    '?status=' + 'a'.repeat(33),
+    '?status=%20',
+    '?lifecycle=paused',
+  ])('rejects %j with 400 without calling upstream', async (query) => {
+    const res = await GET(new NextRequest(`http://localhost/api/dashboard${query}`));
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: { code: 'SCHEMA_VALIDATION', title: 'Invalid query parameters' },
+    });
+    expect(mockCallApi).not.toHaveBeenCalled();
+  });
+});
