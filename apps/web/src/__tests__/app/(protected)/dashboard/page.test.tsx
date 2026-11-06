@@ -818,4 +818,326 @@ describe('<DashboardPageRoot />', () => {
       expect(arg).not.toHaveProperty('lifecycle');
     });
   });
+
+  // The provider view has the same data states, row mapping and filters as
+  // the seeker view, read for the coordinator's own provider-like domain.
+  describe('ProvidersTab', () => {
+    function useProviderDashboard(opts: Parameters<typeof dashboardPageFixture>[0] = {}) {
+      mockUseAggregatorConfig.mockReturnValue({ data: TWO_DOMAIN_CFG_FIXTURE });
+      mockUseProfileRaw.mockReturnValue({ data: { type: 'provider' } });
+      mockUseDashboard.mockReturnValue({
+        data: dashboardPageFixture({ domain: 'provider', ...opts }),
+        isLoading: false,
+        isError: false,
+      });
+      mockDashboardServiceDashboard.mockResolvedValue(
+        dashboardPageFixture({ domain: 'provider', ...opts }),
+      );
+    }
+
+    function rowFor(name: string): HTMLElement {
+      const row = screen.getAllByRole('row').find((r) => within(r).queryByText(name));
+      if (!row) throw new Error(`row ${name} not found`);
+      return row;
+    }
+
+    describe('data states', () => {
+      it('requests the provider domain with the first page', () => {
+        useProviderDashboard();
+        renderPage();
+        expect(mockUseDashboard).toHaveBeenLastCalledWith({
+          domain: 'provider',
+          page: 1,
+          limit: 25,
+        });
+      });
+
+      it('shows the loading card while the dashboard query is in flight', () => {
+        useProviderDashboard();
+        mockUseDashboard.mockReturnValue({ data: undefined, isLoading: true, isError: false });
+        renderPage();
+        expect(screen.getByText('Loading…')).toBeInTheDocument();
+        expect(screen.queryByRole('table')).toBeNull();
+      });
+
+      it('shows the error card when the dashboard query fails', () => {
+        useProviderDashboard();
+        mockUseDashboard.mockReturnValue({ data: undefined, isLoading: false, isError: true });
+        renderPage();
+        expect(screen.getByText('Failed to load. Please try again.')).toBeInTheDocument();
+        expect(screen.queryByRole('table')).toBeNull();
+      });
+
+      it('renders the summary, stat cards, tiles and rows for a populated response', () => {
+        useProviderDashboard();
+        renderPage();
+        expect(screen.getByText('Providers')).toBeInTheDocument();
+        expect(screen.getByText('120 total')).toBeInTheDocument();
+        expect(screen.getByText('90')).toBeInTheDocument();
+        expect(screen.getByText('15')).toBeInTheDocument();
+        expect(screen.getByText('5')).toBeInTheDocument();
+        expect(screen.getByText('10')).toBeInTheDocument();
+        // The provider active card has no plural suffix, unlike the seeker one.
+        expect(screen.getAllByText('Active').length).toBeGreaterThan(0);
+        expect(screen.queryByText('Active Providers')).toBeNull();
+        expect(screen.getByText('Total Providers')).toBeInTheDocument();
+        expect(screen.getByText('67% of all profiles')).toBeInTheDocument();
+        expect(screen.getByText(/Provider Activity & Status/)).toBeInTheDocument();
+        expect(screen.getByText('Alice Seeker')).toBeInTheDocument();
+        expect(screen.getByText('Bob Draft')).toBeInTheDocument();
+      });
+
+      it('renders the empty state', () => {
+        useProviderDashboard({
+          items: [],
+          rollup: { total_items: 0, complete_profiles: 0, has_applications: 0, by_status: {} },
+          totalMatching: 0,
+        });
+        renderPage();
+        expect(screen.getByText('0 total')).toBeInTheDocument();
+        expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+        expect(screen.getByText('Showing 0–0 of 0')).toBeInTheDocument();
+        expect(screen.getByLabelText('Select all rows on this page')).toBeDisabled();
+      });
+
+      it('uses the status labels and descriptions from the domain status rules', () => {
+        mockUseAggregatorConfig.mockReturnValue({
+          data: {
+            ...TWO_DOMAIN_CFG_FIXTURE,
+            domains: [
+              TWO_DOMAIN_CFG_FIXTURE.domains[0]!,
+              {
+                ...TWO_DOMAIN_CFG_FIXTURE.domains[1]!,
+                status_rules: [{ status: 'at_risk', label: 'Stalled', description: 'No hires' }],
+              },
+            ],
+          },
+        });
+        mockUseProfileRaw.mockReturnValue({ data: { type: 'provider' } });
+        mockUseDashboard.mockReturnValue({
+          data: dashboardPageFixture({ domain: 'provider' }),
+          isLoading: false,
+          isError: false,
+        });
+        renderPage();
+        expect(screen.getByText('Stalled')).toBeInTheDocument();
+        expect(screen.getByText('No hires')).toBeInTheDocument();
+      });
+    });
+
+    describe('row mapping', () => {
+      it('maps id, name, initials, joined date, completion and status', () => {
+        useProviderDashboard({
+          items: [
+            rawItem({
+              profile_item_id: 'job-7',
+              name: 'Acme Hiring',
+              profile_status: 'at_risk',
+              profile_completion_pct: 60,
+              profile_created_at: '2024-03-09T12:00:00.000Z',
+            }),
+          ],
+        });
+        renderPage();
+        const row = rowFor('Acme Hiring');
+        expect(within(row).getByText('job-7')).toBeInTheDocument();
+        expect(within(row).getByText('AH')).toBeInTheDocument();
+        expect(within(row).getByText('Mar 09, 2024')).toBeInTheDocument();
+        expect(within(row).getByText('60%')).toBeInTheDocument();
+        expect(within(row).getByText('At Risk')).toBeInTheDocument();
+        expect(within(row).getByRole('checkbox')).toBeInTheDocument();
+      });
+
+      it('falls back for a row without an id, a name or dates', () => {
+        useProviderDashboard({
+          items: [
+            {
+              profile_completion_pct: 'n/a',
+              initiated: null,
+              received: undefined,
+              actionable_tags: 'none',
+            },
+          ],
+        });
+        renderPage();
+        const row = screen.getAllByRole('row')[1];
+        if (!row) throw new Error('row not found');
+        // A row with no profile_item_id gets a synthetic id and is not selectable.
+        expect(within(row).getByText('row-0')).toBeInTheDocument();
+        expect(within(row).getByText('??')).toBeInTheDocument();
+        expect(within(row).getByText('0%')).toBeInTheDocument();
+        expect(within(row).getByText('Active')).toBeInTheDocument();
+        expect(within(row).queryByRole('checkbox')).toBeNull();
+        expect(within(row).getByText('last seen —')).toBeInTheDocument();
+      });
+
+      it('maps an inactive status and sums the initiated actions', () => {
+        useProviderDashboard({
+          items: [
+            rawItem({
+              profile_item_id: 'job-8',
+              name: 'Beta',
+              profile_status: 'inactive',
+              initiated: { create: 2, accept: 3, reject: 1, cancel: 1 },
+            }),
+          ],
+        });
+        renderPage();
+        const row = rowFor('Beta');
+        expect(within(row).getByText('Inactive')).toBeInTheDocument();
+        expect(within(row).getByText('7')).toBeInTheDocument();
+      });
+
+      it('treats a row without lifecycle_status as live from 100% completion', async () => {
+        useProviderDashboard();
+        renderPage();
+        await userEvent.selectOptions(screen.getByLabelText('Lifecycle'), 'live');
+        expect(screen.getByText('Alice Seeker')).toBeInTheDocument();
+        expect(screen.queryByText('Bob Draft')).not.toBeInTheDocument();
+      });
+
+      it('uses lifecycle_status from the row over the completion percentage', () => {
+        nav.resetSearchParams('lifecycle=draft');
+        useProviderDashboard({
+          items: [
+            rawItem({
+              profile_item_id: 'job-9',
+              name: 'Full Draft',
+              profile_completion_pct: 100,
+              lifecycle_status: 'draft',
+            }),
+          ],
+        });
+        renderPage();
+        expect(screen.getByText('Full Draft')).toBeInTheDocument();
+      });
+    });
+
+    describe('filters', () => {
+      it('narrows rows by lifecycle and writes it to the URL', async () => {
+        useProviderDashboard();
+        renderPage();
+        await userEvent.selectOptions(screen.getByLabelText('Lifecycle'), 'draft');
+        expect(screen.queryByText('Alice Seeker')).not.toBeInTheDocument();
+        expect(screen.getByText('Bob Draft')).toBeInTheDocument();
+        expect(mockReplace).toHaveBeenCalledWith('/dashboard?lifecycle=draft', { scroll: false });
+        await waitFor(() =>
+          expect(mockUseDashboard).toHaveBeenLastCalledWith(
+            expect.objectContaining({ domain: 'provider', page: 1, lifecycle: 'draft' }),
+          ),
+        );
+      });
+
+      it('reads the lifecycle from the URL and falls back to "all" for an unknown value', () => {
+        nav.resetSearchParams('lifecycle=bogus');
+        useProviderDashboard();
+        renderPage();
+        expect(screen.getByLabelText('Lifecycle')).toHaveValue('all');
+        expect(screen.getByText('Alice Seeker')).toBeInTheDocument();
+      });
+
+      it('refetches with the selected status and keeps the full status list', async () => {
+        useProviderDashboard();
+        renderPage();
+        await userEvent.click(screen.getByRole('button', { name: /All filters/i }));
+        await userEvent.click(within(screen.getByRole('menu')).getByText('At Risk'));
+        await waitFor(() =>
+          expect(mockUseDashboard).toHaveBeenLastCalledWith(
+            expect.objectContaining({ domain: 'provider', page: 1, status: 'at_risk' }),
+          ),
+        );
+        // The filtered reply has a smaller by_status; the menu keeps every status.
+        mockUseDashboard.mockReturnValue({
+          data: dashboardPageFixture({
+            domain: 'provider',
+            rollup: { by_status: { at_risk: 15 } },
+          }),
+          isLoading: false,
+          isError: false,
+        });
+        await userEvent.click(screen.getByRole('button', { name: 'At Risk' }));
+        const menu = screen.getByRole('menu');
+        expect(within(menu).getByText('Inactive')).toBeInTheDocument();
+        expect(within(menu).getByText('New')).toBeInTheDocument();
+      });
+
+      it('searches the current page by name or id', async () => {
+        useProviderDashboard();
+        renderPage();
+        await userEvent.type(screen.getByLabelText('Search participants'), 'p2');
+        expect(screen.queryByText('Alice Seeker')).not.toBeInTheDocument();
+        expect(screen.getByText('Bob Draft')).toBeInTheDocument();
+        expect(screen.getByText(/Matching 1 of 2/)).toBeInTheDocument();
+      });
+    });
+
+    describe('pagination, refresh and selection', () => {
+      it('refetches the next page for the provider domain', async () => {
+        useProviderDashboard({ totalMatching: 60 });
+        renderPage();
+        await userEvent.click(screen.getByRole('button', { name: 'Next page' }));
+        await waitFor(() =>
+          expect(mockUseDashboard).toHaveBeenLastCalledWith(
+            expect.objectContaining({ domain: 'provider', page: 2 }),
+          ),
+        );
+      });
+
+      it('forces a refresh of the provider domain', async () => {
+        useProviderDashboard();
+        renderPage();
+        await userEvent.click(screen.getByRole('button', { name: /Refresh dashboard/i }));
+        await waitFor(() =>
+          expect(mockDashboardServiceDashboard).toHaveBeenCalledWith(
+            expect.objectContaining({ domain: 'provider', refresh: true }),
+          ),
+        );
+        expect(await screen.findByText('Refreshed just now')).toBeInTheDocument();
+      });
+
+      it('shows the refresh-failed hint when the refresh rejects', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        useProviderDashboard();
+        mockDashboardServiceDashboard.mockRejectedValueOnce(new Error('upstream timeout'));
+        renderPage();
+        await userEvent.click(screen.getByRole('button', { name: /Refresh dashboard/i }));
+        expect(await screen.findByText('Refresh failed')).toBeInTheDocument();
+      });
+
+      it('selects every matching provider with the active lifecycle', async () => {
+        nav.resetSearchParams('lifecycle=draft');
+        useProviderDashboard({ totalMatching: 5 });
+        const draftItems = Array.from({ length: 5 }, (_, i) =>
+          rawItem({
+            profile_item_id: `job-${i}`,
+            name: `Draft Job ${i}`,
+            lifecycle_status: 'draft',
+            profile_completion_pct: 40,
+          }),
+        );
+        mockDashboardServiceDashboard.mockResolvedValueOnce(
+          dashboardPageFixture({ domain: 'provider', items: draftItems, totalMatching: 5 }),
+        );
+        renderPage();
+        await userEvent.click(screen.getByLabelText('Select all rows on this page'));
+        await userEvent.click(screen.getByRole('button', { name: 'Select all 5 matching' }));
+        await waitFor(() =>
+          expect(mockDashboardServiceDashboard).toHaveBeenCalledWith(
+            expect.objectContaining({ domain: 'provider', limit: 5, lifecycle: 'draft' }),
+          ),
+        );
+        expect(await screen.findByText('All 5 matching are selected.')).toBeInTheDocument();
+      });
+
+      it('clears the selection when the status filter changes', async () => {
+        useProviderDashboard();
+        renderPage();
+        await userEvent.click(within(rowFor('Alice Seeker')).getByRole('checkbox'));
+        expect(screen.getByText('1 selected')).toBeInTheDocument();
+        await userEvent.click(screen.getByRole('button', { name: /All filters/i }));
+        await userEvent.click(within(screen.getByRole('menu')).getByText('At Risk'));
+        expect(screen.queryByText('1 selected')).toBeNull();
+      });
+    });
+  });
 });
