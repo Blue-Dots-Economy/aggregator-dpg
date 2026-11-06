@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { useTranslations } from 'next-intl';
 import { I } from '@/icons';
@@ -35,11 +35,27 @@ export function LinkPublicUrl({ publicUrl, slug }: Readonly<LinkPublicUrlProps>)
   // `<host>/<orgSlug>/<slug>`.
   const { host: urlHost, path: urlPath } = splitPublicUrl(publicUrl);
 
+  // One copied-mark timer at a time, cleared on unmount.
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
+
   const onCopy = async () => {
     if (!navigator.clipboard) return;
-    await navigator.clipboard.writeText(publicUrl);
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+    } catch (err) {
+      // The browser refused the write; the missing tick tells the user.
+      console.warn('copy link failed', err);
+      return;
+    }
     setCopied(true);
-    setTimeout(() => setCopied(false), COPIED_MARK_MS);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied(false), COPIED_MARK_MS);
   };
 
   const openQr = async () => {

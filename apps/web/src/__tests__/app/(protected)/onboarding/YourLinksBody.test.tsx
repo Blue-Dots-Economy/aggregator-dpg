@@ -495,6 +495,83 @@ describe('<YourLinksBody />', () => {
     expect(await screen.findByText('conflict text')).toBeInTheDocument();
   });
 
+  it('live card: a failed copy shows no copied mark and logs a warning', async () => {
+    const user = userEvent.setup();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('denied'));
+    useRegistrationLinks.mockReturnValue({
+      data: [baseLink({ status: 'live', public_url: 'https://bluedots.example/acme/d' })],
+      isLoading: false,
+      error: null,
+    });
+    renderLinks();
+
+    await user.click(screen.getByRole('button', { name: 'Copy link' }));
+    await waitFor(() =>
+      expect(warnSpy).toHaveBeenCalledWith('copy link failed', expect.any(Error)),
+    );
+    expect(screen.queryByTitle('Copied!')).not.toBeInTheDocument();
+    warnSpy.mockRestore();
+  });
+
+  it('live card: a second copy keeps the mark for the full delay, and unmount clears the timer', async () => {
+    vi.useFakeTimers();
+    try {
+      useRegistrationLinks.mockReturnValue({
+        data: [baseLink({ status: 'live', public_url: 'https://bluedots.example/acme/d' })],
+        isLoading: false,
+        error: null,
+      });
+      const { unmount } = renderLinks();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+      });
+      act(() => vi.advanceTimersByTime(1000));
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+      });
+      act(() => vi.advanceTimersByTime(1000));
+      // The first click's timer would have cleared the mark at 1500 ms.
+      expect(screen.getByTitle('Copied!')).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(600));
+      expect(screen.queryByTitle('Copied!')).not.toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+      });
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('removes the highlight ring on time even when ?new= is dropped first', () => {
+    vi.useFakeTimers();
+    try {
+      searchParamsRef.current = new URLSearchParams('new=l2');
+      useRegistrationLinks.mockReturnValue({
+        data: [baseLink({ link_id: 'l2', status: 'draft', context: { title: 'Draft One' } })],
+        isLoading: false,
+        error: null,
+      });
+      const { rerender, container } = renderLinks();
+      expect(container.querySelector('.ring-2')).not.toBeNull();
+
+      searchParamsRef.current = new URLSearchParams();
+      rerender(
+        <NextIntlClientProvider locale="en" messages={testMessages}>
+          <YourLinksBody />
+        </NextIntlClientProvider>,
+      );
+      act(() => vi.advanceTimersByTime(2000));
+      expect(container.querySelector('.ring-2')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('live card: renders a malformed public_url as raw text instead of crashing', () => {
     useRegistrationLinks.mockReturnValue({
       data: [baseLink({ status: 'live', public_url: 'not a valid url' })],
