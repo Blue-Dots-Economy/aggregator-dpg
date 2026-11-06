@@ -23,7 +23,5 @@ await writeFile(
   JSON.stringify(spec, null, 2) + '\n',
 );
 await app.close();
-console.log(
-  `openapi.json written (${Object.keys((spec as { paths: object }).paths).length} paths)`,
-);
+console.log(`openapi.json written (${Object.keys(spec.paths ?? {}).length} paths)`);
 process.exit(0);

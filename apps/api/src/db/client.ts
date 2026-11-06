@@ -4,15 +4,12 @@
  * One `pg.Pool` per process, created on first use. `closeDb()` closes it on shutdown.
  */
 
-import { createRequire } from 'node:module';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
-import type * as PgModule from 'pg';
+import pg from 'pg';
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 import * as schema from './schema.js';
 
-const require = createRequire(import.meta.url);
-// pg is CommonJS; load it with createRequire to avoid ESM interop issues.
-const { Pool } = require('pg') as typeof PgModule;
+const { Pool } = pg;
 
 type Pool = InstanceType<typeof Pool>;
 

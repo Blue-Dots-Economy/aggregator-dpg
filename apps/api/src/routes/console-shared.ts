@@ -9,6 +9,7 @@
  */
 
 import type { FastifyBaseLogger, FastifyReply } from 'fastify';
+import { z } from 'zod';
 import { getMailer } from '@aggregator-dpg/mailer';
 import type { Org, User } from '@aggregator-dpg/shared-primitives/user-org';
 import { config } from '../config.js';
@@ -134,9 +135,15 @@ export function ownerContact(
 
 const encode = (v: unknown): string => Buffer.from(JSON.stringify(v)).toString('base64url');
 
+/** A coordinator cursor as encoded: created-at (ISO) and id. */
+const UserCursorSchema = z.object({ c: z.string(), i: z.string() });
+
+/** An org cursor as encoded: name and id. */
+const OrgCursorSchema = z.object({ n: z.string(), i: z.string() });
+
 function decode(cursor: string): unknown {
   try {
-    return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as unknown;
+    return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
   } catch {
     // An unreadable cursor is a client error, answered below.
     return null;
@@ -157,11 +164,11 @@ export function encodeUserCursor(c: CoordinatorCursor): string {
  * @throws {HttpError} SCHEMA_VALIDATION when malformed.
  */
 export function decodeUserCursor(cursor: string): CoordinatorCursor {
-  const v = decode(cursor) as { c?: unknown; i?: unknown } | null;
-  if (!v || typeof v.c !== 'string' || typeof v.i !== 'string') throw badCursor();
-  const createdAt = new Date(v.c);
+  const v = UserCursorSchema.safeParse(decode(cursor));
+  if (!v.success) throw badCursor();
+  const createdAt = new Date(v.data.c);
   if (Number.isNaN(createdAt.getTime())) throw badCursor();
-  return { createdAt, id: v.i };
+  return { createdAt, id: v.data.i };
 }
 
 /** Encodes an org page cursor. */
@@ -175,9 +182,9 @@ export function encodeOrgCursor(c: OrgCursor): string {
  * @throws {HttpError} SCHEMA_VALIDATION when malformed.
  */
 export function decodeOrgCursor(cursor: string): OrgCursor {
-  const v = decode(cursor) as { n?: unknown; i?: unknown } | null;
-  if (!v || typeof v.n !== 'string' || typeof v.i !== 'string') throw badCursor();
-  return { name: v.n, id: v.i };
+  const v = OrgCursorSchema.safeParse(decode(cursor));
+  if (!v.success) throw badCursor();
+  return { name: v.data.n, id: v.data.i };
 }
 
 /**

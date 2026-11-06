@@ -8,6 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import type { ValidateFunction } from 'ajv';
+import { isRecord } from './json-record.js';
 import { getNetworkConfig } from './network-config.js';
 import { resolveSchema, schemaCandidates } from './schema-ref.js';
 
@@ -39,14 +40,14 @@ export async function getRegistrationValidator(): Promise<ValidateFunction> {
   if (cachedValidator) return cachedValidator;
   const schemaPath = resolveSchemaPath();
   const raw = readFileSync(schemaPath, 'utf8');
-  const schema = JSON.parse(raw) as Record<string, unknown>;
+  const schema: unknown = JSON.parse(raw);
 
   try {
     const cfg = await getNetworkConfig();
     const ids = cfg.domainIds;
     if (ids.length > 0) {
-      const props = schema['properties'] as Record<string, Record<string, unknown>> | undefined;
-      if (props?.['type']) {
+      const props = isRecord(schema) ? schema['properties'] : undefined;
+      if (isRecord(props) && isRecord(props['type'])) {
         props['type']['enum'] = ids;
       }
     }

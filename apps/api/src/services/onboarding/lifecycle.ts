@@ -22,8 +22,6 @@ export const LIFECYCLE_STATUSES = ['draft', 'live', 'paused', 'retired'] as cons
  */
 export type LifecycleStatus = (typeof LIFECYCLE_STATUSES)[number];
 
-const VALID = new Set<LifecycleStatus>(LIFECYCLE_STATUSES);
-
 /**
  * Resolves the lifecycle for a signals item, applying the back-compat rule.
  *
@@ -43,5 +41,5 @@ export function resolveLifecycle(
   if (item == null) return null;
   const raw = item.lifecycle_status;
   if (raw === undefined) return 'draft';
-  return VALID.has(raw as LifecycleStatus) ? (raw as LifecycleStatus) : 'draft';
+  return LIFECYCLE_STATUSES.find((s) => s === raw) ?? 'draft';
 }

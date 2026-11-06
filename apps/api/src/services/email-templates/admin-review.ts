@@ -58,8 +58,9 @@ export function renderAdminReview(v: AdminReviewVars): {
     hour: '2-digit',
     minute: '2-digit',
   })} IST`;
-  // True when the coordinator registered with a different email than the invited one.
-  const emailMismatch = Boolean(v.invitedEmail && v.invitedEmail !== v.applicantEmail);
+  // The invited email, when the coordinator registered with a different one.
+  const mismatchedInvite =
+    v.invitedEmail && v.invitedEmail !== v.applicantEmail ? v.invitedEmail : null;
 
   // Rows as data, so the last row can skip its divider and optional rows drop out.
   const rows: Array<{ label: string; value: string; style?: string }> = [
@@ -68,12 +69,12 @@ export function renderAdminReview(v: AdminReviewVars): {
     ...(v.parent ? [{ label: 'Parent', value: escapeHtml(v.parent) }] : []),
     { label: 'Contact', value: escapeHtml(v.applicantName) },
     { label: 'Email', value: escapeHtml(v.applicantEmail) },
-    ...(emailMismatch
+    ...(mismatchedInvite !== null
       ? [
           {
             label: 'Invited email',
             value:
-              `${escapeHtml(v.invitedEmail as string)} ` +
+              `${escapeHtml(mismatchedInvite)} ` +
               `<span style="color:#7c84a6;">— they're registering with a different email (above)</span>`,
             style: 'color:#b45309;',
           },
@@ -134,7 +135,7 @@ Association: ${v.association}
 Type:        ${label}
 ${v.parent ? `Parent:      ${v.parent}\n` : ''}Contact:     ${v.applicantName}
 Email:       ${v.applicantEmail}
-${emailMismatch ? `Invited email: ${v.invitedEmail} (registering with a different email)\n` : ''}Phone:       ${v.applicantPhone}
+${mismatchedInvite !== null ? `Invited email: ${mismatchedInvite} (registering with a different email)\n` : ''}Phone:       ${v.applicantPhone}
 ${v.state ? `State:       ${v.state}\n` : ''}Submitted:   ${submitted}
 Reference:   ${v.registrationId}
 ${v.about ? `\nAbout:\n${v.about}\n` : ''}

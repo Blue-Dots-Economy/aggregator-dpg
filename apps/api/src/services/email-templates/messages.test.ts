@@ -1,10 +1,15 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { resolveConfigRoot } from '@aggregator-dpg/network-config/paths';
 import { parseProperties } from './parse-properties.js';
 import { substitute, toPlainText, tokensUsed } from './substitute.js';
 import {
   getMessage,
   assertMessagesComplete,
   emailMessageOverridePaths,
+  loadEmailMessageOverrides,
   _setEmailMessages,
 } from './messages.js';
 import { EMAIL_CASE_IDS, caseKeys, caseTokenTypes, requiredMessageKeys } from './email-cases.js';
@@ -178,5 +183,46 @@ describe('override path precedence', () => {
     // vitest config points at the repo's own config/.
     expect(() => assertMessagesComplete()).not.toThrow();
     expect(getMessage('applicant_approved.subject')).toContain('approved');
+  });
+});
+
+/** The bundled defaults, relative to the config root. */
+const MESSAGES_FILE = path.join('emails', 'messages.properties');
+
+describe('loadEmailMessageOverrides read errors', () => {
+  /** A config root holding the bundled defaults and, for `blue_dot`, a directory where a layer file belongs. */
+  function configRootWithDirectoryLayer(): string {
+    const root = mkdtempSync(path.join(tmpdir(), 'email-messages-'));
+    const defaults = path.join(resolveConfigRoot(process.env), MESSAGES_FILE);
+    mkdirSync(path.dirname(path.join(root, MESSAGES_FILE)), { recursive: true });
+    copyFileSync(defaults, path.join(root, MESSAGES_FILE));
+    mkdirSync(path.join(root, 'blue_dot', 'emails', 'messages.properties'), { recursive: true });
+    return root;
+  }
+
+  it('skips a network layer that cannot be read', async () => {
+    const root = configRootWithDirectoryLayer();
+    try {
+      await expect(
+        loadEmailMessageOverrides({ CONFIG_ROOT: root, AGGREGATOR_NETWORK: 'blue_dot' }),
+      ).resolves.toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses an EMAIL_MESSAGES_PATH that cannot be read, naming the error code', async () => {
+    const root = configRootWithDirectoryLayer();
+    try {
+      await expect(
+        loadEmailMessageOverrides({
+          CONFIG_ROOT: root,
+          AGGREGATOR_NETWORK: 'purple_dot',
+          EMAIL_MESSAGES_PATH: path.join(root, 'blue_dot'),
+        }),
+      ).rejects.toThrow(/EMAIL_MESSAGES_PATH is set but unreadable: .* \(EISDIR\)/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

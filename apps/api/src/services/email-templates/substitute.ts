@@ -51,7 +51,7 @@ export function substitute(
  * @returns Token names, deduplicated.
  */
 export function tokensUsed(template: string): string[] {
-  return [...new Set([...template.matchAll(TOKEN_RE)].map((m) => m[1] as string))];
+  return [...new Set([...template.matchAll(TOKEN_RE)].flatMap((m) => (m[1] ? [m[1]] : [])))];
 }
 
 /**

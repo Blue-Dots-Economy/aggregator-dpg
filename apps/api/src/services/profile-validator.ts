@@ -30,7 +30,7 @@ export function getProfileValidator(): ValidateFunction {
   if (cachedValidator) return cachedValidator;
   const schemaPath = resolveSchemaPath();
   const raw = readFileSync(schemaPath, 'utf8');
-  const schema = JSON.parse(raw) as Record<string, unknown>;
+  const schema: unknown = JSON.parse(raw);
   const ajv = new AjvCtor({ allErrors: true, strict: false });
   addFormats(ajv);
   const validator: ValidateFunction = ajv.compile(schema);

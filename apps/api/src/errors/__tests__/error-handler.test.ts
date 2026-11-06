@@ -17,6 +17,17 @@ describe('global error handler envelope', () => {
     app.post('/__test/native-throw', { config: { rbac: { access: 'public' } } }, async () => {
       throw new Error('boom from inside');
     });
+    app.post('/__test/validation', { config: { rbac: { access: 'public' } } }, async () => {
+      throw Object.assign(new Error('body/name must be string'), {
+        validation: [{ instancePath: '/name', message: 'must be string' }],
+      });
+    });
+    app.post('/__test/empty-validation', { config: { rbac: { access: 'public' } } }, async () => {
+      throw Object.assign(new Error('no issues'), { validation: [] });
+    });
+    app.post('/__test/too-large', { config: { rbac: { access: 'public' } } }, async () => {
+      throw Object.assign(new Error('body too large'), { code: 'FST_ERR_CTP_BODY_TOO_LARGE' });
+    });
   });
 
   afterAll(async () => {
@@ -84,6 +95,30 @@ describe('global error handler envelope', () => {
     expect(res.body).not.toContain('"hint"');
     expect(res.body).not.toContain('"stack"');
     expect(res.body).not.toContain('boom from inside');
+  });
+
+  it('maps an error with validation issues to SCHEMA_VALIDATION with the issues', async () => {
+    const res = await app.inject({ method: 'POST', url: '/__test/validation', payload: {} });
+    expect(res.statusCode).toBe(400);
+    const body = res.json() as {
+      error: { code: string; fields?: { issues?: unknown[] } };
+    };
+    expect(body.error.code).toBe('SCHEMA_VALIDATION');
+    expect(body.error.fields?.issues).toEqual([
+      { instancePath: '/name', message: 'must be string' },
+    ]);
+  });
+
+  it('treats an empty validation list as an internal error', async () => {
+    const res = await app.inject({ method: 'POST', url: '/__test/empty-validation', payload: {} });
+    expect(res.statusCode).toBe(500);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('INTERNAL');
+  });
+
+  it('maps the body-too-large error code to PAYLOAD_TOO_LARGE', async () => {
+    const res = await app.inject({ method: 'POST', url: '/__test/too-large', payload: {} });
+    expect(res.statusCode).toBe(413);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('PAYLOAD_TOO_LARGE');
   });
 
   it('emits an envelope for unmatched routes via the not-found handler', async () => {

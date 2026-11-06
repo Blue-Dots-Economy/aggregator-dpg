@@ -11,6 +11,7 @@ import {
   WELL_KNOWN_COLUMNS,
   wellKnownColumnMeta,
 } from '@aggregator-dpg/shared-primitives/bulk-columns';
+import { isRecord, stringItems } from '../json-record.js';
 
 /**
  * Example cell for a well-known column, or undefined when `name` is a normal
@@ -63,8 +64,8 @@ export interface IdentitySelectors {
  * @returns Property names in template column order.
  */
 export function orderedColumns(schema: JsonSchema): string[] {
-  const properties = (schema['properties'] as Record<string, Record<string, unknown>>) ?? {};
-  const required = Array.isArray(schema['required']) ? (schema['required'] as string[]) : [];
+  const properties = propertiesOf(schema);
+  const required = stringItems(schema['required']);
   const requiredSet = new Set(required);
 
   const ordered: string[] = [];
@@ -81,6 +82,12 @@ export function orderedColumns(schema: JsonSchema): string[] {
   return ordered;
 }
 
+/** The schema's `properties` object, or an empty one when it has none. */
+function propertiesOf(schema: JsonSchema): Record<string, unknown> {
+  const properties = schema['properties'];
+  return isRecord(properties) ? properties : {};
+}
+
 /**
  * Builds the downloadable CSV template for a participant schema.
  *
@@ -90,7 +97,7 @@ export function orderedColumns(schema: JsonSchema): string[] {
  */
 export function buildCsvTemplate(schema: JsonSchema, options: CsvTemplateOptions = {}): string {
   const { arrayDelimiter = '|', exampleRow = true, identity } = options;
-  const properties = (schema['properties'] as Record<string, Record<string, unknown>>) ?? {};
+  const properties = propertiesOf(schema);
   const ordered = orderedColumns(schema);
 
   const header = ordered.map(escapeCsvCell).join(',') + '\n';
@@ -101,7 +108,8 @@ export function buildCsvTemplate(schema: JsonSchema, options: CsvTemplateOptions
       .map((name) => {
         const wellKnown = wellKnownExample(name);
         if (wellKnown !== undefined) return escapeCsvCell(wellKnown);
-        const prop = properties[name] ?? {};
+        const fragment = properties[name];
+        const prop = isRecord(fragment) ? fragment : {};
         const identityCell =
           identity === undefined ? undefined : identityExample(name, prop, identity);
         return escapeCsvCell(identityCell ?? exampleValue(name, prop, arrayDelimiter));
@@ -181,12 +189,14 @@ export function identityExample(
 
 /** Reads a schema keyword as a string, or undefined when absent/wrong type. */
 function str(prop: Record<string, unknown>, key: string): string | undefined {
-  return typeof prop[key] === 'string' ? (prop[key] as string) : undefined;
+  const value = prop[key];
+  return typeof value === 'string' ? value : undefined;
 }
 
 /** Reads a schema keyword as a number, or undefined when absent/wrong type. */
 function num(prop: Record<string, unknown>, key: string): number | undefined {
-  return typeof prop[key] === 'number' ? (prop[key] as number) : undefined;
+  const value = prop[key];
+  return typeof value === 'number' ? value : undefined;
 }
 
 /**
@@ -198,9 +208,10 @@ function num(prop: Record<string, unknown>, key: string): number | undefined {
  * @returns The joined cell value.
  */
 function arrayExample(prop: Record<string, unknown>, arrayDelimiter: string): string {
-  const items = (prop['items'] as Record<string, unknown> | undefined) ?? {};
+  const items = prop['items'];
   const count = Math.max(2, num(prop, 'minItems') ?? 1);
-  const itemEnum = Array.isArray(items['enum']) ? (items['enum'] as unknown[]) : undefined;
+  const itemEnum: unknown[] | undefined =
+    isRecord(items) && Array.isArray(items['enum']) ? items['enum'] : undefined;
   const values = itemEnum
     ? itemEnum.slice(0, Math.min(count, itemEnum.length)).map(String)
     : Array.from({ length: count }, (_, i) => `example ${i + 1}`);

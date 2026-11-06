@@ -156,16 +156,22 @@ function parseSimpleYaml(raw: string): {
       cur = {};
       const rest = dash[1];
       const m = rest.match(/^(id|name)\s*:\s*(.+)/);
-      if (m && m[1] && m[2]) cur[m[1] as 'id' | 'name'] = unquote(m[2]);
+      if (m && m[1] && m[2]) setField(cur, m[1], unquote(m[2]));
       continue;
     }
     const kv = line.match(/^\s+(id|name)\s*:\s*(.+)/);
     if (kv && kv[1] && kv[2] && cur) {
-      cur[kv[1] as 'id' | 'name'] = unquote(kv[2]);
+      setField(cur, kv[1], unquote(kv[2]));
     }
   }
   flush();
   return { personas, services };
+}
+
+/** Sets the entry's `id` or `name`; any other key is ignored. */
+function setField(entry: Partial<RegistryEntry>, key: string, value: string): void {
+  if (key === 'id') entry.id = value;
+  else if (key === 'name') entry.name = value;
 }
 
 function unquote(v: string): string {

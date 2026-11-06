@@ -21,6 +21,7 @@ import { createRequire } from 'node:module';
 import type { ValidateFunction } from 'ajv';
 import { describeSchemaIssue, type SchemaIssue } from '@aggregator-dpg/network-config/field-errors';
 import { isValidGstin, normaliseGstin } from '@aggregator-dpg/shared-primitives/org-details';
+import { isRecord, stringItems, type JsonRecord } from './json-record.js';
 import { getNetworkConfig } from './network-config.js';
 import { resolveSchema, schemaCandidates } from './schema-ref.js';
 
@@ -54,8 +55,6 @@ const FIXED_REGISTRATION_KEYS: ReadonlySet<string> = new Set([
 /** Message for a GSTIN that fails its check character, unless the schema words it. */
 const GSTIN_MESSAGE = 'Please enter a valid GSTIN.';
 
-type JsonRecord = Record<string, unknown>;
-
 /** Field → message, one per bad field. */
 export type OrgFieldErrors = Record<string, string>;
 
@@ -81,19 +80,14 @@ interface CompiledOrgSchema {
 
 let cached: Promise<CompiledOrgSchema> | null = null;
 
-/** Whether `value` is a plain JSON object. */
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /**
  * Sets the allowed values of every `x-network-domains` property to the
  * network's domain ids. Leaves the schema alone when there are none.
  */
-function fillNetworkDomains(properties: Record<string, JsonRecord>, ids: string[]): void {
+function fillNetworkDomains(properties: JsonRecord, ids: string[]): void {
   if (ids.length === 0) return;
   for (const prop of Object.values(properties)) {
-    if (prop['x-network-domains'] !== true) continue;
+    if (!isRecord(prop) || prop['x-network-domains'] !== true) continue;
     if (prop['type'] === 'array') {
       const items = isRecord(prop['items']) ? prop['items'] : {};
       prop['items'] = { ...items, type: 'string', enum: ids };
@@ -113,11 +107,11 @@ async function compile(): Promise<CompiledOrgSchema> {
         .join(', ')}`,
     );
   }
-  const schema = JSON.parse(readFileSync(resolved.path, 'utf8')) as JsonRecord;
-  const properties = (isRecord(schema['properties']) ? schema['properties'] : {}) as Record<
-    string,
-    JsonRecord
-  >;
+  const schema: unknown = JSON.parse(readFileSync(resolved.path, 'utf8'));
+  if (!isRecord(schema)) {
+    throw new Error(`org-registration schema is not a JSON object: ${resolved.path}`);
+  }
+  const properties = isRecord(schema['properties']) ? schema['properties'] : {};
   try {
     fillNetworkDomains(properties, (await getNetworkConfig()).domainIds);
   } catch {
@@ -127,12 +121,13 @@ async function compile(): Promise<CompiledOrgSchema> {
   const updatable = new Set<string>();
   const gstin = new Set<string>();
   for (const [name, prop] of Object.entries(properties)) {
+    if (!isRecord(prop)) continue;
     if (prop['x-updatable'] === true) updatable.add(name);
     if (prop['x-check'] === 'gstin') gstin.add(name);
   }
 
   const fields = new Set(Object.keys(properties).filter((k) => !FIXED_REGISTRATION_KEYS.has(k)));
-  const required = Array.isArray(schema['required']) ? (schema['required'] as string[]) : [];
+  const required = stringItems(schema['required']);
   const ajv = new AjvCtor({ allErrors: true, strict: false });
   addFormats(ajv);
   const subSchema = (names: Iterable<string>, req: string[]): JsonRecord => ({
@@ -173,7 +168,8 @@ function compiled(): Promise<CompiledOrgSchema> {
  */
 function describe(validate: ValidateFunction, schema: JsonRecord): OrgFieldErrors {
   const errors: OrgFieldErrors = {};
-  for (const issue of (validate.errors ?? []) as SchemaIssue[]) {
+  const issues: readonly SchemaIssue[] = validate.errors ?? [];
+  for (const issue of issues) {
     const { field, message } = describeSchemaIssue(issue, schema);
     const key = field.split('.')[0] ?? field;
     if (!Object.hasOwn(errors, key)) errors[key] = message;
@@ -207,8 +203,9 @@ function checkGstin(c: CompiledOrgSchema, values: JsonRecord, errors: OrgFieldEr
     const value = values[name];
     if (typeof value !== 'string' || Object.hasOwn(errors, name)) continue;
     if (!isValidGstin(value)) {
-      const prop = (c.schema['properties'] as Record<string, JsonRecord>)[name];
-      const authored = prop?.['x-error-message'];
+      const properties = c.schema['properties'];
+      const prop = isRecord(properties) ? properties[name] : undefined;
+      const authored = isRecord(prop) ? prop['x-error-message'] : undefined;
       errors[name] = typeof authored === 'string' && authored.trim() ? authored : GSTIN_MESSAGE;
     }
   }

@@ -40,8 +40,8 @@ try {
   logger.error({
     operation: 'ownerNameBackfill',
     status: 'failure',
-    error: (err as Error).message,
-    error_type: (err as Error).constructor?.name,
+    error: err instanceof Error ? err.message : String(err),
+    error_type: err instanceof Error ? err.constructor.name : typeof err,
   });
   await closeDb().catch(() => undefined);
   process.exit(1);

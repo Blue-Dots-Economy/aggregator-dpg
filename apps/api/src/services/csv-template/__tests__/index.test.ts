@@ -189,4 +189,23 @@ describe('buildCsvTemplate', () => {
     expect(cell).toBe(expected);
     expect(new RegExp(pattern).test(cell)).toBe(true);
   });
+
+  it('lists only the well-known columns for a schema without properties', () => {
+    const { header } = parse(buildCsvTemplate({ type: 'object', required: ['ghost'] }));
+    expect(header).not.toContain('ghost');
+    expect(header.length).toBeGreaterThan(0);
+  });
+
+  it('samples a property whose fragment is not an object like an empty one', () => {
+    const { header, example } = parse(
+      buildCsvTemplate({
+        type: 'object',
+        required: ['anything', 7],
+        properties: { anything: true, tags: { type: 'array', items: true } },
+      }),
+    );
+    expect(header.slice(0, 2)).toEqual(['anything', 'tags']);
+    expect(example[0]).toBe('Example anything');
+    expect(example[1]).toBe('example 1|example 2');
+  });
 });

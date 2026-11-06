@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import cors from '@fastify/cors';
 import formbody from '@fastify/formbody';
 import sensible from '@fastify/sensible';
@@ -58,7 +59,20 @@ import { coerceToHttpError, toEnvelope, toLogPayload } from './errors/serialize.
 import { assertRouteDeclared } from './services/authz/index.js';
 
 const REQUEST_ID_HEADER = 'x-request-id';
-const pkg = createRequire(import.meta.url)('../package.json') as { version: string };
+/** The fields of `package.json` the app reads. */
+const PackageJsonSchema = z.object({ version: z.string() });
+const pkg = PackageJsonSchema.parse(createRequire(import.meta.url)('../package.json'));
+
+/** Fastify's schema-validation issues on an error, when it has any. */
+function validationIssues(err: unknown): unknown[] {
+  if (typeof err !== 'object' || err === null || !('validation' in err)) return [];
+  return Array.isArray(err.validation) ? err.validation : [];
+}
+
+/** Whether `err` carries the given Fastify error code. */
+function hasCode(err: unknown, code: string): boolean {
+  return typeof err === 'object' && err !== null && 'code' in err && err.code === code;
+}
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -235,14 +249,14 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   app.setErrorHandler((rawErr, req, reply) => {
     // Turn Fastify validation errors into the standard error envelope.
-    const fastifyValidation = (rawErr as { validation?: unknown[] }).validation;
+    const fastifyValidation = validationIssues(rawErr);
     let err: HttpError;
-    if (Array.isArray(fastifyValidation) && fastifyValidation.length > 0) {
+    if (fastifyValidation.length > 0) {
       err = new HttpError(ERR.SCHEMA_VALIDATION, {
         cause: rawErr,
         fields: { issues: fastifyValidation },
       });
-    } else if ((rawErr as { code?: string }).code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+    } else if (hasCode(rawErr, 'FST_ERR_CTP_BODY_TOO_LARGE')) {
       // This Fastify error has no `statusCode`, so map it to 413 here instead of a 500.
       err = new HttpError(ERR.PAYLOAD_TOO_LARGE, { cause: rawErr });
     } else {
