@@ -750,7 +750,7 @@
       "known_as_values_more": "+{count} more",
       "known_as_values_new": "New value",
       "known_as_values_placeholder": "Add a value, e.g. District",
-      "known_as_values_exists": "\u201c{name}\u201d is already in the list.",
+      "known_as_values_exists": "“{name}” is already in the list.",
       "known_as_values_notes_heading": "How it works",
       "known_as_values_unchanged": "No changes",
       "known_as_values_unsaved": "Unsaved changes",
@@ -1167,6 +1167,11 @@
       "body": "Something went wrong on our side. Try again, or go back to the console.",
       "retry": "Try again",
       "home": "Go to the console"
+    },
+    "unavailable": {
+      "title": "The console couldn't load",
+      "body": "Something went wrong on our side. Try again in a moment.",
+      "retry": "Try again"
     },
     "page_not_found": {
       "title": "We couldn't find that",

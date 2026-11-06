@@ -62,7 +62,8 @@ vi.mock('@/hooks/useDashboard', () => ({ useDashboard }));
 vi.mock('@/hooks/useProfile', () => ({ useProfileRaw }));
 vi.mock('next/navigation', () => ({ usePathname }));
 vi.mock('next/image', () => ({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // A plain <img> stands in for next/image so jsdom can assert src and alt.
+  // eslint-disable-next-line @next/next/no-img-element, @typescript-eslint/no-explicit-any
   default: (props: any) => <img {...props} alt={props.alt} />,
 }));
 vi.mock('next-intl', () => ({

@@ -102,6 +102,10 @@ export function LoginView({ returnTo, error }: LoginViewProps): JSX.Element {
                       first. Not shown on `account_switch`, which is the state
                       after that logout. */}
                   {error !== 'account_switch' ? (
+                    // A route handler that redirects to the identity provider.
+                    // It needs a full page load; `Link` would prefetch it and
+                    // navigate on the client.
+                    // eslint-disable-next-line @next/next/no-html-link-for-pages
                     <a
                       href="/api/auth/login?switch=1"
                       className="mt-2 block font-semibold underline underline-offset-2"

@@ -16,6 +16,6 @@ export default function ProtectedError({
   reset,
 }: Readonly<{ error: Error & { digest?: string }; reset: () => void }>) {
   const t = useTranslations('page_error');
-  const copy = { title: t('title'), body: t('body'), retry: t('retry'), home: t('home') };
-  return <PageError copy={copy} homeHref="/dashboard" reset={reset} />;
+  const copy = { title: t('title'), body: t('body'), retry: t('retry') };
+  return <PageError copy={copy} home={{ href: '/dashboard', label: t('home') }} reset={reset} />;
 }

@@ -20,6 +20,8 @@ vi.mock('@/hooks/useAggregatorConfig', () => ({
 
 // next/image → plain <img> so the src/alt assert works in jsdom.
 vi.mock('next/image', () => ({
+  // A plain <img> stands in for next/image so jsdom can assert src and alt.
+  // eslint-disable-next-line @next/next/no-img-element
   default: ({ src, alt }: { src: string; alt: string }) => <img src={src} alt={alt} />,
 }));
 

@@ -10,6 +10,6 @@ import { PageError } from '@/components/ui/PageError';
 
 export default function ConsoleError({ reset }: Readonly<{ error: Error; reset: () => void }>) {
   const t = useTranslations('console.page_error');
-  const copy = { title: t('title'), body: t('body'), retry: t('retry'), home: t('home') };
-  return <PageError copy={copy} homeHref="/console" reset={reset} />;
+  const copy = { title: t('title'), body: t('body'), retry: t('retry') };
+  return <PageError copy={copy} home={{ href: '/console', label: t('home') }} reset={reset} />;
 }

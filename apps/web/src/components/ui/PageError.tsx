@@ -2,7 +2,7 @@
 
 /**
  * Error screen body shared by the route `error.tsx` files: a title, a short
- * explanation, a retry and a link back to a home page.
+ * explanation, a retry and, when given, a link back to a home page.
  *
  * Callers pass translated copy only. Never pass the error's message or digest.
  */
@@ -18,25 +18,30 @@ export interface PageErrorCopy {
   title: string;
   body: string;
   retry: string;
-  home: string;
+}
+
+/** A link back to a page that still works. */
+export interface PageErrorHome {
+  href: string;
+  label: string;
 }
 
 /** Props for {@link PageError}. */
 export interface PageErrorProps {
   copy: PageErrorCopy;
-  /** Target of the home link. */
-  homeHref: string;
+  /** The home link. Leave it out when the home page would fail the same way. */
+  home?: PageErrorHome;
   /** The `reset` function Next.js passes to `error.tsx`; clears the error state. */
   reset: () => void;
 }
 
 /**
- * Renders the error message with a retry button and a home link.
+ * Renders the error message with a retry button and an optional home link.
  *
  * Retry refreshes the route as well as resetting the boundary, so a page that
  * failed on a server read is fetched from the server again.
  */
-export function PageError({ copy, homeHref, reset }: Readonly<PageErrorProps>) {
+export function PageError({ copy, home, reset }: Readonly<PageErrorProps>) {
   const router = useRouter();
   const retry = () => {
     startTransition(() => {
@@ -55,9 +60,11 @@ export function PageError({ copy, homeHref, reset }: Readonly<PageErrorProps>) {
         <button type="button" className={buttonClass('primary')} onClick={retry}>
           {copy.retry}
         </button>
-        <Link className={buttonClass('ghost')} href={homeHref}>
-          {copy.home}
-        </Link>
+        {home ? (
+          <Link className={buttonClass('ghost')} href={home.href}>
+            {home.label}
+          </Link>
+        ) : null}
       </div>
     </section>
   );
