@@ -26,6 +26,7 @@ import {
   type AttachmentRejection,
   type SupportConfig,
 } from '../../lib/support-attachments';
+import { withStableKeys } from '@/lib/list-keys';
 
 /** Props for {@link SupportDialog}. */
 export interface SupportDialogProps {
@@ -44,7 +45,13 @@ type Status =
   | 'invalid'
   | 'rate_limited'
   | 'attachment_rejected';
-type SupportType = 'complaint' | 'support_request';
+const SUPPORT_TYPES = ['complaint', 'support_request'] as const;
+type SupportType = (typeof SUPPORT_TYPES)[number];
+
+/** Narrows a `<select>` value to a request type the API accepts. */
+function isSupportType(value: string): value is SupportType {
+  return SUPPORT_TYPES.some((type) => type === value);
+}
 
 /** What the dialog should show after a submit response. */
 interface SubmitOutcome {
@@ -108,6 +115,11 @@ function rejectionMessage(
   return t('attachment_bad_type', { name: rejection.filename });
 }
 
+/** Identifies a picked file by its name, size and modification time. */
+function attachmentKey(file: File): string {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
 /**
  * Displays a modal contact-support form and relays submissions to the BFF.
  *
@@ -157,12 +169,17 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
   useEffect(() => {
     if (!open) return;
     let active = true;
-    void fetch('/api/support/config')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: SupportConfig | null) => {
-        if (active && data) setConfig(data);
-      })
-      .catch(() => undefined);
+    const load = async () => {
+      try {
+        const res = await fetch('/api/support/config');
+        if (!res.ok) return;
+        const data: SupportConfig = await res.json();
+        if (active) setConfig(data);
+      } catch {
+        // The defaults stay in place.
+      }
+    };
+    void load();
     return () => {
       active = false;
     };
@@ -323,7 +340,10 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
               <select
                 id="support-type"
                 value={type}
-                onChange={(e) => setType(e.target.value as SupportType)}
+                onChange={(e) => {
+                  const picked = e.currentTarget.value;
+                  if (isSupportType(picked)) setType(picked);
+                }}
                 className={inputClass}
               >
                 <option value="complaint">{t('type_complaint')}</option>
@@ -376,9 +396,9 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps): JSX.E
               </Button>
               {attachments.length > 0 && (
                 <ul className="mt-2 space-y-1">
-                  {attachments.map((file, index) => (
+                  {withStableKeys(attachments, attachmentKey).map(({ item: file, key }, index) => (
                     <li
-                      key={`${file.name}-${index}`}
+                      key={key}
                       className="flex items-center justify-between gap-2 rounded-[8px] border border-(--bd-border) px-2 py-1 text-[13px]"
                     >
                       <span className="truncate">{file.name}</span>

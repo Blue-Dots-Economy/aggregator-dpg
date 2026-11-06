@@ -114,6 +114,18 @@ describe('SupportDialog', () => {
     expect(await screen.findByText(/message sent/i)).toBeTruthy();
   });
 
+  it('sends the type the user picks', async () => {
+    const fetchSpy = mockFetch(new Response('{"ok":true}', { status: 201 }));
+    renderDialog();
+    await userEvent.selectOptions(screen.getByLabelText('Type'), 'support_request');
+    await userEvent.type(screen.getByLabelText('Details'), 'Need help');
+    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(submitCalls(fetchSpy)).toHaveLength(1));
+    const body = JSON.parse((submitCalls(fetchSpy)[0]![1] as RequestInit).body as string);
+    expect(body.type).toBe('support_request');
+  });
+
   it('shows the unavailable message on 503', async () => {
     mockFetch(new Response('{}', { status: 503 }));
     renderDialog();
@@ -141,6 +153,28 @@ describe('SupportDialog attachments (#551)', () => {
     mockFetch(new Response('{"ok":true}', { status: 201 }));
     renderDialog();
     expect(await screen.findByText(/Up to 3 files, 5.0 MB in total/)).toBeTruthy();
+  });
+
+  it('uses the limits the API serves instead of the defaults', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ...SUPPORT_CONFIG, maxFiles: 5 }), { status: 200 }),
+    );
+    renderDialog();
+    expect(await screen.findByText(/Up to 5 files, 5.0 MB in total/)).toBeTruthy();
+  });
+
+  it('keeps the default limits when the config request fails', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(new Response('', { status: 500 }));
+    renderDialog();
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    expect(screen.getByText(/Up to 3 files, 5.0 MB in total/)).toBeTruthy();
+  });
+
+  it('keeps the default limits when the config request cannot be sent', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockRejectedValue(new TypeError('offline'));
+    renderDialog();
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    expect(screen.getByText(/Up to 3 files, 5.0 MB in total/)).toBeTruthy();
   });
 
   it('lists a chosen file and submits it base64-encoded', async () => {
@@ -185,6 +219,29 @@ describe('SupportDialog attachments (#551)', () => {
     ]);
     await userEvent.click(screen.getByRole('button', { name: /Remove a.png/i }));
     expect(screen.queryByText('a.png')).toBeNull();
+  });
+
+  it('keeps the row of a remaining file when an earlier file is removed', async () => {
+    mockFetch(new Response('{"ok":true}', { status: 201 }));
+    renderDialog();
+    await waitFor(() => expect(screen.getByText(/Up to 3 files/)).toBeTruthy());
+    await userEvent.upload(screen.getByLabelText('Attachments (optional)'), [
+      file('a.png', 'image/png'),
+      file('b.png', 'image/png'),
+    ]);
+    const rowBefore = screen.getByText('b.png').closest('li');
+    await userEvent.click(screen.getByRole('button', { name: /Remove a.png/i }));
+    expect(screen.getByText('b.png').closest('li')).toBe(rowBefore);
+  });
+
+  it('lists the same file twice when it is picked twice', async () => {
+    mockFetch(new Response('{"ok":true}', { status: 201 }));
+    renderDialog();
+    await waitFor(() => expect(screen.getByText(/Up to 3 files/)).toBeTruthy());
+    const picked = file('a.png', 'image/png');
+    await userEvent.upload(screen.getByLabelText('Attachments (optional)'), [picked]);
+    await userEvent.upload(screen.getByLabelText('Attachments (optional)'), [picked]);
+    expect(screen.getAllByText('a.png')).toHaveLength(2);
   });
 
   it('refuses a selection over the total size budget', async () => {

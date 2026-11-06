@@ -21,6 +21,8 @@ import { cn } from '../../../lib/cn';
 import { getGeoProvider } from '../../../lib/geo/provider';
 import { useFormRuntimeConfig } from '../../../lib/FormRuntimeConfigProvider';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
+import { geoSuggestionKey } from './geo-suggestion-key';
+import { withStableKeys } from '@/lib/list-keys';
 import type { GeoComponents, GeoSuggestion } from '../../../lib/geo/types';
 
 /**
@@ -110,18 +112,22 @@ export function LocationAutocompleteWidget({
       return;
     }
     debounceRef.current = window.setTimeout(() => {
-      const controller = new AbortController();
-      abortRef.current = controller;
-      void provider.suggest(q, controller.signal).then((results) => {
-        if (controller.signal.aborted) return;
-        setSuggestions(results);
-        setOpen(results.length > 0);
-        if (results.length > 0) {
-          const rect = inputRef.current?.getBoundingClientRect();
-          setDropUp(!!rect && window.innerHeight - rect.bottom < DROP_UP_THRESHOLD_PX);
-        }
-      });
+      void search(q);
     }, DEBOUNCE_MS);
+  }
+
+  /** Asks the geocoder for `q` and shows the results, unless a newer search started. */
+  async function search(q: string) {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const results = await provider.suggest(q, controller.signal);
+    if (controller.signal.aborted) return;
+    setSuggestions(results);
+    setOpen(results.length > 0);
+    if (results.length > 0) {
+      const rect = inputRef.current?.getBoundingClientRect();
+      setDropUp(!!rect && window.innerHeight - rect.bottom < DROP_UP_THRESHOLD_PX);
+    }
   }
 
   function handleInput(next: string) {
@@ -201,10 +207,10 @@ export function LocationAutocompleteWidget({
             dropUp ? 'bottom-full mb-1' : 'top-full mt-1',
           )}
         >
-          {suggestions.map((s, i) => (
+          {withStableKeys(suggestions, geoSuggestionKey).map(({ item: s, key }, i) => (
             // `role="option"` so `aria-activedescendant` can point at it.
             <li
-              key={`${s.lat},${s.lng},${i}`}
+              key={key}
               id={optionId(i)}
               role="option"
               aria-selected={i === activeIndex}

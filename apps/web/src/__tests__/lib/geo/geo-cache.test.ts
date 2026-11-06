@@ -62,6 +62,30 @@ describe('memoizeGeoLookup', () => {
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
+  it('passes a failed lookup to the caller and calls again next time', async () => {
+    const fn = vi
+      .fn<(q: string) => Promise<string[]>>()
+      .mockRejectedValueOnce(new Error('geocoder down'))
+      .mockResolvedValueOnce(['x']);
+    const memo = memoizeGeoLookup(fn, (v) => v.length > 0);
+    await expect(memo('Delhi')).rejects.toThrow('geocoder down');
+    expect(await memo('Delhi')).toEqual(['x']);
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('calls again after a lookup that throws before returning a promise', async () => {
+    const fn = vi
+      .fn<(q: string) => Promise<string[]>>()
+      .mockImplementationOnce(() => {
+        throw new Error('bad query');
+      })
+      .mockResolvedValueOnce(['x']);
+    const memo = memoizeGeoLookup(fn, (v) => v.length > 0);
+    await expect(memo('Delhi')).rejects.toThrow('bad query');
+    expect(await memo('Delhi')).toEqual(['x']);
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
   it('evicts the oldest entry past the cap (LRU)', async () => {
     const fn = vi.fn(async (q: string) => [q]);
     const memo = memoizeGeoLookup(fn, (v) => v.length > 0, 2);

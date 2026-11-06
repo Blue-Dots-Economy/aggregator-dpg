@@ -22,6 +22,7 @@ import { Input } from '../../ui/Input';
 import { cn } from '../../../lib/cn';
 import { useFormRuntimeConfig } from '../../../lib/FormRuntimeConfigProvider';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
+import { withStableKeys } from '@/lib/list-keys';
 
 interface ReferenceOption {
   name: string;
@@ -162,22 +163,45 @@ function referenceUrl(id: string, referenceBaseUrl: string = DEFAULT_REFERENCE_B
   return new URL(`${id}.json`, new URL(base, window.location.origin)).toString();
 }
 
+/**
+ * Fetches and flattens one dataset.
+ *
+ * @throws {Error} When the response is not OK or the body is not JSON.
+ */
+async function fetchDataset(
+  id: string,
+  referenceBaseUrl: string | undefined,
+): Promise<ReferenceOption[]> {
+  const res = await fetch(referenceUrl(id, referenceBaseUrl));
+  if (!res.ok) throw new Error(`reference dataset ${id} → ${res.status}`);
+  return flattenReferenceDataset(await res.json());
+}
+
+/**
+ * Drops a failed load from the cache so a later mount can retry.
+ *
+ * The caller of `loadDataset` handles the error; this only clears the entry.
+ */
+async function forgetOnFailure(id: string, pending: Promise<ReferenceOption[]>): Promise<void> {
+  try {
+    await pending;
+  } catch {
+    if (datasetCache.get(id) === pending) datasetCache.delete(id);
+  }
+}
+
 function loadDataset(id: string, referenceBaseUrl: string | undefined): Promise<ReferenceOption[]> {
   const cached = datasetCache.get(id);
   if (cached) return cached;
-  const pending = fetch(referenceUrl(id, referenceBaseUrl))
-    .then((res) => {
-      if (!res.ok) throw new Error(`reference dataset ${id} → ${res.status}`);
-      return res.json();
-    })
-    .then(flattenReferenceDataset)
-    .catch((err: unknown) => {
-      // Drop the failed promise so a later mount can retry.
-      datasetCache.delete(id);
-      throw err;
-    });
+  const pending = fetchDataset(id, referenceBaseUrl);
   datasetCache.set(id, pending);
+  void forgetOnFailure(id, pending);
   return pending;
+}
+
+/** Identifies an option by the fields it shows. */
+function optionKey(option: ReferenceOption): string {
+  return `${option.name}|${option.district ?? ''}|${option.state ?? ''}`;
 }
 
 export function ReferenceAutocompleteWidget({
@@ -213,14 +237,19 @@ export function ReferenceAutocompleteWidget({
   React.useEffect(() => {
     if (!source) return undefined;
     let live = true;
-    void loadDataset(resolveDatasetId(source, collegeDataset), referenceBaseUrl)
-      .then((loaded) => {
+    const load = async () => {
+      try {
+        const loaded = await loadDataset(
+          resolveDatasetId(source, collegeDataset),
+          referenceBaseUrl,
+        );
         if (live) setDataset(loaded);
-      })
-      .catch(() => {
+      } catch {
         // On failure the field works as plain text input.
         if (live) setDataset([]);
-      });
+      }
+    };
+    void load();
     return () => {
       live = false;
     };
@@ -296,11 +325,11 @@ export function ReferenceAutocompleteWidget({
           role="listbox"
           className="absolute z-50 mt-1 max-h-[320px] w-full overflow-y-auto rounded-[10px] border border-(--bd-border) bg-(--bd-card) p-1 shadow-lg"
         >
-          {suggestions.map((o, i) => {
+          {withStableKeys(suggestions, optionKey).map(({ item: o, key }, i) => {
             const sub = subtitle(o);
             return (
               <li
-                key={`${o.name}-${i}`}
+                key={key}
                 id={optionId(i)}
                 role="option"
                 aria-selected={i === activeIndex}

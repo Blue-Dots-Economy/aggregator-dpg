@@ -454,6 +454,15 @@ describe('<DashboardPageRoot />', () => {
       expect(within(menu).queryByText('All statuses')).toBeNull();
     });
 
+    it('closes on a click outside it and stays open on a click inside it', async () => {
+      renderPage();
+      await userEvent.click(screen.getByRole('button', { name: /All filters/i }));
+      fireEvent.mouseDown(within(screen.getByRole('menu')).getByText('Any status'));
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+      fireEvent.mouseDown(document.body);
+      expect(screen.queryByRole('menu')).toBeNull();
+    });
+
     it('lists rollup-derived status options and refetches with the selected status', async () => {
       renderPage();
       await userEvent.click(screen.getByRole('button', { name: /All filters/i }));

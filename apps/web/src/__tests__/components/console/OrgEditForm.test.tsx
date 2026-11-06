@@ -156,6 +156,21 @@ describe('<OrgEditForm />', () => {
       expect(screen.getByLabelText(messages.console.org.known_as)).toHaveValue('District');
     });
 
+    it('keeps a location row when the newer org drops the location before it', () => {
+      const second = {
+        geo: { type: 'Point' as const, coordinates: [76.6, 12.3] },
+        address: { streetAddress: '2 Lake Rd', addressLocality: 'Mysuru', addressRegion: 'KA' },
+      };
+      const first = baseOrg.locations[0]!;
+      const { rerender } = renderForm({ ...baseOrg, locations: [first, second] }, OWNER);
+      const rowBefore = screen.getByText('2 Lake Rd, Mysuru, KA').closest('li');
+      rerender(
+        form({ ...baseOrg, locations: [second], updated_at: '2026-02-01T00:00:00Z' }, OWNER),
+      );
+      expect(screen.queryByText('1 Main St, Bengaluru, KA')).toBeNull();
+      expect(screen.getByText('2 Lake Rd, Mysuru, KA').closest('li')).toBe(rowBefore);
+    });
+
     it('skips the network call and reports saved when nothing changed', async () => {
       global.fetch = respond({}, 200) as never;
       renderForm(baseOrg, OWNER);

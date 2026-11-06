@@ -19,6 +19,34 @@ export function normalizeGeoKey(query: string): string {
 }
 
 /**
+ * Calls `fn` at once and returns its result as a promise, so a synchronous
+ * throw arrives as a rejection.
+ */
+async function callNow<T>(
+  fn: (query: string, signal?: AbortSignal) => Promise<T>,
+  query: string,
+  signal: AbortSignal,
+): Promise<T> {
+  return fn(query, signal);
+}
+
+/**
+ * Runs `cleanup` once `promise` settles, and never rejects.
+ *
+ * The lookup's caller receives any rejection; this side task must not raise a
+ * second, unhandled one.
+ */
+async function afterSettled(promise: Promise<unknown>, cleanup: () => void): Promise<void> {
+  try {
+    await promise;
+  } catch {
+    // The caller of the lookup handles the error.
+  } finally {
+    cleanup();
+  }
+}
+
+/**
  * Wraps an async geo lookup with a session LRU cache and in-flight dedup.
  *
  * Only results where `shouldCache(value)` is true are stored. The shared call
@@ -43,6 +71,25 @@ export function memoizeGeoLookup<T>(
   }
   const inFlight = new Map<string, InFlight>();
 
+  /** Runs one lookup, stores a cacheable result, and clears its in-flight entry. */
+  async function lookup(key: string, query: string, signal: AbortSignal): Promise<T> {
+    try {
+      // `callNow` turns a synchronous throw into a rejection, so the `finally`
+      // below runs after the caller has stored this entry and removes it.
+      const value = await callNow(fn, query, signal);
+      if (shouldCache(value)) {
+        resolved.set(key, value);
+        if (resolved.size > cap) {
+          const oldest = resolved.keys().next();
+          if (!oldest.done) resolved.delete(oldest.value);
+        }
+      }
+      return value;
+    } finally {
+      inFlight.delete(key);
+    }
+  }
+
   return (query: string, signal?: AbortSignal): Promise<T> => {
     const key = normalizeGeoKey(query);
 
@@ -59,20 +106,7 @@ export function memoizeGeoLookup<T>(
       const created: InFlight = {
         controller,
         waiters: new Set<object>(),
-        promise: fn(query, controller.signal)
-          .then((value) => {
-            if (shouldCache(value)) {
-              resolved.set(key, value);
-              if (resolved.size > cap) {
-                const oldest = resolved.keys().next().value as string;
-                resolved.delete(oldest);
-              }
-            }
-            return value;
-          })
-          .finally(() => {
-            inFlight.delete(key);
-          }),
+        promise: lookup(key, query, controller.signal),
       };
       inFlight.set(key, created);
       entry = created;
@@ -92,10 +126,10 @@ export function memoizeGeoLookup<T>(
         onAbort();
       } else {
         signal.addEventListener('abort', onAbort, { once: true });
-        void current.promise.finally(() => signal.removeEventListener('abort', onAbort));
+        void afterSettled(current.promise, () => signal.removeEventListener('abort', onAbort));
       }
     }
-    void current.promise.finally(() => {
+    void afterSettled(current.promise, () => {
       current.waiters.delete(token);
     });
 
