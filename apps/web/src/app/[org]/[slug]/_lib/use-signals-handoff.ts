@@ -1,7 +1,7 @@
 /**
  * Post-submit hand-off countdown to the Signals UI (web app, public registration).
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /**
  * Seconds before the post-submit hand-off to Signals.
@@ -63,21 +63,32 @@ function tick(prev: SignalsHandoff | null): SignalsHandoff | null {
 export interface SignalsHandoffControls {
   /** `null` when no countdown is running. */
   handoff: SignalsHandoff | null;
-  /** Starts the countdown to `url`. A running countdown is kept as is. */
-  start: (url: string) => void;
+  /**
+   * Starts the countdown to the latest hand-off URL. Does nothing when there
+   * is no URL. A running countdown is kept as is.
+   */
+  start: () => void;
   /** Stops the countdown without navigating. */
   cancel: () => void;
-  /** Stops the countdown and navigates now. */
+  /** Stops a running countdown and navigates now. Does nothing once navigating. */
   continueNow: () => void;
 }
 
 /**
  * Runs the post-submit countdown and navigates to Signals when it ends.
  *
+ * @param url - Current hand-off URL, or `null` when the hand-off is not configured.
  * @returns The countdown state and its controls.
  */
-export function useSignalsHandoff(): SignalsHandoffControls {
+export function useSignalsHandoff(url: string | null): SignalsHandoffControls {
   const [handoff, setHandoff] = useState<SignalsHandoff | null>(null);
+  // Latest URL for `start`, which runs after an awaited submit and so would
+  // otherwise see the URL from the render that began the submit.
+  const latestUrlRef = useRef(url);
+
+  useEffect(() => {
+    latestUrlRef.current = url;
+  }, [url]);
 
   useEffect(() => {
     if (handoff?.phase !== 'counting') return;
@@ -91,11 +102,17 @@ export function useSignalsHandoff(): SignalsHandoffControls {
 
   return {
     handoff,
-    start: (url) =>
-      setHandoff((prev) => prev ?? { phase: 'counting', url, seconds: SIGNALS_REDIRECT_SECONDS }),
+    start: () => {
+      const target = latestUrlRef.current;
+      if (!target) return;
+      setHandoff(
+        (prev) => prev ?? { phase: 'counting', url: target, seconds: SIGNALS_REDIRECT_SECONDS },
+      );
+    },
     cancel: () => setHandoff(null),
     continueNow: () => {
-      if (!handoff) return;
+      // Once navigating, the navigation has already run.
+      if (handoff?.phase !== 'counting') return;
       // Stop the countdown first so it does not navigate a second time.
       setHandoff(null);
       navigateToSignals(handoff.url);

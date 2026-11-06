@@ -836,6 +836,37 @@ describe('<PublicRegistrationView /> — a failed probe does not block the submi
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('warns with the error type, never the contact or the error text, when the probe throws', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    stubFetch(() => Promise.reject(new TypeError('offline a@b.com')));
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await screen.findByText(messages.profile.public_reg.done_passed_title);
+    expect(warn).toHaveBeenCalledWith(expect.any(String), {
+      operation: 'public-registration.lookup',
+      status: 'failure',
+      error_type: 'TypeError',
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toMatch(/a@b\.com|offline/);
+    warn.mockRestore();
+  });
+
+  it('warns with the HTTP status, never the reply body, when the probe answers with an error', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    stubFetch(async () => new Response('{"detail":"secret a@b.com"}', { status: 503 }));
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    await screen.findByText(messages.profile.public_reg.done_passed_title);
+    expect(warn).toHaveBeenCalledWith(expect.any(String), {
+      operation: 'public-registration.lookup',
+      status: 'failure',
+      error_type: 'HttpError',
+      http_status: 503,
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toMatch(/secret|a@b\.com/);
+    warn.mockRestore();
+  });
+
   it('skips the probe when the form has no email or phone', async () => {
     const fetchMock = stubFetch(async () => new Response('{}', { status: 200 }));
     renderView({ name: 'A' });

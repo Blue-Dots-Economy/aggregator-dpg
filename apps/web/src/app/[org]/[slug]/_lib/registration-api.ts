@@ -48,6 +48,24 @@ function logShapeError(url: string, body: unknown, issues: z.ZodIssue[]): void {
 }
 
 /**
+ * Logs a failed identity probe. The submit still goes ahead.
+ *
+ * Never log the error message, the reply body or the query: they can hold
+ * the participant's email or phone.
+ *
+ * @param errorType - The error's name, or `HttpError` for an error status.
+ * @param httpStatus - The reply's status, when there was a reply.
+ */
+function logProbeFailure(errorType: string, httpStatus?: number): void {
+  console.warn('[public-registration] identity probe failed; submitting without it', {
+    operation: 'public-registration.lookup',
+    status: 'failure',
+    error_type: errorType,
+    ...(httpStatus === undefined ? {} : { http_status: httpStatus }),
+  });
+}
+
+/**
  * BFF path for one of the link's routes.
  *
  * @param org - Organisation slug from the URL.
@@ -111,11 +129,15 @@ export async function probeIdentity(input: IdentityProbeInput): Promise<LookupOu
       method: 'GET',
       headers: { accept: 'application/json' },
     });
-  } catch {
+  } catch (err) {
     // Network error: submit normally; the API handles duplicates.
+    logProbeFailure(err instanceof Error ? err.name : typeof err);
     return { kind: 'allow' };
   }
-  if (!res.ok) return { kind: 'allow' };
+  if (!res.ok) {
+    logProbeFailure('HttpError', res.status);
+    return { kind: 'allow' };
+  }
   // A body that does not match is treated like a failed probe: submit normally.
   const body: unknown = await res.json().catch(() => null);
   const parsed = LookupResponseSchema.safeParse(body);

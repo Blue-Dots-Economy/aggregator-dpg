@@ -127,7 +127,7 @@ export function PublicRegistrationView({
   // Signals sign-in URL for existing participants; `null` when the hand-off is
   // not configured for this domain and mode.
   const signalsHandoffUrl = useSignalsHandoffUrl(domain, registrationMode ?? null, submissionShape);
-  const handoff = useSignalsHandoff();
+  const handoff = useSignalsHandoff(signalsHandoffUrl);
   // The consent step and birth-year field are set per domain in network.json.
   const domainCfg = cfg.domains.find((d) => d.id === domain);
   const showBirthYear = domainRequiresBirthYear(domainCfg);
@@ -171,9 +171,7 @@ export function PublicRegistrationView({
     },
     // Start the hand-off after a successful submit (`passed` or `skipped`)
     // when it is configured.
-    onDone: () => {
-      if (signalsHandoffUrl) handoff.start(signalsHandoffUrl);
-    },
+    onDone: handoff.start,
   });
   const { state, lookup } = registration;
 

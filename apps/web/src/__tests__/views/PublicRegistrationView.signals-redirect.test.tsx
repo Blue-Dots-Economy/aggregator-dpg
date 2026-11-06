@@ -13,7 +13,10 @@
  * two config gates that decide whether this hand-off is armed at all.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { screen, fireEvent, act, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
+import { NextIntlClientProvider } from 'next-intl';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import messages from '@/i18n/messages/en.json';
 import type { ParticipantConsent } from '@/components/consent/consent-types';
 import {
   RjsfShim,
@@ -393,6 +396,64 @@ describe('Signals post-submit redirect', () => {
     expect(continueLabel()).toBe('Continue to Signals (2)');
     await tick(2);
     expect(assign).toHaveBeenCalledTimes(1);
+    expect(assign).toHaveBeenCalledWith(SIGNALS_URL);
+  });
+
+  it('does not navigate a second time when the button is clicked after the countdown fired', async () => {
+    cfgMock.value = CFG;
+    await submitSuccessfully({ domain: 'seeker', registrationMode: 'form' });
+    await tick(4);
+    expect(assign).toHaveBeenCalledTimes(1);
+    fireEvent.click(continueButton()!);
+    expect(assign).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts the countdown with a URL that resolves while the submit is in flight', async () => {
+    // The config has no hand-off URL when the participant presses Submit; a
+    // refetch adds it (and re-renders the view) before the POST returns.
+    cfgMock.value = { ...CFG, signals_ui_urls: {} };
+    let resolveSubmit: (r: Response) => void = () => undefined;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveSubmit = resolve;
+        }),
+    );
+    const client = new QueryClient();
+    const tree = () => (
+      <QueryClientProvider client={client}>
+        <NextIntlClientProvider locale="en" messages={messages as Record<string, unknown>}>
+          <PublicRegistrationView
+            org="acme"
+            slug="winter25"
+            network="blue_dot"
+            domain="seeker"
+            context={{ title: 'Winter 2025 Registration' }}
+            schema={{ type: 'object', properties: { name: { type: 'string' } } }}
+            uiSchema={{}}
+            identity={{ name: 'name', phone: 'phone', email: 'email' }}
+            submissionShape="account_and_profile"
+            publicHintI18nKey={null}
+            registrationMode="form"
+          />
+        </NextIntlClientProvider>
+      </QueryClientProvider>
+    );
+    const view = render(tree());
+    await act(async () => {
+      fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    });
+    cfgMock.value = CFG;
+    view.rerender(tree());
+    await act(async () => {
+      resolveSubmit({
+        ok: true,
+        status: 201,
+        json: async () => ({ submission_id: 'SUB-0001', outcome: 'passed' }),
+      } as unknown as Response);
+    });
+    expect(continueLabel()).toBe('Continue to Signals (4)');
+    await tick(4);
     expect(assign).toHaveBeenCalledWith(SIGNALS_URL);
   });
 
