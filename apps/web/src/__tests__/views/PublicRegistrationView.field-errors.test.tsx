@@ -35,8 +35,8 @@ vi.mock('@/hooks/useAggregatorConfig', () => ({
 import {
   PublicRegistrationView,
   readableFormErrors,
-  toErrorSchema,
 } from '@/app/[org]/[slug]/PublicRegistrationView';
+import { toErrorSchema } from '@/app/[org]/[slug]/_lib/field-errors';
 
 /** The schema as the API serves it: link fields already carry the URL rule. */
 const SCHEMA = {

@@ -8,7 +8,7 @@
  * only the array row-builder spans both columns.
  */
 import { describe, it, expect } from 'vitest';
-import { resolveMarkerUiSchema } from '@/app/[org]/[slug]/PublicRegistrationView';
+import { resolveMarkerUiSchema } from '@/app/[org]/[slug]/_lib/form-schema';
 
 describe('resolveMarkerUiSchema — column spans', () => {
   it('leaves a single-value location field at its default half width', () => {

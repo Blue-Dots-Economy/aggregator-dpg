@@ -11,6 +11,7 @@ import { useState, type JSX } from 'react';
 import { useTranslations } from 'next-intl';
 import { SubmitBlockers } from '@/components/ui/SubmitBlockers';
 import type { LinkIdentity } from '@/lib/registration-link';
+import { birthYearOptions, readBirthYear } from './_lib/birth-year';
 
 export interface MinimalIdentityPayload {
   /** Name field. Key is the network's `identity.name` selector. */
@@ -101,13 +102,9 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   // Age is derived from the birth year; no birthdate is stored. Guardian-gated
   // domains need it, or Signals rejects the submit with `AGE_REQUIRED`.
   const currentYear = new Date().getFullYear();
-  const yobNum = Number(yearOfBirth.trim());
-  const yobValid =
-    /^\d{4}$/.test(yearOfBirth.trim()) && yobNum >= currentYear - 120 && yobNum <= currentYear;
-  const derivedAge = yobValid ? currentYear - yobNum : Number.NaN;
-  // Minors (age <= 18) do not give consent here; they accept terms in the
-  // Signalstack app after signing in. The submit still goes through.
-  const isMinor = yobValid && derivedAge <= 18;
+  // Minors do not give consent here; they accept terms in the Signalstack app
+  // after signing in. The submit still goes through.
+  const { valid: yobValid, isMinor } = readBirthYear(yearOfBirth, currentYear);
   const valid =
     hasName &&
     contactValid &&
@@ -192,7 +189,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
               required
             >
               <option value="">{t('year_of_birth_placeholder')}</option>
-              {Array.from({ length: 101 }, (_, i) => currentYear - i).map((y) => (
+              {birthYearOptions(currentYear).map((y) => (
                 <option key={y} value={String(y)}>
                   {y}
                 </option>
