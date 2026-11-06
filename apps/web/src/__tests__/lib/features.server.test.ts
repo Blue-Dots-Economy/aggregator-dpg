@@ -50,6 +50,23 @@ describe('features.server', () => {
     await expect(customRolesEnabled()).resolves.toBe(false);
   });
 
+  it.each([
+    ['the string "true"', { features: { custom_roles: 'true' } }],
+    ['features as a list', { features: ['custom_roles'] }],
+    ['a null body', null],
+  ])('reports off and logs a failure when the body has %s', async (_label, body) => {
+    warn.mockClear();
+    globalThis.fetch = vi.fn().mockResolvedValue(json(body)) as unknown as typeof fetch;
+    await expect(getAggregatorFeatures()).resolves.toEqual({ custom_roles: false });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'features.getAggregatorFeatures',
+        status: 'failure',
+        error: 'unexpected response shape',
+      }),
+    );
+  });
+
   it('fails safe to off on a non-2xx response', async () => {
     globalThis.fetch = vi
       .fn()

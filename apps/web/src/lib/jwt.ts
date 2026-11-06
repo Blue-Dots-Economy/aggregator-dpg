@@ -8,8 +8,10 @@
  * @module apps/web/src/lib/jwt
  */
 
+import { readJsonObject } from './json-object';
+
 /**
- * Decodes a JWT payload into a claims object, or `null` if it is malformed.
+ * Decodes a JWT payload into a claims object, or `null` if it is malformed or not an object.
  *
  * @param token - The raw JWT.
  * @returns The decoded payload, or `null`.
@@ -18,10 +20,7 @@ export function decodeJwtClaims(token: string): Record<string, unknown> | null {
   const parts = token.split('.');
   if (parts.length < 2) return null;
   try {
-    return JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8')) as Record<
-      string,
-      unknown
-    >;
+    return readJsonObject(JSON.parse(Buffer.from(parts[1] ?? '', 'base64url').toString('utf8')));
   } catch {
     return null;
   }
@@ -52,9 +51,7 @@ export function tokenAggregatorId(token: string): string | null {
  */
 export function tokenRealmRoles(token: string): string[] {
   const claims = decodeJwtClaims(token);
-  const realmAccess = claims?.['realm_access'];
-  if (typeof realmAccess !== 'object' || realmAccess === null) return [];
-  const roles = (realmAccess as Record<string, unknown>)['roles'];
+  const roles = readJsonObject(claims?.['realm_access'])?.['roles'];
   return Array.isArray(roles) ? roles.filter((r): r is string => typeof r === 'string') : [];
 }
 

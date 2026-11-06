@@ -8,6 +8,7 @@
 
 import { z } from 'zod';
 import { apiErrorMessage } from '../lib/api-error';
+import { parseResponseBody } from '../lib/response-shape-error';
 import { jsonFetch } from './http';
 
 /**
@@ -123,10 +124,10 @@ export interface DashboardBulkActionInput {
   ids: string[];
 }
 
-/** Acknowledgement from the bulk-action endpoint (202 envelope). */
-export interface DashboardBulkActionResult {
-  accepted: number;
-}
+/** The ack of `POST /api/dashboard/actions`: how many ids were accepted. */
+const DashboardBulkActionResultSchema = z.object({ accepted: z.number().int().nonnegative() });
+
+export type DashboardBulkActionResult = z.infer<typeof DashboardBulkActionResultSchema>;
 
 export interface DashboardService {
   /**
@@ -155,6 +156,7 @@ export interface DashboardService {
    * @param input - Action name, domain and row ids.
    * @returns The 202 acknowledgement.
    * @throws {Error} If an input is missing or the request fails.
+   * @throws {ResponseShapeError} If the acknowledgement has the wrong shape.
    */
   dashboardBulkAction(input: DashboardBulkActionInput): Promise<DashboardBulkActionResult>;
   /**
@@ -250,7 +252,7 @@ class HttpDashboardService implements DashboardService {
     if (!res.ok) {
       throw new Error(await apiErrorMessage(res, `bulk action failed: ${res.status}`));
     }
-    return (await res.json()) as DashboardBulkActionResult;
+    return parseResponseBody(res, '/api/dashboard/actions', DashboardBulkActionResultSchema);
   }
 }
 export const dashboardService: DashboardService = new HttpDashboardService();

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { dashboardService, triggerCsvDownload } from '../dashboard.service';
+import { ResponseShapeError } from '../http';
 
 /** Captures a rejected promise's Error and returns its message, for
  * environments where `.rejects.toThrow(/regex/)` loses the message text. */
@@ -262,6 +263,25 @@ describe('dashboardService.dashboardExportProfiles', () => {
       itemIds: ['i1'],
     });
     expect(result.filename).toBe('profiles-seeker.csv');
+  });
+
+  it.each([
+    ['a text count', { accepted: 'all' }],
+    ['no count', {}],
+  ])('throws ResponseShapeError when the ack has %s', async (_label, body) => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(body), {
+        status: 202,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch;
+    await expect(
+      dashboardService.dashboardBulkAction({
+        action: 'trigger_callback',
+        domain: 'seeker',
+        ids: ['1'],
+      }),
+    ).rejects.toBeInstanceOf(ResponseShapeError);
   });
 
   it('surfaces the upstream error detail on failure', async () => {

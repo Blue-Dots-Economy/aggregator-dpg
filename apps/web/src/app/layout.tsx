@@ -1,3 +1,4 @@
+import { BrandConfigSchema } from '@aggregator-dpg/network-config/interface';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { Providers } from '../lib/providers';
@@ -8,6 +9,12 @@ import { EnabledLocalesProvider } from '../i18n/EnabledLocalesProvider';
 import { getFormRuntimeConfig } from '../lib/form-runtime-config';
 import { FormRuntimeConfigProvider } from '../lib/FormRuntimeConfigProvider';
 import { getLocale, getMessages, getTranslations } from 'next-intl/server';
+import { z } from 'zod';
+
+/** The brand fields of `/v1/aggregator-config` that the page metadata reads. */
+const MetadataConfigSchema = z.object({
+  brand: BrandConfigSchema.pick({ long_name: true, tagline: true }),
+});
 
 /**
  * Generates the page metadata from the active aggregator config.
@@ -19,9 +26,7 @@ export async function generateMetadata(): Promise<Metadata> {
     const base = process.env.API_BASE_URL ?? 'http://localhost:4000';
     const res = await fetch(`${base}/v1/aggregator-config`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`${res.status}`);
-    const cfg = (await res.json()) as {
-      brand: { long_name: string; tagline?: string };
-    };
+    const cfg = MetadataConfigSchema.parse(await res.json());
     return {
       title: `${cfg.brand.long_name}`,
       description:

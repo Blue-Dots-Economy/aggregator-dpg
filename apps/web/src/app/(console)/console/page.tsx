@@ -7,11 +7,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import type {
-  OrgReadResponse,
-  OrgSearchResponse,
-  UserSearchResponse,
-} from '@aggregator-dpg/shared-primitives/user-org';
+import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
 import { canInvite, CONSOLE_HOME_HREF, coordinatorsHref } from '@/lib/capabilities';
@@ -21,6 +17,10 @@ import { buttonClass } from '@/components/ui/button-class';
 import { ConsoleStatusPill } from '@/components/console/ConsoleUi';
 import { OrgCoordinators, type OrgCoordinatorRow } from '@/components/console/OrgCoordinators';
 import { I } from '@/icons';
+import {
+  OrgReadResponseSchema,
+  UserSearchResponseSchema,
+} from '@aggregator-dpg/shared-primitives/user-org';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
@@ -36,7 +36,7 @@ export default async function ConsoleHomePage() {
 
   const homeOrgId = me.orgs.find((o) => o.org_type === 'aggregator' && !o.is_default)?.id;
   if (!homeOrgId) redirect('/console/orgs');
-  const read = await consoleRead<OrgReadResponse>(`/v1/org/read/${homeOrgId}`);
+  const read = await consoleRead(`/v1/org/read/${homeOrgId}`, OrgReadResponseSchema);
   const homeOrg: OrgRow = {
     ...read.org,
     coordinator_count: read.coordinator_count,
@@ -50,7 +50,7 @@ export default async function ConsoleHomePage() {
 async function renderOrgHome(org: OrgRow, showInvite: boolean) {
   const t = await getTranslations('console');
   const [page, domains] = await Promise.all([
-    consoleRead<UserSearchResponse>('/v1/user/search', {
+    consoleRead('/v1/user/search', UserSearchResponseSchema, {
       filter: { org_id: org.id },
       limit: ORG_HOME_LIMIT,
     }),

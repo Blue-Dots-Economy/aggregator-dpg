@@ -15,8 +15,14 @@ import 'server-only';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import {
+  ConsentStatementVersionSchema,
+  ParticipantConsentDocSchema,
+} from '@aggregator-dpg/network-config/interface';
+import { z } from 'zod';
 import { resolveSchemaRoot } from './config-paths';
 import { logger } from './logger';
+import { ResponseShapeError } from './response-shape-error';
 import type { ConsentDocContent, ParticipantConsent } from '../components/consent/consent-types';
 
 export type { ParticipantConsent };
@@ -27,29 +33,53 @@ const DEFAULT_SUPPORT_EMAIL = 'hello@bluedotseconomy.org';
 /** Explicit timeout for the `GET /v1/participant-consent` fetch. */
 const FETCH_TIMEOUT_MS = 5_000;
 
-/** One version entry inside a Signals `consent.json` document. */
-interface ConsentVersion {
-  version: number;
-  title: string;
-  content: string;
-  effective_from?: string;
-}
+const ConsentDocSchema = ParticipantConsentDocSchema.shape.documents.shape.terms.unwrap();
 
 /** A Signals `consent.json` document (`terms` / `privacy`). */
-interface ConsentDoc {
-  current_version: number;
-  versions: ConsentVersion[];
-}
+type ConsentDoc = z.infer<typeof ConsentDocSchema>;
 
-/** Profile-creation consent document, with a short `statement`. */
-interface StatementDoc {
-  current_version: number;
-  versions: { version: number; statement: string; effective_from?: string }[];
-}
+/**
+ * The participant `consent.json` this loader reads, from the API or from disk.
+ * A profile-creation `statement` may be missing; it is shown as empty text.
+ */
+const ParticipantConsentFileSchema = z.object({
+  documents: z.object({
+    terms: ConsentDocSchema.optional(),
+    privacy: ConsentDocSchema.optional(),
+    profile_creation: z
+      .object({
+        current_version: z.number(),
+        versions: z.array(
+          ConsentStatementVersionSchema.extend({ statement: z.string().optional() }),
+        ),
+      })
+      .optional(),
+  }),
+});
 
-/** The subset of the Signals participant `consent.json` this loader reads. */
-interface ParticipantConsentFile {
-  documents?: { terms?: ConsentDoc; privacy?: ConsentDoc; profile_creation?: StatementDoc };
+/** The parsed participant `consent.json`. */
+type ParticipantConsentFile = z.infer<typeof ParticipantConsentFileSchema>;
+
+/** The body of `GET /v1/participant-consent`. */
+const ParticipantConsentResponseSchema = z.object({ participant_consent: z.unknown() });
+
+/**
+ * Reads a participant consent document, logging the field paths of a wrong shape.
+ *
+ * @param value - The parsed document.
+ * @param operation - The log operation name.
+ * @returns The document, or `null` when it has the wrong shape.
+ */
+function readConsentFile(value: unknown, operation: string): ParticipantConsentFile | null {
+  const parsed = ParticipantConsentFileSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  logger.warn({
+    operation,
+    status: 'failure',
+    error: 'unexpected consent document shape',
+    issues: new ResponseShapeError(operation, parsed.error.issues).issueSummary(),
+  });
+  return null;
 }
 
 /**
@@ -92,11 +122,9 @@ function shapeParticipantConsent(
   parsed: ParticipantConsentFile,
   supportEmail: string,
 ): ParticipantConsent | null {
-  const terms = parsed.documents?.terms;
-  const privacy = parsed.documents?.privacy;
-  if (!terms?.versions?.length || !privacy?.versions?.length) return null;
-  const pc = parsed.documents?.profile_creation;
-  const pcVersion = pc?.versions?.find((x) => x.version === pc.current_version) ?? pc?.versions[0];
+  const { terms, privacy, profile_creation: pc } = parsed.documents;
+  if (!terms?.versions.length || !privacy?.versions.length) return null;
+  const pcVersion = pc?.versions.find((x) => x.version === pc.current_version) ?? pc?.versions[0];
   return {
     terms: toCurrent(terms, supportEmail),
     privacy: toCurrent(privacy, supportEmail),
@@ -104,7 +132,6 @@ function shapeParticipantConsent(
       ? {
           profileCreation: {
             version: pcVersion.version,
-            // The on-disk copy is not validated; `statement` may be missing.
             statement: (pcVersion.statement ?? '').replaceAll('__SUPPORT_EMAIL__', supportEmail),
           },
         }
@@ -134,8 +161,9 @@ async function loadFromApi(): Promise<ParticipantConsentFile | null> {
       });
       return null;
     }
-    const body = (await res.json()) as { participant_consent?: ParticipantConsentFile | null };
-    return body.participant_consent ?? null;
+    const body = ParticipantConsentResponseSchema.safeParse(await res.json());
+    if (!body.success || body.data.participant_consent === null) return null;
+    return readConsentFile(body.data.participant_consent, 'participantConsent.loadFromApi');
   } catch (err) {
     logger.warn({
       operation: 'participantConsent.loadFromApi',
@@ -154,7 +182,10 @@ async function loadFromDisk(): Promise<ParticipantConsentFile | null> {
   const file = resolveParticipantConsentPath();
   if (!file) return null;
   try {
-    return JSON.parse(await readFile(file, 'utf8')) as ParticipantConsentFile;
+    return readConsentFile(
+      JSON.parse(await readFile(file, 'utf8')),
+      'participantConsent.loadFromDisk',
+    );
   } catch {
     return null;
   }
@@ -171,7 +202,7 @@ async function loadFromDisk(): Promise<ParticipantConsentFile | null> {
  */
 export async function loadParticipantConsent(): Promise<ParticipantConsent | null> {
   const supportEmail = process.env.CONSENT_SUPPORT_EMAIL?.trim() || DEFAULT_SUPPORT_EMAIL;
-  // Shaping an unvalidated document must never throw to the page.
+  // Consent problems must never throw to the page.
   try {
     const fromApi = await loadFromApi();
     const shapedApi = fromApi ? shapeParticipantConsent(fromApi, supportEmail) : null;

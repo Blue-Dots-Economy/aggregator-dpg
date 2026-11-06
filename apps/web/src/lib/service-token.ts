@@ -9,6 +9,14 @@
  */
 
 import { stripTrailingSlashes } from '@aggregator-dpg/shared-primitives/url';
+import { z } from 'zod';
+
+/** The Keycloak token response fields this client uses. */
+const TokenResponseSchema = z.object({
+  access_token: z.string().min(1),
+  /** Lifetime in seconds. */
+  expires_in: z.number().positive(),
+});
 
 interface CachedToken {
   accessToken: string;
@@ -39,7 +47,7 @@ function readConfig(): ServiceTokenConfig {
  * token is missing or near expiry.
  *
  * @returns The access token.
- * @throws {Error} If config is missing or Keycloak returns an error.
+ * @throws {Error} If config is missing, Keycloak returns an error, or the response has the wrong shape.
  */
 export async function getServiceAccessToken(): Promise<string> {
   if (cached && Date.now() < cached.expiresAt - REFRESH_LEAD_MS) {
@@ -61,7 +69,10 @@ export async function getServiceAccessToken(): Promise<string> {
     const text = await res.text().catch(() => '');
     throw new Error(`service-token HTTP ${res.status}: ${text.slice(0, 200)}`);
   }
-  const body = (await res.json()) as { access_token: string; expires_in: number };
+  const parsed = TokenResponseSchema.safeParse(await res.json());
+  // The message names no values: the body holds the token.
+  if (!parsed.success) throw new Error('service-token response has an unexpected shape');
+  const body = parsed.data;
   cached = {
     accessToken: body.access_token,
     expiresAt: Date.now() + body.expires_in * 1000,

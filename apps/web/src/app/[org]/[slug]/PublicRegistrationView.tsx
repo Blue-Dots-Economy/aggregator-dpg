@@ -18,6 +18,7 @@ import { LanguageSwitcher } from '../../../components/shell/LanguageSwitcher';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
 import type { ParticipantConsent } from '../../../components/consent/consent-types';
+import type { LinkIdentity } from '@/lib/registration-link';
 
 /** Page background used by every state of the public registration page. */
 const PAGE_BACKGROUND =
@@ -39,7 +40,7 @@ export interface PublicRegistrationViewProps {
    * Identity field names for the domain (name / phone / email). The
    * account_only form collects only these fields.
    */
-  identity?: { name?: string; phone?: string; email?: string } | undefined;
+  identity?: LinkIdentity | undefined;
   /**
    * Link submission shape. `account_only` renders identity fields only;
    * `account_and_profile` renders the full profile form.

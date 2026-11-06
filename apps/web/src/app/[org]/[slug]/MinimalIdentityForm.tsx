@@ -10,6 +10,7 @@
 import { useState, type JSX } from 'react';
 import { useTranslations } from 'next-intl';
 import { SubmitBlockers } from '../../../components/ui/SubmitBlockers';
+import type { LinkIdentity } from '@/lib/registration-link';
 
 export interface MinimalIdentityPayload {
   /** Name field. Key is the network's `identity.name` selector. */
@@ -21,11 +22,7 @@ export interface MinimalIdentityFormProps {
    * Identity field names from the network config, used as payload keys.
    * An undefined `phone` or `email` hides that input.
    */
-  identity: {
-    name?: string;
-    phone?: string;
-    email?: string;
-  };
+  identity: LinkIdentity;
   /** Submit handler; receives the identity-only payload. */
   onSubmit: (payload: MinimalIdentityPayload) => void | Promise<void>;
   /**

@@ -9,11 +9,6 @@
 import { notFound } from 'next/navigation';
 import { getFormatter, getTranslations } from 'next-intl/server';
 import { Briefcase, CalendarDays, Mail, Phone } from 'lucide-react';
-import type {
-  RolesResponse,
-  User,
-  UserRolesResponse,
-} from '@aggregator-dpg/shared-primitives/user-org';
 import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
 import { getConsoleActor } from '@/lib/console-actor';
 import { canManageOrg, canViewCoordinators, coordinatorsHref } from '@/lib/capabilities';
@@ -24,6 +19,11 @@ import { CopyButton } from '@/components/console/CopyButton';
 import { networkDomains } from '@/lib/console-domains.server';
 import { initialsOf } from '@/lib/initials';
 import { CoordinatorActions } from '@/components/console/CoordinatorActions';
+import {
+  RolesResponseSchema,
+  UserRolesResponseSchema,
+  UserSchema,
+} from '@aggregator-dpg/shared-primitives/user-org';
 
 export default async function ConsoleCoordinatorPage({
   params,
@@ -37,7 +37,7 @@ export default async function ConsoleCoordinatorPage({
   // The network admin has no users page.
   if (actor.ok && !canViewCoordinators(actor.me)) notFound();
   const [user, domains] = await Promise.all([
-    consoleRead<User>(`/v1/user/read/${encodeURIComponent(id)}`),
+    consoleRead(`/v1/user/read/${encodeURIComponent(id)}`, UserSchema),
     networkDomains(),
   ]);
   const displayName = user.contact.name ?? user.contact.email;
@@ -45,9 +45,9 @@ export default async function ConsoleCoordinatorPage({
   const [userRoles, catalogue] = await Promise.all([
     // Roles; absent when access control is off or not allowed.
     canManage
-      ? consoleReadOptional<UserRolesResponse>(`/v1/user/roles/${encodeURIComponent(id)}`)
+      ? consoleReadOptional(`/v1/user/roles/${encodeURIComponent(id)}`, UserRolesResponseSchema)
       : Promise.resolve(null),
-    canManage ? consoleReadOptional<RolesResponse>('/v1/roles') : Promise.resolve(null),
+    canManage ? consoleReadOptional('/v1/roles', RolesResponseSchema) : Promise.resolve(null),
   ]);
   return (
     <>

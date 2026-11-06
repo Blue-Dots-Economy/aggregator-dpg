@@ -42,6 +42,7 @@ vi.mock('@/components/console/HierarchySettings', () => ({
 import ConsoleOrgsPage from '@/app/(console)/console/orgs/page';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
+import { OrgHierarchyResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
 
 const NETWORK_ADMIN: MeResponse = {
   kind: 'admin',
@@ -75,7 +76,10 @@ describe('console orgs page — hierarchy settings', () => {
 
   it("reads the hierarchy with the network's values and passes them to the settings", async () => {
     render(await ConsoleOrgsPage({ searchParams: Promise.resolve({}) }));
-    expect(consoleRead).toHaveBeenCalledWith('/v1/org/hierarchy?fields=known_as_values');
+    expect(consoleRead).toHaveBeenCalledWith(
+      '/v1/org/hierarchy?fields=known_as_values',
+      OrgHierarchyResponseSchema,
+    );
     expect(screen.getByTestId('hierarchy-settings')).toHaveTextContent('State');
   });
 });

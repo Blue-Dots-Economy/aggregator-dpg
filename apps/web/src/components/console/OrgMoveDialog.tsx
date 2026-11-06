@@ -14,10 +14,13 @@ import { useEffect, useRef, useState, type SubmitEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { FolderInput } from 'lucide-react';
-import type { OrgParentOptionsResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import {
+  OrgParentOptionsResponseSchema,
+  type OrgParentOptionsResponse,
+} from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { Label } from '../ui/Label';
-import { errorKey, sendConsole, type ConsoleError } from '../../lib/console-client';
+import { errorKey, getConsole, sendConsole } from '../../lib/console-client';
 
 type ParentOption = OrgParentOptionsResponse['options'][number];
 
@@ -86,23 +89,13 @@ function MoveDialog({
   useEffect(() => {
     let live = true;
     void (async () => {
-      let status = 0;
-      let error: ConsoleError = {};
-      try {
-        const res = await fetch(`/api/console/org/parent/options/${orgId}`, {
-          credentials: 'same-origin',
-        });
-        const body = (await res.json().catch(() => null)) as unknown;
-        if (res.ok) {
-          if (live) setData(body as OrgParentOptionsResponse);
-          return;
-        }
-        status = res.status;
-        error = (body as { error?: ConsoleError } | null)?.error ?? {};
-      } catch {
-        // Network failure: reported as a generic error below.
-      }
-      if (live) setMessage(t(errorKey({ status, error })));
+      const r = await getConsole(
+        `/api/console/org/parent/options/${orgId}`,
+        OrgParentOptionsResponseSchema,
+      );
+      if (!live) return;
+      if (r.ok) setData(r.data);
+      else setMessage(t(errorKey(r)));
     })();
     return () => {
       live = false;

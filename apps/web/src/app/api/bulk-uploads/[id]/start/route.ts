@@ -17,7 +17,7 @@ export async function POST(
   try {
     // The body carries the operator `attestation` flag. Pass the parsed object;
     // `callApi` stringifies it, so a string would be double-encoded.
-    const body = (await req.json().catch(() => ({}))) as unknown;
+    const body: unknown = await req.json().catch(() => ({}));
     const upstream = await callApi(`/v1/bulk-uploads/${encodeURIComponent(id)}/start`, {
       method: 'POST',
       body: body ?? {},

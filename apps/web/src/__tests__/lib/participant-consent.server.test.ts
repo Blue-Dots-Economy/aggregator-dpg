@@ -12,8 +12,9 @@ vi.mock('node:fs', () => ({ existsSync: existsSyncMock, default: { existsSync: e
 vi.mock('@/lib/config-paths', () => ({ resolveSchemaRoot: () => '/config/schemas' }));
 
 // Silence structured logging in the API-fetch path.
+const { logWarn } = vi.hoisted(() => ({ logWarn: vi.fn() }));
 vi.mock('@/lib/logger', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  logger: { info: vi.fn(), warn: logWarn, error: vi.fn(), debug: vi.fn() },
 }));
 
 const { loadParticipantConsent } = await import('@/lib/participant-consent.server');
@@ -142,6 +143,74 @@ describe('loadParticipantConsent', () => {
         .mockResolvedValue(apiConsent({ documents: {} })) as unknown as typeof fetch;
       const result = await loadParticipantConsent();
       expect(result!.terms.title).toBe('Terms v2');
+    });
+
+    it.each([
+      ['versions as text', validDoc({ terms: { current_version: 1, versions: 'v1' } })],
+      [
+        'a numeric title',
+        validDoc({
+          terms: { current_version: 1, versions: [{ version: 1, title: 7, content: 'x' }] },
+        }),
+      ],
+      ['a JSON array', [validDoc()]],
+    ])('falls back to disk when the API document has %s', async (_label, doc) => {
+      existsSyncMock.mockReturnValue(true);
+      readFileMock.mockResolvedValue(JSON.stringify(validDoc()));
+      global.fetch = vi.fn().mockResolvedValue(apiConsent(doc)) as unknown as typeof fetch;
+      const result = await loadParticipantConsent();
+      expect(result!.terms.title).toBe('Terms v2');
+    });
+
+    it('falls back to disk when the API body has no participant_consent object', async () => {
+      existsSyncMock.mockReturnValue(true);
+      readFileMock.mockResolvedValue(JSON.stringify(validDoc()));
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ['not', 'an', 'object'],
+      } as unknown as Response) as unknown as typeof fetch;
+      const result = await loadParticipantConsent();
+      expect(result!.terms.title).toBe('Terms v2');
+    });
+
+    it('logs paths only when the API document has the wrong shape', async () => {
+      logWarn.mockClear();
+      existsSyncMock.mockReturnValue(false);
+      global.fetch = vi
+        .fn()
+        .mockResolvedValue(
+          apiConsent(validDoc({ terms: { current_version: 1, versions: [{ title: 'Secret' }] } })),
+        ) as unknown as typeof fetch;
+      await loadParticipantConsent();
+      expect(logWarn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'participantConsent.loadFromApi',
+          status: 'failure',
+          issues: expect.arrayContaining([expect.objectContaining({ code: 'invalid_type' })]),
+        }),
+      );
+      expect(JSON.stringify(logWarn.mock.calls)).not.toContain('Secret');
+    });
+
+    it('does not log when the API serves no document', async () => {
+      logWarn.mockClear();
+      existsSyncMock.mockReturnValue(false);
+      await loadParticipantConsent();
+      expect(logWarn).not.toHaveBeenCalled();
+    });
+
+    it('logs paths only when the on-disk document has the wrong shape', async () => {
+      logWarn.mockClear();
+      existsSyncMock.mockReturnValue(true);
+      readFileMock.mockResolvedValue(JSON.stringify({ documents: 'none' }));
+      await expect(loadParticipantConsent()).resolves.toBeNull();
+      expect(logWarn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'participantConsent.loadFromDisk',
+          status: 'failure',
+        }),
+      );
     });
 
     it('returns null when neither API nor disk has a document', async () => {

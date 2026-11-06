@@ -7,6 +7,7 @@
 
 import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { consoleRead } from './console-api.server';
+import { OrgSearchResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
 
 /** Organisations read per page, and the most pages read. */
 const PAGE = 100;
@@ -24,7 +25,7 @@ export async function readNetworkOrgs(
   const orgs: OrgSearchResponse['orgs'] = [];
   let cursor: string | null = null;
   for (let i = 0; i < MAX_PAGES; i++) {
-    const page: OrgSearchResponse = await consoleRead<OrgSearchResponse>('/v1/org/search', {
+    const page: OrgSearchResponse = await consoleRead('/v1/org/search', OrgSearchResponseSchema, {
       filter: { parent_id: rootId },
       limit: PAGE,
       ...(cursor ? { cursor } : {}),
@@ -46,7 +47,7 @@ export async function readReachableOrgs(): Promise<OrgSearchResponse['orgs']> {
   const orgs: OrgSearchResponse['orgs'] = [];
   let cursor: string | null = null;
   for (let i = 0; i < MAX_PAGES; i++) {
-    const page: OrgSearchResponse = await consoleRead<OrgSearchResponse>('/v1/org/search', {
+    const page: OrgSearchResponse = await consoleRead('/v1/org/search', OrgSearchResponseSchema, {
       limit: PAGE,
       ...(cursor ? { cursor } : {}),
     });

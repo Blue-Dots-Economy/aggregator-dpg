@@ -23,6 +23,17 @@ export function parseJsonObject(text: string): Record<string, unknown> {
 }
 
 /**
+ * Reads a parsed value as a JSON object.
+ *
+ * @param value - The parsed value.
+ * @returns The object, or `null` when the value is not an object.
+ */
+export function readJsonObject(value: unknown): Record<string, unknown> | null {
+  const parsed = JsonObjectSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
  * The JSON Schema keywords this app reads from a form schema file: `type` and
  * `properties`. Other keywords are left to RJSF.
  */
@@ -34,6 +45,17 @@ const JsonSchemaKeywordsSchema = z.object({
 /** Narrows a JSON object to a JSON Schema once its `type` and `properties` have the right form. */
 function isJsonSchema(value: Record<string, unknown>): value is RJSFSchema {
   return JsonSchemaKeywordsSchema.safeParse(value).success;
+}
+
+/**
+ * Reads a parsed value as a JSON Schema for an RJSF form.
+ *
+ * @param value - The parsed value, for example a `schema` field of an API response.
+ * @returns The schema, or `null` when the value is not an object or its `type` or `properties` has the wrong form.
+ */
+export function readJsonSchema(value: unknown): RJSFSchema | null {
+  const object = readJsonObject(value);
+  return object && isJsonSchema(object) ? object : null;
 }
 
 /**
