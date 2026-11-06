@@ -437,4 +437,71 @@ describe('ReferenceAutocompleteWidget', () => {
     expect(screen.queryByRole('option')).not.toBeInTheDocument();
     expect(onChange).toHaveBeenLastCalledWith('anything typed');
   });
+
+  it('shows the subtitle fields the options name, in order', async () => {
+    render(
+      <Wrapper>
+        <ReferenceAutocompleteWidget
+          {...(makeProps({
+            options: { source: uniqueSource(), subtitleFields: ['state', 'district'] },
+          }) as never)}
+        />
+      </Wrapper>,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'jayanagar' } });
+
+    expect(await screen.findByText('Karnataka, Bengaluru')).toBeInTheDocument();
+  });
+
+  it('drops unknown subtitle fields and shows no subtitle for an empty list', async () => {
+    render(
+      <Wrapper>
+        <ReferenceAutocompleteWidget
+          {...(makeProps({
+            options: { source: uniqueSource(), subtitleFields: ['pincode'] },
+          }) as never)}
+        />
+      </Wrapper>,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'jayanagar' } });
+
+    const option = await screen.findByRole('option');
+    expect(option).toHaveTextContent('Government ITI Jayanagar');
+    expect(option).not.toHaveTextContent('Bengaluru');
+  });
+
+  it('shows the district by default when the options name no subtitle fields', async () => {
+    render(
+      <Wrapper>
+        <ReferenceAutocompleteWidget
+          {...(makeProps({ options: { source: uniqueSource() } }) as never)}
+        />
+      </Wrapper>,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'jayanagar' } });
+
+    const option = await screen.findByRole('option');
+    expect(option).toHaveTextContent('Bengaluru');
+    expect(option).not.toHaveTextContent('Karnataka');
+  });
+
+  it('works as a plain text input when the options name no source', () => {
+    const onChange = vi.fn();
+    render(
+      <Wrapper>
+        <ReferenceAutocompleteWidget {...(makeProps({ onChange, options: {} }) as never)} />
+      </Wrapper>,
+    );
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'my institute' } });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenLastCalledWith('my institute');
+  });
 });

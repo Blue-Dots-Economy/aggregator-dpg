@@ -288,4 +288,18 @@ describe('LocationAutocompleteWidget', () => {
 
     expect(onChange).toHaveBeenLastCalledWith(JAYANAGAR.label);
   });
+
+  it('writes the picked label when the registry has no form context', async () => {
+    const onChange = vi.fn();
+    render(
+      <Wrapper>
+        <LocationAutocompleteWidget {...(makeProps({ onChange, registry: {} }) as never)} />
+      </Wrapper>,
+    );
+
+    await typeAndAwaitSuggestions('jayanagar');
+    fireEvent.mouseDown(await screen.findByRole('option', { name: JAYANAGAR.label }));
+
+    expect(onChange).toHaveBeenLastCalledWith(JAYANAGAR.label);
+  });
 });

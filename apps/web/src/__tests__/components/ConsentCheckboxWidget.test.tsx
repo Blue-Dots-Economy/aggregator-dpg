@@ -177,4 +177,15 @@ describe('ConsentCheckboxWidget', () => {
     // Modal is never mounted without content.
     expect(screen.queryByTestId('consent-modal')).toBeNull();
   });
+
+  it('degrades to the plain text label when the registry has no form context', () => {
+    render(
+      <Wrapper>
+        <ConsentCheckboxWidget {...(makeProps({ registry: {} }) as never)} />
+      </Wrapper>,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Terms of Service' })).toBeNull();
+    expect(screen.getByText(/Terms of Service/)).toBeInTheDocument();
+  });
 });

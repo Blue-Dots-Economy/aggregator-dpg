@@ -337,4 +337,76 @@ describe('MultiLocationAutocompleteWidget', () => {
 
     expect(suggestMock).not.toHaveBeenCalled();
   });
+
+  it('replaces the rows when the form sets a different list from outside', () => {
+    const props = makeProps({ value: ['Bengaluru'] });
+    const { rerender } = render(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...(props as never)} />
+      </Wrapper>,
+    );
+    rerender(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget
+          {...({ ...props, value: ['Mysuru', 'Hubballi'] } as never)}
+        />
+      </Wrapper>,
+    );
+
+    const rows = screen.getAllByRole('combobox');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveValue('Mysuru');
+    expect(rows[1]).toHaveValue('Hubballi');
+  });
+
+  it('keeps a blank added row when the form passes back the same names', () => {
+    const props = makeProps({ value: ['Bengaluru'] });
+    const { rerender } = render(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...(props as never)} />
+      </Wrapper>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: messages.form.location_add }));
+    // A new array with the same names, as RJSF passes after the row's onChange.
+    rerender(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...({ ...props, value: ['Bengaluru'] } as never)} />
+      </Wrapper>,
+    );
+
+    expect(screen.getAllByRole('combobox')).toHaveLength(2);
+  });
+
+  it('cancels a pending search when an outside value removes its row', async () => {
+    const props = makeProps({ value: ['Bengaluru', 'Mysuru'] });
+    const { rerender } = render(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...(props as never)} />
+      </Wrapper>,
+    );
+    fireEvent.change(screen.getAllByRole('combobox')[1]!, { target: { value: 'mysuru' } });
+    rerender(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...({ ...props, value: ['Hubballi'] } as never)} />
+      </Wrapper>,
+    );
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(screen.getAllByRole('combobox')).toHaveLength(1);
+    expect(suggestMock).not.toHaveBeenCalled();
+  });
+
+  it('writes the picked labels when the registry has no form context', async () => {
+    const onChange = vi.fn();
+    render(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...(makeProps({ onChange, registry: {} }) as never)} />
+      </Wrapper>,
+    );
+
+    await typeInRow(0, 'bengaluru');
+    await pickSuggestionInRow(0, BENGALURU.label);
+
+    expect(onChange).toHaveBeenLastCalledWith([BENGALURU.label]);
+  });
 });

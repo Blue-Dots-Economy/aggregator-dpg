@@ -775,3 +775,118 @@ describe('<RjsfThemedForm /> wrapper behaviour', () => {
     expect(arg.formData).toEqual({ name: 'Asha' });
   });
 });
+
+describe('<RjsfThemedForm /> ui options', () => {
+  it('TextWidget: uses ui:options.inputType as the native input type', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: { age: { type: 'string', title: 'Age' } },
+    };
+    const uiSchema: UiSchema = { age: { 'ui:options': { inputType: 'number' } } };
+    renderThemed({ schema, uiSchema, formData: {}, onChange: () => {} });
+    expect(screen.getByLabelText('Age')).toHaveAttribute('type', 'number');
+  });
+
+  it('TextWidget: writes ui:emptyValue when the input is cleared', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: { name: { type: 'string', title: 'Name' } },
+    };
+    const uiSchema: UiSchema = { name: { 'ui:emptyValue': 'n/a' } };
+    const onChange = vi.fn();
+    renderThemed({ schema, uiSchema, formData: { name: 'Asha' }, onChange });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: '' } });
+    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]![0];
+    expect(lastCall.formData.name).toBe('n/a');
+  });
+
+  it('ObjectFieldTemplate: suppresses the title when ui:title is empty', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        address: {
+          type: 'object',
+          title: 'Address',
+          properties: { city: { type: 'string', title: 'City' } },
+        },
+      },
+    };
+    const uiSchema: UiSchema = { address: { 'ui:title': '' } };
+    renderThemed({ schema, uiSchema, formData: {}, onChange: () => {} });
+    expect(screen.queryByText('Address')).toBeNull();
+    expect(screen.getByLabelText('City')).toBeInTheDocument();
+  });
+
+  it('ObjectFieldTemplate: a ui:colSpan 2 field spans both grid columns', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        name: { type: 'string', title: 'Name' },
+        about: { type: 'string', title: 'About' },
+      },
+    };
+    const uiSchema: UiSchema = { about: { 'ui:colSpan': 2 } };
+    renderThemed({ schema, uiSchema, formData: {}, onChange: () => {} });
+    expect(screen.getByLabelText('About').closest('.md\\:col-span-2')).toBeTruthy();
+    expect(screen.getByLabelText('Name').closest('.md\\:col-span-2')).toBeNull();
+  });
+
+  it('ArrayFieldTemplate: names items and the add button with ui:options.itemLabel', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        contacts: {
+          type: 'array',
+          title: 'Contacts',
+          items: {
+            type: 'object',
+            properties: { phone: { type: 'string', title: 'Phone' } },
+          },
+        },
+      },
+    };
+    const uiSchema: UiSchema = { contacts: { 'ui:options': { itemLabel: 'Contact' } } };
+    renderThemed({
+      schema,
+      uiSchema,
+      formData: { contacts: [{ phone: '1' }, { phone: '2' }] },
+      onChange: () => {},
+    });
+    expect(screen.getByText(/Contact 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Contact 2/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '+ Add another contact' })).toBeInTheDocument();
+  });
+
+  it('CheckboxesWidget: shows a chip for each string value already in the list', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        langs: {
+          type: 'array',
+          items: { type: 'string', enum: ['js', 'py', 'go'] },
+          uniqueItems: true,
+          title: 'Languages',
+        },
+      },
+    };
+    const uiSchema: UiSchema = {
+      langs: { 'ui:widget': 'CheckboxesWidget', 'ui:enumNames': ['JavaScript', 'Python', 'Go'] },
+    };
+    renderThemed({ schema, uiSchema, formData: { langs: ['py', 'go'] }, onChange: () => {} });
+    const trigger = screen.getByLabelText('Languages');
+    expect(trigger).toHaveTextContent('Python');
+    expect(trigger).toHaveTextContent('Go');
+    expect(trigger).not.toHaveTextContent('JavaScript');
+  });
+
+  it('x-form-layout: ignores a layout with no sections and renders the flat grid', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      'x-form-layout': { sections: [] },
+      properties: { name: { type: 'string', title: 'Name' } },
+    };
+    renderThemed({ schema, formData: {}, onChange: () => {} });
+    expect(screen.getByLabelText('Name')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 3 })).toBeNull();
+  });
+});
