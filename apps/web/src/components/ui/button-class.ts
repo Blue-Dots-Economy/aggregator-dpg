@@ -4,7 +4,7 @@
  * {@link buttonClass} too.
  */
 
-import { cn } from '../../lib/cn';
+import { cn } from '@/lib/cn';
 
 /** The button styles. */
 export type ButtonKind = 'primary' | 'ghost' | 'soft' | 'danger';

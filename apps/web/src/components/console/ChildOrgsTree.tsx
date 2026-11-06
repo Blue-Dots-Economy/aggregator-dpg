@@ -12,8 +12,8 @@ import { useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
-import { I } from '../../icons';
-import { cn } from '../../lib/cn';
+import { I } from '@/icons';
+import { cn } from '@/lib/cn';
 import { ConsoleStatusPill, EmptyState } from './ConsoleUi';
 
 type OrgRow = OrgSearchResponse['orgs'][number];

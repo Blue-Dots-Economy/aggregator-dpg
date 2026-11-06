@@ -8,9 +8,9 @@ import { useQuery } from '@tanstack/react-query';
 import type { RJSFSchema } from '@rjsf/utils';
 import { RegisterPageShell } from '../RegisterPageShell';
 import { CoordinatorRegisterForm } from '../CoordinatorRegisterForm';
-import { jsonFetch } from '../../../../services/http';
+import { jsonFetch } from '@/services/http';
 import { OrgListResponseSchema } from '../registration-shared';
-import type { ConsentDocContent } from '../../../../components/consent/consent-types';
+import type { ConsentDocContent } from '@/components/consent/consent-types';
 
 export interface CoordinatorInviteViewProps {
   schema: RJSFSchema;

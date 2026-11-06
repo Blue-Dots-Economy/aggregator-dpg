@@ -5,21 +5,21 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { I, type IconName } from '../../icons';
+import { I, type IconName } from '@/icons';
 import { BlueDotsLogo } from '../ui/BlueDotsLogo';
-import { useAuth, useCan } from '../../lib/auth-context';
-import { useThemeMode } from '../../lib/theme-mode';
+import { useAuth, useCan } from '@/lib/auth-context';
+import { useThemeMode } from '@/lib/theme-mode';
 import { SupportDialog } from '../support/SupportDialog';
 import { Button } from '../ui/Button';
-import { useDashboard } from '../../hooks/useDashboard';
-import { useProfileRaw } from '../../hooks/useProfile';
+import { useDashboard } from '@/hooks/useDashboard';
+import { useProfileRaw } from '@/hooks/useProfile';
 import {
   useAggregatorConfig,
   DEFAULT_AGGREGATOR_CONFIG,
   type AggregatorConfigPayload,
-} from '../../hooks/useAggregatorConfig';
-import { cn } from '../../lib/cn';
-import { initialsOf } from '../../lib/initials';
+} from '@/hooks/useAggregatorConfig';
+import { cn } from '@/lib/cn';
+import { initialsOf } from '@/lib/initials';
 
 /** One sidebar link. */
 export interface NavItem {

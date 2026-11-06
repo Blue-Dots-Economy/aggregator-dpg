@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { RoleSchema, type Permission, type Role } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
-import { errorKey, sendConsole } from '../../lib/console-client';
+import { errorKey, sendConsole } from '@/lib/console-client';
 
 /** `POST /v1/roles/delete/:key` response. */
 const RoleDeleteResponseSchema = z.object({ deleted: z.boolean() });

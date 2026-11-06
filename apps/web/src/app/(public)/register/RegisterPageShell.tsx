@@ -3,12 +3,12 @@
 import { type JSX, type ReactNode } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
-import { LegalLinksFooter } from '../../../components/legal/LegalLinksFooter';
-import { BrandPanel } from '../../../components/login/BrandPanel';
-import { I } from '../../../icons';
+import { BlueDotsLogo } from '@/components/ui/BlueDotsLogo';
+import { LegalLinksFooter } from '@/components/legal/LegalLinksFooter';
+import { BrandPanel } from '@/components/login/BrandPanel';
+import { I } from '@/icons';
 import { useTranslations } from 'next-intl';
-import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '@/hooks/useAggregatorConfig';
 
 export interface RegisterPageShellProps {
   /** Page heading rendered above the form (the coordinator/owner title). */

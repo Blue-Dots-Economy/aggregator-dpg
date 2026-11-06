@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode, JSX } from 'react';
-import { I } from '../../icons';
+import { I } from '@/icons';
 
 /**
  * Inline hint that explains why a submit button is disabled.

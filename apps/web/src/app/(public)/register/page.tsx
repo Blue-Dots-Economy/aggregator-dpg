@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import { getSession } from '../../../lib/server-session';
+import { getSession } from '@/lib/server-session';
 import { RegisterView } from './RegisterView';
-import { loadRegistrationSchema } from '../../../lib/aggregator-schema.server';
+import { loadRegistrationSchema } from '@/lib/aggregator-schema.server';
 import { loadConsentContent, warnIfLegacyHierarchyFlag } from './register-server';
 
 /**

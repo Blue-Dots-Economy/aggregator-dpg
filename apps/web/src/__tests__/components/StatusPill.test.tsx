@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
-import { StatusPill } from '../../components/ui/StatusPill';
+import { StatusPill } from '@/components/ui/StatusPill';
 import type { ComponentProps } from 'react';
 
 const messages = {

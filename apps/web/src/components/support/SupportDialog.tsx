@@ -13,10 +13,10 @@
 import { useEffect, useRef, useState, type ChangeEvent, type SubmitEvent, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
-import { I } from '../../icons';
+import { I } from '@/icons';
 import { Button } from '../ui/Button';
-import { useAuth } from '../../lib/auth-context';
-import { readApiError } from '../../lib/api-error';
+import { useAuth } from '@/lib/auth-context';
+import { readApiError } from '@/lib/api-error';
 import {
   encodeAttachments,
   formatBytes,
@@ -24,7 +24,7 @@ import {
   validateAttachmentSelection,
   type AttachmentRejection,
   type SupportConfig,
-} from '../../lib/support-attachments';
+} from '@/lib/support-attachments';
 import { withStableKeys } from '@/lib/list-keys';
 import { useSupportConfig } from '@/hooks/useSupportConfig';
 import { useIsClient } from '@/hooks/useIsClient';

@@ -14,14 +14,14 @@ import * as React from 'react';
 import type { WidgetProps } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { X } from 'lucide-react';
-import { Input } from '../../ui/Input';
-import { cn } from '../../../lib/cn';
-import { getGeoProvider } from '../../../lib/geo/provider';
-import { useFormRuntimeConfig } from '../../../lib/FormRuntimeConfigProvider';
+import { Input } from '@/components/ui/Input';
+import { cn } from '@/lib/cn';
+import { getGeoProvider } from '@/lib/geo/provider';
+import { useFormRuntimeConfig } from '@/lib/FormRuntimeConfigProvider';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
 import { geoSuggestionKey } from './geo-suggestion-key';
 import { withStableKeys } from '@/lib/list-keys';
-import type { GeoSuggestion } from '../../../lib/geo/types';
+import type { GeoSuggestion } from '@/lib/geo/types';
 
 export interface ResolvedCoord {
   lat: number;

@@ -10,9 +10,9 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
-import { getSession } from '../../../../lib/server-session';
-import { logger } from '../../../../lib/logger';
-import { unauthorizedResponse } from '../../../../lib/bff-errors';
+import { getSession } from '@/lib/server-session';
+import { logger } from '@/lib/logger';
+import { unauthorizedResponse } from '@/lib/bff-errors';
 
 export const runtime = 'nodejs';
 

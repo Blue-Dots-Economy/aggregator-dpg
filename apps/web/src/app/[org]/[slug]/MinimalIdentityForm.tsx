@@ -9,7 +9,7 @@
 
 import { useState, type JSX } from 'react';
 import { useTranslations } from 'next-intl';
-import { SubmitBlockers } from '../../../components/ui/SubmitBlockers';
+import { SubmitBlockers } from '@/components/ui/SubmitBlockers';
 import type { LinkIdentity } from '@/lib/registration-link';
 
 export interface MinimalIdentityPayload {

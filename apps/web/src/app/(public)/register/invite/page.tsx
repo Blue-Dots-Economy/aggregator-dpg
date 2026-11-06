@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import { getSession } from '../../../../lib/server-session';
-import { resolveMaxInvites } from '../../../../lib/invite-limit';
+import { getSession } from '@/lib/server-session';
+import { resolveMaxInvites } from '@/lib/invite-limit';
 import { OwnerInviteView } from './OwnerInviteView';
 
 /**

@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { OwnerAccessResponseSchema } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
-import { errorKey, sendConsole } from '../../lib/console-client';
+import { errorKey, sendConsole } from '@/lib/console-client';
 
 /**
  * A "Re-grant owner access" button with its outcome.

@@ -10,7 +10,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { ArrowRight, Check } from 'lucide-react';
-import { cn } from '../../lib/cn';
+import { cn } from '@/lib/cn';
 
 /** The colour of a tile, by what it counts. */
 export type TileTone = 'primary' | 'green' | 'amber' | 'rose';

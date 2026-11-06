@@ -15,15 +15,15 @@
 import * as React from 'react';
 import type { WidgetProps } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
-import { Input } from '../../ui/Input';
+import { Input } from '@/components/ui/Input';
 import { Search } from 'lucide-react';
-import { cn } from '../../../lib/cn';
-import { getGeoProvider } from '../../../lib/geo/provider';
-import { useFormRuntimeConfig } from '../../../lib/FormRuntimeConfigProvider';
+import { cn } from '@/lib/cn';
+import { getGeoProvider } from '@/lib/geo/provider';
+import { useFormRuntimeConfig } from '@/lib/FormRuntimeConfigProvider';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
 import { geoSuggestionKey } from './geo-suggestion-key';
 import { withStableKeys } from '@/lib/list-keys';
-import type { GeoComponents, GeoSuggestion } from '../../../lib/geo/types';
+import type { GeoComponents, GeoSuggestion } from '@/lib/geo/types';
 
 /**
  * A selected place reported to the page.

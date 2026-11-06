@@ -8,7 +8,7 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
-import { serviceUnavailableResponse } from '../../../lib/bff-errors';
+import { serviceUnavailableResponse } from '@/lib/bff-errors';
 
 export const runtime = 'nodejs';
 

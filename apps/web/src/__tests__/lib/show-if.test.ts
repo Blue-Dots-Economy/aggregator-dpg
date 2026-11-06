@@ -7,7 +7,7 @@ import {
   pruneHiddenFields,
   resolveVisibleSchema,
   stripShowIf,
-} from '../../lib/show-if';
+} from '@/lib/show-if';
 
 // A small schema mirroring a real conditional chain:
 // educationCategory -> schoolQualification -> schoolQualificationOther

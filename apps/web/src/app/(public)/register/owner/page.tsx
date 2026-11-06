@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
-import { getSession } from '../../../../lib/server-session';
+import { getSession } from '@/lib/server-session';
 import { OwnerRegisterView } from './OwnerRegisterView';
 import { loadConsentContent, loadOrgSchema } from '../register-server';
 

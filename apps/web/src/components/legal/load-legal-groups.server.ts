@@ -11,7 +11,7 @@
 import 'server-only';
 import { getTranslations } from 'next-intl/server';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
-import { logger } from '../../lib/logger';
+import { logger } from '@/lib/logger';
 import type { ConsentDocContent } from '../consent/consent-types';
 import type { LegalGroup } from './LegalDocumentView';
 

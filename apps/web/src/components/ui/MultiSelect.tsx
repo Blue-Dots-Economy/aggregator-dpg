@@ -9,7 +9,7 @@
 import * as React from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { Check, ChevronDown, X } from 'lucide-react';
-import { cn } from '../../lib/cn';
+import { cn } from '@/lib/cn';
 
 export interface MultiSelectOption {
   value: string;

@@ -4,8 +4,8 @@ import { useMemo, useState, type JSX, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { z } from 'zod';
 import { RegisterPageShell } from '../RegisterPageShell';
-import { DEFAULT_MAX_INVITES } from '../../../../lib/invite-limit';
-import { readApiError } from '../../../../lib/api-error';
+import { DEFAULT_MAX_INVITES } from '@/lib/invite-limit';
+import { readApiError } from '@/lib/api-error';
 import { parseResponseBody, ResponseShapeError } from '@/lib/response-shape-error';
 
 const MINT_URL = '/api/invites';

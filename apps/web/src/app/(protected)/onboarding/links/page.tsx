@@ -2,8 +2,8 @@
 
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Topbar } from '../../../../components/shell/Topbar';
-import { I } from '../../../../icons';
+import { Topbar } from '@/components/shell/Topbar';
+import { I } from '@/icons';
 import { CreateLinkSection } from '../_components/RegistrationLinksSection';
 
 export default function RegistrationLinksPage() {

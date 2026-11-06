@@ -10,7 +10,7 @@
 
 import type { WidgetProps } from '@rjsf/utils';
 import { PHONE_COUNTRY_CODE, PHONE_LOCAL_DIGITS } from '@aggregator-dpg/shared-primitives/phone';
-import { cn } from '../../../lib/cn';
+import { cn } from '@/lib/cn';
 
 const PREFIX = `+${PHONE_COUNTRY_CODE}`;
 

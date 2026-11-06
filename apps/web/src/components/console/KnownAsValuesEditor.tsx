@@ -21,9 +21,9 @@ import {
   type KnownAsEntryRequest,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
-import { I } from '../../icons';
-import { cn } from '../../lib/cn';
-import { errorKey, RESPONSE_SHAPE_CODE, setOrgKnownAsValues } from '../../lib/console-client';
+import { I } from '@/icons';
+import { cn } from '@/lib/cn';
+import { errorKey, RESPONSE_SHAPE_CODE, setOrgKnownAsValues } from '@/lib/console-client';
 
 /** One row of the editor. `key` is set for a saved value only. */
 interface Row {

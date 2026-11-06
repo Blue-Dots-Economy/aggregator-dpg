@@ -12,7 +12,7 @@ import type { ChangeEvent, ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { Building2, ChevronDown, CircleDot, Layers } from 'lucide-react';
 import { Button } from '../ui/Button';
-import type { OrgOption } from '../../lib/console-org-options';
+import type { OrgOption } from '@/lib/console-org-options';
 
 const STATUSES = ['pending', 'active', 'inactive', 'retired'] as const;
 

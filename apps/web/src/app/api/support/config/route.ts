@@ -8,8 +8,8 @@
  */
 
 import { type NextResponse } from 'next/server';
-import { callApi } from '../../../../lib/upstream-client';
-import { passthrough, proxyFailureResponse } from '../../../../lib/bff-proxy';
+import { callApi } from '@/lib/upstream-client';
+import { passthrough, proxyFailureResponse } from '@/lib/bff-proxy';
 
 export const runtime = 'nodejs';
 

@@ -5,9 +5,9 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { Languages } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
-import { LOCALE_NAMES } from '../../i18n/config';
-import { useEnabledLocales } from '../../i18n/EnabledLocalesProvider';
-import { setLocale } from '../../i18n/locale-cookie';
+import { LOCALE_NAMES } from '@/i18n/config';
+import { useEnabledLocales } from '@/i18n/EnabledLocalesProvider';
+import { setLocale } from '@/i18n/locale-cookie';
 
 /**
  * Dropdown that switches the UI language. Options come from

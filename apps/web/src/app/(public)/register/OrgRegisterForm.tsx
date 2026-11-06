@@ -5,13 +5,13 @@ import { useQuery } from '@tanstack/react-query';
 import type { IChangeEvent } from '@rjsf/core';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
-import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
-import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
-import { ConsentGate } from '../../../components/consent/ConsentGate';
-import { toConsentDocs } from '../../../components/consent/consent-docs';
-import { SearchableSelect, type SearchableOption } from '../../../components/ui/SearchableSelect';
+import { RjsfThemedForm } from '@/components/forms/RjsfThemed';
+import type { ResolvedPlace } from '@/components/forms/custom-widgets/LocationAutocompleteWidget';
+import { ConsentGate } from '@/components/consent/ConsentGate';
+import { toConsentDocs } from '@/components/consent/consent-docs';
+import { SearchableSelect, type SearchableOption } from '@/components/ui/SearchableSelect';
 import { z } from 'zod';
-import { jsonFetch } from '../../../services/http';
+import { jsonFetch } from '@/services/http';
 import {
   stampConsent,
   stripConsentBlock,
@@ -29,10 +29,10 @@ import {
   useConsentGateSubmit,
   useRegistrationFormState,
 } from './registration-ui';
-import type { ConsentDocContent } from '../../../components/consent/consent-types';
-import { gstinCustomValidate } from '../../../lib/org-schema';
-import { withPhoneWidget } from '../../../lib/phone-ui-schema';
-import { readableFormErrors } from '../../../lib/readable-form-errors';
+import type { ConsentDocContent } from '@/components/consent/consent-types';
+import { gstinCustomValidate } from '@/lib/org-schema';
+import { withPhoneWidget } from '@/lib/phone-ui-schema';
+import { readableFormErrors } from '@/lib/readable-form-errors';
 
 /** One org a new org can register under (`GET /api/orgs/parents`). */
 const ParentOptionSchema = z.object({

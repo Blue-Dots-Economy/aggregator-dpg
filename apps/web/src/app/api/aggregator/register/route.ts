@@ -9,7 +9,7 @@
  */
 
 import { type NextRequest, type NextResponse } from 'next/server';
-import { proxyServiceRequest } from '../../../../lib/bff-service-proxy';
+import { proxyServiceRequest } from '@/lib/bff-service-proxy';
 
 export const runtime = 'nodejs';
 

@@ -16,22 +16,22 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslations, useLocale } from 'next-intl';
-import { Button } from '../../../components/ui/Button';
-import { StatusPill } from '../../../components/ui/StatusPill';
-import { Avatar } from '../../../components/ui/Avatar';
-import { Topbar } from '../../../components/shell/Topbar';
-import { I, type IconName } from '../../../icons';
-import { useDashboard } from '../../../hooks/useDashboard';
-import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
-import { dashboardService, type LifecycleFilter } from '../../../services/dashboard.service';
-import { mapDirectional } from '../../../services/row-mapping';
-import { resolveTiles } from '../../../services/tiles';
-import { DASHBOARD_BULK_ACTIONS, type BulkAction } from '../../../services/bulk-actions';
+import { Button } from '@/components/ui/Button';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { Avatar } from '@/components/ui/Avatar';
+import { Topbar } from '@/components/shell/Topbar';
+import { I, type IconName } from '@/icons';
+import { useDashboard } from '@/hooks/useDashboard';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '@/hooks/useAggregatorConfig';
+import { dashboardService, type LifecycleFilter } from '@/services/dashboard.service';
+import { mapDirectional } from '@/services/row-mapping';
+import { resolveTiles } from '@/services/tiles';
+import { DASHBOARD_BULK_ACTIONS, type BulkAction } from '@/services/bulk-actions';
 import { ResponseShapeError } from '@/lib/response-shape-error';
-import { useCan } from '../../../lib/auth-context';
-import type { DashboardTileDef, StatusRule } from '../../../hooks/useAggregatorConfig';
-import { useProfileRaw } from '../../../hooks/useProfile';
-import { useThemeMode } from '../../../lib/theme-mode';
+import { useCan } from '@/lib/auth-context';
+import type { DashboardTileDef, StatusRule } from '@/hooks/useAggregatorConfig';
+import { useProfileRaw } from '@/hooks/useProfile';
+import { useThemeMode } from '@/lib/theme-mode';
 import type {
   DirectionalStats,
   LifecycleStatus,
@@ -39,7 +39,7 @@ import type {
   ParticipantStatus,
   Provider,
   Seeker,
-} from '../../../types';
+} from '@/types';
 
 /**
  * Indexes a domain's `status_rules` by status key for the status cards.

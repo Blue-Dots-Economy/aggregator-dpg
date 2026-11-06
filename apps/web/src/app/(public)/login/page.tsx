@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { getSession } from '../../../lib/server-session';
+import { getSession } from '@/lib/server-session';
 import { LoginView } from './LoginView';
 
 const LOGOUT_REASON_COOKIE = 'bd_logout_reason';

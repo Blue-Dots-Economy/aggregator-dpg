@@ -7,6 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { NextRequest } from 'next/server';
+// eslint-disable-next-line no-restricted-imports -- middleware.ts is outside src, so the @/ alias does not reach it.
 import { middleware, config } from '../../../../middleware';
 
 describe('middleware', () => {

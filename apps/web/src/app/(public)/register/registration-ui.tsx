@@ -13,11 +13,11 @@ import { useTranslations } from 'next-intl';
 import type { IChangeEvent } from '@rjsf/core';
 import type { FormValidation, RJSFSchema, RJSFValidationError } from '@rjsf/utils';
 import { refusedNameCharacters } from '@aggregator-dpg/shared-primitives/person-name';
-import { readableFormErrors } from '../../[org]/[slug]/PublicRegistrationView';
-import { I } from '../../../icons';
-import type { ConsentDoc } from '../../../components/consent/consent-docs';
-import type { ConsentDocContent } from '../../../components/consent/consent-types';
-import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
+import { readableFormErrors } from '@/app/[org]/[slug]/PublicRegistrationView';
+import { I } from '@/icons';
+import type { ConsentDoc } from '@/components/consent/consent-docs';
+import type { ConsentDocContent } from '@/components/consent/consent-types';
+import type { ResolvedPlace } from '@/components/forms/custom-widgets/LocationAutocompleteWidget';
 import {
   humaniseValidationErrors,
   type AjvLikeError,

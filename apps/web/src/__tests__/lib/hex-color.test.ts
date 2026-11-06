@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { mix, parseHex } from '../../lib/hex-color';
+import { mix, parseHex } from '@/lib/hex-color';
 
 describe('parseHex', () => {
   it('parses a #rrggbb value', () => {

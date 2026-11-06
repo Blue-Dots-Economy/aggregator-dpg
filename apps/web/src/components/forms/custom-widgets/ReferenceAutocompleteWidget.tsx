@@ -18,9 +18,9 @@
 
 import * as React from 'react';
 import type { WidgetProps } from '@rjsf/utils';
-import { Input } from '../../ui/Input';
-import { cn } from '../../../lib/cn';
-import { useFormRuntimeConfig } from '../../../lib/FormRuntimeConfigProvider';
+import { Input } from '@/components/ui/Input';
+import { cn } from '@/lib/cn';
+import { useFormRuntimeConfig } from '@/lib/FormRuntimeConfigProvider';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
 import { withStableKeys } from '@/lib/list-keys';
 import { useReferenceDataset } from '@/hooks/useReferenceDataset';

@@ -18,7 +18,7 @@ import {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { Label } from '../ui/Label';
-import { errorKey, RESPONSE_SHAPE_CODE, setOrgKnownAs } from '../../lib/console-client';
+import { errorKey, RESPONSE_SHAPE_CODE, setOrgKnownAs } from '@/lib/console-client';
 
 /**
  * Renders the "known as" picker.

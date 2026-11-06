@@ -8,7 +8,7 @@
  * branch — this file is what stops that regressing.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { dashboardService } from '../../services/dashboard.service';
+import { dashboardService } from '@/services/dashboard.service';
 
 function csvResponse(headers: Record<string, string>): Response {
   return new Response('item_id,name\n1,Asha\n', {

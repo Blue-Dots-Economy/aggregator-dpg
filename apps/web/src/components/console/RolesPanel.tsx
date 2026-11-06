@@ -22,8 +22,8 @@ import {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { cn } from '../../lib/cn';
-import { errorKey, sendConsole } from '../../lib/console-client';
+import { cn } from '@/lib/cn';
+import { errorKey, sendConsole } from '@/lib/console-client';
 
 /** Durations offered for a time-limited role, in days, up to the role's limit. */
 const DURATIONS = [30, 60, 90];

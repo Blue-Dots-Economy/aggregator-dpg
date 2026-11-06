@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { NextRequest } from 'next/server';
-import { passthrough, isNoSession, proxyFailureResponse, readJsonBody } from '../../lib/bff-proxy';
+import { passthrough, isNoSession, proxyFailureResponse, readJsonBody } from '@/lib/bff-proxy';
 
 describe('passthrough', () => {
   it('forwards a JSON body and its status', async () => {

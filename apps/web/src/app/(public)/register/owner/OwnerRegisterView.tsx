@@ -5,7 +5,7 @@ import type { RJSFSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { RegisterPageShell } from '../RegisterPageShell';
 import { OrgRegisterForm } from '../OrgRegisterForm';
-import type { ConsentDocContent } from '../../../../components/consent/consent-types';
+import type { ConsentDocContent } from '@/components/consent/consent-types';
 
 export interface OwnerRegisterViewProps {
   /** Org-registration JSON Schema loaded by the owner server route. */

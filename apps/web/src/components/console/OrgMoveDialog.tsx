@@ -21,7 +21,7 @@ import {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { Label } from '../ui/Label';
-import { errorKey, getConsole, RESPONSE_SHAPE_CODE, sendConsole } from '../../lib/console-client';
+import { errorKey, getConsole, RESPONSE_SHAPE_CODE, sendConsole } from '@/lib/console-client';
 
 type ParentOption = OrgParentOptionsResponse['options'][number];
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { SegmentedTabs } from '../../components/ui/SegmentedTabs';
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 
 describe('<SegmentedTabs />', () => {
   it('marks the active tab and fires onChange on click', async () => {

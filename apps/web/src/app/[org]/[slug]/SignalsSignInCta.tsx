@@ -7,7 +7,7 @@
 
 import { useTranslations } from 'next-intl';
 import { resolveSignalsCta } from '@aggregator-dpg/network-config/signals-cta';
-import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '@/hooks/useAggregatorConfig';
 
 /**
  * Checks that a hand-off URL is absolute http(s) before it is used as an `href`.

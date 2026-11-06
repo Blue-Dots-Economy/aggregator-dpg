@@ -3,13 +3,13 @@
 import type { JSX } from 'react';
 import Image from 'next/image';
 import { useTranslations } from 'next-intl';
-import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
-import { BrandPanel } from '../../../components/login/BrandPanel';
-import { useThemeMode } from '../../../lib/theme-mode';
-import { I } from '../../../icons';
-import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
-import { BrandAttribution } from '../../../components/login/BrandAttribution';
-import { LegalLinksFooter } from '../../../components/legal/LegalLinksFooter';
+import { BlueDotsLogo } from '@/components/ui/BlueDotsLogo';
+import { BrandPanel } from '@/components/login/BrandPanel';
+import { useThemeMode } from '@/lib/theme-mode';
+import { I } from '@/icons';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '@/hooks/useAggregatorConfig';
+import { BrandAttribution } from '@/components/login/BrandAttribution';
+import { LegalLinksFooter } from '@/components/legal/LegalLinksFooter';
 
 export interface LoginViewProps {
   returnTo: string;

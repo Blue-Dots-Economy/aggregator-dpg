@@ -33,7 +33,7 @@ import { useTranslations } from 'next-intl';
 import { X } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
 import { MultiSelect } from '../ui/MultiSelect';
-import { pruneHiddenFields, resolveVisibleSchema, stripShowIf } from '../../lib/show-if';
+import { pruneHiddenFields, resolveVisibleSchema, stripShowIf } from '@/lib/show-if';
 import { ConsentCheckboxWidget } from './ConsentCheckboxWidget';
 import { LocationAutocompleteWidget } from './custom-widgets/LocationAutocompleteWidget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/MultiLocationAutocompleteWidget';

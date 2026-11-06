@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import type { RJSFSchema } from '@rjsf/utils';
 import { RegisterPageShell } from './RegisterPageShell';
 import { CoordinatorRegisterForm } from './CoordinatorRegisterForm';
-import type { ConsentDocContent } from '../../../components/consent/consent-types';
+import type { ConsentDocContent } from '@/components/consent/consent-types';
 
 export interface RegisterViewProps {
   schema: RJSFSchema;

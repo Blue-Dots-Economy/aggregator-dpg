@@ -16,7 +16,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { RJSFSchema } from '@rjsf/utils';
 import messages from '@/i18n/messages/en.json';
 import { applyNetworkDomains } from '@/lib/org-schema';
+// eslint-disable-next-line no-restricted-imports -- the shared config folder is outside the app, so the @/ alias does not reach it.
 import defaultSchema from '../../../../../config/schemas/aggregator/org-registration.v1.json';
+// eslint-disable-next-line no-restricted-imports -- the shared config folder is outside the app, so the @/ alias does not reach it.
 import defaultUi from '../../../../../config/schemas/aggregator/org-registration.v1.ui.json';
 
 beforeAll(() => {

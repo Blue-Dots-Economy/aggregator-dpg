@@ -8,9 +8,9 @@
  * `/v1/onboarding/by-source`, not signalstack.
  */
 import { useTranslations } from 'next-intl';
-import { Button } from '../../../../components/ui/Button';
-import { I, type IconName } from '../../../../icons';
-import { useOnboardingSummary, useOnboardingBySource } from '../../../../hooks/useOnboarding';
+import { Button } from '@/components/ui/Button';
+import { I, type IconName } from '@/icons';
+import { useOnboardingSummary, useOnboardingBySource } from '@/hooks/useOnboarding';
 
 /** Tone classes per onboarding outcome card (colored chip + value). */
 const ONBOARDING_TONES = {

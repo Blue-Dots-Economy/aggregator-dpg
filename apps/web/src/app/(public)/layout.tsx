@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { LanguageSwitcher } from '../../components/shell/LanguageSwitcher';
-import { ThemeToggle } from '../../components/shell/ThemeToggle';
+import { LanguageSwitcher } from '@/components/shell/LanguageSwitcher';
+import { ThemeToggle } from '@/components/shell/ThemeToggle';
 
 /**
  * Layout for the public auth routes (`/login`, `/register`).

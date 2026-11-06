@@ -19,8 +19,8 @@ import {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { ConsoleStatusPill, EmptyState } from './ConsoleUi';
-import { RESPONSE_SHAPE_CODE, sendConsole } from '../../lib/console-client';
-import { plainErrorKey } from '../../lib/console-errors';
+import { RESPONSE_SHAPE_CODE, sendConsole } from '@/lib/console-client';
+import { plainErrorKey } from '@/lib/console-errors';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 

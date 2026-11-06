@@ -4,22 +4,16 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useTranslations, useFormatter } from 'next-intl';
-import { Button } from '../../../../components/ui/Button';
-import { Dropzone } from '../../../../components/ui/Dropzone';
-import { I } from '../../../../icons';
-import { useBulkUpload, useRecentBulkUploads } from '../../../../hooks/useOnboarding';
-import { useProfileRaw } from '../../../../hooks/useProfile';
-import {
-  useAggregatorConfig,
-  DEFAULT_AGGREGATOR_CONFIG,
-} from '../../../../hooks/useAggregatorConfig';
-import type { BulkUploadStatus } from '../../../../services/onboarding.service';
-import {
-  BulkUploadStartUnreadError,
-  onboardingService,
-} from '../../../../services/onboarding.service';
-import type { BulkAttestationContent } from '../../../../lib/bulk-attestation.server';
-import { useCan } from '../../../../lib/auth-context';
+import { Button } from '@/components/ui/Button';
+import { Dropzone } from '@/components/ui/Dropzone';
+import { I } from '@/icons';
+import { useBulkUpload, useRecentBulkUploads } from '@/hooks/useOnboarding';
+import { useProfileRaw } from '@/hooks/useProfile';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '@/hooks/useAggregatorConfig';
+import type { BulkUploadStatus } from '@/services/onboarding.service';
+import { BulkUploadStartUnreadError, onboardingService } from '@/services/onboarding.service';
+import type { BulkAttestationContent } from '@/lib/bulk-attestation.server';
+import { useCan } from '@/lib/auth-context';
 import { ResponseShapeError } from '@/lib/response-shape-error';
 
 // Defined at module level so re-renders of CSVUpload do not remount the toast.

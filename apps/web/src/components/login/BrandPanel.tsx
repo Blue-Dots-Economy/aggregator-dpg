@@ -2,9 +2,9 @@
 
 import Image from 'next/image';
 import { useRef, useEffect, type JSX } from 'react';
-import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../hooks/useAggregatorConfig';
-import { mix, parseHex } from '../../lib/hex-color';
-import { randomUnit } from '../../lib/random';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '@/hooks/useAggregatorConfig';
+import { mix, parseHex } from '@/lib/hex-color';
+import { randomUnit } from '@/lib/random';
 
 interface Dot {
   ax: number;

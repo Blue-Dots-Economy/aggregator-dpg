@@ -5,20 +5,20 @@ import { createPortal } from 'react-dom';
 import QRCode from 'qrcode';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations, useFormatter } from 'next-intl';
-import { Button } from '../../../../components/ui/Button';
-import { SubmitBlockers } from '../../../../components/ui/SubmitBlockers';
-import { I } from '../../../../icons';
+import { Button } from '@/components/ui/Button';
+import { SubmitBlockers } from '@/components/ui/SubmitBlockers';
+import { I } from '@/icons';
 import {
   useActivateLink,
   useCreateLink,
   useDeactivateLink,
   useRegistrationLinks,
   useUpdateLink,
-} from '../../../../hooks/useOnboarding';
-import { useProfile, useProfileRaw } from '../../../../hooks/useProfile';
-import { useAggregatorConfig } from '../../../../hooks/useAggregatorConfig';
+} from '@/hooks/useOnboarding';
+import { useProfile, useProfileRaw } from '@/hooks/useProfile';
+import { useAggregatorConfig } from '@/hooks/useAggregatorConfig';
 import { useIsClient } from '@/hooks/useIsClient';
-import type { ApiRegistrationLink } from '../../../../services/onboarding.service';
+import type { ApiRegistrationLink } from '@/services/onboarding.service';
 
 interface CreateLinkFormState {
   /** Domain id from the network config (e.g. `seeker`), set to the aggregator's registered type. */

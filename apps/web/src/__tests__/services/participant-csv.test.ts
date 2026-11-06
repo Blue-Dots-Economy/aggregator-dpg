@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildParticipantCsv } from '../../services/participant-csv';
-import type { ParticipantBase } from '../../types';
+import { buildParticipantCsv } from '@/services/participant-csv';
+import type { ParticipantBase } from '@/types';
 
 function buildRow(overrides: Partial<ParticipantBase> = {}): ParticipantBase {
   return {

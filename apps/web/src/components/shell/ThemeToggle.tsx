@@ -1,8 +1,8 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { I } from '../../icons';
-import { useThemeMode } from '../../lib/theme-mode';
+import { I } from '@/icons';
+import { useThemeMode } from '@/lib/theme-mode';
 
 /**
  * Light/dark switch. Used by `Topbar` and the public login page.

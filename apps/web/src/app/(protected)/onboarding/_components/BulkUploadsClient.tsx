@@ -3,10 +3,10 @@
 import type { JSX } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Topbar } from '../../../../components/shell/Topbar';
-import { I } from '../../../../icons';
+import { Topbar } from '@/components/shell/Topbar';
+import { I } from '@/icons';
 import { CSVUpload } from './CSVUpload';
-import type { BulkAttestationContent } from '../../../../lib/bulk-attestation.server';
+import type { BulkAttestationContent } from '@/lib/bulk-attestation.server';
 
 /** Props for {@link BulkUploadsClient}. */
 export interface BulkUploadsClientProps {

@@ -3,12 +3,12 @@
 import { useMemo, useState, type JSX } from 'react';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
-import { Topbar } from '../../../components/shell/Topbar';
-import { Button } from '../../../components/ui/Button';
-import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
-import { useProfileRaw } from '../../../hooks/useProfile';
-import { I } from '../../../icons';
-import type { ProfileApiResponse } from '../../../services/profile.service';
+import { Topbar } from '@/components/shell/Topbar';
+import { Button } from '@/components/ui/Button';
+import { RjsfThemedForm } from '@/components/forms/RjsfThemed';
+import { useProfileRaw } from '@/hooks/useProfile';
+import { I } from '@/icons';
+import type { ProfileApiResponse } from '@/services/profile.service';
 
 /**
  * Read-only aggregator profile view.

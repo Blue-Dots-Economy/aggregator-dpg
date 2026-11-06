@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
-import { getSession } from '../../../../lib/server-session';
-import { loadRegistrationSchema } from '../../../../lib/aggregator-schema.server';
+import { getSession } from '@/lib/server-session';
+import { loadRegistrationSchema } from '@/lib/aggregator-schema.server';
 import { loadConsentContent } from '../register-server';
 import { CoordinatorInviteView } from './CoordinatorInviteView';
 

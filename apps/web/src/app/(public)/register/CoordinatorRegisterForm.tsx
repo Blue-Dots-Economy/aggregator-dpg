@@ -5,20 +5,20 @@ import { useQuery } from '@tanstack/react-query';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import type { IChangeEvent } from '@rjsf/core';
-import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
-import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
-import { ConsentGate } from '../../../components/consent/ConsentGate';
-import { toConsentDocs } from '../../../components/consent/consent-docs';
+import { RjsfThemedForm } from '@/components/forms/RjsfThemed';
+import type { ResolvedPlace } from '@/components/forms/custom-widgets/LocationAutocompleteWidget';
+import { ConsentGate } from '@/components/consent/ConsentGate';
+import { toConsentDocs } from '@/components/consent/consent-docs';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '../../../components/ui/Select';
-import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
-import { withPhoneWidget } from '../../../lib/phone-ui-schema';
-import { jsonFetch } from '../../../services/http';
+} from '@/components/ui/Select';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '@/hooks/useAggregatorConfig';
+import { withPhoneWidget } from '@/lib/phone-ui-schema';
+import { jsonFetch } from '@/services/http';
 import {
   OrgListResponseSchema,
   stampConsent,
@@ -36,7 +36,7 @@ import {
   useConsentGateSubmit,
   useRegistrationFormState,
 } from './registration-ui';
-import type { ConsentDocContent } from '../../../components/consent/consent-types';
+import type { ConsentDocContent } from '@/components/consent/consent-types';
 
 export interface CoordinatorRegisterFormProps {
   /** Coordinator registration JSON Schema. */

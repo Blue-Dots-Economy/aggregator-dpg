@@ -7,8 +7,8 @@
 
 import 'server-only';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
-import { logger } from '../../../lib/logger';
-import type { ConsentDocContent } from '../../../components/consent/consent-types';
+import { logger } from '@/lib/logger';
+import type { ConsentDocContent } from '@/components/consent/consent-types';
 
 let legacyFlagWarned = false;
 
@@ -78,4 +78,4 @@ export async function loadConsentContent(): Promise<{
  * @returns The parsed org schema pair, or `null` if the files are absent or
  *   unreadable (the owner route then returns 404).
  */
-export { loadOrgSchema } from '../../../lib/org-schema.server';
+export { loadOrgSchema } from '@/lib/org-schema.server';

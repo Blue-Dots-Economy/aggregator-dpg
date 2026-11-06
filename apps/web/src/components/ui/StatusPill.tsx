@@ -1,7 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import type { ProfileStatus, ParticipantStatus } from '../../types';
+import type { ProfileStatus, ParticipantStatus } from '@/types';
 
 type Status = ParticipantStatus | ProfileStatus;
 

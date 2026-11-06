@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { profileService } from '../../services/profile.service';
+import { profileService } from '@/services/profile.service';
 
 const apiResponse = {
   aggregator_id: 'agg-1',

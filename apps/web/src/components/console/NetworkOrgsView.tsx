@@ -21,9 +21,9 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
-import { I } from '../../icons';
-import { cn } from '../../lib/cn';
-import { ORG_FILTERS, countOrgs, matchesFilter, type OrgFilter } from '../../lib/org-filters';
+import { I } from '@/icons';
+import { cn } from '@/lib/cn';
+import { ORG_FILTERS, countOrgs, matchesFilter, type OrgFilter } from '@/lib/org-filters';
 import { ConsoleStatusPill } from './ConsoleUi';
 import { CountTile, type TileTone } from './CountTile';
 

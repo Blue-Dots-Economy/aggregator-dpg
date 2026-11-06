@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchCurrentUser, login, logout } from '../../services/auth.service';
-import { ResponseShapeError } from '../../lib/response-shape-error';
+import { fetchCurrentUser, login, logout } from '@/services/auth.service';
+import { ResponseShapeError } from '@/lib/response-shape-error';
 
 describe('auth.service', () => {
   const origFetch = globalThis.fetch;

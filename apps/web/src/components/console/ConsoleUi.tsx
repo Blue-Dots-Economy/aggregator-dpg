@@ -7,8 +7,8 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
-import { I } from '../../icons';
-import { cn } from '../../lib/cn';
+import { I } from '@/icons';
+import { cn } from '@/lib/cn';
 
 /** A registration status of a coordinator or an organisation. */
 export type ConsoleStatus = 'pending' | 'active' | 'inactive' | 'retired';

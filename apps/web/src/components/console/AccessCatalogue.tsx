@@ -29,7 +29,7 @@ import type {
   CataloguePermission,
   CatalogueRole,
 } from '@aggregator-dpg/shared-primitives/user-org';
-import { cn } from '../../lib/cn';
+import { cn } from '@/lib/cn';
 import { CountTile } from './CountTile';
 
 /** Which view is on show. */

@@ -27,8 +27,8 @@ import {
   type User,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
-import { I } from '../../icons';
-import { cn } from '../../lib/cn';
+import { I } from '@/icons';
+import { cn } from '@/lib/cn';
 import { ConsoleStatusPill } from './ConsoleUi';
 import { DomainChips } from './DomainChips';
 import {
@@ -36,8 +36,8 @@ import {
   sendConsole,
   type ConsoleError,
   type ConsoleSendResult,
-} from '../../lib/console-client';
-import { plainErrorKey } from '../../lib/console-errors';
+} from '@/lib/console-client';
+import { plainErrorKey } from '@/lib/console-errors';
 
 /** API error codes with their own message on this page. */
 const ACTION_ERROR_CODES = { TARGET_ORG_INACTIVE: 'org_inactive' } as const;

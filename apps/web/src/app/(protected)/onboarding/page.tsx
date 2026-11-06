@@ -3,12 +3,12 @@
 import { useMemo, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Button } from '../../../components/ui/Button';
-import { Topbar } from '../../../components/shell/Topbar';
-import { I, type IconName } from '../../../icons';
-import { useRecentBulkUploads, useRegistrationLinks } from '../../../hooks/useOnboarding';
-import { useProfileRaw } from '../../../hooks/useProfile';
-import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
+import { Button } from '@/components/ui/Button';
+import { Topbar } from '@/components/shell/Topbar';
+import { I, type IconName } from '@/icons';
+import { useRecentBulkUploads, useRegistrationLinks } from '@/hooks/useOnboarding';
+import { useProfileRaw } from '@/hooks/useProfile';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '@/hooks/useAggregatorConfig';
 import { RecentUploadsBody } from './_components/CSVUpload';
 import { YourLinksBody } from './_components/RegistrationLinksSection';
 import { OnboardingMetrics } from './_components/OnboardingMetrics';

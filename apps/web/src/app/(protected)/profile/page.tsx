@@ -6,7 +6,7 @@
  */
 
 import type { Metadata } from 'next';
-import { loadRegistrationSchema } from '../../../lib/aggregator-schema.server';
+import { loadRegistrationSchema } from '@/lib/aggregator-schema.server';
 import { ProfileFormView } from './ProfileFormView';
 
 export const metadata: Metadata = {

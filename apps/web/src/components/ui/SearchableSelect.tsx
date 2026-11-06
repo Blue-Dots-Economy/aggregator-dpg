@@ -10,7 +10,7 @@
 import * as React from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { Check, ChevronDown, Search } from 'lucide-react';
-import { cn } from '../../lib/cn';
+import { cn } from '@/lib/cn';
 
 /** One choice: what is shown, and an optional note on the right (also searched). */
 export interface SearchableOption {

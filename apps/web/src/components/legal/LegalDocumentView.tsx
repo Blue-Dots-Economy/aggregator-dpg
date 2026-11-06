@@ -18,15 +18,15 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useTranslations, useLocale } from 'next-intl';
 import { ArrowLeft } from 'lucide-react';
-import { cn } from '../../lib/cn';
+import { cn } from '@/lib/cn';
 import { MarkdownContent } from '../forms/MarkdownContent';
 import { extractSections, type LegalSection } from './legal-sections';
 import type { ConsentDocContent } from '../consent/consent-types';
 import { BlueDotsLogo } from '../ui/BlueDotsLogo';
-import { useThemeMode } from '../../lib/theme-mode';
-import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../hooks/useAggregatorConfig';
+import { useThemeMode } from '@/lib/theme-mode';
+import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '@/hooks/useAggregatorConfig';
 import { LanguageSwitcher } from '../shell/LanguageSwitcher';
-import { I } from '../../icons';
+import { I } from '@/icons';
 
 export type LegalDoc = 'privacy' | 'terms';
 

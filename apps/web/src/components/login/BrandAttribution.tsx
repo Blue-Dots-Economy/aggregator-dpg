@@ -1,7 +1,7 @@
 import Image from 'next/image';
-import { useThemeMode } from '../../lib/theme-mode';
+import { useThemeMode } from '@/lib/theme-mode';
 import type { JSX } from 'react';
-import type { BrandAttribution as Row } from '../../hooks/useAggregatorConfig';
+import type { BrandAttribution as Row } from '@/hooks/useAggregatorConfig';
 
 /**
  * "Owned by <X> / Managed by <Y>" rows.

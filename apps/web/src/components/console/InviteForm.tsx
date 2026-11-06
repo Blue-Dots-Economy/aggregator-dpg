@@ -26,12 +26,12 @@ import {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { isEmailAddress, normaliseEmail } from '@aggregator-dpg/shared-primitives/phone';
 import { Button } from '../ui/Button';
-import { I } from '../../icons';
-import { cn } from '../../lib/cn';
+import { I } from '@/icons';
+import { cn } from '@/lib/cn';
 import { ConsoleSection } from './ConsoleUi';
-import { RESPONSE_SHAPE_CODE, sendConsole, type ConsoleError } from '../../lib/console-client';
-import { DEFAULT_MAX_INVITES } from '../../lib/invite-limit';
-import { useLeaveWarning } from '../../hooks/useLeaveWarning';
+import { RESPONSE_SHAPE_CODE, sendConsole, type ConsoleError } from '@/lib/console-client';
+import { DEFAULT_MAX_INVITES } from '@/lib/invite-limit';
+import { useLeaveWarning } from '@/hooks/useLeaveWarning';
 
 interface Recipient {
   email: string;
