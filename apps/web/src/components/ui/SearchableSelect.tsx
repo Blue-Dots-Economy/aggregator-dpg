@@ -28,6 +28,9 @@ export interface SearchableSelectProps {
   searchPlaceholder: string;
   /** Shown when the search matches nothing. */
   emptyText: string;
+  /** Marks the field invalid; `describedBy` is the id of its error message. */
+  invalid?: boolean;
+  describedBy?: string;
 }
 
 /** Whether an option's label or hint contains the search text (case-insensitive). */
@@ -49,6 +52,8 @@ export function SearchableSelect({
   placeholder,
   searchPlaceholder,
   emptyText,
+  invalid = false,
+  describedBy,
 }: Readonly<SearchableSelectProps>) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
@@ -98,7 +103,9 @@ export function SearchableSelect({
           type="button"
           aria-haspopup="listbox"
           aria-expanded={open}
+          {...(invalid ? { 'aria-invalid': true, 'aria-describedby': describedBy } : {})}
           className={cn(
+            invalid && 'border-rose-400',
             'flex w-full items-center justify-between gap-2 rounded-[10px] border border-(--bd-border) bg-(--bd-bg) px-3 py-2.5 text-left text-[14px] text-(--bd-fg) transition-colors',
             'hover:bg-(--bd-border-soft) focus:outline-hidden focus-visible:border-(--bd-primary) focus-visible:bg-(--bd-card) focus-visible:ring-4 focus-visible:ring-(--bd-primary-50)',
           )}

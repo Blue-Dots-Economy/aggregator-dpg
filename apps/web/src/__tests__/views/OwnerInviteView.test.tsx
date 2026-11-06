@@ -2,8 +2,8 @@
  * View test: <OwnerInviteView /> — the org-owner invite surface (#701).
  *
  * Covers the Name+Email rows + "Add another" bulk mint (summary render), the
- * expired-grant recovery banner, invalid-grant, rate-limit, network error, and
- * the invalid-row list. `fetch` is stubbed per case.
+ * expired-grant recovery banner, invalid-grant, rate-limit, network error,
+ * per-row email messages, and the invalid-row list. `fetch` is stubbed per case.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -108,7 +108,11 @@ describe('<OwnerInviteView />', () => {
     renderView();
     typeEmail('a@x.org');
     clickSend();
-    await waitFor(() => expect(screen.getByText(/too many invites/i)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText(messages.form.request_error.rate_limited)).toBeInTheDocument(),
+    );
+    // The rows stay on screen with what was typed.
+    expect(screen.getByPlaceholderText('email@org.in')).toHaveValue('a@x.org');
   });
 
   it('shows a network-error message when fetch rejects', async () => {
@@ -116,7 +120,39 @@ describe('<OwnerInviteView />', () => {
     renderView();
     typeEmail('a@x.org');
     clickSend();
-    await waitFor(() => expect(screen.getByText(/network error/i)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText(messages.form.request_error.network)).toBeInTheDocument(),
+    );
+    expect(screen.getByPlaceholderText('email@org.in')).toHaveValue('a@x.org');
+  });
+
+  it('keeps Send enabled and asks for an email under the row on an empty submit', () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    renderView();
+    const send = screen.getByRole('button', { name: /send/i });
+    expect(send).toBeEnabled();
+    clickSend();
+    expect(
+      screen.getByText(
+        `${messages.register.owner_invite.email_label.replace('{n}', '1')} is required.`,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('email@org.in')).toHaveAttribute('aria-invalid', 'true');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('shows an invalid email under its row once it is left, and sends nothing', () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    renderView();
+    typeEmail('not-an-email');
+    fireEvent.blur(screen.getByPlaceholderText('email@org.in'));
+    expect(
+      screen.getByText(`Invalid entry. ${messages.register.owner_invite.error_email_invalid}`),
+    ).toBeInTheDocument();
+    clickSend();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('lists invalid rows in the result summary', async () => {
@@ -135,6 +171,8 @@ describe('<OwnerInviteView />', () => {
     typeEmail('a@x.org');
     clickSend();
     await waitFor(() => expect(screen.getByText(/couldn.t be invited/i)).toBeInTheDocument());
-    expect(screen.getByText(/bad — invalid email/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(`bad — ${messages.register.owner_invite.reason.invalid_email}`),
+    ).toBeInTheDocument();
   });
 });

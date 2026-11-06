@@ -1,16 +1,16 @@
 'use client';
 
 /**
- * Mobile number input with a fixed country code in front: the person types
- * only the local digits, and the form stores `+<code><digits>`.
- *
- * Non-digits are dropped and the local part is capped at its length, so the
- * value is always the shape the API's phone rule expects.
+ * RJSF phone widget: an editable country code that starts at +91, beside a
+ * number box that takes only digits (`PhoneInput`). The form stores
+ * `+<code><digits>`, or the bare number when the field's pattern accepts only that.
  */
 
 import type { WidgetProps } from '@rjsf/utils';
 import { PHONE_COUNTRY_CODE, PHONE_LOCAL_DIGITS } from '@aggregator-dpg/shared-primitives/phone';
-import { cn } from '../../../lib/cn';
+import { PhoneInput } from '../PhoneInput';
+import { errorAria } from '../error-aria';
+import { phoneValueMode } from '../../../lib/phone';
 
 const PREFIX = `+${PHONE_COUNTRY_CODE}`;
 
@@ -35,37 +35,34 @@ export function localDigits(value: unknown): string {
  * @param props - The RJSF widget props.
  */
 export function PhoneWidget(props: Readonly<WidgetProps>) {
-  const { id, value, onChange, onBlur, onFocus, disabled, readonly, placeholder, rawErrors } =
-    props;
-  const local = localDigits(value);
+  const {
+    id,
+    value,
+    onChange,
+    onBlur,
+    onFocus,
+    disabled,
+    readonly,
+    placeholder,
+    required,
+    rawErrors,
+    schema,
+    options,
+  } = props;
   // A placeholder written with the code ("+91 98765 43210") shows without it.
   const hint = typeof placeholder === 'string' ? placeholder.replace(PREFIX, '').trim() : '';
   return (
-    <div
-      className={cn(
-        'bd-input flex items-center focus-within:border-(--bd-primary)',
-        rawErrors?.length ? 'border-rose-400' : '',
-      )}
-    >
-      <span className="border-r border-(--bd-border) pr-3 text-ink-600 select-none">{PREFIX}</span>
-      <input
-        id={id}
-        type="tel"
-        inputMode="numeric"
-        autoComplete="tel-national"
-        maxLength={PHONE_LOCAL_DIGITS}
-        className="min-w-0 flex-1 bg-transparent pl-3 outline-none"
-        value={local}
-        placeholder={hint}
-        disabled={disabled || readonly}
-        aria-describedby={`${id}__error`}
-        onChange={(e) => {
-          const digits = e.target.value.replace(/\D/g, '').slice(0, PHONE_LOCAL_DIGITS);
-          onChange(digits ? `${PREFIX}${digits}` : undefined);
-        }}
-        onBlur={() => onBlur(id, value)}
-        onFocus={() => onFocus(id, value)}
-      />
-    </div>
+    <PhoneInput
+      id={id}
+      nationalOnly={phoneValueMode(schema?.pattern) === 'national'}
+      value={typeof value === 'string' ? value : undefined}
+      required={Boolean(required)}
+      disabled={Boolean(disabled || readonly)}
+      {...(hint ? { placeholder: hint } : {})}
+      inputProps={errorAria(id, rawErrors)}
+      onChange={(next) => onChange(next ?? options?.['emptyValue'])}
+      onBlur={() => onBlur(id, value)}
+      onFocus={() => onFocus(id, value)}
+    />
   );
 }

@@ -27,12 +27,13 @@ import {
   RegistrationSuccessPanel,
   sharedRegistrationFormProps,
   useConsentGateSubmit,
+  useRegistrationError,
   useRegistrationFormState,
 } from './registration-ui';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
 import { gstinCustomValidate } from '../../../lib/org-schema';
 import { withPhoneWidget } from '../../../lib/phone-ui-schema';
-import { readableFormErrors } from '../../../lib/readable-form-errors';
+import { useFieldErrors } from '../../../components/forms/useFieldErrors';
 
 /** One org a new org can register under (`GET /api/orgs/parents`). */
 const ParentOptionSchema = z.object({
@@ -103,7 +104,7 @@ export function OrgRegisterForm({
   consentContent,
 }: OrgRegisterFormProps): JSX.Element {
   const t = useTranslations('register');
-  const { state, setState, setCanSubmit, errorRef } = useRegistrationFormState();
+  const { state, setState, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   // Coordinate from the address widget; RJSF does not write it into `formData`.
   const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
@@ -138,21 +139,20 @@ export function OrgRegisterForm({
     [uiSchema, formSchema],
   );
   const customValidate = useMemo(() => gstinCustomValidate(formSchema), [formSchema]);
+  const fieldErrors = useFieldErrors(formSchema);
+  const registrationError = useRegistrationError(fieldErrors, {
+    email: 'owner.email',
+    phone: 'owner.phone',
+    name: 'display_name',
+  });
+  const parentError =
+    fieldErrors.attempted && showPicker && !parentId ? t('parent_selector_required') : null;
 
   const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
 
-  /** Opens the consent gate, or reports the missing parent (Enter submits past a disabled button). */
+  /** Opens the consent gate once the parent list has loaded and a parent is picked. */
   const submitWithParent = (e: IChangeEvent<Record<string, unknown>>): void => {
-    if (!parentReady) {
-      setState({
-        status: 'error',
-        title: t('parent_selector_required'),
-        detail: '',
-        code: 'CLIENT_VALIDATION',
-        requestId: '',
-      });
-      return;
-    }
+    if (!parentReady) return;
     handleSubmit(e);
   };
 
@@ -171,8 +171,14 @@ export function OrgRegisterForm({
       const key = treeErrorKey(result.error);
       setState(
         key
-          ? { status: 'error', ...result.error, title: t(key), detail: '' }
-          : { status: 'error', ...result.error },
+          ? {
+              status: 'error',
+              title: t(key),
+              detail: '',
+              code: result.error.code,
+              requestId: result.error.requestId,
+            }
+          : registrationError(result.error),
       );
       return;
     }
@@ -245,7 +251,14 @@ export function OrgRegisterForm({
             placeholder={t('parent_selector_placeholder')}
             searchPlaceholder={t('parent_search_placeholder')}
             emptyText={t('parent_no_match')}
+            invalid={Boolean(parentError)}
+            describedBy="org-parent__error"
           />
+          {parentError ? (
+            <p id="org-parent__error" className="mt-1 text-[11.5px] text-red-500">
+              {parentError}
+            </p>
+          ) : null}
         </div>
       ) : null}
       {childName ? (
@@ -260,27 +273,20 @@ export function OrgRegisterForm({
         {...sharedRegistrationFormProps({
           formData,
           setFormData,
-          setCanSubmit,
-          setState,
           handleSubmit: submitWithParent,
-          formSchema,
+          fieldErrors,
           consentContent,
           onLocationResolved: setResolvedPlace,
-          validationErrorTitle: t('validation_error_title'),
           personName: {
             path: 'owner.name',
             message: (symbols) => t('name_symbols', { symbols }),
           },
           customValidate,
         })}
-        transformErrors={(errors) => readableFormErrors(errors, formSchema)}
       >
-        {/* Never disabled by a bad field: a click runs the form's checks and
-            shows each field's message, so the owner sees what to fix. */}
         <RegistrationSubmitButton
           submitting={state.status === 'submitting'}
-          // Never disabled for an invalid field: a click shows what to fix.
-          canSubmit={parentsQuery.data !== undefined}
+          onAttempt={fieldErrors.markAttempted}
           label={t('org_submit')}
           submittingLabel={t('submitting')}
         />

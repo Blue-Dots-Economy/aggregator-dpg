@@ -19,6 +19,7 @@ import type { WidgetProps } from '@rjsf/utils';
 import { ConsentModal } from '../consent/ConsentModal';
 import type { ConsentTab } from '../consent/ConsentModal';
 import type { ConsentDocContent } from '../consent/consent-types';
+import { errorAria } from './error-aria';
 
 /**
  * Renders the registration consent checkbox with clickable Terms/Privacy links.
@@ -33,7 +34,7 @@ import type { ConsentDocContent } from '../consent/consent-types';
  * @returns The checkbox with its label and, when content exists, the consent modal.
  */
 export function ConsentCheckboxWidget(props: WidgetProps): JSX.Element {
-  const { id, value, required, disabled, readonly, onChange, registry } = props;
+  const { id, value, required, disabled, readonly, onChange, onBlur, registry, rawErrors } = props;
   const t = useTranslations('register');
   const [modalOpen, setModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ConsentTab>('terms');
@@ -84,7 +85,9 @@ export function ConsentCheckboxWidget(props: WidgetProps): JSX.Element {
           checked={Boolean(value)}
           required={required}
           disabled={disabled || readonly}
+          {...errorAria(id, rawErrors)}
           onChange={(e) => onChange(e.target.checked)}
+          onBlur={() => onBlur(id, Boolean(value))}
         />
         {label}
       </label>

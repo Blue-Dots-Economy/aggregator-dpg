@@ -77,16 +77,25 @@ describe('SupportDialog', () => {
     renderDialog();
     expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Asha K');
     expect((screen.getByLabelText('Email') as HTMLInputElement).value).toBe('asha@example.com');
-    expect((screen.getByLabelText('Phone') as HTMLInputElement).value).toBe('+919000000000');
+    expect((screen.getByLabelText('Phone') as HTMLInputElement).value).toBe('9000000000');
+    expect((screen.getByLabelText('Country code') as HTMLInputElement).value).toBe('+91');
   });
 
-  it('does not submit until details + a contact + consent are provided', async () => {
+  it('keeps Send enabled and shows each missing field under it, sending nothing', async () => {
     const fetchSpy = mockFetch(new Response('{"ok":true}', { status: 201 }));
     renderDialog();
-    // Contact is prefilled, but details + consent are missing → send blocked.
-    await userEvent.type(screen.getByLabelText('Details'), 'It broke');
     const send = screen.getByRole('button', { name: /send/i });
-    expect((send as HTMLButtonElement).disabled).toBe(true);
+    expect((send as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.click(send);
+    expect(screen.queryByText('Details is required.')).not.toBeNull();
+    expect(screen.queryByText('Consent is required.')).not.toBeNull();
+    expect(screen.getByLabelText('Details').getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByLabelText('Details').getAttribute('aria-describedby')).toBe(
+      'support-details__error',
+    );
+    // The message goes away as soon as the field is filled.
+    await userEvent.type(screen.getByLabelText('Details'), 'It broke');
+    expect(screen.queryByText('Details is required.')).toBeNull();
     await userEvent.click(send);
     // The dialog does fetch its attachment config on open, so assert on the
     // absence of a submit rather than the absence of any request.

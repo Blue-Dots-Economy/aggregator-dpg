@@ -455,7 +455,7 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     expect(screen.queryByTestId('lookup-owned-elsewhere')).toBeNull();
   });
 
-  it('shows a server error banner (title/detail/code) on a non-409 failure response', async () => {
+  it('shows one readable banner, never the server title/detail/code, on a non-field failure', async () => {
     globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input.toString();
       if (url.includes('/lookup')) {
@@ -473,9 +473,11 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     renderView();
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Rejected');
-    expect(screen.getByText('Bad payload')).toBeInTheDocument();
-    expect(screen.getByText(/Code: BAD_INPUT/)).toBeInTheDocument();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(messages.profile.public_reg.error_submission_title);
+    expect(alert).toHaveTextContent(messages.form.request_error.invalid);
+    expect(screen.queryByText('Bad payload')).toBeNull();
+    expect(screen.queryByText(/BAD_INPUT/)).toBeNull();
   });
 
   it('shows a network-error banner when the /submit fetch throws', async () => {
@@ -493,10 +495,8 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     renderView();
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      messages.profile.public_reg.error_network_title,
-    );
-    expect(screen.getByText('network down')).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(messages.form.request_error.network);
+    expect(screen.queryByText('network down')).toBeNull();
   });
 
   it('"Register another" resets the done screen back to the form', async () => {

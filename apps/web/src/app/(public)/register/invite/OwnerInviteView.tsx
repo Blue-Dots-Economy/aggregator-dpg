@@ -5,6 +5,15 @@ import { useTranslations } from 'next-intl';
 import { RegisterPageShell } from '../RegisterPageShell';
 import { DEFAULT_MAX_INVITES } from '../../../../lib/invite-limit';
 import { readApiError } from '../../../../lib/api-error';
+import { requestErrorKind } from '../../../../lib/request-errors';
+import { humaniseCode } from '../../../../lib/bulk-upload-text';
+import {
+  FieldMessage,
+  useHandFieldErrors,
+  type HandFieldError,
+} from '../../../../components/forms/useHandFieldErrors';
+import { useFieldErrorCopy } from '../../../../components/forms/useFieldErrors';
+import { isEmailAddress } from '@aggregator-dpg/shared-primitives/phone';
 
 export interface OwnerInviteViewProps {
   /** The owner grant token from the deep-link query string. */
@@ -61,6 +70,8 @@ export function OwnerInviteView({
   maxInvites = DEFAULT_MAX_INVITES,
 }: Readonly<OwnerInviteViewProps>): JSX.Element {
   const t = useTranslations('register.owner_invite');
+  const tRequest = useTranslations('form.request_error');
+  const copy = useFieldErrorCopy();
   const [rows, setRows] = useState<InviteRow[]>([newRow()]);
   const [state, setState] = useState<ViewState>({ status: 'idle' });
 
@@ -73,7 +84,17 @@ export function OwnerInviteView({
         .map((r) => (r.name ? { email: r.email, name: r.name } : { email: r.email })),
     [rows],
   );
-  const canSubmit = recipients.length > 0 && state.status !== 'submitting';
+  const rowErrors: Record<string, HandFieldError | null> = {};
+  rows.forEach((r, i) => {
+    const email = r.email.trim();
+    rowErrors[r.id] =
+      email && !isEmailAddress(email.toLowerCase())
+        ? { kind: 'invalid', message: copy.invalid(t('error_email_invalid')) }
+        : i === 0 && recipients.length === 0
+          ? { kind: 'required', message: copy.required(t('email_label', { n: 1 })) }
+          : null;
+  });
+  const fe = useHandFieldErrors<string>('invite-email', rowErrors);
   const plural = recipients.length === 1 ? '' : 's';
   const sendLabel =
     state.status === 'submitting'
@@ -91,6 +112,7 @@ export function OwnerInviteView({
   }
 
   async function submit(): Promise<void> {
+    if (!fe.validate()) return;
     setState({ status: 'submitting' });
     let res: Response;
     try {
@@ -100,26 +122,26 @@ export function OwnerInviteView({
         body: JSON.stringify({ grant, recipients }),
       });
     } catch {
-      setState({ status: 'error', message: 'Network error. Please try again.' });
+      setState({ status: 'error', message: tRequest('network') });
       return;
     }
     if (res.ok) {
       const summary = (await res.json()) as MintSummary;
       // An expired grant emails a fresh link and sends no invites.
       setState(summary.recovered ? { status: 'recovery_sent' } : { status: 'result', summary });
-      if (!summary.recovered) setRows([newRow()]);
+      if (!summary.recovered) {
+        setRows([newRow()]);
+        fe.reset();
+      }
       return;
     }
     const code = await readErrorCode(res);
     if (code === 'GRANT_INVALID') {
       setState({ status: 'invalid_grant' });
-    } else if (res.status === 429) {
-      setState({
-        status: 'error',
-        message: 'Too many invites just now. Please try again shortly.',
-      });
+    } else if (code === 'TARGET_ORG_INACTIVE') {
+      setState({ status: 'error', message: t('error_org_inactive') });
     } else {
-      setState({ status: 'error', message: 'Could not send invites. Please try again.' });
+      setState({ status: 'error', message: tRequest(requestErrorKind(res.status)) });
     }
   }
 
@@ -145,7 +167,7 @@ export function OwnerInviteView({
 
         {state.status === 'error' ? <Banner tone="error">{state.message}</Banner> : null}
 
-        {state.status === 'idle' || state.status === 'submitting' ? (
+        {state.status === 'idle' || state.status === 'submitting' || state.status === 'error' ? (
           <>
             <p className="text-[14px] text-ink-500 mb-4">
               Add a coordinator&apos;s email (and optionally their name). Each person gets their own
@@ -156,22 +178,28 @@ export function OwnerInviteView({
               {rows.map((row, i) => (
                 <div key={row.id} className="flex items-start gap-2">
                   <div className="grid flex-1 gap-2 sm:grid-cols-2">
-                    <input
-                      type="email"
-                      inputMode="email"
-                      aria-label={t('email_label', { n: i + 1 })}
-                      placeholder="email@org.in"
-                      value={row.email}
-                      onChange={(e) => updateRow(i, 'email', e.target.value)}
-                      className="rounded-[10px] border border-ink-200 bg-white px-3.5 py-2.5 text-[14px] focus:border-(--bd-primary) focus:outline-none"
-                    />
+                    <div>
+                      <input
+                        type="email"
+                        inputMode="email"
+                        {...fe.controlProps(row.id)}
+                        aria-label={t('email_label', { n: i + 1 })}
+                        placeholder="email@org.in"
+                        value={row.email}
+                        onChange={(e) => updateRow(i, 'email', e.target.value)}
+                        className={`w-full rounded-[10px] border bg-white px-3.5 py-2.5 text-[14px] focus:border-(--bd-primary) focus:outline-none ${
+                          fe.message(row.id) ? 'border-rose-400' : 'border-ink-200'
+                        }`}
+                      />
+                      <FieldMessage id={fe.errorId(row.id)} message={fe.message(row.id)} />
+                    </div>
                     <input
                       type="text"
                       aria-label={t('name_label', { n: i + 1 })}
                       placeholder="Name (optional)"
                       value={row.name}
                       onChange={(e) => updateRow(i, 'name', e.target.value)}
-                      className="rounded-[10px] border border-ink-200 bg-white px-3.5 py-2.5 text-[14px] focus:border-(--bd-primary) focus:outline-none"
+                      className="h-fit rounded-[10px] border border-ink-200 bg-white px-3.5 py-2.5 text-[14px] focus:border-(--bd-primary) focus:outline-none"
                     />
                   </div>
                   {rows.length > 1 ? (
@@ -204,7 +232,7 @@ export function OwnerInviteView({
             <div className="mt-5 flex items-center gap-3">
               <button
                 type="button"
-                disabled={!canSubmit}
+                disabled={state.status === 'submitting'}
                 onClick={submit}
                 className="rounded-[10px] bg-(--bd-primary) px-5 py-2.5 text-[14px] font-semibold text-white disabled:opacity-50"
               >
@@ -222,6 +250,7 @@ function ResultPanel({
   summary,
   onAgain,
 }: Readonly<{ summary: MintSummary; onAgain: () => void }>): JSX.Element {
+  const t = useTranslations('register.owner_invite');
   const total = summary.sent + summary.resent;
   const n = (c: number, w: string): string => `${c} ${w}${c === 1 ? '' : 's'}`;
 
@@ -259,7 +288,10 @@ function ResultPanel({
           <ul className="mt-1 space-y-0.5">
             {summary.invalid.map((i) => (
               <li key={`${i.email}:${i.reason}`}>
-                {i.email} — {i.reason.replaceAll('_', ' ')}
+                {i.email} —{' '}
+                {/^[a-z_]+$/.test(i.reason) && t.has(`reason.${i.reason}`)
+                  ? t(`reason.${i.reason}`)
+                  : humaniseCode(i.reason)}
               </li>
             ))}
           </ul>

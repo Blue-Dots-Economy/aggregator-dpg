@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState, type JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
-import type { IChangeEvent } from '@rjsf/core';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
+import { useFieldErrors } from '../../../components/forms/useFieldErrors';
 import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
@@ -34,6 +34,7 @@ import {
   RegistrationSuccessPanel,
   sharedRegistrationFormProps,
   useConsentGateSubmit,
+  useRegistrationError,
   useRegistrationFormState,
 } from './registration-ui';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
@@ -111,7 +112,7 @@ export function CoordinatorRegisterForm({
   // Invite mode: org is fixed by the invite, so no selector / no org list.
   const inviteMode = Boolean(inviteToken);
 
-  const { state, setState, setCanSubmit, errorRef } = useRegistrationFormState();
+  const { state, setState, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
     // `[0,0]` means "not resolved yet" (`geo` is required). The real coordinate
     // is added at submit.
@@ -166,6 +167,19 @@ export function CoordinatorRegisterForm({
     const base = stripConsentBlock(stripFormChrome(schema));
     return inheritsFromOrg ? withoutOrgDetails(base) : base;
   }, [schema, inheritsFromOrg]);
+  const fieldErrors = useFieldErrors(formSchema);
+  const registrationError = useRegistrationError(fieldErrors, {
+    email: 'contact.email',
+    phone: 'contact.phone',
+  });
+  const orgMissing = !inviteMode && !orgId;
+  const orgError = fieldErrors.attempted && orgMissing ? t('org_selector_required') : null;
+
+  /** Opens the consent gate once an organisation is picked. */
+  const submitWithOrg: typeof handleSubmit = (e) => {
+    if (orgMissing) return;
+    handleSubmit(e);
+  };
 
   const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
 
@@ -182,21 +196,6 @@ export function CoordinatorRegisterForm({
       },
     };
   }, [uiSchema, formSchema, inheritsFromOrg]);
-
-  /** Opens the consent gate, or says that an organisation must be chosen first. */
-  const submitWithOrg = (e: IChangeEvent<Record<string, unknown>>): void => {
-    if (!inviteMode && !orgId) {
-      setState({
-        status: 'error',
-        title: t('org_selector_required'),
-        detail: '',
-        code: 'CLIENT_VALIDATION',
-        requestId: '',
-      });
-      return;
-    }
-    handleSubmit(e);
-  };
 
   /** Runs after the gate is accepted: stamps consent and posts. */
   const submitWithConsent = async (): Promise<void> => {
@@ -222,11 +221,12 @@ export function CoordinatorRegisterForm({
       delete payload['locations'];
     }
     const result = await submitRegistration('/api/aggregator/register', payload);
-    setState(
-      result.ok
-        ? { status: 'done', refId: String(result.body['aggregator_id'] ?? '') }
-        : { status: 'error', ...result.error },
-    );
+    if (result.ok) {
+      const refId = result.body['aggregator_id'];
+      setState({ status: 'done', refId: typeof refId === 'string' ? refId : '' });
+      return;
+    }
+    setState(registrationError(result.error));
   };
 
   if (state.status === 'done') {
@@ -275,7 +275,17 @@ export function CoordinatorRegisterForm({
               onValueChange={setOrgId}
               disabled={orgsQuery.isLoading}
             >
-              <SelectTrigger id="coordinator-org" aria-required>
+              <SelectTrigger
+                id="coordinator-org"
+                aria-required
+                {...(orgError
+                  ? {
+                      'aria-invalid': true,
+                      'aria-describedby': 'coordinator-org__error',
+                      className: 'border-rose-400',
+                    }
+                  : {})}
+              >
                 <SelectValue
                   placeholder={
                     orgsQuery.isLoading ? t('org_selector_loading') : t('org_selector_placeholder')
@@ -291,6 +301,11 @@ export function CoordinatorRegisterForm({
               </SelectContent>
             </Select>
           )}
+          {orgError ? (
+            <p id="coordinator-org__error" className="mt-1 text-[11.5px] text-red-500">
+              {orgError}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -300,13 +315,10 @@ export function CoordinatorRegisterForm({
         {...sharedRegistrationFormProps({
           formData,
           setFormData,
-          setCanSubmit,
-          setState,
           handleSubmit: submitWithOrg,
-          formSchema,
+          fieldErrors,
           consentContent,
           onLocationResolved: setResolvedPlace,
-          validationErrorTitle: t('validation_error_title'),
           personName: {
             path: 'contact.name',
             message: (symbols) => t('name_symbols', { symbols }),
@@ -315,8 +327,7 @@ export function CoordinatorRegisterForm({
       >
         <RegistrationSubmitButton
           submitting={state.status === 'submitting'}
-          // Never disabled for an invalid field: a click shows what to fix.
-          canSubmit
+          onAttempt={fieldErrors.markAttempted}
           label={t('submit')}
           submittingLabel={t('submitting')}
         />
