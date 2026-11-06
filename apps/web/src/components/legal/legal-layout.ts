@@ -49,6 +49,8 @@ export interface LaidOutDoc {
 export interface LaidOutGroup {
   audience: string;
   label: string;
+  /** Page-unique anchor id of the audience heading. */
+  headingId: string;
   docs: Record<LegalDoc, LaidOutDoc>;
 }
 
@@ -142,30 +144,40 @@ function splitIntoSections(
 /**
  * Splits every document and assigns anchor ids that are unique across the page.
  *
- * Document heading ids are reserved first, so a section id that collides
- * with one gets a numeric suffix. Ids are assigned in render order.
+ * Audience and document heading ids are reserved first, so a section id that
+ * collides with one gets a numeric suffix. A suffixed id that is already taken
+ * moves on to the next suffix. Section ids are assigned in render order.
  *
  * @param groups - Audience groups in render order.
  * @returns The groups with each document's heading id, preamble and sections.
  */
 export function layOutLegalPage(groups: readonly LegalGroup[]): LaidOutGroup[] {
-  const seen = new Map<string, number>();
+  const used = new Set<string>();
+  const lastSuffix = new Map<string, number>();
   function reserve(id: string): string {
-    const count = (seen.get(id) ?? 0) + 1;
-    seen.set(id, count);
-    return count === 1 ? id : `${id}-${count}`;
+    let suffix = lastSuffix.get(id) ?? 1;
+    let candidate = id;
+    while (used.has(candidate)) {
+      suffix += 1;
+      candidate = `${id}-${suffix}`;
+    }
+    lastSuffix.set(id, suffix);
+    used.add(candidate);
+    return candidate;
   }
 
   // The first group uses bare `privacy` / `terms`, the targets of the
   // `/privacy` and `/terms` redirects.
   const headed = groups.map((group, gi) => ({
     group,
+    audienceId: reserve(`${group.audience}-audience`),
     headingIds: perDoc((d) => reserve(gi === 0 ? d : docHeadingId(group.audience, d))),
   }));
 
-  return headed.map(({ group, headingIds }) => ({
+  return headed.map(({ group, audienceId, headingIds }) => ({
     audience: group.audience,
     label: group.label,
+    headingId: audienceId,
     docs: perDoc((d) => {
       const entry = group.content[d];
       const { preamble, sections } = splitIntoSections(entry.content, entry.title);

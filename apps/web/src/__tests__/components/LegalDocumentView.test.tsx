@@ -826,3 +826,24 @@ describe('<LegalDocumentView /> fenced code and the scroll-spy', () => {
     expect(screen.getByRole('link', { name: 'Retention' })).toHaveAttribute('aria-current', 'true');
   });
 });
+
+describe('<LegalDocumentView /> page-unique anchors', () => {
+  it('renders no two elements with the same id', () => {
+    const { container } = renderView('', [
+      {
+        audience: 'org',
+        label: 'For organisations',
+        content: {
+          privacy: {
+            version: 1,
+            title: 'Privacy Policy',
+            content: '## Terms\nx\n## Org audience\ny',
+          },
+          terms: { version: 1, title: 'Terms of Service', content: '## Terms 2\nz' },
+        },
+      },
+    ]);
+    const ids = [...container.querySelectorAll('[id]')].map((el) => el.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});

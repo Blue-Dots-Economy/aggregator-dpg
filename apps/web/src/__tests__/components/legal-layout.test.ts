@@ -45,3 +45,43 @@ describe('layOutLegalPage', () => {
     expect(org && firstPillId(org.docs.terms)).toBe('terms');
   });
 });
+
+describe('layOutLegalPage page-unique ids', () => {
+  const allIds = (groups: LegalGroup[]) =>
+    layOutLegalPage(groups).flatMap((g) => [
+      g.headingId,
+      ...(['privacy', 'terms'] as const).flatMap((d) => [
+        g.docs[d].headingId,
+        ...g.docs[d].sections.map((s) => s.id),
+      ]),
+    ]);
+
+  it('never hands out a suffixed id that a later heading already slugs to', () => {
+    const ids = allIds([
+      {
+        audience: 'org',
+        label: 'For organisations',
+        content: {
+          privacy: doc('Privacy Policy', '## Terms\nx'),
+          terms: doc('Terms of Service', '## Terms 2\ny'),
+        },
+      },
+    ]);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('reserves the audience heading id before any section id', () => {
+    const [org] = layOutLegalPage([
+      {
+        audience: 'org',
+        label: 'For organisations',
+        content: {
+          privacy: doc('Privacy Policy', '## Org audience\nx'),
+          terms: doc('Terms of Service', 'y'),
+        },
+      },
+    ]);
+    expect(org?.headingId).toBe('org-audience');
+    expect(org?.docs.privacy.sections.map((s) => s.id)).toEqual(['org-audience-2']);
+  });
+});

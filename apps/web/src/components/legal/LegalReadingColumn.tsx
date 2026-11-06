@@ -72,18 +72,14 @@ export function LegalReadingColumn({ layout }: Readonly<{ layout: readonly LaidO
   return (
     <div className="min-w-0 max-w-[72ch]">
       {layout.map((group) => {
-        const audienceHeadingId = `${group.audience}-audience`;
         return (
           <section
             key={group.audience}
-            aria-labelledby={audienceHeadingId}
+            aria-labelledby={group.headingId}
             className="mt-10 border-t border-(--bd-border) pt-8 first:mt-6 first:border-t-0 first:pt-0"
           >
             {/* Audience heading marks where each audience starts. */}
-            <h2
-              id={audienceHeadingId}
-              className="mb-6 scroll-mt-20 text-2xl font-bold text-ink-900"
-            >
+            <h2 id={group.headingId} className="mb-6 scroll-mt-20 text-2xl font-bold text-ink-900">
               {group.label}
             </h2>
 
