@@ -99,6 +99,31 @@ describe('<AccessCatalogue /> summary and tabs', () => {
     expect(screen.getByText(messages.console.access.subtitle_roles)).toBeInTheDocument();
   });
 
+  it('opens a tab from its tile and toggles the personal-data filter from its tile', () => {
+    show('matrix');
+    fireEvent.click(screen.getByRole('button', { name: /^Permissions\s*1/ }));
+    expect(tab('Permissions')).toHaveAttribute('aria-selected', 'true');
+    const personalTile = screen.getByRole('button', {
+      name: new RegExp(`^${messages.console.access.stat_personal_data}`),
+    });
+    fireEvent.click(personalTile);
+    expect(document.getElementById('permission-agreement.manage')).toBeNull();
+    expect(
+      screen.getByRole('button', { name: messages.console.access.personal_only }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: /^Roles\s*3/ }));
+    expect(tab('Roles')).toHaveAttribute('aria-selected', 'true');
+    expect(
+      screen.getByRole('button', { name: messages.console.access.personal_only }),
+    ).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: /Network Admin/ })).toBeInTheDocument();
+    fireEvent.click(personalTile);
+    fireEvent.click(personalTile);
+    expect(
+      screen.getByRole('button', { name: messages.console.access.personal_only }),
+    ).toHaveAttribute('aria-pressed', 'false');
+  });
+
   it('has no controls to create, edit, delete or assign', () => {
     show('roles');
     expect(screen.queryByRole('button', { name: /^(create|edit|delete|assign)$/i })).toBeNull();
