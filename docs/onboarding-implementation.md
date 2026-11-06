@@ -130,7 +130,7 @@ Per-row processing. Many jobs per upload, processed in parallel.
 Triggered once per upload via the dedicated `bulk-finalise` queue.
 
 1. `HSCAN bu:{id}:errors` (cursor-based, memory-bounded) → stream into `errors.csv` on S3 multipart upload. Key: `bulk-uploads/{upload_id}/errors.csv` (deterministic; replay overwrites identical bytes).
-2. CSV format: original CSV header columns + `error_category` + `error_reason`.
+2. CSV format: original CSV header columns + `error_category` + `error_reason` + `what_to_do` (one plain sentence telling the coordinator how to fix the row; built in `apps/worker/src/jobs/bulk-fix-advice.ts`).
 3. UPDATE `bulk_upload`: `status='completed'`, final counters from Redis `counters` HASH, `errors_csv_s3_key`, `completed_at`.
 4. INSERT `onboarding` summary row: `source='bulk', batch_id=upload_id, total/passed/failed/skipped`.
 5. `DEL bu:{upload_id}:*` — clean Redis (only after steps 1-4 succeed).
@@ -305,7 +305,7 @@ All keys namespaced `bu:{upload_id}:`. Link path doesn't use Redis — it's sync
 | `meta`       | HASH | Fields: `total_rows`, `reader_done`, `started_at`                     |
 | `processed`  | SET  | Row indices that have completed. SADD return value drives idempotency |
 | `counters`   | HASH | Fields: `passed`, `failed`, `skipped`                                 |
-| `errors`     | HASH | `row_index → JSON {raw_row, reasons, error_category}`                 |
+| `errors`     | HASH | `row_index → JSON {raw_row, reasons, error_category, advice}`         |
 | `error_rows` | SET  | Row indices with errors (drives errors.csv ordering)                  |
 
 24-hour TTL fallback after finalisation (`DEL` is the primary cleanup). Redis AOF persistence required (`appendonly yes`, `appendfsync everysec`).
@@ -450,10 +450,12 @@ Categories:
 `errors.csv` format:
 
 ```
-<original CSV header columns>,error_category,error_reason
-<original raw row>,validation,participant_id: required field missing
-<original raw row>,duplicate,participant_id 'XYZ' already registered
+<original CSV header columns>,error_category,error_reason,what_to_do
+<original raw row>,validation,phone: Please enter a valid Mobile Number.,"Check the format of the phone number in the ""phone"" column. …"
+<original raw row>,duplicate,This participant is already registered as a provider.,This person already has an account of another type. …
 ```
+
+Fix rows in your upload file, not in errors.csv: its three extra columns are not template columns, so re-uploading errors.csv as it is fails the header check.
 
 Mid-run errors are not exposed via API. After finalisation, errors are accessible only by downloading `errors.csv`.
 

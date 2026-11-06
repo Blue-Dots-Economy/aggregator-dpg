@@ -84,7 +84,8 @@ describe('<InviteForm />', () => {
     expect(screen.getAllByRole('button', { name: 'Remove a@x.org' })).toHaveLength(2);
     expect(screen.getByText(/1 invalid email. Fix or remove before sending./)).toBeInTheDocument();
     expect(screen.getByText('Fix the highlighted emails to continue.')).toBeInTheDocument();
-    expect(sendButton()).toBeDisabled();
+    expect(emailBox()).toHaveAttribute('aria-invalid', 'true');
+    expect(sendButton()).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Remove not-an-email' }));
     expect(screen.queryByText(/invalid email/)).not.toBeInTheDocument();
     expect(sendButton()).toHaveTextContent('Send 1 invite');
@@ -151,10 +152,17 @@ describe('<InviteForm />', () => {
     expect(unloadBlocked()).toBe(false);
   });
 
-  it('asks for an address before anything is added', () => {
+  it('asks for an address before anything is added, and says so under the box on Send', () => {
+    global.fetch = vi.fn() as never;
     renderForm();
     expect(screen.getByText('Add at least one email to continue.')).toBeInTheDocument();
-    expect(sendButton()).toBeDisabled();
+    expect(sendButton()).toBeEnabled();
+    fireEvent.click(sendButton());
+    expect(
+      screen.getByText(`${messages.console.invite.recipients} is required.`),
+    ).toBeInTheDocument();
+    expect(emailBox()).toHaveAttribute('aria-invalid', 'true');
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('adds every address in pasted text', () => {
@@ -206,8 +214,9 @@ describe('<InviteForm />', () => {
         }),
       }),
     );
-    // The list clears for the next batch.
+    // The list clears for the next batch, without asking for an address again.
     expect(screen.queryByLabelText('Name for a@x.org')).not.toBeInTheDocument();
+    expect(screen.queryByText(/is required\./)).toBeNull();
   });
 
   it('sends text still in the box without pressing Enter first', async () => {
@@ -378,8 +387,14 @@ describe('<InviteForm />', () => {
     );
   });
 
-  it('disables sending when there are no organisations', () => {
+  it('says why nothing is sent when there are no organisations', () => {
+    global.fetch = vi.fn() as never;
     renderForm([]);
-    expect(sendButton()).toBeDisabled();
+    typeAddresses('a@x.org');
+    fireEvent.click(sendButton());
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      messages.console.invite.error.org_unavailable,
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

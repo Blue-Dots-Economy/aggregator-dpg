@@ -7,10 +7,19 @@
  */
 'use client';
 
-import { useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { useTranslations } from 'next-intl';
-import { SubmitBlockers } from '../../../components/ui/SubmitBlockers';
 import type { LinkIdentity } from '@/lib/registration-link';
+import {
+  FieldMessage,
+  useHandFieldErrors,
+  type HandFieldError,
+} from '../../../components/forms/useHandFieldErrors';
+import { PhoneInput } from '../../../components/forms/PhoneInput';
+import { isValidPhone, phoneValueMode } from '../../../lib/phone';
+import { useFieldErrorCopy } from '../../../components/forms/useFieldErrors';
+
+type IdentityField = 'name' | 'year_of_birth' | 'phone' | 'email' | 'consent_call';
 
 export interface MinimalIdentityPayload {
   /** Name field. Key is the network's `identity.name` selector. */
@@ -38,6 +47,8 @@ export interface MinimalIdentityFormProps {
    * Voice mode: phone is required and email is optional. When false
    * (default), name plus phone or email is required.
    */
+  /** The phone field's schema `pattern`; bare 10-digit patterns store no country code. */
+  phonePattern?: string | undefined;
   requirePhone?: boolean;
   /**
    * Show the consent checkbox. Set when the domain's `go_live_required`
@@ -48,10 +59,12 @@ export interface MinimalIdentityFormProps {
    * Collect a birth year. Set when the domain has `guardian_consent_required`.
    */
   showBirthYear: boolean;
+  /** Server messages keyed by payload key (identity selectors or `year_of_birth`). */
+  serverErrors?: Readonly<Record<string, string>> | null;
 }
 
 /**
- * Checks whether a value looks like an email, for the inline blocker list.
+ * Checks whether a value looks like an email, for the inline field message.
  *
  * Requires one `@`, no whitespace, and a dot inside the domain. Uses index
  * scans instead of a regex to avoid slow backtracking. The server does the
@@ -87,16 +100,14 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   const showEmail = !!emailKey;
 
   // Requires a name and, in voice mode, a valid phone; otherwise a valid phone
-  // or email. Partial values block submit and appear in the blocker list.
+  // or email.
   const hasName = name.trim().length > 0;
   const hasPhone = !!phoneKey && phone.trim().length > 0;
   const hasEmail = showEmail && email.trim().length > 0;
-  const phoneFormatOk = phone.replace(/\D/g, '').length >= 10;
+  const phoneFormatOk = isValidPhone(phone);
   const emailFormatOk = looksLikeEmail(email.trim());
   const phoneValid = hasPhone && phoneFormatOk;
   const emailValid = hasEmail && emailFormatOk;
-  // An entered email must be valid even when it's optional (voice mode).
-  const emailOk = !hasEmail || emailFormatOk;
   const contactValid = requirePhone ? phoneValid : phoneValid || emailValid;
   // Age is derived from the birth year; no birthdate is stored. Guardian-gated
   // domains need it, or Signals rejects the submit with `AGE_REQUIRED`.
@@ -108,28 +119,52 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
   // Minors (age <= 18) do not give consent here; they accept terms in the
   // Signalstack app after signing in. The submit still goes through.
   const isMinor = yobValid && derivedAge <= 18;
-  const valid =
-    hasName &&
-    contactValid &&
-    emailOk &&
-    (!props.showBirthYear || yobValid) &&
-    (!props.showConsent || isMinor || consentCall);
 
-  // Submit stays disabled until valid; list what is blocking it.
-  const blockers: string[] = [];
-  if (!hasName) blockers.push(t('blockers.name'));
-  if (requirePhone) {
-    if (!hasPhone) blockers.push(t('blockers.phone_required'));
-    else if (!phoneFormatOk) blockers.push(t('blockers.phone_invalid'));
-    if (hasEmail && !emailFormatOk) blockers.push(t('blockers.email_invalid'));
-  } else if (!hasPhone && !hasEmail) {
-    blockers.push(t('blockers.contact_required'));
-  } else {
-    if (hasPhone && !phoneFormatOk) blockers.push(t('blockers.phone_invalid'));
-    if (hasEmail && !emailFormatOk) blockers.push(t('blockers.email_invalid'));
-  }
-  if (props.showBirthYear && !yobValid) blockers.push(t('blockers.year_of_birth'));
-  if (props.showConsent && !isMinor && !consentCall) blockers.push(t('blockers.consent_call'));
+  const copy = useFieldErrorCopy();
+  const required = (message: string): HandFieldError => ({ kind: 'required', message });
+  const invalid = (message: string): HandFieldError => ({
+    kind: 'invalid',
+    message: copy.invalid(message),
+  });
+  const phoneError: HandFieldError | null =
+    hasPhone && !phoneFormatOk
+      ? invalid(t('errors.phone_invalid'))
+      : requirePhone && !hasPhone
+        ? required(copy.required(t('phone_label')))
+        : !requirePhone && !contactValid && !hasEmail && phoneKey
+          ? required(t('errors.contact_required'))
+          : null;
+  const emailError: HandFieldError | null =
+    hasEmail && !emailFormatOk
+      ? invalid(t('errors.email_invalid'))
+      : !requirePhone && !contactValid && !hasPhone && !phoneKey
+        ? required(t('errors.contact_required'))
+        : null;
+  const fe = useHandFieldErrors<IdentityField>('account-only', {
+    name: hasName ? null : required(copy.required(t('name_label'))),
+    year_of_birth:
+      props.showBirthYear && !yobValid ? required(copy.required(t('year_of_birth_label'))) : null,
+    phone: phoneError,
+    email: emailError,
+    consent_call:
+      props.showConsent && !isMinor && !consentCall
+        ? required(copy.required(t('errors.consent_call')))
+        : null,
+  });
+
+  const { setServerErrors } = fe;
+  const serverErrors = props.serverErrors;
+  useEffect(() => {
+    if (!serverErrors) return;
+    const byField: Partial<Record<IdentityField, string>> = {};
+    for (const [key, message] of Object.entries(serverErrors)) {
+      if (key === nameKey) byField.name = message;
+      else if (key === phoneKey) byField.phone = message;
+      else if (key === emailKey) byField.email = message;
+      else if (key === 'year_of_birth') byField.year_of_birth = message;
+    }
+    setServerErrors(byField);
+  }, [serverErrors]);
 
   return (
     <div className="rounded-[18px] bg-white border border-(--bd-border) overflow-hidden shadow-[0_1px_0_rgba(11,16,32,0.02),0_20px_60px_-30px_rgba(11,16,32,0.18)]">
@@ -146,7 +181,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (!valid || !nameKey || props.busy) return;
+          if (props.busy || !fe.validate() || !nameKey) return;
           const payload: MinimalIdentityPayload = {
             [nameKey]: name.trim(),
             // Send the birth year only when the domain collects it. The parent
@@ -162,43 +197,57 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
         noValidate
         className="px-6 sm:px-8 py-7 flex flex-col gap-5"
       >
-        <label className="block">
-          <span className="bd-label">
-            {t('name_label')}
-            <span className="text-rose-500 ml-0.5">*</span>
-          </span>
-          <input
-            className="bd-input"
-            type="text"
-            name={nameKey ?? 'name'}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            autoComplete="name"
-          />
-        </label>
-
-        {props.showBirthYear && (
+        <div>
           <label className="block">
             <span className="bd-label">
-              {t('year_of_birth_label')}
+              {t('name_label')}
               <span className="text-rose-500 ml-0.5">*</span>
             </span>
-            <select
+            <input
               className="bd-input"
-              name="year_of_birth"
-              value={yearOfBirth}
-              onChange={(e) => setYearOfBirth(e.target.value)}
+              type="text"
+              {...fe.controlProps('name')}
+              name={nameKey ?? 'name'}
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                fe.clearServer('name');
+              }}
               required
-            >
-              <option value="">{t('year_of_birth_placeholder')}</option>
-              {Array.from({ length: 101 }, (_, i) => currentYear - i).map((y) => (
-                <option key={y} value={String(y)}>
-                  {y}
-                </option>
-              ))}
-            </select>
+              autoComplete="name"
+            />
           </label>
+          <FieldMessage id={fe.errorId('name')} message={fe.message('name')} />
+        </div>
+
+        {props.showBirthYear && (
+          <div>
+            <label className="block">
+              <span className="bd-label">
+                {t('year_of_birth_label')}
+                <span className="text-rose-500 ml-0.5">*</span>
+              </span>
+              <select
+                className="bd-input"
+                {...fe.controlProps('year_of_birth')}
+                name="year_of_birth"
+                value={yearOfBirth}
+                onChange={(e) => {
+                  setYearOfBirth(e.target.value);
+                  fe.clearServer('year_of_birth');
+                }}
+                required
+              >
+                <option value="">{t('year_of_birth_placeholder')}</option>
+                {Array.from({ length: 101 }, (_, i) => currentYear - i).map((y) => (
+                  <option key={y} value={String(y)}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <FieldMessage id={fe.errorId('year_of_birth')} message={fe.message('year_of_birth')} />
+          </div>
         )}
 
         {(phoneKey || showEmail) && (
@@ -208,36 +257,51 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {phoneKey && (
-                <label className="block">
-                  <span className="bd-label">
-                    {t('phone_label')}
-                    {requirePhone && <span className="text-rose-500 ml-0.5">*</span>}
-                  </span>
-                  <input
-                    className="bd-input"
-                    type="tel"
-                    name={phoneKey}
+                <div>
+                  <label className="block" htmlFor={fe.controlProps('phone').id}>
+                    <span className="bd-label">
+                      {t('phone_label')}
+                      {requirePhone && <span className="text-rose-500 ml-0.5">*</span>}
+                    </span>
+                  </label>
+                  <PhoneInput
+                    id={fe.controlProps('phone').id}
+                    nationalOnly={phoneValueMode(props.phonePattern) === 'national'}
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    autoComplete="tel"
-                    placeholder="+91..."
+                    onChange={(next) => {
+                      setPhone(next ?? '');
+                      fe.clearServer('phone');
+                    }}
+                    onBlur={fe.controlProps('phone').onBlur}
+                    inputProps={{
+                      ...fe.controlProps('phone'),
+                      ...(phoneKey ? { name: phoneKey } : {}),
+                    }}
                     required={requirePhone}
                   />
-                </label>
+                  <FieldMessage id={fe.errorId('phone')} message={fe.message('phone')} />
+                </div>
               )}
               {showEmail && (
-                <label className="block">
-                  <span className="bd-label">{t('email_label')}</span>
-                  <input
-                    className="bd-input"
-                    type="email"
-                    name={emailKey}
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    autoComplete="email"
-                    placeholder="you@example.com"
-                  />
-                </label>
+                <div>
+                  <label className="block">
+                    <span className="bd-label">{t('email_label')}</span>
+                    <input
+                      className="bd-input"
+                      type="email"
+                      {...fe.controlProps('email')}
+                      name={emailKey}
+                      value={email}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        fe.clearServer('email');
+                      }}
+                      autoComplete="email"
+                      placeholder="you@example.com"
+                    />
+                  </label>
+                  <FieldMessage id={fe.errorId('email')} message={fe.message('email')} />
+                </div>
               )}
             </div>
           </div>
@@ -254,6 +318,7 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
               <label className="flex items-start gap-2.5 text-[13px] text-ink-900 cursor-pointer">
                 <input
                   type="checkbox"
+                  {...fe.controlProps('consent_call')}
                   name="consent_call"
                   checked={consentCall}
                   onChange={(e) => setConsentCall(e.target.checked)}
@@ -261,15 +326,14 @@ export function MinimalIdentityForm(props: MinimalIdentityFormProps): JSX.Elemen
                 />
                 <span>{t('consent_call_label')}</span>
               </label>
+              <FieldMessage id={fe.errorId('consent_call')} message={fe.message('consent_call')} />
             </div>
           ))}
-
-        {!valid && <SubmitBlockers reasons={blockers} heading={t('blockers.heading')} />}
 
         <div className="flex justify-end pt-2">
           <button
             type="submit"
-            disabled={!valid || props.busy}
+            disabled={props.busy}
             style={{ background: props.brandColor ?? undefined }}
             className="inline-flex items-center justify-center rounded-[10px] px-5 py-2.5 text-[14px] font-semibold text-white bg-(--bd-primary-600) hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition"
           >

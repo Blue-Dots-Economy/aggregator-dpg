@@ -441,6 +441,12 @@ describe('processBulkRow — signalstack push outcomes', () => {
       'mobile_number: Enter a 10-digit mobile number',
       'gender: must be one of: Male, Female',
     ]);
+    expect(result.advice?.[0]).toMatch(
+      /^Check the format of the phone number in the "mobile_number" column/,
+    );
+    expect(result.advice?.[1]).toBe(
+      'Check the value in the "gender" column against the downloadable template.',
+    );
   });
 
   it("falls back to Signals' sentence when the per-field map holds non-string messages", async () => {
@@ -488,6 +494,7 @@ describe('processBulkRow — signalstack push outcomes', () => {
     const result = await processBulkRow(makeJob());
     expect(result.category).toBe('duplicate');
     expect(result.reasons).toEqual(['This participant is already registered as a provider.']);
+    expect(result.advice?.[0]).toMatch(/already has an account of another type/);
   });
 
   it('categorises an owned-elsewhere push rejection distinctly', async () => {

@@ -1,13 +1,15 @@
 /**
  * Unit tests for PhoneWidget and withPhoneWidget.
  *
- * Covers: the fixed +91 prefix, digits only and at most 10, the stored
+ * Covers: the +91 code (editable, starts at +91), digits only and at most 10, the stored
  * `+91…` value, reading back a stored value, an empty field clearing the
  * value, and the widget applied to nested `phone` fields only.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { WidgetProps } from '@rjsf/utils';
+import { NextIntlClientProvider } from 'next-intl';
+import messages from '@/i18n/messages/en.json';
 import { PhoneWidget, localDigits } from '@/components/forms/custom-widgets/PhoneWidget';
 import { withPhoneWidget } from '@/lib/phone-ui-schema';
 
@@ -22,14 +24,21 @@ function renderIt(value?: string) {
     placeholder: '+91 98765 43210',
     rawErrors: [],
   } as unknown as WidgetProps;
-  render(<PhoneWidget {...props} />);
-  return { onChange, input: screen.getByRole('textbox') as HTMLInputElement };
+  render(
+    <NextIntlClientProvider locale="en" messages={messages}>
+      <PhoneWidget {...props} />
+    </NextIntlClientProvider>,
+  );
+  // The number box; the country code box beside it is labelled separately.
+  const input = document.getElementById('root_owner_phone');
+  if (!(input instanceof HTMLInputElement)) throw new Error('number box not rendered');
+  return { onChange, input };
 }
 
 describe('<PhoneWidget />', () => {
   it('shows +91 in front and the placeholder without it', () => {
     const { input } = renderIt();
-    expect(screen.getByText('+91')).toBeInTheDocument();
+    expect(screen.getByLabelText('Country code')).toHaveValue('+91');
     expect(input).toHaveAttribute('placeholder', '98765 43210');
     expect(input).toHaveAttribute('maxLength', '10');
     expect(input).toHaveAttribute('inputMode', 'numeric');

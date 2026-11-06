@@ -205,9 +205,11 @@ describe('<OrgEditForm />', () => {
         fireEvent.change(screen.getByLabelText(/Website/), { target: { value } });
         save();
         expect(
-          await screen.findByText('Please enter a website starting with https://'),
+          await screen.findByText(
+            /^Invalid entry\. Please enter a website starting with https:\/\//,
+          ),
         ).toBeInTheDocument();
-        expect(screen.getByRole('status')).toHaveTextContent(messages.console.org.fix_fields);
+        expect(screen.queryByRole('status')).toBeNull();
         expect(global.fetch).not.toHaveBeenCalled();
       },
     );
@@ -236,7 +238,7 @@ describe('<OrgEditForm />', () => {
       });
       save();
       expect(
-        await screen.findByText('Please enter a website starting with https://'),
+        await screen.findByText(/^Invalid entry\. Please enter a website starting with https:\/\//),
       ).toBeInTheDocument();
       expect(global.fetch).not.toHaveBeenCalled();
     });
@@ -295,8 +297,8 @@ describe('<OrgEditForm />', () => {
         target: { value: '27AAPFU0939F1ZV' },
       });
       save();
-      expect(await screen.findByText('Server says no.')).toBeInTheDocument();
-      expect(screen.getByRole('status')).toHaveTextContent(messages.console.org.fix_fields);
+      expect(await screen.findByText(/^Invalid entry\. Server says no\./)).toBeInTheDocument();
+      expect(screen.queryByRole('status')).toBeNull();
     });
 
     it('shows the name-taken error when the API rejects a rename', async () => {

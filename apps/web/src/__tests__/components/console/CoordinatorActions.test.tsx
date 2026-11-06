@@ -188,14 +188,20 @@ describe('<CoordinatorActions />', () => {
     expect(screen.getByRole('checkbox', { name: /Providers/ })).not.toBeChecked();
   });
 
-  it('blocks saving an empty set and discards back to what was saved', () => {
+  it('refuses to save an empty set with the message under it, and discards back to what was saved', () => {
     renderIt({ ...user, serves: ['seeker'] }, [
       { id: 'seeker', label: 'Seekers' },
       { id: 'provider', label: 'Providers' },
     ]);
     fireEvent.click(screen.getByRole('checkbox', { name: /Seekers/ }));
     expect(screen.getByText(messages.console.coordinator.domains_empty)).toBeInTheDocument();
-    expect(saveButton()).toBeDisabled();
+    expect(
+      screen.getByRole('group', { name: messages.console.coordinator.domains }),
+    ).toHaveAttribute('aria-invalid', 'true');
+    global.fetch = vi.fn() as never;
+    expect(saveButton()).toBeEnabled();
+    fireEvent.click(saveButton());
+    expect(global.fetch).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.discard }));
     expect(screen.getByRole('checkbox', { name: /Seekers/ })).toBeChecked();
     expect(

@@ -6,7 +6,14 @@ import QRCode from 'qrcode';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations, useFormatter } from 'next-intl';
 import { Button } from '../../../../components/ui/Button';
-import { SubmitBlockers } from '../../../../components/ui/SubmitBlockers';
+import {
+  FieldMessage,
+  useHandFieldErrors,
+  type HandControlProps,
+  type HandFieldError,
+} from '../../../../components/forms/useHandFieldErrors';
+import { useFieldErrorCopy } from '../../../../components/forms/useFieldErrors';
+import { useRequestErrorMessage } from '../../../../components/forms/useRequestErrorMessage';
 import { I } from '../../../../icons';
 import {
   useActivateLink,
@@ -213,21 +220,50 @@ function QrPreviewModal({
 function Field({
   label,
   required,
+  error,
   children,
 }: {
   label: string;
   required?: boolean;
+  /** Message under the control, and its element id. */
+  error?: { id: string; message: string | undefined };
   children: React.ReactNode;
 }) {
   return (
-    <label className="block">
-      <span className="bd-label">
-        {label}
-        {required && <span className="text-rose-500 ml-0.5">*</span>}
-      </span>
-      {children}
-    </label>
+    <div>
+      <label className="block">
+        <span className="bd-label">
+          {label}
+          {required && <span className="text-rose-500 ml-0.5">*</span>}
+        </span>
+        {children}
+      </label>
+      {error ? <FieldMessage id={error.id} message={error.message} /> : null}
+    </div>
   );
+}
+
+/** Required-field checks shared by the create and edit link forms. */
+type LinkFieldKey = 'state' | 'lever_event' | 'district' | 'domain' | 'registration_mode';
+
+/** A "{label} is required." error when `value` is empty. */
+function requiredError(value: string, message: string): HandFieldError | null {
+  return value ? null : { kind: 'required', message };
+}
+
+/** Control props plus the Field `error` prop for one key. */
+function wire<K extends string>(
+  fe: {
+    controlProps: (k: K) => HandControlProps;
+    errorId: (k: K) => string;
+    message: (k: K) => string | undefined;
+  },
+  key: K,
+) {
+  return {
+    control: fe.controlProps(key),
+    error: { id: fe.errorId(key), message: fe.message(key) },
+  };
 }
 
 export function CreateLinkSection() {
@@ -237,6 +273,10 @@ export function CreateLinkSection() {
   const router = useRouter();
   const [form, setForm] = useState<CreateLinkFormState>(EMPTY_FORM);
   const [createError, setCreateError] = useState<string | null>(null);
+  const copy = useFieldErrorCopy();
+  const requestMessage = useRequestErrorMessage({
+    DUPLICATE_SLUG: t('create_link.error_duplicate_slug'),
+  });
   const [toast, setToast] = useState<string | null>(null);
   const create = useCreateLink();
   const profile = useProfile();
@@ -252,13 +292,17 @@ export function CreateLinkSection() {
     (cfg?.domains ?? []).map((d) => d.plural_label ?? d.label ?? d.id).join(' / ') ||
     t('create_link.field_domain');
 
-  // Missing required fields, listed under the disabled create button.
-  const createBlockers: string[] = [];
-  if (!form.state) createBlockers.push(t('create_link.blockers.state'));
-  if (!form.district) createBlockers.push(t('create_link.blockers.district'));
-  if (!form.lever_event) createBlockers.push(t('create_link.blockers.lever_event'));
-  if (!form.domain) createBlockers.push(t('create_link.blockers.domain'));
-  if (!form.registration_mode) createBlockers.push(t('create_link.blockers.registration_mode'));
+  const fe = useHandFieldErrors<LinkFieldKey>('create-link', {
+    state: requiredError(form.state, copy.required(t('create_link.field_state'))),
+    lever_event: requiredError(form.lever_event, copy.required(t('create_link.field_event'))),
+    district: requiredError(form.district, copy.required(t('create_link.field_district'))),
+    domain: requiredError(form.domain, copy.required(domainsCaption)),
+    registration_mode: requiredError(
+      form.registration_mode,
+      copy.required(t('create_link.field_registration_mode')),
+    ),
+  });
+  const w = (key: LinkFieldKey) => wire(fe, key);
 
   // Use the aggregator's registered type. The API rejects other types.
   useEffect(() => {
@@ -303,11 +347,12 @@ export function CreateLinkSection() {
       event_location: firstLoc?.addressLocality ?? firstLoc?.streetAddress ?? '',
     });
     setCreateError(null);
+    fe.reset();
   };
 
   const onCreate = async () => {
-    // The Create button is disabled while `createBlockers` is non-empty.
     setCreateError(null);
+    if (!fe.validate()) return;
     try {
       const title = buildLinkTitle(form);
       const slug = buildLinkSlug(form);
@@ -333,7 +378,7 @@ export function CreateLinkSection() {
       setToast(t('create_link.link_created'));
       router.push(`/onboarding?new=${encodeURIComponent(created.link_id)}`);
     } catch (err) {
-      setCreateError((err as Error).message);
+      setCreateError(requestMessage(err));
     }
   };
 
@@ -364,17 +409,19 @@ export function CreateLinkSection() {
               />
             </Field>
           </div>
-          <Field label={t('create_link.field_state')} required>
+          <Field label={t('create_link.field_state')} required error={w('state').error}>
             <input
               className="bd-input"
+              {...w('state').control}
               value={form.state}
               onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
               placeholder={t('create_link.placeholder_state')}
             />
           </Field>
-          <Field label={t('create_link.field_event')} required>
+          <Field label={t('create_link.field_event')} required error={w('lever_event').error}>
             <input
               className="bd-input"
+              {...w('lever_event').control}
               value={form.lever_event}
               onChange={(e) => setForm((f) => ({ ...f, lever_event: e.target.value }))}
               placeholder={t('create_link.placeholder_event')}
@@ -396,26 +443,38 @@ export function CreateLinkSection() {
               placeholder={t('create_link.placeholder_location')}
             />
           </Field>
-          <Field label={t('create_link.field_district')} required>
+          <Field label={t('create_link.field_district')} required error={w('district').error}>
             <input
               className="bd-input"
+              {...w('district').control}
               value={form.district}
               onChange={(e) => setForm((f) => ({ ...f, district: e.target.value }))}
               placeholder={t('create_link.placeholder_district')}
             />
           </Field>
-          <Field label={domainsCaption} required>
+          <Field label={domainsCaption} required error={w('domain').error}>
             {/* Read-only: set to the aggregator's registered type. */}
-            <input className="bd-input" value={domainLabel} readOnly aria-readonly="true" />
+            <input
+              className="bd-input"
+              {...w('domain').control}
+              value={domainLabel}
+              readOnly
+              aria-readonly="true"
+            />
           </Field>
           {/*
            * Registration mode, set at create time and fixed afterwards. Options
            * come from the network config's `registration_modes`. The mode's
            * `public_hint_i18n_key` is for the public form, so it is not shown here.
            */}
-          <Field label={t('create_link.field_registration_mode')} required>
+          <Field
+            label={t('create_link.field_registration_mode')}
+            required
+            error={w('registration_mode').error}
+          >
             <select
               className="bd-input"
+              {...w('registration_mode').control}
               value={form.registration_mode}
               onChange={(e) => setForm((f) => ({ ...f, registration_mode: e.target.value }))}
             >
@@ -435,22 +494,16 @@ export function CreateLinkSection() {
               placeholder={t('create_link.placeholder_tags')}
             />
           </Field>
-          {/* List what is missing while the create button is disabled. */}
-          {createBlockers.length > 0 && (
-            <div className="md:col-span-2">
-              <SubmitBlockers
-                reasons={createBlockers}
-                heading={t('create_link.blockers.heading')}
-              />
-            </div>
-          )}
           <div className="md:col-span-2 flex items-center justify-end gap-2 mt-2 flex-wrap">
-            <Button onClick={onCreate} disabled={create.isPending || createBlockers.length > 0}>
+            <Button onClick={onCreate} disabled={create.isPending}>
               {create.isPending ? t('create_link.creating') : t('create_link.create_button')}
             </Button>
           </div>
           {createError && (
-            <div className="md:col-span-2 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2">
+            <div
+              role="alert"
+              className="md:col-span-2 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2"
+            >
               {createError}
             </div>
           )}
@@ -512,6 +565,11 @@ function LinkCard({
   const activate = useActivateLink();
   const deactivate = useDeactivateLink();
   const update = useUpdateLink();
+  const copy = useFieldErrorCopy();
+  const requestMessage = useRequestErrorMessage({
+    DUPLICATE_SLUG: t('create_link.error_duplicate_slug'),
+  });
+  const [actionError, setActionError] = useState<string | null>(null);
   const isLive = link.status === 'live';
   const isDraft = link.status === 'draft';
   const badge = STATUS_STYLE[link.status] ?? DRAFT_STATUS_STYLE;
@@ -577,9 +635,15 @@ function LinkCard({
     tags: Array.isArray(ctx['tags']) ? (ctx['tags'] as string[]).join(', ') : '',
   }));
   const [editError, setEditError] = useState<string | null>(null);
+  const editFe = useHandFieldErrors<LinkFieldKey>(`edit-link-${link.link_id}`, {
+    state: requiredError(editForm.state, copy.required(t('create_link.field_state'))),
+    district: requiredError(editForm.district, copy.required(t('create_link.field_district'))),
+    lever_event: requiredError(editForm.lever_event, copy.required(t('create_link.field_event'))),
+  });
+  const ew = (key: LinkFieldKey) => wire(editFe, key);
   const onSaveEdit = async () => {
-    // The Save button is disabled while required fields are missing.
     setEditError(null);
+    if (!editFe.validate()) return;
     try {
       const slug = buildLinkSlug(editForm);
       const editTitle = buildLinkTitle(editForm);
@@ -601,7 +665,7 @@ function LinkCard({
       });
       setEditing(false);
     } catch (err) {
-      setEditError((err as Error).message);
+      setEditError(requestMessage(err));
     }
   };
 
@@ -728,7 +792,12 @@ function LinkCard({
           )}
           {isDraft && (
             <Button
-              onClick={() => activate.mutate(link.link_id)}
+              onClick={() => {
+                setActionError(null);
+                activate.mutate(link.link_id, {
+                  onError: (err) => setActionError(requestMessage(err)),
+                });
+              }}
               disabled={activate.isPending || editing || update.isPending}
             >
               {activate.isPending ? t('link_card.going_live') : t('link_card.make_live')}
@@ -737,7 +806,12 @@ function LinkCard({
           {isLive && (
             <Button
               kind="ghost"
-              onClick={() => deactivate.mutate(link.link_id)}
+              onClick={() => {
+                setActionError(null);
+                deactivate.mutate(link.link_id, {
+                  onError: (err) => setActionError(requestMessage(err)),
+                });
+              }}
               disabled={deactivate.isPending}
             >
               {deactivate.isPending ? t('link_card.retiring') : t('link_card.deactivate')}
@@ -746,25 +820,37 @@ function LinkCard({
         </div>
       </div>
 
+      {actionError && (
+        <div
+          role="alert"
+          className="mt-3 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2"
+        >
+          {actionError}
+        </div>
+      )}
+
       {isDraft && editing && (
         <div className="mt-4 pt-4 border-t border-(--bd-border) grid grid-cols-1 md:grid-cols-2 gap-3">
-          <Field label={t('create_link.field_state')} required>
+          <Field label={t('create_link.field_state')} required error={ew('state').error}>
             <input
               className="bd-input"
+              {...ew('state').control}
               value={editForm.state}
               onChange={(e) => setEditForm((f) => ({ ...f, state: e.target.value }))}
             />
           </Field>
-          <Field label={t('create_link.field_district')} required>
+          <Field label={t('create_link.field_district')} required error={ew('district').error}>
             <input
               className="bd-input"
+              {...ew('district').control}
               value={editForm.district}
               onChange={(e) => setEditForm((f) => ({ ...f, district: e.target.value }))}
             />
           </Field>
-          <Field label={t('create_link.field_event')} required>
+          <Field label={t('create_link.field_event')} required error={ew('lever_event').error}>
             <input
               className="bd-input"
+              {...ew('lever_event').control}
               value={editForm.lever_event}
               onChange={(e) => setEditForm((f) => ({ ...f, lever_event: e.target.value }))}
             />
@@ -785,7 +871,10 @@ function LinkCard({
             />
           </Field>
           {editError && (
-            <div className="md:col-span-2 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2">
+            <div
+              role="alert"
+              className="md:col-span-2 text-[12.5px] text-rose-700 bg-rose-50 border border-rose-200 rounded-[10px] px-3 py-2"
+            >
               {editError}
             </div>
           )}
@@ -793,12 +882,7 @@ function LinkCard({
             <Button kind="ghost" onClick={() => setEditing(false)} disabled={update.isPending}>
               {t('link_card.cancel')}
             </Button>
-            <Button
-              onClick={onSaveEdit}
-              disabled={
-                update.isPending || !editForm.state || !editForm.district || !editForm.lever_event
-              }
-            >
+            <Button onClick={onSaveEdit} disabled={update.isPending}>
               {update.isPending ? t('link_card.saving') : t('link_card.save_draft')}
             </Button>
           </div>
@@ -828,6 +912,7 @@ export function YourLinksBody() {
   const aggregatorType: string = rawProfile.data?.type ?? cfg?.domains[0]?.id ?? '';
   // Links are filtered to the aggregator's registered type.
   const { data, isLoading, error } = useRegistrationLinks(aggregatorType);
+  const requestMessage = useRequestErrorMessage();
   const links: ApiRegistrationLink[] = data ?? [];
   const activeCount = links.filter((l) => l.status === 'live').length;
 
@@ -850,9 +935,7 @@ export function YourLinksBody() {
         {isLoading ? (
           <div className="text-center py-8 text-ink-400 text-[13px]">{t('your_links.loading')}</div>
         ) : error ? (
-          <div className="text-center py-8 text-rose-600 text-[13px]">
-            {(error as Error).message}
-          </div>
+          <div className="text-center py-8 text-rose-600 text-[13px]">{requestMessage(error)}</div>
         ) : links.length === 0 ? (
           <div className="text-center py-8 text-ink-400 text-[13px]">
             {t('your_links.empty', { type: aggregatorType })}

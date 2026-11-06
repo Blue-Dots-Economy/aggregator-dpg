@@ -174,6 +174,7 @@ describe('parseError', () => {
       detail: 'Name is required',
       code: 'VALIDATION',
       requestId: 'req-1',
+      status: 400,
     });
   });
 
@@ -184,6 +185,7 @@ describe('parseError', () => {
       detail: 'The server returned HTTP 500.',
       code: 'UNKNOWN',
       requestId: 'req-xyz',
+      status: 500,
     });
   });
 
@@ -249,7 +251,13 @@ describe('submitRegistration', () => {
     const result = await submitRegistration('/api/aggregator/register', {});
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toEqual({ title: 'Nope', detail: 'Bad', code: 'X', requestId: 'req-9' });
+      expect(result.error).toEqual({
+        title: 'Nope',
+        detail: 'Bad',
+        code: 'X',
+        requestId: 'req-9',
+        status: 400,
+      });
     }
   });
 
@@ -267,7 +275,7 @@ describe('submitRegistration', () => {
     }
   });
 
-  it('returns a network-error result when fetch throws', async () => {
+  it('returns a network-error result, without the raw error text, when fetch throws', async () => {
     originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async () => {
       throw new Error('fetch failed: DNS lookup');
@@ -278,9 +286,10 @@ describe('submitRegistration', () => {
     if (!result.ok) {
       expect(result.error).toEqual({
         title: 'Network error',
-        detail: 'fetch failed: DNS lookup',
+        detail: 'Could not reach the server.',
         code: 'NETWORK_ERROR',
         requestId: '',
+        status: 0,
       });
     }
   });

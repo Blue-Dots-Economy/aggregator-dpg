@@ -20,6 +20,7 @@ import { getGeoProvider } from '../../../lib/geo/provider';
 import { useFormRuntimeConfig } from '../../../lib/FormRuntimeConfigProvider';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
 import type { GeoSuggestion } from '../../../lib/geo/types';
+import { errorAria } from '../error-aria';
 
 export interface ResolvedCoord {
   lat: number;
@@ -77,6 +78,8 @@ interface RowComboboxProps {
   onOpenChange: (open: boolean) => void;
   onBlurClose: () => void;
   onChoose: (suggestion: GeoSuggestion) => void;
+  /** The field's `aria-invalid` / `aria-describedby`, when it has errors. */
+  errorProps: ReturnType<typeof errorAria>;
 }
 
 /**
@@ -95,6 +98,7 @@ function RowCombobox({
   onOpenChange,
   onBlurClose,
   onChoose,
+  errorProps,
 }: Readonly<RowComboboxProps>) {
   const { activeIndex, setActiveIndex, optionId, activeDescendantId, listboxId, onKeyDown } =
     useSuggestionKeyboard({
@@ -122,6 +126,7 @@ function RowCombobox({
         aria-controls={listboxId}
         aria-autocomplete="list"
         aria-activedescendant={activeDescendantId}
+        {...errorProps}
         onChange={(e) => onInput(e.target.value)}
         onKeyDown={onKeyDown}
         onFocus={() => onOpenChange(suggestions.length > 0)}
@@ -167,9 +172,11 @@ export function MultiLocationAutocompleteWidget({
   disabled,
   readonly,
   onChange,
+  onBlur,
   schema,
   registry,
   options,
+  rawErrors,
 }: Readonly<WidgetProps>) {
   const t = useTranslations('form');
   const ctx = (registry?.formContext ?? {}) as MultiLocationFormContext;
@@ -364,7 +371,12 @@ export function MultiLocationAutocompleteWidget({
               open={search.open}
               onInput={(next) => handleInput(index, next)}
               onOpenChange={(next) => updateSearch(index, { open: next })}
+              errorProps={errorAria(id, rawErrors)}
               onBlurClose={() => {
+                onBlur?.(
+                  id,
+                  rows.map((r) => r.name),
+                );
                 const ref = refsArray.current[index];
                 if (ref) {
                   ref.blur = window.setTimeout(

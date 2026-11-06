@@ -5,7 +5,10 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, renderHook, act, fireEvent } from '@testing-library/react';
+import { NextIntlClientProvider } from 'next-intl';
+import messages from '@/i18n/messages/en.json';
 import { RjsfThemedForm } from '@/components/forms/RjsfThemed';
+import { useFieldErrors } from '@/components/forms/useFieldErrors';
 import {
   sharedRegistrationFormProps,
   useRegistrationFormState,
@@ -17,19 +20,16 @@ import {
 } from '@/app/(public)/register/registration-ui';
 
 describe('useRegistrationFormState', () => {
-  it('starts idle, not submittable', () => {
+  it('starts idle', () => {
     const { result } = renderHook(() => useRegistrationFormState());
     expect(result.current.state).toEqual({ status: 'idle' });
-    expect(result.current.canSubmit).toBe(false);
   });
 
-  it('updates state and canSubmit via the setters', () => {
+  it('updates state via the setter', () => {
     const { result } = renderHook(() => useRegistrationFormState());
     act(() => {
-      result.current.setCanSubmit(true);
       result.current.setState({ status: 'submitting' });
     });
-    expect(result.current.canSubmit).toBe(true);
     expect(result.current.state).toEqual({ status: 'submitting' });
   });
 
@@ -79,40 +79,24 @@ describe('useRegistrationFormState', () => {
 });
 
 describe('RegistrationSubmitButton', () => {
-  it('renders the idle label when not submitting', () => {
-    render(
-      <RegistrationSubmitButton
-        submitting={false}
-        canSubmit={true}
-        label="Submit"
-        submittingLabel="Submitting…"
-      />,
-    );
-    expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled();
+  const base = {
+    onAttempt: () => {},
+    label: 'Submit',
+    submittingLabel: 'Submitting…',
+  };
+
+  it('stays enabled when not submitting and reports the attempt on click', () => {
+    const onAttempt = vi.fn();
+    render(<RegistrationSubmitButton {...base} submitting={false} onAttempt={onAttempt} />);
+    const button = screen.getByRole('button', { name: 'Submit' });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(onAttempt).toHaveBeenCalledOnce();
   });
 
   it('renders the submitting label and disables the button while submitting', () => {
-    render(
-      <RegistrationSubmitButton
-        submitting={true}
-        canSubmit={true}
-        label="Submit"
-        submittingLabel="Submitting…"
-      />,
-    );
+    render(<RegistrationSubmitButton {...base} submitting={true} />);
     expect(screen.getByRole('button', { name: 'Submitting…' })).toBeDisabled();
-  });
-
-  it('disables the button when canSubmit is false', () => {
-    render(
-      <RegistrationSubmitButton
-        submitting={false}
-        canSubmit={false}
-        label="Submit"
-        submittingLabel="Submitting…"
-      />,
-    );
-    expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
   });
 });
 
@@ -184,47 +168,60 @@ describe('person name check', () => {
     },
   } as const;
 
+  function Harness({
+    name,
+    onSubmit,
+    customValidate,
+  }: {
+    name: string;
+    onSubmit: () => void;
+    customValidate?: Parameters<typeof sharedRegistrationFormProps>[0]['customValidate'];
+  }) {
+    const fieldErrors = useFieldErrors(schema as never);
+    const props = sharedRegistrationFormProps({
+      formData: { owner: { name } },
+      setFormData: () => {},
+      handleSubmit: onSubmit,
+      fieldErrors,
+      onLocationResolved: () => {},
+      personName: { path: 'owner.name', message: (s) => `Remove: ${s}` },
+      customValidate,
+    });
+    return (
+      <RjsfThemedForm schema={schema as never} {...props}>
+        {/* The real Submit button marks the attempt before RJSF validates. */}
+        <button type="submit" onClick={fieldErrors.markAttempted}>
+          Submit
+        </button>
+      </RjsfThemedForm>
+    );
+  }
+
   function renderWithName(
     name: string,
     customValidate?: Parameters<typeof sharedRegistrationFormProps>[0]['customValidate'],
   ) {
     const onSubmit = vi.fn();
-    const setState = vi.fn();
-    const props = sharedRegistrationFormProps({
-      formData: { owner: { name } },
-      setFormData: () => {},
-      setCanSubmit: () => {},
-      setState,
-      handleSubmit: onSubmit,
-      formSchema: schema as never,
-      onLocationResolved: () => {},
-      validationErrorTitle: 'Please fix the highlighted fields',
-      personName: { path: 'owner.name', message: (s) => `Remove: ${s}` },
-      customValidate,
-    });
     render(
-      <RjsfThemedForm schema={schema as never} {...props}>
-        <button type="submit">Submit</button>
-      </RjsfThemedForm>,
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <Harness name={name} onSubmit={onSubmit} {...(customValidate ? { customValidate } : {})} />
+      </NextIntlClientProvider>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
-    return { onSubmit, setState };
+    return { onSubmit };
   }
 
-  it('shows the refused symbols on the name field and does not submit', () => {
-    const { onSubmit, setState } = renderWithName('Ravi Kumar (Ops)');
-    expect(screen.getByText('Remove: ( )')).toBeInTheDocument();
+  it('shows the refused symbols on the name field and does not submit', async () => {
+    const { onSubmit } = renderWithName('Ravi Kumar (Ops)');
+    expect(await screen.findByText(/Remove: \( \)/)).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(setState).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'error', detail: expect.stringContaining('Remove: ( )') }),
-    );
   });
 
-  it("runs the form's own check and the name check together", () => {
+  it("runs the form's own check and the name check together", async () => {
     const own = vi.fn((_data: unknown, errors: Parameters<NonNullable<typeof own>>[1]) => errors);
     renderWithName('Asha / QA', own as never);
     expect(own).toHaveBeenCalled();
-    expect(screen.getByText('Remove: /')).toBeInTheDocument();
+    expect(await screen.findByText(/Remove: \//)).toBeInTheDocument();
   });
 
   it('submits an ordinary name', () => {

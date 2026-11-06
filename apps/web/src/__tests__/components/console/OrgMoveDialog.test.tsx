@@ -136,7 +136,12 @@ describe('<OrgMoveDialog />', () => {
     ).not.toBeDisabled();
     expect(screen.getByText('3 organisations will move.')).toBeInTheDocument();
     expect(screen.getByText(messages.console.org.move_hint_known_as)).toBeInTheDocument();
-    expect(submit()).toBeDisabled();
+    expect(submit()).toBeEnabled();
+    fireEvent.click(submit());
+    expect(
+      screen.getByText(`${messages.console.org.move_parent} is required.`),
+    ).toBeInTheDocument();
+    expect(await parentSelect()).toHaveAttribute('aria-invalid', 'true');
   });
 
   it('moves under the chosen parent, sending only the parent', async () => {

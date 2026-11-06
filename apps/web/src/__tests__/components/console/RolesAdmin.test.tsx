@@ -94,6 +94,38 @@ describe('<RolesAdmin />', () => {
     });
   });
 
+  it('keeps Save enabled and shows each missing field under it without sending', async () => {
+    global.fetch = vi.fn() as never;
+    renderIt([]);
+    fireEvent.click(screen.getByRole('button', { name: messages.console.roles_admin.create }));
+    fireEvent.click(screen.getByRole('button', { name: messages.console.roles_admin.save }));
+    expect(
+      screen.getByText(`${messages.console.roles_admin.key} is required.`),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(`${messages.console.roles_admin.name} is required.`),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(`${messages.console.roles_admin.permissions} is required.`),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(messages.console.roles_admin.key)).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('says a key in the wrong shape is invalid once the field is left', () => {
+    renderIt([]);
+    fireEvent.click(screen.getByRole('button', { name: messages.console.roles_admin.create }));
+    const key = screen.getByLabelText(messages.console.roles_admin.key);
+    fireEvent.change(key, { target: { value: 'Bad Key' } });
+    fireEvent.blur(key);
+    expect(
+      screen.getByText(`Invalid entry. ${messages.console.roles_admin.error_key}`),
+    ).toBeInTheDocument();
+  });
+
   it('explains a refused role', async () => {
     global.fetch = respond(
       { error: { code: 'ROLE_INVALID', fields: { issues: ['x'] } } },
@@ -101,6 +133,13 @@ describe('<RolesAdmin />', () => {
     ) as never;
     renderIt([]);
     fireEvent.click(screen.getByRole('button', { name: messages.console.roles_admin.create }));
+    fireEvent.change(screen.getByLabelText(messages.console.roles_admin.key), {
+      target: { value: 'verifier' },
+    });
+    fireEvent.change(screen.getByLabelText(messages.console.roles_admin.name), {
+      target: { value: 'Verifier' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /profiles\.verify/ }));
     fireEvent.click(screen.getByRole('button', { name: messages.console.roles_admin.save }));
     await waitFor(() =>
       expect(screen.getByRole('status')).toHaveTextContent(messages.console.errors.role_invalid),

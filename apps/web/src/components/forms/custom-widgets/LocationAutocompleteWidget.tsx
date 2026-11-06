@@ -22,6 +22,7 @@ import { getGeoProvider } from '../../../lib/geo/provider';
 import { useFormRuntimeConfig } from '../../../lib/FormRuntimeConfigProvider';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
 import type { GeoComponents, GeoSuggestion } from '../../../lib/geo/types';
+import { errorAria } from '../error-aria';
 
 /**
  * A selected place reported to the page.
@@ -53,9 +54,11 @@ export function LocationAutocompleteWidget({
   disabled,
   readonly,
   onChange,
+  onBlur,
   placeholder,
   registry,
   options,
+  rawErrors,
 }: Readonly<WidgetProps>) {
   const t = useTranslations('form');
   const ctx = (registry?.formContext ?? {}) as LocationFormContext;
@@ -184,12 +187,14 @@ export function LocationAutocompleteWidget({
         aria-controls={listboxId}
         aria-autocomplete="list"
         aria-activedescendant={activeDescendantId}
+        {...errorAria(id, rawErrors)}
         onChange={(e) => handleInput(e.target.value)}
         onKeyDown={onKeyDown}
         onFocus={() => setOpen(suggestions.length > 0)}
         onBlur={() => {
           // Delay the close so a suggestion's mousedown still registers.
           blurRef.current = window.setTimeout(() => setOpen(false), BLUR_CLOSE_MS);
+          onBlur?.(id, text);
         }}
       />
       {open && suggestions.length > 0 && (

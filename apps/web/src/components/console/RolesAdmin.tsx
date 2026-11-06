@@ -12,7 +12,33 @@ import type { Permission, Role } from '@aggregator-dpg/shared-primitives/user-or
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { errorKey, sendConsole } from '../../lib/console-client';
+import { useFieldErrorCopy } from '../forms/useFieldErrors';
+import { FieldMessage, useHandFieldErrors, type HandFieldError } from '../forms/useHandFieldErrors';
 
+type RoleField = 'key' | 'name' | 'org_types' | 'max_days' | 'permissions';
+
+/** Form field for an API body key named by a validation issue. */
+const FIELD_OF: Readonly<Record<string, RoleField>> = {
+  key: 'key',
+  name: 'name',
+  assignable_org_types: 'org_types',
+  max_days: 'max_days',
+  permissions: 'permissions',
+};
+
+/** Form fields named by a `400`'s `fields.issues`. */
+function rejectedFields(fields: Record<string, unknown> | undefined): RoleField[] {
+  const issues = Array.isArray(fields?.['issues'])
+    ? (fields['issues'] as Array<{ instancePath?: string; path?: Array<string | number> }>)
+    : [];
+  const out = new Set<RoleField>();
+  for (const i of issues) {
+    const first = String(i.path?.[0] ?? (i.instancePath ?? '').split('/').find(Boolean) ?? '');
+    const field = FIELD_OF[first];
+    if (field) out.add(field);
+  }
+  return [...out];
+}
 const ORG_TYPES = ['aggregator', 'network_facilitator'] as const;
 const ASSIGNERS = ['org.manage', 'network.administer'] as const;
 
@@ -62,6 +88,35 @@ export function RolesAdmin({
   const [draft, setDraft] = useState<Draft>(empty);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const copy = useFieldErrorCopy();
+  const tForm = useTranslations('form');
+  const creating = editing === '';
+  const required = (ok: boolean, label: string): HandFieldError | null =>
+    ok ? null : { kind: 'required', message: copy.required(label) };
+  const maxDays = draft.max_days.trim();
+  const fe = useHandFieldErrors<RoleField>('role', {
+    key: !creating
+      ? null
+      : !draft.key
+        ? required(false, t('roles_admin.key'))
+        : /^[a-z][a-z0-9_]*$/.test(draft.key)
+          ? null
+          : { kind: 'invalid', message: copy.invalid(t('roles_admin.error_key')) },
+    name: required(draft.name.trim() !== '', t('roles_admin.name')),
+    org_types: required(draft.assignable_org_types.length > 0, t('roles_admin.org_types')),
+    max_days:
+      maxDays && !(/^\d+$/.test(maxDays) && Number(maxDays) > 0)
+        ? { kind: 'invalid', message: copy.invalid(t('roles_admin.error_max_days')) }
+        : null,
+    permissions: required(draft.permissions.length > 0, t('roles_admin.permissions')),
+  });
+  const fieldLabel: Record<RoleField, string> = {
+    key: t('roles_admin.key'),
+    name: t('roles_admin.name'),
+    org_types: t('roles_admin.org_types'),
+    max_days: t('roles_admin.max_days'),
+    permissions: t('roles_admin.permissions'),
+  };
 
   const builtin = roles.filter((r) => r.is_builtin);
   const custom = roles.filter((r) => !r.is_builtin);
@@ -73,9 +128,12 @@ export function RolesAdmin({
     const r = key ? roles.find((x) => x.key === key) : undefined;
     setDraft(r ? draftOf(r) : empty);
     setNote(null);
+    fe.reset();
   }
 
   async function save() {
+    setNote(null);
+    if (!fe.validate()) return;
     setBusy(true);
     const common = {
       name: draft.name,
@@ -97,9 +155,21 @@ export function RolesAdmin({
       setRoles((rs) => [...rs.filter((x) => x.key !== r.data.key), r.data]);
       setEditing(null);
       setNote(t('roles_admin.saved'));
-    } else {
-      setNote(t(errorKey(r)));
+      return;
     }
+    const rejected = r.status === 400 ? rejectedFields(r.error.fields) : [];
+    if (rejected.length > 0) {
+      fe.setServerErrors(
+        Object.fromEntries(
+          rejected.map((k) => [
+            k,
+            copy.invalid(tForm('error_value_rejected', { label: fieldLabel[k] })),
+          ]),
+        ),
+      );
+      return;
+    }
+    setNote(t(errorKey(r)));
   }
 
   async function remove(key: string) {
@@ -162,6 +232,7 @@ export function RolesAdmin({
         ) : (
           <form
             aria-label={t('roles_admin.create')}
+            noValidate
             className="flex flex-col gap-2"
             onSubmit={(e) => {
               e.preventDefault();
@@ -172,19 +243,29 @@ export function RolesAdmin({
               <span className="bd-label">{t('roles_admin.key')}</span>
               <input
                 className="bd-input"
+                {...fe.controlProps('key')}
                 value={draft.key}
                 disabled={editing !== ''}
-                onChange={(e) => setDraft({ ...draft, key: e.target.value })}
+                onChange={(e) => {
+                  setDraft({ ...draft, key: e.target.value });
+                  fe.clearServer('key');
+                }}
               />
             </label>
+            <FieldMessage id={fe.errorId('key')} message={fe.message('key')} />
             <label className="flex flex-col gap-1">
               <span className="bd-label">{t('roles_admin.name')}</span>
               <input
                 className="bd-input"
+                {...fe.controlProps('name')}
                 value={draft.name}
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                onChange={(e) => {
+                  setDraft({ ...draft, name: e.target.value });
+                  fe.clearServer('name');
+                }}
               />
             </label>
+            <FieldMessage id={fe.errorId('name')} message={fe.message('name')} />
             <label className="flex flex-col gap-1">
               <span className="bd-label">{t('roles_admin.description')}</span>
               <input
@@ -207,23 +288,29 @@ export function RolesAdmin({
                 <option value="admin">{t('roles_admin.account_admin')}</option>
               </select>
             </label>
-            <fieldset className="flex flex-col gap-1">
+            <fieldset
+              className="flex flex-col gap-1"
+              tabIndex={-1}
+              {...fe.controlProps('org_types')}
+            >
               <legend className="bd-label">{t('roles_admin.org_types')}</legend>
               {ORG_TYPES.map((o) => (
                 <label key={o} className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     checked={draft.assignable_org_types.includes(o)}
-                    onChange={() =>
+                    onChange={() => {
                       setDraft({
                         ...draft,
                         assignable_org_types: toggle(draft.assignable_org_types, o),
-                      })
-                    }
+                      });
+                      fe.clearServer('org_types');
+                    }}
                   />
                   {t(`roles_admin.org_${o}`)}
                 </label>
               ))}
+              <FieldMessage id={fe.errorId('org_types')} message={fe.message('org_types')} />
             </fieldset>
             <label className="flex flex-col gap-1">
               <span className="bd-label">{t('roles_admin.assigned_by')}</span>
@@ -245,20 +332,30 @@ export function RolesAdmin({
                 className="bd-input"
                 type="number"
                 min={1}
+                {...fe.controlProps('max_days')}
                 value={draft.max_days}
-                onChange={(e) => setDraft({ ...draft, max_days: e.target.value })}
+                onChange={(e) => {
+                  setDraft({ ...draft, max_days: e.target.value });
+                  fe.clearServer('max_days');
+                }}
               />
             </label>
-            <fieldset className="flex flex-col gap-1">
+            <FieldMessage id={fe.errorId('max_days')} message={fe.message('max_days')} />
+            <fieldset
+              className="flex flex-col gap-1"
+              tabIndex={-1}
+              {...fe.controlProps('permissions')}
+            >
               <legend className="bd-label">{t('roles_admin.permissions')}</legend>
               {permissions.map((p) => (
                 <label key={p.key} className="flex items-center gap-2">
                   <input
                     type="checkbox"
                     checked={draft.permissions.includes(p.key)}
-                    onChange={() =>
-                      setDraft({ ...draft, permissions: toggle(draft.permissions, p.key) })
-                    }
+                    onChange={() => {
+                      setDraft({ ...draft, permissions: toggle(draft.permissions, p.key) });
+                      fe.clearServer('permissions');
+                    }}
                   />
                   <span>{p.key}</span>
                   <span className="text-[12px] text-ink-500">{p.description}</span>
@@ -269,6 +366,7 @@ export function RolesAdmin({
                   )}
                 </label>
               ))}
+              <FieldMessage id={fe.errorId('permissions')} message={fe.message('permissions')} />
             </fieldset>
             <div className="flex gap-2">
               <Button type="submit" disabled={busy}>

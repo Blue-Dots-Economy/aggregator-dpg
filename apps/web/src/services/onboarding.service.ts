@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod';
-import { jsonFetch } from './http';
+import { HttpError, jsonFetch } from './http';
 
 /** Submitted, passed, failed and skipped counts. */
 const OutcomeCountsSchema = z.object({
@@ -256,7 +256,7 @@ export const onboardingService = {
    * @param participantType - Domain of the rows.
    * @param attestation - Whether the coordinator accepted the attestation.
    * @returns The upload id and status.
-   * @throws {Error} If the S3 upload or an API call fails.
+   * @throws {HttpError} If the S3 upload or an API call fails.
    */
   async uploadCsv(
     file: File,
@@ -269,14 +269,18 @@ export const onboardingService = {
     message?: string;
   }> {
     const presigned = await this.createBulkUpload(participantType);
-    const put = await fetch(presigned.upload_url, {
-      method: 'PUT',
-      body: file,
-      headers: { 'Content-Type': presigned.content_type },
-    });
-    if (!put.ok) {
-      throw new Error(`S3 PUT failed (${put.status}): ${await put.text().catch(() => '')}`);
+    let put: Response;
+    try {
+      put = await fetch(presigned.upload_url, {
+        method: 'PUT',
+        body: file,
+        headers: { 'Content-Type': presigned.content_type },
+      });
+    } catch {
+      throw new HttpError(0);
     }
+    // The presigned PUT failing (e.g. an expired URL) is retryable, not a permission problem.
+    if (!put.ok) throw new HttpError(503, { code: 'STORAGE_UPLOAD_FAILED' });
     const status = await this.startBulkUpload(presigned.upload_id, attestation);
     const out: {
       uploadId: string;

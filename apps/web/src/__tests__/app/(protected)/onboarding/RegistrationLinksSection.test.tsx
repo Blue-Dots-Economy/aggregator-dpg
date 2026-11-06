@@ -16,6 +16,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
+import { HttpError } from '@/services/http';
 import type { ApiRegistrationLink } from '@/services/onboarding.service';
 
 const { pushMock, searchParamsRef } = vi.hoisted(() => ({
@@ -71,6 +72,7 @@ import {
 
 const testMessages = {
   onboarding: messages.onboarding,
+  form: messages.form,
   regmode: { form: 'Form', voice: 'Voice' },
 };
 
@@ -153,17 +155,25 @@ describe('<CreateLinkSection />', () => {
     expect(screen.getByDisplayValue('Seekers')).toBeInTheDocument();
   });
 
-  it('lists the remaining unmet blockers and keeps Create disabled when required fields are empty', () => {
+  it('keeps Create enabled and, on an empty submit, shows each missing field under it', async () => {
+    const user = userEvent.setup();
     renderCreate();
-    expect(screen.getByText('To create the link:')).toBeInTheDocument();
-    expect(screen.getByText('Enter the State.')).toBeInTheDocument();
-    expect(screen.getByText('Enter the District.')).toBeInTheDocument();
-    expect(screen.getByText('Enter the Event.')).toBeInTheDocument();
-    // domain + registration_mode are auto-pinned by mount-time effects, so
-    // those two blockers should already be cleared.
-    expect(screen.queryByText('Domain is not set.')).not.toBeInTheDocument();
-    expect(screen.queryByText('Select a form type.')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create link' })).toBeDisabled();
+    // Nothing shows before the first attempt.
+    expect(screen.queryByText('State is required.')).not.toBeInTheDocument();
+    const create = screen.getByRole('button', { name: 'Create link' });
+    expect(create).toBeEnabled();
+    await user.click(create);
+
+    expect(screen.getByText('State is required.')).toBeInTheDocument();
+    expect(screen.getByText('District is required.')).toBeInTheDocument();
+    expect(screen.getByText('Event is required.')).toBeInTheDocument();
+    // domain + registration_mode are auto-pinned by mount-time effects.
+    expect(screen.queryByText('Campaign type is required.')).not.toBeInTheDocument();
+    const state = screen.getByPlaceholderText('State');
+    expect(state).toHaveAttribute('aria-invalid', 'true');
+    expect(state).toHaveAttribute('aria-describedby', 'create-link-state__error');
+    await waitFor(() => expect(state).toHaveFocus());
+    expect(createMutateAsync).not.toHaveBeenCalled();
   });
 
   it('prefills state/district/event location from the aggregator profile address at mount', () => {
@@ -177,20 +187,15 @@ describe('<CreateLinkSection />', () => {
     expect(screen.getByPlaceholderText('State')).toHaveValue('Karnataka');
     expect(screen.getByPlaceholderText('District')).toHaveValue('Dharwad');
     expect(screen.getByPlaceholderText('City or venue')).toHaveValue('Dharwad');
-    // Only the Event field remains unmet now.
-    expect(screen.queryByText('Enter the State.')).not.toBeInTheDocument();
-    expect(screen.queryByText('Enter the District.')).not.toBeInTheDocument();
-    expect(screen.getByText('Enter the Event.')).toBeInTheDocument();
   });
 
-  it('clears the blockers and enables Create once the required fields are filled', async () => {
+  it('clears each message live once the field is filled after an attempt', async () => {
     const user = userEvent.setup();
     renderCreate();
+    await user.click(screen.getByRole('button', { name: 'Create link' }));
     await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
-    await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
-    await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Field Drive');
-    expect(screen.queryByText('To create the link:')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create link' })).toBeEnabled();
+    expect(screen.queryByText('State is required.')).not.toBeInTheDocument();
+    expect(screen.getByText('District is required.')).toBeInTheDocument();
   });
 
   it('creates a link with de-duplicated tags, a derived slug/title, and resets the form on success', async () => {
@@ -245,8 +250,8 @@ describe('<CreateLinkSection />', () => {
     expect(input.slug).toBeUndefined();
   });
 
-  it('surfaces the mutation error inline when create fails', async () => {
-    createMutateAsync.mockRejectedValue(new Error('Domain mismatch'));
+  it('shows a readable message, not the raw error, when create fails, and keeps the input', async () => {
+    createMutateAsync.mockRejectedValue(new HttpError(403, { code: 'AGGREGATOR_TYPE_MISMATCH' }));
     const user = userEvent.setup();
     renderCreate();
 
@@ -255,8 +260,23 @@ describe('<CreateLinkSection />', () => {
     await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Field Drive');
     await user.click(screen.getByRole('button', { name: 'Create link' }));
 
-    expect(await screen.findByText('Domain mismatch')).toBeInTheDocument();
+    expect(await screen.findByText("You don't have permission to do this.")).toBeInTheDocument();
+    expect(screen.queryByText(/AGGREGATOR_TYPE_MISMATCH|403/)).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('State')).toHaveValue('Karnataka');
     expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('names a duplicate link instead of the API code', async () => {
+    createMutateAsync.mockRejectedValue(new HttpError(409, { code: 'DUPLICATE_SLUG' }));
+    const user = userEvent.setup();
+    renderCreate();
+    await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
+    await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
+    await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Field Drive');
+    await user.click(screen.getByRole('button', { name: 'Create link' }));
+    expect(
+      await screen.findByText(/A link with this district and event already exists/),
+    ).toBeInTheDocument();
   });
 
   it('changes the registration mode via the select and reflects it on submit', async () => {
@@ -324,10 +344,12 @@ describe('<YourLinksBody />', () => {
     useRegistrationLinks.mockReturnValue({
       data: undefined,
       isLoading: false,
-      error: new Error('links unavailable'),
+      error: new HttpError(503),
     });
     renderLinks();
-    expect(screen.getByText('links unavailable')).toBeInTheDocument();
+    expect(
+      screen.getByText('Something went wrong on our side. Please try again in a moment.'),
+    ).toBeInTheDocument();
   });
 
   it('shows an empty state scoped to the aggregator type', () => {
@@ -380,7 +402,27 @@ describe('<YourLinksBody />', () => {
 
     expect(screen.getByText('Public URL + QR appear after Make Live.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Make Live' }));
-    expect(activateMutate).toHaveBeenCalledWith('link-1');
+    expect(activateMutate).toHaveBeenCalledWith('link-1', expect.anything());
+  });
+
+  it('draft card: shows a readable message when Make Live fails', async () => {
+    activateMutate.mockImplementation((_id: string, opts: { onError: (e: unknown) => void }) =>
+      opts.onError(new HttpError(409, { code: 'CONFLICT' })),
+    );
+    const user = userEvent.setup();
+    useRegistrationLinks.mockReturnValue({
+      data: [baseLink({ context: { district: 'Dharwad', lever_event: 'Drive' } })],
+      isLoading: false,
+      error: null,
+    });
+    renderLinks();
+    await user.click(screen.getByRole('button', { name: 'Make Live' }));
+    expect(
+      await screen.findByText(
+        'This has changed since you opened it. Refresh the page and try again.',
+      ),
+    ).toBeInTheDocument();
+    activateMutate.mockReset();
   });
 
   it('draft card edit flow: validates required fields, saves a patch, and closes the editor on success', async () => {
@@ -400,9 +442,9 @@ describe('<YourLinksBody />', () => {
     await user.click(screen.getByRole('button', { name: 'Edit' }));
     const districtInputs = screen.getAllByDisplayValue('Dharwad');
     await user.clear(districtInputs[districtInputs.length - 1]!);
-    // Save Draft is disabled by the same required-field check while district
-    // is empty, so the button never fires the mutation.
-    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+    // Save Draft stays enabled; the click shows the message and sends nothing.
+    await user.click(screen.getByRole('button', { name: 'Save Draft' }));
+    expect(screen.getByText('District is required.')).toBeInTheDocument();
     expect(updateMutateAsync).not.toHaveBeenCalled();
 
     await user.type(districtInputs[districtInputs.length - 1]!, 'Belagavi');
@@ -432,7 +474,7 @@ describe('<YourLinksBody />', () => {
   });
 
   it('draft card edit flow: keeps the editor open and shows an error on save failure', async () => {
-    updateMutateAsync.mockRejectedValue(new Error('conflict'));
+    updateMutateAsync.mockRejectedValue(new HttpError(409, { code: 'CONFLICT' }));
     const user = userEvent.setup();
     useRegistrationLinks.mockReturnValue({
       data: [baseLink({ context: { state: 'K', district: 'D', lever_event: 'E' } })],
@@ -444,7 +486,11 @@ describe('<YourLinksBody />', () => {
     await user.click(screen.getByRole('button', { name: 'Edit' }));
     await user.click(screen.getByRole('button', { name: 'Save Draft' }));
 
-    expect(await screen.findByText('conflict')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'This has changed since you opened it. Refresh the page and try again.',
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save Draft' })).toBeInTheDocument();
   });
 
@@ -485,7 +531,7 @@ describe('<YourLinksBody />', () => {
     expect(await screen.findByTitle('Copied!')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Deactivate' }));
-    expect(deactivateMutate).toHaveBeenCalledWith('link-1');
+    expect(deactivateMutate).toHaveBeenCalledWith('link-1', expect.anything());
   });
 
   it('QR modal: Download generates from public_url and saves qr-<slug>.png', async () => {

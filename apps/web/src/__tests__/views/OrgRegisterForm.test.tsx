@@ -21,19 +21,14 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
-let capturedOnError: ((errs: unknown[]) => void) | undefined;
-
 vi.mock('@/components/forms/RjsfThemed', () => ({
   RjsfThemedForm: ({
     onSubmit,
-    onError,
     children,
   }: {
     onSubmit: (e: { formData: Record<string, unknown> }, ev: unknown) => void;
-    onError?: (errs: unknown[]) => void;
     children?: ReactNode;
   }) => {
-    capturedOnError = onError;
     return (
       <form
         data-testid="rjsf-shim"
@@ -183,7 +178,6 @@ describe('<OrgRegisterForm />', () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
-    capturedOnError = undefined;
     capturedGateProps = undefined;
     vi.restoreAllMocks();
   });
@@ -253,7 +247,7 @@ describe('<OrgRegisterForm />', () => {
     expect(screen.queryByText(messages.register.org_exists_link_sent)).not.toBeInTheDocument();
   });
 
-  it('shows the error banner on a non-2xx response', async () => {
+  it('shows one readable banner, not the server text, on a non-field failure', async () => {
     originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(
       async () =>
@@ -266,9 +260,10 @@ describe('<OrgRegisterForm />', () => {
     renderForm();
     await submitAndAcceptGate();
 
-    expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect(screen.getByText('Duplicate')).toBeInTheDocument();
-    expect(screen.getByText('Org already exists')).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      messages.form.request_error.conflict,
+    );
+    expect(screen.queryByText('Org already exists')).toBeNull();
   });
 
   it('shows a network-error banner when fetch throws', async () => {
@@ -280,24 +275,8 @@ describe('<OrgRegisterForm />', () => {
     renderForm();
     await submitAndAcceptGate();
 
-    expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect(screen.getByText('Network error')).toBeInTheDocument();
-    expect(screen.getByText('offline')).toBeInTheDocument();
-  });
-
-  it('leaves field errors to the fields, with no banner', async () => {
-    originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn() as unknown as typeof fetch;
-    renderForm();
-
-    // RjsfThemedForm shim captured onError — invoke it directly to simulate
-    // RJSF surfacing a client-validation failure before submit fires.
-    act(() => {
-      capturedOnError?.([{ property: '.display_name', message: 'is required', name: 'required' }]);
-    });
-
-    expect(screen.queryByRole('alert')).toBeNull();
-    expect(screen.queryByText(messages.register.validation_error_title)).toBeNull();
+    expect(await screen.findByRole('alert')).toHaveTextContent(messages.form.request_error.network);
+    expect(screen.queryByText('offline')).toBeNull();
   });
 
   it('passes consentContent through formContext without crashing when omitted', () => {
@@ -361,12 +340,12 @@ describe('<OrgRegisterForm />', () => {
       expect(screen.queryByText(/will be known as/)).toBeNull();
     });
 
-    it('keeps submit clickable before a parent is picked, so a click can say what is missing', () => {
+    it('keeps submit enabled before a parent is picked', () => {
       originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn() as unknown as typeof fetch;
       renderForm();
       const submit = screen.getByRole('button', { name: messages.register.org_submit });
-      expect(submit).toBeEnabled();
+      expect(submit).not.toBeDisabled();
     });
 
     it('refuses a submit without a parent: error shown, no gate, nothing posted', async () => {
@@ -374,9 +353,11 @@ describe('<OrgRegisterForm />', () => {
       const fetchSpy = vi.fn();
       globalThis.fetch = fetchSpy as unknown as typeof fetch;
       renderForm();
-      fireEvent.submit(screen.getByTestId('rjsf-shim'));
-      expect(await screen.findByRole('alert')).toBeInTheDocument();
-      expect(screen.getByText(messages.register.parent_selector_required)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: messages.register.org_submit }));
+      expect(
+        await screen.findByText(messages.register.parent_selector_required, { selector: 'p' }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).toBeNull();
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       expect(fetchSpy).not.toHaveBeenCalled();
     });
@@ -465,7 +446,7 @@ describe('<OrgRegisterForm />', () => {
       expect(screen.queryByText('Upstream title')).toBeNull();
     });
 
-    it('keeps the API message for other schema errors', async () => {
+    it('shows a readable message, not the API title, for other schema errors', async () => {
       originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn(
         async () =>
@@ -483,7 +464,8 @@ describe('<OrgRegisterForm />', () => {
       ) as unknown as typeof fetch;
       renderForm();
       await submitAndAcceptGate('p-state');
-      expect(await screen.findByText('Invalid request')).toBeInTheDocument();
+      expect(await screen.findByText(messages.form.request_error.invalid)).toBeInTheDocument();
+      expect(screen.queryByText('Invalid request')).toBeNull();
     });
   });
 });
