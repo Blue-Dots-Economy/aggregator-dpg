@@ -76,7 +76,7 @@ Both `/register` and `/profile` call `loadRegistrationSchema()`, which loads `re
 
 ## Dashboard layout
 
-`(protected)/dashboard/page.tsx` is a Server Component that renders the client `DashboardView` (`_components/`), which waits for the profile and picks the coordinator's own domain. `SeekersTab` and `ProvidersTab` are thin wrappers over `DomainTab`; its data, paging and filter state live in `useDomainDashboard`, the table in `ParticipantTable` and its parts. Pure helpers (row mappers, formatters, lifecycle and status filters, page list, query building, select-all paging) are in `_lib/` with unit tests. Data reads and the `?lifecycle=` filter stay on the client, so a filter change is not a server round-trip. "Select all N matching" reads in pages of at most 200, the API's `limit` maximum. Tests render `DashboardView`.
+`(protected)/dashboard/page.tsx` is a Server Component that renders the client `DashboardView` (`_components/`), which waits for the profile and picks the coordinator's own domain. `SeekersTab` and `ProvidersTab` are thin wrappers over `DomainTab`; its data, paging and filter state live in `useDomainDashboard`, the table in `ParticipantTable` and its parts. Pure helpers (row mappers, formatters, lifecycle and status filters, page list, query building, select-all paging) are in `_lib/` with unit tests. Data reads and the `?lifecycle=` filter stay on the client: a filter change does not re-render the page on the server, but each change is a new `useDashboard` query and so an API request. "Select all N matching" reads in pages of at most 200 (the API's `limit` maximum), stops after `MAX_SELECT_ALL_PAGES`, and says how many rows it selected when it read fewer than matched. Tests render `DashboardView`.
 
 ## Mobile layout (#793 / #817)
 
