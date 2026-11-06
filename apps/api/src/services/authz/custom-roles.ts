@@ -16,7 +16,6 @@ import {
   type Capability,
   type OrgType,
   type RoleDefinition,
-  type UserType,
 } from '@aggregator-dpg/rbac';
 import { config } from '../../config.js';
 import type { Actor } from '../auth/actor/index.js';
@@ -56,18 +55,27 @@ export interface CustomRoleInput {
 
 const fail = <T>(failure: CustomRoleFailure): CustomRoleOutcome<T> => ({ ok: false, failure });
 
-/** Turns request fields into a role, or lists the unknown names. */
-function toDefinition(input: CustomRoleInput): CustomRoleOutcome<RoleDefinition> {
+/**
+ * Turns request fields into a role, or lists the unknown names.
+ *
+ * @param input - The request fields.
+ * @returns The role, with permissions and organisation types deduplicated.
+ */
+export function toDefinition(input: CustomRoleInput): CustomRoleOutcome<RoleDefinition> {
   const issues: string[] = [];
-  const perms = input.permissions.filter((p) => !CapabilitySchema.safeParse(p).success);
-  if (perms.length > 0) issues.push(`unknown permission: ${perms.join(', ')}`);
-  if (!CapabilitySchema.safeParse(input.assignedBy).success) {
-    issues.push(`unknown assigned_by permission: ${input.assignedBy}`);
+  const permissions = input.permissions.filter(isCapability);
+  const unknownPerms = input.permissions.filter((p) => !isCapability(p));
+  if (unknownPerms.length > 0) issues.push(`unknown permission: ${unknownPerms.join(', ')}`);
+  const assignedBy = CapabilitySchema.safeParse(input.assignedBy);
+  if (!assignedBy.success) issues.push(`unknown assigned_by permission: ${input.assignedBy}`);
+  const accountType = UserTypeSchema.safeParse(input.accountType);
+  if (!accountType.success) issues.push('unknown account_type');
+  const orgTypes = input.assignableOrgTypes.filter(isOrgType);
+  const unknownTypes = input.assignableOrgTypes.filter((t) => !isOrgType(t));
+  if (unknownTypes.length > 0) issues.push(`unknown organisation type: ${unknownTypes.join(', ')}`);
+  if (issues.length > 0 || !assignedBy.success || !accountType.success) {
+    return fail({ kind: 'invalid', issues });
   }
-  if (!UserTypeSchema.safeParse(input.accountType).success) issues.push('unknown account_type');
-  const types = input.assignableOrgTypes.filter((t) => !OrgTypeSchema.safeParse(t).success);
-  if (types.length > 0) issues.push(`unknown organisation type: ${types.join(', ')}`);
-  if (issues.length > 0) return fail({ kind: 'invalid', issues });
   return {
     ok: true,
     value: {
@@ -75,14 +83,24 @@ function toDefinition(input: CustomRoleInput): CustomRoleOutcome<RoleDefinition>
       name: input.name,
       description: input.description,
       isBuiltin: false,
-      accountType: input.accountType as UserType,
+      accountType: accountType.data,
       baseFor: null,
-      assignableOrgTypes: [...new Set(input.assignableOrgTypes)] as OrgType[],
-      assignedBy: input.assignedBy as Capability,
+      assignableOrgTypes: [...new Set(orgTypes)],
+      assignedBy: assignedBy.data,
       maxDays: input.maxDays,
-      permissions: [...new Set(input.permissions)].sort(compareCodeUnits) as Capability[],
+      permissions: [...new Set(permissions)].sort(compareCodeUnits),
     },
   };
+}
+
+/** Whether `value` is a permission the code knows. */
+function isCapability(value: string): value is Capability {
+  return CapabilitySchema.safeParse(value).success;
+}
+
+/** Whether `value` is an organisation type the code knows. */
+function isOrgType(value: string): value is OrgType {
+  return OrgTypeSchema.safeParse(value).success;
 }
 
 /** The role rules the catalogue would break with `roles`. */

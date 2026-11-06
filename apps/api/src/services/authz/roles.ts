@@ -10,7 +10,7 @@
  */
 
 import type { FastifyRequest } from 'fastify';
-import type { Membership, OrgType, RoleDefinition, UserType } from '@aggregator-dpg/rbac';
+import type { Membership, RoleDefinition, UserType } from '@aggregator-dpg/rbac';
 import { baseRoleOf } from '@aggregator-dpg/rbac';
 import { getUserStore } from '../user-store/index.js';
 import { getOrganisationStore } from '../organisation-store/index.js';
@@ -93,7 +93,7 @@ export async function userInReach(actor: Actor, id: string): Promise<RoleOutcome
   if (!root.ok) return fail({ kind: 'unavailable', message: root.error.message });
   const memberships: Membership[] = owned.value
     .filter((o) => o.status === 'active')
-    .map((o) => ({ orgId: o.id, orgType: 'aggregator' as OrgType, relation: 'owner' as const }));
+    .map((o): Membership => ({ orgId: o.id, orgType: 'aggregator', relation: 'owner' }));
   if (root.value && root.value.ownerUserId === id) {
     memberships.push({ orgId: root.value.id, orgType: 'network_facilitator', relation: 'owner' });
   }

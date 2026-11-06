@@ -9,7 +9,12 @@
  * since it is unreachable through the (unregistered) routes.
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import { createCustomRole, updateCustomRole, deleteCustomRole } from './custom-roles.js';
+import {
+  createCustomRole,
+  updateCustomRole,
+  deleteCustomRole,
+  toDefinition,
+} from './custom-roles.js';
 import { getRbacRuntime, _setRbacRuntime } from './runtime.js';
 import { config } from '../../config.js';
 import type { Actor } from '../auth/actor/index.js';
@@ -64,5 +69,61 @@ describe('custom-roles guard with RBAC_CUSTOM_ROLES_ENABLED off', () => {
     _setRbacRuntime(null);
     const res = await createCustomRole(actor, input);
     expect(res).toEqual({ ok: false, failure: { kind: 'custom_roles_disabled' } });
+  });
+});
+
+describe('toDefinition', () => {
+  it('builds the role, deduplicating permissions (sorted) and organisation types', () => {
+    expect(
+      toDefinition({
+        ...input,
+        assignableOrgTypes: ['aggregator', 'aggregator'],
+        permissions: ['profiles.view', 'profiles.verify', 'profiles.view'],
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        key: 'verifier',
+        name: 'Verifier',
+        description: 'x',
+        isBuiltin: false,
+        accountType: 'coordinator',
+        baseFor: null,
+        assignableOrgTypes: ['aggregator'],
+        assignedBy: 'org.manage',
+        maxDays: null,
+        permissions: ['profiles.verify', 'profiles.view'],
+      },
+    });
+  });
+
+  it('lists every unknown name, in field order', () => {
+    expect(
+      toDefinition({
+        ...input,
+        accountType: 'robot',
+        assignableOrgTypes: ['aggregator', 'planet'],
+        assignedBy: 'org.rule',
+        permissions: ['profiles.verify', 'profiles.teleport', 'x.y'],
+      }),
+    ).toEqual({
+      ok: false,
+      failure: {
+        kind: 'invalid',
+        issues: [
+          'unknown permission: profiles.teleport, x.y',
+          'unknown assigned_by permission: org.rule',
+          'unknown account_type',
+          'unknown organisation type: planet',
+        ],
+      },
+    });
+  });
+
+  it('refuses a single unknown account type', () => {
+    expect(toDefinition({ ...input, accountType: 'robot' })).toEqual({
+      ok: false,
+      failure: { kind: 'invalid', issues: ['unknown account_type'] },
+    });
   });
 });

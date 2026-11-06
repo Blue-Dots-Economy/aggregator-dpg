@@ -16,7 +16,7 @@ import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives
 import { err, ok, type Result } from '@aggregator-dpg/shared-primitives/result';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
-import { TEST_EDGE_FETCH_KEY, type EdgeFetchRecorder } from './edge-test-hook.js';
+import { installedEdgeFetchRecorder } from './edge-test-hook.js';
 
 /** The edge's mode: `off` (nothing published), `log` (would-deny logged) or `enforce`. */
 export type EdgeMode = 'off' | 'log' | 'enforce';
@@ -72,8 +72,7 @@ export function edgeCatalogue(
 
 /** The sidecar settings from config; under the unit-test setup, its recording fetch. */
 function optionsFromConfig(): EdgePublishOptions {
-  const test = (globalThis as Record<string, unknown>)[TEST_EDGE_FETCH_KEY] as
-    EdgeFetchRecorder | undefined;
+  const test = installedEdgeFetchRecorder();
   return {
     baseUrl: config.OPA_URL,
     timeoutMs: config.OPA_TIMEOUT_MS,

@@ -151,7 +151,7 @@ export async function authenticate(
  * @returns The auth context; optional fields set only when present.
  */
 function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayload): AuthContext {
-  const claims = payload as Record<string, unknown>;
+  const claims: Record<string, unknown> = payload;
   const ctx: AuthContext = { userId, aggregatorId };
   if (typeof claims.email === 'string') ctx.email = claims.email;
   if (typeof claims.email_verified === 'boolean') ctx.emailVerified = claims.email_verified;
@@ -364,7 +364,7 @@ export async function authenticateAny(
   if (!payload.sub) {
     return { ok: false, error: { code: 'INVALID_TOKEN', message: 'missing sub claim' } };
   }
-  const claims = payload as Record<string, unknown>;
+  const claims: Record<string, unknown> = payload;
   const aggregatorId = readAggregatorId(payload);
   const ctx: AnyAuthContext = {
     subject: payload.sub,
@@ -388,7 +388,7 @@ function readStringOrFirst(v: unknown): string | undefined {
 
 function readAggregatorId(payload: JWTPayload): string | undefined {
   // A mapper may publish the attribute as a string or a one-element array.
-  const direct = (payload as Record<string, unknown>).aggregator_id;
+  const direct = payload['aggregator_id'];
   if (typeof direct === 'string' && direct.length > 0) return direct;
   if (Array.isArray(direct) && typeof direct[0] === 'string') return direct[0];
   return undefined;
@@ -448,7 +448,7 @@ async function verifyToken(token: string, azpAllow?: readonly string[]): Promise
 function assertAllowedAzp(payload: JWTPayload, override?: readonly string[]): void {
   const allow = override ?? allowedAzp();
   if (allow.length === 0) return; // gate disabled when unconfigured
-  const azp = (payload as Record<string, unknown>).azp;
+  const azp = payload.azp;
   if (typeof azp !== 'string' || !allow.includes(azp)) {
     throw new AzpNotAllowedError(
       `token azp '${typeof azp === 'string' ? azp : 'absent'}' is not an allowed client`,

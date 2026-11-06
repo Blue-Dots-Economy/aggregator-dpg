@@ -5,18 +5,12 @@
  * `load` reads roles, permissions and the revision in one read-only
  * REPEATABLE READ transaction, so they always match. The revision is an md5
  * over `role` and `role_permission`, so any row change moves it. Logs SQLSTATE
- * only, never the driver message.
+ * only, never the driver message. A stored value the code does not know is
+ * logged and left out of the snapshot (see `rows.ts`).
  */
 
 import { and, eq, gt, isNull, or, sql } from 'drizzle-orm';
-import type {
-  BaseFor,
-  Capability,
-  OrgType,
-  RoleDefinition,
-  UserType,
-} from '@aggregator-dpg/rbac/interface';
-import { compareCodeUnits } from '@aggregator-dpg/rbac';
+import type { RoleDefinition } from '@aggregator-dpg/rbac/interface';
 import { getDb } from '../../db/client.js';
 import { iamAudit, permission, role, rolePermission, userRole } from '../../db/schema.js';
 import { pgErrorCode } from '../../db/pg-error.js';
@@ -27,6 +21,7 @@ import {
   type CatalogueStoreResult,
   type StoredPermission,
 } from './interface.js';
+import { roleDefinitionsFromRows } from './rows.js';
 
 /** Checksum of the role tables; any row change moves it. */
 const REVISION = sql`select md5(
@@ -74,27 +69,11 @@ export class PostgresRbacCatalogue extends RbacCatalogueBase {
           const revision = revisionOf(await tx.execute(REVISION));
           const roles = await tx.select().from(role);
           const links = await tx.select().from(rolePermission);
-          const permsOf = new Map<string, Capability[]>();
-          for (const l of links) {
-            permsOf.set(l.roleKey, [
-              ...(permsOf.get(l.roleKey) ?? []),
-              l.permissionKey as Capability,
-            ]);
-          }
           return {
             revision,
-            roles: roles.map((r): RoleDefinition => ({
-              key: r.key,
-              name: r.name,
-              description: r.description,
-              isBuiltin: r.isBuiltin,
-              accountType: r.accountType as UserType,
-              baseFor: (r.baseFor as BaseFor | null) ?? null,
-              assignableOrgTypes: r.assignableOrgTypes as OrgType[],
-              assignedBy: (r.assignedBy as Capability | null) ?? null,
-              maxDays: r.maxDays,
-              permissions: (permsOf.get(r.key) ?? []).sort(compareCodeUnits),
-            })),
+            roles: roleDefinitionsFromRows(roles, links, (unknown) =>
+              logger.warn({ operation: 'rbacCatalogue.load', status: 'skipped', ...unknown }),
+            ),
           } satisfies CatalogueSnapshot;
         },
         { isolationLevel: 'repeatable read', accessMode: 'read only' },

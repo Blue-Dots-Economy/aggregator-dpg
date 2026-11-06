@@ -27,10 +27,32 @@ export interface EdgeFetchRecorder {
 export function edgeFetchRecorder(): EdgeFetchRecorder {
   const rec: EdgeFetchRecorder = {
     bodies: [],
-    fetch: ((_url: string, init?: RequestInit) => {
+    fetch: (_url, init) => {
       rec.bodies.push(JSON.parse(String(init?.body ?? 'null')));
       return Promise.resolve(new Response(null, { status: 204 }));
-    }) as unknown as typeof fetch,
+    },
   };
   return rec;
+}
+
+/**
+ * The recorder the setup installed under {@link TEST_EDGE_FETCH_KEY}, if any.
+ *
+ * @returns The recorder, or `undefined` outside the unit-test setup.
+ */
+export function installedEdgeFetchRecorder(): EdgeFetchRecorder | undefined {
+  const value: unknown = Reflect.get(globalThis, TEST_EDGE_FETCH_KEY);
+  return isEdgeFetchRecorder(value) ? value : undefined;
+}
+
+/** Whether `value` has the shape of an {@link EdgeFetchRecorder}. */
+function isEdgeFetchRecorder(value: unknown): value is EdgeFetchRecorder {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'fetch' in value &&
+    typeof value.fetch === 'function' &&
+    'bodies' in value &&
+    Array.isArray(value.bodies)
+  );
 }

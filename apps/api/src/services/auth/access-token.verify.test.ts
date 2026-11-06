@@ -75,3 +75,92 @@ describe('azp allow-list gate', () => {
     if (result.ok) expect(result.context.aggregatorId).toBe(aggregatorId);
   });
 });
+
+describe('claim reading', () => {
+  it('authenticate copies the optional claims onto the context', async () => {
+    const req = makeReq({
+      sub: 'user-1',
+      aggregator_id: [aggregatorId],
+      email: 'asha@example.org',
+      email_verified: true,
+      preferred_username: 'asha',
+      azp: 'aggregator-portal',
+      given_name: 'Asha',
+      family_name: 'Rao',
+      phone_number: ['9876543210'],
+      phone_number_verified: 'true',
+      decision_made: ['approved'],
+      aggregator_type: 'skilling',
+      signalstack_org_id: 'ss-1',
+    });
+    const result = await authenticate(req);
+    expect(result).toEqual({
+      ok: true,
+      context: {
+        userId: 'user-1',
+        aggregatorId,
+        email: 'asha@example.org',
+        emailVerified: true,
+        preferredUsername: 'asha',
+        azp: 'aggregator-portal',
+        firstName: 'Asha',
+        lastName: 'Rao',
+        phoneNumber: '9876543210',
+        phoneNumberVerified: true,
+        decisionMade: 'approved',
+        aggregatorType: 'skilling',
+        signalstackOrgId: 'ss-1',
+      },
+    });
+  });
+
+  it('authenticate ignores claims of the wrong type', async () => {
+    const req = makeReq({
+      sub: 'user-1',
+      aggregator_id: aggregatorId,
+      email: 5,
+      email_verified: 'yes',
+      azp: ['x'],
+      decision_made: 'maybe',
+      phoneNumberVerified: false,
+    });
+    const result = await authenticate(req);
+    expect(result).toEqual({
+      ok: true,
+      context: { userId: 'user-1', aggregatorId, phoneNumberVerified: false },
+    });
+  });
+
+  it('authenticate refuses a token with an empty or non-string aggregator_id', async () => {
+    for (const aggregator_id of ['', [5], undefined]) {
+      const result = await authenticate(makeReq({ sub: 'user-1', aggregator_id }));
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('MISSING_AGGREGATOR_ID');
+    }
+  });
+
+  it('authenticateAny copies the service claims and marks a user token', async () => {
+    const result = await authenticateAny(
+      makeReq({
+        sub: 'user-1',
+        aggregator_id: aggregatorId,
+        azp: 'aggregator-bff',
+        client_id: 'aggregator-bff',
+        preferred_username: 'service-account-aggregator-bff',
+        email: 'svc@example.org',
+      }),
+    );
+    expect(result).toEqual({
+      ok: true,
+      context: {
+        subject: 'user-1',
+        isUser: true,
+        authorizedParty: 'aggregator-bff',
+        clientId: 'aggregator-bff',
+        preferredUsername: 'service-account-aggregator-bff',
+        aggregatorId,
+        email: 'svc@example.org',
+      },
+    });
+  });
+});
