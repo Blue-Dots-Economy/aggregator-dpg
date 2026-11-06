@@ -10,10 +10,13 @@ import { z } from 'zod';
  * Schema-authored form layout (`x-form-layout` on the item schema).
  *
  * `sections` gives the grouping and field order; `twoColumn` names fields that
- * can sit two per row. The Signals profile form reads the same block.
+ * can sit two per row. The Signals profile form reads the same block. A section
+ * may omit its title or its field list; one with no fields is skipped.
  */
 const FormLayoutSchema = z.object({
-  sections: z.array(z.object({ title: z.string(), fields: z.array(z.string()) })),
+  sections: z.array(
+    z.object({ title: z.string().optional(), fields: z.array(z.string()).optional() }),
+  ),
   twoColumn: z.array(z.string()).optional(),
 });
 
@@ -74,14 +77,20 @@ export function SectionedObject({
   const claimed = new Set<string>();
   let sectionNumber = 0;
 
-  const sections = layout.sections.map((section) => {
-    const fields = section.fields
+  const sections = layout.sections.map((section, layoutIndex) => {
+    const fields = (section.fields ?? [])
       .map((name) => byName.get(name))
       .filter((p): p is ObjectProperty => Boolean(p));
     if (fields.length === 0) return null;
     fields.forEach((f) => claimed.add(f.name));
     sectionNumber += 1;
-    return { title: section.title, number: sectionNumber, rows: packRows(fields, twoColumn) };
+    return {
+      // The position in the layout is unique and does not move when a section is hidden.
+      key: layoutIndex,
+      title: section.title,
+      number: sectionNumber,
+      rows: packRows(fields, twoColumn),
+    };
   });
 
   const orphans = properties.filter((p) => !claimed.has(p.name));
@@ -91,7 +100,7 @@ export function SectionedObject({
       {sections.map(
         (section) =>
           section && (
-            <section key={section.title}>
+            <section key={section.key}>
               <div className="mb-5">
                 <div className="flex items-center gap-3">
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-(--bd-primary-50) text-[12px] font-bold text-(--bd-primary-600)">

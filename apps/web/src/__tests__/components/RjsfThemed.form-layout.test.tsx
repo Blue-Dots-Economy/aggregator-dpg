@@ -155,4 +155,59 @@ describe('RjsfThemedForm — x-form-layout sections', () => {
     expect(container.querySelector('section')).toBeNull();
     expect(screen.getByText('Full Name')).toBeInTheDocument();
   });
+
+  it('keeps the layout when a section has no title', () => {
+    const untitled = {
+      ...SCHEMA,
+      'x-form-layout': {
+        sections: [{ fields: ['name', 'phone'] }, { title: 'Work', fields: ['workExperience'] }],
+      },
+    } as unknown as RJSFSchema;
+
+    const { container } = renderForm(untitled, {});
+
+    const sections = [...container.querySelectorAll('section')];
+    expect(sections).toHaveLength(2);
+    expect(within(sections[0]!).getByText('Full Name')).toBeInTheDocument();
+    expect(within(sections[1]!).getByText('Work Experience')).toBeInTheDocument();
+  });
+
+  it('keeps the layout when a section lists no fields, and skips that section', () => {
+    const fieldless = {
+      ...SCHEMA,
+      'x-form-layout': {
+        sections: [{ title: 'Empty' }, { title: 'Personal', fields: ['name'] }],
+      },
+    } as unknown as RJSFSchema;
+
+    const { container } = renderForm(fieldless, {});
+
+    const sections = [...container.querySelectorAll('section')];
+    expect(sections).toHaveLength(1);
+    expect(sections[0]!.textContent?.trim().charAt(0)).toBe('1');
+    expect(within(sections[0]!).getByText('Personal')).toBeInTheDocument();
+    expect(screen.queryByText('Empty')).not.toBeInTheDocument();
+  });
+
+  it('renders two sections that share a title without a duplicate-key warning', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const repeated = {
+      ...SCHEMA,
+      'x-form-layout': {
+        sections: [
+          { title: 'Details', fields: ['name'] },
+          { title: 'Details', fields: ['email'] },
+        ],
+      },
+    } as unknown as RJSFSchema;
+
+    const { container } = renderForm(repeated, {});
+
+    expect(container.querySelectorAll('section')).toHaveLength(2);
+    const keyWarnings = consoleError.mock.calls.filter((args) =>
+      args.some((a) => typeof a === 'string' && a.includes('same key')),
+    );
+    consoleError.mockRestore();
+    expect(keyWarnings).toEqual([]);
+  });
 });
