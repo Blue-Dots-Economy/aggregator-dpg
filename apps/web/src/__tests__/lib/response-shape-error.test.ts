@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { parseResponseBody, ResponseShapeError } from '@/lib/response-shape-error';
+import { parseResponseBody, ResponseShapeError, summariseIssues } from '@/lib/response-shape-error';
 
 const Schema = z.object({ id: z.string() });
 
@@ -49,5 +49,18 @@ describe('ResponseShapeError', () => {
     expect(error.issues).toHaveLength(1);
     expect(Object.keys(error)).not.toContain('issues');
     expect(JSON.stringify({ ...error })).not.toContain('12345');
+  });
+});
+
+describe('summariseIssues', () => {
+  it('keeps the path and code of each issue and leaves out the received value', () => {
+    const parsed = z.object({ user: z.object({ name: z.string() }) }).safeParse({
+      user: { name: 42, secret: 'Private' },
+    });
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    const summary = summariseIssues(parsed.error.issues);
+    expect(summary).toEqual([{ path: 'user.name', code: 'invalid_type' }]);
+    expect(JSON.stringify(summary)).not.toContain('42');
   });
 });

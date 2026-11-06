@@ -21,14 +21,14 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import type Form from '@rjsf/core';
 import type { ErrorSchema, RJSFSchema, UiSchema } from '@rjsf/utils';
-import type { Org } from '@aggregator-dpg/shared-primitives/user-org';
+import { OrgSchema, type Org } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { I } from '../../icons';
 import { ConsoleSection, DetailList } from './ConsoleUi';
 import { Input } from '../ui/Input';
 import { Label } from '../ui/Label';
 import { RjsfThemedForm } from '../forms/RjsfThemed';
-import { errorKey, sendConsole } from '../../lib/console-client';
+import { errorKey, RESPONSE_SHAPE_CODE, sendConsole } from '../../lib/console-client';
 import { consoleOrgSchema, gstinCustomValidate, orgFieldText } from '../../lib/org-schema';
 import { readableFormErrors } from '../../lib/readable-form-errors';
 
@@ -157,7 +157,7 @@ export function OrgEditForm({
       return;
     }
     setBusy(true);
-    const r = await sendConsole<Org>(`/api/console/org/metadata/${org.id}`, 'PATCH', patch);
+    const r = await sendConsole(`/api/console/org/metadata/${org.id}`, 'PATCH', OrgSchema, patch);
     setBusy(false);
     if (r.ok) {
       // The page's copy catches up through the refresh below.
@@ -166,6 +166,8 @@ export function OrgEditForm({
       router.refresh();
       return;
     }
+    // The change may have been saved: reload the page's copy.
+    if (r.error.code === RESPONSE_SHAPE_CODE) router.refresh();
     const serverErrors = r.error.fields?.['field_errors'];
     if (r.status === 400 && serverErrors && typeof serverErrors === 'object') {
       const mapped: JsonRecord = {};

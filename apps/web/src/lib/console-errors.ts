@@ -4,12 +4,13 @@
  * @module apps/web/src/lib/console-errors
  */
 
-import type { ConsoleError } from './console-client';
+import { RESPONSE_SHAPE_CODE, type ConsoleError } from './console-client';
 
 /**
  * The message key for a failed console action, under `<namespace>.error`.
  * Each namespace defines `network`, `signed_out`, `forbidden`, `not_found`,
  * `rate_limited`, `server` and `generic`, plus any kinds named in `byCode`.
+ * An OK reply that could not be read gives the shared `errors.response_shape` key.
  *
  * @param r - The failed result.
  * @param namespace - The message namespace, such as `coordinator` or `orgs`.
@@ -21,6 +22,7 @@ export function plainErrorKey(
   namespace: string,
   byCode: Readonly<Record<string, string>> = {},
 ): string {
+  if (r.error.code === RESPONSE_SHAPE_CODE) return 'errors.response_shape';
   const kind = (k: string) => `${namespace}.error.${k}`;
   const special = r.error.code ? byCode[r.error.code] : undefined;
   if (special) return kind(special);

@@ -8,8 +8,6 @@
 import { z } from 'zod';
 import { parseResponseBody, ResponseShapeError } from '../lib/response-shape-error';
 
-export { ResponseShapeError };
-
 let redirecting = false;
 
 /** The 401 body that `bff-errors.ts` sends when the session has expired. */

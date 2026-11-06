@@ -19,13 +19,24 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useFormatter, useTranslations } from 'next-intl';
 import { Check, CircleCheck, CircleX, Clock, Tag } from 'lucide-react';
-import type { DecisionResponse, User } from '@aggregator-dpg/shared-primitives/user-org';
+import {
+  DecisionResponseSchema,
+  UserOrgStatusSchema,
+  UserSchema,
+  type DecisionResponse,
+  type User,
+} from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { I } from '../../icons';
 import { cn } from '../../lib/cn';
 import { ConsoleStatusPill } from './ConsoleUi';
 import { DomainChips } from './DomainChips';
-import { sendConsole, type ConsoleError, type ConsoleSendResult } from '../../lib/console-client';
+import {
+  RESPONSE_SHAPE_CODE,
+  sendConsole,
+  type ConsoleError,
+  type ConsoleSendResult,
+} from '../../lib/console-client';
 import { plainErrorKey } from '../../lib/console-errors';
 
 /** API error codes with their own message on this page. */
@@ -72,7 +83,8 @@ function decisionView(
     };
   }
   if (r.error.code === 'ALREADY_DECIDED') {
-    const now = (r.error.fields?.['status'] as User['status'] | undefined) ?? null;
+    const reported = UserOrgStatusSchema.safeParse(r.error.fields?.['status']);
+    const now = reported.success ? reported.data : null;
     const label = now ? t(`status.${now}`) : '';
     return { status: now, note: t('coordinator.already', { status: label }), settled: true };
   }
@@ -107,9 +119,10 @@ export function CoordinatorActions({
     setBusy(true);
     const body =
       decision === 'reject' && reason.trim() ? { decision, reason: reason.trim() } : { decision };
-    const r = await sendConsole<DecisionResponse>(
+    const r = await sendConsole(
       `/api/console/user/decision/${user.id}`,
       'POST',
+      DecisionResponseSchema,
       body,
     );
     setBusy(false);
@@ -118,6 +131,9 @@ export function CoordinatorActions({
     setDecisionNote(view.note);
     if (view.settled) {
       setRejecting(false);
+      router.refresh();
+    } else if (!r.ok && r.error.code === RESPONSE_SHAPE_CODE) {
+      // The decision may have been saved: reload the page's copy.
       router.refresh();
     }
   }
@@ -137,7 +153,7 @@ export function CoordinatorActions({
 
   async function saveServes() {
     setBusy(true);
-    const r = await sendConsole<User>(`/api/console/user/metadata/${user.id}`, 'PATCH', {
+    const r = await sendConsole(`/api/console/user/metadata/${user.id}`, 'PATCH', UserSchema, {
       serves: chosen,
     });
     setBusy(false);

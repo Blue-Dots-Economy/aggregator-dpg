@@ -18,14 +18,18 @@ import {
 } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Check, FileText, Info, Mail, X } from 'lucide-react';
-import type { UserInviteResponse } from '@aggregator-dpg/shared-primitives/user-org';
+import {
+  UserInviteResponseSchema,
+  type UserInviteResponse,
+} from '@aggregator-dpg/shared-primitives/user-org';
 import { isEmailAddress, normaliseEmail } from '@aggregator-dpg/shared-primitives/phone';
 import { Button } from '../ui/Button';
 import { I } from '../../icons';
 import { cn } from '../../lib/cn';
 import { ConsoleSection } from './ConsoleUi';
-import { sendConsole, type ConsoleError } from '../../lib/console-client';
+import { RESPONSE_SHAPE_CODE, sendConsole, type ConsoleError } from '../../lib/console-client';
 import { DEFAULT_MAX_INVITES } from '../../lib/invite-limit';
 import { useLeaveWarning } from '../../hooks/useLeaveWarning';
 
@@ -110,6 +114,7 @@ function notSentOf(res: UserInviteResponse): NotSent[] {
  * own message.
  */
 function failureKey(r: { status: number; error: ConsoleError }): string {
+  if (r.error.code === RESPONSE_SHAPE_CODE) return 'invite.error.response_shape';
   if (r.status === 400 && r.error.fields?.field === 'recipients') return 'invite.too_many';
   if (r.status === 0) return 'invite.error.network';
   if (r.status === 400) return 'invite.error.invalid';
@@ -154,6 +159,7 @@ export function InviteForm({
   coordinatorsHref?: string | null;
 }>) {
   const t = useTranslations('console');
+  const router = useRouter();
   const [orgId, setOrgId] = useState(orgs[0]?.id ?? '');
   const [draft, setDraft] = useState('');
   const [recipients, setRecipients] = useState<Recipient[]>([]);
@@ -236,7 +242,7 @@ export function InviteForm({
     }
     setBusy(true);
     setError(null);
-    const r = await sendConsole<UserInviteResponse>('/api/console/user/invite', 'POST', {
+    const r = await sendConsole('/api/console/user/invite', 'POST', UserInviteResponseSchema, {
       org_id: orgId,
       recipients: all.map((x) =>
         x.name.trim() ? { email: x.email, name: x.name.trim() } : { email: x.email },
@@ -246,6 +252,12 @@ export function InviteForm({
     if (r.ok) {
       setResult({ sent: r.data.sent + r.data.resent, notSent: notSentOf(r.data) });
       update([]);
+    } else if (r.error.code === RESPONSE_SHAPE_CODE) {
+      // The invites may have been sent: clear the list so a second click does not resend them.
+      update([]);
+      setResult(null);
+      setError(t(failureKey(r)));
+      router.refresh();
     } else {
       update(all, next.skipped);
       setResult(null);

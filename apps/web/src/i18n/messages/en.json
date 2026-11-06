@@ -55,7 +55,13 @@
       "heading": "Invite your [[users]]",
       "email_label": "[[User]] email {n}",
       "name_label": "[[User]] name {n} (optional)",
-      "remove_label": "Remove [[user]] {n}"
+      "remove_label": "Remove [[user]] {n}",
+      "error": {
+        "network": "Network error. Please try again.",
+        "unreadable": "Your request was received, but the reply could not be read. Some invites may have been sent; sending again re-sends them.",
+        "rate_limited": "Too many invites just now. Please try again shortly.",
+        "generic": "Could not send invites. Please try again."
+      }
     },
     "tab_coordinator": "Register as [[User]]",
     "tab_org": "Register [[Org]]",
@@ -194,7 +200,8 @@
       "loading": "Loading…",
       "failedToLoad": "Failed to load. Please try again.",
       "refreshedJustNow": "Refreshed just now",
-      "refreshFailed": "Refresh failed"
+      "refreshFailed": "Refresh failed",
+      "refreshUnreadable": "The refreshed numbers couldn't be read. Try again in a few minutes."
     },
     "ministat": {
       "completeProfiles": "Complete Profiles",
@@ -340,7 +347,9 @@
         "col_reason": "Reason / errors",
         "all_rows_passed": "All rows passed",
         "signing": "Signing…"
-      }
+      },
+      "start_unconfirmed": "Your file was received, but we couldn't confirm that processing started. Check Recent uploads under Bulk Upload on the Onboarding page before uploading it again.",
+      "reply_unreadable": "The server's reply couldn't be read. Try again in a few minutes."
     },
     "create_link": {
       "title": "Share a registration link",
@@ -955,7 +964,8 @@
         "org_unavailable": "This [[org]] can't take invites right now. Refresh the page and try again.",
         "rate_limited": "Too many requests in a short time. Wait a minute and try again.",
         "server": "Something went wrong on our side. Your emails are still here, so try again in a few minutes.",
-        "generic": "The invites couldn't be sent. Please try again."
+        "generic": "The invites couldn't be sent. Please try again.",
+        "response_shape": "The invites may have been sent, but the reply couldn't be read. Refresh the page before sending them again."
       }
     },
     "account": {
@@ -995,7 +1005,8 @@
       "network": "We couldn't reach the server. Check your internet connection and try again.",
       "signed_out": "You've been signed out. Sign in again, then try once more.",
       "forbidden": "You don't have permission to do this.",
-      "server": "Something went wrong on our side. Try again in a few minutes."
+      "server": "Something went wrong on our side. Try again in a few minutes.",
+      "response_shape": "The server's reply couldn't be read. Reload the page to see the latest state."
     },
     "roles": {
       "title": "Roles",

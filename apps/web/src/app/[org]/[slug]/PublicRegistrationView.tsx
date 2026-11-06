@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type { ErrorSchema, RJSFSchema, UiSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { useTranslations } from 'next-intl';
+import { z } from 'zod';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { readableFormErrors } from '../../../lib/readable-form-errors';
 import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
@@ -19,6 +20,8 @@ import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
 import type { ParticipantConsent } from '../../../components/consent/consent-types';
 import type { LinkIdentity } from '@/lib/registration-link';
+import { readErrorEnvelope } from '@/lib/api-error';
+import { summariseIssues } from '@/lib/response-shape-error';
 
 /** Page background used by every state of the public registration page. */
 const PAGE_BACKGROUND =
@@ -114,32 +117,30 @@ function navigateToSignals(url: string): void {
  */
 type LookupOutcome = { kind: 'allow' } | { kind: 'owned_elsewhere' };
 
-interface LookupResponse {
-  user_exists?: boolean;
-  owned_elsewhere?: boolean;
-  lifecycle_summary?: {
-    primary_item?: {
-      item_id: string;
-      lifecycle_status: 'draft' | 'live' | 'paused';
-    } | null;
-  } | null;
-}
+/** `GET /api/:org/:slug/lookup`: the field the probe reads. */
+const LookupResponseSchema = z.object({ owned_elsewhere: z.boolean() });
 
-interface SubmitResponse {
-  outcome: 'passed' | 'skipped';
-  submission_id: string;
-  /** Omitted by the server on the public path so a participant's row id is not exposed. */
-  participant_id?: string | null;
-  message?: string;
-}
+/**
+ * `POST /api/:org/:slug/submit`, both the 201 body and the 409 body.
+ * `outcome` is a plain string in the API's contract.
+ */
+const SubmitResponseSchema = z.object({
+  outcome: z.string(),
+  submission_id: z.string().optional(),
+});
 
-interface ApiErrorEnvelope {
-  error?: {
-    code?: string;
-    title?: string;
-    detail?: string;
-    fields?: { field_errors?: unknown };
-  };
+/**
+ * Logs the field paths of a response body that does not match its schema.
+ *
+ * @param url - The request URL.
+ * @param body - The parsed body, or `null` when it was not JSON.
+ * @param issues - The schema issues.
+ */
+function logShapeError(url: string, body: unknown, issues: z.ZodIssue[]): void {
+  console.error('[public-registration] unexpected response shape', {
+    url,
+    issues: body === null ? [] : summariseIssues(issues),
+  });
 }
 
 /**
@@ -565,19 +566,26 @@ export function PublicRegistrationView({
     if (phone) qs.set('phone_number', phone);
     qs.set('network', network);
     qs.set('domain', domain);
+    const lookupPath = `/api/${encodeURIComponent(org)}/${encodeURIComponent(slug)}/lookup`;
     let res: Response;
     try {
-      res = await fetch(
-        `/api/${encodeURIComponent(org)}/${encodeURIComponent(slug)}/lookup?${qs.toString()}`,
-        { method: 'GET', headers: { accept: 'application/json' } },
-      );
+      res = await fetch(`${lookupPath}?${qs.toString()}`, {
+        method: 'GET',
+        headers: { accept: 'application/json' },
+      });
     } catch {
       // Network error: submit normally; the API handles duplicates.
       return { kind: 'allow' };
     }
     if (!res.ok) return { kind: 'allow' };
-    const body = (await res.json().catch(() => ({}))) as LookupResponse;
-    if (body.owned_elsewhere) return { kind: 'owned_elsewhere' };
+    // A body that does not match is treated like a failed probe: submit normally.
+    const body: unknown = await res.json().catch(() => null);
+    const parsed = LookupResponseSchema.safeParse(body);
+    if (!parsed.success) {
+      logShapeError(lookupPath, body, parsed.error.issues);
+      return { kind: 'allow' };
+    }
+    if (parsed.data.owned_elsewhere) return { kind: 'owned_elsewhere' };
     // Existing profiles under this aggregator (live, draft, or paused) do not
     // block: the submit creates another profile. Signals enforces the profile
     // limit and returns `PROFILE_LIMIT_REACHED`. `lifecycle_summary` is not read.
@@ -613,70 +621,70 @@ export function PublicRegistrationView({
   ): Promise<void> => {
     setLookup(null);
     setState({ status: 'submitting' });
+    const submitPath = `/api/${encodeURIComponent(org)}/${encodeURIComponent(slug)}/submit`;
     try {
-      const res = await fetch(
-        `/api/${encodeURIComponent(org)}/${encodeURIComponent(slug)}/submit`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          // The server accepts partial profiles (Signals marks them `draft`)
-          // and records consent before building the profile. Consent flags
-          // are sent only when the domain shows the consent step, and the
-          // birth year only when the domain collects it. `consent_profile`
-          // is not sent for `account_only`; the server rejects it there.
-          body: JSON.stringify({
-            ...values,
-            ...(showConsent
-              ? {
-                  consent_terms: consentGiven,
-                  consent_privacy: consentGiven,
-                  ...(isAccountOnly ? {} : { consent_profile: consentGiven }),
-                }
-              : {}),
-            ...(showBirthYear ? { year_of_birth: birthYear.trim() } : {}),
-            // Picked coordinates. Omitted when none, so Signals geocodes the
-            // address text. Never sent for account_only, which has no profile.
-            ...(!isAccountOnly && resolvedLocations.length > 0
-              ? { item_locations: resolvedLocations }
-              : {}),
-          }),
-        },
-      );
+      const res = await fetch(submitPath, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // The server accepts partial profiles (Signals marks them `draft`)
+        // and records consent before building the profile. Consent flags
+        // are sent only when the domain shows the consent step, and the
+        // birth year only when the domain collects it. `consent_profile`
+        // is not sent for `account_only`; the server rejects it there.
+        body: JSON.stringify({
+          ...values,
+          ...(showConsent
+            ? {
+                consent_terms: consentGiven,
+                consent_privacy: consentGiven,
+                ...(isAccountOnly ? {} : { consent_profile: consentGiven }),
+              }
+            : {}),
+          ...(showBirthYear ? { year_of_birth: birthYear.trim() } : {}),
+          // Picked coordinates. Omitted when none, so Signals geocodes the
+          // address text. Never sent for account_only, which has no profile.
+          ...(!isAccountOnly && resolvedLocations.length > 0
+            ? { item_locations: resolvedLocations }
+            : {}),
+        }),
+      });
+      const body: unknown = await res.json().catch(() => null);
       // 409 with outcome=skipped means already registered here; show the done screen.
       if (res.status === 409) {
-        const dup = (await res.json().catch(() => ({}))) as {
-          outcome?: string;
-          submission_id?: string;
-        };
-        if (dup.outcome === 'skipped') {
+        const dup = SubmitResponseSchema.safeParse(body);
+        if (dup.success && dup.data.outcome === 'skipped') {
           setState({
             status: 'done',
-            submissionId: dup.submission_id ?? '',
+            submissionId: dup.data.submission_id ?? '',
             outcome: 'skipped',
           });
           return;
         }
       }
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as ApiErrorEnvelope;
-        const inline = toErrorSchema(body.error?.fields?.field_errors);
+        const error = readErrorEnvelope(body);
+        const inline = toErrorSchema(error.fields?.['field_errors']);
         if (inline) {
           setServerFieldErrors(inline);
           setShowValidation(true);
         }
         setState({
           status: 'error',
-          title: body.error?.title ?? t('error_submission_title'),
-          detail: body.error?.detail ?? t('error_server_detail', { status: res.status }),
-          code: body.error?.code ?? 'UNKNOWN',
+          title: error.title ?? t('error_submission_title'),
+          detail: error.detail ?? t('error_server_detail', { status: res.status }),
+          code: error.code ?? 'UNKNOWN',
         });
         return;
       }
-      const body = (await res.json()) as SubmitResponse;
+      // The server accepted the registration. A body that does not match still
+      // shows the done screen, without a reference; an error would invite a
+      // second submission.
+      const accepted = SubmitResponseSchema.safeParse(body);
+      if (!accepted.success) logShapeError(submitPath, body, accepted.error.issues);
       setState({
         status: 'done',
-        submissionId: body.submission_id,
-        outcome: body.outcome,
+        submissionId: accepted.success ? (accepted.data.submission_id ?? '') : '',
+        outcome: accepted.success && accepted.data.outcome === 'skipped' ? 'skipped' : 'passed',
       });
     } catch (err) {
       setState({

@@ -144,6 +144,27 @@ describe('<OrgsTable />', () => {
     expect(screen.queryByRole('button', { name: messages.console.orgs.approve })).toBeNull();
   });
 
+  it('keeps the row status when an already-decided reply names an unknown status', async () => {
+    global.fetch = respond(
+      { error: { code: 'ALREADY_DECIDED', fields: { status: 'archived' } } },
+      409,
+    ) as never;
+    renderTable([pendingOrg]);
+    fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.approve }));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+    await screen.findByText(/Already decided elsewhere/);
+    expect(screen.getByText(messages.console.status.pending)).toBeInTheDocument();
+  });
+
+  it('says the reply could not be read when a decision reply has the wrong shape', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    global.fetch = respond({ id: pendingOrg.id, status: 'active', notified: true }, 200) as never;
+    renderTable([pendingOrg]);
+    fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.approve }));
+    expect(await screen.findByText(messages.console.errors.response_shape)).toBeInTheDocument();
+    expect(refresh).toHaveBeenCalled();
+  });
+
   it('asks for a reason before a rejection and sends it', async () => {
     global.fetch = respond(
       { id: pendingOrg.id, status: 'inactive', notified: true, owner_access: 'none' },

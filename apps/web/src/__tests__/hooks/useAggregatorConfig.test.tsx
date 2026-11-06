@@ -3,7 +3,8 @@ import type * as Http from '@/services/http';
 import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ResponseShapeError, jsonFetch } from '@/services/http';
+import { ResponseShapeError } from '@/lib/response-shape-error';
+import { jsonFetch } from '@/services/http';
 
 vi.mock('@/services/http', async (importOriginal) => ({
   ...(await importOriginal<typeof Http>()),

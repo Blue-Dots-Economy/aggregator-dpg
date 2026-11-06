@@ -12,13 +12,14 @@ import { Fragment, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import type {
-  OrgDecisionResponse,
-  OrgSearchResponse,
+import {
+  OrgDecisionResponseSchema,
+  UserOrgStatusSchema,
+  type OrgSearchResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { ConsoleStatusPill, EmptyState } from './ConsoleUi';
-import { sendConsole } from '../../lib/console-client';
+import { RESPONSE_SHAPE_CODE, sendConsole } from '../../lib/console-client';
 import { plainErrorKey } from '../../lib/console-errors';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
@@ -40,9 +41,10 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
   async function decide(id: string, decision: 'approve' | 'reject') {
     setBusy(id);
     const body = decision === 'reject' ? { decision, reason: reason.trim() } : { decision };
-    const r = await sendConsole<OrgDecisionResponse>(
+    const r = await sendConsole(
       `/api/console/org/decision/${id}`,
       'POST',
+      OrgDecisionResponseSchema,
       body,
     );
     setBusy(null);
@@ -53,10 +55,13 @@ export function OrgsTable({ orgs }: Readonly<{ orgs: OrgRow[] }>) {
       note(id, t('coordinator.decided'));
       router.refresh();
     } else if (r.error.code === 'ALREADY_DECIDED') {
-      const status = r.error.fields?.['status'] as OrgRow['status'] | undefined;
+      const reported = UserOrgStatusSchema.safeParse(r.error.fields?.['status']);
+      const status = reported.success ? reported.data : undefined;
       if (status) setStatus(id, status);
       note(id, t('coordinator.already', { status: status ? t(`status.${status}`) : '' }));
     } else {
+      // The change may have been saved: reload the page's copy.
+      if (r.error.code === RESPONSE_SHAPE_CODE) router.refresh();
       note(id, t(plainErrorKey(r, 'orgs')));
     }
   }

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fetchCurrentUser, login, logout } from '../../services/auth.service';
+import { ResponseShapeError } from '../../lib/response-shape-error';
 
 describe('auth.service', () => {
   const origFetch = globalThis.fetch;
@@ -40,6 +41,31 @@ describe('auth.service', () => {
     ) as unknown as typeof fetch;
     const user = await fetchCurrentUser();
     expect(user).toEqual({ id: 'sub-1', name: 'Alice', org: 'a@b.c' });
+  });
+
+  it('fetchCurrentUser throws ResponseShapeError when the user has no sub', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ user: { email: 'a@b.c' } }), { status: 200 }),
+      ) as unknown as typeof fetch;
+    await expect(fetchCurrentUser()).rejects.toBeInstanceOf(ResponseShapeError);
+  });
+
+  it('fetchCurrentUser throws ResponseShapeError when the body is not JSON', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response('<html>', { status: 200 })) as unknown as typeof fetch;
+    await expect(fetchCurrentUser()).rejects.toBeInstanceOf(ResponseShapeError);
+  });
+
+  it('fetchCurrentUser falls back to the phone, then the sub, for the name', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ user: { sub: 'sub-2', phone: '+911' } }), { status: 200 }),
+      ) as unknown as typeof fetch;
+    expect(await fetchCurrentUser()).toEqual({ id: 'sub-2', name: '+911', org: '' });
   });
 
   it('fetchCurrentUser throws on unexpected status', async () => {

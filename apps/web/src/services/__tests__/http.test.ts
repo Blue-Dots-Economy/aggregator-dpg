@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
-import { ResponseShapeError, jsonFetch, retryUnlessShapeError } from '../http';
+import { ResponseShapeError } from '@/lib/response-shape-error';
+import { jsonFetch, retryUnlessShapeError } from '../http';
 
 const HelloSchema = z.object({ hello: z.string() });
 const AnySchema = z.unknown();

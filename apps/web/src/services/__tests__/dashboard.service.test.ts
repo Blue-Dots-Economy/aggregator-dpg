@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { dashboardService, triggerCsvDownload } from '../dashboard.service';
-import { ResponseShapeError } from '../http';
+import { ResponseShapeError } from '@/lib/response-shape-error';
 
 /** Captures a rejected promise's Error and returns its message, for
  * environments where `.rejects.toThrow(/regex/)` loses the message text. */
@@ -54,6 +54,16 @@ describe('dashboardService.dashboard', () => {
       },
       metadata: { refreshed: true, source: 'cache' },
     };
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      ) as unknown as typeof fetch;
+    await expect(dashboardService.dashboard({ domain: 'seeker' })).resolves.toEqual(payload);
+  });
+
+  it('accepts a dashboard that Signals has not computed yet (last_computed_at null)', async () => {
+    const payload = { by_domain: {}, metadata: { last_computed_at: null, refreshed: false } };
     globalThis.fetch = vi
       .fn()
       .mockResolvedValue(

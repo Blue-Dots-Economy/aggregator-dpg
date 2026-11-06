@@ -31,6 +31,7 @@ import { useSyncExternalStore } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { ThemeModeProvider } from '@/lib/theme-mode';
 import messages from '@/i18n/messages/en.json';
+import { ResponseShapeError } from '@/lib/response-shape-error';
 
 // ---------------------------------------------------------------------------
 // next/navigation — locally overridden (not the global setup.ts stub) so the
@@ -664,6 +665,17 @@ describe('<DashboardPageRoot />', () => {
       const refreshBtn = screen.getByRole('button', { name: /Refresh dashboard/i });
       await userEvent.click(refreshBtn);
       expect(await screen.findByText('Refresh failed')).toBeInTheDocument();
+    });
+
+    it('keeps the raw text of an unreadable refresh reply out of the banner', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      mockDashboardServiceDashboard.mockRejectedValueOnce(
+        new ResponseShapeError('/api/dashboard/items', []),
+      );
+      renderPage();
+      await userEvent.click(screen.getByRole('button', { name: /Refresh dashboard/i }));
+      const hint = await screen.findByText('Refresh failed');
+      expect(hint).toHaveAttribute('title', messages.dashboard.state.refreshUnreadable);
     });
   });
 

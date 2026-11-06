@@ -3,6 +3,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { User } from '@aggregator-dpg/shared-primitives/user-org';
+
+const refresh = vi.fn();
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
+
 import { CoordinatorActions } from '@/components/console/CoordinatorActions';
 
 const user: User = {
@@ -167,6 +171,31 @@ describe('<CoordinatorActions />', () => {
     expect(
       screen.queryByRole('button', { name: messages.console.coordinator.save_domains }),
     ).toBeNull();
+  });
+
+  it('keeps the shown status when an already-decided reply names an unknown status', async () => {
+    global.fetch = respond(
+      { error: { code: 'ALREADY_DECIDED', fields: { status: 'archived' } } },
+      409,
+    ) as never;
+    renderIt();
+    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
+    await waitFor(() =>
+      expect(
+        screen.getByText(messages.console.coordinator.already.replace('{status}', '').trim()),
+      ).toBeInTheDocument(),
+    );
+    // The coordinator is still shown as pending, so no decided-status pill renders.
+    expect(screen.queryByTestId('coordinator-status')).toBeNull();
+  });
+
+  it('says the reply could not be read when a decision reply has the wrong shape', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    global.fetch = respond({ id: user.id, status: 'approved' }, 200) as never;
+    renderIt();
+    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
+    expect(await screen.findByText(messages.console.errors.response_shape)).toBeInTheDocument();
+    expect(refresh).toHaveBeenCalled();
   });
 
   it('narrows the domains and saves the chosen ones', async () => {

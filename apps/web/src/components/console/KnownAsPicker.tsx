@@ -18,7 +18,7 @@ import {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { Button } from '../ui/Button';
 import { Label } from '../ui/Label';
-import { errorKey, setOrgKnownAs } from '../../lib/console-client';
+import { errorKey, RESPONSE_SHAPE_CODE, setOrgKnownAs } from '../../lib/console-client';
 
 /**
  * Renders the "known as" picker.
@@ -64,6 +64,8 @@ export function KnownAsPicker({
       router.refresh();
       return;
     }
+    // The change may have been saved: reload the page's copy.
+    if (r.error.code === RESPONSE_SHAPE_CODE) router.refresh();
     setMessage(t(errorKey(r)));
   }
 

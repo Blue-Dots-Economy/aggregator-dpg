@@ -22,6 +22,7 @@ vi.mock('@/hooks/useAggregatorConfig', () => {
 import { OwnerInviteView } from '@/app/(public)/register/invite/OwnerInviteView';
 
 const term = (key: string): string => fillTerms(`[[${key}]]`, 'en');
+const errors = messages.register.owner_invite.error;
 
 function renderView() {
   return render(
@@ -108,7 +109,7 @@ describe('<OwnerInviteView />', () => {
     renderView();
     typeEmail('a@x.org');
     clickSend();
-    await waitFor(() => expect(screen.getByText(/too many invites/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(errors.rate_limited)).toBeInTheDocument());
   });
 
   it('shows a network-error message when fetch rejects', async () => {
@@ -116,7 +117,7 @@ describe('<OwnerInviteView />', () => {
     renderView();
     typeEmail('a@x.org');
     clickSend();
-    await waitFor(() => expect(screen.getByText(/network error/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(errors.network)).toBeInTheDocument());
   });
 
   it('lists invalid rows in the result summary', async () => {
@@ -136,5 +137,38 @@ describe('<OwnerInviteView />', () => {
     clickSend();
     await waitFor(() => expect(screen.getByText(/couldn.t be invited/i)).toBeInTheDocument());
     expect(screen.getByText(/bad — invalid email/i)).toBeInTheDocument();
+  });
+
+  it('shows a could-not-read message and clears the rows when an OK body lacks the summary fields', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { recovered: false })));
+    renderView();
+    typeEmail('a@x.org');
+    clickSend();
+    await waitFor(() => expect(screen.getByText(errors.unreadable)).toBeInTheDocument());
+    expect(screen.queryByDisplayValue('a@x.org')).toBeNull();
+  });
+
+  it('shows the generic message for another failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(500, {})));
+    renderView();
+    typeEmail('a@x.org');
+    clickSend();
+    await waitFor(() => expect(screen.getByText(errors.generic)).toBeInTheDocument());
+  });
+
+  it('shows a could-not-read message when an OK body is not JSON', async () => {
+    const notJson = {
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new SyntaxError('Unexpected token <');
+      },
+    } as unknown as Response;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(notJson));
+    renderView();
+    typeEmail('a@x.org');
+    clickSend();
+    await waitFor(() => expect(screen.getByText(errors.unreadable)).toBeInTheDocument());
   });
 });

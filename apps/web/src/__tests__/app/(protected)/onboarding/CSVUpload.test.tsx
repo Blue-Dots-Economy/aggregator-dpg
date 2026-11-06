@@ -21,6 +21,9 @@ import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { BulkUploadStatus } from '@/services/onboarding.service';
+import { BulkUploadStartUnreadError } from '@/services/onboarding.service';
+import type * as OnboardingServiceModule from '@/services/onboarding.service';
+import { ResponseShapeError } from '@/lib/response-shape-error';
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -59,7 +62,8 @@ vi.mock('@/lib/auth-context', () => ({
 }));
 
 const { errorsCsvUrl } = vi.hoisted(() => ({ errorsCsvUrl: vi.fn() }));
-vi.mock('@/services/onboarding.service', () => ({
+vi.mock('@/services/onboarding.service', async (importOriginal) => ({
+  ...(await importOriginal<typeof OnboardingServiceModule>()),
   onboardingService: { errorsCsvUrl: (...args: unknown[]) => errorsCsvUrl(...args) },
 }));
 
@@ -281,6 +285,31 @@ describe('<CSVUpload />', () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 
+  it('says the file was received, clears it and re-reads the list when /start cannot be confirmed', async () => {
+    mutateAsync.mockRejectedValue(new BulkUploadStartUnreadError('up-9'));
+    const user = userEvent.setup();
+    renderUpload();
+    await pickAndAttest(user);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    expect(await screen.findByText(messages.onboarding.csv.start_unconfirmed)).toBeInTheDocument();
+    expect(screen.queryByText('roster.csv')).not.toBeInTheDocument();
+    expect(screen.queryByText(/could not be read/)).not.toBeInTheDocument();
+    expect(refetch).toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('shows a plain message instead of the raw text for an unreadable reply', async () => {
+    mutateAsync.mockRejectedValue(new ResponseShapeError('/api/bulk-uploads', []));
+    const user = userEvent.setup();
+    renderUpload();
+    await pickAndAttest(user);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    expect(await screen.findByText(messages.onboarding.csv.reply_unreadable)).toBeInTheDocument();
+    expect(screen.queryByText(/unexpected response shape/)).not.toBeInTheDocument();
+  });
+
   it('redirects to the template-download endpoint scoped to the participant type', async () => {
     const user = userEvent.setup();
     const origLocation = window.location;
@@ -334,6 +363,17 @@ describe('<RecentUploadsBody />', () => {
     renderRecent();
     expect(screen.getByText('upstream unavailable')).toBeInTheDocument();
     expect(screen.queryByText('No uploads yet.')).not.toBeInTheDocument();
+  });
+
+  it('shows a plain message instead of the raw text when the list reply is unreadable', () => {
+    useRecentBulkUploads.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new ResponseShapeError('/api/bulk-uploads/list', []),
+    });
+    renderRecent();
+    expect(screen.getByText(messages.onboarding.csv.reply_unreadable)).toBeInTheDocument();
+    expect(screen.queryByText(/unexpected response shape/)).not.toBeInTheDocument();
   });
 
   it('does not show the empty-state row while the query is still loading', () => {

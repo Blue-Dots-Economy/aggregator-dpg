@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { onboardingService } from '../../services/onboarding.service';
+import { BulkUploadStartUnreadError, onboardingService } from '../../services/onboarding.service';
 
 /** A complete bulk-upload status body, as the API sends it. */
 function uploadStatus(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -355,6 +355,58 @@ describe('onboardingService', () => {
       const result = await onboardingService.uploadCsv(file, 'seeker', true);
       expect(result.duplicate).toBe(true);
       expect(result.message).toBe('Matches a prior upload');
+    });
+
+    /** The presign reply for upload `id`. */
+    const presign = (id: string) =>
+      new Response(
+        JSON.stringify({
+          upload_id: id,
+          upload_url: 'https://s3/put',
+          s3_key: 'k',
+          expires_at: '2026-01-01',
+          content_type: 'text/csv',
+          max_bytes: 1000,
+          schema_id: 's',
+          schema_version: '1',
+          status: 'pending',
+        }),
+        { status: 201, headers: { 'content-type': 'application/json' } },
+      );
+
+    it('re-reads the upload when /start accepts it with an unreadable reply', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const file = new File(['a,b'], 'rows.csv', { type: 'text/csv' });
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(presign('u4'))
+        .mockResolvedValueOnce(new Response(null, { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ upload_id: 'u4' }), { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify(uploadStatus({ upload_id: 'u4', status: 'file_validating' })),
+            { status: 200 },
+          ),
+        );
+      const result = await onboardingService.uploadCsv(file, 'seeker', true);
+      expect(result).toEqual({
+        uploadId: 'u4',
+        status: expect.objectContaining({ upload_id: 'u4', status: 'file_validating' }),
+      });
+      expect(fetchSpy.mock.calls[3]![0]).toBe('/api/bulk-uploads/u4');
+    });
+
+    it('throws BulkUploadStartUnreadError when the re-read fails too', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const file = new File(['a,b'], 'rows.csv', { type: 'text/csv' });
+      vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(presign('u5'))
+        .mockResolvedValueOnce(new Response(null, { status: 200 }))
+        .mockResolvedValueOnce(new Response('<html>', { status: 200 }))
+        .mockResolvedValueOnce(new Response('down', { status: 503 }));
+      const err = await onboardingService.uploadCsv(file, 'seeker', true).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(BulkUploadStartUnreadError);
+      expect(err).toMatchObject({ uploadId: 'u5' });
     });
 
     it('throws when the S3 PUT fails', async () => {

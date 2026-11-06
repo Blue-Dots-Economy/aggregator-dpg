@@ -13,6 +13,10 @@ import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import hiMessages from '@/i18n/messages/hi.json';
 import { fillTerms } from '@/i18n/terms';
+
+const refresh = vi.fn();
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
+
 import { InviteForm, parseRecipients } from '@/components/console/InviteForm';
 
 const term = (key: string): string => fillTerms(`[[${key}]]`, 'en');
@@ -351,6 +355,20 @@ describe('<InviteForm />', () => {
       expect(screen.getByLabelText('Name for a@x.org')).toBeInTheDocument();
     },
   );
+
+  it('says the reply could not be read when an OK body does not match', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    global.fetch = respond({ sent: 1 }, 200) as never;
+    renderForm();
+    typeAddresses('a@x.org');
+    fireEvent.click(sendButton());
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      messages.console.invite.error.response_shape,
+    );
+    // The invites may have gone out: the list is cleared so a click does not resend them.
+    expect(screen.queryByLabelText('Name for a@x.org')).toBeNull();
+    expect(refresh).toHaveBeenCalled();
+  });
 
   it('says the server could not be reached when the request fails', async () => {
     global.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch')) as never;

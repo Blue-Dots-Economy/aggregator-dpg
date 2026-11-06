@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod';
+import { ResponseShapeError } from '@/lib/response-shape-error';
 import { jsonFetch } from './http';
 
 /** Submitted, passed, failed and skipped counts. */
@@ -150,6 +151,28 @@ function withQuery(path: string, params: URLSearchParams): string {
   return qs ? `${path}?${qs}` : path;
 }
 
+/**
+ * Thrown when `/start` answered OK with an unreadable body and the upload's
+ * status could not be read again either.
+ *
+ * The upload was started, so the caller must not offer a plain retry: that
+ * would upload the same file twice.
+ */
+export class BulkUploadStartUnreadError extends Error {
+  override readonly name = 'BulkUploadStartUnreadError';
+
+  /**
+   * @param uploadId - The upload that was started.
+   * @param options - The error that stopped the re-read, as `cause`.
+   */
+  constructor(
+    readonly uploadId: string,
+    options?: ErrorOptions,
+  ) {
+    super(`bulk upload ${uploadId} started, but its status could not be read`, options);
+  }
+}
+
 export const onboardingService = {
   async listLinks(
     opts: {
@@ -251,11 +274,14 @@ export const onboardingService = {
    * Runs a bulk upload: presign, PUT to S3, then start.
    *
    * `duplicate` is true when the file matches a prior upload; the existing run is returned.
+   * When `/start` accepts the upload but its reply cannot be read, the status
+   * is read again, so the caller does not upload the same file twice.
    *
    * @param file - The CSV file.
    * @param participantType - Domain of the rows.
    * @param attestation - Whether the coordinator accepted the attestation.
    * @returns The upload id and status.
+   * @throws {BulkUploadStartUnreadError} If `/start` accepted the upload and its status could not be read.
    * @throws {Error} If the S3 upload or an API call fails.
    */
   async uploadCsv(
@@ -277,7 +303,20 @@ export const onboardingService = {
     if (!put.ok) {
       throw new Error(`S3 PUT failed (${put.status}): ${await put.text().catch(() => '')}`);
     }
-    const status = await this.startBulkUpload(presigned.upload_id, attestation);
+    let status: BulkUploadStartResult;
+    try {
+      status = await this.startBulkUpload(presigned.upload_id, attestation);
+    } catch (err) {
+      if (!(err instanceof ResponseShapeError)) throw err;
+      console.error('[bulk-upload] unexpected /start reply; reading the status again', {
+        url: err.url,
+        issues: err.issueSummary(),
+      });
+      return {
+        uploadId: presigned.upload_id,
+        status: await rereadStarted(presigned.upload_id),
+      };
+    }
     const out: {
       uploadId: string;
       status: BulkUploadStatus;
@@ -292,3 +331,18 @@ export const onboardingService = {
     return out;
   },
 };
+
+/**
+ * Reads the status of an upload that `/start` accepted.
+ *
+ * @param uploadId - The started upload.
+ * @returns The upload's status.
+ * @throws {BulkUploadStartUnreadError} If the status cannot be read.
+ */
+async function rereadStarted(uploadId: string): Promise<BulkUploadStatus> {
+  try {
+    return await onboardingService.readBulkUpload(uploadId);
+  } catch (err) {
+    throw new BulkUploadStartUnreadError(uploadId, { cause: err });
+  }
+}

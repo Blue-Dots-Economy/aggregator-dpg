@@ -22,7 +22,7 @@ import {
 import { z } from 'zod';
 import { resolveSchemaRoot } from './config-paths';
 import { logger } from './logger';
-import { ResponseShapeError } from './response-shape-error';
+import { summariseIssues } from './response-shape-error';
 import type { ConsentDocContent, ParticipantConsent } from '../components/consent/consent-types';
 
 export type { ParticipantConsent };
@@ -77,7 +77,7 @@ function readConsentFile(value: unknown, operation: string): ParticipantConsentF
     operation,
     status: 'failure',
     error: 'unexpected consent document shape',
-    issues: new ResponseShapeError(operation, parsed.error.issues).issueSummary(),
+    issues: summariseIssues(parsed.error.issues),
   });
   return null;
 }
