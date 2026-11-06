@@ -10,6 +10,7 @@
 
 import 'server-only';
 import { cache } from 'react';
+import { z } from 'zod';
 import { logger } from './logger';
 
 /** Deploy-time capability flags surfaced by `GET /v1/aggregator-config`. */
@@ -21,6 +22,11 @@ const FETCH_TIMEOUT_MS = 5000;
 
 /** Fail-safe default when the api is unreachable or omits the field. */
 const DEFAULT_FEATURES: AggregatorFeatures = { custom_roles: false };
+
+/** The `features` block of `/v1/aggregator-config`. A missing flag is off. */
+const FeaturesConfigSchema = z.object({
+  features: z.object({ custom_roles: z.boolean().optional() }).optional(),
+});
 
 /**
  * Logs a warning without ever throwing.
@@ -65,8 +71,17 @@ export const getAggregatorFeatures = cache(
         });
         return DEFAULT_FEATURES;
       }
-      const cfg = (await res.json()) as { features?: { custom_roles?: unknown } };
-      return { custom_roles: cfg.features?.custom_roles === true };
+      const cfg = FeaturesConfigSchema.safeParse(await res.json());
+      if (!cfg.success) {
+        warnSafe({
+          operation: 'features.getAggregatorFeatures',
+          status: 'failure',
+          error: 'unexpected response shape',
+          latency_ms: Date.now() - start,
+        });
+        return DEFAULT_FEATURES;
+      }
+      return { custom_roles: cfg.data.features?.custom_roles === true };
     } catch (err) {
       warnSafe({
         operation: 'features.getAggregatorFeatures',

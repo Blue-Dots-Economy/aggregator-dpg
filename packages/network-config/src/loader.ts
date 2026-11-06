@@ -13,7 +13,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { parse as parseYaml } from 'yaml';
-import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { UpstreamError, errorMessage, toError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
@@ -26,10 +26,10 @@ import {
   BrandTypographySchema,
   NetworkConfigLoaderBase,
   ParticipantConsentDocSchema,
+  SignalstackNetworkSchema,
   type AggregatorYaml,
-  type IdentitySelectors,
   type NetworkConfigError,
-  type NetworkDomain,
+  type NetworkConfigWarning,
   type ParticipantConsentDoc,
   type ResolvedDomain,
   type ResolvedNetworkConfig,
@@ -183,7 +183,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
     } catch (e) {
       return err({
         code: 'CONFIG_FILE_MISSING',
-        message: `aggregator config not found at ${this.opts.configPath}: ${(e as Error).message}`,
+        message: `aggregator config not found at ${this.opts.configPath}: ${errorMessage(e)}`,
       });
     }
     let parsed: unknown;
@@ -192,8 +192,8 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
     } catch (e) {
       return err({
         code: 'CONFIG_PARSE_FAILED',
-        message: `YAML parse failed: ${(e as Error).message}`,
-        cause: e as Error,
+        message: `YAML parse failed: ${errorMessage(e)}`,
+        cause: toError(e),
       });
     }
     const validated = AggregatorYamlSchema.safeParse(parsed);
@@ -233,8 +233,8 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
     } catch (e) {
       return err({
         code: 'CONFIG_PARSE_FAILED',
-        message: `brand.json at ${brandPath} is not valid JSON: ${(e as Error).message}`,
-        cause: e as Error,
+        message: `brand.json at ${brandPath} is not valid JSON: ${errorMessage(e)}`,
+        cause: toError(e),
       });
     }
     const validated = BrandJsonSchema.safeParse(parsed);
@@ -251,7 +251,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
 
   private async fetchNetwork(
     url: string,
-  ): Promise<Result<SignalstackNetwork, BaseError | NetworkConfigError>> {
+  ): Promise<Result<CheckedNetwork, BaseError | NetworkConfigError>> {
     const fetchImpl = this.opts.fetchImpl ?? fetch;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.opts.fetchTimeoutMs);
@@ -260,16 +260,17 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
       if (!res.ok) {
         return this.recoverFromCache(url, `signalstack network.json fetch returned ${res.status}`);
       }
-      const payload = (await res.json()) as SignalstackNetwork;
+      const payload: unknown = await res.json();
       const checked = validateNetwork(payload);
       if (!checked.success) {
         return this.recoverFromCache(url, checked.error.message);
       }
+      // The payload is cached as sent and re-checked on read, so a cache-served
+      // load reports the same dropped blocks.
       await this.writeCacheFile(url, 'network', payload);
-      return ok(payload);
+      return ok(checked.value);
     } catch (e) {
-      const cause = e as Error;
-      return this.recoverFromCache(url, `network fetch transport failure: ${cause.message}`);
+      return this.recoverFromCache(url, `network fetch transport failure: ${errorMessage(e)}`);
     } finally {
       clearTimeout(timer);
     }
@@ -278,7 +279,7 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
   private async recoverFromCache(
     url: string,
     upstreamReason: string,
-  ): Promise<Result<SignalstackNetwork, BaseError | NetworkConfigError>> {
+  ): Promise<Result<CheckedNetwork, BaseError | NetworkConfigError>> {
     const cachePath = this.cachePath(url);
     if (!cachePath) {
       return err(
@@ -287,18 +288,27 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
         }),
       );
     }
+    let cached: unknown;
     try {
-      const cached = await fs.readFile(cachePath, 'utf8');
-      const payload = JSON.parse(cached) as SignalstackNetwork;
-      return ok(payload);
+      cached = JSON.parse(await fs.readFile(cachePath, 'utf8'));
     } catch (e) {
       return err(
         new UpstreamError(`${upstreamReason}; cache miss at ${cachePath}`, {
-          cause: e as Error,
+          cause: toError(e),
           code: 'NETWORK_FETCH_FAILED',
         }),
       );
     }
+    const checked = validateNetwork(cached);
+    if (!checked.success) {
+      return err(
+        new UpstreamError(
+          `${upstreamReason}; cached network.json at ${cachePath} is invalid: ${checked.error.message}`,
+          { code: 'NETWORK_FETCH_FAILED' },
+        ),
+      );
+    }
+    return ok(checked.value);
   }
 
   /**
@@ -374,37 +384,119 @@ export class FileNetworkConfigLoader extends NetworkConfigLoaderBase {
 
 // ─── Resolution ──────────────────────────────────────────────────────────────
 
-function validateNetwork(payload: unknown): Result<SignalstackNetwork, NetworkConfigError> {
-  if (!payload || typeof payload !== 'object') {
-    return err({ code: 'NETWORK_PARSE_FAILED', message: 'network.json must be an object' });
-  }
-  const n = payload as Partial<SignalstackNetwork>;
-  if (typeof n.id !== 'string' || !n.id) {
-    return err({ code: 'NETWORK_PARSE_FAILED', message: 'network.json missing `id`' });
-  }
-  if (!Array.isArray(n.domains) || n.domains.length === 0) {
+/** A validated network and the optional parts dropped while validating it. */
+interface CheckedNetwork {
+  network: SignalstackNetwork;
+  warnings: NetworkConfigWarning[];
+}
+
+/**
+ * Reads the optional blocks as sent, before validation drops any of them.
+ *
+ * Every field is `unknown`, so this parse succeeds for any payload that passed
+ * {@link SignalstackNetworkSchema}.
+ */
+const RawOptionalBlocksSchema = z.object({
+  display_name: z.unknown(),
+  description: z.unknown(),
+  dashboard_buckets: z.unknown(),
+  domains: z.array(
+    z.object({
+      description: z.unknown(),
+      dashboard_tiles: z.unknown(),
+      status_rules: z.unknown(),
+      guardian_consent_required: z.unknown(),
+      go_live_required: z.unknown(),
+    }),
+  ),
+});
+
+/** The bucket label maps as sent, used to count dropped labels. */
+const RawBucketMapsSchema = z.object({
+  by_status: z.record(z.string(), z.unknown()).optional().catch(undefined),
+  by_initiated_action_status: z.record(z.string(), z.unknown()).optional().catch(undefined),
+  by_received_action_status: z.record(z.string(), z.unknown()).optional().catch(undefined),
+});
+
+/**
+ * Checks a `network.json` payload against {@link SignalstackNetworkSchema}.
+ *
+ * @param payload - The parsed JSON body, from the upstream or the cache.
+ * @returns The parsed network with warnings for dropped blocks, or
+ *   `NETWORK_PARSE_FAILED` naming the first problem.
+ */
+function validateNetwork(payload: unknown): Result<CheckedNetwork, NetworkConfigError> {
+  const parsed = SignalstackNetworkSchema.safeParse(payload);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const where = issue && issue.path.length > 0 ? ` (at ${issue.path.join('.')})` : '';
     return err({
       code: 'NETWORK_PARSE_FAILED',
-      message: 'network.json must declare at least one domain',
+      message: `${issue?.message ?? 'network.json is invalid'}${where}`,
     });
   }
-  for (const d of n.domains) {
-    if (!d || typeof d !== 'object' || typeof d.id !== 'string') {
-      return err({ code: 'NETWORK_PARSE_FAILED', message: 'each domain must declare `id`' });
+  return ok({ network: parsed.data, warnings: droppedBlocks(payload, parsed.data) });
+}
+
+/**
+ * Lists the optional blocks present in the payload that validation dropped.
+ *
+ * @param payload - The payload as sent.
+ * @param network - The same payload after validation.
+ */
+function droppedBlocks(payload: unknown, network: SignalstackNetwork): NetworkConfigWarning[] {
+  const raw = RawOptionalBlocksSchema.safeParse(payload);
+  if (!raw.success) return [];
+  const warnings: NetworkConfigWarning[] = [];
+  const dropped = (path: string, sent: unknown, kept: unknown): void => {
+    if (sent !== undefined && kept === undefined) {
+      warnings.push({ path, code: 'MALFORMED_BLOCK_DROPPED' });
     }
-    if (!d.item_schemas || typeof d.item_schemas !== 'object') {
-      return err({
-        code: 'NETWORK_PARSE_FAILED',
-        message: `domain ${d.id} missing item_schemas`,
-      });
+  };
+  raw.data.domains.forEach((sent, i) => {
+    const kept = network.domains[i];
+    if (!kept) return;
+    dropped(`domains.${i}.description`, sent.description, kept.description);
+    dropped(`domains.${i}.dashboard_tiles`, sent.dashboard_tiles, kept.dashboard_tiles);
+    dropped(`domains.${i}.status_rules`, sent.status_rules, kept.status_rules);
+    dropped(
+      `domains.${i}.guardian_consent_required`,
+      sent.guardian_consent_required,
+      kept.guardian_consent_required,
+    );
+    dropped(`domains.${i}.go_live_required`, sent.go_live_required, kept.go_live_required);
+    if (
+      Array.isArray(sent.go_live_required) &&
+      kept.go_live_required !== undefined &&
+      kept.go_live_required.length < sent.go_live_required.length
+    ) {
+      warnings.push({ path: `domains.${i}.go_live_required`, code: 'NON_STRING_ENTRIES_DROPPED' });
+    }
+  });
+  dropped('display_name', raw.data.display_name, network.display_name);
+  dropped('description', raw.data.description, network.description);
+  dropped('dashboard_buckets', raw.data.dashboard_buckets, network.dashboard_buckets);
+  const sentBuckets = RawBucketMapsSchema.safeParse(raw.data.dashboard_buckets);
+  const keptBuckets = network.dashboard_buckets;
+  if (sentBuckets.success && keptBuckets) {
+    for (const key of [
+      'by_status',
+      'by_initiated_action_status',
+      'by_received_action_status',
+    ] as const) {
+      const sent = sentBuckets.data[key];
+      const kept = keptBuckets[key];
+      if (sent && kept && Object.keys(kept).length < Object.keys(sent).length) {
+        warnings.push({ path: `dashboard_buckets.${key}`, code: 'NON_STRING_ENTRIES_DROPPED' });
+      }
     }
   }
-  return ok(payload as SignalstackNetwork);
+  return warnings;
 }
 
 function resolveDomains(
   yaml: AggregatorYaml,
-  network: SignalstackNetwork,
+  { network, warnings }: CheckedNetwork,
 ): Result<ResolvedNetworkConfig, NetworkConfigError> {
   const overrides = yaml.aggregator.network.field_overrides ?? {};
   const labels = yaml.aggregator.domain_labels ?? {};
@@ -412,19 +504,20 @@ function resolveDomains(
   const order: string[] = [];
 
   for (const d of network.domains) {
-    const itemTypes = Object.keys(d.item_schemas);
-    if (itemTypes.length === 0) {
+    // The first item type is the domain's default.
+    const [first] = Object.entries(d.item_schemas);
+    if (!first) {
       return err({
         code: 'DOMAIN_RESOLUTION_FAILED',
         message: `domain ${d.id} has no item_schemas`,
       });
     }
-    const itemType = itemTypes[0]!;
+    const [itemType, itemSchema] = first;
     // Link fields get Signals' URL rule here, once, so the registration form,
     // the public submit route and the bulk worker all validate them exactly as
-    // Signals will on the push (#904).
-    const schema = applyUrlRule(d.item_schemas[itemType] as Record<string, unknown>);
-    const identity = pickIdentity(d, schema, overrides[d.id]);
+    // Signals will on the push.
+    const schema = applyUrlRule(itemSchema);
+    const identity = overrides[d.id] ?? sniffIdentitySelectors(schema);
     if (!identity) {
       return err({
         code: 'DOMAIN_RESOLUTION_FAILED',
@@ -443,7 +536,7 @@ function resolveDomains(
       identity,
       // Missing keys default to off: no consent step and no birth year.
       guardianConsentRequired: d.guardian_consent_required === true,
-      goLiveRequired: Array.isArray(d.go_live_required) ? d.go_live_required : [],
+      goLiveRequired: d.go_live_required ?? [],
       ...(d.dashboard_tiles !== undefined ? { dashboardTiles: d.dashboard_tiles } : {}),
       ...(d.status_rules !== undefined ? { statusRules: d.status_rules } : {}),
     };
@@ -458,16 +551,8 @@ function resolveDomains(
     ...(network.dashboard_buckets !== undefined
       ? { dashboardBuckets: network.dashboard_buckets }
       : {}),
+    ...(warnings.length > 0 ? { warnings } : {}),
   });
-}
-
-function pickIdentity(
-  _domain: NetworkDomain,
-  schema: Record<string, unknown>,
-  override: IdentitySelectors | undefined,
-): IdentitySelectors | null {
-  if (override) return override;
-  return sniffIdentitySelectors(schema);
 }
 
 /**

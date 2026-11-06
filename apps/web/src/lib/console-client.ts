@@ -13,15 +13,51 @@ import type {
   Org,
   OrgKnownAsUpdateRequest,
 } from '@aggregator-dpg/shared-primitives/user-org';
+import { z } from 'zod';
+import { parseResponseBody, ResponseShapeError } from './response-shape-error';
+
+/** The fields of the API's error envelope that the console reads. A field of the wrong type is dropped. */
+const ConsoleErrorSchema = z.object({
+  code: z.string().optional().catch(undefined),
+  fields: z.record(z.unknown()).optional().catch(undefined),
+});
 
 /** The API's error envelope, as far as the console reads it. */
-export interface ConsoleError {
-  code?: string;
-  fields?: Record<string, unknown>;
-}
+export type ConsoleError = z.infer<typeof ConsoleErrorSchema>;
+
+const ConsoleErrorBodySchema = z.object({ error: ConsoleErrorSchema });
+
+/** The error code a view gets when an OK body does not match its schema. */
+export const RESPONSE_SHAPE_CODE = 'RESPONSE_SHAPE';
 
 export type ConsoleSendResult<T> =
   { ok: true; status: number; data: T } | { ok: false; status: number; error: ConsoleError };
+
+/**
+ * Reads the error envelope of a failed console response body.
+ *
+ * @param body - The parsed body, or `null` when it was not JSON.
+ * @returns The code and fields; empty when the body has no error object.
+ */
+function readConsoleError(body: unknown): ConsoleError {
+  const parsed = ConsoleErrorBodySchema.safeParse(body);
+  if (!parsed.success) return {};
+  const { code, fields } = parsed.data.error;
+  return { ...(code !== undefined ? { code } : {}), ...(fields !== undefined ? { fields } : {}) };
+}
+
+/**
+ * Reads a response body as JSON.
+ *
+ * @returns The body, or `null` when it is not JSON.
+ */
+async function readJson(res: Response): Promise<unknown> {
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Calls a console BFF route.
@@ -47,10 +83,37 @@ export async function sendConsole<T>(
   } catch {
     return { ok: false, status: 0, error: {} };
   }
-  const json = (await res.json().catch(() => null)) as unknown;
+  const json = await readJson(res);
   if (res.ok) return { ok: true, status: res.status, data: json as T };
-  const error = (json as { error?: ConsoleError } | null)?.error;
-  return { ok: false, status: res.status, error: typeof error === 'object' && error ? error : {} };
+  return { ok: false, status: res.status, error: readConsoleError(json) };
+}
+
+/**
+ * Reads a console BFF route and checks the body with a schema.
+ *
+ * @param url - BFF path, e.g. `/api/console/org/parent/options/<id>`.
+ * @param schema - The expected OK body.
+ * @returns The outcome; an OK body that does not match gives the `RESPONSE_SHAPE` error code. Never throws.
+ */
+export async function getConsole<S extends z.ZodTypeAny>(
+  url: string,
+  schema: S,
+): Promise<ConsoleSendResult<z.output<S>>> {
+  let res: Response;
+  try {
+    res = await fetch(url, { credentials: 'same-origin' });
+  } catch {
+    return { ok: false, status: 0, error: {} };
+  }
+  if (!res.ok)
+    return { ok: false, status: res.status, error: readConsoleError(await readJson(res)) };
+  try {
+    return { ok: true, status: res.status, data: await parseResponseBody(res, url, schema) };
+  } catch (err) {
+    if (!(err instanceof ResponseShapeError)) throw err;
+    console.error('[console] unexpected response shape', { url, issues: err.issueSummary() });
+    return { ok: false, status: res.status, error: { code: RESPONSE_SHAPE_CODE } };
+  }
 }
 
 /** Message keys for error codes that need no more detail. */

@@ -6,15 +6,10 @@
  * @module apps/web/src/lib/console-domains.server
  */
 
-/** One network domain. */
-export interface ConsoleDomain {
-  id: string;
-  label: string;
-}
+import { readDomainLabels, type DomainLabel } from './aggregator-config-domains';
 
-interface ConfigPayload {
-  domains?: ConsoleDomain[];
-}
+/** One network domain. */
+export type ConsoleDomain = DomainLabel;
 
 /**
  * Reads the network's domains (server-side; empty on any failure, so a
@@ -27,8 +22,7 @@ export async function networkDomains(): Promise<ConsoleDomain[]> {
   try {
     const res = await fetch(`${base}/v1/aggregator-config`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return [];
-    const cfg = (await res.json()) as ConfigPayload;
-    return (cfg.domains ?? []).map((d) => ({ id: d.id, label: d.label }));
+    return readDomainLabels(await res.json()) ?? [];
   } catch {
     return [];
   }

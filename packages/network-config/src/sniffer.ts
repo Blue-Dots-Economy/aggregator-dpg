@@ -9,25 +9,13 @@
  */
 
 import type { IdentitySelectors } from './interface.js';
+import { isPlainObject, type JsonRecord } from './json-record.js';
 
 /**
- * The JSON Schema fields the sniffer reads. Unknown keys are ignored.
+ * One property schema. The sniffer reads `type`, `pattern` and `format`, and
+ * checks each one's type before use.
  */
-interface SchemaProperty {
-  type?: string | string[];
-  pattern?: string;
-  format?: string;
-  title?: string;
-  minLength?: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
-}
-
-interface SchemaShape {
-  properties?: Record<string, SchemaProperty>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
-}
+type SchemaProperty = JsonRecord;
 
 /**
  * Derives {@link IdentitySelectors} from a JSON Schema's properties.
@@ -43,9 +31,8 @@ interface SchemaShape {
  * @returns The selectors, or `null` when phone, email or name cannot be found.
  */
 export function sniffIdentitySelectors(schema: unknown): IdentitySelectors | null {
-  if (!schema || typeof schema !== 'object') return null;
-  const props = (schema as SchemaShape).properties;
-  if (!props || typeof props !== 'object') return null;
+  if (!isPlainObject(schema) || !isPlainObject(schema.properties)) return null;
+  const props = schema.properties;
 
   const phone = pickFirstMatch(props, isPhoneField);
   const email = pickFirstMatch(props, isEmailField);
@@ -58,11 +45,12 @@ export function sniffIdentitySelectors(schema: unknown): IdentitySelectors | nul
 }
 
 function pickFirstMatch(
-  props: Record<string, SchemaProperty>,
+  props: Record<string, unknown>,
   predicate: (prop: SchemaProperty, name: string) => boolean,
 ): string | null {
   for (const [name, prop] of Object.entries(props)) {
-    if (predicate(prop, name)) return name;
+    // A non-object property (`true`, `null`) carries no keywords; only its name can match.
+    if (predicate(isPlainObject(prop) ? prop : {}, name)) return name;
   }
   return null;
 }

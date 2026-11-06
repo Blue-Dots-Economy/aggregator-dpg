@@ -27,6 +27,21 @@ describe('decodeJwtClaims', () => {
   });
 });
 
+describe('decodeJwtClaims with a payload that is not an object', () => {
+  function tokenWith(payload: unknown): string {
+    const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url');
+    return `${header}.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.sig`;
+  }
+
+  it.each([
+    ['an array', ['aggregator_id']],
+    ['a string', 'agg-1'],
+    ['null', null],
+  ])('returns null for %s', (_label, payload) => {
+    expect(decodeJwtClaims(tokenWith(payload))).toBeNull();
+  });
+});
+
 describe('tokenAggregatorId', () => {
   it('returns the aggregator_id claim when present and non-empty', () => {
     const token = makeToken({ aggregator_id: 'agg-42' });

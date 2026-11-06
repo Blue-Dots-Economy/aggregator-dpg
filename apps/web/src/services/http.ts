@@ -6,40 +6,14 @@
  */
 
 import { z } from 'zod';
+import { parseResponseBody, ResponseShapeError } from '../lib/response-shape-error';
+
+export { ResponseShapeError };
 
 let redirecting = false;
 
 /** The 401 body that `bff-errors.ts` sends when the session has expired. */
 const SessionExpiredBodySchema = z.object({ code: z.literal('NO_ACTIVE_SESSION') });
-
-/**
- * Thrown when an OK response body is not JSON or does not match the expected schema.
- *
- * TanStack Query surfaces it as the query's error state.
- */
-export class ResponseShapeError extends Error {
-  override readonly name = 'ResponseShapeError';
-
-  /**
-   * @param url - The request URL.
-   * @param issues - The schema issues; empty when the body was not JSON.
-   */
-  constructor(
-    readonly url: string,
-    readonly issues: z.ZodIssue[],
-  ) {
-    super(`unexpected response shape from ${url}`);
-  }
-
-  /**
-   * Field path and issue code of each problem, for logs.
-   *
-   * Leaves out the received values, which can be personal data.
-   */
-  issueSummary(): { path: string; code: string }[] {
-    return this.issues.map((issue) => ({ path: issue.path.join('.'), code: issue.code }));
-  }
-}
 
 /**
  * TanStack Query `retry` rule: one retry, but none for a `ResponseShapeError`,
@@ -112,14 +86,5 @@ export async function jsonFetch<S extends z.ZodTypeAny>(
     throw new Error(`request failed (${res.status}): ${text || res.statusText}`);
   }
 
-  const url = typeof input === 'string' ? input : input.url;
-  let body: unknown;
-  try {
-    body = await res.json();
-  } catch {
-    throw new ResponseShapeError(url, []);
-  }
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) throw new ResponseShapeError(url, parsed.error.issues);
-  return parsed.data;
+  return parseResponseBody(res, typeof input === 'string' ? input : input.url, schema);
 }

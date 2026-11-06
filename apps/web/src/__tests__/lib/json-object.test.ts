@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { parseJsonObject, parseJsonSchema } from '@/lib/json-object';
+import {
+  parseJsonObject,
+  parseJsonSchema,
+  readJsonObject,
+  readJsonSchema,
+} from '@/lib/json-object';
 
 describe('parseJsonObject', () => {
   it('returns the object a JSON text holds', () => {
@@ -33,5 +38,37 @@ describe('parseJsonSchema', () => {
     ['{"properties":[]}', 'properties as a list'],
   ])('throws for %s (%s), which is not a JSON Schema', (text) => {
     expect(() => parseJsonSchema(text)).toThrow(/JSON Schema/);
+  });
+});
+
+describe('readJsonSchema', () => {
+  it('returns a value that is a JSON Schema object', () => {
+    const value = { type: 'object', properties: { name: { type: 'string' } } };
+    expect(readJsonSchema(value)).toEqual(value);
+  });
+
+  it.each([
+    ['null', null],
+    ['an array', [{ type: 'object' }]],
+    ['a string', 'object'],
+    ['a numeric type', { type: 5 }],
+    ['properties as a list', { properties: [] }],
+  ])('returns null for %s', (_label, value) => {
+    expect(readJsonSchema(value)).toBeNull();
+  });
+});
+
+describe('readJsonObject', () => {
+  it('returns a value that is an object', () => {
+    expect(readJsonObject({ 'ui:widget': 'radio' })).toEqual({ 'ui:widget': 'radio' });
+  });
+
+  it.each([
+    ['undefined', undefined],
+    ['null', null],
+    ['an array', ['radio']],
+    ['a string', 'radio'],
+  ])('returns null for %s', (_label, value) => {
+    expect(readJsonObject(value)).toBeNull();
   });
 });

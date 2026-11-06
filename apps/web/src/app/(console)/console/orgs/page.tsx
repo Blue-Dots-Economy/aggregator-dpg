@@ -16,12 +16,7 @@ import { Fragment } from 'react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import type {
-  KnownAsValues,
-  OrgHierarchyResponse,
-  OrgReadResponse,
-  OrgSearchResponse,
-} from '@aggregator-dpg/shared-primitives/user-org';
+import type { KnownAsValues, OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
 import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
@@ -35,6 +30,10 @@ import { ConsoleSection, EmptyState } from '@/components/console/ConsoleUi';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
 import { I } from '@/icons';
+import {
+  OrgHierarchyResponseSchema,
+  OrgReadResponseSchema,
+} from '@aggregator-dpg/shared-primitives/user-org';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
@@ -54,8 +53,9 @@ export default async function ConsoleOrgsPage({
       />
     );
   }
-  const hierarchy = await consoleRead<OrgHierarchyResponse>(
+  const hierarchy = await consoleRead(
     '/v1/org/hierarchy?fields=known_as_values',
+    OrgHierarchyResponseSchema,
   );
   const network = await readNetworkOrgs(hierarchy.network.id);
   const pending = network.orgs.filter((o) => o.status === 'pending');
@@ -155,8 +155,9 @@ async function knownAsValuesToEdit(
   ownerIds: readonly string[],
 ): Promise<KnownAsValues | null> {
   if (!ownerIds.includes(root.id) || root.status !== 'active') return null;
-  const read = await consoleRead<OrgReadResponse>(
+  const read = await consoleRead(
     `/v1/org/read/${encodeURIComponent(root.id)}?fields=known_as_values`,
+    OrgReadResponseSchema,
   );
   return read.org.known_as_values ?? null;
 }

@@ -22,7 +22,7 @@
  * @module @aggregator-dpg/network-config/uri-fields
  */
 
-type JsonRecord = Record<string, unknown>;
+import { isPlainObject, type JsonRecord } from './json-record.js';
 
 /** Signals' field-level URL marker. */
 const URI_FIELD_MARKER = 'x-uri';
@@ -33,10 +33,6 @@ const URI_FIELD_MARKER = 'x-uri';
  * string are accepted (presence is `required[]`'s job).
  */
 export const URL_PATTERN = String.raw`^\s*$|^\s*([hH][tT][tT][pP][sS]?:\/\/)?([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(:\d{1,5})?([\/?#][^\s]*)?\s*$`;
-
-function isPlainObject(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /**
  * Returns a copy of a participant schema with every link field validated by
@@ -51,9 +47,10 @@ function isPlainObject(value: unknown): value is JsonRecord {
  * @param schema - A JSON Schema document (normally one network.json item schema).
  * @returns The rewritten schema; non-object input is returned unchanged.
  */
-export function applyUrlRule<T>(schema: T): T {
-  if (!isPlainObject(schema)) return schema;
-  return transform(schema) as T;
+export function applyUrlRule(schema: JsonRecord): JsonRecord;
+export function applyUrlRule(schema: unknown): unknown;
+export function applyUrlRule(schema: unknown): unknown {
+  return isPlainObject(schema) ? transform(schema) : schema;
 }
 
 function transform(node: JsonRecord): JsonRecord {
@@ -72,9 +69,10 @@ function transform(node: JsonRecord): JsonRecord {
   }
 
   if (isLinkField(node)) {
-    if (node.type === 'array' && isPlainObject(out.items)) {
+    const items = out.items;
+    if (node.type === 'array' && isPlainObject(items)) {
       // `x-uri` on an array means "a list of links": the rule goes on items.
-      out.items = withUrlRule(out.items as JsonRecord, false);
+      out.items = withUrlRule(items, false);
     } else {
       out = withUrlRule(out, true);
     }

@@ -11,11 +11,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import type {
-  OrgSearchResponse,
-  RolesResponse,
-  UserSearchResponse,
-} from '@aggregator-dpg/shared-primitives/user-org';
+import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 
 type UserSearchOrg = OrgSearchResponse['orgs'][number];
 import { consoleRead, consoleReadOptional } from '@/lib/console-api.server';
@@ -34,6 +30,10 @@ import { ConsoleSection, ConsoleStatusPill, EmptyState } from '@/components/cons
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
 import { I } from '@/icons';
+import {
+  RolesResponseSchema,
+  UserSearchResponseSchema,
+} from '@aggregator-dpg/shared-primitives/user-org';
 
 const STATUSES = ['pending', 'active', 'inactive', 'retired'] as const;
 const UUID_RE = /^[0-9a-f-]{36}$/i;
@@ -121,7 +121,7 @@ export default async function ConsoleCoordinatorsPage({
   const orgId = params.org_id && UUID_RE.test(params.org_id) ? params.org_id : undefined;
   const searchAfterDomains = networkDomains().then(async (domains) => {
     const serves = domains.find((d) => d.id === params.serves)?.id;
-    const page = await consoleRead<UserSearchResponse>('/v1/user/search', {
+    const page = await consoleRead('/v1/user/search', UserSearchResponseSchema, {
       filter: {
         ...(status ? { status } : {}),
         ...(orgId ? { org_id: orgId } : {}),
@@ -155,7 +155,7 @@ export default async function ConsoleCoordinatorsPage({
   });
   // Roles are null when access control is off: no Access column then.
   const showAccess = page.users.some((u) => Array.isArray(u.roles));
-  const catalogue = showAccess ? await consoleReadOptional<RolesResponse>('/v1/roles') : null;
+  const catalogue = showAccess ? await consoleReadOptional('/v1/roles', RolesResponseSchema) : null;
   const roleNames = Object.fromEntries((catalogue?.roles ?? []).map((r) => [r.key, r.name]));
   return (
     <>
@@ -387,7 +387,7 @@ async function countCoordinators(
   serves: string | undefined,
 ): Promise<Record<Counted, { n: number; more: boolean }>> {
   const read = async (status?: 'active' | 'pending' | 'inactive') => {
-    const r = await consoleRead<UserSearchResponse>('/v1/user/search', {
+    const r = await consoleRead('/v1/user/search', UserSearchResponseSchema, {
       filter: {
         ...(status ? { status } : {}),
         ...(orgId ? { org_id: orgId } : {}),
