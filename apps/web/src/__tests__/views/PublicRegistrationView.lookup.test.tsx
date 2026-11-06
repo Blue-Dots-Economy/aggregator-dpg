@@ -787,3 +787,63 @@ describe('<PublicRegistrationView /> — response bodies are checked', () => {
     expect(screen.queryByText(messages.profile.public_reg.done_ref_prefix)).toBeNull();
   });
 });
+
+describe('<PublicRegistrationView /> — a failed probe does not block the submit', () => {
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  /**
+   * Stubs fetch: `lookup` answers the probe, `/submit` accepts.
+   *
+   * @param lookup - Probe behaviour.
+   */
+  function stubFetch(lookup: () => Promise<Response>) {
+    const fetchMock = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) return lookup();
+      return new Response(JSON.stringify({ outcome: 'passed', submission_id: 'sub-1' }), {
+        status: 201,
+      });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    return fetchMock;
+  }
+
+  it('submits when the probe request throws', async () => {
+    const fetchMock = stubFetch(() => Promise.reject(new TypeError('offline')));
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    expect(
+      await screen.findByText(messages.profile.public_reg.done_passed_title),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('submits when the probe answers with an error status', async () => {
+    const fetchMock = stubFetch(async () => new Response('{}', { status: 503 }));
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    expect(
+      await screen.findByText(messages.profile.public_reg.done_passed_title),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips the probe when the form has no email or phone', async () => {
+    const fetchMock = stubFetch(async () => new Response('{}', { status: 200 }));
+    renderView({ name: 'A' });
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+    expect(
+      await screen.findByText(messages.profile.public_reg.done_passed_title),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/submit');
+  });
+});
