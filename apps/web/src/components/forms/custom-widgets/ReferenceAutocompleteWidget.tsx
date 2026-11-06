@@ -24,6 +24,7 @@ import { useFormRuntimeConfig } from '@/lib/FormRuntimeConfigProvider';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
 import { withStableKeys } from '@/lib/list-keys';
 import { useReferenceDataset } from '@/hooks/useReferenceDataset';
+import { isRecord } from '../is-record';
 
 interface ReferenceOption {
   name: string;
@@ -36,15 +37,9 @@ const SUBTITLE_FIELDS = ['district', 'state'] as const;
 type SubtitleField = (typeof SUBTITLE_FIELDS)[number];
 const DEFAULT_SUBTITLE: SubtitleField[] = ['district'];
 
-type HierarchicalDataset = {
-  states?: Array<{
-    name?: string;
-    districts?: Array<{
-      name?: string;
-      organizations?: Array<Record<string, unknown>>;
-    }>;
-  }>;
-};
+function isSubtitleField(value: unknown): value is SubtitleField {
+  return SUBTITLE_FIELDS.some((field) => field === value);
+}
 
 /** Maximum number of matches shown. */
 const MAX_SUGGESTIONS = 50;
@@ -56,6 +51,19 @@ const BLUR_CLOSE_MS = 150;
 function stringField(source: Record<string, unknown>, field: string): string | undefined {
   const value = source[field];
   return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * Reads the list under `key` of an unverified node, keeping only its object entries.
+ *
+ * @param node - A dataset node, shape unverified.
+ * @param key - The key that holds the child list.
+ * @returns The child records, or `[]` when the node or list is missing.
+ */
+function childRecords(node: unknown, key: string): Record<string, unknown>[] {
+  if (!isRecord(node)) return [];
+  const list = node[key];
+  return Array.isArray(list) ? list.filter(isRecord) : [];
 }
 
 /**
@@ -76,8 +84,7 @@ function toOption(
 /** Reads the flat shape: `[{ name, district?, state? }, ...]`. */
 function flattenFlat(raw: unknown[]): ReferenceOption[] {
   const out: ReferenceOption[] = [];
-  for (const entry of raw) {
-    const record = entry as Record<string, unknown>;
+  for (const record of raw.filter(isRecord)) {
     const name = stringField(record, 'name');
     if (!name) continue;
     out.push(toOption(name, stringField(record, 'district'), stringField(record, 'state')));
@@ -91,18 +98,18 @@ function flattenFlat(raw: unknown[]): ReferenceOption[] {
  *
  * An organization's own `district`/`state` takes precedence over its parent nodes.
  */
-function flattenHierarchical(raw: HierarchicalDataset | null): ReferenceOption[] {
+function flattenHierarchical(raw: unknown): ReferenceOption[] {
   const out: ReferenceOption[] = [];
-  for (const state of raw?.states ?? []) {
-    for (const district of state.districts ?? []) {
-      for (const org of district.organizations ?? []) {
+  for (const state of childRecords(raw, 'states')) {
+    for (const district of childRecords(state, 'districts')) {
+      for (const org of childRecords(district, 'organizations')) {
         const name = stringField(org, 'name');
         if (!name) continue;
         out.push(
           toOption(
             name,
-            stringField(org, 'district') ?? district.name,
-            stringField(org, 'state') ?? state.name,
+            stringField(org, 'district') ?? stringField(district, 'name'),
+            stringField(org, 'state') ?? stringField(state, 'name'),
           ),
         );
       }
@@ -118,9 +125,7 @@ function flattenHierarchical(raw: HierarchicalDataset | null): ReferenceOption[]
  * @returns Flat options; entries without a string `name` are dropped.
  */
 export function flattenReferenceDataset(raw: unknown): ReferenceOption[] {
-  return Array.isArray(raw)
-    ? flattenFlat(raw)
-    : flattenHierarchical(raw as HierarchicalDataset | null);
+  return Array.isArray(raw) ? flattenFlat(raw) : flattenHierarchical(raw);
 }
 
 /**
@@ -151,13 +156,11 @@ export function ReferenceAutocompleteWidget({
   placeholder,
   options,
 }: Readonly<WidgetProps>) {
-  const opts = options as { source?: string; subtitleFields?: string[] } | undefined;
-  const source = opts?.source;
+  const source = typeof options.source === 'string' ? options.source : undefined;
+  const subtitleOption: unknown = options.subtitleFields;
   // Unknown names are dropped. An explicit list, even `[]`, replaces the default.
-  const subtitleFields: SubtitleField[] = Array.isArray(opts?.subtitleFields)
-    ? opts.subtitleFields.filter((f): f is SubtitleField =>
-        (SUBTITLE_FIELDS as readonly string[]).includes(f),
-      )
+  const subtitleFields: SubtitleField[] = Array.isArray(subtitleOption)
+    ? subtitleOption.filter(isSubtitleField)
     : DEFAULT_SUBTITLE;
 
   const { collegeDataset, referenceBaseUrl } = useFormRuntimeConfig();

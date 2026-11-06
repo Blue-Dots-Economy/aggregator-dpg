@@ -22,6 +22,7 @@ import { useSuggestionKeyboard } from './use-suggestion-keyboard';
 import { geoSuggestionKey } from './geo-suggestion-key';
 import { withStableKeys } from '@/lib/list-keys';
 import type { GeoSuggestion } from '@/lib/geo/types';
+import { isRecord } from '../is-record';
 
 export interface ResolvedCoord {
   lat: number;
@@ -31,6 +32,18 @@ export interface ResolvedCoord {
 
 export interface MultiLocationFormContext {
   onLocationsResolved?: (coords: ResolvedCoord[]) => void;
+}
+
+/**
+ * Tells whether the form context has the shape this widget reads.
+ *
+ * Only the callback's presence can be checked at runtime, not its signature.
+ */
+function isMultiLocationFormContext(value: unknown): value is MultiLocationFormContext {
+  return (
+    isRecord(value) &&
+    (value.onLocationsResolved === undefined || typeof value.onLocationsResolved === 'function')
+  );
 }
 
 const MIN_QUERY_LENGTH = 3;
@@ -66,6 +79,13 @@ function makeRow(name = ''): LocationRow {
 /** Builds rows for a value; always returns at least one row. */
 function rowsFromValue(value: string[]): LocationRow[] {
   return value.length === 0 ? [makeRow()] : value.map((name) => makeRow(name));
+}
+
+/** Tells whether the rows' non-blank names equal the non-blank values, in order. */
+function sameNames(rows: LocationRow[], value: string[]): boolean {
+  const rowNames = rows.map((r) => r.name).filter(Boolean);
+  const valueNames = value.filter(Boolean);
+  return rowNames.length === valueNames.length && rowNames.every((n, i) => n === valueNames[i]);
 }
 
 interface RowComboboxProps {
@@ -174,16 +194,13 @@ export function MultiLocationAutocompleteWidget({
   options,
 }: Readonly<WidgetProps>) {
   const t = useTranslations('form');
-  const ctx = (registry?.formContext ?? {}) as MultiLocationFormContext;
-  const isPrimary =
-    (options as { isPrimaryLocation?: boolean } | undefined)?.isPrimaryLocation === true;
+  const formContext: unknown = registry?.formContext;
+  const ctx: MultiLocationFormContext = isMultiLocationFormContext(formContext) ? formContext : {};
+  const isPrimary = options.isPrimaryLocation === true;
 
   // RJSF passes `undefined` on a fresh form.
   const incoming = React.useMemo<string[]>(
-    () =>
-      Array.isArray(value)
-        ? (value as unknown[]).filter((v): v is string => typeof v === 'string')
-        : [],
+    () => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []),
     [value],
   );
 
@@ -214,17 +231,13 @@ export function MultiLocationAutocompleteWidget({
   }
   ensureRefs(rows.length);
 
-  // Resync from outside values only when the list differs, so edits are kept.
-  React.useEffect(() => {
-    setRows((prev) => {
-      const prevNames = prev.map((r) => r.name).filter(Boolean);
-      const nextNames = incoming.filter(Boolean);
-      if (prevNames.length === nextNames.length && prevNames.every((n, i) => n === nextNames[i])) {
-        return prev;
-      }
-      return rowsFromValue(incoming);
-    });
-  }, [incoming]);
+  // Take a new value from RJSF during render. The rows are rebuilt only when
+  // their names differ from it, so blank rows and picked coordinates are kept.
+  const [syncedIncoming, setSyncedIncoming] = React.useState(incoming);
+  if (incoming !== syncedIncoming) {
+    setSyncedIncoming(incoming);
+    if (!sameNames(rows, incoming)) setRows(rowsFromValue(incoming));
+  }
 
   React.useEffect(() => {
     ensureRefs(rows.length);

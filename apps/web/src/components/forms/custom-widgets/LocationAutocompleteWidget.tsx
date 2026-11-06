@@ -24,6 +24,7 @@ import { useSuggestionKeyboard } from './use-suggestion-keyboard';
 import { geoSuggestionKey } from './geo-suggestion-key';
 import { withStableKeys } from '@/lib/list-keys';
 import type { GeoComponents, GeoSuggestion } from '@/lib/geo/types';
+import { isRecord } from '../is-record';
 
 /**
  * A selected place reported to the page.
@@ -39,6 +40,18 @@ export interface ResolvedPlace {
 
 export interface LocationFormContext {
   onLocationResolved?: (place: ResolvedPlace | null) => void;
+}
+
+/**
+ * Tells whether the form context has the shape this widget reads.
+ *
+ * Only the callback's presence can be checked at runtime, not its signature.
+ */
+function isLocationFormContext(value: unknown): value is LocationFormContext {
+  return (
+    isRecord(value) &&
+    (value.onLocationResolved === undefined || typeof value.onLocationResolved === 'function')
+  );
 }
 
 /** How close to the viewport bottom the input may sit before the list flips up. */
@@ -60,9 +73,9 @@ export function LocationAutocompleteWidget({
   options,
 }: Readonly<WidgetProps>) {
   const t = useTranslations('form');
-  const ctx = (registry?.formContext ?? {}) as LocationFormContext;
-  const isPrimary =
-    (options as { isPrimaryLocation?: boolean } | undefined)?.isPrimaryLocation === true;
+  const formContext: unknown = registry?.formContext;
+  const ctx: LocationFormContext = isLocationFormContext(formContext) ? formContext : {};
+  const isPrimary = options.isPrimaryLocation === true;
 
   const valueText = typeof value === 'string' ? value : '';
   const [text, setText] = React.useState(valueText);

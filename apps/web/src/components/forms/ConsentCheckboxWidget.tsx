@@ -19,6 +19,33 @@ import type { WidgetProps } from '@rjsf/utils';
 import { ConsentModal } from '../consent/ConsentModal';
 import type { ConsentTab } from '../consent/ConsentModal';
 import type { ConsentDocContent } from '../consent/consent-types';
+import { isRecord } from './is-record';
+
+/** Tells whether a value has the fields of one consent document. */
+function isConsentDoc(value: unknown): value is ConsentDocContent['terms'] {
+  return (
+    isRecord(value) &&
+    typeof value.version === 'number' &&
+    typeof value.title === 'string' &&
+    typeof value.content === 'string' &&
+    (value.effective_from === undefined || typeof value.effective_from === 'string')
+  );
+}
+
+/**
+ * Reads the consent documents off the form context.
+ *
+ * @param formContext - `registry.formContext`, untyped by RJSF.
+ * @returns The terms and privacy documents, or `undefined` when either is missing.
+ */
+function readConsentContent(formContext: unknown): ConsentDocContent | undefined {
+  if (!isRecord(formContext)) return undefined;
+  const content = formContext.consentContent;
+  if (!isRecord(content) || !isConsentDoc(content.terms) || !isConsentDoc(content.privacy)) {
+    return undefined;
+  }
+  return { terms: content.terms, privacy: content.privacy };
+}
 
 /**
  * Renders the registration consent checkbox with clickable Terms/Privacy links.
@@ -38,8 +65,7 @@ export function ConsentCheckboxWidget(props: WidgetProps): JSX.Element {
   const [modalOpen, setModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ConsentTab>('terms');
 
-  const consentContent = (registry.formContext as Record<string, unknown> | undefined)
-    ?.consentContent as ConsentDocContent | undefined;
+  const consentContent = readConsentContent(registry.formContext);
 
   const openTab = (tab: ConsentTab): void => {
     setActiveTab(tab);
