@@ -292,7 +292,9 @@ describe('finaliseBulk — normal completion', () => {
     const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
     const lines = csv.trim().split('\n');
     expect(lines).toHaveLength(2);
-    expect(lines[1]!.trim()).toBe('Asha,,bad phone');
+    expect(lines[1]!.trim()).toBe(
+      'Asha,,bad phone,"Check this row against the downloadable template, then fix it in your upload file (not in errors.csv) and upload it again."',
+    );
   });
 
   it('pads a raw CSV line that is shorter than the header (defensive, ragged row)', async () => {
