@@ -1173,5 +1173,11 @@
       "body": "It may have been removed, or you may not have access to it.",
       "home": "Go to the console"
     }
+  },
+  "page_error": {
+    "title": "This page couldn't load",
+    "body": "Something went wrong on our side. Try again, or go back to the overview.",
+    "retry": "Try again",
+    "home": "Go to the overview"
   }
 }
