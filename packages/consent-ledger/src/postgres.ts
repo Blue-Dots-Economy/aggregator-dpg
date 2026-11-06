@@ -8,12 +8,14 @@
  * @module @aggregator-dpg/consent-ledger/postgres
  */
 
-import type { PgDatabase } from 'drizzle-orm/pg-core';
+import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import { consentRecord } from '@aggregator-dpg/db-schema/schema';
 import {
   UpstreamError,
   DomainError,
   ValidationError,
+  errorType,
+  toError,
 } from '@aggregator-dpg/shared-primitives/errors';
 import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok } from '@aggregator-dpg/shared-primitives/result';
@@ -27,9 +29,22 @@ import {
 } from './interface.js';
 import { logger } from './logger.js';
 
-// Loose type so both a `db` and a `tx` handle are accepted.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type DbHandle = PgDatabase<any, any, any>;
+/** The part of a Drizzle database or transaction handle the ledger uses. Both a `db` and a `tx` fit. */
+type DbHandle = Pick<PgDatabase<PgQueryResultHKT>, 'insert'>;
+
+/**
+ * True when `value` has an `insert` method, as a Drizzle database or transaction does.
+ *
+ * @param value - The executor a caller passed to `withExecutor`.
+ */
+function isDbHandle(value: unknown): value is DbHandle {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'insert' in value &&
+    typeof value.insert === 'function'
+  );
+}
 
 /**
  * Postgres-backed implementation of {@link ConsentLedgerBase}.
@@ -51,10 +66,14 @@ export class PostgresConsentLedger extends ConsentLedgerBase {
    *
    * @param executor - The caller's Drizzle transaction, or nothing.
    * @returns A ledger bound to it (this ledger when none is given).
+   * @throws {TypeError} If `executor` is not a Drizzle database or transaction handle.
    */
   override withExecutor(executor: unknown): PostgresConsentLedger {
     if (executor === undefined || executor === null) return this;
-    return new PostgresConsentLedger(executor as DbHandle);
+    if (!isDbHandle(executor)) {
+      throw new TypeError('consent ledger executor is not a Drizzle database or transaction');
+    }
+    return new PostgresConsentLedger(executor);
   }
 
   /**
@@ -153,12 +172,12 @@ export class PostgresConsentLedger extends ConsentLedgerBase {
 
       return ok(record);
     } catch (e) {
-      const cause = e as Error;
+      const cause = toError(e);
       logger.error({
         operation,
         status: 'failure',
         error: cause.message,
-        error_type: cause.constructor.name,
+        error_type: errorType(e),
         latency_ms: Date.now() - start,
       });
       return err(
