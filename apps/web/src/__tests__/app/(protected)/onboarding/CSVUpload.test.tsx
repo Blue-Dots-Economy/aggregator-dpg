@@ -1,26 +1,18 @@
 /**
- * Tests for `CSVUpload` (the upload widget) and `RecentUploadsBody` (the
- * "recent uploads" table), the two exports of
- * `app/(protected)/onboarding/_components/CSVUpload.tsx`.
- *
- * This is the largest / highest-priority file in the onboarding scope, so
- * coverage here is deliberately thorough: file-type validation, drag+drop,
- * the attestation gate, the full upload lifecycle (success / duplicate /
- * failure), the template-download redirect, and every branch of the
- * recent-uploads table (loading/error/empty, status badges, the errors-CSV
- * download action and its failure path).
+ * Tests for `CSVUpload` (the bulk upload widget): file-type validation,
+ * drag+drop, the attestation gate, the upload lifecycle (success / duplicate /
+ * failure), the template-download redirect, and the participant type.
  *
  * `setTimeout`-driven UI (the success toast and the post-upload navigation
  * delay) is exercised by spying on `global.setTimeout` and invoking the
- * captured callback directly — this avoids fighting fake timers against
- * Testing Library's async `findBy*`/`waitFor` polling.
+ * captured callback directly, which avoids fake timers fighting Testing
+ * Library's async `findBy*`/`waitFor` polling.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
-import type { BulkUploadStatus } from '@/services/onboarding.service';
 import { BulkUploadStartUnreadError } from '@/services/onboarding.service';
 import type * as OnboardingServiceModule from '@/services/onboarding.service';
 import { ResponseShapeError } from '@/lib/response-shape-error';
@@ -67,7 +59,7 @@ vi.mock('@/services/onboarding.service', async (importOriginal) => ({
   onboardingService: { errorsCsvUrl: (...args: unknown[]) => errorsCsvUrl(...args) },
 }));
 
-import { CSVUpload, RecentUploadsBody } from '@/app/(protected)/onboarding/_components/CSVUpload';
+import { CSVUpload } from '@/app/(protected)/onboarding/_components/bulk-upload/CSVUpload';
 
 function renderUpload(props: Parameters<typeof CSVUpload>[0] = {}) {
   return render(
@@ -77,35 +69,8 @@ function renderUpload(props: Parameters<typeof CSVUpload>[0] = {}) {
   );
 }
 
-function renderRecent() {
-  return render(
-    <NextIntlClientProvider locale="en" messages={{ onboarding: messages.onboarding }}>
-      <RecentUploadsBody />
-    </NextIntlClientProvider>,
-  );
-}
-
 function makeCsv(name = 'roster.csv', content = 'name,phone\nA,123') {
   return new File([content], name, { type: 'text/csv' });
-}
-
-function baseUpload(overrides: Partial<BulkUploadStatus> = {}): BulkUploadStatus {
-  return {
-    upload_id: 'up-1',
-    status: 'completed',
-    status_reason: null,
-    participant_type: 'seeker',
-    total_rows: 10,
-    passed: 8,
-    failed: 2,
-    skipped: 0,
-    errors_csv_s3_key: null,
-    schema_id: 'profile',
-    schema_version: '1.0',
-    created_at: new Date().toISOString(),
-    completed_at: new Date().toISOString(),
-    ...overrides,
-  };
 }
 
 describe('<CSVUpload />', () => {
@@ -342,176 +307,52 @@ describe('<CSVUpload />', () => {
     renderUpload();
     expect(screen.getByLabelText('Participant type: Seekers')).toBeInTheDocument();
   });
-});
 
-describe('<RecentUploadsBody />', () => {
-  afterEach(() => vi.clearAllMocks());
-
-  it('shows a loading-safe empty table when there are no uploads and the query is not loading', () => {
-    useRecentBulkUploads.mockReturnValue({ data: { items: [] }, isLoading: false, error: null });
-    renderRecent();
-    expect(screen.getByText('No uploads yet.')).toBeInTheDocument();
-    expect(screen.getByText('0 shown')).toBeInTheDocument();
-  });
-
-  it('shows an error row when the query fails', () => {
-    useRecentBulkUploads.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      error: new Error('upstream unavailable'),
-    });
-    renderRecent();
-    expect(screen.getByText('upstream unavailable')).toBeInTheDocument();
-    expect(screen.queryByText('No uploads yet.')).not.toBeInTheDocument();
-  });
-
-  it('shows a plain message instead of the raw text when the list reply is unreadable', () => {
-    useRecentBulkUploads.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      error: new ResponseShapeError('/api/bulk-uploads/list', []),
-    });
-    renderRecent();
-    expect(screen.getByText(messages.onboarding.csv.reply_unreadable)).toBeInTheDocument();
-    expect(screen.queryByText(/unexpected response shape/)).not.toBeInTheDocument();
-  });
-
-  it('does not show the empty-state row while the query is still loading', () => {
-    useRecentBulkUploads.mockReturnValue({ data: undefined, isLoading: true, error: null });
-    renderRecent();
-    expect(screen.queryByText('No uploads yet.')).not.toBeInTheDocument();
-  });
-
-  it('renders a row per upload with status, counts, and a relative + absolute timestamp', () => {
-    const hoursAgo = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
-    useRecentBulkUploads.mockReturnValue({
-      data: { items: [baseUpload({ upload_id: 'u1', created_at: hoursAgo })] },
-      isLoading: false,
-      error: null,
-    });
-    renderRecent();
-    expect(screen.getByText('1 shown')).toBeInTheDocument();
-    expect(screen.getByText('2h ago')).toBeInTheDocument();
-    expect(screen.getByText('seeker')).toBeInTheDocument();
-    expect(screen.getByText('completed')).toBeInTheDocument();
-  });
-
-  it('badges a "provider" row distinctly from "seeker", and formats a days-ago timestamp', () => {
-    const daysAgo = new Date(Date.now() - 2 * 86400 * 1000).toISOString();
-    useRecentBulkUploads.mockReturnValue({
-      data: { items: [baseUpload({ participant_type: 'provider', created_at: daysAgo })] },
-      isLoading: false,
-      error: null,
-    });
-    renderRecent();
-    expect(screen.getByText('provider')).toBeInTheDocument();
-    expect(screen.getByText('2d ago')).toBeInTheDocument();
-  });
-
-  it('shows "All rows passed" for a completed upload with zero failures', () => {
-    useRecentBulkUploads.mockReturnValue({
-      data: { items: [baseUpload({ failed: 0, errors_csv_s3_key: null })] },
-      isLoading: false,
-      error: null,
-    });
-    renderRecent();
-    expect(screen.getByText('All rows passed')).toBeInTheDocument();
-  });
-
-  it('shows an em dash when a non-completed upload has no status_reason', () => {
-    useRecentBulkUploads.mockReturnValue({
-      data: { items: [baseUpload({ status: 'row_processing', status_reason: null, failed: 0 })] },
-      isLoading: false,
-      error: null,
-    });
-    renderRecent();
-    expect(screen.getByText('—')).toBeInTheDocument();
-  });
-
-  it('shows the status_reason for a failed upload with no errors CSV', () => {
-    useRecentBulkUploads.mockReturnValue({
-      data: {
-        items: [
-          baseUpload({
-            status: 'file_failed',
-            status_reason: 'invalid header row',
-            errors_csv_s3_key: null,
-            failed: 0,
-          }),
-        ],
-      },
-      isLoading: false,
-      error: null,
-    });
-    renderRecent();
-    expect(screen.getByText(/invalid header row/)).toBeInTheDocument();
-  });
-
-  it('downloads the errors CSV and opens it in a new tab when clicked', async () => {
-    errorsCsvUrl.mockResolvedValue({ url: 'https://example.com/errors.csv' });
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+  it('uploads as the profile type once the profile loads after the first render', async () => {
+    mutateAsync.mockResolvedValue({ duplicate: true });
+    useProfileRaw.mockReturnValue({ data: undefined });
     const user = userEvent.setup();
-    useRecentBulkUploads.mockReturnValue({
-      data: {
-        items: [baseUpload({ status: 'completed', failed: 3, errors_csv_s3_key: 'k1' })],
-      },
-      isLoading: false,
-      error: null,
-    });
-    renderRecent();
+    const { rerender } = renderUpload();
+    expect(screen.getByText(/uploaded as seekers/)).toBeInTheDocument();
 
-    await user.click(screen.getByText('errors.csv'));
-    await waitFor(() =>
-      expect(openSpy).toHaveBeenCalledWith(
-        'https://example.com/errors.csv',
-        '_blank',
-        'noopener,noreferrer',
-      ),
+    useProfileRaw.mockReturnValue({ data: { type: 'provider' } });
+    rerender(
+      <NextIntlClientProvider locale="en" messages={{ onboarding: messages.onboarding }}>
+        <CSVUpload />
+      </NextIntlClientProvider>,
     );
-    openSpy.mockRestore();
+    expect(screen.getByText(/uploaded as providers/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Participant type: Providers')).toBeInTheDocument();
+
+    await pickAndAttest(user);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+    expect(mutateAsync.mock.calls[0]![0].participantType).toBe('provider');
   });
 
-  it('hides the errors CSV from a caller without profiles.view_pii', () => {
-    canMock.mockImplementation((c: string) => c !== 'profiles.view_pii');
-    useRecentBulkUploads.mockReturnValue({
-      data: {
-        items: [baseUpload({ status: 'completed', failed: 3, errors_csv_s3_key: 'k1' })],
-      },
-      isLoading: false,
-      error: null,
-    });
-    renderRecent();
-    expect(screen.queryByText('errors.csv')).not.toBeInTheDocument();
-    expect(screen.queryByText(/all rows passed/i)).not.toBeInTheDocument();
-    canMock.mockImplementation(() => true);
-  });
-
-  it('logs a warning and resets the downloading state when the errors-CSV fetch fails', async () => {
-    errorsCsvUrl.mockRejectedValue(new Error('sign failed'));
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('hides the success toast after it has been shown', async () => {
+    mutateAsync.mockResolvedValue({ duplicate: false });
+    const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
     const user = userEvent.setup();
-    useRecentBulkUploads.mockReturnValue({
-      data: {
-        items: [baseUpload({ status: 'completed', failed: 3, errors_csv_s3_key: 'k1' })],
-      },
-      isLoading: false,
-      error: null,
-    });
-    renderRecent();
+    renderUpload();
+    await pickAndAttest(user);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+    const toastText =
+      'Accounts will be live once the user logs in on the platform or via the call.';
+    expect(await screen.findByText(toastText)).toBeInTheDocument();
 
-    await user.click(screen.getByText('errors.csv'));
-    await waitFor(() => expect(warnSpy).toHaveBeenCalled());
-    expect(screen.getByText('errors.csv')).toBeInTheDocument(); // downloading flag reset, button back to normal label
-    warnSpy.mockRestore();
+    const hideCall = setTimeoutSpy.mock.calls.find((c) => c[1] === 6000);
+    expect(hideCall).toBeDefined();
+    act(() => (hideCall![0] as () => void)());
+    expect(screen.queryByText(toastText)).not.toBeInTheDocument();
   });
 
-  it('renders an unmapped status raw via the badge fallback style', () => {
-    useRecentBulkUploads.mockReturnValue({
-      data: { items: [baseUpload({ status: 'some_new_status', failed: 0 })] },
-      isLoading: false,
-      error: null,
-    });
-    renderRecent();
-    expect(screen.getByText('some_new_status')).toBeInTheDocument();
+  it('clears the file input when the picked file is removed', async () => {
+    const user = userEvent.setup();
+    renderUpload();
+    const input = document.getElementById('csv-file-input') as HTMLInputElement;
+    await user.upload(input, makeCsv());
+    expect(input.files).toHaveLength(1);
+    await user.click(screen.getByLabelText('Remove file'));
+    expect(input.value).toBe('');
   });
 });

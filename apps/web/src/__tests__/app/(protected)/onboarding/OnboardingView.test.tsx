@@ -31,7 +31,7 @@ vi.mock('@/components/shell/Topbar', () => ({
   ),
 }));
 
-vi.mock('@/app/(protected)/onboarding/_components/CSVUpload', () => ({
+vi.mock('@/app/(protected)/onboarding/_components/bulk-upload/RecentUploadsBody', () => ({
   RecentUploadsBody: () => <div data-testid="recent-uploads-body" />,
 }));
 

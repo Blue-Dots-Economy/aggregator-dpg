@@ -29,7 +29,7 @@ vi.mock('@/components/shell/Topbar', () => ({
 }));
 
 const { csvUploadPropsSpy } = vi.hoisted(() => ({ csvUploadPropsSpy: vi.fn() }));
-vi.mock('@/app/(protected)/onboarding/_components/CSVUpload', () => ({
+vi.mock('@/app/(protected)/onboarding/_components/bulk-upload/CSVUpload', () => ({
   CSVUpload: (props: { attestation: BulkAttestationContent | null }) => {
     csvUploadPropsSpy(props);
     return <div data-testid="csv-upload">{props.attestation?.content ?? 'no-attestation'}</div>;

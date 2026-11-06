@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { useRecentBulkUploads, useRegistrationLinks } from '@/hooks/useOnboarding';
 import { useProfileRaw } from '@/hooks/useProfile';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '@/hooks/useAggregatorConfig';
-import { RecentUploadsBody } from './CSVUpload';
+import { RecentUploadsBody } from './bulk-upload/RecentUploadsBody';
 import { YourLinksBody } from './registration-links/YourLinksBody';
 import { formatRelative } from './format-relative';
 import { SummaryCard } from './SummaryCard';
