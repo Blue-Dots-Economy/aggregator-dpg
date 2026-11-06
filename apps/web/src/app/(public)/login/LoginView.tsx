@@ -166,13 +166,8 @@ function humanizeError(code: string, t: TFunction): string {
     'exchange_token_verify_failed',
   ] as const;
 
-  type ErrorKey = (typeof knownKeys)[number];
-  const known = new Set<string>(knownKeys);
-
-  if (known.has(code)) {
-    return t(`errors.${code as ErrorKey}`);
-  }
-  return t('errors.unknown');
+  const known = knownKeys.find((key) => key === code);
+  return known ? t(`errors.${known}`) : t('errors.unknown');
 }
 
 interface WelcomeProps {
