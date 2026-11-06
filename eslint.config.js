@@ -20,9 +20,9 @@ const TEST_FILES = [
   '**/e2e/**',
 ];
 
-/** Turns every rule of a shared config into a warning, for the lint ratchet. */
-function asWarnings(rules) {
-  return Object.fromEntries(Object.keys(rules).map((name) => [name, 'warn']));
+/** Turns every rule of a shared config into an error. */
+function asErrors(rules) {
+  return Object.fromEntries(Object.keys(rules).map((name) => [name, 'error']));
 }
 
 export default tseslint.config(
@@ -86,7 +86,7 @@ export default tseslint.config(
       'import-x/no-cycle': 'error',
       // Lint ratchet: warn now, error once each block is clean.
       eqeqeq: ['error', 'always', { null: 'ignore' }],
-      '@typescript-eslint/consistent-type-assertions': ['warn', { assertionStyle: 'never' }],
+      '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }],
     },
   },
 
@@ -120,9 +120,9 @@ export default tseslint.config(
     },
     rules: {
       'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'warn',
-      'react-hooks/set-state-in-effect': 'warn',
-      ...asWarnings(nextPlugin.flatConfig.coreWebVitals.rules),
+      'react-hooks/exhaustive-deps': 'error',
+      'react-hooks/set-state-in-effect': 'error',
+      ...asErrors(nextPlugin.flatConfig.coreWebVitals.rules),
     },
   },
 
@@ -131,7 +131,7 @@ export default tseslint.config(
     files: ['apps/web/src/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [
-        'warn',
+        'error',
         {
           patterns: [
             { group: ['../../*'], message: 'Import through the @/ alias instead of ../../.' },

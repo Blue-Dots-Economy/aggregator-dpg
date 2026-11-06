@@ -87,8 +87,8 @@ test('eqeqeq allows == null', async () => {
 const CAST = 'interface Foo { x: number }\nexport const f = (v: unknown): Foo => v as Foo;\n';
 const RULE_CAST = '@typescript-eslint/consistent-type-assertions';
 
-test('warns on an `as` cast in production code', async () => {
-  assert.deepEqual(severities(await lint(PKG_FILE, CAST), RULE_CAST), [1]);
+test('an `as` cast in production code is an error', async () => {
+  assert.deepEqual(severities(await lint(PKG_FILE, CAST), RULE_CAST), [2]);
 });
 
 test('allows `as const`', async () => {
@@ -123,7 +123,7 @@ export function Probe({ on }: { on: boolean }) {
   assert.deepEqual(severities(await lint(WEB_FILE, code), 'react-hooks/rules-of-hooks'), [2]);
 });
 
-test('react-hooks/set-state-in-effect warns on state copied in an effect', async () => {
+test('react-hooks/set-state-in-effect is an error for state copied in an effect', async () => {
   const code = `import { useEffect, useState } from 'react';
 export function Probe({ items }: { items: string[] }) {
   const [visible, setVisible] = useState(items);
@@ -133,10 +133,10 @@ export function Probe({ items }: { items: string[] }) {
   return <p>{visible.length}</p>;
 }
 `;
-  assert.deepEqual(severities(await lint(WEB_FILE, code), 'react-hooks/set-state-in-effect'), [1]);
+  assert.deepEqual(severities(await lint(WEB_FILE, code), 'react-hooks/set-state-in-effect'), [2]);
 });
 
-test('react-hooks/exhaustive-deps warns on a missing dependency', async () => {
+test('react-hooks/exhaustive-deps is an error for a missing dependency', async () => {
   const code = `import { useEffect } from 'react';
 export function Probe({ id }: { id: string }) {
   useEffect(() => {
@@ -145,21 +145,21 @@ export function Probe({ id }: { id: string }) {
   return null;
 }
 `;
-  assert.deepEqual(severities(await lint(WEB_FILE, code), 'react-hooks/exhaustive-deps'), [1]);
+  assert.deepEqual(severities(await lint(WEB_FILE, code), 'react-hooks/exhaustive-deps'), [2]);
 });
 
 // ── Next.js (web only) ─────────────────────────────────────────────────────
 
-test('@next/next rules run in the web app as warnings', async () => {
+test('@next/next rules run in the web app as errors', async () => {
   const code = 'export function Probe() {\n  return <img src="/x.png" alt="x" />;\n}\n';
-  assert.deepEqual(severities(await lint(WEB_FILE, code), '@next/next/no-img-element'), [1]);
+  assert.deepEqual(severities(await lint(WEB_FILE, code), '@next/next/no-img-element'), [2]);
 });
 
 // ── Import alias (web only) ────────────────────────────────────────────────
 
-test('warns on a ../../ import inside apps/web/src', async () => {
+test('a ../../ import inside apps/web/src is an error', async () => {
   const m = await lint(WEB_FILE, "export { cn } from '../../lib/cn';\n");
-  assert.deepEqual(severities(m, 'no-restricted-imports'), [1]);
+  assert.deepEqual(severities(m, 'no-restricted-imports'), [2]);
 });
 
 test('allows the @/ alias and a single ../ import', async () => {
