@@ -316,15 +316,14 @@ services:
       # changing this needs only a container restart. Set it to `en,hi` to drop
       # Kannada, or to `en` to hide the switcher entirely.
       #
-      # NO literal default here, deliberately. `${ENABLED_LANGUAGES:-en,kn,hi}`
-      # would put that default in the container whenever the operator's `.env`
-      # omits the var, which is indistinguishable from them having chosen it —
-      # and it silently masked the legacy-name fallback below. The default now
-      # lives in exactly one place, `parseEnabledLocales`' SUPPORTED_LOCALES,
-      # which an empty value falls through to.
+      # No literal default here. `${ENABLED_LANGUAGES:-en,kn,hi}` would put that
+      # default in the container whenever the operator's `.env` omits the var,
+      # which looks the same as the operator choosing it. The default lives in
+      # one place, `parseEnabledLocales`' SUPPORTED_LOCALES, which an empty
+      # value falls through to.
       ENABLED_LANGUAGES: ${ENABLED_LANGUAGES:-}
       # Max invites an org owner can send per submission. Keep in step with the
-      # api's INVITE_MINT_MAX_RECIPIENTS. Empty → the app's default of 10.
+      # api's INVITE_MINT_MAX_RECIPIENTS. Empty → the app's default.
       INVITE_MAX_RECIPIENTS: ${INVITE_MAX_RECIPIENTS:-}
       # Registration-form address autocomplete + institute picker. All four are
       # runtime values read per request by the root layout, so a change needs a
@@ -343,12 +342,6 @@ services:
       REFERENCE_BASE_URL: ${REFERENCE_BASE_URL:-}
       PHOTON_URL: ${PHOTON_URL:-}
       GEO_COUNTRY: ${GEO_COUNTRY:-}
-      # Transitional: both settings were `NEXT_PUBLIC_`-prefixed before they
-      # were made runtime-readable. Forwarded so a deployment whose `.env` still
-      # uses the old name keeps working until it renames. Drop these two once no
-      # deployment sets them.
-      NEXT_PUBLIC_ENABLED_LANGUAGES: ${NEXT_PUBLIC_ENABLED_LANGUAGES:-}
-      NEXT_PUBLIC_INVITE_MAX_RECIPIENTS: ${NEXT_PUBLIC_INVITE_MAX_RECIPIENTS:-}
       # ─── OIDC (Authorization Code + PKCE) ────────────────────────────
       # OIDC_ISSUER must resolve identically from the browser AND the web
       # container. With nginx as the sole ingress, both reach Keycloak via
