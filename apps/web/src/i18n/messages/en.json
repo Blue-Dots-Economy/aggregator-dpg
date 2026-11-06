@@ -38,7 +38,8 @@
     "back": "Back",
     "cancel": "Cancel",
     "continue": "Continue",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "domain_label": "Profile Type"
   },
   "register": {
     "heading_tagline": "Tell us about your [[org]].",
@@ -351,7 +352,7 @@
       "field_event_date": "Event Date",
       "field_event_location": "Event Location",
       "field_district": "District",
-      "field_domain": "Domain",
+      "field_domain": "Profile Type",
       "field_registration_mode": "Campaign type",
       "field_tags": "Tags (optional)",
       "placeholder_state": "State",
@@ -370,7 +371,7 @@
         "state": "Enter the State.",
         "district": "Enter the District.",
         "lever_event": "Enter the Event.",
-        "domain": "Domain is not set.",
+        "domain": "Profile type is not set.",
         "registration_mode": "Select a form type."
       }
     },
@@ -835,7 +836,7 @@
       "name": "Name",
       "contact": "Contact",
       "status": "Status",
-      "serves": "Domains",
+      "serves": "Profile Types",
       "open": "Open",
       "coordinator": "[[User]]",
       "organisation": "[[Org]]",
@@ -844,8 +845,8 @@
       "apply": "Apply",
       "org_filter": "[[Org]]",
       "all_orgs": "All [[orgs]]",
-      "serves_filter": "Serves",
-      "all_domains": "All domains",
+      "serves_filter": "Profile type",
+      "all_domains": "All profile types",
       "clear_filter": "Remove the {label} filter",
       "clear_all": "Clear filters"
     },
@@ -855,13 +856,15 @@
       "reason": "Reason (optional, sent to the applicant)",
       "already": "Already decided elsewhere — now {status}.",
       "decided": "Decision saved.",
-      "domains": "Domains served",
-      "domains_sub": "Which records this [[user]] can work with.",
-      "domains_empty": "Pick at least one domain.",
+      "domains": "Profile Types",
+      "domains_sub": "Which profile types this [[user]] can work with.",
+      "domains_empty": "Pick at least one profile type.",
       "unsaved": "Unsaved changes",
       "discard": "Discard",
-      "save_domains": "Save domains",
-      "domains_saved": "Domains saved.",
+      "save_domains": "Save profile types",
+      "domains_saved": "Profile types saved.",
+      "remove_domains_note": "Removing {domains} stops this [[user]] working with those profiles.",
+      "remove_domains_confirm": "Remove and save",
       "back": "Back to [[users]]",
       "joined": "Joined {date}",
       "copy_email": "Copy email",
@@ -884,7 +887,7 @@
         "server": "Something went wrong on our side. Try again in a few minutes.",
         "generic": "That didn't work. Please try again."
       },
-      "save_domains_first": "Save or discard your domain changes before deciding."
+      "save_domains_first": "Save or discard your profile type changes before deciding."
     },
     "invite": {
       "heading": "Invite [[users]]",
@@ -1142,7 +1145,7 @@
       "col_coordinator": "[[User]]",
       "col_organisation": "[[Org]]",
       "col_status": "Status",
-      "col_domains": "Domains",
+      "col_domains": "Profile Types",
       "col_action": "Action",
       "view": "View",
       "view_named": "View {name}",

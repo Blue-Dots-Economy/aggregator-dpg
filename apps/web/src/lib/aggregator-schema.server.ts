@@ -47,7 +47,7 @@ export function resolveAggregatorSchemaPath(file: string): string {
 
 /**
  * Replaces the `type` options in the schema and UI schema with the network's
- * domains from `GET /v1/aggregator-config`.
+ * domains from `GET /v1/aggregator-config`, for a single-choice or a list field.
  *
  * Keeps the file's static values if the api is unreachable.
  *
@@ -65,16 +65,24 @@ export async function patchTypeFromNetwork(
     const domains = readDomainLabels(await res.json()) ?? [];
     if (domains.length === 0) return;
 
+    const ids = domains.map((d) => d.id);
+    const labels = domains.map((d) => d.label);
     const typeField = schema.properties?.['type'];
-    if (typeof typeField === 'object') {
-      typeField.enum = domains.map((d) => d.id);
-      typeField.oneOf = domains.map((d) => ({ const: d.id, title: d.label }));
-    }
+    const typeUi = readJsonObject(uiSchema['type']) ?? {};
 
-    uiSchema['type'] = {
-      ...readJsonObject(uiSchema['type']),
-      'ui:enumNames': domains.map((d) => d.label),
-    };
+    // A list field (several domains) carries its choices on `items`, and RJSF
+    // reads their labels from the items UI schema.
+    if (typeof typeField === 'object' && typeField.type === 'array') {
+      typeField.items = { type: 'string', enum: ids };
+      typeUi['items'] = { 'ui:enumNames': labels };
+    } else {
+      if (typeof typeField === 'object') {
+        typeField.enum = ids;
+        typeField.oneOf = domains.map((d) => ({ const: d.id, title: d.label }));
+      }
+      typeUi['ui:enumNames'] = labels;
+    }
+    uiSchema['type'] = typeUi;
   } catch {
     // Best-effort; the static values remain.
   }

@@ -115,8 +115,9 @@ describe('OrgCoordinators', () => {
     );
   });
 
-  it('shows each served domain as a chip', () => {
+  it('shows each served profile type as a chip under a Profile Types column', () => {
     renderList();
+    expect(screen.getByRole('columnheader', { name: 'Profile Types' })).toBeInTheDocument();
     expect(screen.getAllByText('Seekers')).toHaveLength(3);
     expect(screen.getAllByText('Providers')).toHaveLength(2);
   });
@@ -147,5 +148,6 @@ describe('OrgCoordinators', () => {
       </NextIntlClientProvider>,
     );
     expect(screen.getByRole('searchbox', { name: 'नाम या ईमेल खोजें' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'प्रोफ़ाइल प्रकार' })).toBeInTheDocument();
   });
 });

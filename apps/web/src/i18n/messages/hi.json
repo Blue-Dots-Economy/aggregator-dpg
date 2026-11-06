@@ -38,7 +38,8 @@
     "back": "वापस",
     "cancel": "रद्द करें",
     "continue": "जारी रखें",
-    "loading": "लोड हो रहा है…"
+    "loading": "लोड हो रहा है…",
+    "domain_label": "प्रोफ़ाइल प्रकार"
   },
   "register": {
     "heading_tagline": "हमें अपने [[org]] के बारे में बताएं।",
@@ -351,7 +352,7 @@
       "field_event_date": "कार्यक्रम की तारीख",
       "field_event_location": "कार्यक्रम का स्थान",
       "field_district": "जिला",
-      "field_domain": "डोमेन",
+      "field_domain": "प्रोफ़ाइल प्रकार",
       "field_registration_mode": "अभियान प्रकार",
       "field_tags": "टैग (वैकल्पिक)",
       "placeholder_state": "राज्य",
@@ -370,7 +371,7 @@
         "state": "राज्य दर्ज करें।",
         "district": "जिला दर्ज करें।",
         "lever_event": "कार्यक्रम दर्ज करें।",
-        "domain": "डोमेन सेट नहीं है।",
+        "domain": "प्रोफ़ाइल प्रकार सेट नहीं है।",
         "registration_mode": "फॉर्म प्रकार चुनें।"
       }
     },
@@ -835,7 +836,7 @@
       "name": "Name",
       "contact": "Contact",
       "status": "Status",
-      "serves": "Domains",
+      "serves": "Profile Types",
       "open": "Open",
       "coordinator": "[[User]]",
       "organisation": "[[Org]]",
@@ -844,8 +845,8 @@
       "apply": "Apply",
       "org_filter": "[[Org]]",
       "all_orgs": "All [[orgs]]",
-      "serves_filter": "Serves",
-      "all_domains": "All domains",
+      "serves_filter": "Profile type",
+      "all_domains": "All profile types",
       "clear_filter": "Remove the {label} filter",
       "clear_all": "Clear filters"
     },
@@ -855,13 +856,15 @@
       "reason": "कारण (वैकल्पिक, आवेदक को भेजा जाएगा)",
       "already": "कहीं और पहले ही निर्णय हो चुका है — अब {status}।",
       "decided": "निर्णय सहेजा गया।",
-      "domains": "सेवा वाले डोमेन",
-      "domains_sub": "यह [[user]] किन रिकॉर्ड पर काम कर सकता है।",
-      "domains_empty": "कम से कम एक डोमेन चुनें।",
+      "domains": "प्रोफ़ाइल प्रकार",
+      "domains_sub": "यह [[user]] किन प्रोफ़ाइल प्रकारों पर काम कर सकता है।",
+      "domains_empty": "कम से कम एक प्रोफ़ाइल प्रकार चुनें।",
       "unsaved": "बदलाव सहेजे नहीं गए",
       "discard": "रद्द करें",
-      "save_domains": "डोमेन सहेजें",
-      "domains_saved": "डोमेन सहेजे गए।",
+      "save_domains": "प्रोफ़ाइल प्रकार सहेजें",
+      "domains_saved": "प्रोफ़ाइल प्रकार सहेजे गए।",
+      "remove_domains_note": "{domains} हटाने से यह [[user]] उन प्रोफ़ाइल पर काम नहीं कर पाएगा।",
+      "remove_domains_confirm": "हटाएँ और सहेजें",
       "back": "[[users_obl]] पर वापस",
       "joined": "{date} को जुड़े",
       "copy_email": "ईमेल कॉपी करें",
@@ -884,7 +887,7 @@
         "server": "हमारी ओर से कुछ गड़बड़ हुई। कुछ मिनट बाद फिर से प्रयास करें।",
         "generic": "यह नहीं हो सका। कृपया फिर से प्रयास करें।"
       },
-      "save_domains_first": "निर्णय लेने से पहले डोमेन बदलाव सहेजें या रद्द करें।"
+      "save_domains_first": "निर्णय लेने से पहले प्रोफ़ाइल प्रकार के बदलाव सहेजें या रद्द करें।"
     },
     "invite": {
       "heading": "[[users_obl]] को आमंत्रित करें",
@@ -1142,7 +1145,7 @@
       "col_coordinator": "[[user]]",
       "col_organisation": "[[org]]",
       "col_status": "स्थिति",
-      "col_domains": "डोमेन",
+      "col_domains": "प्रोफ़ाइल प्रकार",
       "col_action": "कार्रवाई",
       "view": "देखें",
       "view_named": "{name} देखें",
