@@ -751,3 +751,78 @@ describe('<LegalDocumentView /> click pins the highlight through its scroll', ()
     expect(screen.getByRole('link', { name: 'Third' })).not.toHaveAttribute('aria-current');
   });
 });
+
+describe('<LegalDocumentView /> fenced code and the scroll-spy', () => {
+  const FENCED: LegalGroup[] = [
+    {
+      audience: 'org',
+      label: 'For organisations',
+      content: {
+        privacy: {
+          version: 1,
+          title: 'Privacy Policy',
+          content:
+            'Intro.\n```\n## Not a preamble heading\n```\n## Overview\n```\n### Not a section heading\n```\n### Retention\nx',
+        },
+        terms: { version: 1, title: 'Terms of Service', content: 'Welcome.' },
+      },
+    },
+  ];
+
+  it('treats headings inside fenced code as content, in the preamble and in a section', () => {
+    renderView('', FENCED);
+    const rail = screen.getByRole('navigation', { name: messages.legal.contents_label });
+    expect(within(rail).getByRole('link', { name: 'Overview' })).toBeInTheDocument();
+    expect(within(rail).getByRole('link', { name: 'Retention' })).toBeInTheDocument();
+    expect(within(rail).queryByRole('link', { name: /Not a/ })).toBeNull();
+    expect(screen.getByText(/## Not a preamble heading/)).toBeInTheDocument();
+    expect(screen.getByText(/### Not a section heading/)).toBeInTheDocument();
+  });
+
+  const SPY_GROUPS: LegalGroup[] = [
+    {
+      audience: 'participant',
+      label: 'For participants',
+      content: {
+        privacy: {
+          version: 1,
+          title: 'Privacy Policy',
+          content: '## Privacy Policy\n\nIntro.\n### Retention\nx',
+        },
+        terms: {
+          version: 1,
+          title: 'Terms of Service',
+          content: '## Terms of Service\n\nWelcome.\n### Governing law\nIndia.',
+        },
+      },
+    },
+  ];
+
+  function placeHeadings(tops: Record<string, number>) {
+    for (const [id, top] of Object.entries(tops)) {
+      const el = document.getElementById(id);
+      if (!el) throw new Error(`missing element #${id}`);
+      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue(
+        DOMRect.fromRect({ x: 0, y: top, width: 0, height: 20 }),
+      );
+    }
+  }
+
+  it('follows the scroll when nothing is pinned, and pills a passed document’s first section', () => {
+    renderView('', SPY_GROUPS);
+    placeHeadings({ privacy: 0, retention: 10, terms: 200, 'governing-law': 300 });
+    fireEvent.scroll(window);
+    expect(screen.getByRole('link', { name: 'Retention' })).toHaveAttribute('aria-current', 'true');
+
+    placeHeadings({ privacy: -300, retention: -200, terms: 20, 'governing-law': 300 });
+    fireEvent.scroll(window);
+    expect(screen.getByRole('link', { name: 'Governing law' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
+
+    placeHeadings({ privacy: 200, retention: 300, terms: 400, 'governing-law': 500 });
+    fireEvent.resize(window);
+    expect(screen.getByRole('link', { name: 'Retention' })).toHaveAttribute('aria-current', 'true');
+  });
+});
