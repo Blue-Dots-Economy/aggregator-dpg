@@ -265,7 +265,7 @@ describe('finaliseBulk — normal completion', () => {
     expect(putObject).toHaveBeenCalledTimes(1);
     const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
     // No stashed headers -> only the two synthetic columns appear.
-    expect(csv.split('\n')[0]!.trim()).toBe('error_category,error_reason');
+    expect(csv.split('\n')[0]!.trim()).toBe('error_category,error_reason,what_to_do');
   });
 
   it('skips error entries that are valid JSON but not error records, and keeps the valid ones', async () => {
@@ -313,8 +313,10 @@ describe('finaliseBulk — normal completion', () => {
     expect(res.failed).toBe(1);
     const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
     const dataLine = csv.split('\n')[1]!;
-    // name,email,city(padded-empty),error_category,error_reason
-    expect(dataLine).toBe('Asha,asha@x.io,,validation,missing city');
+    // name,email,city(padded-empty),error_category,error_reason,what_to_do
+    expect(dataLine).toBe(
+      'Asha,asha@x.io,,validation,missing city,"Check this row against the downloadable template, then fix it in your upload file (not in errors.csv) and upload it again."',
+    );
   });
 
   it('rebuilds a row from its stored JSON cells, untouched by "|", "," or quotes', async () => {
@@ -342,6 +344,7 @@ describe('finaliseBulk — normal completion', () => {
       'Basti, "UP"',
       'validation',
       'bad category',
+      'Check this row against the downloadable template, then fix it in your upload file (not in errors.csv) and upload it again.',
     ]);
   });
 
@@ -380,7 +383,7 @@ describe('finaliseBulk — normal completion', () => {
     await finaliseBulk(JOB);
     const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
     expect(csv.split('\n')[1]!.trim()).toBe(
-      'Asha,Blindness|Deaf|Low Vision|Dwarfism|Hemophilia|Thalassemia,Basti,validation,bad category',
+      'Asha,Blindness|Deaf|Low Vision|Dwarfism|Hemophilia|Thalassemia,Basti,validation,bad category,"Check this row against the downloadable template, then fix it in your upload file (not in errors.csv) and upload it again."',
     );
   });
 
@@ -401,9 +404,35 @@ describe('finaliseBulk — normal completion', () => {
     await finaliseBulk(JOB);
     const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
     const [cells] = Papa.parse<string[]>(csv.split('\n')[1]!, { delimiter: ',' }).data;
-    expect(cells).toHaveLength(4);
+    expect(cells).toHaveLength(5);
     expect(cells!.slice(0, 3)).toEqual(['Asha', 'Basti', 'validation']);
     expect(cells![3]).toMatch(/^bad city; row has 4 cells but the header has 2 columns/);
+    expect(cells![4]).toContain('Remove the extra cells at the end of this row');
+  });
+
+  it('writes the stored advice in the what_to_do column', async () => {
+    counters = { passed: '0', failed: '1', skipped: '0' };
+    hscanPages = [
+      [
+        '0',
+        [
+          'err-0',
+          JSON.stringify({
+            row_index: 0,
+            reasons: ['phone: Please enter a valid Mobile Number.'],
+            error_category: 'validation',
+            advice: ['Check the format of the phone number in the "phone" column.'],
+          }),
+        ],
+      ],
+    ];
+    headersJson = JSON.stringify(['name', 'phone']);
+    hmgetReturn = [JSON.stringify(['Asha', '12345'])];
+
+    await finaliseBulk(JOB);
+    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const [cells] = Papa.parse<string[]>(csv.split('\n')[1]!, { delimiter: ',' }).data;
+    expect(cells![4]).toBe('Check the format of the phone number in the "phone" column.');
   });
 
   it('defuses spreadsheet-formula-injection cells in errors.csv (security)', async () => {
@@ -436,7 +465,7 @@ describe('finaliseBulk — normal completion', () => {
     const res = await finaliseBulk(JOB);
     expect(res.failed).toBe(1);
     const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
-    expect(csv.split('\n')[0]!.trim()).toBe('error_category,error_reason');
+    expect(csv.split('\n')[0]!.trim()).toBe('error_category,error_reason,what_to_do');
   });
 
   it('falls back to a headers-only CSV when the stashed :meta headers JSON is not an array', async () => {
@@ -449,7 +478,7 @@ describe('finaliseBulk — normal completion', () => {
     const res = await finaliseBulk(JOB);
     expect(res.failed).toBe(1);
     const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
-    expect(csv.split('\n')[0]!.trim()).toBe('error_category,error_reason');
+    expect(csv.split('\n')[0]!.trim()).toBe('error_category,error_reason,what_to_do');
   });
 
   it('paginates through multiple HSCAN cursors before finalising', async () => {
