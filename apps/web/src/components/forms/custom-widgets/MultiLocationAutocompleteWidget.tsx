@@ -233,11 +233,30 @@ export function MultiLocationAutocompleteWidget({
 
   // Take a new value from RJSF during render. The rows are rebuilt only when
   // their names differ from it, so blank rows and picked coordinates are kept.
+  // A rebuild also clears every row's search state.
   const [syncedIncoming, setSyncedIncoming] = React.useState(incoming);
+  const [rebuildCount, setRebuildCount] = React.useState(0);
   if (incoming !== syncedIncoming) {
     setSyncedIncoming(incoming);
-    if (!sameNames(rows, incoming)) setRows(rowsFromValue(incoming));
+    if (!sameNames(rows, incoming)) {
+      const rebuilt = rowsFromValue(incoming);
+      setRows(rebuilt);
+      setSearches(rebuilt.map(() => ({ suggestions: [], open: false })));
+      setRebuildCount((count) => count + 1);
+    }
   }
+
+  // After a rebuild, cancel every row's pending debounce, blur close and
+  // in-flight search, so no earlier result lands on a new row. A layout effect
+  // runs before any timer can fire.
+  React.useLayoutEffect(() => {
+    if (rebuildCount === 0) return;
+    for (const ref of refsArray.current) {
+      window.clearTimeout(ref.debounce);
+      window.clearTimeout(ref.blur);
+      ref.abort?.abort();
+    }
+  }, [rebuildCount]);
 
   React.useEffect(() => {
     ensureRefs(rows.length);

@@ -12,7 +12,7 @@
  * `registry` because that is the only place RJSF v6 exposes it (signals-dpg#506).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
 import messages from '@/i18n/messages/en.json';
@@ -408,5 +408,98 @@ describe('MultiLocationAutocompleteWidget', () => {
     await pickSuggestionInRow(0, BENGALURU.label);
 
     expect(onChange).toHaveBeenLastCalledWith([BENGALURU.label]);
+  });
+
+  it('closes the open suggestion list when an outside value rebuilds the rows', async () => {
+    const props = makeProps({ value: ['Bengaluru'] });
+    const { rerender } = render(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...(props as never)} />
+      </Wrapper>,
+    );
+    await typeInRow(0, 'bengaluru');
+    await screen.findByRole('listbox');
+
+    rerender(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...({ ...props, value: ['Hubballi'] } as never)} />
+      </Wrapper>,
+    );
+
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('cancels a pending search when an outside value rebuilds the rows at the same length', async () => {
+    const props = makeProps({ value: ['Bengaluru'] });
+    const { rerender } = render(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...(props as never)} />
+      </Wrapper>,
+    );
+    fireEvent.change(screen.getAllByRole('combobox')[0]!, { target: { value: 'mysuru' } });
+    rerender(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...({ ...props, value: ['Hubballi'] } as never)} />
+      </Wrapper>,
+    );
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(suggestMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('ignores an in-flight search that lands after an outside value rebuilds the rows', async () => {
+    let resolveSearch: (results: GeoSuggestion[]) => void = () => {};
+    suggestMock.mockImplementationOnce(
+      () =>
+        new Promise<GeoSuggestion[]>((resolve) => {
+          resolveSearch = resolve;
+        }),
+    );
+    const props = makeProps({ value: ['Bengaluru'] });
+    const { rerender } = render(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...(props as never)} />
+      </Wrapper>,
+    );
+    await typeInRow(0, 'mysuru');
+    expect(suggestMock).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...({ ...props, value: ['Hubballi'] } as never)} />
+      </Wrapper>,
+    );
+    await act(async () => {
+      resolveSearch([MYSURU]);
+    });
+
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('keeps a picked coordinate when the form echoes the same names back', async () => {
+    const onLocationsResolved = vi.fn();
+    const props = makeProps({ formContext: { onLocationsResolved } });
+    const { rerender } = render(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...(props as never)} />
+      </Wrapper>,
+    );
+    await typeInRow(0, 'bengaluru');
+    await pickSuggestionInRow(0, BENGALURU.label);
+
+    // The new array RJSF passes after the pick, holding the same name.
+    rerender(
+      <Wrapper>
+        <MultiLocationAutocompleteWidget {...({ ...props, value: [BENGALURU.label] } as never)} />
+      </Wrapper>,
+    );
+    expect(screen.getAllByRole('combobox')[0]).toHaveValue(BENGALURU.label);
+
+    // Adding a row re-reports the coordinates; the picked one must still be there.
+    fireEvent.click(screen.getByRole('button', { name: messages.form.location_add }));
+    expect(onLocationsResolved).toHaveBeenLastCalledWith([
+      { lat: 12.9716, lng: 77.5946, label: BENGALURU.label },
+    ]);
   });
 });
