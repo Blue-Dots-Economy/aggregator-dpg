@@ -85,10 +85,14 @@ function errorMessage(err: unknown): string {
  * Checks the `bulk_row_commit.lua` reply: four integer counters.
  *
  * @param raw - The EVAL / EVALSHA reply.
- * @returns `true` when the reply is an array of four numbers.
+ * @returns `true` when the reply is an array of four integers.
  */
 function isCommitReply(raw: unknown): raw is [number, number, number, number] {
-  return Array.isArray(raw) && raw.length === 4 && raw.every((n) => typeof n === 'number');
+  return (
+    Array.isArray(raw) &&
+    raw.length === 4 &&
+    raw.every((n) => typeof n === 'number' && Number.isInteger(n))
+  );
 }
 
 export type BulkRowOutcome = 'passed' | 'failed' | 'skipped';

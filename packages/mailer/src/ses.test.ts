@@ -3,7 +3,7 @@
  * `cc` on the SendInput is projected onto `Destination.CcAddresses`. A
  * stub SESv2 client is injected so no AWS call is made.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { type SESv2Client } from '@aws-sdk/client-sesv2';
 import { SesMailer } from './ses.js';
 
@@ -129,10 +129,9 @@ describe('SesMailer cc handling', () => {
   });
 
   it('reads the name and message from an Error instance', async () => {
-    const { mailer } = makeMailer();
+    const { client, mailer } = makeMailer();
     const error = Object.assign(new Error('denied'), { name: 'AccessDeniedException' });
-    (mailer as unknown as { client: { send: () => Promise<never> } }).client.send = () =>
-      Promise.reject(error);
+    vi.spyOn(client, 'send').mockRejectedValue(error);
     const r = await mailer.send({ to: 'to@org.com', subject: 's', html: '', text: '' });
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -142,9 +141,8 @@ describe('SesMailer cc handling', () => {
   });
 
   it('falls back to default error text when a non-object is thrown', async () => {
-    const { mailer } = makeMailer();
-    (mailer as unknown as { client: { send: () => Promise<never> } }).client.send = () =>
-      Promise.reject('boom');
+    const { client, mailer } = makeMailer();
+    vi.spyOn(client, 'send').mockRejectedValue('boom');
     const r = await mailer.send({ to: 'to@org.com', subject: 's', html: '', text: '' });
     expect(r.ok).toBe(false);
     if (!r.ok) {

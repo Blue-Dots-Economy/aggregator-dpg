@@ -1,6 +1,9 @@
 /**
- * Readers for fields on a thrown value. Transports throw `Error` subclasses or
- * plain objects, so callers check each field instead of assuming a shape.
+ * Field readers for values caught from a mail transport (`@aggregator-dpg/mailer`).
+ *
+ * The SES and SMTP adapters use them to map a send failure to a mailer error
+ * code. Transports throw `Error` subclasses or plain objects, so each field is
+ * checked before it is used. Internal to the package; not exported.
  */
 
 /**

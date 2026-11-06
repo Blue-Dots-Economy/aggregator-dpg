@@ -119,6 +119,25 @@ describe('FileSchemaLoader', () => {
     }
   });
 
+  it.each([
+    { document: 'true', accepts: true },
+    { document: 'false', accepts: false },
+  ])('compiles a boolean schema document $document', async ({ document, accepts }) => {
+    const dir = path.join(rootDir, 'flag');
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, `${document}.v1.json`), document, 'utf8');
+
+    const loader = new FileSchemaLoader({ rootDir });
+    const ref = { id: `flag-${document}`, version: 'v1' };
+
+    expect((await loader.getSchema(ref)).success).toBe(true);
+    const validatorResult = await loader.getValidator(ref);
+    expect(validatorResult.success).toBe(true);
+    if (validatorResult.success) {
+      expect(validatorResult.value({ anything: 1 })).toBe(accepts);
+    }
+  });
+
   it('rejects ref ids containing path-traversal characters', async () => {
     const loader = new FileSchemaLoader({ rootDir });
     const traversal = await loader.getSchema({ id: '../etc/passwd', version: 'v1' });

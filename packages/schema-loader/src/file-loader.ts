@@ -75,11 +75,14 @@ export class FileSchemaLoader extends SchemaLoaderBase {
     } catch (parseErr) {
       return err(new SchemaCompileError(ref, parseErr));
     }
-    if (!isJsonSchema(parsed)) {
-      return err(new SchemaCompileError(ref, new Error('schema document is not a JSON object')));
+    const schema = toSchemaObject(parsed);
+    if (!schema) {
+      return err(
+        new SchemaCompileError(ref, new Error('schema document is not an object or boolean')),
+      );
     }
-    this.schemaCache.set(cacheKey, parsed);
-    return ok(parsed);
+    this.schemaCache.set(cacheKey, schema);
+    return ok(schema);
   }
 
   async getValidator(ref: SchemaRef): Promise<Result<ValidateFunction, BaseError>> {
@@ -120,14 +123,25 @@ export class FileSchemaLoader extends SchemaLoaderBase {
 const SAFE_ID_RE = /^[a-z][a-z0-9-]{0,63}$/;
 const SAFE_VERSION_RE = /^v\d{1,4}$/;
 
+/** Object form of the boolean schema `true`: accepts every instance. */
+const ACCEPT_ALL_SCHEMA: JsonSchema = {};
+/** Object form of the boolean schema `false`: rejects every instance. */
+const REJECT_ALL_SCHEMA: JsonSchema = { not: {} };
+
 /**
- * Checks that a parsed schema document is a JSON object.
+ * Converts a parsed schema document to object form.
+ *
+ * JSON Schema 2020-12 allows `true` and `false` as whole documents. They are
+ * returned as the equivalent object schemas, so callers always get an object.
  *
  * @param value - The result of `JSON.parse`.
- * @returns `true` for a non-null, non-array object.
+ * @returns The schema object, or `null` when the document is neither an object nor a boolean.
  */
-function isJsonSchema(value: unknown): value is JsonSchema {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+function toSchemaObject(value: unknown): JsonSchema | null {
+  if (value === true) return { ...ACCEPT_ALL_SCHEMA };
+  if (value === false) return { ...REJECT_ALL_SCHEMA };
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) return { ...value };
+  return null;
 }
 
 function isSafeRef(ref: SchemaRef): boolean {

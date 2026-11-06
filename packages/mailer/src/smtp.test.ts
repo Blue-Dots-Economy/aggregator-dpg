@@ -91,11 +91,9 @@ describe('SmtpMailer error handling', () => {
   });
 
   it('reads code and message from an Error instance', async () => {
-    const { mailer } = makeMailer();
+    const { mailer, sendMail } = makeMailer();
     const error = Object.assign(new Error('bad creds'), { code: 'EAUTH' });
-    (mailer as unknown as { transporter: { sendMail: unknown } }).transporter.sendMail = vi
-      .fn()
-      .mockRejectedValue(error);
+    sendMail.mockRejectedValue(error);
     const r = await mailer.send({ to: 'to@org.com', subject: 's', html: '', text: '' });
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -105,10 +103,8 @@ describe('SmtpMailer error handling', () => {
   });
 
   it('maps a non-object rejection to TRANSPORT_FAILED with the default message', async () => {
-    const { mailer } = makeMailer();
-    (mailer as unknown as { transporter: { sendMail: unknown } }).transporter.sendMail = vi
-      .fn()
-      .mockRejectedValue('boom');
+    const { mailer, sendMail } = makeMailer();
+    sendMail.mockRejectedValue('boom');
     const r = await mailer.send({ to: 'to@org.com', subject: 's', html: '', text: '' });
     expect(r.ok).toBe(false);
     if (!r.ok) {

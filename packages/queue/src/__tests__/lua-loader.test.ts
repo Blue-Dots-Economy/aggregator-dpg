@@ -123,10 +123,8 @@ describe('runBulkRowCommit', () => {
 
   it('falls back to EVAL when EVALSHA rejects with a NOSCRIPT reply that is not an Error', async () => {
     const redis = makeRedisStub();
-    (redis.evalsha as ReturnType<typeof vi.fn>).mockRejectedValue({
-      message: 'NOSCRIPT No matching script',
-    });
-    (redis.eval as ReturnType<typeof vi.fn>).mockResolvedValue([2, 5, 1, 0]);
+    redis.evalsha.mockRejectedValue({ message: 'NOSCRIPT No matching script' });
+    redis.eval.mockResolvedValue([2, 5, 1, 0]);
 
     const result = await runBulkRowCommit(redis, 'up-8', 1, 'passed', '', 60);
 
@@ -136,7 +134,7 @@ describe('runBulkRowCommit', () => {
 
   it('rethrows a rejection without a message from EVALSHA', async () => {
     const redis = makeRedisStub();
-    (redis.evalsha as ReturnType<typeof vi.fn>).mockRejectedValue('boom');
+    redis.evalsha.mockRejectedValue('boom');
 
     await expect(runBulkRowCommit(redis, 'up-10', 0, 'passed', '', 60)).rejects.toBe('boom');
     expect(redis.eval).not.toHaveBeenCalled();
@@ -163,12 +161,24 @@ describe('runBulkRowCommit', () => {
 
   it('throws a descriptive error when the script returns non-numeric counters', async () => {
     const redis = makeRedisStub();
-    (redis.evalsha as ReturnType<typeof vi.fn>).mockResolvedValue([1, '2', 0, 1]);
+    redis.evalsha.mockResolvedValue([1, '2', 0, 1]);
 
     await expect(runBulkRowCommit(redis, 'up-11', 0, 'passed', '', 60)).rejects.toThrow(
       /unexpected shape/,
     );
   });
+
+  it.each([[[1, 1.5, 0, 1]], [[1, Number.NaN, 0, 1]]])(
+    'throws a descriptive error when a counter is not an integer: %j',
+    async (reply) => {
+      const redis = makeRedisStub();
+      redis.evalsha.mockResolvedValue(reply);
+
+      await expect(runBulkRowCommit(redis, 'up-12', 0, 'passed', '', 60)).rejects.toThrow(
+        /unexpected shape/,
+      );
+    },
+  );
 
   it('issues SCRIPT LOAD once per client and reuses the digest', async () => {
     const redis = makeRedisStub();
