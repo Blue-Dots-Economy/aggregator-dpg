@@ -26,10 +26,7 @@ export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
     const loader = new FileNetworkConfigLoader({ configPath, cacheDir });
     const result = await loader.load();
     if (!result.success) {
-      const message =
-        'error' in result && typeof result.error === 'object' && result.error
-          ? ((result.error as { message?: string }).message ?? 'unknown error')
-          : 'unknown error';
+      const message = failureMessage(result.error);
       logger.error({
         operation: 'network-config.load',
         status: 'failure',
@@ -39,6 +36,17 @@ export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
       throw new Error(`network-config load failed: ${message}`);
     }
     cached = result.value;
+    if (cached.warnings && cached.warnings.length > 0) {
+      logger.warn(
+        {
+          operation: 'network-config.load',
+          status: 'skipped',
+          finding: 'network_json_parts_dropped',
+          warnings: cached.warnings,
+        },
+        'network.json: malformed optional parts were dropped',
+      );
+    }
     logger.info(
       {
         operation: 'network-config.load',
@@ -55,6 +63,21 @@ export async function getNetworkConfig(): Promise<ResolvedNetworkConfig> {
   } finally {
     inflight = null;
   }
+}
+
+/**
+ * Reads the message from a failed load's error.
+ *
+ * @param error - The loader's error value.
+ * @returns The `message` string, or `unknown error` when there is none.
+ */
+function failureMessage(error: unknown): string {
+  return typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof error.message === 'string'
+    ? error.message
+    : 'unknown error';
 }
 
 /** Test helper. */
