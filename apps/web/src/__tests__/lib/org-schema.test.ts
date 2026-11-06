@@ -93,6 +93,33 @@ describe('applyNetworkDomains', () => {
   });
 });
 
+describe('boolean property definitions', () => {
+  const withBoolean: RJSFSchema = {
+    type: 'object',
+    properties: {
+      sector: { type: 'string', 'x-network-domains': true },
+      note: true,
+    },
+  };
+  const domains = [{ id: 'd1', label: 'Domain one' }];
+
+  it('applyNetworkDomains keeps a boolean property as it is', () => {
+    const { schema } = applyNetworkDomains(withBoolean, {}, domains);
+    expect(schema.properties?.['note']).toBe(true);
+    expect(schema.properties?.['sector']).toMatchObject({ enum: ['d1'] });
+  });
+
+  it('orgSchemaFields lists a boolean property', () => {
+    expect(orgSchemaFields(withBoolean, {})).toEqual(['sector', 'note']);
+  });
+
+  it('consoleOrgSchema keeps a boolean property read-only', () => {
+    const view = consoleOrgSchema(withBoolean, {}, true);
+    expect(view.schema.properties?.['note']).toBe(true);
+    expect(view.updatable).toEqual([]);
+  });
+});
+
 describe('gstinCustomValidate', () => {
   it('adds the schema message for a wrong check character only', () => {
     const validate = gstinCustomValidate(SCHEMA);

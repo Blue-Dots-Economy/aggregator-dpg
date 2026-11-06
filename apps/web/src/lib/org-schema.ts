@@ -44,6 +44,9 @@ const GSTIN_MESSAGE = 'Please enter a valid GSTIN.';
 
 type JsonRecord = Record<string, unknown>;
 
+/** A schema's `properties` map. Definitions may be objects or booleans. */
+type SchemaProperties = NonNullable<RJSFSchema['properties']>;
+
 /**
  * Fills the choices of every `x-network-domains` property with the network's
  * domains: ids in the schema, labels in the UI schema. Returns copies; leaves
@@ -62,10 +65,10 @@ export function applyNetworkDomains(
   if (domains.length === 0) return { schema, uiSchema };
   const ids = domains.map((d) => d.id);
   const labels = domains.map((d) => d.label);
-  const properties: Record<string, RJSFSchema> = {};
+  const properties: SchemaProperties = {};
   const ui: JsonRecord = { ...uiSchema };
-  for (const [name, prop] of Object.entries(schemaProperties(schema))) {
-    if (prop['x-network-domains'] !== true) {
+  for (const [name, prop] of Object.entries(schema.properties ?? {})) {
+    if (!isJsonObject(prop) || prop['x-network-domains'] !== true) {
       properties[name] = prop;
       continue;
     }
@@ -121,7 +124,7 @@ export function gstinCustomValidate(schema: RJSFSchema) {
  * @returns Field names.
  */
 export function orgSchemaFields(schema: RJSFSchema, uiSchema: JsonRecord): string[] {
-  const names = Object.keys(schemaProperties(schema)).filter((name) => !FIXED_KEYS.has(name));
+  const names = Object.keys(schema.properties ?? {}).filter((name) => !FIXED_KEYS.has(name));
   const order: unknown[] = Array.isArray(uiSchema['ui:order']) ? uiSchema['ui:order'] : [];
   const ranked = order.filter(
     (name): name is string => typeof name === 'string' && names.includes(name),
@@ -144,6 +147,7 @@ export function consoleOrgSchema(
   uiSchema: JsonRecord,
   editable: boolean,
 ): { schema: RJSFSchema; uiSchema: JsonRecord; updatable: string[] } {
+  const all: SchemaProperties = schema.properties ?? {};
   const props = schemaProperties(schema);
   const fields = orgSchemaFields(schema, uiSchema);
   const updatable = editable ? fields.filter((name) => props[name]?.['x-updatable'] === true) : [];
@@ -156,7 +160,7 @@ export function consoleOrgSchema(
     schema: {
       ...(schema.$schema ? { $schema: schema.$schema } : {}),
       type: 'object',
-      properties: Object.fromEntries(fields.map((name) => [name, props[name] ?? {}])),
+      properties: Object.fromEntries(fields.map((name) => [name, all[name] ?? {}])),
     },
     uiSchema: ui,
     updatable,
