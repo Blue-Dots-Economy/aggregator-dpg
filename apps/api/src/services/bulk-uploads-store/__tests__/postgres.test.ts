@@ -427,6 +427,23 @@ describe('PostgresBulkUploadsStore.markUploaded', () => {
     expect(result.error.code).toBe('DUPLICATE_ETAG');
   });
 
+  it('maps a Drizzle-wrapped unique violation (code on .cause) to DUPLICATE_ETAG', async () => {
+    const db = makeFakeDb((chain) => {
+      if (hasCall(chain, 'update')) {
+        const driverErr = Object.assign(new Error('duplicate key value'), { code: '23505' });
+        throw new Error('Failed query: update bulk_uploads ...', { cause: driverErr });
+      }
+      return [makeRow({ status: 'pending' })];
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresBulkUploadsStore();
+
+    const result = await store.markUploaded('upload-1', 'agg-1', 'etag-1');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('DUPLICATE_ETAG');
+  });
+
   it('maps any other write error to DB_UNAVAILABLE', async () => {
     const db = makeFakeDb((chain) => {
       if (hasCall(chain, 'update')) throw new Error('connection reset');
