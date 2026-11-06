@@ -223,6 +223,20 @@ describe('loadConsentConfig', () => {
     expect(config.audiences.aggregator.documents.terms.versions[0].content).toBe(`## Terms v1`);
   });
 
+  it.each([
+    ['null', 'null'],
+    ['an array', '[]'],
+    ['a string', '"terms"'],
+  ])('throws CONSENT_CONFIG_INVALID when the brand file is %s', async (_label, body) => {
+    writeConsentFile(tmpDir, 'orange_dot');
+    const brandPath = writeConsentFileContent(tmpDir, makeValidConfig(), 'orange_dot', 'onetac');
+    writeFileSync(brandPath, body, 'utf8');
+
+    const loading = loadConsentConfig('orange_dot', 'onetac', tmpDir);
+    await expect(loading).rejects.toThrowError(ConfigError);
+    await expect(loading).rejects.toMatchObject({ code: 'CONSENT_CONFIG_INVALID' });
+  });
+
   it('throws ConfigError when no consent file is found at all', async () => {
     // Remove the default file written in beforeEach
     rmSync(join(tmpDir, 'config'), { recursive: true, force: true });

@@ -13,16 +13,34 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
+import { isRecord } from './record.js';
+
+/**
+ * Exports read from a config.schema module. Each is checked after import.
+ * `configDefaults` holds optional baseline values merged before env overrides.
+ */
+const ConfigSchemaModuleSchema = z.object({
+  configKey: z.unknown(),
+  configSchema: z.unknown(),
+  configDefaults: z.unknown(),
+});
 
 /** Shape every config.schema module must export. */
-export interface ConfigSchemaModule {
-  configKey: unknown;
-  configSchema: unknown;
-  /** Optional baseline values merged into the config tree before env overrides. */
-  configDefaults?: unknown;
+export type ConfigSchemaModule = z.infer<typeof ConfigSchemaModuleSchema>;
+
+/**
+ * True when `value` is a Zod schema. Every Zod schema carries a `_def`.
+ *
+ * @param value - The `configSchema` export of a config.schema module.
+ */
+function isZodSchema(value: unknown): value is z.ZodTypeAny {
+  return value !== null && typeof value === 'object' && '_def' in value;
 }
+
+/** The `name` field of a package.json; anything else falls back to the directory name. */
+const PackageJsonNameSchema = z.object({ name: z.string() });
 
 /** One registered package entry after discovery. */
 export interface RegisteredPackage {
@@ -49,18 +67,23 @@ export interface RegisteredPackage {
  * Returns null if neither file exists.
  *
  * @param packageDir - Absolute path to the package directory.
+ * @throws {ConfigError} With code CONFIG_SCHEMA_MODULE_INVALID if the import is not a module object.
  */
 async function importConfigModule(packageDir: string): Promise<ConfigSchemaModule | null> {
   const distPath = join(packageDir, 'dist', 'config.schema.js');
   const srcPath = join(packageDir, 'src', 'config.schema.ts');
 
-  if (existsSync(distPath)) {
-    return import(pathToFileURL(distPath).href) as Promise<ConfigSchemaModule>;
+  const modulePath = existsSync(distPath) ? distPath : existsSync(srcPath) ? srcPath : null;
+  if (modulePath === null) return null;
+  const mod: unknown = await import(pathToFileURL(modulePath).href);
+  const parsed = ConfigSchemaModuleSchema.safeParse(mod);
+  if (!parsed.success) {
+    throw new ConfigError(`Config schema module did not load as an ES module: ${modulePath}`, {
+      code: 'CONFIG_SCHEMA_MODULE_INVALID',
+      details: { modulePath },
+    });
   }
-  if (existsSync(srcPath)) {
-    return import(pathToFileURL(srcPath).href) as Promise<ConfigSchemaModule>;
-  }
-  return null;
+  return parsed.data;
 }
 
 /**
@@ -70,8 +93,8 @@ async function importConfigModule(packageDir: string): Promise<ConfigSchemaModul
 function readPackageName(packageJsonPath: string, fallback: string): string {
   try {
     const raw = readFileSync(packageJsonPath, 'utf8');
-    const parsed = JSON.parse(raw) as { name?: string };
-    return parsed.name ?? fallback;
+    const parsed = PackageJsonNameSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data.name : fallback;
   } catch {
     return fallback;
   }
@@ -82,8 +105,8 @@ function readPackageName(packageJsonPath: string, fallback: string): string {
  *
  * @param packagesDir - Absolute path to the packages/ directory.
  * @returns Map from configKey to RegisteredPackage.
- * @throws {ConfigError} If any package is missing configKey, configSchema, or if
- *   two packages declare the same configKey.
+ * @throws {ConfigError} If any package is missing configKey, has a configSchema that
+ *   is missing or not a Zod schema, or if two packages declare the same configKey.
  */
 export async function discoverPackages(
   packagesDir: string,
@@ -128,6 +151,13 @@ export async function discoverPackages(
       );
     }
 
+    if (!isZodSchema(mod.configSchema)) {
+      throw new ConfigError(
+        `Package "${packageName}" exports a configSchema that is not a Zod schema.`,
+        { code: 'CONFIG_INVALID_SCHEMA', details: { package: packageName } },
+      );
+    }
+
     if (registry.has(mod.configKey)) {
       const existing = registry.get(mod.configKey)!;
       throw new ConfigError(
@@ -140,19 +170,13 @@ export async function discoverPackages(
       );
     }
 
-    const configDefaults =
-      mod.configDefaults !== undefined &&
-      mod.configDefaults !== null &&
-      typeof mod.configDefaults === 'object' &&
-      !Array.isArray(mod.configDefaults)
-        ? (mod.configDefaults as Record<string, unknown>)
-        : undefined;
+    const configDefaults = isRecord(mod.configDefaults) ? mod.configDefaults : undefined;
 
     registry.set(mod.configKey, {
       packageName,
       packageDir,
       configKey: mod.configKey,
-      configSchema: mod.configSchema as z.ZodTypeAny,
+      configSchema: mod.configSchema,
       ...(configDefaults !== undefined && { configDefaults }),
     });
   }

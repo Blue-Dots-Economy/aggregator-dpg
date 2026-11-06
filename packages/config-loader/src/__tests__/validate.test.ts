@@ -44,18 +44,6 @@ describe('buildCompositeSchema', () => {
     const result = schema.safeParse({ db: { host: 'x' }, unknownKey: 'value' });
     expect(result.success).toBe(false);
   });
-
-  it('falls back to z.unknown() for non-Zod schemas', () => {
-    const fakeSchema = {
-      parse: () => ({}),
-      safeParse: (v: unknown) => ({ success: true, data: v }),
-    };
-    const registry = makeRegistry([{ key: 'pkg', schema: fakeSchema as unknown as z.ZodTypeAny }]);
-    const schema = buildCompositeSchema(registry);
-    // z.unknown() accepts anything
-    const result = schema.safeParse({ pkg: { anything: 'goes' } });
-    expect(result.success).toBe(true);
-  });
 });
 
 describe('validateConfig', () => {

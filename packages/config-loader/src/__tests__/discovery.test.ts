@@ -5,6 +5,12 @@ import { tmpdir } from 'node:os';
 import { discoverPackages } from '../discovery.js';
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 
+/** Absolute URL of zod, so fixture modules written to a temp dir can import it. */
+const ZOD_URL = import.meta.resolve('zod');
+
+/** Fixture source lines declaring a real Zod configSchema that accepts any slice. */
+const ZOD_SCHEMA_LINES = `import { z } from ${JSON.stringify(ZOD_URL)};\nexport const configSchema = z.unknown();`;
+
 /**
  * Creates a package that ships only src/config.schema.ts (no dist build),
  * exercising the dev-mode (tsx) import fallback in importConfigModule.
@@ -16,7 +22,7 @@ function makeSrcOnlyPackage(root: string, dirName: string, configKeyValue: strin
   writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: `@test/${dirName}` }), 'utf8');
   writeFileSync(
     join(srcDir, 'config.schema.ts'),
-    `export const configKey = ${JSON.stringify(configKeyValue)};\nexport const configSchema = { parse: () => ({}) };\n`,
+    `export const configKey = ${JSON.stringify(configKeyValue)};\n${ZOD_SCHEMA_LINES}\n`,
     'utf8',
   );
 }
@@ -41,11 +47,11 @@ function makePackage(
 
   writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: `@test/${dirName}` }), 'utf8');
 
-  // Write a plain-JS module — no Zod needed; discovery only checks presence
+  // Write a plain-JS module that imports zod by absolute URL.
   const keyLine = opts.omitConfigKey
     ? ''
     : `export const configKey = ${JSON.stringify(opts.configKey ?? dirName)};`;
-  const schemaLine = opts.omitSchema ? '' : `export const configSchema = { parse: () => ({}) };`;
+  const schemaLine = opts.omitSchema ? '' : ZOD_SCHEMA_LINES;
   const defaultsLine =
     opts.configDefaults !== undefined
       ? `export const configDefaults = ${JSON.stringify(opts.configDefaults)};`
@@ -125,6 +131,17 @@ describe('discoverPackages', () => {
     await expect(discoverPackages(tmpDir)).rejects.toMatchObject({ code: 'CONFIG_MISSING_SCHEMA' });
   });
 
+  it('throws CONFIG_INVALID_SCHEMA when configSchema is not a Zod schema', async () => {
+    makePackage(tmpDir, 'pkg-a', { configKey: 'pkgA' });
+    writeFileSync(
+      join(tmpDir, 'pkg-a', 'dist', 'config.schema.js'),
+      `export const configKey = 'pkgA';\nexport const configSchema = { parse: () => ({}) };\n`,
+      'utf8',
+    );
+    await expect(discoverPackages(tmpDir)).rejects.toThrow(ConfigError);
+    await expect(discoverPackages(tmpDir)).rejects.toMatchObject({ code: 'CONFIG_INVALID_SCHEMA' });
+  });
+
   it('skips non-directory entries in packagesDir', async () => {
     writeFileSync(join(tmpDir, 'not-a-dir.txt'), 'content');
     makePackage(tmpDir, 'valid-pkg', { configKey: 'valid' });
@@ -153,7 +170,7 @@ describe('discoverPackages', () => {
     const distPath = join(tmpDir, 'pkg-a', 'dist', 'config.schema.js');
     writeFileSync(
       distPath,
-      `export const configKey = 'pkgA';\nexport const configSchema = { parse: () => ({}) };\nexport const configDefaults = [1, 2, 3];\n`,
+      `export const configKey = 'pkgA';\n${ZOD_SCHEMA_LINES}\nexport const configDefaults = [1, 2, 3];\n`,
       'utf8',
     );
     const result = await discoverPackages(tmpDir);
@@ -181,6 +198,20 @@ describe('discoverPackages', () => {
       JSON.stringify({ version: '1.0.0' }),
       'utf8',
     );
+    const result = await discoverPackages(tmpDir);
+    expect(result.get('pkgA')?.packageName).toBe('pkg-a');
+  });
+
+  it('falls back to the directory name when package.json has a non-string "name"', async () => {
+    makePackage(tmpDir, 'pkg-a', { configKey: 'pkgA' });
+    writeFileSync(join(tmpDir, 'pkg-a', 'package.json'), JSON.stringify({ name: 42 }), 'utf8');
+    const result = await discoverPackages(tmpDir);
+    expect(result.get('pkgA')?.packageName).toBe('pkg-a');
+  });
+
+  it('falls back to the directory name when package.json is JSON null', async () => {
+    makePackage(tmpDir, 'pkg-a', { configKey: 'pkgA' });
+    writeFileSync(join(tmpDir, 'pkg-a', 'package.json'), 'null', 'utf8');
     const result = await discoverPackages(tmpDir);
     expect(result.get('pkgA')?.packageName).toBe('pkg-a');
   });
