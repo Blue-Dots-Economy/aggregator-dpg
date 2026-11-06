@@ -1,11 +1,9 @@
 /**
- * Smoke test for the registration-links page
- * (`app/(protected)/onboarding/links/page.tsx`).
+ * Tests for the registration links view (`_components/RegistrationLinksView.tsx`).
  *
- * A thin client wrapper: Topbar chrome (back/refresh) + `CreateLinkSection`.
- * `CreateLinkSection` is stubbed since it's covered in depth by
- * `RegistrationLinksSection.test.tsx`; this file only exercises the page's
- * own composition and navigation wiring.
+ * Topbar chrome (back/refresh) + `CreateLinkSection`. `CreateLinkSection` is
+ * stubbed since `CreateLinkSection.test.tsx` covers it; this file only
+ * exercises the view's own composition and navigation wiring.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -29,21 +27,21 @@ vi.mock('@/components/shell/Topbar', () => ({
   ),
 }));
 
-vi.mock('@/app/(protected)/onboarding/_components/RegistrationLinksSection', () => ({
+vi.mock('@/app/(protected)/onboarding/_components/registration-links/CreateLinkSection', () => ({
   CreateLinkSection: () => <div data-testid="create-link-section" />,
 }));
 
-import RegistrationLinksPage from '@/app/(protected)/onboarding/links/page';
+import { RegistrationLinksView } from '@/app/(protected)/onboarding/_components/RegistrationLinksView';
 
 function renderPage() {
   return render(
     <NextIntlClientProvider locale="en" messages={{ onboarding: messages.onboarding }}>
-      <RegistrationLinksPage />
+      <RegistrationLinksView />
     </NextIntlClientProvider>,
   );
 }
 
-describe('RegistrationLinksPage', () => {
+describe('<RegistrationLinksView />', () => {
   beforeEach(() => pushMock.mockClear());
   afterEach(() => vi.clearAllMocks());
 
