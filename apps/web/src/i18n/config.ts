@@ -53,15 +53,13 @@ export function parseEnabledLocales(raw: string | undefined | null): Locale[] {
  * Server-only: never call from a client component. Client components get the
  * list from `EnabledLocalesProvider`.
  *
- * Falls back to `NEXT_PUBLIC_ENABLED_LANGUAGES`. Uses `||` because Compose
- * sets an unset variable to an empty string.
+ * An empty value counts as unset, because Compose sets an unset variable to
+ * an empty string.
  *
  * @returns The enabled locales, in display order.
  */
 export function getEnabledLocales(): Locale[] {
-  return parseEnabledLocales(
-    process.env.ENABLED_LANGUAGES || process.env.NEXT_PUBLIC_ENABLED_LANGUAGES,
-  );
+  return parseEnabledLocales(process.env.ENABLED_LANGUAGES);
 }
 
 /** True when `v` is supported AND enabled for this deployment. */
