@@ -308,7 +308,32 @@ names on any deployment; behaviour is unaffected.
    `errors_csv_s3_key`, `CSVUpload.tsx:380`); the old fields are removed in a
    later release. Web and api can then deploy in any order.
 
-## 8. Testing expectations
+## 8. Open question — oversized uploads stay in storage
+
+Today `BULK_UPLOAD_MAX_BYTES` (default 10 MB, `apps/api/src/config.ts:135`)
+stops an oversized CSV from being **processed**, not from being **uploaded**:
+
+- The web app does not check the file size before uploading. The create
+  response returns `max_bytes`, but `apps/web` does not use it.
+- The signed upload URL does not limit the size, so storage accepts any file
+  up to its own limit (5 GB for a single S3 PUT).
+- Only `/start` checks the size, by reading the stored file's details
+  (`bulk-uploads.ts:464`). An oversized file is rejected there and never
+  queued, so the worker never reads it.
+- Nothing deletes the rejected file. No code deletes objects, and the bucket
+  lifecycle rule only expires `campaign-exports/`
+  (`bluedots-automation/opentofu/aws/modules/storage/main.tf`), so
+  `bulk-uploads/` files are kept indefinitely.
+
+For the coordinator, Upload is one click, so the error reads as "the upload
+failed", while the file is in fact stored.
+
+**Reviewers: please decide** whether keeping the uploaded file is intended,
+or whether large uploads should be blocked before they reach storage (and
+rejected files removed). This change keeps today's behaviour either way; any
+fix is separate work.
+
+## 9. Testing expectations
 
 - Unit tests for the S3 provider (request shapes, not-found handling, ETag
   quote stripping, public vs internal endpoint for signed URLs, credentials
@@ -320,7 +345,7 @@ names on any deployment; behaviour is unaffected.
 - A local run against MinIO of the three flows in section 2 still works end
   to end: browser upload, errors CSV download, campaign export link.
 
-## 9. Left to the builder
+## 10. Left to the builder
 
 - Exact method names and type names in the interface.
 - How the fake in `testing.ts` is shaped, as long as both apps' tests can use
