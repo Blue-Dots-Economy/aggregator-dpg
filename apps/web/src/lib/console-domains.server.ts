@@ -31,14 +31,13 @@ export async function networkDomains(): Promise<ConsoleDomain[]> {
 /**
  * The domains a coordinator serves, with their labels.
  *
- * @param serves - Domain ids served; empty means every domain.
+ * @param serves - Domain ids served; empty means none.
  * @param domains - From {@link networkDomains}.
- * @returns The served domains (an unknown id keeps its id as the label); every domain when `serves` is empty.
+ * @returns The served domains (an unknown id keeps its id as the label).
  */
 export function servedDomains(
   serves: readonly string[],
   domains: readonly ConsoleDomain[],
 ): ConsoleDomain[] {
-  if (serves.length === 0) return [...domains];
   return serves.map((id) => ({ id, label: domains.find((d) => d.id === id)?.label ?? id }));
 }

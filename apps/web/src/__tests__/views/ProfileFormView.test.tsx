@@ -280,8 +280,8 @@ describe('<ProfileFormView />', () => {
       expect(renderList(['seeker', 'provider'])).toEqual(['seeker', 'provider']);
     });
 
-    it('shows every choice for a coordinator serving every domain', () => {
-      expect(renderList([])).toEqual(['seeker', 'provider']);
+    it('ticks no choice for a coordinator serving none', () => {
+      expect(renderList([])).toEqual([]);
     });
   });
 });

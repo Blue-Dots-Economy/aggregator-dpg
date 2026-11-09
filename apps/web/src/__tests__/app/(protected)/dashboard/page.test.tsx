@@ -141,7 +141,7 @@ vi.mock('@/hooks/useAggregatorConfig', () => ({
   DEFAULT_AGGREGATOR_CONFIG: CFG_FIXTURE,
 }));
 
-const mockUseProfileRaw = vi.fn(() => ({ data: { type: 'seeker' } }));
+const mockUseProfileRaw = vi.fn(() => ({ data: { type: 'seeker', serves: ['seeker'] } }));
 vi.mock('@/hooks/useProfile', () => ({
   useProfileRaw: () => mockUseProfileRaw(),
 }));
@@ -248,7 +248,7 @@ describe('<DashboardPageRoot />', () => {
     vi.clearAllMocks();
     nav.resetSearchParams();
     mockUseAggregatorConfig.mockReturnValue({ data: CFG_FIXTURE });
-    mockUseProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    mockUseProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     mockUseDashboard.mockReturnValue({
       data: dashboardPageFixture(),
       isLoading: false,
@@ -289,7 +289,7 @@ describe('<DashboardPageRoot />', () => {
       // this exercises `isProviderLike`/`ProvidersTab` via the profile type
       // rather than a tab click.
       mockUseAggregatorConfig.mockReturnValue({ data: TWO_DOMAIN_CFG_FIXTURE });
-      mockUseProfileRaw.mockReturnValue({ data: { type: 'provider' } });
+      mockUseProfileRaw.mockReturnValue({ data: { type: 'provider', serves: ['provider'] } });
       mockUseDashboard.mockReturnValue({
         data: dashboardPageFixture({ domain: 'provider' }),
         isLoading: false,
@@ -383,11 +383,12 @@ describe('<DashboardPageRoot />', () => {
       expect(selectedTab()).toHaveTextContent('Providers');
     });
 
-    it('renders the dashboard for a coordinator serving every domain', () => {
+    it('shows the no-profile-types notice, and fetches nothing, for a coordinator serving none', () => {
       mockUseProfileRaw.mockReturnValue({ data: { type: null, serves: [] } });
       renderPage();
       expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
-      expect(selectedTab()).toHaveTextContent('Seekers');
+      expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+      expect(screen.getByText(/no profile types yet/)).toBeInTheDocument();
     });
   });
 
@@ -399,7 +400,9 @@ describe('<DashboardPageRoot />', () => {
       // seeker view, and that view fetched `domains[0]` — so the dashboard was
       // headed "Seekers" and asked for seeker data the coordinator does not own.
       mockUseAggregatorConfig.mockReturnValue({ data: THREE_DOMAIN_CFG_FIXTURE });
-      mockUseProfileRaw.mockReturnValue({ data: { type: 'service_provider' } });
+      mockUseProfileRaw.mockReturnValue({
+        data: { type: 'service_provider', serves: ['service_provider'] },
+      });
       mockUseDashboard.mockReturnValue({
         data: dashboardPageFixture({ domain: 'service_provider' }),
         isLoading: false,
@@ -415,7 +418,9 @@ describe('<DashboardPageRoot />', () => {
 
     it('labels a third-domain dashboard from its own domain label', () => {
       mockUseAggregatorConfig.mockReturnValue({ data: THREE_DOMAIN_CFG_FIXTURE });
-      mockUseProfileRaw.mockReturnValue({ data: { type: 'service_provider' } });
+      mockUseProfileRaw.mockReturnValue({
+        data: { type: 'service_provider', serves: ['service_provider'] },
+      });
       mockUseDashboard.mockReturnValue({
         data: dashboardPageFixture({ domain: 'service_provider' }),
         isLoading: false,

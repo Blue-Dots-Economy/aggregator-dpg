@@ -10,10 +10,12 @@
  * Domains can be changed while the coordinator is pending or approved; a
  * rejected or retired coordinator's domains are shown read-only.
  *
- * Domains are the network's configured domains. A coordinator saved with none
- * serves every domain, so all are shown ticked. A save bar appears once the
+ * Domains are the network's configured domains; a saved id the network no
+ * longer has is not shown and is dropped on the next save. A coordinator saved
+ * with none serves nothing, so none is ticked. A save bar appears once the
  * choice differs from what is saved, and at least one domain must stay ticked.
- * A save that removes a saved domain asks for confirmation first.
+ * A save that removes a saved domain asks for confirmation first. Saving ends
+ * the coordinator's sessions; its next sign-in carries the new domains.
  */
 
 import { useState } from 'react';
@@ -106,9 +108,9 @@ export function CoordinatorActions({
   const router = useRouter();
   const [status, setStatus] = useState(user.status);
   const [reason, setReason] = useState('');
-  // An empty `serves` means every domain, shown as all of them ticked.
+  // The saved domains the network still has, in network order.
   const ticked = (serves: readonly string[]) =>
-    serves.length ? [...serves] : domains.map((d) => d.id);
+    domains.filter((d) => serves.includes(d.id)).map((d) => d.id);
   const [saved, setSaved] = useState<string[]>(() => ticked(user.serves));
   const [chosen, setChosen] = useState<string[]>(() => ticked(user.serves));
   const [decisionNote, setDecisionNote] = useState<string | null>(null);
@@ -176,7 +178,7 @@ export function CoordinatorActions({
     setConfirmingRemoval(false);
     setBusy(true);
     const r = await sendConsole(`/api/console/user/metadata/${user.id}`, 'PATCH', UserSchema, {
-      serves: chosen,
+      serves: ticked(chosen),
     });
     setBusy(false);
     if (!r.ok) {

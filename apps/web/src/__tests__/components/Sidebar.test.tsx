@@ -133,7 +133,7 @@ describe('<Sidebar />', () => {
   });
 
   it('shows the participants badge on the dashboard link when a rollup total is available', () => {
-    useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     useDashboard.mockReturnValue({
       data: { by_domain: { seeker: { rollup: { total_items: 42 } } } },
     });
@@ -255,7 +255,7 @@ describe('<Sidebar />', () => {
 
   it('applies the active-tone badge styling when the dashboard link itself is the current route', () => {
     usePathname.mockReturnValue('/dashboard');
-    useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     useDashboard.mockReturnValue({
       data: { by_domain: { seeker: { rollup: { total_items: 7 } } } },
     });

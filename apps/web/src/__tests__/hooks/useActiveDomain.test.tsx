@@ -35,9 +35,9 @@ const PROVIDER = {
   item_type: 'job_posting_1.0',
 };
 
-function mockProfile(serves: string[] | undefined, type: string | null = serves?.[0] ?? null) {
+function mockProfile(serves: string[], type: string | null = serves[0] ?? null) {
   useProfileRaw.mockReturnValue({
-    data: { type, ...(serves ? { serves } : {}) },
+    data: { type, serves },
     isSuccess: true,
     isError: false,
   });
@@ -64,8 +64,8 @@ describe('resolveActiveDomain', () => {
 });
 
 describe('servedNetworkDomains', () => {
-  it('returns every network domain for an empty list', () => {
-    expect(servedNetworkDomains([], [SEEKER, PROVIDER])).toEqual([SEEKER, PROVIDER]);
+  it('returns no domain for an empty list', () => {
+    expect(servedNetworkDomains([], [SEEKER, PROVIDER])).toEqual([]);
   });
 
   it('keeps network order and drops domains not served', () => {
@@ -107,18 +107,12 @@ describe('useActiveDomain', () => {
     expect(result.current.active).toBe('seeker');
   });
 
-  it('serves every network domain when the profile lists none', async () => {
+  it('serves no domain when the profile lists none', async () => {
     mockProfile([]);
     const { result } = renderHook(() => useActiveDomain());
     await waitFor(() => expect(result.current.ready).toBe(true));
-    expect(result.current.domains).toHaveLength(2);
-    expect(result.current.active).toBe('seeker');
-  });
-
-  it('falls back to type when the API sends no serves', async () => {
-    mockProfile(undefined, 'provider');
-    const { result } = renderHook(() => useActiveDomain());
-    await waitFor(() => expect(result.current.active).toBe('provider'));
+    expect(result.current.domains).toHaveLength(0);
+    expect(result.current.active).toBeUndefined();
   });
 
   it('is not ready while the network config loads', () => {

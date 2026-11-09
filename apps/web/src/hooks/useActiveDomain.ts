@@ -59,7 +59,7 @@ export function resolveActiveDomain(
 /**
  * The network domains a coordinator serves.
  *
- * An empty `serves` means every domain.
+ * An empty `serves` means none: the coordinator can act on no participants.
  *
  * @param serves - The coordinator's stored domain ids.
  * @param networkDomains - The network's domains, in declaration order.
@@ -69,7 +69,6 @@ export function servedNetworkDomains(
   serves: readonly string[],
   networkDomains: readonly AggregatorConfigDomain[],
 ): AggregatorConfigDomain[] {
-  if (serves.length === 0) return [...networkDomains];
   return networkDomains.filter((d) => serves.includes(d.id));
 }
 
@@ -102,9 +101,7 @@ export function useActiveDomain(): ActiveDomainState {
   const profileData = profile.data;
   const domains = useMemo(() => {
     if (!profileData) return [];
-    // An API without `serves` reports the one registered domain as `type`.
-    const serves = profileData.serves ?? (profileData.type ? [profileData.type] : []);
-    return servedNetworkDomains(serves, networkDomains);
+    return servedNetworkDomains(profileData.serves, networkDomains);
   }, [profileData, networkDomains]);
 
   const profileSettled = profileData !== undefined || profile.isError;

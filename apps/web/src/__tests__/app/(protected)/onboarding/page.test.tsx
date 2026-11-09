@@ -87,7 +87,7 @@ describe('<OnboardingPage />', () => {
   beforeEach(() => {
     pushMock.mockClear();
     useAggregatorConfig.mockReturnValue({ data: cfg });
-    useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
   });
 
   afterEach(() => {

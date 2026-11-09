@@ -132,7 +132,7 @@ describe('<CSVUpload />', () => {
     mutateAsync.mockReset();
     refetch.mockClear();
     useAggregatorConfig.mockReturnValue({ data: cfg });
-    useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     useBulkUpload.mockReturnValue({ mutateAsync, isPending: false });
     useRecentBulkUploads.mockReturnValue({ data: { items: [] }, isLoading: false, refetch });
   });

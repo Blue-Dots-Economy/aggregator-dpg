@@ -158,7 +158,7 @@ describe('<CreateLinkSection />', () => {
     updateMutateAsync.mockReset();
     useAggregatorConfig.mockReturnValue({ data: cfg });
     useProfile.mockReturnValue({ data: { org: 'Acme Org' } });
-    useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     useCreateLink.mockReturnValue({ mutateAsync: createMutateAsync, isPending: false });
     useUpdateLink.mockReturnValue({ mutateAsync: updateMutateAsync, isPending: false });
     useActivateLink.mockReturnValue({ mutate: activateMutate, isPending: false });
@@ -191,6 +191,7 @@ describe('<CreateLinkSection />', () => {
     useProfileRaw.mockReturnValue({
       data: {
         type: 'seeker',
+        serves: ['seeker'],
         locations: [{ address: { addressRegion: 'Karnataka', addressLocality: 'Dharwad' } }],
       },
     });
@@ -353,7 +354,7 @@ describe('<YourLinksBody />', () => {
       this.dispatchEvent(new Event('close'));
     });
     useAggregatorConfig.mockReturnValue({ data: cfg });
-    useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     useProfile.mockReturnValue({ data: { org: 'Acme Org' } });
     useCreateLink.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
     useUpdateLink.mockReturnValue({ mutateAsync: updateMutateAsync, isPending: false });

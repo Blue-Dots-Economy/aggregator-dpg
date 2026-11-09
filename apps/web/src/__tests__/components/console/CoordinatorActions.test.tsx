@@ -15,7 +15,7 @@ const user: User = {
   status: 'pending',
   name: 'Coordinator One',
   contact: { name: 'C1', email: 'c1@x.org', phone: null },
-  serves: [],
+  serves: ['seeker', 'provider'],
   org_id: null,
   invited: false,
   created_at: '2026-01-01T00:00:00Z',
@@ -165,13 +165,13 @@ describe('<CoordinatorActions />', () => {
   const saveButton = () =>
     screen.getByRole('button', { name: messages.console.coordinator.save_domains });
 
-  it('shows a coordinator with no saved domains as serving every configured domain', () => {
-    renderIt(user, [
+  it('shows a coordinator with no saved domains with none ticked', () => {
+    renderIt({ ...user, serves: [] }, [
       { id: 'seeker', label: 'Seekers' },
       { id: 'provider', label: 'Providers' },
     ]);
-    expect(screen.getByRole('checkbox', { name: /Seekers/ })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: /Providers/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Seekers/ })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Providers/ })).not.toBeChecked();
     expect(
       screen.queryByRole('button', { name: messages.console.coordinator.save_domains }),
     ).toBeNull();
@@ -381,16 +381,33 @@ describe('<CoordinatorActions />', () => {
     await waitFor(() => expect(screen.queryByRole('checkbox')).toBeNull());
   });
 
-  it('lists every configured domain when a read-only coordinator has none saved', () => {
+  it('lists no domain when a read-only coordinator has none saved', () => {
     renderIt(
-      user,
+      { ...user, serves: [] },
       [
         { id: 'seeker', label: 'Seekers' },
         { id: 'provider', label: 'Providers' },
       ],
       true,
     );
-    expect(screen.getByText('Seekers')).toBeInTheDocument();
-    expect(screen.getByText('Providers')).toBeInTheDocument();
+    expect(screen.queryByText('Seekers')).toBeNull();
+    expect(screen.queryByText('Providers')).toBeNull();
+  });
+
+  it('drops a saved id the network no longer has and saves in network order', async () => {
+    global.fetch = respond({ ...user, serves: ['seeker', 'provider'] }, 200) as never;
+    renderIt({ ...user, serves: ['gone', 'provider'] }, [
+      { id: 'seeker', label: 'Seekers' },
+      { id: 'provider', label: 'Providers' },
+    ]);
+    expect(screen.getByRole('checkbox', { name: /Providers/ })).toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Seekers/ }));
+    fireEvent.click(saveButton());
+    await waitFor(() =>
+      expect(global.fetch).toHaveBeenCalledWith(
+        `/api/console/user/metadata/${user.id}`,
+        expect.objectContaining({ body: JSON.stringify({ serves: ['seeker', 'provider'] }) }),
+      ),
+    );
   });
 });

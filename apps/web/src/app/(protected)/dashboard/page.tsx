@@ -2031,7 +2031,7 @@ function DashboardContent({ activeDomain }: { activeDomain: ActiveDomainState })
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const { domains, active, setActive } = activeDomain;
   // Undefined when the coordinator serves no network domain, which skips the
-  // dashboard fetch.
+  // dashboard fetch and shows the no-profile-types notice.
   const primaryDomainCfg = domains.find((d) => d.id === active);
   const primaryDomain = primaryDomainCfg?.id;
   // Provider-like when the domain's `item_type` is job postings, not profiles.
@@ -2064,19 +2064,28 @@ function DashboardContent({ activeDomain }: { activeDomain: ActiveDomainState })
           )
         }
       />
-      <DomainTabs
-        className="-mt-2 mb-6"
-        domains={domains}
-        value={active}
-        onChange={setActive}
-        counts={counts}
-      />
-
-      {/* Keyed by domain so a switch resets paging, filters and selection. */}
-      {isProviderLike ? (
-        <ProvidersTab key={primaryDomain} domainId={primaryDomain} />
+      {domains.length === 0 ? (
+        // No profile types: every read is refused until an owner sets them.
+        <div className="text-center text-[13px] text-ink-500 py-12">
+          {t('state.noProfileTypes')}
+        </div>
       ) : (
-        <SeekersTab key={primaryDomain} domainId={primaryDomain} />
+        <>
+          <DomainTabs
+            className="-mt-2 mb-6"
+            domains={domains}
+            value={active}
+            onChange={setActive}
+            counts={counts}
+          />
+
+          {/* Keyed by domain so a switch resets paging, filters and selection. */}
+          {isProviderLike ? (
+            <ProvidersTab key={primaryDomain} domainId={primaryDomain} />
+          ) : (
+            <SeekersTab key={primaryDomain} domainId={primaryDomain} />
+          )}
+        </>
       )}
     </div>
   );

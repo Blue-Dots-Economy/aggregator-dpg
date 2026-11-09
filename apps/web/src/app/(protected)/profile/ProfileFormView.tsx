@@ -42,10 +42,8 @@ function toFormData(api: ProfileApiResponse, schema: RJSFSchema): Record<string,
     'type'
   ];
   if (typeDef?.['type'] === 'array') {
-    // An empty `serves` means every domain, shown as every choice ticked.
-    const choices = ((typeDef['items'] as Record<string, unknown> | undefined)?.['enum'] ??
-      []) as string[];
-    data['type'] = api.serves.length > 0 ? api.serves : choices;
+    // An empty `serves` means none, shown as no choice ticked.
+    data['type'] = api.serves;
   } else if (api.type) {
     data['type'] = api.type;
   }
