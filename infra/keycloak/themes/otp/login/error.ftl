@@ -1,35 +1,17 @@
 <#import "template.ftl" as layout>
 <#--
-  Overrides keycloak.v2's error page to give the visitor a way out.
+  Overrides keycloak.v2's error page so the visitor can sign out and use another
+  account. Keycloak shows it when the portal gate refuses the signed-in account,
+  or when a second account signs in while another is signed in.
 
-  Two cases need it. The portal entitlement gate (infra/keycloak/init/apply-portal-gate.py)
-  denies on the auth-cookie path too, so someone signed in to the other DPG in
-  the same browser is refused here without a token ever being issued. And a
-  second sign-in in the same browser while another account is signed in is
-  refused with "already authenticated as different user". In both cases the
-  realm session is what is replayed, so only signing out lets the visitor name
-  a different account.
+  The button goes to the app's account-switch route (`switchAccountPath`), which
+  ends the app session as well as the realm session. The portal's address is
+  the client's last post-logout URI ending in "/login"; the realm lists the
+  public URL last. Otherwise the button uses Keycloak's end-session endpoint
+  with `client_id` only, because a guessed post-logout URI may be wrong or
+  unregistered.
 
-  The sign-out button goes to the app's own account-switch route when the theme
-  names one (`switchAccountPath`). That route ends the app's session as well as
-  the realm session and returns to the app's sign-in page. Ending only the realm
-  session leaves the app session alive, and the app's sign-in page then sends
-  the visitor back to the old account.
-
-  The portal's address is read from the client's registered post-logout
-  redirect URIs: the last one ending in "/login". The realm registers the public
-  portal URL last, after the local-development entries. This lookup only runs
-  for a theme that names a switch route: the portal client has one public host,
-  but a signals client can serve several, so its list does not say which host
-  the visitor came from.
-
-  Any other case uses Keycloak's own end-session endpoint with `client_id` only.
-  No `post_logout_redirect_uri` is guessed, because a wrong one sends the
-  visitor to another app, and an unregistered one fails with "Invalid redirect uri".
-
-  The layout's Back arrow is hidden here: going back from this page reopens a
-  form or logout confirmation that Keycloak has already used, which fails again
-  with "Logout failed".
+  The Back arrow is hidden: going back reopens a form Keycloak has already used.
 -->
 <@layout.registrationLayout displayMessage=false showBack=false; section>
 <!-- template: error.ftl -->
