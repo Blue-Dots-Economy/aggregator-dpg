@@ -14,7 +14,8 @@ import { z } from 'zod';
 export const SESSION_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid';
 export const OIDC_FLOW_COOKIE = 'oidc_flow';
 
-const FIVE_MIN = 60 * 5;
+/** Lifetime of an in-progress sign-in: the handshake cookie and its Redis record. */
+export const OIDC_FLOW_TTL_SECONDS = 60 * 5;
 
 function cookieSecure(): boolean {
   const v = process.env.COOKIE_SECURE;
@@ -57,7 +58,7 @@ export function oidcFlowCookieOptions(): {
     secure: cookieSecure(),
     sameSite: 'lax',
     path: '/',
-    maxAge: FIVE_MIN,
+    maxAge: OIDC_FLOW_TTL_SECONDS,
   };
 }
 

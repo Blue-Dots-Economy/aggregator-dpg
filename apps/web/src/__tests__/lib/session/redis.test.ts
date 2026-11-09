@@ -9,6 +9,7 @@ interface FakeRedis {
   get: ReturnType<typeof vi.fn>;
   expire: ReturnType<typeof vi.fn>;
   del: ReturnType<typeof vi.fn>;
+  getdel: ReturnType<typeof vi.fn>;
 }
 
 function makeFakeRedis(): FakeRedis {
@@ -25,6 +26,11 @@ function makeFakeRedis(): FakeRedis {
       const had = store.has(key);
       store.delete(key);
       return had ? 1 : 0;
+    }),
+    getdel: vi.fn(async (key: string) => {
+      const value = store.get(key) ?? null;
+      store.delete(key);
+      return value;
     }),
   };
 }
@@ -140,5 +146,29 @@ describe('RedisSessionStore', () => {
   it('destroy of empty sid is no-op', async () => {
     await expect(s.destroy('')).resolves.toBeUndefined();
     expect(fake.del).not.toHaveBeenCalled();
+  });
+
+  it('remembers a sign-in under a hash of its state, with the given TTL', async () => {
+    await s.rememberSignIn('the-state', 300);
+    const [key, , mode, ttl] = fake.set.mock.calls[0] ?? [];
+    expect(key).toMatch(/^signin:[0-9a-f]{64}$/);
+    expect(key).not.toContain('the-state');
+    expect([mode, ttl]).toEqual(['EX', 300]);
+  });
+
+  it('takes a remembered sign-in once', async () => {
+    await s.rememberSignIn('the-state', 300);
+    expect(await s.takeSignIn('the-state')).toBe(true);
+    expect(await s.takeSignIn('the-state')).toBe(false);
+  });
+
+  it('treats a Redis failure as no sign-in, and never throws on remember', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    fake.set.mockRejectedValueOnce(new Error('down'));
+    fake.getdel.mockRejectedValueOnce(new Error('down'));
+    await expect(s.rememberSignIn('the-state', 300)).resolves.toBeUndefined();
+    expect(await s.takeSignIn('the-state')).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 });

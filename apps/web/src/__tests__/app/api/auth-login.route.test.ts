@@ -32,8 +32,18 @@ const mockGetSessionStore = vi.mocked(getSessionStore);
 describe('GET /api/auth/login', () => {
   let originalRedirectUri: string | undefined;
   let originalSessionKey: string | undefined;
+  const store = {
+    create: vi.fn(),
+    get: vi.fn(),
+    update: vi.fn(),
+    destroy: vi.fn(async () => undefined),
+    close: vi.fn(),
+    rememberSignIn: vi.fn(async () => undefined),
+    takeSignIn: vi.fn(async () => false),
+  };
 
   beforeEach(() => {
+    mockGetSessionStore.mockReturnValue(store as never);
     originalRedirectUri = process.env.OIDC_REDIRECT_URI;
     originalSessionKey = process.env.SESSION_KEY;
     process.env.OIDC_REDIRECT_URI = 'http://localhost:3000/api/auth/callback';
@@ -52,6 +62,7 @@ describe('GET /api/auth/login', () => {
     if (originalSessionKey === undefined) delete process.env.SESSION_KEY;
     else process.env.SESSION_KEY = originalSessionKey;
     vi.clearAllMocks();
+    store.takeSignIn.mockResolvedValue(false);
   });
 
   it('redirects to the IdP authorization URL and sets the signed flow cookie', async () => {
@@ -61,6 +72,11 @@ describe('GET /api/auth/login', () => {
     expect(res.headers.get('location')).toBe('https://kc.test/auth?client_id=x');
     const setCookie = res.headers.get('set-cookie') ?? '';
     expect(setCookie).toContain('oidc_flow=');
+  });
+
+  it('records the sign-in it starts for as long as the handshake cookie lasts', async () => {
+    await GET(new NextRequest('http://localhost/api/auth/login'));
+    expect(store.rememberSignIn).toHaveBeenCalledWith('state-123', 300);
   });
 
   it('defaults returnTo to / when absent', async () => {
@@ -147,16 +163,9 @@ describe('GET /api/auth/login', () => {
       expect(setCookie).not.toContain('oidc_flow=');
     });
 
-    it('ends a live portal session and hints Keycloak with its ID token', async () => {
-      const destroy = vi.fn(async () => undefined);
-      const get = vi.fn(async () => ({ ok: true, value: { idToken: 'id-token-a' } }));
-      mockGetSessionStore.mockReturnValue({
-        create: vi.fn(),
-        get,
-        update: vi.fn(),
-        destroy,
-        close: vi.fn(),
-      } as never);
+    it('ends a live portal session and hints Keycloak when the flow is one it started', async () => {
+      store.takeSignIn.mockResolvedValue(true);
+      store.get.mockResolvedValue({ ok: true, value: { idToken: 'id-token-a' } });
       const buildLogoutUrl = vi.fn(async () => 'https://kc.test/logout?id_token_hint=a');
       mockGetOidcAdapter.mockReturnValue({
         buildAuthorizationUrl: vi.fn(),
@@ -166,14 +175,15 @@ describe('GET /api/auth/login', () => {
       } as never);
 
       const res = await GET(
-        new NextRequest('http://localhost/api/auth/login?switch=1', {
+        new NextRequest('http://localhost/api/auth/login?switch=1&flow=state-b', {
           headers: { cookie: 'sid=sess-a' },
         }),
       );
 
+      expect(store.takeSignIn).toHaveBeenCalledWith('state-b');
       // Without this, /login would send the visitor back to the old account's
       // dashboard after Keycloak signs out.
-      expect(destroy).toHaveBeenCalledWith('sess-a');
+      expect(store.destroy).toHaveBeenCalledWith('sess-a');
       const arg = buildLogoutUrl.mock.calls[0]?.[0] as { idToken?: string };
       expect(arg.idToken).toBe('id-token-a');
       const setCookie = res.headers.get('set-cookie') ?? '';
@@ -182,14 +192,8 @@ describe('GET /api/auth/login', () => {
     });
 
     it('falls back to client_id when the session cookie has no live session', async () => {
-      const destroy = vi.fn(async () => undefined);
-      mockGetSessionStore.mockReturnValue({
-        create: vi.fn(),
-        get: vi.fn(async () => ({ ok: false, error: new Error('not found') })),
-        update: vi.fn(),
-        destroy,
-        close: vi.fn(),
-      } as never);
+      store.takeSignIn.mockResolvedValue(true);
+      store.get.mockResolvedValue({ ok: false, error: new Error('not found') });
       const buildLogoutUrl = vi.fn(async () => 'https://kc.test/logout');
       mockGetOidcAdapter.mockReturnValue({
         buildAuthorizationUrl: vi.fn(),
@@ -199,14 +203,53 @@ describe('GET /api/auth/login', () => {
       } as never);
 
       await GET(
-        new NextRequest('http://localhost/api/auth/login?switch=1', {
+        new NextRequest('http://localhost/api/auth/login?switch=1&flow=state-b', {
           headers: { cookie: 'sid=gone' },
         }),
       );
 
-      expect(destroy).toHaveBeenCalledWith('gone');
+      expect(store.destroy).toHaveBeenCalledWith('gone');
       const arg = buildLogoutUrl.mock.calls[0]?.[0] as { idToken?: string };
       expect(arg.idToken).toBeUndefined();
+    });
+
+    it('leaves the portal session alone when the flow is unknown', async () => {
+      // A link from another site cannot name a live sign-in, so it must not be
+      // able to sign the user out; Keycloak's confirmation page still guards.
+      mockGetOidcAdapter.mockReturnValue({
+        buildAuthorizationUrl: vi.fn(),
+        exchangeCode: vi.fn(),
+        refresh: vi.fn(),
+        buildLogoutUrl: vi.fn(async () => 'https://kc.test/logout'),
+      } as never);
+
+      const res = await GET(
+        new NextRequest('http://localhost/api/auth/login?switch=1&flow=forged', {
+          headers: { cookie: 'sid=sess-a' },
+        }),
+      );
+
+      expect(store.get).not.toHaveBeenCalled();
+      expect(store.destroy).not.toHaveBeenCalled();
+      expect(res.headers.get('set-cookie') ?? '').not.toContain('sid=;');
+    });
+
+    it('leaves the portal session alone when no flow is given', async () => {
+      mockGetOidcAdapter.mockReturnValue({
+        buildAuthorizationUrl: vi.fn(),
+        exchangeCode: vi.fn(),
+        refresh: vi.fn(),
+        buildLogoutUrl: vi.fn(async () => 'https://kc.test/logout'),
+      } as never);
+
+      await GET(
+        new NextRequest('http://localhost/api/auth/login?switch=1', {
+          headers: { cookie: 'sid=sess-a' },
+        }),
+      );
+
+      expect(store.takeSignIn).not.toHaveBeenCalled();
+      expect(store.destroy).not.toHaveBeenCalled();
     });
   });
 

@@ -13,6 +13,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { getOidcAdapter, oidcGenerators } from '@/lib/oidc';
 import {
   OIDC_FLOW_COOKIE,
+  OIDC_FLOW_TTL_SECONDS,
   SESSION_COOKIE,
   clearCookieOptions,
   oidcFlowCookieOptions,
@@ -69,6 +70,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     codeChallenge,
     redirectUri,
   });
+  await getSessionStore().rememberSignIn(state, OIDC_FLOW_TTL_SECONDS);
 
   const res = NextResponse.redirect(authUrl, { status: 302 });
   res.cookies.set(
@@ -98,7 +100,13 @@ const LOGOUT_HINT_MAX_AGE = 300; // 5 minutes
  * is sent as `id_token_hint` when there is one, so Keycloak signs out without
  * asking for confirmation when the token matches the browser's session.
  *
- * @param req - Incoming request, for the session cookie, origin fallback and cookie flags.
+ * The portal session is only touched when `flow` names a sign-in this portal
+ * started and has not used yet. `state` only appears in this browser's
+ * Keycloak URLs, so another site cannot sign a user out by linking here. The
+ * handshake cookie cannot be the proof, because a second sign-in in the same
+ * browser replaces it.
+ *
+ * @param req - Incoming request, for `flow`, the session cookie, origin fallback and cookie flags.
  * @param adapter - OIDC adapter used to build the end-session URL.
  * @returns Redirect to the IdP end-session endpoint.
  */
@@ -106,7 +114,9 @@ async function redirectToAccountSwitch(
   req: NextRequest,
   adapter: ReturnType<typeof getOidcAdapter>,
 ): Promise<NextResponse> {
-  const sid = req.cookies.get(SESSION_COOKIE)?.value;
+  const flow = req.nextUrl.searchParams.get('flow');
+  const proven = flow ? await getSessionStore().takeSignIn(flow) : false;
+  const sid = proven ? req.cookies.get(SESSION_COOKIE)?.value : undefined;
   let idToken: string | undefined;
   if (sid) {
     const result = await getSessionStore().get(sid);

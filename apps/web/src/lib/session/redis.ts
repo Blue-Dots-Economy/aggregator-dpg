@@ -5,7 +5,7 @@
  * `get` refreshes.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type Redis from 'ioredis';
 import {
   SessionDataSchema,
@@ -17,6 +17,12 @@ import { getRedisClient } from './redis-client';
 import { logger } from '../logger';
 
 const KEY_PREFIX = 'session:';
+const SIGN_IN_PREFIX = 'signin:';
+
+/** `state` is a credential for its sign-in, so keys hold only its hash. */
+function signInKey(state: string): string {
+  return SIGN_IN_PREFIX + createHash('sha256').update(state).digest('hex');
+}
 
 export interface RedisSessionStoreOptions {
   /** Sliding TTL in seconds (default 12h). */
@@ -145,5 +151,40 @@ export class RedisSessionStore extends SessionStoreBase {
    */
   async close(): Promise<void> {
     /* shared client lifecycle is managed externally */
+  }
+
+  /**
+   * Records a sign-in this portal started. A failure is logged, not thrown, so
+   * Redis trouble never blocks a sign-in; the record is then simply missing.
+   */
+  async rememberSignIn(state: string, ttlSec: number): Promise<void> {
+    if (!state) return;
+    try {
+      await this.redis.set(signInKey(state), '1', 'EX', ttlSec);
+    } catch (err) {
+      logger.warn({
+        operation: 'session.rememberSignIn',
+        status: 'failure',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /**
+   * Removes the record of a sign-in this portal started. A failure counts as no
+   * record, so the caller falls back to its safer path.
+   */
+  async takeSignIn(state: string): Promise<boolean> {
+    if (!state) return false;
+    try {
+      return (await this.redis.getdel(signInKey(state))) !== null;
+    } catch (err) {
+      logger.warn({
+        operation: 'session.takeSignIn',
+        status: 'failure',
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
   }
 }
