@@ -333,7 +333,7 @@ export class InMemoryUserStore extends UserStoreBase {
     if (filter.status) rows = rows.filter((r) => r.status === filter.status);
     if (filter.serves) {
       const d = filter.serves;
-      rows = rows.filter((r) => r.serves.length === 0 || r.serves.includes(d));
+      rows = rows.filter((r) => r.serves.includes(d));
     }
     // Newest first, id as the tie-break (descending), as Postgres orders.
     rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : -1));

@@ -3740,7 +3740,8 @@
                     "serves": {
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1
                       }
                     },
                     "org_id": {
@@ -4106,7 +4107,8 @@
                           "serves": {
                             "type": "array",
                             "items": {
-                              "type": "string"
+                              "type": "string",
+                              "minLength": 1
                             }
                           },
                           "org_id": {
@@ -5288,11 +5290,11 @@
     },
     "/v1/user/metadata/update/{id}": {
       "patch": {
-        "summary": "Change a coordinator's served domains",
+        "summary": "Change a coordinator's profile types",
         "tags": [
           "console"
         ],
-        "description": "`serves` lists network domain ids (`[]` = every domain). For an approved coordinator the Signals organisation's domains are updated first.",
+        "description": "`serves` lists one or more network domain ids. The coordinator's Keycloak `aggregator_type` attribute is written first, then, for an approved coordinator, the Signals organisation's domains. The coordinator's sessions are then ended, so its next login carries the new types.",
         "requestBody": {
           "required": true,
           "content": {
@@ -5306,6 +5308,7 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "minItems": 1,
                     "maxItems": 50
                   }
                 },
@@ -5382,7 +5385,8 @@
                     "serves": {
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1
                       }
                     },
                     "org_id": {

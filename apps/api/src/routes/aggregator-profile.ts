@@ -73,7 +73,7 @@ const ProfileCommonResponseShape = {
   org_slug: z.string(),
   actor_type: z.string(),
   type: z.string().nullable(),
-  // Every domain served; empty means every domain. `type` is its first entry.
+  // The profile types served; empty means none. `type` is its first entry.
   serves: z.array(z.string()),
   url: z.string().nullable(),
   contact: BecknContactSchema,

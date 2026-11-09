@@ -8,14 +8,14 @@ describe('servesOf', () => {
     expect(servesOf('seeker')).toEqual(['seeker']);
   });
 
-  it('stores null (every domain) as an empty list', () => {
+  it('stores null (no profile type) as an empty list', () => {
     expect(servesOf(null)).toEqual([]);
   });
 });
 
 describe('servedDomains', () => {
-  it('returns every network domain for an empty list', () => {
-    expect(servedDomains([], NETWORK)).toEqual(['seeker', 'provider']);
+  it('returns no domain for an empty list', () => {
+    expect(servedDomains([], NETWORK)).toEqual([]);
   });
 
   it('returns the one domain served', () => {
@@ -51,7 +51,7 @@ describe('servesForCreate', () => {
     expect(servesForCreate({ type: null, serves: ['seeker', 'seeker'] })).toEqual(['seeker']);
   });
 
-  it('keeps an empty list as every domain', () => {
+  it('keeps an empty list as no profile type', () => {
     expect(servesForCreate({ type: 'seeker', serves: [] })).toEqual([]);
   });
 

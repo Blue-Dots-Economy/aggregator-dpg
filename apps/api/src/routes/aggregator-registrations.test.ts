@@ -118,14 +118,14 @@ describe('POST /v1/aggregator-registrations/create', () => {
     });
   }
 
-  it('stores every domain picked and writes the first to Keycloak', async () => {
+  it('stores every profile type picked and writes them all to Keycloak', async () => {
     const res = await registerWithType(['seeker', 'provider']);
     expect(res.statusCode).toBe(201);
     const { aggregator_id } = res.json() as { aggregator_id: string };
     const stored = await userStore.findById(aggregator_id);
     expect(stored.ok && stored.value?.serves).toEqual(['seeker', 'provider']);
     const kcUser = await idp.findByEmail(validBody.contact.email);
-    expect(kcUser.ok && kcUser.value?.attributes?.aggregator_type).toEqual(['seeker']);
+    expect(kcUser.ok && kcUser.value?.attributes?.aggregator_type).toEqual(['seeker', 'provider']);
   });
 
   it('stores a single domain sent as a string as a one-item list', async () => {

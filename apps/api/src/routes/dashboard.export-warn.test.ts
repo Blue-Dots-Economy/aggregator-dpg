@@ -109,6 +109,7 @@ describe('POST /v1/dashboard/export/profiles unowned-id warning', () => {
           email: 'a@x.com',
           aggregator_id: AGG_A,
           decision_made: 'approved',
+          aggregator_type: ['seeker', 'provider'],
           signalstack_org_id: ORG_A,
         };
       }

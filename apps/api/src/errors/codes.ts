@@ -178,10 +178,10 @@ export const ERR = {
   DOMAIN_NOT_SERVED: {
     code: 'DOMAIN_NOT_SERVED',
     status: 403,
-    title: 'Domain not served',
+    title: 'Profile type not served',
     detail:
-      'Your account does not serve this participant type. You can only work with the participant types your account serves.',
-    hint: "The requested domain is not in the coordinator's stored domains (users.serves; empty = every domain).",
+      'Your account does not serve this profile type. You can only work with the profile types your account serves. If they were changed recently, sign out and back in.',
+    hint: "The requested domain is not in the token's aggregator_type claim (empty = none). The claim changes at the next login.",
   },
 
   // ── Registration ────────────────────────────────────────────────────────

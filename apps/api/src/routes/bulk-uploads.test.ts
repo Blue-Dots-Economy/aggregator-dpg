@@ -259,7 +259,7 @@ const AGG_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const AGG_BOTH = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const AGG_ALL = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
-/** Coordinators keyed by id; their stored domains decide what they may upload. */
+/** Coordinators keyed by id. The token claim, not these rows, decides what they may upload. */
 function seedCoordinators(): UserStoreFake {
   const users = new UserStoreFake();
   users.seed([
@@ -362,11 +362,10 @@ describe('bulk-uploads routes', () => {
         return { sub: 'kc-3', aggregator_id: AGG_A, decision_made: 'approved' };
       }
       if (token === 'both-approved') {
-        // The claim still carries the registration domain only.
         return {
           sub: 'kc-5',
           aggregator_id: AGG_BOTH,
-          aggregator_type: 'seeker',
+          aggregator_type: ['seeker', 'provider'],
           decision_made: 'approved',
         };
       }
@@ -565,13 +564,14 @@ describe('bulk-uploads routes', () => {
       expect(res.statusCode).toBe(400);
     });
 
-    it('ignores the token claim and checks the stored domains', async () => {
+    it('403 DOMAIN_NOT_SERVED when the token carries no profile type, whatever the stored row says', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/template?participant_type=seeker',
         headers: AUTH('no-type-approved'),
       });
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(403);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('DOMAIN_NOT_SERVED');
     });
 
     it('403 DOMAIN_NOT_SERVED when requesting a domain the coordinator does not serve', async () => {
@@ -584,7 +584,7 @@ describe('bulk-uploads routes', () => {
       expect((res.json() as { error: { code: string } }).error.code).toBe('DOMAIN_NOT_SERVED');
     });
 
-    it('accepts a second served domain the token claim does not carry', async () => {
+    it('accepts a second profile type the token claim carries', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/template?participant_type=provider',
@@ -594,16 +594,16 @@ describe('bulk-uploads routes', () => {
       expect(res.headers['content-disposition']).toContain('provider-template.csv');
     });
 
-    it('accepts any domain for a coordinator that serves every domain', async () => {
+    it('403 DOMAIN_NOT_SERVED for a coordinator with no profile types', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/template?participant_type=provider',
         headers: AUTH('all-approved'),
       });
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(403);
     });
 
-    it('503 DB_UNAVAILABLE when the coordinator cannot be read', async () => {
+    it('does not read the coordinator row to check the profile type', async () => {
       const users = seedCoordinators();
       users.findById = async () => ({
         ok: false,
@@ -615,7 +615,8 @@ describe('bulk-uploads routes', () => {
         url: '/v1/bulk-uploads/template?participant_type=seeker',
         headers: AUTH('seeker-approved'),
       });
-      expect(res.statusCode).toBe(503);
+      expect(res.statusCode).toBe(200);
+      _setUserStore(seedCoordinators());
     });
 
     it('200s with a schema-generated CSV', async () => {

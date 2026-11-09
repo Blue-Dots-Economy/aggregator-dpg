@@ -499,11 +499,11 @@ async function loadAggregatorAndUser(aggregatorId: string): Promise<LookupOk | L
 }
 
 /**
- * The domains a coordinator serves, as shown on the review page.
+ * The profile types a coordinator serves, as shown on the review page.
  *
- * @param serves - The stored domain ids; empty means every domain.
- * @returns The ids joined by commas, or `All domains`.
+ * @param serves - The stored profile types.
+ * @returns The ids joined by commas, or `None` when it serves none.
  */
 function servesLabel(serves: readonly string[]): string {
-  return serves.length > 0 ? serves.join(', ') : 'All domains';
+  return serves.length > 0 ? serves.join(', ') : 'None';
 }

@@ -232,8 +232,10 @@ describe('admin approval routes', () => {
     expect(await reviewPage()).toContain('seeker, provider');
   });
 
-  it('GET /read/:id shows all domains for an applicant serving every domain', async () => {
-    expect(await reviewPage()).toContain('All domains');
+  it('GET /read/:id shows None for an applicant serving no profile type', async () => {
+    const page = await reviewPage();
+    expect(page).toContain('None');
+    expect(page).not.toContain('All domains');
   });
 
   it('GET /read/:id shows already-approved when aggregator.status=active', async () => {
@@ -641,9 +643,8 @@ describe('admin approval routes', () => {
     },
   );
 
-  it('POST /decision/:id approve falls back to both domains when aggregator.type is null (legacy)', async () => {
-    // Default seed uses type: null. Capture upsert + assert the
-    // legacy fallback list goes out.
+  it('POST /decision/:id approve sends no domains when the coordinator serves no profile type', async () => {
+    // The default seed serves nothing; Signals must not be given every domain.
     const captured: Array<{ external_id: string; domains: string[] | undefined }> = [];
     _setSignalStackWriter(buildCapturingWriter(captured, 'mem-org-legacy'));
 
@@ -658,6 +659,28 @@ describe('admin approval routes', () => {
       payload: { token, decision: 'approve' },
     });
     expect(res.statusCode).toBe(200);
+    expect(captured[0]?.domains).toBeUndefined();
+  });
+
+  it('POST /decision/:id approve sends every profile type the coordinator serves', async () => {
+    const found = await userStore.findById(aggregatorId);
+    if (!found.ok || !found.value) throw new Error('seed missing');
+    userStore.seed([{ ...found.value, type: 'provider', serves: ['provider', 'seeker', 'gone'] }]);
+    const captured: Array<{ external_id: string; domains: string[] | undefined }> = [];
+    _setSignalStackWriter(buildCapturingWriter(captured, 'mem-org-multi'));
+
+    const { token } = await mintApprovalToken({
+      org: DEFAULT_ORG,
+      aggregatorId,
+      intent: 'approve',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
+      payload: { token, decision: 'approve' },
+    });
+    expect(res.statusCode).toBe(200);
+    // Network order, and an id the network no longer has is dropped.
     expect(captured[0]?.domains).toEqual(['seeker', 'provider']);
   });
 

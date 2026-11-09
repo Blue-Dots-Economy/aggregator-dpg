@@ -214,7 +214,7 @@ export async function registerRegistrationLinksRoutes(base: FastifyInstance): Pr
           fields: { domain: 'invalid' },
         });
       }
-      const caller = await requireServedDomain(auth, body.domain);
+      await requireServedDomain(auth, body.domain);
 
       const declaredModes = Object.keys(networkCfg.aggregator.registration_modes ?? {});
       // Enforce AGGREGATOR_ONBOARDING_ENABLED here; hiding a mode in the UI is not
@@ -283,7 +283,16 @@ export async function registerRegistrationLinksRoutes(base: FastifyInstance): Pr
       }
 
       // Coordinator org_slug for the URL path.
-      const callerOrgSlug = caller.orgSlug;
+      const userStore = getUserStore();
+      const aggLookup = await userStore.findById(auth.aggregatorId);
+      if (!aggLookup.ok || !aggLookup.value) {
+        throw httpError('DB_UNAVAILABLE', {
+          cause: new Error(
+            aggLookup.ok ? 'aggregator row missing for caller' : aggLookup.error.message,
+          ),
+        });
+      }
+      const callerOrgSlug = aggLookup.value.orgSlug;
 
       // The public URL exists only once the link is live; a draft slug can still
       // change. The QR is generated client-side from the URL.

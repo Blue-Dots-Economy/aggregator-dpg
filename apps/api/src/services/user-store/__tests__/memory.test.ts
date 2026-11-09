@@ -227,8 +227,8 @@ describe('InMemoryUserStore CAS, list, search and counts', () => {
       }),
     ]);
     const scoped = await store.search({ orgIds: ['org-a'], serves: 'seeker', limit: 20 });
-    // org-a rows serving seeker: c1 (explicit) and c2 (serves-all).
-    expect(scoped.ok && scoped.value.rows.map((r) => r.id).sort()).toEqual(['c1', 'c2']);
+    // org-a rows serving seeker: only c1; c2 serves no profile type.
+    expect(scoped.ok && scoped.value.rows.map((r) => r.id).sort()).toEqual(['c1']);
 
     const page1 = await store.search({ orgIds: null, limit: 1 });
     expect(page1.ok && page1.value.rows.map((r) => r.id)).toEqual(['c1']);

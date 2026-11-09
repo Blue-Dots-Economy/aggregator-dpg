@@ -34,6 +34,13 @@ export type RoleType = z.infer<typeof RoleTypeSchema>;
 export const DomainIdSchema = RoleTypeSchema;
 export type DomainId = RoleType;
 
+/**
+ * A profile type a coordinator serves: a network domain id such as `seeker`.
+ * A coordinator serves one or more; none means it can act on no participants.
+ */
+export const ProfileTypeSchema = z.string().min(1);
+export type ProfileType = z.infer<typeof ProfileTypeSchema>;
+
 export const AggregatorStatusSchema = z.enum(['pending', 'active', 'inactive', 'retired']);
 export type AggregatorStatus = z.infer<typeof AggregatorStatusSchema>;
 
@@ -80,15 +87,14 @@ export const RegistrationPayloadSchema = z
   .object({
     name: z.string().min(2).max(200),
     /**
-     * The domain ids the coordinator serves: one id, or a non-empty list
-     * without repeats. Stored in `users.serves`, which routes that write
-     * participant data check. The first id is also copied to the Keycloak
-     * `aggregator_type` attribute, which nothing checks.
+     * The profile types the coordinator serves: one id, or a non-empty list
+     * without repeats. Stored in `users.serves` and copied to the multivalued
+     * Keycloak `aggregator_type` attribute, whose token claim the API checks.
      */
     type: z.union([
-      RoleTypeSchema,
+      ProfileTypeSchema,
       z
-        .array(RoleTypeSchema)
+        .array(ProfileTypeSchema)
         .min(1)
         .refine((ids) => new Set(ids).size === ids.length, {
           message: 'domain ids must not repeat',

@@ -182,17 +182,31 @@ describe('requireApproved + signalstack backfill', () => {
     expect(await backfilledDomains()).toEqual(['provider']);
   });
 
-  it('backfill sends every network domain when the coordinator serves every domain', async () => {
+  it('backfill sends no domains when the coordinator serves no profile type', async () => {
     seedServes([]);
-    expect(await backfilledDomains()).toEqual(['seeker', 'provider']);
+    expect(await backfilledDomains()).toBeUndefined();
   });
 
-  it('backfill sends every network domain when no stored domain is in the network', async () => {
+  it('backfill sends no domains when no stored profile type is in the network', async () => {
     seedServes(['retired']);
-    expect(await backfilledDomains()).toEqual(['seeker', 'provider']);
+    expect(await backfilledDomains()).toBeUndefined();
   });
 
-  it('does not read the aggregator_type claim into the context', async () => {
+  it('reads a multivalued aggregator_type claim into serves', async () => {
+    const result = await requireApproved(
+      makeReq({
+        sub: kcUserId,
+        aggregator_id: aggregatorId,
+        aggregator_type: ['seeker', 'provider', 'seeker', ''],
+        decision_made: 'approved',
+        signalstack_org_id: 'org_existing',
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.context.serves).toEqual(['seeker', 'provider']);
+  });
+
+  it('reads a single-string aggregator_type claim as a one-item list', async () => {
     const result = await requireApproved(
       makeReq({
         sub: kcUserId,
@@ -203,7 +217,20 @@ describe('requireApproved + signalstack backfill', () => {
       }),
     );
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.context).not.toHaveProperty('aggregatorType');
+    if (result.ok) expect(result.context.serves).toEqual(['seeker']);
+  });
+
+  it('reads a missing aggregator_type claim as no profile type', async () => {
+    const result = await requireApproved(
+      makeReq({
+        sub: kcUserId,
+        aggregator_id: aggregatorId,
+        decision_made: 'approved',
+        signalstack_org_id: 'org_existing',
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.context.serves).toEqual([]);
   });
 
   it('soft-fails when signalstack upsert returns an error', async () => {

@@ -385,8 +385,7 @@ export class PostgresUserStore extends UserStoreBase {
       if (filter.orgIds !== null) conds.push(inArray(users.orgId, filter.orgIds));
       if (filter.status) conds.push(eq(users.status, filter.status));
       if (filter.serves) {
-        // '{}' serves every domain.
-        conds.push(sql`(${users.serves} = '{}' OR ${filter.serves} = ANY(${users.serves}))`);
+        conds.push(sql`${filter.serves} = ANY(${users.serves})`);
       }
       // Compare at millisecond precision: the cursor is a JS Date, `created_at`
       // has microseconds, and rows inserted in one transaction share an instant.

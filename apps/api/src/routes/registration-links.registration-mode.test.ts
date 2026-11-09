@@ -547,6 +547,7 @@ const TOKEN_SEEKER_APPROVED = 'full-seeker-approved';
 const TOKEN_PROVIDER_APPROVED = 'full-provider-approved';
 const TOKEN_PENDING = 'full-pending';
 const TOKEN_NO_AGG_TYPE = 'full-no-agg-type';
+const TOKEN_BOTH_APPROVED = 'full-both-approved';
 
 async function bootFullApp(opts: {
   store: FullRegistrationLinksStore;
@@ -580,6 +581,14 @@ async function bootFullApp(opts: {
         aggregator_id: AGG_ID,
         aggregator_type: 'seeker',
         decision_made: 'pending',
+      };
+    }
+    if (token === TOKEN_BOTH_APPROVED) {
+      return {
+        sub: USER_ID,
+        aggregator_id: AGG_ID,
+        aggregator_type: ['seeker', 'provider'],
+        decision_made: 'approved',
       };
     }
     if (token === TOKEN_NO_AGG_TYPE) {
@@ -682,7 +691,7 @@ describe('POST /v1/links/create — full lifecycle', () => {
     _setUserStore(users);
   }
 
-  it('checks the stored domains, not the token claim', async () => {
+  it('checks the token claim, not the stored row', async () => {
     seedServes(['seeker']);
     const r = await app.inject({
       method: 'POST',
@@ -690,7 +699,9 @@ describe('POST /v1/links/create — full lifecycle', () => {
       headers: { authorization: `Bearer ${TOKEN_NO_AGG_TYPE}` },
       payload: { domain: 'seeker' },
     });
-    expect(r.statusCode).toBe(201);
+    expect(r.statusCode).toBe(403);
+    expect(r.json().error.code).toBe('DOMAIN_NOT_SERVED');
+    expect(store.size()).toBe(0);
   });
 
   it('403 DOMAIN_NOT_SERVED when creating a link for a domain not served', async () => {
@@ -706,12 +717,12 @@ describe('POST /v1/links/create — full lifecycle', () => {
     expect(store.size()).toBe(0);
   });
 
-  it('creates a link for a second served domain the token claim does not carry', async () => {
-    seedServes(['seeker', 'provider']);
+  it('creates a link for a second profile type the token claim carries', async () => {
+    seedServes(['seeker']);
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
-      headers: { authorization: `Bearer ${TOKEN_SEEKER_APPROVED}` },
+      headers: { authorization: `Bearer ${TOKEN_BOTH_APPROVED}` },
       payload: { domain: 'provider' },
     });
     expect(r.statusCode).toBe(201);

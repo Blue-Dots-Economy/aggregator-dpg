@@ -183,7 +183,7 @@ export async function registerAggregatorRegistrationRoutes(base: FastifyInstance
         const keycloakUserId = await createCoordinatorLogin(
           userStore,
           aggregatorId,
-          domains[0]!,
+          domains,
           contact,
         );
 
@@ -542,7 +542,8 @@ async function assertNotInIdp(email: string, phoneE164: string): Promise<void> {
  * coordinator row is deleted.
  *
  * Keycloak attributes: `aggregator_id` (the row id), `aggregator_type`
- * (the first domain; informational, nothing checks it), `phoneNumber` (OTP login key), `decision_made` (login gate).
+ * (every profile type served; its token claim is checked per request),
+ * `phoneNumber` (OTP login key), `decision_made` (login gate).
  *
  * @returns The Keycloak user id.
  * @throws {HttpError} USER_EXISTS, NAME_INVALID_CHARACTERS or IDP_UNAVAILABLE
@@ -550,7 +551,7 @@ async function assertNotInIdp(email: string, phoneE164: string): Promise<void> {
 async function createCoordinatorLogin(
   userStore: UserStore,
   aggregatorId: string,
-  type: string,
+  types: string[],
   contact: BecknContact,
 ): Promise<string> {
   const { firstName, lastName } = splitName(contact.name);
@@ -563,7 +564,7 @@ async function createCoordinatorLogin(
     lastName,
     attributes: {
       [KC_ATTR.AGGREGATOR_ID]: aggregatorId,
-      [KC_ATTR.AGGREGATOR_TYPE]: type,
+      [KC_ATTR.AGGREGATOR_TYPE]: types,
       [KC_ATTR.PHONE_NUMBER]: contact.phone,
       [KC_ATTR.DECISION_MADE]: 'pending',
     },

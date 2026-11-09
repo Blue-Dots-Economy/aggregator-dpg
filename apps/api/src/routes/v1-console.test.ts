@@ -91,6 +91,13 @@ describe('console routes /v1/user, /v1/org', () => {
   let idp: IdpAdminFake;
   let mailer: FakeMailer;
 
+  /** The coordinator's Keycloak user, found by its `aggregator_id`. */
+  async function kcUserOf(id: string) {
+    const found = await idp.findByAttribute(KC_ATTR.AGGREGATOR_ID, id);
+    if (!found.ok || !found.value) throw new Error('kc seed missing');
+    return found.value;
+  }
+
   function coordinator(
     id: string,
     orgId: string,
@@ -208,6 +215,7 @@ describe('console routes /v1/user, /v1/org', () => {
     for (const [id, n] of [
       [C1, 1],
       [C2, 2],
+      [C3, 3],
     ] as const) {
       await idp.createUser({
         email: `c${n}@x.org`,
@@ -592,10 +600,18 @@ describe('console routes /v1/user, /v1/org', () => {
   });
 
   describe('PATCH /v1/user/metadata/update/:id', () => {
-    it('sets the served domains', async () => {
+    it('sets the profile types, writes the token attribute and ends the sessions', async () => {
       const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: ['seeker'] });
       expect(res.statusCode).toBe(200);
       expect((res.json() as { serves: string[] }).serves).toEqual(['seeker']);
+      const kc = await kcUserOf(C3);
+      expect(kc.attributes?.[KC_ATTR.AGGREGATOR_TYPE]).toEqual(['seeker']);
+      expect(idp.logouts.get(kc.id)).toBe(1);
+    });
+
+    it('400 on an empty list: a coordinator serves at least one profile type', async () => {
+      const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: [] });
+      expect(res.statusCode).toBe(400);
     });
 
     it('refuses a domain the network does not have', async () => {
@@ -604,7 +620,7 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('answers 404 out of reach', async () => {
-      const res = await patch(`/v1/user/metadata/update/${C2}`, 'a', { serves: [] });
+      const res = await patch(`/v1/user/metadata/update/${C2}`, 'a', { serves: ['seeker'] });
       expect(res.statusCode).toBe(404);
     });
   });
@@ -1824,13 +1840,56 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(res.statusCode).toBe(200);
     });
 
-    it('updates an active coordinator to all domains when serves is empty', async () => {
-      const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: [] });
+    it('sends Signals exactly the profile types saved', async () => {
+      const ss = new SignalStackWriterFake();
+      const upsert = vi.spyOn(ss, 'upsertAggregator');
+      _setSignalStackWriter(ss);
+      const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', {
+        serves: ['provider', 'seeker'],
+      });
       expect(res.statusCode).toBe(200);
-      expect((res.json() as { serves: string[] }).serves).toEqual([]);
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ domains: ['provider', 'seeker'] }),
+      );
     });
 
-    it('502 when the signalstack push fails for an active coordinator', async () => {
+    it('503 IDP_UNAVAILABLE when the Keycloak write fails, and nothing else changes', async () => {
+      const ss = new SignalStackWriterFake();
+      const upsert = vi.spyOn(ss, 'upsertAggregator');
+      _setSignalStackWriter(ss);
+      const update = vi.spyOn(coordinators, 'update');
+      idp.setAttributes = async () => ({
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
+      });
+      const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: ['seeker'] });
+      expect(res.statusCode).toBe(503);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('IDP_UNAVAILABLE');
+      expect(upsert).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('503 IDP_UNAVAILABLE when the coordinator has no Keycloak user', async () => {
+      idp.findByAttribute = async () => ({ ok: true, value: null });
+      const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: ['seeker'] });
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('still saves when ending the sessions fails', async () => {
+      idp.logoutSessions = async () => ({
+        ok: false,
+        error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
+      });
+      const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: ['seeker'] });
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('502 when the signalstack push fails for an active coordinator, and Keycloak is restored', async () => {
+      const kc = await kcUserOf(C3);
+      await idp.setAttributes(kc.id, { [KC_ATTR.AGGREGATOR_TYPE]: ['provider'] });
+      const found = await coordinators.findById(C3);
+      if (!found.ok || !found.value) throw new Error('seed');
+      coordinators.seed([{ ...found.value, serves: ['provider'], type: 'provider' }]);
       const ss = new SignalStackWriterFake();
       ss.upsertAggregator = async () => err(new UpstreamError('down', { code: 'SS_DOWN' }));
       _setSignalStackWriter(ss);
@@ -1839,6 +1898,8 @@ describe('console routes /v1/user, /v1/org', () => {
       expect((res.json() as { error: { code: string } }).error.code).toBe(
         'SIGNALSTACK_PUSH_FAILED',
       );
+      expect((await kcUserOf(C3)).attributes?.[KC_ATTR.AGGREGATOR_TYPE]).toEqual(['provider']);
+      expect(idp.logouts.get(kc.id)).toBeUndefined();
     });
 
     it('503 when the metadata store update fails', async () => {
@@ -1849,6 +1910,11 @@ describe('console routes /v1/user, /v1/org', () => {
 
     it('502 when a coordinator is approved mid-update and the re-push fails', async () => {
       coordinators.seed([coordinator(C5, ORG_A, 'pending', 5)]);
+      await idp.createUser({
+        email: 'c5@x.org',
+        enabled: false,
+        attributes: { [KC_ATTR.AGGREGATOR_ID]: C5 },
+      });
       const ss = new SignalStackWriterFake();
       ss.upsertAggregator = async () => err(new UpstreamError('down', { code: 'SS_DOWN' }));
       _setSignalStackWriter(ss);
@@ -2450,7 +2516,7 @@ describe('console routes /v1/user, /v1/org', () => {
           (await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' })).statusCode,
         ).toBe(404);
         expect(
-          (await patch(`/v1/user/metadata/update/${C3}`, 'na', { serves: [] })).statusCode,
+          (await patch(`/v1/user/metadata/update/${C3}`, 'na', { serves: ['seeker'] })).statusCode,
         ).toBe(404);
         const invite = await post('/v1/user/create', 'na', {
           org_id: ORG_A,
