@@ -1,7 +1,7 @@
 # Object storage behind an interface — design
 
 Issue: Blue-Dots-Economy/aggregator-dpg#933
-Status: draft for review
+Status: reviewed (aggregator-dpg#933 review comment, 2026-11-09); decisions recorded below
 Branch: `refactor/933-object-storage-interface` (cut from `origin/feature`)
 
 ## 1. Why
@@ -10,10 +10,23 @@ The aggregator can only store files in Amazon S3 or an S3-compatible store
 such as MinIO. The AWS SDK is called directly from two places, so an adopter
 whose cloud is not S3-like cannot run the aggregator without changing code.
 
-This change puts object storage behind one interface. S3 becomes the first
-(and, for now, only) storage provider behind it. Adding another provider later
-must mean writing one new provider file and changing a config value, with no
-change to the features that store files.
+This change defines one object-storage contract for the Blue Dots
+organisation and implements it in this repo, with S3 as the first and, for
+now, only provider. Adding another provider later means writing one new
+provider and changing a config value, with no change to the features that
+store files.
+
+The contract is cut for more than today's three uses. Known and upcoming
+uses it must fit:
+- signals-dpg#566: file fields on profiles (uploads by public users,
+  visibility, PII, deletion).
+- aggregator-dpg#833 / #407: large exports sent by email (10k–50k rows).
+- ai-diffusion-dpg#67: call recordings (large files written as a stream,
+  with retention).
+- ai-diffusion-dpg `knowledge_engine/src/storage/`: an existing Python
+  storage layer (Azure Blob + local PVC).
+- On-prem sites (ALIMCO, Tata Cloud) running self-hosted MinIO with a public
+  endpoint, its own TLS and a Host-header rule.
 
 ## 2. What uses object storage today
 
@@ -37,316 +50,376 @@ Both keep two S3 clients: an internal one (`S3_ENDPOINT`) for server-side
 calls, and a presigner (`S3_PUBLIC_ENDPOINT`, falling back to `S3_ENDPOINT`)
 so signed URLs point at a host the browser can reach.
 
-Nothing else stores files. Signals-DPG has no storage code. The Signals
-`s3-export` job and the aggregator `/v1/campaign/dump` route are being retired
-(replaced by `platform-sync`, which writes straight to the Campaign Manager
-database) and are out of scope.
+Nothing else in this repo stores files, and Signals-DPG has no storage code.
+The Signals `s3-export` cron job (adhoc-scripts) is being replaced by
+`platform-sync`, and the aggregator `/v1/campaign/dump` route is already
+removed on `feature`; both are out of scope.
+
+Today no code deletes an object, and the only bucket lifecycle rule expires
+`campaign-exports/` (`bluedots-automation/opentofu/aws/modules/storage/main.tf`).
+Files under `bulk-uploads/`, which are raw participant CSVs (PII), are kept
+indefinitely. Section 8 covers this.
 
 ## 3. Goals, non-goals, anti-goals
 
 **Goals**
-- One object-storage interface shared by the api and the worker.
-- S3 implemented as a provider behind it, behaving exactly as today.
+- One language-neutral object-storage contract for the organisation, written
+  down in bluedots-docs (section 4).
+- One TypeScript implementation of it in this repo, shared by the api and
+  the worker, with S3 as a provider behind it.
 - A `STORAGE_PROVIDER` setting chooses the provider. Switching to another
   provider, once one exists, is a config change only.
-- The features above depend only on the interface, never on a storage SDK.
-- The way to write a new provider is obvious from the code: one file
-  implementing the interface, plus one case in the factory.
+- The features depend only on the contract, never on a storage SDK.
+- Oversized bulk uploads are refused at upload time, and every file the api
+  rejects is deleted (section 8).
+- `bulk-uploads/` files expire after a configurable retention (section 8).
+- Writing a new provider is obvious from the code, and every provider is
+  held to the same behaviour by one shared test suite.
 
 **Non-goals**
 - Shipping any provider other than S3.
-- Changing how any feature behaves for users, including the browser
-  uploading straight to storage. The only user-visible difference is the
-  reworded upload error text (section 7.1).
-- Changing deployment config (helm, docker-compose, `.env.example` values)
-  beyond what is listed in section 6.
+- Building a provider that serves files through the api (section 5.6 keeps
+  room for it).
+- Areas other than the two used today; public visibility.
+- Changing the Python storage layer in ai-diffusion-dpg (it is aligned with
+  the contract when it is next changed).
+- Publishing the package to npm or moving it to its own repo.
+- Renaming the `s3` database columns, queue field or API fields (section 7.2).
 
 **Anti-goals** (this would be a failure even if it technically works)
-- Any behaviour change for existing S3/MinIO deployments, including on
-  upgrade: same env vars, same object keys, same URLs, same limits.
-- The interface leaking S3 concepts (bucket, ETag quoting, path style,
-  `Command` objects) to callers.
+- Any behaviour change for existing S3/MinIO deployments other than the
+  oversized-upload fix and the retention: same env vars, same object keys,
+  same download URLs, same stored values.
+- The contract leaking S3 concepts (bucket, ETag quoting, path style,
+  `Command` objects, POST policies) to callers.
 - Two copies of the storage code surviving the change.
+- Feature code and infrastructure each holding their own copy of an area's
+  prefix with nothing tying them together.
 
-## 4. Design
+## 4. Where the contract lives
 
-### 4.1 A shared package: `@aggregator-dpg/object-storage`
+- **The contract**: a language-neutral page in bluedots-docs. It states the
+  operations and what each one means, the error cases, the areas (section
+  5.2), how provider settings are named, and what every provider and
+  deployment must handle outside the code: CORS, lifecycle (retention) and
+  encryption at rest. TypeScript and Python both implement against it. It is
+  written as part of work item (a) and kept in step with the code.
+- **The TypeScript code**: `packages/object-storage` in this repo, built to be
+  extracted: it depends on no workspace package except
+  `@aggregator-dpg/shared-primitives`. It moves to its own repo or published
+  package only when a second TypeScript repo (Signals, for #566) adopts it. No
+  Blue Dots repo publishes shared npm packages today.
+- **Python**: ai-diffusion-dpg's `knowledge_engine` storage layer is brought in
+  line with the contract when #67 or the next storage change lands.
+
+## 5. Design
+
+### 5.1 A shared package: `@aggregator-dpg/object-storage`
 
 A new workspace package under `packages/object-storage`, scaffolded from
 `packages/_template` and used by both `apps/api` and `apps/worker`. Its shape
-follows the existing `@aggregator-dpg/mailer` package, which solves the same
-problem for email (`MailerAdapter` contract, `smtp` and `ses` providers,
-`MAIL_PROVIDER` to choose, a fake for tests), and the repo rules in
-`.claude/rules/base-class-pattern.md` and `.claude/rules/interfaces.md`.
-It differs from the mailer in two ways: it takes parsed config from the apps
-instead of reading `process.env`, and it fails at startup, not on first use.
+follows the existing `@aggregator-dpg/mailer` package (`MailerAdapter`
+contract, `smtp` and `ses` providers, `MAIL_PROVIDER` to choose, a fake for
+tests) and the repo rules in `.claude/rules/base-class-pattern.md` and
+`.claude/rules/interfaces.md`. It differs from the mailer in two ways: it
+takes parsed config from the apps instead of reading `process.env`, and it
+fails at startup, not on first use.
 
 | File | Subpath export | Purpose |
 |---|---|---|
 | `src/interface.ts` | `./interface` | `ObjectStorageBase` abstract class, input/output types |
+| `src/areas.ts` | `./areas` | The area definitions (section 5.2) |
 | `src/config.ts` | `./config` | Storage config field-set (`STORAGE_PROVIDER` + each provider's settings), spread into both apps' config schemas |
 | `src/s3.ts` | none | `S3ObjectStorage extends ObjectStorageBase`; all `@aws-sdk/*` imports live here only |
 | `src/index.ts` | `.` | `getObjectStorage()` factory: provider choice, process-wide singleton, test override |
-| `src/testing.ts` | `./testing` | In-memory fake extending `ObjectStorageBase`, for unit tests |
+| `src/testing.ts` | `./testing` | In-memory fake extending `ObjectStorageBase`, and the shared provider test suite (section 6) |
 
 Provider files are not exported, so apps cannot import a provider directly:
 they reach a provider only through `getObjectStorage()`. The package's
 `exports` map enforces this; `pnpm dep-check` scans `packages/` only, so it
 does not need to change.
 
-The `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner` dependencies move
-from `apps/api` and `apps/worker` into this package.
+The `@aws-sdk/*` dependencies move from `apps/api` and `apps/worker` into
+this package. The package does not depend on `@aggregator-dpg/observability`:
+it returns results, and the callers log, so it stays extractable.
 
-### 4.2 The interface
+### 5.2 Areas
+
+Every object belongs to a named **area**. An area declares:
+
+| Field | Meaning |
+|---|---|
+| Name | How code refers to it |
+| Prefix | The folder its objects live under |
+| Retention | How long its objects are kept before the storage deletes them |
+| Visibility | `private` (only reachable through a signed link) or `public` |
+
+Two areas are defined in this change, both matching today's paths, so no
+existing object moves:
+
+| Area | Prefix | Retention | Visibility |
+|---|---|---|---|
+| `bulk-uploads` | `bulk-uploads/` | Configurable; default to be confirmed (section 8) | private |
+| `exports` | `campaign-exports/` | `global.campaignExportExpiryDays` (default 1 day) | private |
+
+Further areas (`profile-files`, recordings, …) are added when those features
+are built, the same way.
+
+Callers name the area on every operation, and the provider keeps the object
+inside the area's prefix. Feature code no longer chooses the top-level folder.
+The area list on the contract page is the one declaration of names, prefixes,
+retention settings and visibility. The package's `src/areas.ts` and the
+storage lifecycle rules in bluedots-automation both implement that list, and
+each points at the page.
+
+Retention is enforced by the storage itself (an S3 lifecycle rule per prefix),
+not by the app. The retention value is a deployment setting in bluedots-automation global values, which already drives
+both the export lifecycle rule and the worker's `EXPORT_URL_TTL_SECONDS`.
+`bulk-uploads` gets a matching setting (section 8). A later provider without
+lifecycle rules must provide its own expiry.
+
+### 5.3 The contract
 
 `ObjectStorageBase` is an abstract class (repo rule: contracts are abstract
 classes, not TS interfaces). Every method is abstract and returns
 `Promise<Result<T, BaseError>>` from `@aggregator-dpg/shared-primitives`.
-Generic, storage-neutral operations. Callers decide object keys and TTLs;
-the provider knows nothing about bulk uploads or campaigns.
+Callers decide keys within an area, TTLs and size limits; the provider knows
+nothing about bulk uploads or campaigns.
 
 | Operation | Purpose | Used by |
 |---|---|---|
-| Create upload URL (key, content type, expiry) → URL, expiry time, headers the browser must send | Lets a browser upload one object directly. The content type is enforced by the signature. The headers carry what the provider requires on the PUT (S3: `Content-Type`; Azure: also `x-ms-blob-type: BlockBlob`). | bulk upload create |
-| Create download URL (key, expiry, download filename, content type) → URL, expiry time | Lets a browser or email recipient download one object, served as an attachment with the given filename. | errors CSV, campaign export |
-| Stat (key) → `{ size, fingerprint }` or "not found" | Confirms an upload landed, checks its size, captures a content fingerprint. "Not found" is a success value; failures are error results. | bulk upload `/start` |
-| Open read stream (key) → Node `Readable` | Streams an object without loading it into memory. The caller owns the stream. | bulk file process |
-| Put (key, bytes, content type) | Writes an object, with a bounded per-call timeout. | errors CSV, campaign export |
+| Create upload (area, key, content type, max bytes, expiry) → upload instructions `{ method, url, headers, formFields }` + expiry time | Lets a browser upload one object directly by following the instructions, without knowing the provider. A provider that can refuse an oversized file at upload does so (S3: POST policy with `content-length-range`; GCS likewise). One that cannot returns PUT instructions, and the caller's size check plus `delete` covers it. | bulk upload create |
+| Create download URL (area, key, expiry, download filename, content type) → URL, expiry time | Lets a browser or email recipient download one object, served as an attachment with the given filename. | errors CSV, campaign export |
+| Stat (area, key) → `{ size, fingerprint }` or "not found" | Confirms an upload landed, checks its size, captures a content fingerprint. | bulk upload `/start` |
+| Open read stream (area, key) → Node `Readable` or "not found" | Streams an object without loading it into memory. The caller owns the stream. | bulk file process |
+| Put (area, key, `Buffer` or `Readable`, content type) | Writes an object. A stream is uploaded in parts, so memory stays bounded for any size. | errors CSV, campaign export |
+| Delete (area, key) | Removes an object. Deleting an object that does not exist succeeds. | bulk upload `/start` (rejected files), later profile files and erasure requests |
+| Check health → ok or error | Optional readiness check that the storage is reachable with the configured credentials. | readiness probe, when wired |
 
 Notes on the contract:
-- **Fingerprint** replaces "ETag" in the interface. For S3 it is today's ETag
-  with the quotes stripped, so the values stored in the database do not
-  change. It is compared only on the same upload row (`markUploaded` treats a repeat
-  `/start` with the same value as a no-op), so values from different
-  providers never meet.
-- **Not carried over**: the comment in today's api storage module saying the
-  size is checked at `/complete`; the route is `/start`.
+- **"Not found"** is a success value on stat and on open read stream, not an
+  error. Callers decide what it means.
+- **Fingerprint** replaces "ETag". For S3 it is today's ETag with the quotes
+  stripped, so stored values do not change. It is compared only on the same
+  upload row (`markUploaded` treats a repeat `/start` with the same value as
+  a no-op), so values from different providers never meet.
+- **Upload instructions** may point at the storage or, for a future
+  api-served provider, at an api route (section 5.6). Callers never assume
+  which.
 - **Two endpoints** stay a provider concern. The S3 provider keeps the
   internal client for server-side calls and the public presigner for URLs.
 - **Timeouts and retries** stay as today for S3: 5 s connect timeout, 3
-  attempts, 60 s timeout on writes, no total timeout on streamed reads.
+  attempts, 60 s timeout on buffered writes, no total timeout on streamed
+  reads and streamed writes.
 - **Errors**: providers never throw across the boundary. A transport or
-  provider failure is returned as an `UpstreamError`; a bad input as a
-  `ValidationError`. Callers map an error result to exactly today's behaviour:
-  in the bulk-upload routes a storage failure today is uncaught and answers
+  provider failure is returned as an `UpstreamError`; a bad input (including
+  an unknown area) as a `ValidationError`. Callers map an error result to
+  today's behaviour: in the bulk-upload routes a storage failure answers
   **500 `INTERNAL`** (`apps/api/src/errors/serialize.ts`), and it stays 500;
-  worker jobs still fail and retry where they do now. Changing the api to a
-  503 would be a behaviour change and is out of scope. "Not found" on stat is a success value, not an
-  error.
+  worker jobs still fail and retry where they do now.
+- **Encryption at rest** is a provider and deployment requirement, because
+  exports and bulk uploads contain PII. On AWS the bucket's default encryption
+  (`AES256`, bluedots-automation storage module) already covers it; every
+  other deployment, including on-prem MinIO, must enable it.
+- **Not carried over**: the comment in today's api storage module saying the
+  size is checked at `/complete`; the route is `/start`.
 
-### 4.3 Choosing the provider: `STORAGE_PROVIDER`
+### 5.4 Choosing the provider: `STORAGE_PROVIDER`
 
 - New optional setting `STORAGE_PROVIDER`, default `s3`, read by both the
   api and the worker.
 - The storage settings are declared once, in the package's `./config`
-  field-set, and spread into both apps' config schemas, the same way
+  field-set, and spread into both apps' config schemas, the way
   `signalStackConfigFields` from `@aggregator-dpg/shared-primitives/config`
-  is today. Keeping it in the storage package means a new provider touches
-  only this package. This removes the duplicate
-  `S3_*` definitions in `apps/api/src/config.ts` and
-  `apps/worker/src/config.ts`, and the apps pass the parsed values to the
-  factory.
+  is today. This removes the duplicate `S3_*` definitions in
+  `apps/api/src/config.ts` and `apps/worker/src/config.ts`; the apps pass
+  the parsed values to the factory.
 - `s3` builds the S3 provider from the existing `S3_*` settings, which keep
-  their current names and meanings: `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`,
-  `S3_REGION`, `S3_BUCKET`, `S3_FORCE_PATH_STYLE`, `S3_ACCESS_KEY_ID`,
+  their names and meanings: `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`,
+  `S3_BUCKET`, `S3_FORCE_PATH_STYLE`, `S3_ACCESS_KEY_ID`,
   `S3_SECRET_ACCESS_KEY`. Leaving the keys blank still falls back to the
   default AWS credential chain (IAM role / IRSA).
 - An unknown value fails at startup with a clear message, never at the first
   upload.
-- Each provider owns its own settings, named with its own prefix (for example
-  `AZURE_STORAGE_*` for a future Azure provider).
+- Each provider owns its settings, named with its own prefix (for example
+  `AZURE_STORAGE_*` for a future Azure provider). This naming rule is part of
+  the contract page.
 - **Required-ness depends on the selected provider.** In the schema every
-  provider's settings are optional on their own. A check on the whole config
-  then requires the settings of the provider named in `STORAGE_PROVIDER`
-  only, and fails startup naming each missing one. Settings of providers
-  that are not selected are ignored, so an S3 deployment never needs
-  `AZURE_STORAGE_*` and an Azure deployment never needs `S3_*`.
-- For `s3` the existing defaults and fallbacks are kept exactly:
-  `S3_REGION` defaults to `us-east-1`, `S3_BUCKET` to
-  `aggregator-bulk-uploads`, `S3_FORCE_PATH_STYLE` to `true`;
-  `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT` and the two keys stay optional. So no
-  existing deployment gains a newly required setting.
+  provider's settings are optional. A check on the whole config then
+  requires the settings of the provider named in `STORAGE_PROVIDER` only, and
+  fails startup naming each missing one. An S3 deployment never needs
+  `AZURE_STORAGE_*`, and an Azure deployment never needs `S3_*`.
+- For `s3` the existing defaults are kept exactly: `S3_REGION` =
+  `us-east-1`, `S3_BUCKET` = `aggregator-bulk-uploads`,
+  `S3_FORCE_PATH_STYLE` = `true`; `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT` and the
+  two keys stay optional. No existing deployment gains a required setting.
 
-### 4.4 What stays in the apps
+### 5.5 What stays in the apps
 
-- **Object keys** are still built by the features:
+- **Keys within an area** are still built by the features, and the full
+  object keys stay exactly as today:
   `bulk-uploads/<aggregatorId>/<uploadId>/raw.csv`,
   `bulk-uploads/<uploadId>/errors.csv`,
-  `campaign-exports/<orgId>/<jobId>.csv`.
+  `campaign-exports/<orgId>/<jobId>.csv`. Values already stored in
+  `bulk_uploads.s3_key` and `errors_csv_s3_key` keep working with no data
+  migration.
 - **TTLs and limits** stay in each app's config: `BULK_UPLOAD_URL_TTL_SECONDS`,
-  `BULK_UPLOAD_MAX_BYTES` (api) and `EXPORT_URL_TTL_SECONDS` (worker).
-- **Response shapes** of the bulk-upload API are unchanged except for one
-  added field on the create response, `upload_headers` (an object of header
-  name → value the browser must send on the PUT). For S3 it holds only
-  `Content-Type`, which equals the existing `content_type` field, so S3
-  behaviour is identical. The existing fields stay.
+  `BULK_UPLOAD_MAX_BYTES` (api) and `EXPORT_URL_TTL_SECONDS` (worker). The api
+  passes `BULK_UPLOAD_MAX_BYTES` as the upload's max bytes.
+- **The create response** of `POST /v1/bulk-uploads` gains one field,
+  `upload` (`{ method, url, headers, form_fields }`), which the web app
+  follows to upload the file. The existing fields stay. `upload_url` and
+  `content_type` are marked deprecated in `openapi.json`, because once S3
+  switches to POST (work item b) a bare PUT to `upload_url` no longer works;
+  they are removed later through the API deprecation cycle
+  (signals-dpg#839). Today only the web app uses them.
 
-### 4.5 How a new provider is written
+### 5.6 How a new provider is written
 
-This is the recipe the code should make obvious (shown here for a future
-Azure Blob provider; not part of this change):
+The recipe the code should make obvious (shown for a future Azure Blob
+provider; not part of this change):
 
-1. Add `src/<provider>.ts` with a class extending `ObjectStorageBase`, using the provider's
-   own SDK. Upload/download URLs map to the provider's equivalent of
-   pre-signed URLs (Azure: SAS URLs; GCS: signed URLs).
+1. Add `src/<provider>.ts` with a class extending `ObjectStorageBase`, using
+   the provider's own SDK. Upload instructions and download URLs map to the
+   provider's equivalent of signed URLs (Azure: SAS URLs, with
+   `x-ms-blob-type: BlockBlob` in the upload headers; GCS: signed URLs or a
+   signed POST policy).
 2. Add the SDK as a dependency of `@aggregator-dpg/object-storage` only.
 3. Add the provider's settings to `src/config.ts`, and one case to the
    factory in `src/index.ts` that fails fast at startup when a required
    setting is missing.
-4. Add unit tests for the provider.
+4. Run the shared provider test suite (section 6) against it.
 5. Document the new `STORAGE_PROVIDER` value and its settings in
-   `.env.example`.
+   `.env.example` and on the contract page.
 
-Things every provider must also handle outside the code, which the S3
-deployment handles today:
-- **CORS** on the container/bucket, so the browser can PUT directly.
-- **Expiry of export files** (S3 uses a bucket lifecycle rule tied to
-  `global.campaignExportExpiryDays`); the download URL TTL is only the link.
+Every provider and deployment must also handle, outside the code: CORS for
+the methods its upload instructions use, retention per area (section 5.2),
+and encryption at rest.
 
-A provider that cannot issue pre-signed URLs (for example plain disk) cannot
-fit this interface as is; it would need new upload/download API routes and is
-deliberately not designed here.
+**A provider that serves files through the api** (local disk, a PVC, or
+on-prem without a public MinIO endpoint) is not built now, and the contract
+does not rule it out: its upload instructions and download URLs would point
+at signed api routes, which receive or serve the bytes and store them
+locally. Building it would add those routes (each a new API, needing
+approval) and its own retention sweep.
 
-## 5. Changes by area
+## 6. Shared provider test suite
 
-| Area | Change |
-|---|---|
-| `packages/object-storage` (new) | Interface, S3 provider, factory, test fake, unit tests |
-| `apps/api` | `routes/bulk-uploads.ts` calls the interface; `services/object-storage/` removed; `config.ts` spreads the shared storage fields instead of its own `S3_*`; AWS S3 deps removed from `package.json` |
-| `apps/worker` | `jobs/bulk-file-process.ts`, `jobs/bulk-finalise.ts`, `jobs/campaign-process.ts`, `services/campaign-process` call the interface; `src/object-storage.ts` removed; `config.ts` spreads the shared storage fields; AWS S3 deps removed from `package.json` |
-| `apps/web` | The browser PUT sends the headers from `upload_headers` (falling back to `content_type` when the field is absent, so web and api deploy in either order); the upload error text is reworded (section 7.1). No visible change otherwise. |
-| Tests | Tests that mock the two old storage modules switch to the package's fake; existing route and job tests keep their assertions |
-| Config / docs | `STORAGE_PROVIDER` added to `.env.example`, `apps/api/.env.example`, `apps/worker/.env.example`, and the env docs; helm and docker-compose need no change because the default is `s3` |
-| Database | None (unless the decision in section 7.2 chooses to rename the columns) |
+`./testing` exports one test suite that describes how any provider must
+behave: upload instructions work, an upload over max bytes is refused (or,
+for a provider that cannot refuse it, is reported by stat so the caller can
+delete it), stat and open read stream report "not found", put accepts a
+buffer and a stream, delete removes an object and succeeds when it is
+missing, download URLs serve the object with its filename, unknown areas are
+rejected, and objects stay inside their area's prefix.
 
-## 6. Deploying it
-
-With the contract names kept (section 7.2 "Keep"):
-- **No database migration.**
-- **No env or helm change.** `STORAGE_PROVIDER` is unset everywhere and
-  defaults to `s3`.
-- **No ordering constraint** between api, worker and web (the web falls
-  back when `upload_headers` is absent); api and worker talk to the same
-  bucket with the same keys as before.
-- Rollback is a plain image rollback.
+The in-memory fake and the S3 provider (run against MinIO) must both pass it,
+and so must every future provider. This is what lets the apps' tests trust
+the fake.
 
 ## 7. The "S3" names outside the S3 provider
 
-After the interface is in, the word "S3" still appears in names outside the
-S3 provider. The stored values (`bulk-uploads/...`) are already
-provider-neutral; only the names say S3. They fall into two groups.
+After the change, "S3" still appears in some names outside the S3 provider.
+The stored values (`bulk-uploads/...`) are provider-neutral; only the names
+say S3. `S3_*` env vars configure the S3 provider specifically and keep their
+names.
 
-`S3_*` env vars are not renamed in either group: they configure the S3
-provider specifically, and keep their names.
+### 7.1 Renamed in this change
 
-### 7.1 Renamed in this change (no migration, no compatibility step)
-
-These are internal or plain text. Renaming them changes no stored data and no
-contract, so they are part of this change:
+These are internal or plain text. Renaming them changes no stored data and
+no contract:
 
 | What | Today | After |
 |---|---|---|
 | Upload error a coordinator can see | `S3 PUT failed (<status>): <body>` (`apps/web/src/services/onboarding.service.ts:263`, shown by `CSVUpload.tsx`) | Storage-neutral wording, e.g. `File upload failed (<status>)` |
-| API route descriptions | "pre-signed S3 GET URL" and similar (`routes/bulk-uploads.ts`, regenerated into `openapi.json`) | "pre-signed download URL" and similar. Descriptions only; field names unchanged. |
+| API route descriptions | "pre-signed S3 GET URL" and similar (`routes/bulk-uploads.ts`, regenerated into `openapi.json`) | "pre-signed download URL" and similar. Descriptions only. |
 | Log fields and reasons | `s3_key`, `s3_object_missing`, `sub: 's3.put'` | `storage_key`, `storage_object_missing`, `storage.put` |
-| Code names | `s3Key`, `s3Etag`, `errorsCsvS3Key` in the bulk-uploads store, route and worker jobs | `storageKey`, `contentFingerprint`, `errorsCsvStorageKey`. The Drizzle fields keep mapping to the existing column names (e.g. `storageKey: text('s3_key')`), so the database is untouched. |
+| Code names | `s3Key`, `s3Etag`, `errorsCsvS3Key` in the bulk-uploads store, route and worker jobs | `storageKey`, `contentFingerprint`, `errorsCsvStorageKey`. The Drizzle fields keep mapping to the existing columns (e.g. `storageKey: text('s3_key')`). |
 | Dead code | `findByAggregatorAndEtag` and the `DUPLICATE_ETAG` error, unused since migration 0012 dropped the unique index they relied on (only a test stub calls the finder) | Deleted |
 | Docs | `docs/onboarding-design.md`, `docs/onboarding-implementation.md` | Neutral wording |
 
-Before release, check that no log-based alert or dashboard filters on the
-old log field names.
+No alert or dashboard in bluedots-automation (`helm/monitoring`) reads these
+log fields: the alerts and dashboards are metric-based, and Loki has no
+log-based rules.
 
-### 7.2 Open decision — the three contract names
+### 7.2 Decided — the contract names are kept
 
-These three names are contracts with stored data or with callers, so
-renaming them needs a migration or a compatibility step. **Reviewers: please
-choose keep or rename for each row (they are independent).**
+The database columns `bulk_uploads.s3_key`, `s3_etag`, `errors_csv_s3_key`,
+the queue job field `s3Key` (`packages/queue/src/index.ts`) and the API
+response fields `s3_key`, `errors_csv_s3_key` keep their names. No migration
+and no queue compatibility step. The code reads them through neutral names
+(section 7.1). The API fields are renamed later through the API deprecation
+cycle (signals-dpg#839), not in this change.
 
-| Name | What it is | Rename means |
-|---|---|---|
-| Database columns `bulk_uploads.s3_key` (NOT NULL), `s3_etag`, `errors_csv_s3_key` | Where each uploaded CSV and its errors CSV live in storage, and the upload's fingerprint. The files themselves are in storage; these columns hold only their location. | A migration (see below) |
-| Queue job field `s3Key` (`packages/queue/src/index.ts`, bulk file job) | Tells the worker which object to read | Worker accepts both names for one release |
-| API response fields `s3_key`, `errors_csv_s3_key` (`routes/bulk-uploads.ts`, `openapi.json`) | Returned to the web app and any other caller | Both names returned for one release |
-
-**Keep**: no work, no migration. "s3" stays visible in these column and field
-names on any deployment; behaviour is unaffected.
-
-**Rename** (about one more day for all three):
-
-1. **Database**: a Drizzle migration renaming the three columns to
-   `storage_key`, `content_fingerprint`, `errors_csv_storage_key`. Postgres
-   renames are metadata-only (instant, no table rewrite), but code still
-   running against the old names fails while the rename is live. With
-   today's single api replica, the old pod errors on bulk-upload requests for
-   the seconds between the migration and the new pod becoming ready. To avoid
-   even that window, split it into two releases: release A adds the new
-   columns and writes both, release B switches reads and drops the old
-   columns.
-2. **Queue field**: jobs already waiting in Redis when the new worker starts
-   still carry `s3Key`. The new worker accepts both names for one release;
-   the old name is dropped in a later release, once no old jobs remain.
-   Deploy the worker before or together with the api.
-3. **API fields**: where they are and who reads them today:
-
-   | Endpoint | Field | Read by |
-   |---|---|---|
-   | `POST /v1/bulk-uploads` (create) | `s3_key` (path of the uploaded CSV) | Nobody: typed in `apps/web/src/services/onboarding.service.ts` but never used |
-   | `GET /v1/bulk-uploads`, `GET /v1/bulk-uploads/:id` | `errors_csv_s3_key` (path of the errors CSV, or null) | The web upload screen: shows the "download errors" button only when it is set (`CSVUpload.tsx:380`) |
-   | `GET /v1/bulk-uploads/:id/errors.csv` | `s3_key` (path of the errors CSV) | Nobody: typed in the web app but never used |
-
-   The web BFF routes (`apps/web/src/app/api/bulk-uploads/**`) pass the API
-   responses through unchanged. Outside this repo, `bluedots-e2e` has
-   generated client types (no test uses the fields) and `bluedots-docs`
-   publishes a copy of `openapi.json`. The API is also reachable directly
-   through the Kong ingress (`v1/bulk-uploads` rate-limit group in
-   `bluedots-automation`), so an unknown caller with a coordinator token
-   cannot be ruled out.
-
-   Rename steps: the api returns both the old and the new field for one
-   release (old marked deprecated in `openapi.json`); the web app moves to
-   the new field (it decides whether to show the errors-download button from
-   `errors_csv_s3_key`, `CSVUpload.tsx:380`); the old fields are removed in a
-   later release. Web and api can then deploy in any order.
-
-## 8. Open question — oversized uploads stay in storage
+## 8. Oversized uploads and retention — decided: fix
 
 Today `BULK_UPLOAD_MAX_BYTES` (default 10 MB, `apps/api/src/config.ts:135`)
-stops an oversized CSV from being **processed**, not from being **uploaded**:
+stops an oversized CSV from being **processed**, not from being **uploaded**.
+The web app does not check the size (it ignores the `max_bytes` it is sent),
+the signed PUT URL does not limit the size, and only `/start` checks it
+(`bulk-uploads.ts:464`). The rejected file is never deleted. For the
+coordinator Upload is one click, so the error reads as "the upload failed"
+while the file is stored.
 
-- The web app does not check the file size before uploading. The create
-  response returns `max_bytes`, but `apps/web` does not use it.
-- The signed upload URL does not limit the size, so storage accepts any file
-  up to its own limit (5 GB for a single S3 PUT).
-- Only `/start` checks the size, by reading the stored file's details
-  (`bulk-uploads.ts:464`). An oversized file is rejected there and never
-  queued, so the worker never reads it.
-- Nothing deletes the rejected file. No code deletes objects, and the bucket
-  lifecycle rule only expires `campaign-exports/`
-  (`bluedots-automation/opentofu/aws/modules/storage/main.tf`), so
-  `bulk-uploads/` files are kept indefinitely.
+Decision:
+- **Refuse at upload.** The S3 provider issues POST upload instructions with
+  a `content-length-range` up to `BULK_UPLOAD_MAX_BYTES`, so S3 refuses an
+  oversized file before storing it. The web app follows the instructions.
+- **Delete on rejection.** `/start` keeps its size check, and deletes the
+  stored file whenever it rejects one (too large or empty), so nothing a
+  coordinator was told "failed" stays in storage.
+- **Check in the browser first.** The web app compares the file size with
+  `max_bytes` before asking for an upload, and shows the size error
+  immediately.
+- **Retention for `bulk-uploads/`.** A lifecycle rule deletes objects under
+  `bulk-uploads/` after a configurable number of days (a
+  `global.bulkUploadRetentionDays`-style value in bluedots-automation, next to
+  `campaignExportExpiryDays`). The default is to be confirmed. It applies to
+  every instance, including on-prem MinIO.
+- **Expired errors CSV.** Once retention has removed an upload's errors CSV,
+  the errors download answers a clear not-found instead of handing out a
+  link to a missing file.
 
-For the coordinator, Upload is one click, so the error reads as "the upload
-failed", while the file is in fact stored.
+## 9. Work items, order and deployment
 
-**Reviewers: please decide** whether keeping the uploaded file is intended,
-or whether large uploads should be blocked before they reach storage (and
-rejected files removed). This change keeps today's behaviour either way; any
-fix is separate work.
+The work is three sub-issues under #933:
 
-## 9. Testing expectations
+| Item | Repo | Delivers |
+|---|---|---|
+| (a) Contract and package | bluedots-docs, aggregator-dpg | The contract page; `packages/object-storage` with the contract, areas, S3 provider, fake and shared test suite; the api and worker moved onto it; the `upload` field on the create response and the web app following it (PUT instructions from S3, so no behaviour change yet); the renames in section 7.1 |
+| (b) Oversized uploads | aggregator-dpg | S3 POST upload instructions with the size limit, delete on rejection at `/start`, the browser size check, the expired errors CSV answer |
+| (c) Storage settings | bluedots-automation | Lifecycle rule for `bulk-uploads/` with the configurable retention; `POST` added to the bucket CORS methods (today `GET`, `HEAD`, `PUT`, `opentofu/aws/modules/storage/variables.tf`); the same on on-prem MinIO |
 
-- Unit tests for the S3 provider (request shapes, not-found handling, ETag
-  quote stripping, public vs internal endpoint for signed URLs, credentials
-  vs default chain) and for the factory (default `s3`, unknown value fails).
-- The create route returns `upload_headers`, and the web upload sends those
-  headers (and falls back to `content_type` without them).
+Order and deployment:
+- **(a)** has no database migration, no env change and no helm change
+  (`STORAGE_PROVIDER` defaults to `s3`). Web, api and worker deploy in any
+  order: the web falls back to `upload_url` and `content_type` when `upload`
+  is absent. Rollback is a plain image rollback.
+- **(c)** is applied on each instance **before (b)** reaches it, because the
+  browser's POST upload is blocked by CORS without it.
+- **(b)** follows (a) and (c). It has no migration and no new env setting.
+
+## 10. Testing expectations
+
+- The shared provider test suite passes for the fake and for the S3 provider
+  against MinIO.
+- Unit tests for the factory: default `s3`, unknown value fails, missing
+  settings of the selected provider fail and name each setting.
+- The create route returns `upload`; the web app uploads by following it, and
+  falls back to `upload_url` and `content_type` without it.
 - Existing bulk-upload route tests, worker job tests and campaign export
   tests pass unchanged in what they assert.
+- For (b): an oversized file is refused by storage; a file rejected at
+  `/start` is deleted; the browser shows the size error without uploading.
 - A local run against MinIO of the three flows in section 2 still works end
   to end: browser upload, errors CSV download, campaign export link.
 
-## 10. Left to the builder
+## 11. Left to the builder
 
-- Exact method names and type names in the interface.
-- How the fake in `testing.ts` is shaped, as long as both apps' tests can use
-  it.
+- Exact method names and type names in the contract.
+- How a caller's key within an area maps to the full object key, as long as
+  the full keys and the values already stored in the database stay exactly as
+  today.
+- Whether the health check is wired into the api's readiness probe.
+- How the fake in `testing.ts` is shaped, as long as it passes the shared
+  suite and both apps' tests can use it.
