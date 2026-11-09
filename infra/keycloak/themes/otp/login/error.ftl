@@ -1,64 +1,76 @@
 <#import "template.ftl" as layout>
 <#--
-  Overrides keycloak.v2's error page for one reason: to give the visitor a way
-  out.
+  Overrides keycloak.v2's error page to give the visitor a way out.
 
-  The portal entitlement gate (infra/keycloak/init/apply-portal-gate.py) denies
-  on the auth-cookie path too, so someone signed in to the other DPG in the
-  same browser is refused here without a token ever being issued. The base page
-  offers only "back to application", which re-enters SSO, hands the same
-  identity to the same gate and lands straight back on this page — refreshing
-  cannot help, because the realm session is what is being replayed.
+  Two cases need it. The portal entitlement gate (infra/keycloak/init/apply-portal-gate.py)
+  denies on the auth-cookie path too, so someone signed in to the other DPG in
+  the same browser is refused here without a token ever being issued. And a
+  second sign-in in the same browser while another account is signed in is
+  refused with "already authenticated as different user". In both cases the
+  realm session is what is replayed, so only signing out lets the visitor name
+  a different account.
 
-  The realm is shared by both DPGs, so ending it is the only thing that lets
-  the visitor name a different account. `id_token_hint` is not available on an
-  error page, so Keycloak will ask for confirmation before signing out; that
-  prompt is honest here, since signing out also ends the other app's session.
+  The sign-out button goes to the app's own account-switch route when the theme
+  names one (`switchAccountPath`). That route ends the app's session as well as
+  the realm session and returns to the app's sign-in page. Ending only the realm
+  session leaves the app session alive, and the app's sign-in page then sends
+  the visitor back to the old account.
 
-  `post_logout_redirect_uri` is deliberately NOT sent: it is validated against
-  the client's registered URIs, and an unregistered value fails with "Invalid
-  redirect uri" — swapping one dead end for another. Passing `client_id` alone
-  is enough for Keycloak to offer its own link back to the application after
-  sign-out.
+  The portal's address is read from the client's registered post-logout
+  redirect URIs: the last one ending in "/login". The realm registers the public
+  portal URL last, after the local-development entries. This lookup only runs
+  for a theme that names a switch route: the portal client has one public host,
+  but a signals client can serve several, so its list does not say which host
+  the visitor came from.
+
+  Any other case uses Keycloak's own end-session endpoint with `client_id` only.
+  No `post_logout_redirect_uri` is guessed, because a wrong one sends the
+  visitor to another app, and an unregistered one fails with "Invalid redirect uri".
+
+  The layout's Back arrow is hidden here: going back from this page reopens a
+  form or logout confirmation that Keycloak has already used, which fails again
+  with "Logout failed".
 -->
-<@layout.registrationLayout displayMessage=false; section>
+<@layout.registrationLayout displayMessage=false showBack=false; section>
 <!-- template: error.ftl -->
 
     <#if section="header">
         ${msg("errorTitle")}
     <#elseif section="form">
-        <div id="kc-error-message" class="bd-form-area">
-            <p class="instruction">${kcSanitize(message.summary)?no_esc}</p>
-
-            <#--
-              `url.resourcesPath` is the only reliable handle on the server's
-              base path from an error page — it is "<base>/resources/<ver>/login/<theme>",
-              so trimming at "/resources/" yields the base ("" or e.g. "/auth")
-              without hardcoding either.
-            -->
-            <#assign kcBase = url.resourcesPath?keep_before("/resources/")>
-            <#assign logoutUrl = kcBase + "/realms/" + realm.name?url('UTF-8') + "/protocol/openid-connect/logout">
-            <#if client?? && client.clientId?has_content>
-                <#assign logoutUrl = logoutUrl + "?client_id=" + client.clientId?url('UTF-8')>
-            </#if>
-
-            <p class="bd-error-switch">
-                <span>${msg("errorWrongAccountPrompt")}</span>
-                <a id="signOutAndSwitch" class="bd-link-btn" href="${logoutUrl}">
-                    ${msg("doSignOutAndSwitch")}
-                </a>
-            </p>
-
-            <#if skipLink??>
-            <#else>
-                <#if client?? && client.baseUrl?has_content>
-                    <p>
-                        <a id="backToApplication" href="${client.baseUrl}">
-                            ${kcSanitize(msg("backToApplication"))?no_esc}
-                        </a>
-                    </p>
+        <#assign appLogin = "">
+        <#if (properties.switchAccountPath!'')?has_content && client?? && client.attributes?? && client.attributes["post.logout.redirect.uris"]??>
+            <#list client.attributes["post.logout.redirect.uris"]?split("##") as uri>
+                <#if uri?trim?ends_with("/login")>
+                    <#assign appLogin = uri?trim>
                 </#if>
-            </#if>
+            </#list>
+        </#if>
+        <#assign appBase = appLogin?keep_before_last("/login")>
+
+        <#--
+          `url.resourcesPath` is "<base>/resources/<ver>/login/<theme>", so
+          trimming at "/resources/" yields the server's base path ("" or e.g.
+          "/auth") without hardcoding either.
+        -->
+        <#assign kcBase = url.resourcesPath?keep_before("/resources/")>
+        <#assign signOutUrl = kcBase + "/realms/" + realm.name?url('UTF-8') + "/protocol/openid-connect/logout">
+        <#if appLogin?has_content>
+            <#assign signOutUrl = appBase + properties.switchAccountPath>
+        <#elseif client?? && client.clientId?has_content>
+            <#assign signOutUrl = signOutUrl + "?client_id=" + client.clientId?url('UTF-8')>
+        </#if>
+
+        <div id="kc-error-message" class="bd-error">
+            <div class="bd-alert bd-alert-warning" role="alert">
+                <span aria-hidden="true">!</span>
+                <span>${kcSanitize(message.summary)?no_esc}</span>
+            </div>
+
+            <a id="signOutAndSwitch"
+               class="${properties.kcButtonClass!} ${properties.kcButtonPrimaryClass!} bd-error-primary"
+               href="${signOutUrl}">
+                ${msg("doSignOutAndSwitch")}
+            </a>
         </div>
     </#if>
 </@layout.registrationLayout>

@@ -18,11 +18,16 @@ vi.mock('@/lib/oidc', () => ({
     codeChallenge: vi.fn(() => 'challenge-123'),
   },
 }));
+vi.mock('@/lib/session', () => ({
+  getSessionStore: vi.fn(),
+}));
 
 import { GET } from '@/app/api/auth/login/route';
 import { getOidcAdapter } from '@/lib/oidc';
+import { getSessionStore } from '@/lib/session';
 
 const mockGetOidcAdapter = vi.mocked(getOidcAdapter);
+const mockGetSessionStore = vi.mocked(getSessionStore);
 
 describe('GET /api/auth/login', () => {
   let originalRedirectUri: string | undefined;
@@ -140,6 +145,68 @@ describe('GET /api/auth/login', () => {
       expect(setCookie).toContain('bd_logout_reason=account_switch');
       // No code is exchanged on this leg, so a flow cookie would only go stale.
       expect(setCookie).not.toContain('oidc_flow=');
+    });
+
+    it('ends a live portal session and hints Keycloak with its ID token', async () => {
+      const destroy = vi.fn(async () => undefined);
+      const get = vi.fn(async () => ({ ok: true, value: { idToken: 'id-token-a' } }));
+      mockGetSessionStore.mockReturnValue({
+        create: vi.fn(),
+        get,
+        update: vi.fn(),
+        destroy,
+        close: vi.fn(),
+      } as never);
+      const buildLogoutUrl = vi.fn(async () => 'https://kc.test/logout?id_token_hint=a');
+      mockGetOidcAdapter.mockReturnValue({
+        buildAuthorizationUrl: vi.fn(),
+        exchangeCode: vi.fn(),
+        refresh: vi.fn(),
+        buildLogoutUrl,
+      } as never);
+
+      const res = await GET(
+        new NextRequest('http://localhost/api/auth/login?switch=1', {
+          headers: { cookie: 'sid=sess-a' },
+        }),
+      );
+
+      // Without this, /login would send the visitor back to the old account's
+      // dashboard after Keycloak signs out.
+      expect(destroy).toHaveBeenCalledWith('sess-a');
+      const arg = buildLogoutUrl.mock.calls[0]?.[0] as { idToken?: string };
+      expect(arg.idToken).toBe('id-token-a');
+      const setCookie = res.headers.get('set-cookie') ?? '';
+      expect(setCookie).toContain('sid=;');
+      expect(setCookie).toContain('bd_logout_reason=account_switch');
+    });
+
+    it('falls back to client_id when the session cookie has no live session', async () => {
+      const destroy = vi.fn(async () => undefined);
+      mockGetSessionStore.mockReturnValue({
+        create: vi.fn(),
+        get: vi.fn(async () => ({ ok: false, error: new Error('not found') })),
+        update: vi.fn(),
+        destroy,
+        close: vi.fn(),
+      } as never);
+      const buildLogoutUrl = vi.fn(async () => 'https://kc.test/logout');
+      mockGetOidcAdapter.mockReturnValue({
+        buildAuthorizationUrl: vi.fn(),
+        exchangeCode: vi.fn(),
+        refresh: vi.fn(),
+        buildLogoutUrl,
+      } as never);
+
+      await GET(
+        new NextRequest('http://localhost/api/auth/login?switch=1', {
+          headers: { cookie: 'sid=gone' },
+        }),
+      );
+
+      expect(destroy).toHaveBeenCalledWith('gone');
+      const arg = buildLogoutUrl.mock.calls[0]?.[0] as { idToken?: string };
+      expect(arg.idToken).toBeUndefined();
     });
   });
 

@@ -11,7 +11,14 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { getOidcAdapter, oidcGenerators } from '@/lib/oidc';
-import { OIDC_FLOW_COOKIE, oidcFlowCookieOptions, signFlowState } from '@/lib/cookies';
+import {
+  OIDC_FLOW_COOKIE,
+  SESSION_COOKIE,
+  clearCookieOptions,
+  oidcFlowCookieOptions,
+  signFlowState,
+} from '@/lib/cookies';
+import { getSessionStore } from '@/lib/session';
 
 export const runtime = 'nodejs';
 
@@ -83,9 +90,15 @@ const LOGOUT_REASON_COOKIE = 'bd_logout_reason';
 const LOGOUT_HINT_MAX_AGE = 300; // 5 minutes
 
 /**
- * Ends the Keycloak session so the next sign-in can name a different account.
+ * Ends the portal session and the Keycloak session so the next sign-in can
+ * name a different account.
  *
- * @param req - Incoming request, for origin fallback and cookie flags.
+ * The portal session is ended too: `/login` sends a visitor who still has one
+ * to the dashboard, so the switch would land on the old account. Its ID token
+ * is sent as `id_token_hint` when there is one, so Keycloak signs out without
+ * asking for confirmation when the token matches the browser's session.
+ *
+ * @param req - Incoming request, for the session cookie, origin fallback and cookie flags.
  * @param adapter - OIDC adapter used to build the end-session URL.
  * @returns Redirect to the IdP end-session endpoint.
  */
@@ -93,6 +106,14 @@ async function redirectToAccountSwitch(
   req: NextRequest,
   adapter: ReturnType<typeof getOidcAdapter>,
 ): Promise<NextResponse> {
+  const sid = req.cookies.get(SESSION_COOKIE)?.value;
+  let idToken: string | undefined;
+  if (sid) {
+    const result = await getSessionStore().get(sid);
+    if (result.ok) idToken = result.value.idToken;
+    await getSessionStore().destroy(sid);
+  }
+
   // Use the public portal URL, as the logout route does. The reason travels in
   // a cookie because the post-logout URI cannot carry a query string.
   const publicBase =
@@ -101,9 +122,11 @@ async function redirectToAccountSwitch(
       ? new URL(process.env.OIDC_POST_LOGOUT_REDIRECT_URI).origin
       : req.nextUrl.origin);
   const target = await adapter.buildLogoutUrl({
+    ...(idToken ? { idToken } : {}),
     postLogoutRedirectUri: new URL('/login', publicBase).toString(),
   });
   const res = NextResponse.redirect(target, { status: 302 });
+  if (sid) res.cookies.set(SESSION_COOKIE, '', clearCookieOptions());
   res.cookies.set(LOGOUT_REASON_COOKIE, 'account_switch', {
     httpOnly: false,
     sameSite: 'lax',
