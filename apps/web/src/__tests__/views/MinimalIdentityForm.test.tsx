@@ -18,6 +18,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 
 import { MinimalIdentityForm } from '@/app/[org]/[slug]/MinimalIdentityForm';
+import { chooseOption } from '@/__tests__/test-utils';
 
 const currentYear = new Date().getFullYear();
 const validYear = String(currentYear - 25);
@@ -39,9 +40,9 @@ function renderForm(props: Partial<React.ComponentProps<typeof MinimalIdentityFo
   return { ...utils, onSubmit };
 }
 
-function fillCommon(getByLabel: (l: string | RegExp) => HTMLElement) {
+async function fillCommon(getByLabel: (l: string | RegExp) => HTMLElement) {
   fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'Jane Doe' } });
-  fireEvent.change(screen.getByLabelText(/Year of birth/), { target: { value: validYear } });
+  await chooseOption(screen.getByLabelText(/Year of birth/), String(validYear));
   void getByLabel;
 }
 
@@ -76,27 +77,27 @@ describe('<MinimalIdentityForm />', () => {
     ).toBeInTheDocument();
   });
 
-  it('flags an invalid phone number as a blocker', () => {
+  it('flags an invalid phone number as a blocker', async () => {
     renderForm();
-    fillCommon(screen.getByLabelText.bind(screen));
+    await fillCommon(screen.getByLabelText.bind(screen));
     fireEvent.change(screen.getByLabelText(/Phone/), { target: { value: '123' } });
     expect(
       screen.getByText(messages.profile.public_reg.account_only.blockers.phone_invalid),
     ).toBeInTheDocument();
   });
 
-  it('flags an invalid email as a blocker when entered', () => {
+  it('flags an invalid email as a blocker when entered', async () => {
     renderForm();
-    fillCommon(screen.getByLabelText.bind(screen));
+    await fillCommon(screen.getByLabelText.bind(screen));
     fireEvent.change(screen.getByLabelText(/Email/), { target: { value: 'not-an-email' } });
     expect(
       screen.getByText(messages.profile.public_reg.account_only.blockers.email_invalid),
     ).toBeInTheDocument();
   });
 
-  it('enables submit once name + valid phone + year of birth + consent are set', () => {
+  it('enables submit once name + valid phone + year of birth + consent are set', async () => {
     renderForm();
-    fillCommon(screen.getByLabelText.bind(screen));
+    await fillCommon(screen.getByLabelText.bind(screen));
     fireEvent.change(screen.getByLabelText(/Phone/), { target: { value: '9876543210' } });
     fireEvent.click(screen.getByRole('checkbox'));
     expect(
@@ -104,10 +105,10 @@ describe('<MinimalIdentityForm />', () => {
     ).toBeEnabled();
   });
 
-  it('submits the identity payload with the network field keys on click', () => {
+  it('submits the identity payload with the network field keys on click', async () => {
     const onSubmit = vi.fn();
     renderForm({ onSubmit });
-    fillCommon(screen.getByLabelText.bind(screen));
+    await fillCommon(screen.getByLabelText.bind(screen));
     fireEvent.change(screen.getByLabelText(/Phone/), { target: { value: '9876543210' } });
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(
@@ -137,11 +138,11 @@ describe('<MinimalIdentityForm />', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows the U18 notice and skips consent for a minor, still allowing submit', () => {
+  it('shows the U18 notice and skips consent for a minor, still allowing submit', async () => {
     const onSubmit = vi.fn();
     renderForm({ onSubmit });
     fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'Kid' } });
-    fireEvent.change(screen.getByLabelText(/Year of birth/), { target: { value: minorYear } });
+    await chooseOption(screen.getByLabelText(/Year of birth/), String(minorYear));
     fireEvent.change(screen.getByLabelText(/Phone/), { target: { value: '9876543210' } });
     expect(
       screen.getByText(messages.profile.public_reg.account_only.u18_notice),
@@ -160,9 +161,9 @@ describe('<MinimalIdentityForm />', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders the submit button disabled while `busy` is true even when otherwise valid', () => {
+  it('renders the submit button disabled while `busy` is true even when otherwise valid', async () => {
     renderForm({ busy: true });
-    fillCommon(screen.getByLabelText.bind(screen));
+    await fillCommon(screen.getByLabelText.bind(screen));
     fireEvent.change(screen.getByLabelText(/Phone/), { target: { value: '9876543210' } });
     fireEvent.click(screen.getByRole('checkbox'));
     expect(
@@ -170,14 +171,14 @@ describe('<MinimalIdentityForm />', () => {
     ).toBeDisabled();
   });
 
-  it('rejects an out-of-range year of birth', () => {
+  it('offers no future year and blocks submit until a year is chosen', async () => {
     renderForm();
     fireEvent.change(screen.getByLabelText(/Name/), { target: { value: 'Jane' } });
-    fireEvent.change(screen.getByLabelText(/Year of birth/), {
-      target: { value: String(currentYear + 5) },
-    });
     expect(
       screen.getByText(messages.profile.public_reg.account_only.blockers.year_of_birth),
     ).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(/Year of birth/));
+    expect(await screen.findByRole('option', { name: String(currentYear) })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: String(currentYear + 1) })).toBeNull();
   });
 });

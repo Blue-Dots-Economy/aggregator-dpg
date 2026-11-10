@@ -28,6 +28,7 @@ import {
 import { withStableKeys } from '@/lib/list-keys';
 import { useSupportConfig } from '@/hooks/useSupportConfig';
 import { useIsClient } from '@/hooks/useIsClient';
+import { SelectField } from '@/components/ui/SelectField';
 
 /** Props for {@link SupportDialog}. */
 export interface SupportDialogProps {
@@ -49,7 +50,7 @@ type Status =
 const SUPPORT_TYPES = ['complaint', 'support_request'] as const;
 type SupportType = (typeof SUPPORT_TYPES)[number];
 
-/** Narrows a `<select>` value to a request type the API accepts. */
+/** Narrows a picked value to a request type the API accepts. */
 function isSupportType(value: string): value is SupportType {
   return SUPPORT_TYPES.some((type) => type === value);
 }
@@ -308,18 +309,17 @@ function SupportForm({
               <label htmlFor="support-type" className="block text-[13px] font-medium mb-1">
                 {t('label_type')}
               </label>
-              <select
+              <SelectField
                 id="support-type"
                 value={type}
-                onChange={(e) => {
-                  const picked = e.currentTarget.value;
-                  if (isSupportType(picked)) setType(picked);
+                onChange={(v) => {
+                  if (isSupportType(v)) setType(v);
                 }}
-                className={inputClass}
-              >
-                <option value="complaint">{t('type_complaint')}</option>
-                <option value="support_request">{t('type_support_request')}</option>
-              </select>
+                options={[
+                  { value: 'complaint', label: t('type_complaint') },
+                  { value: 'support_request', label: t('type_support_request') },
+                ]}
+              />
             </div>
             <div>
               <label htmlFor="support-details" className="block text-[13px] font-medium mb-1">

@@ -32,6 +32,7 @@ import type { ReactElement, ReactNode } from 'react';
 import { ThemeModeProvider } from '@/lib/theme-mode';
 import messages from '@/i18n/messages/en.json';
 import { ResponseShapeError } from '@/lib/response-shape-error';
+import { chooseOption } from '@/__tests__/test-utils';
 
 // ---------------------------------------------------------------------------
 // next/navigation — locally overridden (not the global setup.ts stub) so the
@@ -396,18 +397,18 @@ describe('<DashboardPageRoot />', () => {
       expect(screen.getByText('Alice Seeker')).toBeInTheDocument();
       expect(screen.getByText('Bob Draft')).toBeInTheDocument();
 
-      await userEvent.selectOptions(select, 'draft');
+      await chooseOption(select, messages.dashboard.filters.lifecycle_draft);
       expect(screen.queryByText('Alice Seeker')).not.toBeInTheDocument();
       expect(screen.getByText('Bob Draft')).toBeInTheDocument();
       // The rollup-driven total is unaffected by the row-level filter.
       expect(screen.getByText('120 total')).toBeInTheDocument();
       expect(mockReplace).toHaveBeenCalledWith('/dashboard?lifecycle=draft', { scroll: false });
 
-      await userEvent.selectOptions(select, 'live');
+      await chooseOption(select, messages.dashboard.filters.lifecycle_live);
       expect(screen.getByText('Alice Seeker')).toBeInTheDocument();
       expect(screen.queryByText('Bob Draft')).not.toBeInTheDocument();
 
-      await userEvent.selectOptions(select, 'all');
+      await chooseOption(select, messages.dashboard.filters.lifecycle_all);
       expect(screen.getByText('Alice Seeker')).toBeInTheDocument();
       expect(screen.getByText('Bob Draft')).toBeInTheDocument();
       expect(mockReplace).toHaveBeenLastCalledWith('/dashboard', { scroll: false });
@@ -416,7 +417,9 @@ describe('<DashboardPageRoot />', () => {
     it('reads the initial lifecycle value from the URL on mount', () => {
       nav.resetSearchParams('lifecycle=draft');
       renderPage();
-      expect(screen.getByLabelText('Lifecycle')).toHaveValue('draft');
+      expect(screen.getByLabelText('Lifecycle')).toHaveTextContent(
+        messages.dashboard.filters.lifecycle_draft,
+      );
       expect(screen.queryByText('Alice Seeker')).not.toBeInTheDocument();
       expect(screen.getByText('Bob Draft')).toBeInTheDocument();
     });
@@ -424,7 +427,9 @@ describe('<DashboardPageRoot />', () => {
     it('falls back an unknown lifecycle URL value to "all"', () => {
       nav.resetSearchParams('lifecycle=bogus');
       renderPage();
-      expect(screen.getByLabelText('Lifecycle')).toHaveValue('all');
+      expect(screen.getByLabelText('Lifecycle')).toHaveTextContent(
+        messages.dashboard.filters.lifecycle_all,
+      );
       expect(screen.getByText('Alice Seeker')).toBeInTheDocument();
       expect(screen.getByText('Bob Draft')).toBeInTheDocument();
     });

@@ -32,6 +32,7 @@ import { ConsoleSection } from './ConsoleUi';
 import { RESPONSE_SHAPE_CODE, sendConsole, type ConsoleError } from '../../lib/console-client';
 import { DEFAULT_MAX_INVITES } from '../../lib/invite-limit';
 import { useLeaveWarning } from '../../hooks/useLeaveWarning';
+import { SelectField } from '@/components/ui/SelectField';
 
 interface Recipient {
   email: string;
@@ -420,13 +421,11 @@ function OrgHeader({
       ) : (
         <label className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="text-[12px] text-ink-500">{t('invite.org')}</span>
-          <select className="bd-input" value={orgId} onChange={(e) => onChange(e.target.value)}>
-            {orgs.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
-            ))}
-          </select>
+          <SelectField
+            value={orgId}
+            onChange={onChange}
+            options={orgs.map((o) => ({ value: o.id, label: o.name }))}
+          />
         </label>
       )}
       <span className="ml-auto rounded-full bg-(--bd-bg) px-2.5 py-1 text-[12px] font-semibold text-ink-700">
