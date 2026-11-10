@@ -94,7 +94,7 @@ UPDATED=$(printf '%s' "$PROFILE" | jq --arg policy "$POLICY" '
       ([(.attributes // [])[] | select(.name as $n | ["aggregator_id", "decision_made", "aggregator_type", "signalstack_org_id", "roles"] | index($n) | not)] + [
         { name: "aggregator_id", displayName: "Aggregator id", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: false },
         { name: "decision_made", displayName: "Registration decision", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: false },
-        { name: "aggregator_type", displayName: "Aggregator type", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: false },
+        { name: "aggregator_type", displayName: "Profile types", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: true },
         { name: "signalstack_org_id", displayName: "Signals organisation id", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: false },
         { name: "roles", displayName: "Roles", permissions: { view: ["admin"], edit: ["admin"] }, multivalued: true },
         {
@@ -387,6 +387,39 @@ EOF
   ensure_mapper "phone_number"  "phoneNumber"   "phone_number"  "true"
   # Live role keys for the edge check; access token only, one value per role.
   ensure_mapper "roles"         "roles"         "roles"         "false" "true"
+
+  # The profile types a coordinator serves, one value per type. The API checks
+  # this claim per request. Realm import makes the mapper single-valued on
+  # older instances and ensure_mapper never edits an existing mapper, so switch
+  # it here. A no-op when it is already multivalued.
+  ensure_mapper_multivalued() {
+    mapper_name="$1"
+    mapper=$(curl -fsS "${KC_URL}/admin/realms/${REALM}/clients/${PORTAL_UUID}/protocol-mappers/models" \
+      -H "Authorization: Bearer ${TOKEN}" \
+      | jq -c --arg n "${mapper_name}" '[.[] | select(.name == $n)][0] // empty')
+    if [ -z "$mapper" ]; then
+      echo "[kc-init] mapper '${mapper_name}' absent — skip multivalued switch"
+      return 0
+    fi
+    if [ "$(printf '%s' "$mapper" | jq -r '.config.multivalued')" = "true" ]; then
+      echo "[kc-init] mapper '${mapper_name}' already multivalued — skip"
+      return 0
+    fi
+    mapper_id=$(printf '%s' "$mapper" | jq -r '.id')
+    HTTP=$(curl -s -o /tmp/mapper-resp.json -w "%{http_code}" \
+      -X PUT "${KC_URL}/admin/realms/${REALM}/clients/${PORTAL_UUID}/protocol-mappers/models/${mapper_id}" \
+      -H "Authorization: Bearer ${TOKEN}" \
+      -H "Content-Type: application/json" \
+      --data "$(printf '%s' "$mapper" | jq -c '.config.multivalued = "true"')")
+    if [ "$HTTP" = "204" ]; then
+      echo "[kc-init] mapper '${mapper_name}' switched to multivalued"
+    else
+      echo "[kc-init] mapper '${mapper_name}' multivalued switch FAILED: HTTP ${HTTP}"
+      cat /tmp/mapper-resp.json || true
+    fi
+  }
+  ensure_mapper "aggregator_type" "aggregator_type" "aggregator_type" "false" "true"
+  ensure_mapper_multivalued "aggregator_type"
 fi
 
 # ────────────────────────────────────────────────────────────────────────────
