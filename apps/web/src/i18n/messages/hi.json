@@ -202,8 +202,7 @@
       "failedToLoad": "लोड करने में विफल। कृपया पुनः प्रयास करें।",
       "refreshedJustNow": "अभी रिफ्रेश हुआ",
       "refreshFailed": "रिफ्रेश विफल",
-      "refreshUnreadable": "रिफ्रेश किए गए आँकड़े पढ़े नहीं जा सके। कुछ मिनट बाद फिर से प्रयास करें।",
-      "noProfileTypes": "आपके खाते में अभी कोई प्रोफ़ाइल प्रकार नहीं है, इसलिए दिखाने के लिए कुछ नहीं है। अपने संगठन के स्वामी से इन्हें सेट करने को कहें, फिर दोबारा साइन इन करें।"
+      "refreshUnreadable": "रिफ्रेश किए गए आँकड़े पढ़े नहीं जा सके। कुछ मिनट बाद फिर से प्रयास करें।"
     },
     "ministat": {
       "completeProfiles": "पूर्ण प्रोफ़ाइलें",
@@ -752,7 +751,7 @@
       "known_as_values_more": "+{count} more",
       "known_as_values_new": "New value",
       "known_as_values_placeholder": "Add a value, e.g. District",
-      "known_as_values_exists": "\u201c{name}\u201d is already in the list.",
+      "known_as_values_exists": "“{name}” is already in the list.",
       "known_as_values_notes_heading": "How it works",
       "known_as_values_unchanged": "No changes",
       "known_as_values_unsaved": "Unsaved changes",
@@ -1183,5 +1182,22 @@
     "body": "हमारी ओर से कुछ गड़बड़ हुई। फिर से प्रयास करें, या अवलोकन पर वापस जाएँ।",
     "retry": "फिर से प्रयास करें",
     "home": "अवलोकन पर जाएँ"
+  },
+  "access": {
+    "no_profile_types": {
+      "title": "आपको अभी पहुँच नहीं मिली है",
+      "body": "आपके खाते में कोई प्रोफ़ाइल प्रकार नहीं है, इसलिए आप प्रतिभागियों को देख या जोड़ नहीं सकते।",
+      "step_contact": "अपने संगठन के एडमिन या नेटवर्क एडमिन से संपर्क करें और उनसे अपने प्रोफ़ाइल प्रकार सेट करने को कहें।",
+      "step_sign_in": "उनके पुष्टि करने के बाद, साइन आउट करें और अपने प्रतिभागियों को देखने के लिए दोबारा साइन इन करें।",
+      "signed_in_as": "साइन इन किया गया खाता:",
+      "sign_out": "साइन आउट करें"
+    },
+    "load_error": {
+      "title": "हम आपके खाते का विवरण लोड नहीं कर सके",
+      "body": "आपके प्रोफ़ाइल प्रकार लोड करते समय हमारी ओर से कुछ गड़बड़ हुई। आपकी पहुँच नहीं बदली है। थोड़ी देर में फिर से प्रयास करें।",
+      "retry": "फिर से प्रयास करें",
+      "retrying": "फिर से प्रयास हो रहा है…",
+      "reload": "पेज फिर से लोड करें"
+    }
   }
 }

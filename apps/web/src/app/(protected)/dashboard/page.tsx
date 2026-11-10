@@ -32,6 +32,10 @@ import { useCan } from '../../../lib/auth-context';
 import type { DashboardTileDef, StatusRule } from '../../../hooks/useAggregatorConfig';
 import { useActiveDomain, type ActiveDomainState } from '../../../hooks/useActiveDomain';
 import { DomainTabs } from '../../../components/ui/DomainTabs';
+import {
+  NoProfileTypesNotice,
+  ProfileLoadError,
+} from '../../../components/access/DomainAccessGate';
 import { useThemeMode } from '../../../lib/theme-mode';
 import type {
   DirectionalStats,
@@ -2004,14 +2008,16 @@ function toProviderRow(
 export default function DashboardPageRoot() {
   const activeDomain = useActiveDomain();
   // Wait for the profile and the stored choice before mounting a tab, so no
-  // tab fetches the wrong domain.
-  if (!activeDomain.ready) {
-    return <DashboardLoadingFrame />;
+  // tab fetches the wrong domain. A failed load or no profile types shows a
+  // full-page notice instead of the tabs.
+  if (activeDomain.error || !activeDomain.ready || activeDomain.domains.length === 0) {
+    return <DashboardGateFrame activeDomain={activeDomain} />;
   }
   return <DashboardContent activeDomain={activeDomain} />;
 }
 
-function DashboardLoadingFrame() {
+/** The dashboard title over the loading state, the load error or the no-access notice. */
+function DashboardGateFrame({ activeDomain }: { activeDomain: ActiveDomainState }) {
   const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   return (
@@ -2020,7 +2026,13 @@ function DashboardLoadingFrame() {
         title={`My ${cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
       />
-      <div className="text-center text-[13px] text-ink-400 py-12">{t('state.loading')}</div>
+      {activeDomain.error ? (
+        <ProfileLoadError onRetry={activeDomain.retry} retrying={activeDomain.retrying} />
+      ) : !activeDomain.ready ? (
+        <div className="text-center text-[13px] text-ink-400 py-12">{t('state.loading')}</div>
+      ) : (
+        <NoProfileTypesNotice />
+      )}
     </div>
   );
 }
@@ -2030,8 +2042,7 @@ function DashboardContent({ activeDomain }: { activeDomain: ActiveDomainState })
   const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   const { domains, active, setActive } = activeDomain;
-  // Undefined when the coordinator serves no network domain, which skips the
-  // dashboard fetch and shows the no-profile-types notice.
+  // Defined here: the page root renders this only when a domain is served.
   const primaryDomainCfg = domains.find((d) => d.id === active);
   const primaryDomain = primaryDomainCfg?.id;
   // Provider-like when the domain's `item_type` is job postings, not profiles.
@@ -2064,28 +2075,19 @@ function DashboardContent({ activeDomain }: { activeDomain: ActiveDomainState })
           )
         }
       />
-      {domains.length === 0 ? (
-        // No profile types: every read is refused until an owner sets them.
-        <div className="text-center text-[13px] text-ink-500 py-12">
-          {t('state.noProfileTypes')}
-        </div>
-      ) : (
-        <>
-          <DomainTabs
-            className="-mt-2 mb-6"
-            domains={domains}
-            value={active}
-            onChange={setActive}
-            counts={counts}
-          />
+      <DomainTabs
+        className="-mt-2 mb-6"
+        domains={domains}
+        value={active}
+        onChange={setActive}
+        counts={counts}
+      />
 
-          {/* Keyed by domain so a switch resets paging, filters and selection. */}
-          {isProviderLike ? (
-            <ProvidersTab key={primaryDomain} domainId={primaryDomain} />
-          ) : (
-            <SeekersTab key={primaryDomain} domainId={primaryDomain} />
-          )}
-        </>
+      {/* Keyed by domain so a switch resets paging, filters and selection. */}
+      {isProviderLike ? (
+        <ProvidersTab key={primaryDomain} domainId={primaryDomain} />
+      ) : (
+        <SeekersTab key={primaryDomain} domainId={primaryDomain} />
       )}
     </div>
   );
