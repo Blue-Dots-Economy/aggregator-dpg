@@ -36,6 +36,7 @@ import { config } from '../config.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { getUserStore, type Coordinator } from '../services/user-store/index.js';
+import { servedDomains } from '../services/user-store/serves.js';
 import { getOrganisationStore, type Organisation } from '../services/organisation-store/index.js';
 import {
   isNetworkAdmin,
@@ -154,6 +155,36 @@ async function restoreTokenTypes(
       sub_operation: 'idp.setAttributes.aggregator_type.restore',
       code: restored.error.code,
     });
+  }
+}
+
+/**
+ * Puts a coordinator's previous profile types back after a later step of a
+ * change failed: Keycloak first, then the Signals org's domains when they were
+ * already changed. Best effort: each failure is logged for an operator to
+ * repair.
+ *
+ * @param kcUserId - The coordinator's Keycloak user id.
+ * @param previous - The profile types stored before the change.
+ * @param log - Request logger.
+ * @param pushDomains - Writes the Signals org's domains, or null when Signals was not changed.
+ */
+async function rollbackServes(
+  kcUserId: string,
+  previous: string[],
+  log: FastifyBaseLogger,
+  pushDomains: ((domains: string[]) => Promise<boolean>) | null,
+): Promise<void> {
+  await restoreTokenTypes(kcUserId, previous, log);
+  if (!pushDomains) return;
+  // Signals is not sent an empty list; its org keeps the new domains, which
+  // give no access because requests are checked against the token claim.
+  if (previous.length === 0) {
+    log.warn({ status: 'skipped', sub_operation: 'signalstack.upsertAggregator.restore' });
+    return;
+  }
+  if (!(await pushDomains(previous))) {
+    log.error({ status: 'failure', sub_operation: 'signalstack.upsertAggregator.restore' });
   }
 }
 
@@ -508,7 +539,7 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
         tags: ['console'],
         summary: 'Approve or reject a pending coordinator',
         description:
-          'The same compare-and-set decision service as the emailed review link. A decision already made answers 409 ALREADY_DECIDED with status, decided_at and decided_by.',
+          'The same compare-and-set decision service as the emailed review link. A decision already made answers 409 ALREADY_DECIDED with status, decided_at and decided_by. Approving a coordinator that serves no profile type of the network answers 409 NO_PROFILE_TYPES.',
         params: IdParamsSchema,
         body: DecisionRequestSchema,
         response: {
@@ -594,29 +625,35 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
       const kcUserId = await findCoordinatorLogin(row.id, log);
       await writeTokenTypes(kcUserId, serves, log);
 
-      // An approved coordinator's Signals org carries its domains. On a
-      // Signals failure Keycloak is restored, so every side stays unchanged.
+      // An approved coordinator's Signals org carries its domains. If a later
+      // step fails, Keycloak and Signals are put back, so every side stays
+      // unchanged.
       const signalstack = getSignalStackWriter();
-      const pushDomains = async (): Promise<boolean> => {
-        if (!signalstack) return true;
-        const upsert = await signalstack.upsertAggregator({
-          external_id: row.id,
-          name: row.name,
-          slug: row.orgSlug,
-          domains: serves,
-          requestId: req.id,
-        });
-        if (!upsert.success) {
-          log.error({
-            status: 'failure',
-            sub_operation: 'signalstack.upsertAggregator',
-            code: upsert.error.code,
-          });
-        }
-        return upsert.success;
-      };
-      if (row.status === 'active' && !(await pushDomains())) {
-        await restoreTokenTypes(kcUserId, row.serves, log);
+      const pushDomains = signalstack
+        ? async (domains: string[]): Promise<boolean> => {
+            const upsert = await signalstack.upsertAggregator({
+              external_id: row.id,
+              name: row.name,
+              slug: row.orgSlug,
+              domains,
+              requestId: req.id,
+            });
+            if (!upsert.success) {
+              log.error({
+                status: 'failure',
+                sub_operation: 'signalstack.upsertAggregator',
+                code: upsert.error.code,
+              });
+            }
+            return upsert.success;
+          }
+        : null;
+      // What Keycloak and Signals are put back to: the stored types still in
+      // the network, the same value the profile-types sync writes.
+      const previous = servedDomains(row.serves, networkCfg.domainIds);
+      const signalsUpdated = row.status === 'active' && pushDomains !== null;
+      if (signalsUpdated && !(await pushDomains(serves))) {
+        await rollbackServes(kcUserId, previous, log, null);
         throw httpError('SIGNALSTACK_PUSH_FAILED');
       }
 
@@ -624,12 +661,9 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
         serves,
         updatedBy: actor.userId,
       });
-      if (!updated.ok) dbDown('userStore.update', updated.error.message);
-      // Approved meanwhile with the old domains: push again.
-      if (row.status !== 'active' && updated.value.status === 'active' && !(await pushDomains())) {
-        throw httpError('SIGNALSTACK_PUSH_FAILED', {
-          detail: 'The domains were saved, but Signals was not updated. Save them again.',
-        });
+      if (!updated.ok) {
+        await rollbackServes(kcUserId, previous, log, signalsUpdated ? pushDomains : null);
+        dbDown('userStore.update', updated.error.message);
       }
       // End the coordinator's sessions so its next login carries the new types.
       const logout = await getIdpAdmin().logoutSessions(kcUserId);
@@ -638,6 +672,18 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
           status: 'failure',
           sub_operation: 'idp.logoutSessions',
           code: logout.error.code,
+        });
+      }
+      // Approved meanwhile with the old domains: push again. Saving again
+      // repeats the push.
+      if (
+        pushDomains &&
+        row.status !== 'active' &&
+        updated.value.status === 'active' &&
+        !(await pushDomains(serves))
+      ) {
+        throw httpError('SIGNALSTACK_PUSH_FAILED', {
+          detail: 'The domains were saved, but Signals was not updated. Save them again.',
         });
       }
       log.info({ status: 'success', fields: ['serves'], sessions_ended: logout.ok });

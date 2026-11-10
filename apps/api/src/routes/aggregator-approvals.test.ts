@@ -71,7 +71,7 @@ describe('admin approval routes', () => {
         id: aggregatorId,
         orgSlug: 'trrain-abcd',
         actorType: 'aggregator',
-        type: null,
+        type: 'seeker',
         name: 'TRRAIN',
         contact: {
           name: 'Asha Rao',
@@ -233,6 +233,7 @@ describe('admin approval routes', () => {
   });
 
   it('GET /read/:id shows None for an applicant serving no profile type', async () => {
+    seedAggregatorWithType(null);
     const page = await reviewPage();
     expect(page).toContain('None');
     expect(page).not.toContain('All domains');
@@ -643,10 +644,10 @@ describe('admin approval routes', () => {
     },
   );
 
-  it('POST /decision/:id approve sends no domains when the coordinator serves no profile type', async () => {
-    // The default seed serves nothing; Signals must not be given every domain.
+  it('POST /decision/:id approve is refused with a page when the coordinator serves no profile type', async () => {
+    seedAggregatorWithType(null);
     const captured: Array<{ external_id: string; domains: string[] | undefined }> = [];
-    _setSignalStackWriter(buildCapturingWriter(captured, 'mem-org-legacy'));
+    _setSignalStackWriter(buildCapturingWriter(captured, 'mem-org-none'));
 
     const { token } = await mintApprovalToken({
       org: DEFAULT_ORG,
@@ -658,8 +659,14 @@ describe('admin approval routes', () => {
       url: `/admin/v1/aggregator-registrations/decision/${aggregatorId}`,
       payload: { token, decision: 'approve' },
     });
-    expect(res.statusCode).toBe(200);
-    expect(captured[0]?.domains).toBeUndefined();
+    expect(res.statusCode).toBe(409);
+    expect(res.headers['content-type']).toContain('text/html');
+    expect(res.body).toContain('Set the coordinator&#39;s profile types before approving.');
+    expect(captured).toHaveLength(0);
+    const kc = await idp.findById(kcUserId);
+    expect(kc.ok && kc.value?.enabled).toBe(false);
+    const row = await userStore.findById(aggregatorId);
+    expect(row.ok && row.value?.status).toBe('pending');
   });
 
   it('POST /decision/:id approve sends every profile type the coordinator serves', async () => {
