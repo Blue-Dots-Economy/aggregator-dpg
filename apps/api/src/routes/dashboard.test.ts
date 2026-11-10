@@ -15,6 +15,9 @@ const AGG_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const AGG_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const ORG_A = 'org_aaa_signalstack';
 
+/** The `aggregator_type` claim of the approved test tokens; reset before each test. */
+let tokenTypes: string[] = ['seeker', 'provider'];
+
 /**
  * Builds a deterministic rollup with the same shape signalstack returns
  * per domain. Defaults zero everything; tests override only the fields
@@ -56,6 +59,7 @@ describe('GET /v1/dashboard', () => {
   let idp: IdpAdminFake;
 
   beforeEach(async () => {
+    tokenTypes = ['seeker', 'provider'];
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
@@ -142,6 +146,7 @@ describe('GET /v1/dashboard', () => {
           email: 'a@x.com',
           aggregator_id: AGG_A,
           decision_made: 'approved',
+          aggregator_type: tokenTypes,
           signalstack_org_id: ORG_A,
         };
       }
@@ -151,6 +156,7 @@ describe('GET /v1/dashboard', () => {
           email: 'a@x.com',
           aggregator_id: AGG_A,
           decision_made: 'approved',
+          aggregator_type: tokenTypes,
         };
       }
       if (token === 'agg-b-approved-null-store') {
@@ -159,6 +165,7 @@ describe('GET /v1/dashboard', () => {
           email: 'b@x.com',
           aggregator_id: AGG_B,
           decision_made: 'approved',
+          aggregator_type: tokenTypes,
         };
       }
       if (token === 'agg-a-pending') {
@@ -473,6 +480,88 @@ describe('GET /v1/dashboard', () => {
     );
   });
 
+  /** Sets the profile types the approved token carries. */
+  function seedAggAServes(serves: string[]): void {
+    tokenTypes = serves;
+  }
+
+  it('defaults to the first served domain when no ?domain= is given', async () => {
+    seedAggAServes(['provider']);
+    const spy = vi.spyOn(writer, 'fetchDashboard');
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ domain: 'provider' }));
+  });
+
+  it('403 DOMAIN_NOT_SERVED for a dashboard domain the coordinator does not serve', async () => {
+    seedAggAServes(['provider']);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard?domain=seeker',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('DOMAIN_NOT_SERVED');
+  });
+
+  it('serves the second domain of a multi-domain coordinator', async () => {
+    seedAggAServes(['seeker', 'provider']);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard?domain=provider',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('403 DOMAIN_NOT_SERVED when the token carries no profile type', async () => {
+    seedAggAServes([]);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('DOMAIN_NOT_SERVED');
+  });
+
+  it('checks the token claim, not the stored row', async () => {
+    userStore.seed([
+      buildCoordinator({
+        id: AGG_A,
+        orgSlug: 'agg-a',
+        name: 'Agg A',
+        status: 'active',
+        signalstackOrgId: ORG_A,
+        serves: ['seeker'],
+      }),
+    ]);
+    const findById = vi.spyOn(userStore, 'findById');
+    seedAggAServes(['provider']);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard?domain=provider',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(findById).not.toHaveBeenCalled();
+  });
+
+  it('403 DOMAIN_NOT_SERVED for an export domain the coordinator does not serve', async () => {
+    seedAggAServes(['provider']);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/dashboard/export?domain=seeker',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('DOMAIN_NOT_SERVED');
+  });
+
   it('400 SCHEMA_VALIDATION on an unknown domain for /v1/dashboard/export', async () => {
     const res = await app.inject({
       method: 'GET',
@@ -504,6 +593,7 @@ describe('POST /v1/dashboard/export/profiles', () => {
   let idp: IdpAdminFake;
 
   beforeEach(async () => {
+    tokenTypes = ['seeker', 'provider'];
     _resetJwks();
     process.env.KEYCLOAK_URL = 'http://kc.local';
     process.env.KEYCLOAK_REALM = 'bluedots';
@@ -542,6 +632,7 @@ describe('POST /v1/dashboard/export/profiles', () => {
           email: 'a@x.com',
           aggregator_id: AGG_A,
           decision_made: 'approved',
+          aggregator_type: tokenTypes,
           signalstack_org_id: ORG_A,
         };
       }
@@ -679,6 +770,18 @@ describe('POST /v1/dashboard/export/profiles', () => {
       payload: { item_ids: ['x'], domain: 'bogus' },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  it('403 DOMAIN_NOT_SERVED for a profile export domain the token does not carry', async () => {
+    tokenTypes = ['provider'];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/dashboard/export/profiles',
+      headers: { authorization: 'Bearer agg-a-approved-with-org' },
+      payload: { item_ids: ['p1'], domain: 'seeker' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.code).toBe('DOMAIN_NOT_SERVED');
   });
 
   it('500 INTERNAL when signalstack is not configured', async () => {

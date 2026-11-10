@@ -32,8 +32,9 @@ let cachedValidator: ValidateFunction | null = null;
 /**
  * Returns the shared compiled validator, cached on first use.
  *
- * Before compiling, sets `properties.type.enum` to the current network's
- * domain ids from network config.
+ * Before compiling, replaces `properties.type` so it accepts one domain id or a
+ * non-empty list without repeats, drawn from the current network's domain ids.
+ * Falls back to the schema file's own ids when network config is unavailable.
  */
 export async function getRegistrationValidator(): Promise<ValidateFunction> {
   if (cachedValidator) return cachedValidator;
@@ -41,17 +42,16 @@ export async function getRegistrationValidator(): Promise<ValidateFunction> {
   const raw = readFileSync(schemaPath, 'utf8');
   const schema = JSON.parse(raw) as Record<string, unknown>;
 
+  let networkIds: string[] = [];
   try {
-    const cfg = await getNetworkConfig();
-    const ids = cfg.domainIds;
-    if (ids.length > 0) {
-      const props = schema['properties'] as Record<string, Record<string, unknown>> | undefined;
-      if (props?.['type']) {
-        props['type']['enum'] = ids;
-      }
-    }
+    networkIds = (await getNetworkConfig()).domainIds;
   } catch {
-    // Keep the schema file's enum if network config is unavailable.
+    // Keep the schema file's ids if network config is unavailable.
+  }
+  const props = schema['properties'] as Record<string, Record<string, unknown>> | undefined;
+  const typeProp = props?.['type'];
+  if (props && typeProp) {
+    props['type'] = oneOrListOf(networkIds.length > 0 ? networkIds : fileDomainIds(typeProp));
   }
 
   const ajv = new AjvCtor({ allErrors: true, strict: false });
@@ -88,4 +88,33 @@ function resolveSchemaPath(): string {
  */
 export function _resetValidator(): void {
   cachedValidator = null;
+}
+
+/**
+ * The domain ids a schema file's `type` property declares, if any.
+ *
+ * @param typeProp - The file's `properties.type`, a string or array field.
+ * @returns The ids from `enum` or `items.enum`; `undefined` when neither is set.
+ */
+function fileDomainIds(typeProp: Record<string, unknown>): string[] | undefined {
+  const items = typeProp['items'] as Record<string, unknown> | undefined;
+  const ids = typeProp['enum'] ?? items?.['enum'];
+  return Array.isArray(ids) ? (ids as string[]) : undefined;
+}
+
+/**
+ * A JSON Schema for one domain id or a non-empty list without repeats.
+ *
+ * The form sends a string or a list depending on the deployment's schema copy,
+ * so the API accepts both.
+ *
+ * @param ids - The allowed ids; `undefined` allows any non-empty string.
+ * @returns The schema for `properties.type`.
+ */
+function oneOrListOf(ids: string[] | undefined): Record<string, unknown> {
+  const one: Record<string, unknown> = { type: 'string', minLength: 1 };
+  if (ids) one['enum'] = ids;
+  return {
+    anyOf: [one, { type: 'array', minItems: 1, uniqueItems: true, items: one }],
+  };
 }

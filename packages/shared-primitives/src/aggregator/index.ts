@@ -34,6 +34,13 @@ export type RoleType = z.infer<typeof RoleTypeSchema>;
 export const DomainIdSchema = RoleTypeSchema;
 export type DomainId = RoleType;
 
+/**
+ * A profile type a coordinator serves: a network domain id such as `seeker`.
+ * A coordinator serves one or more; none means it can act on no participants.
+ */
+export const ProfileTypeSchema = z.string().min(1);
+export type ProfileType = z.infer<typeof ProfileTypeSchema>;
+
 export const AggregatorStatusSchema = z.enum(['pending', 'active', 'inactive', 'retired']);
 export type AggregatorStatus = z.infer<typeof AggregatorStatusSchema>;
 
@@ -66,15 +73,33 @@ export const RegistrationConsentSchema = ConsentRecordSchema.extend({
 
 // ─── Registration payload (slim — what the signup form submits) ─────────────
 
+/**
+ * The registration's domain ids as a list.
+ *
+ * @param type - The payload's `type`: one id or a list.
+ * @returns The ids, in the order given.
+ */
+export function registrationDomains(type: string | readonly string[]): string[] {
+  return typeof type === 'string' ? [type] : [...type];
+}
+
 export const RegistrationPayloadSchema = z
   .object({
     name: z.string().min(2).max(200),
     /**
-     * Coordinator's domain id. Copied to the Keycloak `aggregator_type`
-     * attribute and JWT claim. Routes that write participant data check
-     * the request against that claim.
+     * The profile types the coordinator serves: one id, or a non-empty list
+     * without repeats. Stored in `users.serves` and copied to the multivalued
+     * Keycloak `aggregator_type` attribute, whose token claim the API checks.
      */
-    type: RoleTypeSchema,
+    type: z.union([
+      ProfileTypeSchema,
+      z
+        .array(ProfileTypeSchema)
+        .min(1)
+        .refine((ids) => new Set(ids).size === ids.length, {
+          message: 'domain ids must not repeat',
+        }),
+    ]),
     url: z.string().url().max(2048).optional(),
     /**
      * Sub-org, division or institution name. Present only when the

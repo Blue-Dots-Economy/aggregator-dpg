@@ -20,6 +20,7 @@ import { getOrganisationStore } from '../organisation-store/index.js';
 import { getIdpAdmin, KC_ATTR, type IdpUser } from '../idp-admin/index.js';
 import { getSignalStackWriter } from '../signalstack.js';
 import { getNetworkConfig } from '../network-config.js';
+import { servedDomains } from '../user-store/serves.js';
 import { renderApplicantApproved, renderApplicantRejected } from '../email-templates/index.js';
 import { recordLoginIdentity } from '../identity-store/record.js';
 import { revokeRolesOnLeave } from '../authz/roles.js';
@@ -173,14 +174,18 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
   if (signalstack) {
     const started = Date.now();
     const networkCfg = await getNetworkConfig();
-    // The coordinator's known domains; none (or `[]`) means all of them.
-    const served = aggregator.serves.filter((d) => networkCfg.domainIds.includes(d));
-    const domains = served.length > 0 ? served : networkCfg.domainIds;
+    // The coordinator's profile types still in the network. With none, the
+    // domains are not sent: the coordinator can act on nothing until an owner
+    // sets its types.
+    const served = servedDomains(aggregator.serves, networkCfg.domainIds);
+    if (served.length === 0) {
+      log.warn({ status: 'skipped', sub_operation: 'signalstack.upsertAggregator.domains' });
+    }
     const upsert = await signalstack.upsertAggregator({
       external_id: aggregator.id,
       name: aggregator.name,
       slug: aggregator.orgSlug,
-      domains,
+      ...(served.length > 0 ? { domains: served } : {}),
       ...(input.requestId ? { requestId: input.requestId } : {}),
     });
     if (!upsert.success) {

@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getUserStore } from '../services/user-store/index.js';
+import { requireServedDomain } from './served-domains-shared.js';
 import { getRegistrationLinksStore } from '../services/registration-links-store/index.js';
 import type { RegistrationLink } from '../services/registration-links-store/index.js';
 import { httpError } from '../errors/http-error.js';
@@ -213,7 +214,7 @@ export async function registerRegistrationLinksRoutes(base: FastifyInstance): Pr
           fields: { domain: 'invalid' },
         });
       }
-      enforceAggregatorType(auth, body.domain);
+      await requireServedDomain(auth, body.domain);
 
       const declaredModes = Object.keys(networkCfg.aggregator.registration_modes ?? {});
       // Enforce AGGREGATOR_ONBOARDING_ENABLED here; hiding a mode in the UI is not
@@ -755,24 +756,4 @@ async function requireAuth(req: FastifyRequest): Promise<AuthContext> {
   }
   await recordRouteCaller(req, callerFromAuth(result.context));
   return result.context;
-}
-
-/**
- * Rejects a link domain (seeker | provider) that does not match the
- * aggregator's registered type (`aggregator_type` claim).
- */
-function enforceAggregatorType(auth: AuthContext, domain: string): void {
-  if (!auth.aggregatorType) {
-    throw httpError('AGGREGATOR_TYPE_MISSING', {
-      fields: { aggregator_id: auth.aggregatorId },
-    });
-  }
-  if (auth.aggregatorType !== domain) {
-    throw httpError('AGGREGATOR_TYPE_MISMATCH', {
-      fields: {
-        aggregator_type: auth.aggregatorType,
-        requested_type: domain,
-      },
-    });
-  }
 }

@@ -14,12 +14,12 @@ import { z } from 'zod';
 import { errorResponses } from '../errors/openapi.js';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getUserStore } from '../services/user-store/index.js';
-import { getNetworkConfig } from '../services/network-config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import type { SignalStackDecryptedProfileRow } from '@aggregator-dpg/signalstack-writer/interface';
 import { buildDecryptedProfilesCsv } from '@aggregator-dpg/profile-csv';
 import { httpError } from '../errors/http-error.js';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
+import { resolveRequestedDomain } from './served-domains-shared.js';
 
 /**
  * Lifecycle statuses the dashboard shows. Paused and retired are excluded.
@@ -111,13 +111,7 @@ export async function registerDashboardRoutes(base: FastifyInstance): Promise<vo
       // Validated (and defaulted) by the route's `querystring` zod schema.
       const query = req.query;
       const { page, limit, status, lifecycle, refresh } = query;
-      const networkCfg = await getNetworkConfig();
-      const domain = query.domain ?? networkCfg.domainIds[0]!;
-      if (!networkCfg.domains[domain]) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-        });
-      }
+      const domain = await resolveRequestedDomain(auth, query.domain);
 
       const ss = getSignalStackWriter();
       if (!ss) {
@@ -199,13 +193,7 @@ export async function registerDashboardRoutes(base: FastifyInstance): Promise<vo
       // Validated (and defaulted) by the route's `querystring` zod schema.
       const query = req.query;
       const { status, refresh } = query;
-      const networkCfg = await getNetworkConfig();
-      const domain = query.domain ?? networkCfg.domainIds[0]!;
-      if (!networkCfg.domains[domain]) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-        });
-      }
+      const domain = await resolveRequestedDomain(auth, query.domain);
 
       const ss = getSignalStackWriter();
       if (!ss) {
@@ -281,13 +269,7 @@ export async function registerDashboardRoutes(base: FastifyInstance): Promise<vo
       const start = Date.now();
 
       const { item_ids, domain: requestedDomain } = req.body;
-      const networkCfg = await getNetworkConfig();
-      const domain = requestedDomain ?? networkCfg.domainIds[0]!;
-      if (!networkCfg.domains[domain]) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `unknown domain '${domain}' — valid: ${networkCfg.domainIds.join(', ')}`,
-        });
-      }
+      const domain = await resolveRequestedDomain(auth, requestedDomain);
 
       const ss = getSignalStackWriter();
       if (!ss) {

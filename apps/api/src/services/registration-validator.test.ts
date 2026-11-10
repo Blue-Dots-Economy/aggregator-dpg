@@ -43,6 +43,31 @@ describe('getRegistrationValidator', () => {
     }
   });
 
+  /** Errors on `/type` for `type`, against a network of seeker and provider. */
+  async function typeErrors(type: unknown) {
+    mockGetNetworkConfig.mockResolvedValue({ domainIds: ['seeker', 'provider'] });
+    const { getRegistrationValidator } = await import('./registration-validator.js');
+    const validate = await getRegistrationValidator();
+    validate({ type });
+    return (validate.errors ?? []).filter((e) => e.instancePath.startsWith('/type'));
+  }
+
+  it('accepts a list of network domain ids', async () => {
+    expect(await typeErrors(['seeker', 'provider'])).toHaveLength(0);
+  });
+
+  it('rejects a list with an id outside the network', async () => {
+    expect((await typeErrors(['seeker', 'learner'])).length).toBeGreaterThan(0);
+  });
+
+  it('rejects an empty list', async () => {
+    expect((await typeErrors([])).length).toBeGreaterThan(0);
+  });
+
+  it('rejects a list with a repeated id', async () => {
+    expect((await typeErrors(['seeker', 'seeker'])).length).toBeGreaterThan(0);
+  });
+
   it('keeps the static schema enum when the network reports no domain ids', async () => {
     mockGetNetworkConfig.mockResolvedValue({ domainIds: [] });
     const { getRegistrationValidator } = await import('./registration-validator.js');

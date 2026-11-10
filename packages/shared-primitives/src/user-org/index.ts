@@ -12,6 +12,7 @@ import { z } from 'zod';
 
 import { BecknLocationSchema } from '../beckn/index.js';
 import { fieldsQuerySchema } from '../dto/index.js';
+import { ProfileTypeSchema } from '../aggregator/index.js';
 
 // ─── Shared pieces ──────────────────────────────────────────────────────────
 
@@ -162,8 +163,8 @@ export const UserSchema = z.object({
   /** The coordinator's own organisation name as registered (its Signals org). */
   name: z.string(),
   contact: PersonContactSchema,
-  /** Network domain ids served; `[]` = every domain. */
-  serves: z.array(z.string()),
+  /** The profile types served; `[]` = none, so the coordinator can act on no participants. */
+  serves: z.array(ProfileTypeSchema),
   org_id: z.string().nullable(),
   /** Registered through an invite. */
   invited: z.boolean(),
@@ -214,7 +215,7 @@ export const UserSearchRequestSchema = z
       .object({
         org_id: z.string().uuid().optional(),
         status: UserOrgStatusSchema.optional(),
-        serves: z.string().min(1).optional(),
+        serves: ProfileTypeSchema.optional(),
       })
       .strict()
       .default({}),
@@ -282,8 +283,8 @@ export type DecisionResponse = z.infer<typeof DecisionResponseSchema>;
 /** `PATCH /v1/user/metadata/update/:id`. */
 export const UserMetadataUpdateRequestSchema = z
   .object({
-    /** Network domain ids; `[]` = every domain. */
-    serves: z.array(z.string().min(1)).max(50),
+    /** The profile types to serve: at least one network domain id. */
+    serves: z.array(ProfileTypeSchema).min(1).max(50),
   })
   .strict();
 export type UserMetadataUpdateRequest = z.infer<typeof UserMetadataUpdateRequestSchema>;

@@ -14,7 +14,7 @@
  * Single reads are audit-logged.
  */
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import {
@@ -54,6 +54,8 @@ import { mintInviteBatch } from '../services/invites/mint.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { getNetworkConfig } from '../services/network-config.js';
+import { getIdpAdmin } from '../services/idp-admin/index.js';
+import { KC_ATTR } from '../services/idp-admin/attributes.js';
 import {
   decodeUserCursor,
   encodeUserCursor,
@@ -80,6 +82,79 @@ function dbDown(subOperation: string, message: string): never {
     cause: new Error(message),
     fields: { sub_operation: subOperation },
   });
+}
+
+/**
+ * The Keycloak user id of a coordinator's login.
+ *
+ * @param aggregatorId - The coordinator's `users.id`.
+ * @param log - Request logger.
+ * @returns The Keycloak user id.
+ * @throws IDP_UNAVAILABLE if Keycloak fails or has no user for the coordinator.
+ */
+async function findCoordinatorLogin(aggregatorId: string, log: FastifyBaseLogger): Promise<string> {
+  const kc = await getIdpAdmin().findByAttribute(KC_ATTR.AGGREGATOR_ID, aggregatorId);
+  if (!kc.ok || !kc.value) {
+    log.error({
+      status: 'failure',
+      sub_operation: 'idp.findByAttribute',
+      code: kc.ok ? 'not_found' : kc.error.code,
+    });
+    throw httpError('IDP_UNAVAILABLE', { fields: { sub_operation: 'idp.findByAttribute' } });
+  }
+  return kc.value.id;
+}
+
+/**
+ * Writes a coordinator's profile types to its multivalued `aggregator_type`
+ * attribute, the source of the token claim the API checks.
+ *
+ * @param kcUserId - The coordinator's Keycloak user id.
+ * @param serves - The profile types to write.
+ * @param log - Request logger.
+ * @throws IDP_UNAVAILABLE if the write fails.
+ */
+async function writeTokenTypes(
+  kcUserId: string,
+  serves: string[],
+  log: FastifyBaseLogger,
+): Promise<void> {
+  const written = await getIdpAdmin().setAttributes(kcUserId, {
+    [KC_ATTR.AGGREGATOR_TYPE]: serves,
+  });
+  if (!written.ok) {
+    log.error({
+      status: 'failure',
+      sub_operation: 'idp.setAttributes.aggregator_type',
+      code: written.error.code,
+    });
+    throw httpError('IDP_UNAVAILABLE', { fields: { sub_operation: 'idp.setAttributes' } });
+  }
+}
+
+/**
+ * Puts back a coordinator's previous profile types in Keycloak after a later
+ * step failed. Best effort: a failure is logged for an operator to repair.
+ *
+ * @param kcUserId - The coordinator's Keycloak user id.
+ * @param serves - The profile types stored before the change.
+ * @param log - Request logger.
+ */
+async function restoreTokenTypes(
+  kcUserId: string,
+  serves: string[],
+  log: FastifyBaseLogger,
+): Promise<void> {
+  const restored = await getIdpAdmin().setAttributes(kcUserId, {
+    [KC_ATTR.AGGREGATOR_TYPE]: serves.length > 0 ? serves : null,
+  });
+  if (!restored.ok) {
+    log.error({
+      status: 'failure',
+      sub_operation: 'idp.setAttributes.aggregator_type.restore',
+      code: restored.error.code,
+    });
+  }
 }
 
 /**
@@ -484,9 +559,9 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
       config: { rbac: { capability: 'org.manage' } },
       schema: {
         tags: ['console'],
-        summary: "Change a coordinator's served domains",
+        summary: "Change a coordinator's profile types",
         description:
-          "`serves` lists network domain ids (`[]` = every domain). For an approved coordinator the Signals organisation's domains are updated first.",
+          "`serves` lists one or more network domain ids. The coordinator's Keycloak `aggregator_type` attribute is written first, then, for an approved coordinator, the Signals organisation's domains. The coordinator's sessions are then ended, so its next login carries the new types.",
         params: IdParamsSchema,
         body: UserMetadataUpdateRequestSchema,
         response: { 200: UserSchema, ...errorResponses(400, 401, 403, 404, 429, 502, 503) },
@@ -514,8 +589,13 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
         target_id: row.id,
       });
 
-      // An approved coordinator's Signals org carries its domains: update it
-      // first, so a Signals failure leaves both sides unchanged.
+      // The token claim decides what the coordinator may act on, so Keycloak
+      // is written first: a failure here changes nothing.
+      const kcUserId = await findCoordinatorLogin(row.id, log);
+      await writeTokenTypes(kcUserId, serves, log);
+
+      // An approved coordinator's Signals org carries its domains. On a
+      // Signals failure Keycloak is restored, so every side stays unchanged.
       const signalstack = getSignalStackWriter();
       const pushDomains = async (): Promise<boolean> => {
         if (!signalstack) return true;
@@ -523,7 +603,7 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
           external_id: row.id,
           name: row.name,
           slug: row.orgSlug,
-          domains: serves.length > 0 ? serves : networkCfg.domainIds,
+          domains: serves,
           requestId: req.id,
         });
         if (!upsert.success) {
@@ -536,6 +616,7 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
         return upsert.success;
       };
       if (row.status === 'active' && !(await pushDomains())) {
+        await restoreTokenTypes(kcUserId, row.serves, log);
         throw httpError('SIGNALSTACK_PUSH_FAILED');
       }
 
@@ -550,7 +631,16 @@ export function registerV1UserRoutes(base: FastifyInstance): void {
           detail: 'The domains were saved, but Signals was not updated. Save them again.',
         });
       }
-      log.info({ status: 'success', fields: ['serves'] });
+      // End the coordinator's sessions so its next login carries the new types.
+      const logout = await getIdpAdmin().logoutSessions(kcUserId);
+      if (!logout.ok) {
+        log.warn({
+          status: 'failure',
+          sub_operation: 'idp.logoutSessions',
+          code: logout.error.code,
+        });
+      }
+      log.info({ status: 'success', fields: ['serves'], sessions_ended: logout.ok });
 
       if (row.parentOrgId) {
         const org = await getOrganisationStore().findById(row.parentOrgId);

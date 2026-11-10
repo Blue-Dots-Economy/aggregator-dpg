@@ -21,7 +21,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { RegistrationPayloadSchema } from '@aggregator-dpg/shared-primitives/aggregator';
+import {
+  RegistrationPayloadSchema,
+  registrationDomains,
+} from '@aggregator-dpg/shared-primitives/aggregator';
 import type { BecknContact, BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getRegistrationValidator } from '../services/registration-validator.js';
 import { getUserStore } from '../services/user-store/index.js';
@@ -134,7 +137,7 @@ export async function registerAggregatorRegistrationRoutes(base: FastifyInstance
         await assertServiceCaller(req);
         // Already validated and parsed by the route schema.
         const body = req.body;
-        const { contact, phoneE164, serverConsent } = await checkCoordinatorBody(body);
+        const { contact, phoneE164, serverConsent, domains } = await checkCoordinatorBody(body);
         // Fails open so a Redis outage does not block registration.
         await assertSubmitRate(`${req.ip}|${contact.email}`, reply);
 
@@ -157,7 +160,7 @@ export async function registerAggregatorRegistrationRoutes(base: FastifyInstance
         });
 
         const aggregator = await createAggregatorWithSlug(userStore, body.name, {
-          type: body.type,
+          domains,
           contact,
           consent: serverConsent,
           recordConsent,
@@ -180,7 +183,7 @@ export async function registerAggregatorRegistrationRoutes(base: FastifyInstance
         const keycloakUserId = await createCoordinatorLogin(
           userStore,
           aggregatorId,
-          body.type,
+          domains,
           contact,
         );
 
@@ -243,15 +246,17 @@ interface TargetOrg {
 /**
  * Checks the body against the network and the registration schema.
  *
- * @returns The contact with its E.164 phone, and the server-stamped consent.
+ * @returns The contact with its E.164 phone, the server-stamped consent and the domains picked.
  * @throws {HttpError} SCHEMA_VALIDATION or INVALID_PHONE
  */
 async function checkCoordinatorBody(body: CoordinatorBody) {
-  // `type` must be one of the network's domain ids.
+  // Every domain in `type` must be one of the network's domain ids.
   const networkCfg = await getNetworkConfig();
-  if (!networkCfg.domainIds.includes(body.type)) {
+  const domains = registrationDomains(body.type);
+  const unknownDomains = domains.filter((d) => !networkCfg.domainIds.includes(d));
+  if (unknownDomains.length > 0) {
     throw httpError('SCHEMA_VALIDATION', {
-      detail: `unknown type '${body.type}' — valid: ${networkCfg.domainIds.join(', ')}`,
+      detail: `unknown type '${unknownDomains.join("', '")}' — valid: ${networkCfg.domainIds.join(', ')}`,
       fields: { type: 'invalid' },
     });
   }
@@ -285,7 +290,7 @@ async function checkCoordinatorBody(body: CoordinatorBody) {
       fields: { 'consent.valid_till': 'invalid' },
     });
   }
-  return { contact, phoneE164, serverConsent };
+  return { contact, phoneE164, serverConsent, domains };
 }
 
 /**
@@ -537,7 +542,8 @@ async function assertNotInIdp(email: string, phoneE164: string): Promise<void> {
  * coordinator row is deleted.
  *
  * Keycloak attributes: `aggregator_id` (the row id), `aggregator_type`
- * (participant focus), `phoneNumber` (OTP login key), `decision_made` (login gate).
+ * (every profile type served; its token claim is checked per request),
+ * `phoneNumber` (OTP login key), `decision_made` (login gate).
  *
  * @returns The Keycloak user id.
  * @throws {HttpError} USER_EXISTS, NAME_INVALID_CHARACTERS or IDP_UNAVAILABLE
@@ -545,7 +551,7 @@ async function assertNotInIdp(email: string, phoneE164: string): Promise<void> {
 async function createCoordinatorLogin(
   userStore: UserStore,
   aggregatorId: string,
-  type: string,
+  types: string[],
   contact: BecknContact,
 ): Promise<string> {
   const { firstName, lastName } = splitName(contact.name);
@@ -558,7 +564,7 @@ async function createCoordinatorLogin(
     lastName,
     attributes: {
       [KC_ATTR.AGGREGATOR_ID]: aggregatorId,
-      [KC_ATTR.AGGREGATOR_TYPE]: type,
+      [KC_ATTR.AGGREGATOR_TYPE]: types,
       [KC_ATTR.PHONE_NUMBER]: contact.phone,
       [KC_ATTR.DECISION_MADE]: 'pending',
     },
@@ -714,7 +720,8 @@ async function createAggregatorWithSlug(
   store: ReturnType<typeof getUserStore>,
   name: string,
   extras: {
-    type: ReturnType<typeof RegistrationPayloadSchema.parse>['type'];
+    /** The domains served, validated and non-empty. */
+    domains: string[];
     contact: BecknContact;
     consent: ReturnType<typeof RegistrationPayloadSchema.parse>['consent'];
     /** Writes the consent ledger row inside the create transaction. */
@@ -736,7 +743,8 @@ async function createAggregatorWithSlug(
     last = await store.create({
       orgSlug,
       name,
-      type: extras.type,
+      type: extras.domains[0] ?? null,
+      serves: extras.domains,
       contact: extras.contact,
       consent: extras.consent,
       recordConsent: extras.recordConsent,

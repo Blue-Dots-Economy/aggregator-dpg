@@ -9,6 +9,8 @@
 import { jwtVerify, createRemoteJWKSet, type JWTPayload } from 'jose';
 import type { FastifyRequest } from 'fastify';
 import { getUserStore } from '../user-store/index.js';
+import { servedDomains } from '../user-store/serves.js';
+import type { ProfileType } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getIdpAdmin } from '../idp-admin/index.js';
 import { KC_ATTR } from '../idp-admin/attributes.js';
 import { getSignalStackWriter } from '../signalstack.js';
@@ -21,18 +23,17 @@ let cachedJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 let cachedJwksUrl: string | null = null;
 let testOverride: ((token: string) => Promise<JWTPayload>) | null = null;
 
-export type AggregatorType = string;
-
 export interface AuthContext {
   /** Keycloak `sub` claim — stable user id. */
   userId: string;
   /** Custom claim mapped from the `aggregator_id` user attribute. */
   aggregatorId: string;
   /**
-   * Claim from the `aggregator_type` user attribute. Bulk uploads and public
-   * registration links accept only this type.
+   * The profile types the coordinator serves, from the multivalued
+   * `aggregator_type` claim; `[]` when absent. Fixed for the session: a change
+   * in the console ends the coordinator's sessions, so the next login carries it.
    */
-  aggregatorType?: AggregatorType;
+  serves: ProfileType[];
   /**
    * Approval state from the `decision_made` claim; `'pending'` until decided.
    * {@link requireApproved} rejects anything other than `'approved'`.
@@ -152,7 +153,7 @@ export async function authenticate(
  */
 function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayload): AuthContext {
   const claims = payload as Record<string, unknown>;
-  const ctx: AuthContext = { userId, aggregatorId };
+  const ctx: AuthContext = { userId, aggregatorId, serves: readStringList(claims.aggregator_type) };
   if (typeof claims.email === 'string') ctx.email = claims.email;
   if (typeof claims.email_verified === 'boolean') ctx.emailVerified = claims.email_verified;
   if (typeof claims.preferred_username === 'string') {
@@ -170,9 +171,6 @@ function hydrateContext(userId: string, aggregatorId: string, payload: JWTPayloa
   if (decision === 'pending' || decision === 'approved' || decision === 'rejected') {
     ctx.decisionMade = decision;
   }
-  // Accept any non-empty domain id; the network config decides which are valid.
-  const aggregatorType = readStringOrFirst(claims.aggregator_type);
-  if (aggregatorType) ctx.aggregatorType = aggregatorType;
   const signalstackOrgId = readStringOrFirst(claims.signalstack_org_id);
   if (signalstackOrgId) ctx.signalstackOrgId = signalstackOrgId;
   return ctx;
@@ -249,20 +247,22 @@ async function backfillSignalstackOrgId(ctx: AuthContext): Promise<void> {
     return;
   }
 
-  // Domains come from the live network config, so the backfill never writes a
-  // stale domain set into org.metadata.domains: the aggregator's registered
-  // type when set, else every domain of the network.
+  // Every profile type the coordinator serves, filtered by the live network
+  // config so no stale id reaches org.metadata.domains. With none left the
+  // domains are not sent and Signals keeps the org's current list.
   const networkCfg = await getNetworkConfig();
-  const aggregatorType = found.value.type;
-  const upsertDomains: string[] =
-    aggregatorType && networkCfg.domainIds.includes(aggregatorType)
-      ? [aggregatorType]
-      : networkCfg.domainIds;
+  const served = servedDomains(found.value.serves, networkCfg.domainIds);
+  if (served.length === 0) {
+    log.warn(
+      { status: 'skipped', sub_operation: 'signalstack.upsertAggregator.domains' },
+      'coordinator serves no network profile type; domains not sent',
+    );
+  }
   const upsert = await signalstack.upsertAggregator({
     external_id: ctx.aggregatorId,
     name: found.value.name,
     slug: found.value.orgSlug,
-    domains: upsertDomains,
+    ...(served.length > 0 ? { domains: served } : {}),
   });
   if (!upsert.success) {
     log.warn(
@@ -378,6 +378,17 @@ export async function authenticateAny(
   if (aggregatorId) ctx.aggregatorId = aggregatorId;
   if (typeof claims.email === 'string') ctx.email = claims.email;
   return { ok: true, context: ctx };
+}
+
+/**
+ * Reads a claim a mapper may publish as a string or a list of strings.
+ *
+ * @param v - The raw claim value.
+ * @returns The non-empty strings, without repeats; `[]` when absent.
+ */
+function readStringList(v: unknown): string[] {
+  const values = Array.isArray(v) ? v : [v];
+  return [...new Set(values.filter((x): x is string => typeof x === 'string' && x.length > 0))];
 }
 
 function readStringOrFirst(v: unknown): string | undefined {

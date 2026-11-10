@@ -392,6 +392,11 @@ class FullRegistrationLinksStore extends RegistrationLinksStoreBase {
   private seq = 0;
   private failNext = new Map<string, StoreError>();
 
+  /** Number of stored links. */
+  size(): number {
+    return this.rows.size;
+  }
+
   seed(rows: RegistrationLink[]): void {
     for (const r of rows) this.rows.set(r.id, r);
   }
@@ -542,6 +547,7 @@ const TOKEN_SEEKER_APPROVED = 'full-seeker-approved';
 const TOKEN_PROVIDER_APPROVED = 'full-provider-approved';
 const TOKEN_PENDING = 'full-pending';
 const TOKEN_NO_AGG_TYPE = 'full-no-agg-type';
+const TOKEN_BOTH_APPROVED = 'full-both-approved';
 
 async function bootFullApp(opts: {
   store: FullRegistrationLinksStore;
@@ -575,6 +581,14 @@ async function bootFullApp(opts: {
         aggregator_id: AGG_ID,
         aggregator_type: 'seeker',
         decision_made: 'pending',
+      };
+    }
+    if (token === TOKEN_BOTH_APPROVED) {
+      return {
+        sub: USER_ID,
+        aggregator_id: AGG_ID,
+        aggregator_type: ['seeker', 'provider'],
+        decision_made: 'approved',
       };
     }
     if (token === TOKEN_NO_AGG_TYPE) {
@@ -661,7 +675,24 @@ describe('POST /v1/links/create — full lifecycle', () => {
     expect(r.json().error.code).toBe('SCHEMA_VALIDATION');
   });
 
-  it('403 AGGREGATOR_TYPE_MISSING when the token has no aggregator_type claim', async () => {
+  /** Replaces the seeded coordinator with one serving `serves`. */
+  function seedServes(serves: string[]): void {
+    const users = new UserStoreFake();
+    users.seed([
+      buildCoordinator({
+        id: AGG_ID,
+        orgSlug: ORG_SLUG,
+        name: 'Acme',
+        status: 'active',
+        signalstackOrgId: ORG_ID,
+        serves,
+      }),
+    ]);
+    _setUserStore(users);
+  }
+
+  it('checks the token claim, not the stored row', async () => {
+    seedServes(['seeker']);
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
@@ -669,10 +700,12 @@ describe('POST /v1/links/create — full lifecycle', () => {
       payload: { domain: 'seeker' },
     });
     expect(r.statusCode).toBe(403);
-    expect(r.json().error.code).toBe('AGGREGATOR_TYPE_MISSING');
+    expect(r.json().error.code).toBe('DOMAIN_NOT_SERVED');
+    expect(store.size()).toBe(0);
   });
 
-  it('403 AGGREGATOR_TYPE_MISMATCH when creating a link for a different domain', async () => {
+  it('403 DOMAIN_NOT_SERVED when creating a link for a domain not served', async () => {
+    seedServes(['seeker']);
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
@@ -680,7 +713,20 @@ describe('POST /v1/links/create — full lifecycle', () => {
       payload: { domain: 'provider' },
     });
     expect(r.statusCode).toBe(403);
-    expect(r.json().error.code).toBe('AGGREGATOR_TYPE_MISMATCH');
+    expect(r.json().error.code).toBe('DOMAIN_NOT_SERVED');
+    expect(store.size()).toBe(0);
+  });
+
+  it('creates a link for a second profile type the token claim carries', async () => {
+    seedServes(['seeker']);
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/links/create',
+      headers: { authorization: `Bearer ${TOKEN_BOTH_APPROVED}` },
+      payload: { domain: 'provider' },
+    });
+    expect(r.statusCode).toBe(201);
+    expect((r.json() as { domain: string }).domain).toBe('provider');
   });
 
   it('retries once on a slug collision and succeeds with a suffixed slug', async () => {

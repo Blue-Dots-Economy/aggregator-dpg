@@ -244,8 +244,8 @@ export const users = pgTable(
       .unique('users_signalstack_org_slug_unique'),
     /** The coordinator's Signals org name. */
     signalstackOrgName: text('signalstack_org_name').notNull(),
-    // Domain ids the coordinator serves, e.g. `{seeker}`. Empty means every
-    // domain. `'{}'` for admin accounts.
+    // Profile types (domain ids) the coordinator serves, e.g. `{seeker}`.
+    // Empty means none. `'{}'` for admin accounts.
     serves: text('serves')
       .array()
       .notNull()

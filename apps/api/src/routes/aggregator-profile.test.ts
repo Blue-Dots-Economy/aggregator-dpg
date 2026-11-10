@@ -114,6 +114,35 @@ describe('aggregator profile routes', () => {
     expect(id.active).toBe(true);
   });
 
+  it('GET returns every domain the coordinator serves', async () => {
+    userStore.seed([
+      buildCoordinator({
+        id: aggregatorId,
+        orgSlug: 'trrain-zzzz',
+        type: 'seeker',
+        serves: ['seeker', 'provider'],
+      }),
+    ]);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { type: string | null; serves: string[] };
+    expect(body.serves).toEqual(['seeker', 'provider']);
+    expect(body.type).toBe('seeker');
+  });
+
+  it('GET returns an empty domain list for a coordinator serving every domain', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/aggregators/profile/me',
+      headers: { authorization: 'Bearer good-token' },
+    });
+    expect((res.json() as { serves: string[] }).serves).toEqual([]);
+  });
+
   it('PATCH rejects an empty body — `aggregator` is required', async () => {
     const res = await app.inject({
       method: 'PATCH',
