@@ -187,6 +187,7 @@
         </main>
     </div>
     <script src="${url.resourcesPath}/js/blue-dots.js" defer></script>
+    <script src="${url.resourcesPath}/js/switch-account.js" defer></script>
 </body>
 </html>
 </#macro>

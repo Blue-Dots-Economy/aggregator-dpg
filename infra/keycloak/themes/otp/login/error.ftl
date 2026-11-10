@@ -12,6 +12,12 @@
   Otherwise the button uses Keycloak's end-session endpoint with `client_id`
   only.
 
+  A failed logout confirmation (the confirmation page went stale) carries no
+  refused sign-in. The button then goes to the post-logout address the
+  confirmation page was opened with, which switch-account.js keeps for the tab.
+  Keycloak shows that failure once the realm session has ended or the
+  confirmation was already used, so there is nothing left to sign out.
+
   The Back arrow is hidden: going back reopens a form Keycloak has already used.
 -->
 <@layout.registrationLayout displayMessage=false showBack=false; section>
@@ -55,6 +61,5 @@
                 ${msg("doSignOutAndSwitch")}
             </a>
         </div>
-        <script src="${url.resourcesPath}/js/switch-account.js"></script>
     </#if>
 </@layout.registrationLayout>
