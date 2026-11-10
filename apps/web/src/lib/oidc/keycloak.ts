@@ -33,6 +33,12 @@ export interface KeycloakAdapterOptions {
 /** The `events` member that marks a back-channel logout token (OIDC Back-Channel Logout 1.0, §2.4). */
 const BACKCHANNEL_LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout';
 
+/**
+ * Oldest logout token accepted, by its `iat`. Keycloak sends the token the
+ * moment a session ends, so anything older is a replay, not a delivery.
+ */
+const LOGOUT_TOKEN_MAX_AGE_SECONDS = 120;
+
 export class KeycloakAdapter extends IdentityProviderAdapter {
   private clientPromise: Promise<Client> | null = null;
   private jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
@@ -211,8 +217,8 @@ export class KeycloakAdapter extends IdentityProviderAdapter {
 
   /**
    * Verifies a Keycloak back-channel logout token: signature against the
-   * realm's published keys, `iss`, an `aud` naming this client, the logout
-   * event, and no `nonce` (OIDC Back-Channel Logout 1.0, §2.6). Only a token
+   * realm's published keys, `iss`, an `aud` naming this client, a recent
+   * `iat`, the logout event, and no `nonce` (OIDC Back-Channel Logout 1.0, §2.6). Only a token
    * naming a Keycloak session (`sid`) is accepted, because sessions are looked
    * up by it.
    */
@@ -232,6 +238,7 @@ export class KeycloakAdapter extends IdentityProviderAdapter {
         issuer,
         audience: this.opts.clientId,
         requiredClaims: ['iat', 'jti'],
+        maxTokenAge: LOGOUT_TOKEN_MAX_AGE_SECONDS,
       }));
     } catch (err) {
       const unavailable =

@@ -59,7 +59,13 @@ function adapter() {
 
 /** A logout token shaped the way Keycloak sends one. */
 async function logoutToken(
-  over: { aud?: string; claims?: Record<string, unknown>; omit?: string[]; key?: CryptoKey } = {},
+  over: {
+    aud?: string;
+    claims?: Record<string, unknown>;
+    omit?: string[];
+    key?: CryptoKey;
+    issuedAt?: number;
+  } = {},
 ): Promise<string> {
   const payload: Record<string, unknown> = {
     sid: 'kc-session-1',
@@ -73,7 +79,7 @@ async function logoutToken(
     .setIssuer(discovered.issuer)
     .setAudience(over.aud ?? 'aggregator-portal')
     .setSubject('user-1')
-    .setIssuedAt()
+    .setIssuedAt(over.issuedAt)
     .sign(over.key ?? privateKey);
 }
 
@@ -113,6 +119,14 @@ describe('KeycloakAdapter.verifyLogoutToken', () => {
         error: { code: 'LOGOUT_TOKEN_INVALID' },
       });
     }
+  });
+
+  it('rejects a replayed logout token issued minutes ago', async () => {
+    const tenMinutesAgo = Math.floor(Date.now() / 1000) - 600;
+    const result = await adapter().verifyLogoutToken(
+      await logoutToken({ issuedAt: tenMinutesAgo }),
+    );
+    expect(result).toMatchObject({ ok: false, error: { code: 'LOGOUT_TOKEN_INVALID' } });
   });
 
   it('reports unreachable keys as unavailable, not as a bad token', async () => {
