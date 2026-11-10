@@ -81,6 +81,7 @@ describe('useActiveDomain', () => {
     useAggregatorConfig.mockReturnValue({
       data: { domains: [SEEKER, PROVIDER] },
       isLoading: false,
+      isError: false,
     });
   });
 
@@ -123,11 +124,48 @@ describe('useActiveDomain', () => {
     expect(result.current.active).toBeUndefined();
   });
 
-  it('is ready with no domain when the profile fails to load', async () => {
+  it('reports an error, not an empty list, when the profile fails to load', async () => {
     useProfileRaw.mockReturnValue({ data: undefined, isSuccess: false, isError: true });
     const { result } = renderHook(() => useActiveDomain());
     await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.error).toBe(true);
     expect(result.current.active).toBeUndefined();
+  });
+
+  it('reports an error when the network config fails to load', async () => {
+    mockProfile(['seeker']);
+    useAggregatorConfig.mockReturnValue({ data: undefined, isLoading: false, isError: true });
+    const { result } = renderHook(() => useActiveDomain());
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.error).toBe(true);
+  });
+
+  it('retry refetches the profile and the network config', async () => {
+    const refetchProfile = vi.fn();
+    const refetchConfig = vi.fn();
+    useProfileRaw.mockReturnValue({
+      data: undefined,
+      isError: true,
+      isFetching: true,
+      refetch: refetchProfile,
+    });
+    useAggregatorConfig.mockReturnValue({
+      data: { domains: [SEEKER] },
+      isLoading: false,
+      refetch: refetchConfig,
+    });
+    const { result } = renderHook(() => useActiveDomain());
+    expect(result.current.retrying).toBe(true);
+    act(() => result.current.retry());
+    expect(refetchProfile).toHaveBeenCalledTimes(1);
+    expect(refetchConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports no error for a loaded profile', async () => {
+    mockProfile(['seeker']);
+    const { result } = renderHook(() => useActiveDomain());
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    expect(result.current.error).toBe(false);
   });
 
   it('setActive stores the choice and writes it to the URL', async () => {

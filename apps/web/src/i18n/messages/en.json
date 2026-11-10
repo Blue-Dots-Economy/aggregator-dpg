@@ -202,8 +202,7 @@
       "failedToLoad": "Failed to load. Please try again.",
       "refreshedJustNow": "Refreshed just now",
       "refreshFailed": "Refresh failed",
-      "refreshUnreadable": "The refreshed numbers couldn't be read. Try again in a few minutes.",
-      "noProfileTypes": "Your account has no profile types yet, so there is nothing to show. Ask your organisation's owner to set them, then sign in again."
+      "refreshUnreadable": "The refreshed numbers couldn't be read. Try again in a few minutes."
     },
     "ministat": {
       "completeProfiles": "Complete Profiles",
@@ -752,7 +751,7 @@
       "known_as_values_more": "+{count} more",
       "known_as_values_new": "New value",
       "known_as_values_placeholder": "Add a value, e.g. District",
-      "known_as_values_exists": "\u201c{name}\u201d is already in the list.",
+      "known_as_values_exists": "“{name}” is already in the list.",
       "known_as_values_notes_heading": "How it works",
       "known_as_values_unchanged": "No changes",
       "known_as_values_unsaved": "Unsaved changes",
@@ -1183,5 +1182,22 @@
     "body": "Something went wrong on our side. Try again, or go back to the overview.",
     "retry": "Try again",
     "home": "Go to the overview"
+  },
+  "access": {
+    "no_profile_types": {
+      "title": "You don't have access yet",
+      "body": "Your account has no profile types, so you can't view or add participants.",
+      "step_contact": "Contact your organisation admin or the network admin and ask them to set your profile types.",
+      "step_sign_in": "Once they confirm, sign out and sign in again to see your participants.",
+      "signed_in_as": "Signed in as",
+      "sign_out": "Sign out"
+    },
+    "load_error": {
+      "title": "We couldn't load your account details",
+      "body": "Something went wrong on our side while loading your profile types. Your access has not changed. Try again in a moment.",
+      "retry": "Try again",
+      "retrying": "Trying again…",
+      "reload": "Reload page"
+    }
   }
 }

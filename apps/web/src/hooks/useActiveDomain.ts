@@ -33,6 +33,15 @@ export interface ActiveDomainState {
   setActive: (id: string) => void;
   /** `false` until the profile, the network config and the stored choice are loaded. */
   ready: boolean;
+  /**
+   * `true` when the profile or the network config failed to load. `domains`
+   * is then empty because it is unknown, not because none is served.
+   */
+  error: boolean;
+  /** `true` while a {@link ActiveDomainState.retry} is in flight. */
+  retrying: boolean;
+  /** Fetches the profile and the network config again. */
+  retry: () => void;
 }
 
 /**
@@ -129,5 +138,14 @@ export function useActiveDomain(): ActiveDomainState {
     [router, pathname, searchParams],
   );
 
-  return { domains, active, setActive, ready };
+  const error = profile.isError || config.isError;
+  const retrying = error && (profile.isFetching || config.isFetching);
+  const { refetch: refetchProfile } = profile;
+  const { refetch: refetchConfig } = config;
+  const retry = useCallback(() => {
+    void refetchProfile();
+    void refetchConfig();
+  }, [refetchProfile, refetchConfig]);
+
+  return { domains, active, setActive, ready, error, retrying, retry };
 }

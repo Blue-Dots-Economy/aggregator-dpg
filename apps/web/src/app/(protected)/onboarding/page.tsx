@@ -8,6 +8,7 @@ import { Topbar } from '../../../components/shell/Topbar';
 import { I, type IconName } from '../../../icons';
 import { useRecentBulkUploads, useRegistrationLinks } from '../../../hooks/useOnboarding';
 import { useActiveDomain } from '../../../hooks/useActiveDomain';
+import { DomainAccessGate } from '../../../components/access/DomainAccessGate';
 import { RecentUploadsBody } from './_components/CSVUpload';
 import { YourLinksBody } from './_components/RegistrationLinksSection';
 import { OnboardingMetrics } from './_components/OnboardingMetrics';
@@ -32,10 +33,12 @@ export default function OnboardingPage() {
           </button>
         }
       />
-      {/* Onboarding summary and joins by entry mode. */}
-      <OnboardingMetrics />
-      <BulkUploadCard />
-      <RegistrationLinkCard />
+      <DomainAccessGate>
+        {/* Onboarding summary and joins by entry mode. */}
+        <OnboardingMetrics />
+        <BulkUploadCard />
+        <RegistrationLinkCard />
+      </DomainAccessGate>
     </div>
   );
 }

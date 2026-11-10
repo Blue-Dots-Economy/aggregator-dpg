@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
+import { AuthProvider } from '@/lib/auth-context';
 import type { ReactNode } from 'react';
 import messages from '@/i18n/messages/en.json';
 
@@ -77,8 +78,10 @@ import OnboardingPage from '@/app/(protected)/onboarding/page';
 
 function renderPage() {
   return render(
-    <NextIntlClientProvider locale="en" messages={{ onboarding: messages.onboarding }}>
-      <OnboardingPage />
+    <NextIntlClientProvider locale="en" messages={messages}>
+      <AuthProvider initialUser={{ id: 'u1', name: 'C', org: '', email: 'c@example.com' }}>
+        <OnboardingPage />
+      </AuthProvider>
     </NextIntlClientProvider>,
   );
 }
@@ -86,6 +89,8 @@ function renderPage() {
 describe('<OnboardingPage />', () => {
   beforeEach(() => {
     pushMock.mockClear();
+    useRegistrationLinks.mockClear();
+    useRecentBulkUploads.mockClear();
     useAggregatorConfig.mockReturnValue({ data: cfg });
     useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
   });
@@ -183,14 +188,27 @@ describe('<OnboardingPage />', () => {
     expect(screen.getByText(/Last link 2d ago/)).toBeInTheDocument();
   });
 
-  it('names no domain for the links count until the profile has loaded', () => {
+  it('shows the loading text and reads no links until the profile has loaded', () => {
     useProfileRaw.mockReturnValue({ data: undefined });
     useRecentBulkUploads.mockReturnValue({ data: { items: [] }, isLoading: false });
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false });
 
     renderPage();
 
-    expect(useRegistrationLinks).toHaveBeenLastCalledWith('');
+    expect(screen.getByRole('status')).toHaveTextContent('Loading…');
+    expect(useRegistrationLinks).not.toHaveBeenCalled();
+  });
+
+  it('shows the no-access notice instead of the cards for a coordinator with no profile types', () => {
+    useProfileRaw.mockReturnValue({ data: { type: null, serves: [] } });
+    useRecentBulkUploads.mockReturnValue({ data: { items: [] }, isLoading: false });
+    useRegistrationLinks.mockReturnValue({ data: [], isLoading: false });
+
+    renderPage();
+
+    expect(screen.getByRole('heading', { name: "You don't have access yet" })).toBeInTheDocument();
+    expect(useRegistrationLinks).not.toHaveBeenCalled();
+    expect(useRecentBulkUploads).not.toHaveBeenCalled();
   });
 
   it('counts links for the stored active domain of a multi-domain coordinator', async () => {

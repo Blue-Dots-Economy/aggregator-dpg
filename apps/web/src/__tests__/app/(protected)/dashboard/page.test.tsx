@@ -30,6 +30,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { useSyncExternalStore } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { ThemeModeProvider } from '@/lib/theme-mode';
+import { AuthProvider } from '@/lib/auth-context';
 import messages from '@/i18n/messages/en.json';
 import { ResponseShapeError } from '@/lib/response-shape-error';
 
@@ -173,7 +174,11 @@ function renderPage(ui: ReactElement = <DashboardPageRoot />) {
   return render(
     <QueryClientProvider client={client}>
       <NextIntlClientProvider locale="en" messages={messages}>
-        <ThemeModeProvider>{ui}</ThemeModeProvider>
+        <AuthProvider
+          initialUser={{ id: 'u1', name: 'Coord', org: '', email: 'coord@example.com' }}
+        >
+          <ThemeModeProvider>{ui}</ThemeModeProvider>
+        </AuthProvider>
       </NextIntlClientProvider>
     </QueryClientProvider>,
   );
@@ -388,7 +393,31 @@ describe('<DashboardPageRoot />', () => {
       renderPage();
       expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
       expect(screen.queryByRole('tab')).not.toBeInTheDocument();
-      expect(screen.getByText(/no profile types yet/)).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: "You don't have access yet" }),
+      ).toBeInTheDocument();
+      expect(screen.getByText('coord@example.com')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+      expect(mockUseDashboard).not.toHaveBeenCalled();
+    });
+
+    it('shows a load error with a retry, not the no-access notice, when the profile fails to load', () => {
+      const refetch = vi.fn();
+      mockUseProfileRaw.mockReturnValue({
+        data: undefined,
+        isError: true,
+        isFetching: false,
+        refetch,
+      });
+      mockUseAggregatorConfig.mockReturnValue({ data: CFG_FIXTURE, refetch: vi.fn() });
+      renderPage();
+      expect(
+        screen.getByRole('heading', { name: "We couldn't load your account details" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("You don't have access yet")).not.toBeInTheDocument();
+      expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+      expect(refetch).toHaveBeenCalled();
     });
   });
 
