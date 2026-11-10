@@ -7,6 +7,7 @@ const apiResponse = {
   org_name: 'TRRAIN',
   actor_type: 'aggregator',
   type: null,
+  serves: [],
   url: null,
   contact: {
     name: 'Asha Rao',

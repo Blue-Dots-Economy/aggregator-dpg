@@ -7,8 +7,8 @@ const domains = [
 ];
 
 describe('servedDomains', () => {
-  it('returns every configured domain for an empty list', () => {
-    expect(servedDomains([], domains)).toEqual(domains);
+  it('returns no domain for an empty list', () => {
+    expect(servedDomains([], domains)).toEqual([]);
   });
 
   it('labels the served ids and keeps an unknown id as its own label', () => {

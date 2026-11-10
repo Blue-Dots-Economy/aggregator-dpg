@@ -25,7 +25,8 @@ const { pushMock, searchParamsRef } = vi.hoisted(() => ({
   searchParamsRef: { current: new URLSearchParams() },
 }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: pushMock }),
+  useRouter: () => ({ push: pushMock, replace: vi.fn() }),
+  usePathname: () => '/onboarding',
   // YourLinksBody reads `?new=` to highlight a freshly-created draft.
   useSearchParams: () => searchParamsRef.current,
 }));
@@ -70,7 +71,18 @@ import {
   YourLinksBody,
 } from '@/app/(protected)/onboarding/_components/RegistrationLinksSection';
 
+/** Opens the Radix domain dropdown and picks an option; jsdom needs the pointer stubs. */
+async function pickDomain(name: RegExp): Promise<void> {
+  Element.prototype.scrollIntoView = vi.fn();
+  Element.prototype.hasPointerCapture = vi.fn().mockReturnValue(false);
+  Element.prototype.setPointerCapture = vi.fn();
+  Element.prototype.releasePointerCapture = vi.fn();
+  fireEvent.click(screen.getByRole('combobox', { name: 'Profile Type' }));
+  fireEvent.click(await screen.findByRole('option', { name }));
+}
+
 const testMessages = {
+  common: messages.common,
   onboarding: messages.onboarding,
   regmode: { form: 'Form', voice: 'Voice' },
 };
@@ -107,6 +119,15 @@ const cfg = {
   },
 };
 
+const twoDomainCfg = {
+  ...cfg,
+  domains: [
+    { id: 'seeker', label: 'Seeker', plural_label: 'Seekers' },
+    { id: 'provider', label: 'Provider', plural_label: 'Providers' },
+  ],
+};
+const BOTH = { type: 'seeker', serves: ['seeker', 'provider'] };
+
 function baseLink(overrides: Partial<ApiRegistrationLink> = {}): ApiRegistrationLink {
   return {
     link_id: 'link-1',
@@ -138,7 +159,7 @@ describe('<CreateLinkSection />', () => {
     updateMutateAsync.mockReset();
     useAggregatorConfig.mockReturnValue({ data: cfg });
     useProfile.mockReturnValue({ data: { org: 'Acme Org' } });
-    useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     useCreateLink.mockReturnValue({ mutateAsync: createMutateAsync, isPending: false });
     useUpdateLink.mockReturnValue({ mutateAsync: updateMutateAsync, isPending: false });
     useActivateLink.mockReturnValue({ mutate: activateMutate, isPending: false });
@@ -171,6 +192,7 @@ describe('<CreateLinkSection />', () => {
     useProfileRaw.mockReturnValue({
       data: {
         type: 'seeker',
+        serves: ['seeker'],
         locations: [{ address: { addressRegion: 'Karnataka', addressLocality: 'Dharwad' } }],
       },
     });
@@ -260,6 +282,41 @@ describe('<CreateLinkSection />', () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 
+  it('lets a multi-domain coordinator pick the link domain', async () => {
+    window.localStorage.clear();
+    useAggregatorConfig.mockReturnValue({ data: twoDomainCfg });
+    useProfileRaw.mockReturnValue({ data: BOTH });
+    createMutateAsync.mockResolvedValue(baseLink());
+    const user = userEvent.setup();
+    renderCreate();
+
+    const domainSelect = screen.getByRole('combobox', { name: 'Profile Type' });
+    expect(domainSelect).toHaveTextContent(/Seeker/);
+    expect(
+      screen.getByText('Profile Type', { selector: '.bd-label *, .bd-label' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Seekers / Providers')).toBeNull();
+    await pickDomain(/Provider/);
+    await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
+    await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
+    await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Drive');
+    await user.click(screen.getByRole('button', { name: 'Create link' }));
+
+    expect(createMutateAsync.mock.calls[0]![0].domain).toBe('provider');
+  });
+
+  it('keeps the domain set after the form resets on success', async () => {
+    createMutateAsync.mockResolvedValue(baseLink());
+    const user = userEvent.setup();
+    renderCreate();
+    await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
+    await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
+    await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Drive');
+    await user.click(screen.getByRole('button', { name: 'Create link' }));
+    await screen.findByText('Registration link created');
+    expect(screen.queryByText('Domain is not set.')).not.toBeInTheDocument();
+  });
+
   it('changes the registration mode via the select and reflects it on submit', async () => {
     createMutateAsync.mockResolvedValue(baseLink());
     const user = userEvent.setup();
@@ -298,7 +355,7 @@ describe('<YourLinksBody />', () => {
       this.dispatchEvent(new Event('close'));
     });
     useAggregatorConfig.mockReturnValue({ data: cfg });
-    useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     useProfile.mockReturnValue({ data: { org: 'Acme Org' } });
     useCreateLink.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
     useUpdateLink.mockReturnValue({ mutateAsync: updateMutateAsync, isPending: false });
@@ -335,6 +392,23 @@ describe('<YourLinksBody />', () => {
     useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
     renderLinks();
     expect(screen.getByText('No seeker links yet. Create one above.')).toBeInTheDocument();
+  });
+
+  it('lists the active domain and switches domain from the header', async () => {
+    window.localStorage.clear();
+    useAggregatorConfig.mockReturnValue({ data: twoDomainCfg });
+    useProfileRaw.mockReturnValue({ data: BOTH });
+    useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
+    renderLinks();
+    expect(useRegistrationLinks).toHaveBeenLastCalledWith('seeker');
+    await pickDomain(/Provider/);
+    expect(useRegistrationLinks).toHaveBeenLastCalledWith('provider');
+  });
+
+  it('shows no domain dropdown for a single-domain coordinator', () => {
+    useRegistrationLinks.mockReturnValue({ data: [], isLoading: false, error: null });
+    renderLinks();
+    expect(screen.queryByRole('combobox', { name: 'Profile Type' })).not.toBeInTheDocument();
   });
 
   it('renders the active-count and type-pill badges alongside each link card', () => {

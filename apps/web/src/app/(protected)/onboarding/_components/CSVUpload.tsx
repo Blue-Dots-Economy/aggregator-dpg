@@ -8,11 +8,8 @@ import { Button } from '../../../../components/ui/Button';
 import { Dropzone } from '../../../../components/ui/Dropzone';
 import { I } from '../../../../icons';
 import { useBulkUpload, useRecentBulkUploads } from '../../../../hooks/useOnboarding';
-import { useProfileRaw } from '../../../../hooks/useProfile';
-import {
-  useAggregatorConfig,
-  DEFAULT_AGGREGATOR_CONFIG,
-} from '../../../../hooks/useAggregatorConfig';
+import { useActiveDomain } from '../../../../hooks/useActiveDomain';
+import { DomainSelect } from '../../../../components/ui/DomainSelect';
 import type { BulkUploadStatus } from '../../../../services/onboarding.service';
 import {
   BulkUploadStartUnreadError,
@@ -56,18 +53,13 @@ export interface CSVUploadProps {
 export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
   const t = useTranslations('onboarding');
   const [attested, setAttested] = useState(false);
-  const rawProfile = useProfileRaw();
-  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Participant type from the `aggregator_type` claim. Uses the network's first
-  // domain while the profile loads; the API checks the type on upload.
-  const aggregatorType: string = rawProfile.data?.type ?? cfg.domains[0]?.id ?? '';
-  // Plural label for the scoped domain, sourced from network config.
-  const aggregatorTypeLabel =
-    cfg.domains.find((d) => d.id === aggregatorType)?.plural_label ?? aggregatorType;
-  const [participantType, setParticipantType] = useState<string>(aggregatorType);
-  useEffect(() => {
-    if (rawProfile.data?.type) setParticipantType(rawProfile.data.type);
-  }, [rawProfile.data?.type]);
+  // Participant type: the active domain. Empty until the profile loads; the
+  // API checks it against the domains the coordinator serves.
+  const { domains: servedDomains, active, setActive } = useActiveDomain();
+  const participantType = active ?? '';
+  // Plural label for the active domain, sourced from network config.
+  const participantTypeLabel =
+    servedDomains.find((d) => d.id === participantType)?.plural_label ?? participantType;
   const [pickedFile, setPickedFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
@@ -154,20 +146,25 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
           <div className="text-[12.5px] text-ink-400 mt-0.5">{t('csv.subtitle')}</div>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Aggregators have one participant type, so this is a read-only label. */}
-          <div
-            className="flex items-center bg-ink-50 border border-(--bd-border) rounded-[10px] p-0.5"
-            aria-label={`Participant type: ${aggregatorTypeLabel}`}
-          >
-            {aggregatorTypeLabel && (
-              <div className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-primary-600 bd-shadow select-none">
-                {aggregatorTypeLabel}
-              </div>
-            )}
-          </div>
+          {servedDomains.length > 1 ? (
+            <DomainSelect domains={servedDomains} value={active} onChange={setActive} />
+          ) : (
+            // One participant type, so this is a read-only label.
+            <div
+              className="flex items-center bg-ink-50 border border-(--bd-border) rounded-[10px] p-0.5"
+              aria-label={`Participant type: ${participantTypeLabel}`}
+            >
+              {participantTypeLabel && (
+                <div className="px-3 py-1.5 rounded-[8px] text-[12.5px] font-semibold bg-white text-primary-600 bd-shadow select-none">
+                  {participantTypeLabel}
+                </div>
+              )}
+            </div>
+          )}
           <button
             type="button"
             onClick={downloadTemplate}
+            disabled={!participantType}
             className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-primary-600 hover:underline"
           >
             <I.download size={14} /> {t('csv.download_template_xlsx')}
@@ -242,7 +239,10 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
       </label>
 
       <div className="flex items-center justify-end mt-4">
-        <Button onClick={onUpload} disabled={!pickedFile || upload.isPending || !attested}>
+        <Button
+          onClick={onUpload}
+          disabled={!pickedFile || upload.isPending || !attested || !participantType}
+        >
           {upload.isPending ? t('csv.uploading') : t('csv.upload_button')}
         </Button>
       </div>

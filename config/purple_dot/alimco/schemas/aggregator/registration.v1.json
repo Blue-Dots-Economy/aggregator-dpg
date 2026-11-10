@@ -15,9 +15,14 @@
       "examples": ["ABC Limited", "XYZ Foundation"]
     },
     "type": {
-      "type": "string",
+      "type": "array",
       "title": "Aggregator Type",
-      "enum": ["seeker", "provider"]
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["seeker", "provider"]
+      }
     },
     "sub_org_name": {
       "type": "string",

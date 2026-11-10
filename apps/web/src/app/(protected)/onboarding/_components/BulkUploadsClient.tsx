@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Topbar } from '../../../../components/shell/Topbar';
 import { I } from '../../../../icons';
 import { CSVUpload } from './CSVUpload';
+import { DomainAccessGate } from '../../../../components/access/DomainAccessGate';
 import type { BulkAttestationContent } from '../../../../lib/bulk-attestation.server';
 
 /** Props for {@link BulkUploadsClient}. */
@@ -50,7 +51,9 @@ export function BulkUploadsClient({ attestation }: BulkUploadsClientProps): JSX.
           </div>
         }
       />
-      <CSVUpload attestation={attestation} />
+      <DomainAccessGate>
+        <CSVUpload attestation={attestation} />
+      </DomainAccessGate>
     </div>
   );
 }

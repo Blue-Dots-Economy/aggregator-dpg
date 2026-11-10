@@ -32,12 +32,21 @@ export interface ProfileFormViewProps {
  * Only fields declared in the registration schema are kept.
  *
  * @param api - The merged `GET /v1/aggregators/profile/me` response.
+ * @param schema - The registration JSON Schema; decides the shape of `type`.
  * @returns Form data keyed to the registration schema properties.
  */
-function toFormData(api: ProfileApiResponse): Record<string, unknown> {
+function toFormData(api: ProfileApiResponse, schema: RJSFSchema): Record<string, unknown> {
   const data: Record<string, unknown> = {};
   if (api.org_name) data['name'] = api.org_name;
-  if (api.type) data['type'] = api.type;
+  const typeDef = (schema.properties as Record<string, Record<string, unknown>> | undefined)?.[
+    'type'
+  ];
+  if (typeDef?.['type'] === 'array') {
+    // An empty `serves` means none, shown as no choice ticked.
+    data['type'] = api.serves;
+  } else if (api.type) {
+    data['type'] = api.type;
+  }
   if (api.url) data['url'] = api.url;
   if (api.contact) {
     data['contact'] = {
@@ -140,7 +149,7 @@ export function ProfileFormView({ schema, uiSchema }: ProfileFormViewProps): JSX
     return clone;
   }, [schema]);
 
-  const formData = useMemo(() => (data ? toFormData(data) : {}), [data]);
+  const formData = useMemo(() => (data ? toFormData(data, schema) : {}), [data, schema]);
 
   return (
     <div className="fade-up">

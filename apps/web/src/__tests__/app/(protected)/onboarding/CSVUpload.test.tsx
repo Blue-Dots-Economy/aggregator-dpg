@@ -27,7 +27,9 @@ import { ResponseShapeError } from '@/lib/response-shape-error';
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: pushMock }),
+  useRouter: () => ({ push: pushMock, replace: vi.fn() }),
+  usePathname: () => '/onboarding/upload',
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 const { useBulkUpload, useRecentBulkUploads } = vi.hoisted(() => ({
@@ -69,9 +71,22 @@ vi.mock('@/services/onboarding.service', async (importOriginal) => ({
 
 import { CSVUpload, RecentUploadsBody } from '@/app/(protected)/onboarding/_components/CSVUpload';
 
+/** Opens the Radix domain dropdown and picks an option; jsdom needs the pointer stubs. */
+async function pickDomain(name: RegExp): Promise<void> {
+  Element.prototype.scrollIntoView = vi.fn();
+  Element.prototype.hasPointerCapture = vi.fn().mockReturnValue(false);
+  Element.prototype.setPointerCapture = vi.fn();
+  Element.prototype.releasePointerCapture = vi.fn();
+  fireEvent.click(screen.getByRole('combobox', { name: 'Profile Type' }));
+  fireEvent.click(await screen.findByRole('option', { name }));
+}
+
 function renderUpload(props: Parameters<typeof CSVUpload>[0] = {}) {
   return render(
-    <NextIntlClientProvider locale="en" messages={{ onboarding: messages.onboarding }}>
+    <NextIntlClientProvider
+      locale="en"
+      messages={{ common: messages.common, onboarding: messages.onboarding }}
+    >
       <CSVUpload {...props} />
     </NextIntlClientProvider>,
   );
@@ -117,7 +132,7 @@ describe('<CSVUpload />', () => {
     mutateAsync.mockReset();
     refetch.mockClear();
     useAggregatorConfig.mockReturnValue({ data: cfg });
-    useProfileRaw.mockReturnValue({ data: { type: 'seeker' } });
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     useBulkUpload.mockReturnValue({ mutateAsync, isPending: false });
     useRecentBulkUploads.mockReturnValue({ data: { items: [] }, isLoading: false, refetch });
   });
@@ -337,10 +352,38 @@ describe('<CSVUpload />', () => {
     });
   });
 
-  it('falls back to the aggregator config default domain when the profile has not loaded', () => {
+  it('names no participant type and offers no template until the profile has loaded', () => {
     useProfileRaw.mockReturnValue({ data: undefined });
     renderUpload();
-    expect(screen.getByLabelText('Participant type: Seekers')).toBeInTheDocument();
+    expect(screen.queryByText('Seekers')).not.toBeInTheDocument();
+    expect(screen.getByText('Download Excel template').closest('button')).toBeDisabled();
+  });
+
+  it('lets a multi-domain coordinator pick the participant type for the template', async () => {
+    window.localStorage.clear();
+    useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker', 'provider'] } });
+    const user = userEvent.setup();
+    const origLocation = window.location;
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      configurable: true,
+      value: { ...origLocation, href: '' },
+    });
+
+    renderUpload();
+    const select = screen.getByRole('combobox', { name: 'Profile Type' });
+    expect(select).toHaveTextContent(/Seeker/);
+    await pickDomain(/Provider/);
+    await user.click(screen.getByText('Download Excel template'));
+    expect(window.location.href).toBe(
+      '/api/bulk-uploads/template?participant_type=provider&format=xlsx',
+    );
+
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      configurable: true,
+      value: origLocation,
+    });
   });
 });
 

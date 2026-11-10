@@ -38,7 +38,8 @@
     "back": "ಹಿಂದೆ",
     "cancel": "ರದ್ದುಮಾಡಿ",
     "continue": "ಮುಂದುವರಿಸಿ",
-    "loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ…"
+    "loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ…",
+    "domain_label": "ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರ"
   },
   "register": {
     "heading_tagline": "ನಿಮ್ಮ [[org]]ಯ ಬಗ್ಗೆ ನಮಗೆ ತಿಳಿಸಿ.",
@@ -360,7 +361,7 @@
       "field_event_date": "ಕಾರ್ಯಕ್ರಮದ ದಿನಾಂಕ",
       "field_event_location": "ಕಾರ್ಯಕ್ರಮದ ಸ್ಥಳ",
       "field_district": "ಜಿಲ್ಲೆ",
-      "field_domain": "ಡೊಮೇನ್",
+      "field_domain": "ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರ",
       "field_registration_mode": "ಅಭಿಯಾನ ಪ್ರಕಾರ",
       "field_tags": "ಟ್ಯಾಗ್‌ಗಳು (ಐಚ್ಛಿಕ)",
       "placeholder_state": "ರಾಜ್ಯ",
@@ -379,7 +380,7 @@
         "state": "ರಾಜ್ಯ ನಮೂದಿಸಿ.",
         "district": "ಜಿಲ್ಲೆ ನಮೂದಿಸಿ.",
         "lever_event": "ಕಾರ್ಯಕ್ರಮ ನಮೂದಿಸಿ.",
-        "domain": "ಡೊಮೇನ್ ಹೊಂದಿಸಿಲ್ಲ.",
+        "domain": "ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರ ಹೊಂದಿಸಿಲ್ಲ.",
         "registration_mode": "ಫಾರ್ಮ್ ಪ್ರಕಾರ ಆಯ್ಕೆಮಾಡಿ."
       }
     },
@@ -750,7 +751,7 @@
       "known_as_values_more": "+{count} more",
       "known_as_values_new": "New value",
       "known_as_values_placeholder": "Add a value, e.g. District",
-      "known_as_values_exists": "\u201c{name}\u201d is already in the list.",
+      "known_as_values_exists": "“{name}” is already in the list.",
       "known_as_values_notes_heading": "How it works",
       "known_as_values_unchanged": "No changes",
       "known_as_values_unsaved": "Unsaved changes",
@@ -844,7 +845,7 @@
       "name": "Name",
       "contact": "Contact",
       "status": "Status",
-      "serves": "Domains",
+      "serves": "Profile Types",
       "open": "Open",
       "coordinator": "[[User]]",
       "organisation": "[[Org]]",
@@ -853,8 +854,8 @@
       "apply": "Apply",
       "org_filter": "[[Org]]",
       "all_orgs": "All [[orgs]]",
-      "serves_filter": "Serves",
-      "all_domains": "All domains",
+      "serves_filter": "Profile type",
+      "all_domains": "All profile types",
       "clear_filter": "Remove the {label} filter",
       "clear_all": "Clear filters"
     },
@@ -864,13 +865,15 @@
       "reason": "ಕಾರಣ (ಐಚ್ಛಿಕ, ಅರ್ಜಿದಾರರಿಗೆ ಕಳುಹಿಸಲಾಗುತ್ತದೆ)",
       "already": "ಬೇರೆಡೆ ಈಗಾಗಲೇ ನಿರ್ಧರಿಸಲಾಗಿದೆ — ಈಗ {status}.",
       "decided": "ನಿರ್ಧಾರ ಉಳಿಸಲಾಗಿದೆ.",
-      "domains": "ಸೇವೆ ನೀಡುವ ಡೊಮೇನ್‌ಗಳು",
-      "domains_sub": "ಈ [[user]]ರು ಯಾವ ದಾಖಲೆಗಳೊಂದಿಗೆ ಕೆಲಸ ಮಾಡಬಹುದು.",
-      "domains_empty": "ಕನಿಷ್ಠ ಒಂದು ಡೊಮೇನ್ ಆರಿಸಿ.",
+      "domains": "ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರಗಳು",
+      "domains_sub": "ಈ [[user]]ರು ಯಾವ ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರಗಳೊಂದಿಗೆ ಕೆಲಸ ಮಾಡಬಹುದು.",
+      "domains_empty": "ಕನಿಷ್ಠ ಒಂದು ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರವನ್ನು ಆರಿಸಿ.",
       "unsaved": "ಉಳಿಸದ ಬದಲಾವಣೆಗಳು",
       "discard": "ರದ್ದುಮಾಡಿ",
-      "save_domains": "ಡೊಮೇನ್‌ಗಳನ್ನು ಉಳಿಸಿ",
-      "domains_saved": "ಡೊಮೇನ್‌ಗಳನ್ನು ಉಳಿಸಲಾಗಿದೆ.",
+      "save_domains": "ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರಗಳನ್ನು ಉಳಿಸಿ",
+      "domains_saved": "ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರಗಳನ್ನು ಉಳಿಸಲಾಗಿದೆ. ಸಂಯೋಜಕರನ್ನು ಸೈನ್ ಔಟ್ ಮಾಡಲಾಗಿದೆ, ಮುಂದಿನ ಸೈನ್ ಇನ್‌ನಲ್ಲಿ ಬದಲಾವಣೆ ಕಾಣಿಸುತ್ತದೆ.",
+      "remove_domains_note": "{domains} ತೆಗೆದುಹಾಕಿದರೆ ಈ [[user]]ರು ಆ ಪ್ರೊಫೈಲ್‌ಗಳೊಂದಿಗೆ ಕೆಲಸ ಮಾಡಲು ಸಾಧ್ಯವಾಗುವುದಿಲ್ಲ.",
+      "remove_domains_confirm": "ತೆಗೆದುಹಾಕಿ ಮತ್ತು ಉಳಿಸಿ",
       "back": "[[user]]ರಿಗೆ ಹಿಂತಿರುಗಿ",
       "joined": "{date} ರಂದು ಸೇರಿದರು",
       "copy_email": "ಇಮೇಲ್ ನಕಲಿಸಿ",
@@ -893,7 +896,7 @@
         "server": "ನಮ್ಮ ಕಡೆಯಿಂದ ಏನೋ ತಪ್ಪಾಗಿದೆ. ಕೆಲವು ನಿಮಿಷಗಳ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
         "generic": "ಅದು ಆಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
       },
-      "save_domains_first": "ನಿರ್ಧರಿಸುವ ಮೊದಲು ಡೊಮೇನ್ ಬದಲಾವಣೆಗಳನ್ನು ಉಳಿಸಿ ಅಥವಾ ರದ್ದುಮಾಡಿ."
+      "save_domains_first": "ನಿರ್ಧರಿಸುವ ಮೊದಲು ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರದ ಬದಲಾವಣೆಗಳನ್ನು ಉಳಿಸಿ ಅಥವಾ ರದ್ದುಮಾಡಿ."
     },
     "invite": {
       "heading": "[[user]]ರನ್ನು ಆಹ್ವಾನಿಸಿ",
@@ -1153,7 +1156,7 @@
       "col_coordinator": "[[user]]",
       "col_organisation": "[[org]]",
       "col_status": "ಸ್ಥಿತಿ",
-      "col_domains": "ಡೊಮೇನ್‌ಗಳು",
+      "col_domains": "ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರಗಳು",
       "col_action": "ಕ್ರಿಯೆ",
       "view": "ನೋಡಿ",
       "view_named": "{name} ನೋಡಿ",
@@ -1179,5 +1182,22 @@
     "body": "ನಮ್ಮ ಕಡೆಯಿಂದ ಏನೋ ತಪ್ಪಾಗಿದೆ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ, ಅಥವಾ ಅವಲೋಕನಕ್ಕೆ ಹಿಂತಿರುಗಿ.",
     "retry": "ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ",
     "home": "ಅವಲೋಕನಕ್ಕೆ ಹೋಗಿ"
+  },
+  "access": {
+    "no_profile_types": {
+      "title": "ನಿಮಗೆ ಇನ್ನೂ ಪ್ರವೇಶವಿಲ್ಲ",
+      "body": "ನಿಮ್ಮ ಖಾತೆಗೆ ಯಾವುದೇ ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರಗಳಿಲ್ಲ, ಆದ್ದರಿಂದ ನೀವು ಭಾಗವಹಿಸುವವರನ್ನು ನೋಡಲು ಅಥವಾ ಸೇರಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.",
+      "step_contact": "ನಿಮ್ಮ ಸಂಸ್ಥೆಯ ಅಡ್ಮಿನ್ ಅಥವಾ ನೆಟ್‌ವರ್ಕ್ ಅಡ್ಮಿನ್ ಅನ್ನು ಸಂಪರ್ಕಿಸಿ, ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರಗಳನ್ನು ಹೊಂದಿಸಲು ಕೇಳಿ.",
+      "step_sign_in": "ಅವರು ದೃಢಪಡಿಸಿದ ನಂತರ, ಸೈನ್ ಔಟ್ ಮಾಡಿ ಮತ್ತು ನಿಮ್ಮ ಭಾಗವಹಿಸುವವರನ್ನು ನೋಡಲು ಮತ್ತೆ ಸೈನ್ ಇನ್ ಮಾಡಿ.",
+      "signed_in_as": "ಸೈನ್ ಇನ್ ಆಗಿರುವ ಖಾತೆ:",
+      "sign_out": "ಸೈನ್ ಔಟ್"
+    },
+    "load_error": {
+      "title": "ನಿಮ್ಮ ಖಾತೆಯ ವಿವರಗಳನ್ನು ಲೋಡ್ ಮಾಡಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
+      "body": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಪ್ರಕಾರಗಳನ್ನು ಲೋಡ್ ಮಾಡುವಾಗ ನಮ್ಮ ಕಡೆಯಿಂದ ಏನೋ ತಪ್ಪಾಗಿದೆ. ನಿಮ್ಮ ಪ್ರವೇಶ ಬದಲಾಗಿಲ್ಲ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+      "retry": "ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ",
+      "retrying": "ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಲಾಗುತ್ತಿದೆ…",
+      "reload": "ಪುಟವನ್ನು ಮತ್ತೆ ಲೋಡ್ ಮಾಡಿ"
+    }
   }
 }

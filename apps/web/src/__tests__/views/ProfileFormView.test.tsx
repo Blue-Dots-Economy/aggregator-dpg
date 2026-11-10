@@ -48,6 +48,7 @@ const apiResponse = {
   org_name: 'Acme Org',
   actor_type: 'aggregator' as const,
   type: 'seeker',
+  serves: ['seeker'],
   url: 'https://acme.example',
   contact: { name: 'Jane', phone: '9876543210', email: 'jane@acme.example' },
   locations: [
@@ -248,5 +249,39 @@ describe('<ProfileFormView />', () => {
     // `name` (no matching API field) and `url` (explicitly null) both render
     // the em-dash placeholder.
     expect(screen.getAllByText('—')).toHaveLength(2);
+  });
+
+  describe('with a list domain field', () => {
+    const listSchema: RJSFSchema = {
+      ...schema,
+      properties: {
+        ...schema.properties,
+        type: { type: 'array', items: { type: 'string', enum: ['seeker', 'provider'] } },
+      },
+    };
+
+    function renderList(serves: string[]) {
+      useProfileRaw.mockReturnValue({
+        data: { ...apiResponse, type: serves[0] ?? null, serves },
+        isLoading: false,
+        isError: false,
+      });
+      render(
+        <NextIntlClientProvider locale="en" messages={messages}>
+          <ThemeModeProvider>
+            <ProfileFormView schema={listSchema} uiSchema={uiSchema} />
+          </ThemeModeProvider>
+        </NextIntlClientProvider>,
+      );
+      return (lastRjsfProps?.formData as Record<string, unknown>)['type'];
+    }
+
+    it('shows every stored domain', () => {
+      expect(renderList(['seeker', 'provider'])).toEqual(['seeker', 'provider']);
+    });
+
+    it('ticks no choice for a coordinator serving none', () => {
+      expect(renderList([])).toEqual([]);
+    });
   });
 });

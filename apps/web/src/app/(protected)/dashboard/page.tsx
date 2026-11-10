@@ -30,7 +30,12 @@ import { DASHBOARD_BULK_ACTIONS, type BulkAction } from '../../../services/bulk-
 import { ResponseShapeError } from '@/lib/response-shape-error';
 import { useCan } from '../../../lib/auth-context';
 import type { DashboardTileDef, StatusRule } from '../../../hooks/useAggregatorConfig';
-import { useProfileRaw } from '../../../hooks/useProfile';
+import { useActiveDomain, type ActiveDomainState } from '../../../hooks/useActiveDomain';
+import { DomainTabs } from '../../../components/ui/DomainTabs';
+import {
+  NoProfileTypesNotice,
+  ProfileLoadError,
+} from '../../../components/access/DomainAccessGate';
 import { useThemeMode } from '../../../lib/theme-mode';
 import type {
   DirectionalStats,
@@ -1417,7 +1422,7 @@ function filterRowsByLifecycle<R extends { lifecycle_status?: LifecycleStatus }>
 
 /** Props for the participant-profile tab (any `profile_*` domain). */
 interface DomainTabProps {
-  /** The signed-in coordinator's own domain, from its `aggregator_type`. */
+  /** The active domain the coordinator is working with. */
   domainId: string | undefined;
 }
 
@@ -2003,16 +2008,18 @@ function toProviderRow(
 }
 
 export default function DashboardPageRoot() {
-  const rawProfile = useProfileRaw();
-  // Wait for the profile before mounting a tab, so no tab fetches the wrong domain.
-  const profileType = rawProfile.data?.type;
-  if (!profileType) {
-    return <DashboardLoadingFrame />;
+  const activeDomain = useActiveDomain();
+  // Wait for the profile and the stored choice before mounting a tab, so no
+  // tab fetches the wrong domain. A failed load or no profile types shows a
+  // full-page notice instead of the tabs.
+  if (activeDomain.error || !activeDomain.ready || activeDomain.domains.length === 0) {
+    return <DashboardGateFrame activeDomain={activeDomain} />;
   }
-  return <DashboardContent aggregatorType={profileType} />;
+  return <DashboardContent activeDomain={activeDomain} />;
 }
 
-function DashboardLoadingFrame() {
+/** The dashboard title over the loading state, the load error or the no-access notice. */
+function DashboardGateFrame({ activeDomain }: { activeDomain: ActiveDomainState }) {
   const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
   return (
@@ -2021,22 +2028,37 @@ function DashboardLoadingFrame() {
         title={`My ${cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
       />
-      <div className="text-center text-[13px] text-ink-400 py-12">{t('state.loading')}</div>
+      {activeDomain.error ? (
+        <ProfileLoadError onRetry={activeDomain.retry} retrying={activeDomain.retrying} />
+      ) : !activeDomain.ready ? (
+        <div className="text-center text-[13px] text-ink-400 py-12">{t('state.loading')}</div>
+      ) : (
+        <NoProfileTypesNotice />
+      )}
     </div>
   );
 }
 
-function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
+function DashboardContent({ activeDomain }: { activeDomain: ActiveDomainState }) {
   const router = useRouter();
   const t = useTranslations('dashboard');
   const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  // Domain id from the config entry matching `aggregatorType`. Undefined when
-  // no entry matches, which skips the dashboard fetch.
-  const primaryDomainCfg = cfg.domains?.find((d) => d.id === aggregatorType);
+  const { domains, active, setActive } = activeDomain;
+  // Defined here: the page root renders this only when a domain is served.
+  const primaryDomainCfg = domains.find((d) => d.id === active);
   const primaryDomain = primaryDomainCfg?.id;
   // Provider-like when the domain's `item_type` is job postings, not profiles.
   const isProviderLike = (primaryDomainCfg?.item_type ?? '').startsWith('job_posting');
   const canOnboard = useCan()('profiles.onboard');
+  // Same query as the active tab's first unfiltered page, so it shares that
+  // request. The payload carries every domain's rollup, which gives each tab
+  // its count.
+  const { data: dashboard } = useDashboard(
+    primaryDomain ? { domain: primaryDomain, page: 1, limit: PAGE_SIZE } : undefined,
+  );
+  const counts = Object.fromEntries(
+    domains.map((d) => [d.id, dashboard?.by_domain[d.id]?.rollup.total_items]),
+  );
 
   return (
     <div className="fade-up">
@@ -2044,21 +2066,30 @@ function DashboardContent({ aggregatorType }: { aggregatorType: string }) {
         title={`My ${cfg.brand.short_name}`}
         subtitle={cfg.brand.tagline ?? 'Track every participant in your network — at a glance.'}
         right={
-          <div className="flex items-center gap-2">
-            {canOnboard && (
-              <Button icon={<I.plus size={14} />} onClick={() => router.push('/onboarding')}>
-                {t('buttons.addParticipants')}
-              </Button>
-            )}
-          </div>
+          canOnboard && (
+            <Button
+              className="whitespace-nowrap"
+              icon={<I.plus size={14} />}
+              onClick={() => router.push('/onboarding')}
+            >
+              {t('buttons.addParticipants')}
+            </Button>
+          )
         }
       />
+      <DomainTabs
+        className="-mt-2 mb-6"
+        domains={domains}
+        value={active}
+        onChange={setActive}
+        counts={counts}
+      />
 
-      {/* No tab strip: the tab is fixed by the aggregator's type. */}
+      {/* Keyed by domain so a switch resets paging, filters and selection. */}
       {isProviderLike ? (
-        <ProvidersTab domainId={primaryDomain} />
+        <ProvidersTab key={primaryDomain} domainId={primaryDomain} />
       ) : (
-        <SeekersTab domainId={primaryDomain} />
+        <SeekersTab key={primaryDomain} domainId={primaryDomain} />
       )}
     </div>
   );

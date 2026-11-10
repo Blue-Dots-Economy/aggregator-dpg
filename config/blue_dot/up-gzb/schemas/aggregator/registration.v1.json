@@ -15,9 +15,14 @@
       "examples": ["SkillBridge Network", "TRRAIN", "Pankh Foundation"]
     },
     "type": {
-      "type": "string",
+      "type": "array",
       "title": "Aggregator Type",
-      "enum": ["seeker", "provider", "service_provider"]
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["seeker", "provider", "service_provider"]
+      }
     },
     "sub_org_name": {
       "type": "string",
