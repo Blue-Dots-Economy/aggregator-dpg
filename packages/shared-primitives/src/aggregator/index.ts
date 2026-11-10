@@ -41,6 +41,21 @@ export type DomainId = RoleType;
 export const ProfileTypeSchema = z.string().min(1);
 export type ProfileType = z.infer<typeof ProfileTypeSchema>;
 
+/**
+ * The network domains a coordinator serves, in network order.
+ *
+ * Ids that are not in the network are dropped, so the result is always a
+ * subset of `domainIds`. An empty `serves` serves nothing. The API, the portal
+ * and the console use it, so all three read `serves` the same way.
+ *
+ * @param serves - The coordinator's stored domain ids.
+ * @param domainIds - The active network's domain ids, in declaration order.
+ * @returns The served domain ids.
+ */
+export function servedDomainIds(serves: readonly string[], domainIds: readonly string[]): string[] {
+  return domainIds.filter((d) => serves.includes(d));
+}
+
 export const AggregatorStatusSchema = z.enum(['pending', 'active', 'inactive', 'retired']);
 export type AggregatorStatus = z.infer<typeof AggregatorStatusSchema>;
 

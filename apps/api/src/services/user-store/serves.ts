@@ -3,6 +3,8 @@
  * user store. Shared by the Postgres and in-memory stores.
  */
 
+import { servedDomainIds } from '@aggregator-dpg/shared-primitives/aggregator';
+
 /**
  * The `serves` value for a registration's domain.
  *
@@ -32,15 +34,13 @@ export function servesForCreate(input: {
 }
 
 /**
- * The network domains a coordinator serves, in network order.
- *
- * Ids that are not in the network are dropped, so the result is always a
- * subset of `domainIds`. An empty `serves` serves nothing.
+ * The network domains a coordinator serves, in network order. Ids not in the
+ * network are dropped; an empty `serves` serves nothing.
  *
  * @param serves - The coordinator's stored domain ids.
  * @param domainIds - The active network's domain ids, in declaration order.
  * @returns The served domain ids.
  */
 export function servedDomains(serves: readonly string[], domainIds: readonly string[]): string[] {
-  return domainIds.filter((d) => serves.includes(d));
+  return servedDomainIds(serves, domainIds);
 }

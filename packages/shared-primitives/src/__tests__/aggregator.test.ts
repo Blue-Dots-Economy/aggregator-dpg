@@ -3,6 +3,7 @@ import {
   ConsentRecordSchema,
   RegistrationConsentSchema,
   RegistrationPayloadSchema,
+  servedDomainIds,
   registrationDomains,
 } from '../aggregator/index.js';
 
@@ -109,5 +110,29 @@ describe('registrationDomains', () => {
     const out = registrationDomains(ids);
     expect(out).toEqual(ids);
     expect(out).not.toBe(ids);
+  });
+});
+
+describe('servedDomainIds', () => {
+  const NETWORK = ['seeker', 'provider'];
+
+  it('returns nothing for an empty list', () => {
+    expect(servedDomainIds([], NETWORK)).toEqual([]);
+  });
+
+  it('returns nothing when no id is in the network', () => {
+    expect(servedDomainIds(['retired'], NETWORK)).toEqual([]);
+  });
+
+  it('drops ids the network does not declare', () => {
+    expect(servedDomainIds(['retired', 'provider'], NETWORK)).toEqual(['provider']);
+  });
+
+  it('returns the ids in network order', () => {
+    expect(servedDomainIds(['provider', 'seeker'], NETWORK)).toEqual(['seeker', 'provider']);
+  });
+
+  it('does not repeat an id stored twice', () => {
+    expect(servedDomainIds(['seeker', 'seeker'], NETWORK)).toEqual(['seeker']);
   });
 });
