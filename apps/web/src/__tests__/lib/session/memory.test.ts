@@ -66,16 +66,16 @@ describe('MemorySessionStore', () => {
     const got = await store.get(sid);
     expect(got.ok).toBe(false);
   });
-  it('takes a remembered sign-in once', async () => {
-    await store.rememberSignIn('state-1', 60);
-    expect(await store.takeSignIn('state-1')).toBe(true);
-    expect(await store.takeSignIn('state-1')).toBe(false);
+  it('takes a remembered sign-in once, returning the browser that started it', async () => {
+    await store.rememberSignIn('state-1', 'browser-1', 60);
+    expect(await store.takeSignIn('state-1')).toBe('browser-1');
+    expect(await store.takeSignIn('state-1')).toBeNull();
   });
 
   it('does not take an unknown or expired sign-in', async () => {
-    expect(await store.takeSignIn('unknown')).toBe(false);
-    await store.rememberSignIn('state-2', -1);
-    expect(await store.takeSignIn('state-2')).toBe(false);
+    expect(await store.takeSignIn('unknown')).toBeNull();
+    await store.rememberSignIn('state-2', 'browser-1', -1);
+    expect(await store.takeSignIn('state-2')).toBeNull();
   });
 });
 

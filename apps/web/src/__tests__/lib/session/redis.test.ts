@@ -148,26 +148,26 @@ describe('RedisSessionStore', () => {
     expect(fake.del).not.toHaveBeenCalled();
   });
 
-  it('remembers a sign-in under a hash of its state, with the given TTL', async () => {
-    await s.rememberSignIn('the-state', 300);
-    const [key, , mode, ttl] = fake.set.mock.calls[0] ?? [];
+  it('remembers a sign-in and its browser under a hash of its state, with the given TTL', async () => {
+    await s.rememberSignIn('the-state', 'the-browser', 300);
+    const [key, value, mode, ttl] = fake.set.mock.calls[0] ?? [];
     expect(key).toMatch(/^signin:[0-9a-f]{64}$/);
     expect(key).not.toContain('the-state');
-    expect([mode, ttl]).toEqual(['EX', 300]);
+    expect([value, mode, ttl]).toEqual(['the-browser', 'EX', 300]);
   });
 
-  it('takes a remembered sign-in once', async () => {
-    await s.rememberSignIn('the-state', 300);
-    expect(await s.takeSignIn('the-state')).toBe(true);
-    expect(await s.takeSignIn('the-state')).toBe(false);
+  it('takes a remembered sign-in once, returning the browser that started it', async () => {
+    await s.rememberSignIn('the-state', 'the-browser', 300);
+    expect(await s.takeSignIn('the-state')).toBe('the-browser');
+    expect(await s.takeSignIn('the-state')).toBeNull();
   });
 
   it('treats a Redis failure as no sign-in, and never throws on remember', async () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
     fake.set.mockRejectedValueOnce(new Error('down'));
     fake.getdel.mockRejectedValueOnce(new Error('down'));
-    await expect(s.rememberSignIn('the-state', 300)).resolves.toBeUndefined();
-    expect(await s.takeSignIn('the-state')).toBe(false);
+    await expect(s.rememberSignIn('the-state', 'the-browser', 300)).resolves.toBeUndefined();
+    expect(await s.takeSignIn('the-state')).toBeNull();
     expect(warn).toHaveBeenCalledTimes(2);
     warn.mockRestore();
   });

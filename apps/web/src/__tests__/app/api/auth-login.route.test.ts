@@ -39,7 +39,7 @@ describe('GET /api/auth/login', () => {
     destroy: vi.fn(async () => undefined),
     close: vi.fn(),
     rememberSignIn: vi.fn(async () => undefined),
-    takeSignIn: vi.fn(async () => false),
+    takeSignIn: vi.fn(async (): Promise<string | null> => null),
   };
 
   beforeEach(() => {
@@ -62,7 +62,7 @@ describe('GET /api/auth/login', () => {
     if (originalSessionKey === undefined) delete process.env.SESSION_KEY;
     else process.env.SESSION_KEY = originalSessionKey;
     vi.clearAllMocks();
-    store.takeSignIn.mockResolvedValue(false);
+    store.takeSignIn.mockResolvedValue(null);
   });
 
   it('redirects to the IdP authorization URL and sets the signed flow cookie', async () => {
@@ -74,9 +74,20 @@ describe('GET /api/auth/login', () => {
     expect(setCookie).toContain('oidc_flow=');
   });
 
-  it('records the sign-in it starts for as long as the handshake cookie lasts', async () => {
-    await GET(new NextRequest('http://localhost/api/auth/login'));
-    expect(store.rememberSignIn).toHaveBeenCalledWith('state-123', 300);
+  it('records the sign-in with the browser that started it, as long as the handshake cookie lasts', async () => {
+    const res = await GET(new NextRequest('http://localhost/api/auth/login'));
+    const browser = res.cookies.get('bd_signin_browser');
+    expect(browser).toMatchObject({ httpOnly: true, sameSite: 'lax', path: '/' });
+    expect(store.rememberSignIn).toHaveBeenCalledWith('state-123', browser?.value, 300);
+  });
+
+  it('keeps the browser cookie across sign-ins in the same browser', async () => {
+    await GET(
+      new NextRequest('http://localhost/api/auth/login', {
+        headers: { cookie: 'bd_signin_browser=this-browser' },
+      }),
+    );
+    expect(store.rememberSignIn).toHaveBeenCalledWith('state-123', 'this-browser', 300);
   });
 
   it('defaults returnTo to / when absent', async () => {
@@ -163,8 +174,8 @@ describe('GET /api/auth/login', () => {
       expect(setCookie).not.toContain('oidc_flow=');
     });
 
-    it('ends a live portal session and hints Keycloak when the flow is one it started', async () => {
-      store.takeSignIn.mockResolvedValue(true);
+    it('ends a live portal session and hints Keycloak when this browser started the sign-in', async () => {
+      store.takeSignIn.mockResolvedValue('this-browser');
       store.get.mockResolvedValue({ ok: true, value: { idToken: 'id-token-a' } });
       const buildLogoutUrl = vi.fn(async () => 'https://kc.test/logout?id_token_hint=a');
       mockGetOidcAdapter.mockReturnValue({
@@ -176,7 +187,7 @@ describe('GET /api/auth/login', () => {
 
       const res = await GET(
         new NextRequest('http://localhost/api/auth/login?switch=1&flow=state-b', {
-          headers: { cookie: 'sid=sess-a' },
+          headers: { cookie: 'sid=sess-a; bd_signin_browser=this-browser' },
         }),
       );
 
@@ -192,7 +203,7 @@ describe('GET /api/auth/login', () => {
     });
 
     it('falls back to client_id when the session cookie has no live session', async () => {
-      store.takeSignIn.mockResolvedValue(true);
+      store.takeSignIn.mockResolvedValue('this-browser');
       store.get.mockResolvedValue({ ok: false, error: new Error('not found') });
       const buildLogoutUrl = vi.fn(async () => 'https://kc.test/logout');
       mockGetOidcAdapter.mockReturnValue({
@@ -204,7 +215,7 @@ describe('GET /api/auth/login', () => {
 
       await GET(
         new NextRequest('http://localhost/api/auth/login?switch=1&flow=state-b', {
-          headers: { cookie: 'sid=gone' },
+          headers: { cookie: 'sid=gone; bd_signin_browser=this-browser' },
         }),
       );
 
@@ -226,6 +237,28 @@ describe('GET /api/auth/login', () => {
       const res = await GET(
         new NextRequest('http://localhost/api/auth/login?switch=1&flow=forged', {
           headers: { cookie: 'sid=sess-a' },
+        }),
+      );
+
+      expect(store.get).not.toHaveBeenCalled();
+      expect(store.destroy).not.toHaveBeenCalled();
+      expect(res.headers.get('set-cookie') ?? '').not.toContain('sid=;');
+    });
+
+    it('leaves the portal session alone when the sign-in was started in another browser', async () => {
+      // An attacker can start their own sign-in and send its `state` in a link;
+      // the record is live, but it carries the attacker's browser value.
+      store.takeSignIn.mockResolvedValue('attacker-browser');
+      mockGetOidcAdapter.mockReturnValue({
+        buildAuthorizationUrl: vi.fn(),
+        exchangeCode: vi.fn(),
+        refresh: vi.fn(),
+        buildLogoutUrl: vi.fn(async () => 'https://kc.test/logout'),
+      } as never);
+
+      const res = await GET(
+        new NextRequest('http://localhost/api/auth/login?switch=1&flow=attacker-state', {
+          headers: { cookie: 'sid=sess-a; bd_signin_browser=victim-browser' },
         }),
       );
 

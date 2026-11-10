@@ -11,13 +11,17 @@
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { getOidcAdapter, oidcGenerators } from '@/lib/oidc';
+import { randomBytes } from 'node:crypto';
 import {
   OIDC_FLOW_COOKIE,
   OIDC_FLOW_TTL_SECONDS,
   SESSION_COOKIE,
+  SIGNIN_BROWSER_COOKIE,
   clearCookieOptions,
   oidcFlowCookieOptions,
+  safeEqual,
   signFlowState,
+  signinBrowserCookieOptions,
 } from '@/lib/cookies';
 import { getSessionStore } from '@/lib/session';
 
@@ -70,7 +74,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     codeChallenge,
     redirectUri,
   });
-  await getSessionStore().rememberSignIn(state, OIDC_FLOW_TTL_SECONDS);
+  const browser =
+    req.cookies.get(SIGNIN_BROWSER_COOKIE)?.value || randomBytes(32).toString('base64url');
+  await getSessionStore().rememberSignIn(state, browser, OIDC_FLOW_TTL_SECONDS);
 
   const res = NextResponse.redirect(authUrl, { status: 302 });
   res.cookies.set(
@@ -78,6 +84,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     signFlowState({ state, nonce, codeVerifier, returnTo }),
     oidcFlowCookieOptions(),
   );
+  res.cookies.set(SIGNIN_BROWSER_COOKIE, browser, signinBrowserCookieOptions());
   return res;
 }
 
@@ -100,11 +107,11 @@ const LOGOUT_HINT_MAX_AGE = 300; // 5 minutes
  * is sent as `id_token_hint` when there is one, so Keycloak signs out without
  * asking for confirmation when the token matches the browser's session.
  *
- * The portal session is only touched when `flow` names a sign-in this portal
- * started and has not used yet. `state` only appears in this browser's
- * Keycloak URLs, so another site cannot sign a user out by linking here. The
- * handshake cookie cannot be the proof, because a second sign-in in the same
- * browser replaces it.
+ * The portal session is only touched when `flow` names a live sign-in that
+ * this browser started: the browser cookie stored with it must match this
+ * request's. A link from another site can name a sign-in, but only one started
+ * in another browser. The handshake cookie cannot be the proof, because a
+ * second sign-in in the same browser replaces it.
  *
  * @param req - Incoming request, for `flow`, the session cookie, origin fallback and cookie flags.
  * @param adapter - OIDC adapter used to build the end-session URL.
@@ -115,8 +122,10 @@ async function redirectToAccountSwitch(
   adapter: ReturnType<typeof getOidcAdapter>,
 ): Promise<NextResponse> {
   const flow = req.nextUrl.searchParams.get('flow');
-  const proven = flow ? await getSessionStore().takeSignIn(flow) : false;
-  const sid = proven ? req.cookies.get(SESSION_COOKIE)?.value : undefined;
+  const startedBy = flow ? await getSessionStore().takeSignIn(flow) : null;
+  const browser = req.cookies.get(SIGNIN_BROWSER_COOKIE)?.value;
+  const ownSignIn = Boolean(startedBy && browser && safeEqual(startedBy, browser));
+  const sid = ownSignIn ? req.cookies.get(SESSION_COOKIE)?.value : undefined;
   let idToken: string | undefined;
   if (sid) {
     const result = await getSessionStore().get(sid);

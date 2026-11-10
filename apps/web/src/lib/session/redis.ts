@@ -157,10 +157,10 @@ export class RedisSessionStore extends SessionStoreBase {
    * Records a sign-in this portal started. A failure is logged, not thrown, so
    * Redis trouble never blocks a sign-in; the record is then simply missing.
    */
-  async rememberSignIn(state: string, ttlSec: number): Promise<void> {
-    if (!state) return;
+  async rememberSignIn(state: string, browser: string, ttlSec: number): Promise<void> {
+    if (!state || !browser) return;
     try {
-      await this.redis.set(signInKey(state), '1', 'EX', ttlSec);
+      await this.redis.set(signInKey(state), browser, 'EX', ttlSec);
     } catch (err) {
       logger.warn({
         operation: 'session.rememberSignIn',
@@ -174,17 +174,17 @@ export class RedisSessionStore extends SessionStoreBase {
    * Removes the record of a sign-in this portal started. A failure counts as no
    * record, so the caller falls back to its safer path.
    */
-  async takeSignIn(state: string): Promise<boolean> {
-    if (!state) return false;
+  async takeSignIn(state: string): Promise<string | null> {
+    if (!state) return null;
     try {
-      return (await this.redis.getdel(signInKey(state))) !== null;
+      return await this.redis.getdel(signInKey(state));
     } catch (err) {
       logger.warn({
         operation: 'session.takeSignIn',
         status: 'failure',
         error: err instanceof Error ? err.message : String(err),
       });
-      return false;
+      return null;
     }
   }
 }

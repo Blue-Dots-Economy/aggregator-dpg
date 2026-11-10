@@ -58,18 +58,19 @@ export abstract class SessionStoreBase {
   abstract destroy(sid: string): Promise<void>;
   abstract close(): Promise<void>;
   /**
-   * Records a sign-in this portal started, so a later request can prove it
-   * belongs to this browser.
+   * Records a sign-in this portal started and the browser that started it, so
+   * a later request can prove the sign-in is its own.
    *
    * @param state - The OIDC `state` of the sign-in.
+   * @param browser - The starting browser's browser-cookie value.
    * @param ttlSec - How long the record lasts.
    */
-  abstract rememberSignIn(state: string, ttlSec: number): Promise<void>;
+  abstract rememberSignIn(state: string, browser: string, ttlSec: number): Promise<void>;
   /**
    * Removes the record of a sign-in this portal started.
    *
    * @param state - The OIDC `state` of the sign-in.
-   * @returns Whether a live record existed.
+   * @returns The browser-cookie value it was started with, or null when there is no live record.
    */
-  abstract takeSignIn(state: string): Promise<boolean>;
+  abstract takeSignIn(state: string): Promise<string | null>;
 }

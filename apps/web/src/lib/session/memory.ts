@@ -21,7 +21,7 @@ export interface MemorySessionStoreOptions {
  */
 export class MemorySessionStore extends SessionStoreBase {
   private readonly store = new Map<string, Entry>();
-  private readonly signIns = new Map<string, number>();
+  private readonly signIns = new Map<string, { browser: string; expiresAt: number }>();
   private readonly ttlSec: number;
 
   constructor(opts: MemorySessionStoreOptions = {}) {
@@ -82,15 +82,15 @@ export class MemorySessionStore extends SessionStoreBase {
     this.signIns.clear();
   }
 
-  async rememberSignIn(state: string, ttlSec: number): Promise<void> {
-    if (!state) return;
-    this.signIns.set(state, Date.now() + ttlSec * 1000);
+  async rememberSignIn(state: string, browser: string, ttlSec: number): Promise<void> {
+    if (!state || !browser) return;
+    this.signIns.set(state, { browser, expiresAt: Date.now() + ttlSec * 1000 });
   }
 
-  async takeSignIn(state: string): Promise<boolean> {
-    const expiresAt = this.signIns.get(state);
+  async takeSignIn(state: string): Promise<string | null> {
+    const entry = this.signIns.get(state);
     this.signIns.delete(state);
-    return expiresAt !== undefined && expiresAt >= Date.now();
+    return entry && entry.expiresAt >= Date.now() ? entry.browser : null;
   }
 
   /** Test helper — wipes the store. */
