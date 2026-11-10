@@ -18,6 +18,13 @@ import { logger } from '../logger';
 
 const KEY_PREFIX = 'session:';
 const SIGN_IN_PREFIX = 'signin:';
+/** IdP session id → the ids of the portal sessions created under it. */
+const IDP_SESSION_PREFIX = 'sessionidp:';
+
+/** Hashed so a key listing does not reveal IdP session ids. */
+function idpIndexKey(idpSid: string): string {
+  return IDP_SESSION_PREFIX + createHash('sha256').update(idpSid).digest('hex');
+}
 
 /** `state` is a credential for its sign-in, so keys hold only its hash. */
 function signInKey(state: string): string {
@@ -53,6 +60,11 @@ export class RedisSessionStore extends SessionStoreBase {
   async create(data: SessionData): Promise<string> {
     const sid = randomUUID();
     await this.redis.set(KEY_PREFIX + sid, JSON.stringify(data), 'EX', this.ttlSec);
+    if (data.idpSid) {
+      const index = idpIndexKey(data.idpSid);
+      await this.redis.sadd(index, sid);
+      await this.redis.expire(index, this.ttlSec);
+    }
     return sid;
   }
 
@@ -93,8 +105,10 @@ export class RedisSessionStore extends SessionStoreBase {
     const session = SessionDataSchema.safeParse(stored);
     if (!session.success) return this.discardCorrupt(sid, 'unexpected shape');
     const parsed = session.data;
-    // Slide the TTL; failure is non-fatal.
+    // Slide the TTL; failure is non-fatal. The IdP index slides with it, so it
+    // outlives every session it lists.
     void this.redis.expire(KEY_PREFIX + sid, this.ttlSec);
+    if (parsed.idpSid) void this.redis.expire(idpIndexKey(parsed.idpSid), this.ttlSec);
     return { ok: true, value: parsed };
   }
 
@@ -186,5 +200,12 @@ export class RedisSessionStore extends SessionStoreBase {
       });
       return null;
     }
+  }
+
+  async destroyByIdpSession(idpSid: string): Promise<number> {
+    const index = idpIndexKey(idpSid);
+    const sids = await this.redis.smembers(index);
+    await this.redis.del(...sids.map((sid) => KEY_PREFIX + sid), index);
+    return sids.length;
   }
 }

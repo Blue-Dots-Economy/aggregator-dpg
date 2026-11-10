@@ -38,6 +38,12 @@ export const SessionDataSchema = z.object({
   lastSeenAt: z.number(),
   /** Console actor cache; absent until the console reads it. */
   consoleActor: CachedActorSchema.optional().catch(undefined),
+  /**
+   * Keycloak's session id (`sid` in the ID token). Keycloak's back-channel
+   * logout names this session. Optional: sessions created before it existed,
+   * and an ID token without `sid`, have none.
+   */
+  idpSid: z.string().optional(),
 });
 export type SessionData = z.infer<typeof SessionDataSchema>;
 
@@ -73,4 +79,11 @@ export abstract class SessionStoreBase {
    * @returns The browser-cookie value it was started with, or null when there is no live record.
    */
   abstract takeSignIn(state: string): Promise<string | null>;
+  /**
+   * Destroys every session created under an IdP session.
+   *
+   * @param idpSid - The IdP session id, from a verified logout token.
+   * @returns How many sessions were listed for it.
+   */
+  abstract destroyByIdpSession(idpSid: string): Promise<number>;
 }

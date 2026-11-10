@@ -77,6 +77,17 @@ export class MemorySessionStore extends SessionStoreBase {
     this.store.delete(sid);
   }
 
+  async destroyByIdpSession(idpSid: string): Promise<number> {
+    let ended = 0;
+    for (const [sid, entry] of this.store) {
+      if (entry.data.idpSid === idpSid) {
+        this.store.delete(sid);
+        ended += 1;
+      }
+    }
+    return ended;
+  }
+
   async close(): Promise<void> {
     this.store.clear();
     this.signIns.clear();
