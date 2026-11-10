@@ -2,9 +2,10 @@
  * Profile type checks shared by the coordinator routes in `@aggregator-dpg/api`.
  *
  * The profile types a request may act on come from the access token's
- * multivalued `aggregator_type` claim, read once at login. The database is not
- * read: a change in the console ends the coordinator's sessions, so the next
- * login carries the new types.
+ * multivalued `aggregator_type` claim, set when the token is issued. The
+ * database is not read. A token refresh picks up a change to the attribute; a
+ * change in the console also ends the coordinator's sessions, so it takes
+ * effect at once.
  */
 
 import { httpError } from '../errors/http-error.js';

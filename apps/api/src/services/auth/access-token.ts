@@ -30,8 +30,9 @@ export interface AuthContext {
   aggregatorId: string;
   /**
    * The profile types the coordinator serves, from the multivalued
-   * `aggregator_type` claim; `[]` when absent. Fixed for the session: a change
-   * in the console ends the coordinator's sessions, so the next login carries it.
+   * `aggregator_type` claim; `[]` when absent. Set when the token is issued; a
+   * token refresh picks up a change, and the console ends the coordinator's
+   * sessions so a change takes effect at once.
    */
   serves: ProfileType[];
   /**
