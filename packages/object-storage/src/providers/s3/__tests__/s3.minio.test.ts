@@ -1,8 +1,8 @@
 import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { beforeAll, describe } from 'vitest';
 import { z } from 'zod';
-import { storageConfigFields } from '../config.js';
-import { runObjectStorageContract } from '../contract-suite.js';
+import { storageConfigFields } from '../../../config.js';
+import { runObjectStorageContract } from '../../../contract-suite.js';
 import { S3ObjectStorage } from '../s3.js';
 
 const endpoint = process.env.OBJECT_STORAGE_IT_ENDPOINT;

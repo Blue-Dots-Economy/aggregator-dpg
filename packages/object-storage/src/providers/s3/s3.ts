@@ -11,8 +11,8 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Readable } from 'node:stream';
 import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok, type Result } from '@aggregator-dpg/shared-primitives/result';
-import { toStoredKey } from './areas.js';
-import type { StorageConfig } from './config.js';
+import { toStoredKey } from '../../areas.js';
+import type { StorageConfig } from '../../config.js';
 import {
   ObjectStorageBase,
   type CreateDownloadInput,
@@ -22,7 +22,7 @@ import {
   type ObjectStat,
   type PutInput,
   type UploadInstructions,
-} from './interface.js';
+} from '../../interface.js';
 
 function errorName(error: unknown): string {
   return typeof error === 'object' && error !== null && 'name' in error ? String(error.name) : '';

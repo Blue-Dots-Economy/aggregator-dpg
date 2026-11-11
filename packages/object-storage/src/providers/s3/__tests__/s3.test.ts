@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
-import { storageConfigFields } from '../config.js';
+import { storageConfigFields } from '../../../config.js';
 import { z } from 'zod';
 
 const h = vi.hoisted(() => ({

@@ -1,7 +1,7 @@
 import { ConfigError } from '@aggregator-dpg/shared-primitives/errors';
 import type { StorageConfig } from './config.js';
 import type { ObjectStorageBase } from './interface.js';
-import { S3ObjectStorage } from './s3.js';
+import { S3ObjectStorage } from './providers/s3/s3.js';
 
 export * from './interface.js';
 export * from './areas.js';
