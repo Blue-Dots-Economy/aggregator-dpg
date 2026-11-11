@@ -897,7 +897,9 @@ describe('bulk-uploads routes', () => {
     it('still answers 400 too large and logs a warning when deleting the rejected file fails', async () => {
       const warn = vi.fn();
       const child = app.log.child.bind(app.log);
-      vi.spyOn(app.log, 'child').mockImplementation(((...args: Parameters<typeof child>) => {
+      const childSpy = vi.spyOn(app.log, 'child').mockImplementation(((
+        ...args: Parameters<typeof child>
+      ) => {
         const logger = child(...args);
         logger.warn = warn as never;
         return logger;
@@ -911,6 +913,7 @@ describe('bulk-uploads routes', () => {
         headers: AUTH('seeker-approved'),
         payload: { attestation: true },
       });
+      childSpy.mockRestore();
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: { detail: string } }).error.detail).toContain('too large');
       expect(warn).toHaveBeenCalledWith(

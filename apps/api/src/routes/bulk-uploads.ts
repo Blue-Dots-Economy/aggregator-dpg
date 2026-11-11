@@ -478,7 +478,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
           latency_ms: Date.now() - start,
         });
         throw httpError('SCHEMA_VALIDATION', {
-          detail: 'CSV upload not found in object storage. Complete the PUT and retry.',
+          detail: 'CSV upload not found in object storage. Complete the upload and retry.',
         });
       }
       if (head.size === 0) {
@@ -798,11 +798,7 @@ function toResponse(
   };
 }
 
-/**
- * Loads live counters from Redis for an in-flight upload.
- *
- * Returns ZERO_COUNTS when the keys are missing.
- */
+/** Deletes a rejected stored file; a failed delete is logged and never changes the response. */
 async function deleteRejectedUpload(ref: ObjectRef, log: FastifyBaseLogger): Promise<void> {
   const deleted = await getObjectStorage().delete(ref);
   if (deleted.success) return;
@@ -814,6 +810,11 @@ async function deleteRejectedUpload(ref: ObjectRef, log: FastifyBaseLogger): Pro
   });
 }
 
+/**
+ * Loads live counters from Redis for an in-flight upload.
+ *
+ * Returns ZERO_COUNTS when the keys are missing.
+ */
 async function loadCountsFromRedis(uploadId: string): Promise<UploadCounts> {
   try {
     const redis = getRedis();
