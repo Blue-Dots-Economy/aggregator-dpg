@@ -24,12 +24,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
 import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
-import {
-  fromStoredKey,
-  getObjectStorage,
-  toStoredKey,
-  type ObjectRef,
-} from '@aggregator-dpg/object-storage';
+import { buildKey, getObjectStorage } from '@aggregator-dpg/object-storage';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { checkBulkTemplateRate, checkBulkUploadRate } from '../services/bulk-upload-rate.js';
@@ -45,7 +40,7 @@ import { getDb } from '../db/client.js';
 import { onboarding } from '../db/schema.js';
 import { getRedis } from '../services/redis/index.js';
 import { callerFromAuth, recordRouteCaller } from '../services/authz/index.js';
-import { errorMessage } from '@aggregator-dpg/shared-primitives/errors';
+import { errorMessage, ValidationError } from '@aggregator-dpg/shared-primitives/errors';
 import { requireServedDomain } from './served-domains-shared.js';
 
 /**
@@ -360,13 +355,9 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
       }
 
       const uploadId = created.value.id;
-      const ref: ObjectRef = {
-        area: 'bulk-uploads',
-        key: `${auth.aggregatorId}/${uploadId}/raw.csv`,
-      };
-      const storedKey = toStoredKey(ref);
+      const storedKey = buildKey('bulk-uploads', auth.aggregatorId, uploadId, 'raw.csv');
       const signed = await getObjectStorage().createUpload({
-        ref,
+        ref: { area: 'bulk-uploads', key: storedKey },
         contentType: 'text/csv',
         maxBytes: config.BULK_UPLOAD_MAX_BYTES,
         expiresInSeconds: config.BULK_UPLOAD_URL_TTL_SECONDS,
@@ -471,10 +462,14 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         });
       }
 
-      const parsedRef = fromStoredKey('bulk-uploads', upload.storageKey);
-      const statResult = parsedRef.success ? await getObjectStorage().stat(parsedRef.value) : null;
-      if (statResult && !statResult.success) throw statResult.error;
-      const head = statResult?.value ?? null;
+      const statResult = await getObjectStorage().stat({
+        area: 'bulk-uploads',
+        key: upload.storageKey,
+      });
+      if (!statResult.success && !(statResult.error instanceof ValidationError)) {
+        throw statResult.error;
+      }
+      const head = statResult.success ? statResult.value : null;
       if (!head) {
         log.warn({
           status: 'failure',
@@ -687,8 +682,11 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         });
       }
       // Only sign keys that match the errors.csv layout, never an arbitrary object.
-      const expectedKey = `bulk-uploads/${upload.id}/errors.csv`;
-      if (upload.errorsCsvStorageKey !== expectedKey) {
+      const expectedKeys = [
+        `bulk-uploads/${upload.id}/errors.csv`,
+        buildKey('bulk-uploads', auth.aggregatorId, upload.id, 'errors.csv'),
+      ];
+      if (!expectedKeys.includes(upload.errorsCsvStorageKey)) {
         log.error({
           status: 'failure',
           reason: 'errors_csv_key_invalid',
@@ -698,7 +696,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
       }
 
       const signed = await getObjectStorage().createDownloadUrl({
-        ref: { area: 'bulk-uploads', key: `${upload.id}/errors.csv` },
+        ref: { area: 'bulk-uploads', key: upload.errorsCsvStorageKey },
         expiresInSeconds: config.BULK_UPLOAD_URL_TTL_SECONDS,
         filename: 'errors.csv',
         contentType: 'text/csv',

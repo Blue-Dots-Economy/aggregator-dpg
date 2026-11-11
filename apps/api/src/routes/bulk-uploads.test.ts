@@ -236,7 +236,10 @@ function buildUpload(overrides: Partial<BulkUpload> = {}): BulkUpload {
 }
 
 const AGG_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const UPLOAD_REF = { area: 'bulk-uploads', key: 'agg-a/upload-fixed/raw.csv' } as const;
+const UPLOAD_REF = {
+  area: 'bulk-uploads',
+  key: 'bulk-uploads/agg-a/upload-fixed/raw.csv',
+} as const;
 const AGG_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const AGG_BOTH = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const AGG_ALL = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
@@ -1257,6 +1260,45 @@ describe('bulk-uploads routes', () => {
         headers: AUTH('seeker-approved'),
       });
       expect(res.statusCode).toBe(404);
+    });
+
+    it('404 NOT_FOUND when the errors.csv key names another aggregator', async () => {
+      store.seed([
+        buildUpload({
+          id: 'upload-1',
+          aggregatorId: AGG_A,
+          status: 'completed',
+          errorsCsvStorageKey: `bulk-uploads/${AGG_B}/upload-1/errors.csv`,
+        }),
+      ]);
+      storage.failNext('createDownloadUrl', new UpstreamError('must not be called'));
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/upload-1/errors.csv',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('200s and signs the owner-first errors.csv key as stored', async () => {
+      const key = `bulk-uploads/${AGG_A}/upload-1/errors.csv`;
+      store.seed([
+        buildUpload({
+          id: 'upload-1',
+          aggregatorId: AGG_A,
+          status: 'completed',
+          errorsCsvStorageKey: key,
+        }),
+      ]);
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/upload-1/errors.csv',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { url: string; s3_key: string };
+      expect(body.url).toBe(`fake://${key}?filename=errors.csv`);
+      expect(body.s3_key).toBe(key);
     });
 
     it('500 INTERNAL when signing the download URL fails', async () => {
