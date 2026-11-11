@@ -639,7 +639,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         params: BulkUploadParamsSchema,
         response: {
           200: ErrorsCsvResponseSchema,
-          ...errorResponses(400, 401, 403, 404, 410, 503),
+          ...errorResponses(400, 401, 403, 404, 410, 500, 503),
         },
       },
     },
@@ -697,12 +697,8 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
       }
 
-      const errorsRef = fromStoredKey('bulk-uploads', upload.errorsCsvStorageKey);
-      if (!errorsRef.success) {
-        throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
-      }
       const signed = await getObjectStorage().createDownloadUrl({
-        ref: errorsRef.value,
+        ref: { area: 'bulk-uploads', key: `${upload.id}/errors.csv` },
         expiresInSeconds: config.BULK_UPLOAD_URL_TTL_SECONDS,
         filename: 'errors.csv',
         contentType: 'text/csv',

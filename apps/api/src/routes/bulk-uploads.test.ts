@@ -708,6 +708,20 @@ describe('bulk-uploads routes', () => {
       expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
     });
 
+    it('500 INTERNAL and the row stays pending when signing the upload fails', async () => {
+      storage.failNext('createUpload', new UpstreamError('storage down'));
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/bulk-uploads',
+        headers: AUTH('seeker-approved'),
+        payload: { participant_type: 'seeker' },
+      });
+      expect(res.statusCode).toBe(500);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('INTERNAL');
+      expect(store.get('upload-1')?.status).toBe('pending');
+      expect(dbUpdateSpy).not.toHaveBeenCalled();
+    });
+
     it('201s with upload instructions on success', async () => {
       const res = await app.inject({
         method: 'POST',
@@ -1243,6 +1257,25 @@ describe('bulk-uploads routes', () => {
         headers: AUTH('seeker-approved'),
       });
       expect(res.statusCode).toBe(404);
+    });
+
+    it('500 INTERNAL when signing the download URL fails', async () => {
+      store.seed([
+        buildUpload({
+          id: 'upload-1',
+          aggregatorId: AGG_A,
+          status: 'completed',
+          errorsCsvStorageKey: 'bulk-uploads/upload-1/errors.csv',
+        }),
+      ]);
+      storage.failNext('createDownloadUrl', new UpstreamError('storage down'));
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/upload-1/errors.csv',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(500);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('INTERNAL');
     });
 
     it('200s with a signed download URL + final counts on success', async () => {

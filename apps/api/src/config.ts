@@ -116,9 +116,9 @@ const ConfigSchema = z.object({
   ...storageConfigFields,
   /** Redis connection URL used by BullMQ queues. */
   REDIS_URL: z.string().default('redis://localhost:6379'),
-  /** Pre-signed PUT URL TTL for bulk uploads (seconds). */
+  /** Signed upload URL TTL for bulk uploads (seconds). */
   BULK_UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
-  /** Maximum CSV file size for the pre-signed PUT (bytes). */
+  /** Maximum CSV file size for the signed upload (bytes). */
   BULK_UPLOAD_MAX_BYTES: z.coerce
     .number()
     .int()
