@@ -149,7 +149,7 @@ existing object moves:
 
 | Area           | Prefix              | Retention                                         | Visibility |
 | -------------- | ------------------- | ------------------------------------------------- | ---------- |
-| `bulk-uploads` | `bulk-uploads/`     | Configurable; default to be confirmed (section 7) | private    |
+| `bulk-uploads` | `bulk-uploads/`     | Configurable; default 30 days (section 7)         | private    |
 | `exports`      | `campaign-exports/` | `global.campaignExportExpiryDays` (default 1 day) | private    |
 
 Further areas (`profile-files`, recordings, …) are added when those features
@@ -401,7 +401,7 @@ Decision:
 - **Retention for `bulk-uploads/`.** A lifecycle rule deletes objects under
   `bulk-uploads/` after a configurable number of days (a
   `global.bulkUploadRetentionDays`-style value in bluedots-automation, next to
-  `campaignExportExpiryDays`). The default is to be confirmed. It applies to
+  `campaignExportExpiryDays`). The default is 30 days. It applies to
   every instance, including on-prem MinIO.
 - **Expired errors CSV.** Once retention has removed an upload's errors CSV,
   the errors download answers a clear not-found instead of handing out a
