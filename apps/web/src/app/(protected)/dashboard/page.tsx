@@ -266,8 +266,8 @@ function SummaryBar({
       </span>
       <div className="ml-auto flex items-center gap-2">
         {refreshError ? (
-          <span className="max-w-[220px] truncate text-xs text-red-600" title={refreshError}>
-            {t('state.refreshFailed')}
+          <span role="alert" className="max-w-[320px] text-right text-xs text-red-600">
+            {refreshError}
           </span>
         ) : lastRefreshedAt !== null && Date.now() - lastRefreshedAt < 5000 ? (
           <span className="text-xs text-ink-400">{t('state.refreshedJustNow')}</span>

@@ -33,6 +33,7 @@ import { ThemeModeProvider } from '@/lib/theme-mode';
 import { AuthProvider } from '@/lib/auth-context';
 import messages from '@/i18n/messages/en.json';
 import { ResponseShapeError } from '@/lib/response-shape-error';
+import { HttpError } from '@/services/http';
 import { chooseOption } from '@/__tests__/test-utils';
 
 // ---------------------------------------------------------------------------
@@ -801,7 +802,15 @@ describe('<DashboardPageRoot />', () => {
       renderPage();
       const refreshBtn = screen.getByRole('button', { name: /Refresh dashboard/i });
       await userEvent.click(refreshBtn);
-      expect(await screen.findByText('Refresh failed')).toBeInTheDocument();
+      expect(await screen.findByRole('alert')).toHaveTextContent('Refresh failed');
+      expect(screen.queryByText(/upstream timeout/)).not.toBeInTheDocument();
+    });
+
+    it('shows the profile type text when the refresh is refused for an unserved type', async () => {
+      mockDashboardServiceDashboard.mockRejectedValueOnce(new HttpError(403, 'DOMAIN_NOT_SERVED'));
+      renderPage();
+      await userEvent.click(screen.getByRole('button', { name: /Refresh dashboard/i }));
+      expect(await screen.findByRole('alert')).toHaveTextContent(messages.access.domain_not_served);
     });
 
     it('keeps the raw text of an unreadable refresh reply out of the banner', async () => {
@@ -811,8 +820,9 @@ describe('<DashboardPageRoot />', () => {
       );
       renderPage();
       await userEvent.click(screen.getByRole('button', { name: /Refresh dashboard/i }));
-      const hint = await screen.findByText('Refresh failed');
-      expect(hint).toHaveAttribute('title', messages.dashboard.state.refreshUnreadable);
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        messages.dashboard.state.refreshUnreadable,
+      );
     });
   });
 
