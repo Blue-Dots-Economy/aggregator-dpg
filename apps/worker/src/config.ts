@@ -94,7 +94,7 @@ const ConfigSchema = z.object({
   // ─── Campaign PII export ────────────────────────────────────────────────
   /**
    * TTL (seconds) of the export download link. Default 1 day.
-   * Keep in step with the S3 lifecycle rule that deletes the file
+   * Keep in step with the storage lifecycle rule that deletes the file
    * (bluedots-automation `global.campaignExportExpiryDays`).
    */
   EXPORT_URL_TTL_SECONDS: z.coerce.number().int().positive().default(86400),

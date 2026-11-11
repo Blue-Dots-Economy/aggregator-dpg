@@ -3,7 +3,7 @@
  *
  * Steps:
  *   1. Load the JSON Schema for the upload.
- *   2. Stream-parse the S3 object (UTF-8, header check, per-row limits).
+ *   2. Stream-parse the stored object (UTF-8, header check, per-row limits).
  *   3. Set status to `row_processing`, save headers and row cells for the
  *      finaliser, and enqueue one job per row.
  *   4. Publish total_rows and reader_done only after every row job is enqueued.

@@ -2,12 +2,12 @@
  * Bulk finaliser: writes the run summary for a bulk upload in the worker app.
  *
  * Steps:
- *   1. Read row errors from `bu:{id}:errors` and write errors.csv to S3
+ *   1. Read row errors from `bu:{id}:errors` and write errors.csv to object storage
  *      (original header columns + error_category + error_reason).
  *   2. Mark the upload completed and insert the onboarding rollup row.
  *   3. Delete the `bu:{id}:*` Redis keys after the DB writes succeed.
  *
- * Idempotent: the jobId `${uploadId}__finalise` dedups triggers, the S3 key is
+ * Idempotent: the jobId `${uploadId}__finalise` dedups triggers, the storage key is
  * fixed, and the onboarding insert is skipped if the row already exists.
  */
 

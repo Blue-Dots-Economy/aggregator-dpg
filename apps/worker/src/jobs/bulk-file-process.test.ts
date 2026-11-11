@@ -271,7 +271,11 @@ describe('processBulkFile — idempotency + failure', () => {
   });
 
   it('fails with system_error and logs storage.get when the object is missing', async () => {
-    await processBulkFile({ ...JOB, s3Key: 'bulk-uploads/up-1/absent.csv' });
+    const res = await processBulkFile({ ...JOB, s3Key: 'bulk-uploads/up-1/absent.csv' });
+    expect(res).toEqual({ status: 'failed', reason: 'system_error' });
+    expect(
+      updates.some((u) => u['status'] === 'file_failed' && u['statusReason'] === 'system_error'),
+    ).toBe(true);
     expect(logError).toHaveBeenCalledWith(expect.objectContaining({ sub: 'storage.get' }));
     expect(enqueueRowProcessBulk).not.toHaveBeenCalled();
   });

@@ -110,6 +110,7 @@ function makeRedis() {
 vi.mock('../services/redis.js', () => ({ getRedis: () => makeRedis() }));
 
 const fake = new FakeObjectStorage();
+const putSpy = vi.spyOn(fake, 'put');
 const ERRORS_REF = { area: 'bulk-uploads', key: 'up-1/errors.csv' } as const;
 
 function errorsCsv(): string {
@@ -227,6 +228,9 @@ describe('finaliseBulk — normal completion', () => {
     const res = await finaliseBulk(JOB);
 
     expect(res).toEqual({ status: 'completed', total: 2, passed: 1, failed: 1, skipped: 0 });
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ ref: ERRORS_REF, contentType: 'text/csv' }),
+    );
     const csv = errorsCsv();
     expect(csv).toContain('name');
     expect(csv).toContain('email');

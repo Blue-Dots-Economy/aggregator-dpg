@@ -45,12 +45,14 @@ describe('processCampaignJob', () => {
 
   it('writes the export under campaign-exports and signs a download link', async () => {
     const exp = await exportCollaborators();
+    const putSpy = vi.spyOn(fake, 'put');
     await exp.putObject('campaign-exports/org-1/job-1.csv', Buffer.from('a,b'), 'text/csv');
+    expect(putSpy).toHaveBeenCalledWith(expect.objectContaining({ contentType: 'text/csv' }));
     expect(fake.read({ area: 'exports', key: 'org-1/job-1.csv' })?.toString('utf8')).toBe('a,b');
     const signed = await exp.signDownloadUrl('campaign-exports/org-1/job-1.csv');
     expect(signed.url).toContain('campaign-exports/org-1/job-1.csv');
     expect(signed.url).toContain('participant-export.csv');
-    expect(Date.parse(signed.expiresAt)).toBeGreaterThan(Date.now());
+    expect(Math.abs(Date.parse(signed.expiresAt) - (Date.now() + 900_000))).toBeLessThan(5_000);
   });
 
   it('throws when the export write or signing fails so the job retries', async () => {

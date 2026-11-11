@@ -1,7 +1,7 @@
 /**
  * `campaign-process` job processor in `@aggregator-dpg/worker`.
  *
- * Builds the real collaborators (job DB client, Signals, S3, mailer, voice
+ * Builds the real collaborators (job DB client, Signals, object storage, mailer, voice
  * provider) and calls `runCampaignJob`. Throws if Signals is not configured.
  */
 import type { CampaignProcessJob } from '@aggregator-dpg/queue';
