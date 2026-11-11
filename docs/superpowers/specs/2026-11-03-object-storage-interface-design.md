@@ -92,7 +92,8 @@ indefinitely. Section 8 covers this.
 **Anti-goals** (this would be a failure even if it technically works)
 
 - Any behaviour change for existing S3/MinIO deployments other than the
-  oversized-upload fix and the retention: same env vars, same object keys,
+  oversized-upload fix, the retention and the owner-first key of new errors
+  reports: same env vars, same object keys,
   same download URLs, same stored values.
 - The contract leaking S3 concepts (bucket, ETag quoting, path style,
   `Command` objects, POST policies) to callers.
@@ -154,10 +155,27 @@ existing object moves:
 Further areas (`profile-files`, recordings, …) are added when those features
 are built, the same way.
 
-Callers name the area on every operation, and the provider keeps the object
-inside the area's prefix. Feature code no longer chooses the top-level folder.
+Only `private` exists. A `public` area would need its own bucket and an
+operation that returns a public URL; both are added when profile files need
+them. All areas share `S3_BUCKET`. A bucket per area is not needed now; it can
+be added later as an optional per-area setting that defaults to `S3_BUCKET`.
+
+Callers name the area on every operation and pass the full object key, the
+same value the database stores (for example
+`bulk-uploads/<aggregatorId>/<uploadId>/raw.csv`). There is no conversion in
+either direction. The provider rejects a key that does not start with the
+area's prefix, or has nothing after it, with a `ValidationError`.
+
+New keys are built with `buildKey(area, ownerId, ...segments)`, which returns
+`<area prefix><ownerId>/<segments joined by '/'>`. The rule is that every key
+starts with its owner, so a later folder operation can reach one owner's
+files. The errors CSV layout without an owner
+(`bulk-uploads/<uploadId>/errors.csv`) is legacy: the api still serves it, and
+those files expire under retention.
+
+Feature code no longer chooses the top-level folder.
 `src/areas.ts` is the one declaration of area names, prefixes and
-visibility. Prefixes are not a setting, because changing one would orphan
+visibility, and of `buildKey`. Prefixes are not a setting, because changing one would orphan
 the objects already stored. The storage lifecycle rules in
 bluedots-automation use the same prefixes.
 
@@ -175,15 +193,15 @@ classes, not TS interfaces). Every method is abstract and returns
 Callers decide keys within an area, TTLs and size limits; the provider knows
 nothing about bulk uploads or campaigns.
 
-| Operation                                                                                                                             | Purpose                                                                                                                                                                                                                                                                                                                           | Used by                                                                         |
-| ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Create upload (area, key, content type, max bytes, expiry) → upload instructions `{ method, url, headers, formFields }` + expiry time | Lets a browser upload one object directly by following the instructions, without knowing the provider. A provider that can refuse an oversized file at upload does so (S3: POST policy with `content-length-range`; GCS likewise). One that cannot returns PUT instructions, and the caller's size check plus `delete` covers it. | bulk upload create                                                              |
-| Create download URL (area, key, expiry, download filename, content type) → URL, expiry time                                           | Lets a browser or email recipient download one object, served as an attachment with the given filename.                                                                                                                                                                                                                           | errors CSV, campaign export                                                     |
-| Stat (area, key) → `{ size, fingerprint }` or "not found"                                                                             | Confirms an upload landed, checks its size, captures a content fingerprint.                                                                                                                                                                                                                                                       | bulk upload `/start`                                                            |
-| Open read stream (area, key) → Node `Readable` or "not found"                                                                         | Streams an object without loading it into memory. The caller owns the stream.                                                                                                                                                                                                                                                     | bulk file process                                                               |
-| Put (area, key, `Buffer` or `Readable`, content type)                                                                                 | Writes an object. A stream is uploaded in parts, so memory stays bounded for any size.                                                                                                                                                                                                                                            | errors CSV, campaign export                                                     |
-| Delete (area, key)                                                                                                                    | Removes an object. Deleting an object that does not exist succeeds.                                                                                                                                                                                                                                                               | bulk upload `/start` (rejected files), later profile files and erasure requests |
-| Check health → ok or error                                                                                                            | Optional readiness check that the storage is reachable with the configured credentials.                                                                                                                                                                                                                                           | readiness probe, when wired                                                     |
+| Operation                                                                                                                             | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                         | Used by                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Create upload (area, key, content type, max bytes, expiry) → upload instructions `{ method, url, headers, formFields }` + expiry time | Lets a browser upload one object directly by following the instructions, without knowing the provider. A provider that can refuse an oversized file at upload does so (S3: POST policy with `content-length-range`; GCS likewise). One that cannot returns PUT instructions, and the caller's size check plus `delete` covers it. Max bytes is optional: without it the instructions are a plain signed PUT with no size limit. | bulk upload create                                                              |
+| Create download URL (area, key, expiry, download filename, content type) → URL, expiry time                                           | Lets a browser or email recipient download one object, served as an attachment with the given filename.                                                                                                                                                                                                                                                                                                                         | errors CSV, campaign export                                                     |
+| Stat (area, key) → `{ size, fingerprint }` or "not found"                                                                             | Confirms an upload landed, checks its size, captures a content fingerprint.                                                                                                                                                                                                                                                                                                                                                     | bulk upload `/start`                                                            |
+| Open read stream (area, key) → Node `Readable` or "not found"                                                                         | Streams an object without loading it into memory. The caller owns the stream.                                                                                                                                                                                                                                                                                                                                                   | bulk file process                                                               |
+| Put (area, key, `Buffer` or `Readable`, content type)                                                                                 | Writes an object. A stream is uploaded in parts, so memory stays bounded for any size.                                                                                                                                                                                                                                                                                                                                          | errors CSV, campaign export                                                     |
+| Delete (area, key)                                                                                                                    | Removes an object. Deleting an object that does not exist succeeds.                                                                                                                                                                                                                                                                                                                                                             | bulk upload `/start` (rejected files), later profile files and erasure requests |
+| Check health → ok or error                                                                                                            | Optional readiness check that the storage is reachable with the configured credentials.                                                                                                                                                                                                                                                                                                                                         | readiness probe, when wired                                                     |
 
 Notes on the contract:
 
@@ -212,6 +230,19 @@ Notes on the contract:
   exports and bulk uploads contain PII. On AWS the bucket's default encryption
   (`AES256`, bluedots-automation storage module) already covers it; every
   other deployment, including on-prem MinIO, must enable it.
+- **Keys**: every operation takes the full stored key and rejects one
+  outside the area's prefix (section 4.2).
+- **Write order**: a feature writes the file first, then the database row.
+  A crash in between leaves an orphan file, which retention removes. A row
+  that points at an expired or deleted file is handled by the reader: the
+  errors download answers "no longer available", and the raw CSV is read only
+  shortly after upload. A streamed put is not retried inside the call; the
+  job retries and builds the stream again.
+- **Large reads and writes run only in the worker**, never inside an api
+  request. The api only signs, stats and deletes.
+- **Folder operations** are not built. The contract leaves room for a paged
+  `list(area, prefix)` and a `deleteByPrefix(area, prefix)` for erasure and
+  clean-up; owner-first keys make one owner's files a single prefix.
 - **Not carried over**: the comment in today's api storage module saying the
   size is checked at `/complete`; the route is `/start`.
 
@@ -246,12 +277,13 @@ Notes on the contract:
 
 ### 4.5 What stays in the apps
 
-- **Keys within an area** are still built by the features, and the full
-  object keys stay exactly as today:
-  `bulk-uploads/<aggregatorId>/<uploadId>/raw.csv`,
-  `bulk-uploads/<uploadId>/errors.csv`,
-  `campaign-exports/<orgId>/<jobId>.csv`. Values already stored in
-  `bulk_uploads.s3_key` and `errors_csv_s3_key` keep working with no data
+- **Keys** are still chosen by the features, built with `buildKey`. The raw
+  CSV and export keys stay exactly as today:
+  `bulk-uploads/<aggregatorId>/<uploadId>/raw.csv` and
+  `campaign-exports/<orgId>/<jobId>.csv`. New errors reports are written to
+  `bulk-uploads/<aggregatorId>/<uploadId>/errors.csv`; the api accepts that
+  and the legacy `bulk-uploads/<uploadId>/errors.csv`. Values already stored
+  in `bulk_uploads.s3_key` and `errors_csv_s3_key` keep working with no data
   migration.
 - **TTLs and limits** stay in each app's config: `BULK_UPLOAD_URL_TTL_SECONDS`,
   `BULK_UPLOAD_MAX_BYTES` (api) and `EXPORT_URL_TTL_SECONDS` (worker). The api
@@ -259,10 +291,11 @@ Notes on the contract:
 - **The create response** of `POST /v1/bulk-uploads` gains one field,
   `upload` (`{ method, url, headers, form_fields }`), which the web app
   follows to upload the file. The existing fields stay. `upload_url` and
-  `content_type` are marked deprecated in `openapi.json`, because once S3
-  switches to POST (work item b) a bare PUT to `upload_url` no longer works;
-  they are removed later through the API deprecation cycle
-  (signals-dpg#839). Today only the web app uses them.
+  `content_type` are marked deprecated in `openapi.json` and are removed
+  later through the API deprecation cycle (signals-dpg#839). Until then
+  `upload_url` stays a working signed PUT URL, without the size limit, so a
+  client that still PUTs to it keeps working. Today only the web app uses
+  them.
 
 ### 4.6 How a new provider is written
 
@@ -301,7 +334,7 @@ for a provider that cannot refuse it, is reported by stat so the caller can
 delete it), stat and open read stream report "not found", put accepts a
 buffer and a stream, delete removes an object and succeeds when it is
 missing, download URLs serve the object with its filename, unknown areas are
-rejected, and objects stay inside their area's prefix.
+rejected, and a key outside its area's prefix is rejected.
 
 The in-memory fake and the S3 provider (run against MinIO) must both pass it,
 and so must every future provider. This is what lets the apps' tests trust
@@ -319,14 +352,14 @@ names.
 These are internal or plain text. Renaming them changes no stored data and
 no contract:
 
-| What                               | Today                                                                                                                                                             | After                                                                                                                                                                                                                                                                                                                   |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Upload error a coordinator can see | `S3 PUT failed (<status>): <body>` (`apps/web/src/services/onboarding.service.ts:263`, shown by `CSVUpload.tsx`)                                                  | Storage-neutral wording, e.g. `File upload failed (<status>)`                                                                                                                                                                                                                                                           |
-| API route descriptions             | "pre-signed S3 GET URL" and similar (`routes/bulk-uploads.ts`, regenerated into `openapi.json`)                                                                   | "pre-signed download URL" and similar. Descriptions only.                                                                                                                                                                                                                                                               |
-| Log fields and reasons             | `s3_key`, `s3_object_missing`, `sub: 's3.put'`                                                                                                                    | `storage_key`, `storage_object_missing`, `storage.put`                                                                                                                                                                                                                                                                  |
-| Code names                         | `s3Key`, `s3Etag`, `errorsCsvS3Key` in the bulk-uploads store, route and worker jobs                                                                              | `storageKey`, `contentFingerprint`, `errorsCsvStorageKey` in the bulk-uploads store and route. The Drizzle schema properties (`s3Key`, `s3Etag`, `errorsCsvS3Key`) are not renamed in this change: renaming them touches the api and the worker in one PR, which the repo's PR rules allow only with explicit approval. |
-| Dead code                          | `findByAggregatorAndEtag` and the `DUPLICATE_ETAG` error, unused since migration 0012 dropped the unique index they relied on (only a test stub calls the finder) | Deleted                                                                                                                                                                                                                                                                                                                 |
-| Docs                               | `docs/onboarding-design.md`, `docs/onboarding-implementation.md`                                                                                                  | Neutral wording                                                                                                                                                                                                                                                                                                         |
+| What                               | Today                                                                                                                                                             | After                                                                                                                                                                                                                                             |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Upload error a coordinator can see | `S3 PUT failed (<status>): <body>` (`apps/web/src/services/onboarding.service.ts:263`, shown by `CSVUpload.tsx`)                                                  | Storage-neutral wording, e.g. `File upload failed (<status>)`                                                                                                                                                                                     |
+| API route descriptions             | "pre-signed S3 GET URL" and similar (`routes/bulk-uploads.ts`, regenerated into `openapi.json`)                                                                   | "pre-signed download URL" and similar. Descriptions only.                                                                                                                                                                                         |
+| Log fields and reasons             | `s3_key`, `s3_object_missing`, `sub: 's3.put'`                                                                                                                    | `storage_key`, `storage_object_missing`, `storage.put`                                                                                                                                                                                            |
+| Code names                         | `s3Key`, `s3Etag`, `errorsCsvS3Key` in the bulk-uploads store, route and worker jobs                                                                              | `storageKey`, `contentFingerprint`, `errorsCsvStorageKey` in the bulk-uploads store and route. The Drizzle schema properties are renamed the same way in a separate PR across db-schema, api and worker (approved); the columns keep their names. |
+| Dead code                          | `findByAggregatorAndEtag` and the `DUPLICATE_ETAG` error, unused since migration 0012 dropped the unique index they relied on (only a test stub calls the finder) | Deleted                                                                                                                                                                                                                                           |
+| Docs                               | `docs/onboarding-design.md`, `docs/onboarding-implementation.md`                                                                                                  | Neutral wording                                                                                                                                                                                                                                   |
 
 No alert or dashboard in bluedots-automation (`helm/monitoring`) reads these
 log fields: the alerts and dashboards are metric-based, and Loki has no
@@ -372,6 +405,9 @@ Decision:
 - **Expired errors CSV.** Once retention has removed an upload's errors CSV,
   the errors download answers a clear not-found instead of handing out a
   link to a missing file.
+- **`upload_url` during deprecation.** The create response's `upload` carries
+  the size-limited POST. `upload_url` stays a working signed PUT URL with no
+  size limit until it is removed (section 4.5).
 
 ## 8. Work items, order and deployment
 
@@ -384,9 +420,9 @@ requires, merged bottom up:
 | #1057 | #1055 | packages | `packages/object-storage`: the contract, areas, config fields, S3 provider (`src/providers/s3/`), fake and shared test suite               |
 | #1058 | #1055 | api      | The api on the package; the `upload` field on the create response; neutral names in the bulk-uploads store; the unused ETag finder removed |
 | #1059 | #1055 | worker   | The worker on the package (CSV reads, errors CSV, campaign export)                                                                         |
-| web   | #1055 | web      | The web app following the upload instructions (PUT from S3, so no behaviour change yet); this design and the plans; onboarding docs        |
-| api   | #1056 | api      | S3 POST upload instructions with the size limit, delete on rejection at `/start`, the expired errors CSV answer                            |
-| web   | #1056 | web      | The browser size check and its message                                                                                                     |
+| #1060 | #1055 | web      | The web app following the upload instructions (PUT from S3, so no behaviour change yet); this design and the plans; onboarding docs        |
+| #1061 | #1056 | api      | S3 POST upload instructions with the size limit, delete on rejection at `/start`, the expired errors CSV answer                            |
+| #1062 | #1056 | web      | The browser size check and its message                                                                                                     |
 
 bluedots-automation#321 (item (c)) holds the lifecycle rule for
 `bulk-uploads/` with the configurable retention, `POST` in the bucket CORS
@@ -402,6 +438,10 @@ Order and deployment:
 - **(c)** is applied on each instance **before (b)** reaches it, because the
   browser's POST upload is blocked by CORS without it.
 - **(b)** follows (a) and (c). It has no migration and no new env setting.
+  On an instance, bluedots-automation#321 is applied first, then the web
+  from #1060, then #1061.
+- The Drizzle property rename (section 6.1) is code only: no migration and
+  no deployment step.
 
 ## 9. Testing expectations
 
@@ -421,9 +461,14 @@ Order and deployment:
 ## 10. Left to the builder
 
 - Exact method names and type names in the contract.
-- How a caller's key within an area maps to the full object key, as long as
-  the full keys and the values already stored in the database stay exactly as
-  today.
 - Whether the health check is wired into the api's readiness probe.
 - How the fake in `testing.ts` is shaped, as long as it passes the shared
   suite and both apps' tests can use it.
+
+## 11. Future work
+
+- Browser multipart upload for very large files.
+- Malware scanning before public profile uploads (signals-dpg#566).
+- The folder operations `list(area, prefix)` and `deleteByPrefix(area, prefix)`
+  (section 4.3).
+- A `public` area and a bucket per area (section 4.2).
