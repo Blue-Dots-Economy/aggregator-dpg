@@ -34,6 +34,8 @@ import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
 import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { _setObjectStorage } from '@aggregator-dpg/object-storage';
+import type { CreateUploadInput } from '@aggregator-dpg/object-storage/interface';
+import { err } from '@aggregator-dpg/shared-primitives/result';
 import { FakeObjectStorage } from '@aggregator-dpg/object-storage/testing';
 import { _setRedis } from '../services/redis/index.js';
 import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
@@ -714,6 +716,28 @@ describe('bulk-uploads routes', () => {
 
     it('500 INTERNAL and the row stays pending when signing the upload fails', async () => {
       storage.failNext('createUpload', new UpstreamError('storage down'));
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/bulk-uploads',
+        headers: AUTH('seeker-approved'),
+        payload: { participant_type: 'seeker' },
+      });
+      expect(res.statusCode).toBe(500);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('INTERNAL');
+      expect(store.get('upload-1')?.status).toBe('pending');
+      expect(dbUpdateSpy).not.toHaveBeenCalled();
+    });
+
+    it('500 INTERNAL and the row stays pending when signing the PUT upload_url fails', async () => {
+      class FailsSecondSign extends FakeObjectStorage {
+        private signs = 0;
+        override async createUpload(input: CreateUploadInput) {
+          this.signs += 1;
+          if (this.signs === 2) return err(new UpstreamError('storage down'));
+          return super.createUpload(input);
+        }
+      }
+      _setObjectStorage(new FailsSecondSign());
       const res = await app.inject({
         method: 'POST',
         url: '/v1/bulk-uploads',
