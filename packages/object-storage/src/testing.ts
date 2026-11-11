@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
-import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok, type Result } from '@aggregator-dpg/shared-primitives/result';
 import { toStoredKey } from './areas.js';
 import {
@@ -97,9 +97,13 @@ export class FakeObjectStorage extends ObjectStorageBase {
   async put(input: PutInput): Promise<Result<void, BaseError>> {
     const failure = this.takeFailure('put');
     if (failure) return err(failure);
-    const bytes = await collect(input.body);
-    this.objects.set(toStoredKey(input.ref), { bytes, contentType: input.contentType });
-    return ok(undefined);
+    try {
+      const bytes = await collect(input.body);
+      this.objects.set(toStoredKey(input.ref), { bytes, contentType: input.contentType });
+      return ok(undefined);
+    } catch (cause) {
+      return err(new UpstreamError('object storage put failed', { cause }));
+    }
   }
 
   async delete(ref: ObjectRef): Promise<Result<void, BaseError>> {

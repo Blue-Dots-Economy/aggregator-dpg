@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
-import { beforeEach, describe, expect, it } from 'vitest';
-import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { ObjectRef, ObjectStorageBase } from './interface.js';
 
@@ -29,10 +29,22 @@ export function runObjectStorageContract(name: string, make: () => Promise<Contr
     let storage: ObjectStorageBase;
     let seed: ContractHarness['seed'];
     let ref: ObjectRef;
+    let created: ObjectRef[];
+
+    function track(area: ObjectRef['area'], key: string): ObjectRef {
+      const tracked: ObjectRef = { area, key };
+      created.push(tracked);
+      return tracked;
+    }
 
     beforeEach(async () => {
       ({ storage, seed } = await make());
-      ref = { area: 'bulk-uploads', key: `contract/${randomUUID()}/raw.csv` };
+      created = [];
+      ref = track('bulk-uploads', `contract/${randomUUID()}/raw.csv`);
+    });
+
+    afterEach(async () => {
+      await Promise.all(created.map((tracked) => storage.delete(tracked)));
     });
 
     it('returns null when stat targets a missing object', async () => {
@@ -66,7 +78,7 @@ export function runObjectStorageContract(name: string, make: () => Promise<Contr
     });
 
     it('gives equal fingerprints for equal bytes and different ones otherwise', async () => {
-      const other: ObjectRef = { area: 'bulk-uploads', key: `contract/${randomUUID()}/other.csv` };
+      const other = track('bulk-uploads', `contract/${randomUUID()}/other.csv`);
       unwrap(await storage.put({ ref, body: Buffer.from('same'), contentType: 'text/csv' }));
       const first = unwrap(await storage.stat(ref));
       unwrap(await storage.put({ ref, body: Buffer.from('same'), contentType: 'text/csv' }));
@@ -77,6 +89,18 @@ export function runObjectStorageContract(name: string, make: () => Promise<Contr
       const third = unwrap(await storage.stat(other));
       expect(second?.fingerprint).toBe(first?.fingerprint);
       expect(third?.fingerprint).not.toBe(first?.fingerprint);
+    });
+
+    it('returns an upstream error and stores nothing when a streamed put fails midway', async () => {
+      const failing = Readable.from(
+        (async function* () {
+          yield Buffer.from('partial');
+          throw new Error('source broke');
+        })(),
+      );
+      const result = await storage.put({ ref, body: failing, contentType: 'text/csv' });
+      expect(!result.success && result.error).toBeInstanceOf(UpstreamError);
+      expect(unwrap(await storage.stat(ref))).toBeNull();
     });
 
     it('removes the object on delete', async () => {
@@ -119,7 +143,7 @@ export function runObjectStorageContract(name: string, make: () => Promise<Contr
     });
 
     it('keeps areas isolated for the same relative key', async () => {
-      const exportsRef: ObjectRef = { area: 'exports', key: ref.key };
+      const exportsRef = track('exports', ref.key);
       unwrap(
         await storage.put({ ref: exportsRef, body: Buffer.from('x'), contentType: 'text/csv' }),
       );

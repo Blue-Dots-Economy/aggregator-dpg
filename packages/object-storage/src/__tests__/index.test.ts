@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { ValidationError } from '@aggregator-dpg/shared-primitives/errors';
+import { ConfigError, ValidationError } from '@aggregator-dpg/shared-primitives/errors';
 import { fromStoredKey, toStoredKey } from '../areas.js';
 import { storageConfigFields } from '../config.js';
 import { runObjectStorageContract } from '../contract-suite.js';
 import { FakeObjectStorage } from '../testing.js';
+import { _setObjectStorage, getObjectStorage, initObjectStorage } from '../index.js';
 
 describe('areas', () => {
   it('maps bulk-uploads refs to the bulk-uploads prefix', () => {
@@ -91,5 +92,27 @@ describe('FakeObjectStorage', () => {
       headers: { 'Content-Type': 'text/csv' },
       formFields: {},
     });
+  });
+});
+
+describe('provider factory', () => {
+  const cfg = z.object(storageConfigFields).parse({});
+
+  beforeEach(() => _setObjectStorage(null));
+
+  it('throws ConfigError before initialisation', () => {
+    expect(() => getObjectStorage()).toThrow(ConfigError);
+  });
+
+  it('builds the provider once and returns the same instance', () => {
+    const first = initObjectStorage(cfg);
+    expect(initObjectStorage(cfg)).toBe(first);
+    expect(getObjectStorage()).toBe(first);
+  });
+
+  it('lets a test override the provider', () => {
+    const fake = new FakeObjectStorage();
+    _setObjectStorage(fake);
+    expect(getObjectStorage()).toBe(fake);
   });
 });
