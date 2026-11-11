@@ -14,7 +14,7 @@
 
 import type { Readable } from 'node:stream';
 import { eq } from 'drizzle-orm';
-import { fromStoredKey, getObjectStorage } from '@aggregator-dpg/object-storage';
+import { getObjectStorage } from '@aggregator-dpg/object-storage';
 import type { BulkFileProcessJob } from '@aggregator-dpg/queue';
 import { schema, getDb } from '../db.js';
 import { config } from '../config.js';
@@ -39,9 +39,7 @@ interface ProcessOutcome {
 }
 
 async function openCsvStream(storedKey: string): Promise<Readable> {
-  const ref = fromStoredKey('bulk-uploads', storedKey);
-  if (!ref.success) throw ref.error;
-  const opened = await getObjectStorage().openReadStream(ref.value);
+  const opened = await getObjectStorage().openReadStream({ area: 'bulk-uploads', key: storedKey });
   if (!opened.success) throw opened.error;
   if (!opened.value) throw new Error(`object not found for stored key: ${storedKey}`);
   return opened.value;

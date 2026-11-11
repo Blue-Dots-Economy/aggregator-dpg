@@ -14,7 +14,7 @@
 import { and, eq } from 'drizzle-orm';
 import Papa from 'papaparse';
 import { z } from 'zod';
-import { getObjectStorage, toStoredKey } from '@aggregator-dpg/object-storage';
+import { buildKey, getObjectStorage } from '@aggregator-dpg/object-storage';
 import { type BulkFinaliseJob, bulkRedisKeys } from '@aggregator-dpg/queue';
 import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 import { schema, getDb } from '../db.js';
@@ -121,11 +121,10 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
       ];
     });
     const csvBody = Papa.unparse({ fields: csvHeader, data: csvRows });
-    const errorsRef = { area: 'bulk-uploads', key: `${job.uploadId}/errors.csv` } as const;
-    errorsKey = toStoredKey(errorsRef);
+    errorsKey = buildKey('bulk-uploads', upload.userId, job.uploadId, 'errors.csv');
     try {
       const put = await getObjectStorage().put({
-        ref: errorsRef,
+        ref: { area: 'bulk-uploads', key: errorsKey },
         body: Buffer.from(csvBody, 'utf8'),
         contentType: 'text/csv',
       });

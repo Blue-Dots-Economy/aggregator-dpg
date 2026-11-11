@@ -111,7 +111,7 @@ vi.mock('../services/redis.js', () => ({ getRedis: () => makeRedis() }));
 
 const fake = new FakeObjectStorage();
 const putSpy = vi.spyOn(fake, 'put');
-const ERRORS_REF = { area: 'bulk-uploads', key: 'up-1/errors.csv' } as const;
+const ERRORS_REF = { area: 'bulk-uploads', key: 'bulk-uploads/agg-1/up-1/errors.csv' } as const;
 
 function errorsCsv(): string {
   return fake.read(ERRORS_REF)!.toString('utf8');
@@ -240,7 +240,7 @@ describe('finaliseBulk — normal completion', () => {
     expect(csv).toContain('bad email');
     expect(txUpdates[0]).toMatchObject({
       status: 'completed',
-      errorsCsvS3Key: 'bulk-uploads/up-1/errors.csv',
+      errorsCsvS3Key: 'bulk-uploads/agg-1/up-1/errors.csv',
     });
   });
 

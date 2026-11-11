@@ -48,7 +48,9 @@ describe('processCampaignJob', () => {
     const putSpy = vi.spyOn(fake, 'put');
     await exp.putObject('campaign-exports/org-1/job-1.csv', Buffer.from('a,b'), 'text/csv');
     expect(putSpy).toHaveBeenCalledWith(expect.objectContaining({ contentType: 'text/csv' }));
-    expect(fake.read({ area: 'exports', key: 'org-1/job-1.csv' })?.toString('utf8')).toBe('a,b');
+    expect(
+      fake.read({ area: 'exports', key: 'campaign-exports/org-1/job-1.csv' })?.toString('utf8'),
+    ).toBe('a,b');
     const signed = await exp.signDownloadUrl('campaign-exports/org-1/job-1.csv');
     expect(signed.url).toContain('campaign-exports/org-1/job-1.csv');
     expect(signed.url).toContain('participant-export.csv');
@@ -69,7 +71,7 @@ describe('processCampaignJob', () => {
 
   it('throws on an export key outside the exports area', async () => {
     const exp = await exportCollaborators();
-    await expect(exp.signDownloadUrl('other/x.csv')).rejects.toThrow('not a valid exports key');
+    await expect(exp.signDownloadUrl('other/x.csv')).rejects.toThrow('not inside the exports area');
   });
 
   it('throws when the signalstack client is not configured', async () => {

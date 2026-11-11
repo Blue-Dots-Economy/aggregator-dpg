@@ -91,7 +91,10 @@ const JOB = {
 const fake = new FakeObjectStorage();
 
 function seedCsv(content: string): void {
-  fake.seed({ area: 'bulk-uploads', key: 'up-1/source.csv' }, Buffer.from(content, 'utf8'));
+  fake.seed(
+    { area: 'bulk-uploads', key: 'bulk-uploads/up-1/source.csv' },
+    Buffer.from(content, 'utf8'),
+  );
 }
 
 beforeEach(() => {

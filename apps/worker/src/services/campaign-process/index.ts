@@ -23,7 +23,7 @@ import type {
 } from '@aggregator-dpg/signalstack-writer/interface';
 import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/interface';
 import { buildContactExportCsv, buildDecryptedProfilesCsv } from '@aggregator-dpg/profile-csv';
-import type { DownloadUrl } from '@aggregator-dpg/object-storage';
+import { buildKey, type DownloadUrl } from '@aggregator-dpg/object-storage';
 import { TERMINAL_JOB_STATUSES, toAuditCounts } from '../campaign-job-client.js';
 import type {
   CampaignJobItemStatus,
@@ -144,7 +144,7 @@ export function resolveExportRecipient(
  * @returns The object key, e.g. `campaign-exports/org-1/job-1.csv`.
  */
 export function exportObjectKey(orgId: string, jobId: string): string {
-  return `campaign-exports/${orgId}/${jobId}.csv`;
+  return buildKey('exports', orgId, `${jobId}.csv`);
 }
 
 /**

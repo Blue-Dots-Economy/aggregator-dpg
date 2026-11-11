@@ -129,7 +129,7 @@ Per-row processing. Many jobs per upload, processed in parallel.
 
 Triggered once per upload via the dedicated `bulk-finalise` queue.
 
-1. `HSCAN bu:{id}:errors` (cursor-based, memory-bounded) → stream into `errors.csv` on S3 multipart upload. Key: `bulk-uploads/{upload_id}/errors.csv` (deterministic; replay overwrites identical bytes).
+1. `HSCAN bu:{id}:errors` (cursor-based, memory-bounded) → stream into `errors.csv` on S3 multipart upload. Key: `bulk-uploads/{aggregator_id}/{upload_id}/errors.csv` (deterministic; replay overwrites identical bytes).
 2. CSV format: original CSV header columns + `error_category` + `error_reason`.
 3. UPDATE `bulk_upload`: `status='completed'`, final counters from Redis `counters` HASH, `errors_csv_s3_key`, `completed_at`.
 4. INSERT `onboarding` summary row: `source='bulk', batch_id=upload_id, total/passed/failed/skipped`.

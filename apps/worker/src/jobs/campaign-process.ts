@@ -6,7 +6,7 @@
  */
 import type { CampaignProcessJob } from '@aggregator-dpg/queue';
 import { getMailer } from '@aggregator-dpg/mailer';
-import { fromStoredKey, getObjectStorage, type DownloadUrl } from '@aggregator-dpg/object-storage';
+import { getObjectStorage, type DownloadUrl, type ObjectRef } from '@aggregator-dpg/object-storage';
 import { logger } from '../logger.js';
 import { config } from '../config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
@@ -23,10 +23,8 @@ export interface CampaignAttempt {
   maxAttempts: number;
 }
 
-function exportRef(key: string) {
-  const ref = fromStoredKey('exports', key);
-  if (!ref.success) throw ref.error;
-  return ref.value;
+function exportRef(key: string): ObjectRef {
+  return { area: 'exports', key };
 }
 
 async function putExport(key: string, body: Buffer, contentType: string): Promise<void> {
