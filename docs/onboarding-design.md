@@ -96,7 +96,7 @@ CSV-driven, async, signed-URL upload, worker-fanout processing.
    │                │  uploads           │                   │                │
    │                │ ─────────────────► │ insert bulk_uploads                │
    │                │                    │ (status=pending)  │                │
-   │                │ ◄──signed PUT URL  │                   │                │
+   │                │ ◄──signed upload   │                   │                │
    │                │                                        │                │
    │                │ ──── PUT raw.csv ─────────────────────►│                │
    │                │ ◄────── 200 OK (ETag) ─────────────────│                │

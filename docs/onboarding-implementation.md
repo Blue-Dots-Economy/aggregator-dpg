@@ -409,7 +409,7 @@ All endpoints validate `req.auth.aggregator_id` matches the resource. Mismatch �
 
 ```
 Bulk:
-  POST   /v1/bulk-uploads                       → pre-signed PUT URL
+  POST   /v1/bulk-uploads                       → signed upload instructions
   POST   /v1/bulk-uploads/:id/start             → confirms ETag, enqueues
   GET    /v1/bulk-uploads/:id                   → DB read only
   GET    /v1/bulk-uploads/:id/errors.csv        → pre-signed download (410 if not completed)

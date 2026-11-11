@@ -333,13 +333,7 @@ export const onboardingService = {
   },
 };
 
-/**
- * Sends the file as the api's upload instructions say, or to `upload_url` on older api builds.
- *
- * @param file - The CSV file.
- * @param created - The reservation returned by the api.
- * @throws {Error} If storage answers with a non-2xx status.
- */
+/** Sends the file as the api's upload instructions say, or to `upload_url` on older api builds. */
 async function uploadFile(file: File, created: BulkUploadCreateResponse): Promise<void> {
   const { upload } = created;
   let res: Response;
