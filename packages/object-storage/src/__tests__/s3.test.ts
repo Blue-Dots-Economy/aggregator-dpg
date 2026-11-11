@@ -169,6 +169,23 @@ describe('S3ObjectStorage', () => {
       expect(opts.abortSignal).toBeInstanceOf(AbortSignal);
     });
 
+    it('aborts a buffered put after the configured write timeout', async () => {
+      h.sendImpl.mockResolvedValue({});
+      await build({ STORAGE_WRITE_TIMEOUT_MS: '1' }).put({
+        ref,
+        body: Buffer.from('x'),
+        contentType: 'text/csv',
+      });
+      const signal: AbortSignal = h.sendImpl.mock.calls[0]?.[1].abortSignal;
+      await vi.waitFor(() => expect(signal.aborted).toBe(true));
+    });
+
+    it('returns an UpstreamError when a buffered put fails', async () => {
+      h.sendImpl.mockRejectedValue(named('TimeoutError'));
+      const result = await build().put({ ref, body: Buffer.from('x'), contentType: 'text/csv' });
+      expect(!result.success && result.error).toBeInstanceOf(UpstreamError);
+    });
+
     it('returns an UpstreamError when the streamed source errors', async () => {
       const body = new Readable({ read() {} });
       const pending = build().put({ ref, body, contentType: 'text/csv' });
@@ -191,6 +208,77 @@ describe('S3ObjectStorage', () => {
     h.sendImpl.mockRejectedValue(named('NoSuchKey'));
     const result = await build().openReadStream(ref);
     expect(result.success && result.value).toBeNull();
+  });
+
+  it('returns null from stat when the object has no ETag', async () => {
+    h.sendImpl.mockResolvedValue({ ContentLength: 3 });
+    const result = await build().stat(ref);
+    expect(result.success && result.value).toBeNull();
+  });
+
+  it('reports size 0 from stat when ContentLength is missing', async () => {
+    h.sendImpl.mockResolvedValue({ ETag: '"abc"' });
+    const result = await build().stat(ref);
+    expect(result.success && result.value).toEqual({ size: 0, fingerprint: 'abc' });
+  });
+
+  it('returns the body stream from openReadStream', async () => {
+    const body = Readable.from(['x']);
+    h.sendImpl.mockResolvedValue({ Body: body });
+    const result = await build().openReadStream(ref);
+    expect(result.success && result.value).toBe(body);
+  });
+
+  it('returns an UpstreamError when the object body is missing', async () => {
+    h.sendImpl.mockResolvedValue({});
+    const result = await build().openReadStream(ref);
+    expect(!result.success && result.error).toBeInstanceOf(UpstreamError);
+  });
+
+  it('returns an UpstreamError when the object body is not a Node stream', async () => {
+    h.sendImpl.mockResolvedValue({ Body: 'text' });
+    const result = await build().openReadStream(ref);
+    expect(!result.success && result.error).toBeInstanceOf(UpstreamError);
+  });
+
+  it('returns an UpstreamError for other openReadStream failures', async () => {
+    h.sendImpl.mockRejectedValue(named('AccessDenied'));
+    const result = await build().openReadStream(ref);
+    expect(!result.success && result.error).toBeInstanceOf(UpstreamError);
+  });
+
+  it('returns an UpstreamError when signing an upload fails', async () => {
+    vi.mocked(getSignedUrl).mockRejectedValueOnce(new Error('sign failed'));
+    const result = await build().createUpload({
+      ref,
+      contentType: 'text/csv',
+      maxBytes: 5,
+      expiresInSeconds: 300,
+    });
+    expect(!result.success && result.error).toBeInstanceOf(UpstreamError);
+  });
+
+  it('returns an UpstreamError when signing a download fails', async () => {
+    vi.mocked(getSignedUrl).mockRejectedValueOnce(new Error('sign failed'));
+    const result = await build().createDownloadUrl({
+      ref,
+      expiresInSeconds: 60,
+      filename: 'errors.csv',
+      contentType: 'text/csv',
+    });
+    expect(!result.success && result.error).toBeInstanceOf(UpstreamError);
+  });
+
+  it('returns an UpstreamError when delete fails', async () => {
+    h.sendImpl.mockRejectedValue(named('AccessDenied'));
+    const result = await build().delete(ref);
+    expect(!result.success && result.error).toBeInstanceOf(UpstreamError);
+  });
+
+  it('returns an UpstreamError when the health check fails', async () => {
+    h.sendImpl.mockRejectedValue(named('NoSuchBucket'));
+    const result = await build().checkHealth();
+    expect(!result.success && result.error).toBeInstanceOf(UpstreamError);
   });
 
   it('checks health with HeadBucket', async () => {

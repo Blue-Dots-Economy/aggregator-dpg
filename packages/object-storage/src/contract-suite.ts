@@ -93,7 +93,7 @@ export function runObjectStorageContract(name: string, make: () => Promise<Contr
 
     it('returns an upstream error and stores nothing when a streamed put fails midway', async () => {
       const failing = Readable.from(
-        (async function* () {
+        (function* () {
           yield Buffer.from('partial');
           throw new Error('source broke');
         })(),
