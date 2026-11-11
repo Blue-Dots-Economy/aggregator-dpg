@@ -1,7 +1,7 @@
 # Object storage behind an interface — design
 
 Issue: Blue-Dots-Economy/aggregator-dpg#933
-Status: reviewed (aggregator-dpg#933 review comment, 2026-11-09); decisions recorded below
+Status: reviewed (aggregator-dpg#933 review comment, 2026-11-09) and agreed; ready for implementation
 Branch: `refactor/933-object-storage-interface` (cut from `origin/feature`)
 
 ## 1. Why
@@ -10,14 +10,13 @@ The aggregator can only store files in Amazon S3 or an S3-compatible store
 such as MinIO. The AWS SDK is called directly from two places, so an adopter
 whose cloud is not S3-like cannot run the aggregator without changing code.
 
-This change defines one object-storage contract for the Blue Dots
-organisation and implements it in this repo, with S3 as the first and, for
-now, only provider. Adding another provider later means writing one new
+This change puts object storage behind one interface in this repo, with S3
+as the first and, for now, only provider. Adding another provider later means writing one new
 provider and changing a config value, with no change to the features that
 store files.
 
-The contract is cut for more than today's three uses. Known and upcoming
-uses it must fit:
+The interface is cut for more than today's three uses. Known and upcoming
+uses it must not rule out:
 - signals-dpg#566: file fields on profiles (uploads by public users,
   visibility, PII, deletion).
 - aggregator-dpg#833 / #407: large exports sent by email (10k–50k rows).
@@ -63,28 +62,29 @@ indefinitely. Section 8 covers this.
 ## 3. Goals, non-goals, anti-goals
 
 **Goals**
-- One language-neutral object-storage contract for the organisation, written
-  down in bluedots-docs (section 4).
-- One TypeScript implementation of it in this repo, shared by the api and
-  the worker, with S3 as a provider behind it.
+- One object-storage interface in this repo, shared by the api and the
+  worker, with S3 as a provider behind it.
 - A `STORAGE_PROVIDER` setting chooses the provider. Switching to another
   provider, once one exists, is a config change only.
 - The features depend only on the contract, never on a storage SDK.
 - Oversized bulk uploads are refused at upload time, and every file the api
-  rejects is deleted (section 8).
-- `bulk-uploads/` files expire after a configurable retention (section 8).
+  rejects is deleted (section 7).
+- `bulk-uploads/` files expire after a configurable retention (section 7).
 - Writing a new provider is obvious from the code, and every provider is
   held to the same behaviour by one shared test suite.
 
 **Non-goals**
 - Shipping any provider other than S3.
-- Building a provider that serves files through the api (section 5.6 keeps
+- Building a provider that serves files through the api (section 4.6 keeps
   room for it).
 - Areas other than the two used today; public visibility.
-- Changing the Python storage layer in ai-diffusion-dpg (it is aligned with
-  the contract when it is next changed).
+- An organisation-wide contract document (for example in bluedots-docs), or
+  changing the Python storage layer in ai-diffusion-dpg.
 - Publishing the package to npm or moving it to its own repo.
-- Renaming the `s3` database columns, queue field or API fields (section 7.2).
+- Loading providers at runtime as separate plugins, so that an image carries
+  only the provider its deployment uses. Discussed and not needed now; with
+  S3 as the only provider there is no unused provider code.
+- Renaming the `s3` database columns, queue field or API fields (section 6.2).
 
 **Anti-goals** (this would be a failure even if it technically works)
 - Any behaviour change for existing S3/MinIO deployments other than the
@@ -93,28 +93,11 @@ indefinitely. Section 8 covers this.
 - The contract leaking S3 concepts (bucket, ETag quoting, path style,
   `Command` objects, POST policies) to callers.
 - Two copies of the storage code surviving the change.
-- Feature code and infrastructure each holding their own copy of an area's
-  prefix with nothing tying them together.
+- Feature code choosing top-level folders itself instead of naming an area.
 
-## 4. Where the contract lives
+## 4. Design
 
-- **The contract**: a language-neutral page in bluedots-docs. It states the
-  operations and what each one means, the error cases, the areas (section
-  5.2), how provider settings are named, and what every provider and
-  deployment must handle outside the code: CORS, lifecycle (retention) and
-  encryption at rest. TypeScript and Python both implement against it. It is
-  written as part of work item (a) and kept in step with the code.
-- **The TypeScript code**: `packages/object-storage` in this repo, built to be
-  extracted: it depends on no workspace package except
-  `@aggregator-dpg/shared-primitives`. It moves to its own repo or published
-  package only when a second TypeScript repo (Signals, for #566) adopts it. No
-  Blue Dots repo publishes shared npm packages today.
-- **Python**: ai-diffusion-dpg's `knowledge_engine` storage layer is brought in
-  line with the contract when #67 or the next storage change lands.
-
-## 5. Design
-
-### 5.1 A shared package: `@aggregator-dpg/object-storage`
+### 4.1 A shared package: `@aggregator-dpg/object-storage`
 
 A new workspace package under `packages/object-storage`, scaffolded from
 `packages/_template` and used by both `apps/api` and `apps/worker`. Its shape
@@ -128,11 +111,11 @@ fails at startup, not on first use.
 | File | Subpath export | Purpose |
 |---|---|---|
 | `src/interface.ts` | `./interface` | `ObjectStorageBase` abstract class, input/output types |
-| `src/areas.ts` | `./areas` | The area definitions (section 5.2) |
+| `src/areas.ts` | `./areas` | The area definitions (section 4.2) |
 | `src/config.ts` | `./config` | Storage config field-set (`STORAGE_PROVIDER` + each provider's settings), spread into both apps' config schemas |
 | `src/s3.ts` | none | `S3ObjectStorage extends ObjectStorageBase`; all `@aws-sdk/*` imports live here only |
 | `src/index.ts` | `.` | `getObjectStorage()` factory: provider choice, process-wide singleton, test override |
-| `src/testing.ts` | `./testing` | In-memory fake extending `ObjectStorageBase`, and the shared provider test suite (section 6) |
+| `src/testing.ts` | `./testing` | In-memory fake extending `ObjectStorageBase`, and the shared provider test suite (section 5) |
 
 Provider files are not exported, so apps cannot import a provider directly:
 they reach a provider only through `getObjectStorage()`. The package's
@@ -140,10 +123,12 @@ they reach a provider only through `getObjectStorage()`. The package's
 does not need to change.
 
 The `@aws-sdk/*` dependencies move from `apps/api` and `apps/worker` into
-this package. The package does not depend on `@aggregator-dpg/observability`:
-it returns results, and the callers log, so it stays extractable.
+this package. Apart from them it depends only on
+`@aggregator-dpg/shared-primitives` (not on `@aggregator-dpg/observability`:
+it returns results and the callers log), so it can be moved out of this repo
+later without changes.
 
-### 5.2 Areas
+### 4.2 Areas
 
 Every object belongs to a named **area**. An area declares:
 
@@ -159,7 +144,7 @@ existing object moves:
 
 | Area | Prefix | Retention | Visibility |
 |---|---|---|---|
-| `bulk-uploads` | `bulk-uploads/` | Configurable; default to be confirmed (section 8) | private |
+| `bulk-uploads` | `bulk-uploads/` | Configurable; default to be confirmed (section 7) | private |
 | `exports` | `campaign-exports/` | `global.campaignExportExpiryDays` (default 1 day) | private |
 
 Further areas (`profile-files`, recordings, …) are added when those features
@@ -167,18 +152,18 @@ are built, the same way.
 
 Callers name the area on every operation, and the provider keeps the object
 inside the area's prefix. Feature code no longer chooses the top-level folder.
-The area list on the contract page is the one declaration of names, prefixes,
-retention settings and visibility. The package's `src/areas.ts` and the
-storage lifecycle rules in bluedots-automation both implement that list, and
-each points at the page.
+`src/areas.ts` is the one declaration of area names, prefixes and
+visibility. Prefixes are not a setting, because changing one would orphan
+the objects already stored. The storage lifecycle rules in
+bluedots-automation use the same prefixes.
 
 Retention is enforced by the storage itself (an S3 lifecycle rule per prefix),
 not by the app. The retention value is a deployment setting in bluedots-automation global values, which already drives
 both the export lifecycle rule and the worker's `EXPORT_URL_TTL_SECONDS`.
-`bulk-uploads` gets a matching setting (section 8). A later provider without
+`bulk-uploads` gets a matching setting (section 7). A later provider without
 lifecycle rules must provide its own expiry.
 
-### 5.3 The contract
+### 4.3 The contract
 
 `ObjectStorageBase` is an abstract class (repo rule: contracts are abstract
 classes, not TS interfaces). Every method is abstract and returns
@@ -204,7 +189,7 @@ Notes on the contract:
   upload row (`markUploaded` treats a repeat `/start` with the same value as
   a no-op), so values from different providers never meet.
 - **Upload instructions** may point at the storage or, for a future
-  api-served provider, at an api route (section 5.6). Callers never assume
+  api-served provider, at an api route (section 4.6). Callers never assume
   which.
 - **Two endpoints** stay a provider concern. The S3 provider keeps the
   internal client for server-side calls and the public presigner for URLs.
@@ -224,7 +209,7 @@ Notes on the contract:
 - **Not carried over**: the comment in today's api storage module saying the
   size is checked at `/complete`; the route is `/start`.
 
-### 5.4 Choosing the provider: `STORAGE_PROVIDER`
+### 4.4 Choosing the provider: `STORAGE_PROVIDER`
 
 - New optional setting `STORAGE_PROVIDER`, default `s3`, read by both the
   api and the worker.
@@ -242,8 +227,7 @@ Notes on the contract:
 - An unknown value fails at startup with a clear message, never at the first
   upload.
 - Each provider owns its settings, named with its own prefix (for example
-  `AZURE_STORAGE_*` for a future Azure provider). This naming rule is part of
-  the contract page.
+  `AZURE_STORAGE_*` for a future Azure provider).
 - **Required-ness depends on the selected provider.** In the schema every
   provider's settings are optional. A check on the whole config then
   requires the settings of the provider named in `STORAGE_PROVIDER` only, and
@@ -254,7 +238,7 @@ Notes on the contract:
   `S3_FORCE_PATH_STYLE` = `true`; `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT` and the
   two keys stay optional. No existing deployment gains a required setting.
 
-### 5.5 What stays in the apps
+### 4.5 What stays in the apps
 
 - **Keys within an area** are still built by the features, and the full
   object keys stay exactly as today:
@@ -274,7 +258,7 @@ Notes on the contract:
   they are removed later through the API deprecation cycle
   (signals-dpg#839). Today only the web app uses them.
 
-### 5.6 How a new provider is written
+### 4.6 How a new provider is written
 
 The recipe the code should make obvious (shown for a future Azure Blob
 provider; not part of this change):
@@ -288,12 +272,12 @@ provider; not part of this change):
 3. Add the provider's settings to `src/config.ts`, and one case to the
    factory in `src/index.ts` that fails fast at startup when a required
    setting is missing.
-4. Run the shared provider test suite (section 6) against it.
+4. Run the shared provider test suite (section 5) against it.
 5. Document the new `STORAGE_PROVIDER` value and its settings in
-   `.env.example` and on the contract page.
+   `.env.example`.
 
 Every provider and deployment must also handle, outside the code: CORS for
-the methods its upload instructions use, retention per area (section 5.2),
+the methods its upload instructions use, retention per area (section 4.2),
 and encryption at rest.
 
 **A provider that serves files through the api** (local disk, a PVC, or
@@ -303,7 +287,7 @@ at signed api routes, which receive or serve the bytes and store them
 locally. Building it would add those routes (each a new API, needing
 approval) and its own retention sweep.
 
-## 6. Shared provider test suite
+## 5. Shared provider test suite
 
 `./testing` exports one test suite that describes how any provider must
 behave: upload instructions work, an upload over max bytes is refused (or,
@@ -317,14 +301,14 @@ The in-memory fake and the S3 provider (run against MinIO) must both pass it,
 and so must every future provider. This is what lets the apps' tests trust
 the fake.
 
-## 7. The "S3" names outside the S3 provider
+## 6. The "S3" names outside the S3 provider
 
 After the change, "S3" still appears in some names outside the S3 provider.
 The stored values (`bulk-uploads/...`) are provider-neutral; only the names
 say S3. `S3_*` env vars configure the S3 provider specifically and keep their
 names.
 
-### 7.1 Renamed in this change
+### 6.1 Renamed in this change
 
 These are internal or plain text. Renaming them changes no stored data and
 no contract:
@@ -342,16 +326,16 @@ No alert or dashboard in bluedots-automation (`helm/monitoring`) reads these
 log fields: the alerts and dashboards are metric-based, and Loki has no
 log-based rules.
 
-### 7.2 Decided — the contract names are kept
+### 6.2 Decided — the contract names are kept
 
 The database columns `bulk_uploads.s3_key`, `s3_etag`, `errors_csv_s3_key`,
 the queue job field `s3Key` (`packages/queue/src/index.ts`) and the API
 response fields `s3_key`, `errors_csv_s3_key` keep their names. No migration
 and no queue compatibility step. The code reads them through neutral names
-(section 7.1). The API fields are renamed later through the API deprecation
+(section 6.1). The API fields are renamed later through the API deprecation
 cycle (signals-dpg#839), not in this change.
 
-## 8. Oversized uploads and retention — decided: fix
+## 7. Oversized uploads and retention — decided: fix
 
 Today `BULK_UPLOAD_MAX_BYTES` (default 10 MB, `apps/api/src/config.ts:135`)
 stops an oversized CSV from being **processed**, not from being **uploaded**.
@@ -380,13 +364,13 @@ Decision:
   the errors download answers a clear not-found instead of handing out a
   link to a missing file.
 
-## 9. Work items, order and deployment
+## 8. Work items, order and deployment
 
 The work is three sub-issues under #933:
 
 | Item | Repo | Delivers |
 |---|---|---|
-| (a) Contract and package | bluedots-docs, aggregator-dpg | The contract page; `packages/object-storage` with the contract, areas, S3 provider, fake and shared test suite; the api and worker moved onto it; the `upload` field on the create response and the web app following it (PUT instructions from S3, so no behaviour change yet); the renames in section 7.1 |
+| (a) Interface and package | aggregator-dpg | `packages/object-storage` with the interface, areas, S3 provider, fake and shared test suite; the api and worker moved onto it; the `upload` field on the create response and the web app following it (PUT instructions from S3, so no behaviour change yet); the renames in section 6.1 |
 | (b) Oversized uploads | aggregator-dpg | S3 POST upload instructions with the size limit, delete on rejection at `/start`, the browser size check, the expired errors CSV answer |
 | (c) Storage settings | bluedots-automation | Lifecycle rule for `bulk-uploads/` with the configurable retention; `POST` added to the bucket CORS methods (today `GET`, `HEAD`, `PUT`, `opentofu/aws/modules/storage/variables.tf`); the same on on-prem MinIO |
 
@@ -399,7 +383,7 @@ Order and deployment:
   browser's POST upload is blocked by CORS without it.
 - **(b)** follows (a) and (c). It has no migration and no new env setting.
 
-## 10. Testing expectations
+## 9. Testing expectations
 
 - The shared provider test suite passes for the fake and for the S3 provider
   against MinIO.
@@ -414,7 +398,7 @@ Order and deployment:
 - A local run against MinIO of the three flows in section 2 still works end
   to end: browser upload, errors CSV download, campaign export link.
 
-## 11. Left to the builder
+## 10. Left to the builder
 
 - Exact method names and type names in the contract.
 - How a caller's key within an area maps to the full object key, as long as
