@@ -353,8 +353,10 @@ Decision:
   stored file whenever it rejects one (too large or empty), so nothing a
   coordinator was told "failed" stays in storage.
 - **Check in the browser first.** The web app compares the file size with
-  `max_bytes` before asking for an upload, and shows the size error
-  immediately.
+  `max_bytes` from the create response before sending any bytes, and shows
+  the size error. The reserved row stays `pending`, like any abandoned
+  upload. The limit is only known after the create call, so no new API is
+  added.
 - **Retention for `bulk-uploads/`.** A lifecycle rule deletes objects under
   `bulk-uploads/` after a configurable number of days (a
   `global.bulkUploadRetentionDays`-style value in bluedots-automation, next to
