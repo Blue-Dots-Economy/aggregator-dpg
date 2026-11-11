@@ -1,5 +1,7 @@
 # Object storage interface (#1055) Implementation Plan
 
+> Superseded in part: refs now carry the full stored key (see design section 4.2); `toStoredKey`/`fromStoredKey` below were replaced by `buildKey` and a key check.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Move all object storage in the api and worker behind one shared `@aggregator-dpg/object-storage` package, with S3 as the only provider and no behaviour change for users or deployments.

@@ -93,8 +93,8 @@ indefinitely. Section 8 covers this.
 
 - Any behaviour change for existing S3/MinIO deployments other than the
   oversized-upload fix, the retention and the owner-first key of new errors
-  reports: same env vars, same object keys,
-  same download URLs, same stored values.
+  reports. Deployments keep the same env vars, the same object keys, the same
+  download URLs and the same stored values.
 - The contract leaking S3 concepts (bucket, ETag quoting, path style,
   `Command` objects, POST policies) to callers.
 - Two copies of the storage code surviving the change.
@@ -175,13 +175,14 @@ those files expire under retention.
 
 Feature code no longer chooses the top-level folder.
 `src/areas.ts` is the one declaration of area names, prefixes and
-visibility, and of `buildKey`. Prefixes are not a setting, because changing one would orphan
-the objects already stored. The storage lifecycle rules in
+visibility, and of `buildKey`. Prefixes are not a setting, because changing
+one would orphan the objects already stored. The storage lifecycle rules in
 bluedots-automation use the same prefixes.
 
 Retention is enforced by the storage itself (an S3 lifecycle rule per prefix),
-not by the app. The retention value is a deployment setting in bluedots-automation global values, which already drives
-both the export lifecycle rule and the worker's `EXPORT_URL_TTL_SECONDS`.
+not by the app. The retention value is a deployment setting in
+bluedots-automation global values, which already drives both the export
+lifecycle rule and the worker's `EXPORT_URL_TTL_SECONDS`.
 `bulk-uploads` gets a matching setting (section 7). A later provider without
 lifecycle rules must provide its own expiry.
 
