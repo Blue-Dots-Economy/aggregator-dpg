@@ -148,6 +148,15 @@ describe('<CoordinatorActions />', () => {
     ).toBeInTheDocument();
   });
 
+  it('asks for profile types when the approval is refused for having none', async () => {
+    global.fetch = respond({ error: { code: 'NO_PROFILE_TYPES' } }, 409) as never;
+    renderIt();
+    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
+    expect(
+      await screen.findByText(messages.console.coordinator.error.no_profile_types),
+    ).toBeInTheDocument();
+  });
+
   it('confirms the approval on success', async () => {
     global.fetch = respond({ id: user.id, status: 'active', notified: true }, 200) as never;
     renderIt();

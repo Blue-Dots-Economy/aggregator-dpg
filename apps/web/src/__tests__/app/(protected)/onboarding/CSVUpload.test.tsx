@@ -24,6 +24,7 @@ import type { BulkUploadStatus } from '@/services/onboarding.service';
 import { BulkUploadStartUnreadError } from '@/services/onboarding.service';
 import type * as OnboardingServiceModule from '@/services/onboarding.service';
 import { ResponseShapeError } from '@/lib/response-shape-error';
+import { HttpError } from '@/services/http';
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -85,7 +86,11 @@ function renderUpload(props: Parameters<typeof CSVUpload>[0] = {}) {
   return render(
     <NextIntlClientProvider
       locale="en"
-      messages={{ common: messages.common, onboarding: messages.onboarding }}
+      messages={{
+        common: messages.common,
+        onboarding: messages.onboarding,
+        access: messages.access,
+      }}
     >
       <CSVUpload {...props} />
     </NextIntlClientProvider>,
@@ -94,7 +99,10 @@ function renderUpload(props: Parameters<typeof CSVUpload>[0] = {}) {
 
 function renderRecent() {
   return render(
-    <NextIntlClientProvider locale="en" messages={{ onboarding: messages.onboarding }}>
+    <NextIntlClientProvider
+      locale="en"
+      messages={{ onboarding: messages.onboarding, access: messages.access }}
+    >
       <RecentUploadsBody />
     </NextIntlClientProvider>,
   );
@@ -289,15 +297,26 @@ describe('<CSVUpload />', () => {
     ).toBeInTheDocument();
   });
 
-  it('surfaces the mutation error message inline on failure', async () => {
-    mutateAsync.mockRejectedValue(new Error('S3 PUT failed (500)'));
+  it('shows a plain message, not the error text, when the upload fails', async () => {
+    mutateAsync.mockRejectedValue(new Error('S3 PUT failed (500): <Error>…</Error>'));
     const user = userEvent.setup();
     renderUpload();
     await pickAndAttest(user);
     await user.click(screen.getByRole('button', { name: 'Upload' }));
 
-    expect(await screen.findByText('S3 PUT failed (500)')).toBeInTheDocument();
+    expect(await screen.findByText(messages.onboarding.csv.upload_failed)).toBeInTheDocument();
+    expect(screen.queryByText(/S3 PUT failed/)).not.toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('explains a refused profile type when the upload answers DOMAIN_NOT_SERVED', async () => {
+    mutateAsync.mockRejectedValue(new HttpError(403, 'DOMAIN_NOT_SERVED'));
+    const user = userEvent.setup();
+    renderUpload();
+    await pickAndAttest(user);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    expect(await screen.findByText(messages.access.domain_not_served)).toBeInTheDocument();
   });
 
   it('says the file was received, clears it and re-reads the list when /start cannot be confirmed', async () => {
@@ -404,7 +423,8 @@ describe('<RecentUploadsBody />', () => {
       error: new Error('upstream unavailable'),
     });
     renderRecent();
-    expect(screen.getByText('upstream unavailable')).toBeInTheDocument();
+    expect(screen.getByText(messages.onboarding.csv.recent.load_failed)).toBeInTheDocument();
+    expect(screen.queryByText('upstream unavailable')).not.toBeInTheDocument();
     expect(screen.queryByText('No uploads yet.')).not.toBeInTheDocument();
   });
 

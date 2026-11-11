@@ -31,6 +31,7 @@ import { ResponseShapeError } from '@/lib/response-shape-error';
 import { useCan } from '../../../lib/auth-context';
 import type { DashboardTileDef, StatusRule } from '../../../hooks/useAggregatorConfig';
 import { useActiveDomain, type ActiveDomainState } from '../../../hooks/useActiveDomain';
+import { useRequestErrorText } from '@/hooks/useRequestErrorText';
 import { DomainTabs } from '../../../components/ui/DomainTabs';
 import {
   NoProfileTypesNotice,
@@ -207,16 +208,16 @@ function MiniStat({ label, value, icon, sub, delta, deltaTone = 'flat' }: MiniSt
 }
 
 /**
- * Text to show for a failed dashboard call.
+ * Text to show for a failed dashboard call. Never the error's own message,
+ * which can hold a response body.
  *
  * @param err - The failure.
  * @param unreadable - The message for a reply that could not be read.
- * @param fallback - The message when the failure is not an `Error`.
- * @returns A plain message for an unreadable reply, else the error's own message.
+ * @param otherwise - The message for any other failure.
+ * @returns `unreadable` for an unreadable reply, else `otherwise`.
  */
-function failureText(err: unknown, unreadable: string, fallback: string): string {
-  if (err instanceof ResponseShapeError) return unreadable;
-  return err instanceof Error ? err.message : fallback;
+function failureText(err: unknown, unreadable: string, otherwise: string): string {
+  return err instanceof ResponseShapeError ? unreadable : otherwise;
 }
 
 /**
@@ -1428,6 +1429,7 @@ interface DomainTabProps {
 
 function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
   const t = useTranslations('dashboard');
+  const requestErrorText = useRequestErrorText();
   const locale = useLocale();
   // `/aggregator/dashboard` scopes results to the caller's org and returns
   // each domain under `by_domain[<id>]`. An `undefined` domain id skips the
@@ -1543,7 +1545,13 @@ function SeekersTab({ domainId }: Readonly<DomainTabProps>) {
       setLastRefreshedAt(Date.now());
     } catch (err) {
       console.error('Dashboard refresh failed', err);
-      setRefreshError(failureText(err, t('state.refreshUnreadable'), t('state.refreshFailed')));
+      setRefreshError(
+        failureText(
+          err,
+          t('state.refreshUnreadable'),
+          requestErrorText(err, t('state.refreshFailed')),
+        ),
+      );
     } finally {
       setRefreshing(false);
     }
@@ -1777,6 +1785,7 @@ function formatRelative(iso: string): string {
 
 function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
   const t = useTranslations('dashboard');
+  const requestErrorText = useRequestErrorText();
   const locale = useLocale();
   // Same rollup shape and fetch as SeekersTab; only the labels differ.
   const providerDomainId = domainId;
@@ -1887,7 +1896,13 @@ function ProvidersTab({ domainId }: Readonly<DomainTabProps>) {
       setLastRefreshedAt(Date.now());
     } catch (err) {
       console.error('Dashboard refresh failed', err);
-      setRefreshError(failureText(err, t('state.refreshUnreadable'), t('state.refreshFailed')));
+      setRefreshError(
+        failureText(
+          err,
+          t('state.refreshUnreadable'),
+          requestErrorText(err, t('state.refreshFailed')),
+        ),
+      );
     } finally {
       setRefreshing(false);
     }

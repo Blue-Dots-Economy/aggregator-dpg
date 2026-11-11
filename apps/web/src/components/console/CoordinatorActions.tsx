@@ -43,7 +43,10 @@ import {
 import { plainErrorKey } from '../../lib/console-errors';
 
 /** API error codes with their own message on this page. */
-const ACTION_ERROR_CODES = { TARGET_ORG_INACTIVE: 'org_inactive' } as const;
+const ACTION_ERROR_CODES = {
+  TARGET_ORG_INACTIVE: 'org_inactive',
+  NO_PROFILE_TYPES: 'no_profile_types',
+} as const;
 
 /** The message key for a failed decision or domains save. */
 function actionErrorKey(r: { status: number; error: ConsoleError }): string {

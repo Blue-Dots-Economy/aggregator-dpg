@@ -9,6 +9,7 @@ import { Dropzone } from '../../../../components/ui/Dropzone';
 import { I } from '../../../../icons';
 import { useBulkUpload, useRecentBulkUploads } from '../../../../hooks/useOnboarding';
 import { useActiveDomain } from '../../../../hooks/useActiveDomain';
+import { useRequestErrorText } from '@/hooks/useRequestErrorText';
 import { DomainSelect } from '../../../../components/ui/DomainSelect';
 import type { BulkUploadStatus } from '../../../../services/onboarding.service';
 import {
@@ -52,6 +53,7 @@ export interface CSVUploadProps {
 
 export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
   const t = useTranslations('onboarding');
+  const requestErrorText = useRequestErrorText();
   const [attested, setAttested] = useState(false);
   // Participant type: the active domain. Empty until the profile loads; the
   // API checks it against the domains the coordinator serves.
@@ -128,7 +130,13 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
         recent.refetch();
         return;
       }
-      setUploadError(uploadErrorText(err, t('csv.reply_unreadable')));
+      setUploadError(
+        uploadErrorText(
+          err,
+          t('csv.reply_unreadable'),
+          requestErrorText(err, t('csv.upload_failed')),
+        ),
+      );
     }
   };
 
@@ -269,6 +277,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
  */
 export function RecentUploadsBody() {
   const t = useTranslations('onboarding');
+  const requestErrorText = useRequestErrorText();
   const recent = useRecentBulkUploads(10);
   const items = recent.data?.items ?? [];
   const error = recent.error;
@@ -309,7 +318,11 @@ export function RecentUploadsBody() {
             {error && (
               <tr>
                 <td colSpan={8} className="text-rose-600 text-[13px] py-6 text-center">
-                  {uploadErrorText(error, t('csv.reply_unreadable'))}
+                  {uploadErrorText(
+                    error,
+                    t('csv.reply_unreadable'),
+                    requestErrorText(error, t('csv.recent.load_failed')),
+                  )}
                 </td>
               </tr>
             )}
@@ -422,15 +435,16 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
 }
 
 /**
- * Text to show for a failed upload call.
+ * Text to show for a failed upload call. Never the error's own message, which
+ * can hold a response body.
  *
  * @param err - The failure.
  * @param unreadable - The message for a reply that could not be read.
- * @returns The plain message for an unreadable reply, else the error's own message.
+ * @param otherwise - The message for any other failure.
+ * @returns `unreadable` for an unreadable reply, else `otherwise`.
  */
-function uploadErrorText(err: unknown, unreadable: string): string {
-  if (err instanceof ResponseShapeError) return unreadable;
-  return err instanceof Error ? err.message : String(err);
+function uploadErrorText(err: unknown, unreadable: string, otherwise: string): string {
+  return err instanceof ResponseShapeError ? unreadable : otherwise;
 }
 
 function formatRelative(iso: string): string {

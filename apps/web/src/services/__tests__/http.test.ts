@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
 import { ResponseShapeError } from '@/lib/response-shape-error';
-import { jsonFetch, retryUnlessShapeError } from '../http';
+import { HttpError, jsonFetch, retryUnlessShapeError } from '../http';
 
 const HelloSchema = z.object({ hello: z.string() });
 const AnySchema = z.unknown();
@@ -63,6 +63,36 @@ describe('jsonFetch', () => {
     // CI on Node 24 / JSDOM 25 sometimes empties template-string error
     // messages; assert that the call throws rather than match the text.
     await expect(jsonFetch('/api/thing', AnySchema)).rejects.toThrow();
+  });
+
+  it('throws an HttpError with the status and the API error code, without the body', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'DOMAIN_NOT_SERVED',
+            detail: 'Your account does not serve this profile type.',
+          },
+        }),
+        { status: 403 },
+      ),
+    ) as unknown as typeof fetch;
+    const err = await jsonFetch('/api/thing', AnySchema).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect(err).toMatchObject({ status: 403, code: 'DOMAIN_NOT_SERVED' });
+    expect(String((err as Error).message)).not.toContain('profile type');
+  });
+
+  it('throws an HttpError with no code when the body is not the API error shape', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response('<html>bad gateway</html>', { status: 502 }),
+      ) as unknown as typeof fetch;
+    const err = await jsonFetch('/api/thing', AnySchema).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect(err).toMatchObject({ status: 502, code: undefined });
+    expect(String((err as Error).message)).not.toContain('bad gateway');
   });
 
   it('force-logs-out on a 401 NO_ACTIVE_SESSION body and throws session expired', async () => {
