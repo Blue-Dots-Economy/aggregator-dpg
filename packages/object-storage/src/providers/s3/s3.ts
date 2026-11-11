@@ -7,6 +7,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
+import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Readable } from 'node:stream';
 import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
@@ -65,20 +66,21 @@ export class S3ObjectStorage extends ObjectStorageBase {
     const stored = checkRef(input.ref);
     if (!stored.success) return stored;
     try {
-      const url = await getSignedUrl(
-        this.presigner,
-        new PutObjectCommand({
-          Bucket: this.cfg.S3_BUCKET,
-          Key: stored.value,
-          ContentType: input.contentType,
-        }),
-        { expiresIn: input.expiresInSeconds },
-      );
+      const { url, fields } = await createPresignedPost(this.presigner, {
+        Bucket: this.cfg.S3_BUCKET,
+        Key: stored.value,
+        Conditions: [
+          ['content-length-range', 0, input.maxBytes],
+          ['eq', '$Content-Type', input.contentType],
+        ],
+        Fields: { 'Content-Type': input.contentType },
+        Expires: input.expiresInSeconds,
+      });
       return ok({
-        method: 'PUT',
+        method: 'POST',
         url,
-        headers: { 'Content-Type': input.contentType },
-        formFields: {},
+        headers: {},
+        formFields: fields,
         expiresAt: new Date(Date.now() + input.expiresInSeconds * 1000).toISOString(),
       });
     } catch (cause) {

@@ -41,6 +41,26 @@ vi.mock('@aws-sdk/s3-request-presigner', () => ({
   ),
 }));
 
+vi.mock('@aws-sdk/s3-presigned-post', () => ({
+  createPresignedPost: vi.fn(
+    async (
+      client: { config: { endpoint: string } },
+      opts: {
+        Key: string;
+        Conditions: unknown[];
+        Fields: Record<string, string>;
+      },
+    ) => ({
+      url: `${client.config.endpoint}/bucket`,
+      fields: {
+        ...opts.Fields,
+        key: opts.Key,
+        Policy: Buffer.from(JSON.stringify({ conditions: opts.Conditions })).toString('base64'),
+      },
+    }),
+  ),
+}));
+
 vi.mock('@aws-sdk/lib-storage', () => ({
   Upload: class {
     constructor(private readonly opts: { params: { Body: Readable } }) {}
@@ -52,6 +72,7 @@ vi.mock('@aws-sdk/lib-storage', () => ({
 
 const { S3ObjectStorage } = await import('../s3.js');
 const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+const { createPresignedPost } = await import('@aws-sdk/s3-presigned-post');
 
 const schema = z.object(storageConfigFields);
 const ref: ObjectRef = { area: 'bulk-uploads', key: 'bulk-uploads/x/raw.csv' };
@@ -110,25 +131,28 @@ describe('S3ObjectStorage', () => {
   });
 
   describe('createUpload', () => {
-    it('signs with the public endpoint and the content type', async () => {
+    it('issues a POST policy on the public endpoint capped at maxBytes', async () => {
       const result = await build({
         S3_ENDPOINT: 'http://internal:9000',
         S3_PUBLIC_ENDPOINT: 'http://public.example:9000',
-      }).createUpload({ ref, contentType: 'text/csv', maxBytes: 5, expiresInSeconds: 300 });
+      }).createUpload({
+        ref,
+        contentType: 'text/csv',
+        maxBytes: 10485760,
+        expiresInSeconds: 300,
+      });
       expect(result.success).toBe(true);
       if (!result.success) return;
       expect(new URL(result.value.url).host).toBe('public.example:9000');
-      expect(result.value).toMatchObject({
-        method: 'PUT',
-        headers: { 'Content-Type': 'text/csv' },
-        formFields: {},
-      });
-      const command = vi.mocked(getSignedUrl).mock.calls.at(-1)?.[1] as unknown as {
-        input: Record<string, unknown>;
-      };
-      expect(command.input).toMatchObject({
-        ContentType: 'text/csv',
-        Key: 'bulk-uploads/x/raw.csv',
+      expect(result.value).toMatchObject({ method: 'POST', headers: {} });
+      expect(result.value.formFields['Content-Type']).toBe('text/csv');
+      expect(result.value.formFields.key).toBe('bulk-uploads/x/raw.csv');
+      const policy = Buffer.from(result.value.formFields.Policy ?? '', 'base64').toString();
+      expect(policy).toContain('["content-length-range",0,10485760]');
+      expect(policy).toContain('["eq","$Content-Type","text/csv"]');
+      expect(vi.mocked(createPresignedPost).mock.calls.at(-1)?.[1]).toMatchObject({
+        Bucket: 'aggregator-bulk-uploads',
+        Expires: 300,
       });
     });
 
@@ -249,7 +273,7 @@ describe('S3ObjectStorage', () => {
   });
 
   it('returns an UpstreamError when signing an upload fails', async () => {
-    vi.mocked(getSignedUrl).mockRejectedValueOnce(new Error('sign failed'));
+    vi.mocked(createPresignedPost).mockRejectedValueOnce(new Error('sign failed'));
     const result = await build().createUpload({
       ref,
       contentType: 'text/csv',

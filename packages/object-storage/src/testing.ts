@@ -30,6 +30,10 @@ async function collect(body: Buffer | Readable): Promise<Buffer> {
 
 /** In-memory ObjectStorageBase for tests, with seeding, inspection and one-shot failure injection. */
 export class FakeObjectStorage extends ObjectStorageBase {
+  private readonly issued = new Map<
+    string,
+    { ref: ObjectRef; maxBytes: number; contentType: string }
+  >();
   private readonly objects = new Map<string, StoredObject>();
   private readonly failures = new Map<keyof ObjectStorageBase, BaseError>();
 
@@ -60,13 +64,30 @@ export class FakeObjectStorage extends ObjectStorageBase {
     if (!stored.success) return stored;
     const failure = this.takeFailure('createUpload');
     if (failure) return err(failure);
+    const url = `fake://${stored.value}`;
+    this.issued.set(url, {
+      ref: input.ref,
+      maxBytes: input.maxBytes,
+      contentType: input.contentType,
+    });
     return ok({
-      method: 'PUT',
-      url: `fake://${stored.value}`,
-      headers: { 'Content-Type': input.contentType },
-      formFields: {},
+      method: 'POST',
+      url,
+      headers: {},
+      formFields: { 'Content-Type': input.contentType },
       expiresAt: new Date(Date.now() + input.expiresInSeconds * 1000).toISOString(),
     });
+  }
+
+  /** Mimics the browser upload: returns 204 and stores the bytes, or 400 when they exceed the issued limit. */
+  upload(instructions: UploadInstructions, bytes: Buffer): number {
+    const grant = this.issued.get(instructions.url);
+    if (!grant || bytes.length > grant.maxBytes) return 400;
+    this.objects.set(grant.ref.key, {
+      bytes: Buffer.from(bytes),
+      contentType: grant.contentType,
+    });
+    return 204;
   }
 
   async createDownloadUrl(input: CreateDownloadInput): Promise<Result<DownloadUrl, BaseError>> {

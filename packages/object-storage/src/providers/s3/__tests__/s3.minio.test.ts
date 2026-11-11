@@ -46,6 +46,18 @@ describe.skipIf(!endpoint)('S3ObjectStorage against a live S3-compatible endpoin
         const result = await storage.put({ ref, body: bytes, contentType: 'text/csv' });
         if (!result.success) throw result.error;
       },
+      upload: async (instructions, bytes) => {
+        const form = new FormData();
+        for (const [name, value] of Object.entries(instructions.formFields))
+          form.append(name, value);
+        form.append('file', new Blob([bytes], { type: 'text/csv' }), 'upload.csv');
+        const response = await fetch(instructions.url, {
+          method: instructions.method,
+          headers: instructions.headers,
+          body: form,
+        });
+        return response.status;
+      },
     };
   });
 

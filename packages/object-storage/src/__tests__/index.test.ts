@@ -67,6 +67,7 @@ runObjectStorageContract('fake', async () => {
     seed: async (ref, bytes) => {
       storage.seed(ref, bytes);
     },
+    upload: async (instructions, bytes) => storage.upload(instructions, bytes),
   };
 });
 
@@ -98,11 +99,21 @@ describe('FakeObjectStorage', () => {
       expiresInSeconds: 60,
     });
     expect(result.success && result.value).toMatchObject({
-      method: 'PUT',
+      method: 'POST',
       url: 'fake://bulk-uploads/a/raw.csv',
-      headers: { 'Content-Type': 'text/csv' },
-      formFields: {},
+      headers: {},
+      formFields: { 'Content-Type': 'text/csv' },
     });
+  });
+});
+
+describe('FakeObjectStorage upload', () => {
+  it('refuses bytes for an instruction it never issued', () => {
+    const status = new FakeObjectStorage().upload(
+      { method: 'POST', url: 'fake://nope', headers: {}, formFields: {}, expiresAt: '' },
+      Buffer.from('x'),
+    );
+    expect(status).toBe(400);
   });
 });
 

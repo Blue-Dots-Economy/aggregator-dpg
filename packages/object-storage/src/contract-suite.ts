@@ -8,11 +8,12 @@ import {
 } from '@aggregator-dpg/shared-primitives/errors';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import { buildKey } from './areas.js';
-import type { ObjectRef, ObjectStorageBase } from './interface.js';
+import type { ObjectRef, ObjectStorageBase, UploadInstructions } from './interface.js';
 
 interface ContractHarness {
   storage: ObjectStorageBase;
   seed(ref: ObjectRef, bytes: Buffer): Promise<void>;
+  upload(instructions: UploadInstructions, bytes: Buffer): Promise<number>;
 }
 
 function unwrap<T>(result: Result<T, BaseError>): T {
@@ -33,6 +34,7 @@ export function runObjectStorageContract(name: string, make: () => Promise<Contr
   describe(`ObjectStorage contract: ${name}`, () => {
     let storage: ObjectStorageBase;
     let seed: ContractHarness['seed'];
+    let upload: ContractHarness['upload'];
     let ref: ObjectRef;
     let created: ObjectRef[];
 
@@ -64,7 +66,7 @@ export function runObjectStorageContract(name: string, make: () => Promise<Contr
     }
 
     beforeEach(async () => {
-      ({ storage, seed } = await make());
+      ({ storage, seed, upload } = await make());
       created = [];
       ref = track('bulk-uploads', 'raw.csv');
     });
@@ -166,6 +168,38 @@ export function runObjectStorageContract(name: string, make: () => Promise<Contr
       );
       expect(['PUT', 'POST']).toContain(upload.method);
       expect(upload.headers['Content-Type'] ?? upload.formFields['Content-Type']).toBe('text/csv');
+    });
+
+    it('accepts an upload of exactly maxBytes', async () => {
+      const maxBytes = 1024;
+      const instructions = unwrap(
+        await storage.createUpload({
+          ref,
+          contentType: 'text/csv',
+          maxBytes,
+          expiresInSeconds: 300,
+        }),
+      );
+      const status = await upload(instructions, Buffer.alloc(maxBytes, 'a'));
+      expect(status).toBeGreaterThanOrEqual(200);
+      expect(status).toBeLessThan(300);
+      expect(unwrap(await storage.stat(ref))?.size).toBe(maxBytes);
+    });
+
+    it('refuses an upload of maxBytes + 1 and stores nothing', async () => {
+      const maxBytes = 1024;
+      const instructions = unwrap(
+        await storage.createUpload({
+          ref,
+          contentType: 'text/csv',
+          maxBytes,
+          expiresInSeconds: 300,
+        }),
+      );
+      const status = await upload(instructions, Buffer.alloc(maxBytes + 1, 'a'));
+      expect(status).toBeGreaterThanOrEqual(400);
+      expect(status).toBeLessThan(500);
+      expect(unwrap(await storage.stat(ref))).toBeNull();
     });
 
     const outside: Array<[string, ObjectRef]> = [
