@@ -3,9 +3,8 @@
 /**
  * Domain dropdown for coordinators who serve more than one domain, in `apps/web`.
  *
- * Renders nothing for a coordinator with a single domain, so their screens
- * look the same as before. Uses the shared `Select`, styled like the language
- * switcher.
+ * Renders nothing for a single domain. Uses the shared `Select`, styled like
+ * the language switcher.
  */
 
 import type { JSX } from 'react';
