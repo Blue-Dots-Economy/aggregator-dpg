@@ -103,6 +103,9 @@ importers:
       '@aggregator-dpg/network-config':
         specifier: workspace:*
         version: link:../../packages/network-config
+      '@aggregator-dpg/object-storage':
+        specifier: workspace:*
+        version: link:../../packages/object-storage
       '@aggregator-dpg/profile-csv':
         specifier: workspace:*
         version: link:../../packages/profile-csv
@@ -121,13 +124,7 @@ importers:
       '@aggregator-dpg/signalstack-writer':
         specifier: workspace:*
         version: link:../../packages/signalstack-writer
-      '@aws-sdk/client-s3':
-        specifier: ^3.1151.0
-        version: 3.1158.0
       '@aws-sdk/client-sesv2':
-        specifier: ^3.1151.0
-        version: 3.1158.0
-      '@aws-sdk/s3-request-presigner':
         specifier: ^3.1151.0
         version: 3.1158.0
       '@fastify/cors':

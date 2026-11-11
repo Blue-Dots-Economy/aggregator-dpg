@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { storageConfigFields } from '@aggregator-dpg/object-storage/config';
 import {
   assertSignalStackClientIdentity,
   assertTlsPosture,
@@ -112,21 +113,7 @@ const ConfigSchema = z.object({
     .default(5 * 1024 * 1024),
   SUPPORT_ATTACHMENT_MAX_FILES: z.coerce.number().int().positive().default(3),
 
-  // ─── Object storage (bulk uploads + errors.csv) ──────────────────────────
-  /** S3-compatible endpoint URL (MinIO in dev). Leave blank for AWS S3. */
-  S3_ENDPOINT: z.string().optional(),
-  /** Browser-reachable endpoint for pre-signed URLs. Falls back to S3_ENDPOINT. */
-  S3_PUBLIC_ENDPOINT: z.string().optional(),
-  S3_REGION: z.string().default('us-east-1'),
-  /** Bucket holding uploaded CSVs and generated error reports. */
-  S3_BUCKET: z.string().default('aggregator-bulk-uploads'),
-  S3_ACCESS_KEY_ID: z.string().optional(),
-  S3_SECRET_ACCESS_KEY: z.string().optional(),
-  /** Force path-style addressing (`endpoint/bucket`). Required for MinIO. */
-  S3_FORCE_PATH_STYLE: z
-    .enum(['true', 'false'])
-    .default('true')
-    .transform((v) => v === 'true'),
+  ...storageConfigFields,
   /** Redis connection URL used by BullMQ queues. */
   REDIS_URL: z.string().default('redis://localhost:6379'),
   /** Pre-signed PUT URL TTL for bulk uploads (seconds). */

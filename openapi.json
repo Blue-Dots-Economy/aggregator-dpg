@@ -13858,7 +13858,7 @@
         "tags": [
           "bulk-uploads"
         ],
-        "description": "Reserves a pending bulk-upload job for the caller aggregator and returns a pre-signed S3 PUT URL. The browser uploads CSV bytes directly to S3, then calls /start. `participant_type` is validated against the active network config at request time.",
+        "description": "Reserves a pending bulk-upload job for the caller aggregator and returns pre-signed upload instructions. The browser uploads CSV bytes directly to object storage, then calls /start. `participant_type` is validated against the active network config at request time.",
         "requestBody": {
           "required": true,
           "content": {
@@ -13896,8 +13896,44 @@
                     "upload_id": {
                       "type": "string"
                     },
+                    "upload": {
+                      "type": "object",
+                      "properties": {
+                        "method": {
+                          "type": "string",
+                          "enum": [
+                            "PUT",
+                            "POST"
+                          ]
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "headers": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        },
+                        "form_fields": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "url",
+                        "headers",
+                        "form_fields"
+                      ],
+                      "additionalProperties": false
+                    },
                     "upload_url": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "Deprecated: use upload.url.",
+                      "deprecated": true
                     },
                     "s3_key": {
                       "type": "string"
@@ -13906,7 +13942,9 @@
                       "type": "string"
                     },
                     "content_type": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "Deprecated: use upload.headers[\"Content-Type\"].",
+                      "deprecated": true
                     },
                     "max_bytes": {
                       "type": "number"
@@ -13923,6 +13961,7 @@
                   },
                   "required": [
                     "upload_id",
+                    "upload",
                     "upload_url",
                     "s3_key",
                     "expires_at",
@@ -15213,7 +15252,7 @@
         "tags": [
           "bulk-uploads"
         ],
-        "description": "Returns a JSON payload carrying a short-lived pre-signed S3 GET URL for the errors.csv report (rows that failed validation/onboarding with reason + offending fields), plus the final counters. Only available once the upload is completed and at least one row failed.",
+        "description": "Returns a JSON payload carrying a short-lived pre-signed download URL for the errors.csv report (rows that failed validation/onboarding with reason + offending fields), plus the final counters. Only available once the upload is completed and at least one row failed.",
         "parameters": [
           {
             "schema": {

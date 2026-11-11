@@ -1,11 +1,11 @@
 /**
  * Tests for the bulk-uploads route surface (`/v1/bulk-uploads*`).
  *
- * Covers the full lifecycle: template download, create (pre-signed PUT
- * reservation), start (S3 HEAD + attestation + enqueue), list, single read,
+ * Covers the full lifecycle: template download, create (upload
+ * instructions), start (storage stat + attestation + enqueue), list, single read,
  * and the errors.csv signed-download endpoint — including the auth wrapper,
  * aggregator-type enforcement, the fail-closed consent-ledger attestation
- * write, and every upstream-failure branch (store, S3, queue, Redis).
+ * write, and every upstream-failure branch (store, storage, queue, Redis).
  *
  * @module apps/api/routes/bulk-uploads.test
  */
@@ -15,6 +15,7 @@ import ExcelJS from 'exceljs';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
+import { config } from '../config.js';
 import { _setNetworkConfig } from '../services/network-config.js';
 import { buildBlueDotConfig } from '@aggregator-dpg/network-config/testing';
 import type { ResolvedNetworkConfig } from '@aggregator-dpg/network-config/interface';
@@ -31,30 +32,17 @@ import type {
 } from '../services/bulk-uploads-store/index.js';
 import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
-import type { BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import { _setObjectStorage } from '@aggregator-dpg/object-storage';
+import { FakeObjectStorage } from '@aggregator-dpg/object-storage/testing';
 import { _setRedis } from '../services/redis/index.js';
 import { UserStoreFake, _setUserStore, buildCoordinator } from '../services/user-store/index.js';
 
 // Hoisted so the vi.mock factories can reference them (mocks are hoisted
 // above module code).
-const {
-  headObjectMock,
-  signBulkUploadUrlMock,
-  signErrorsCsvDownloadUrlMock,
-  enqueueBulkFileProcessMock,
-  loadConsentConfigMock,
-} = vi.hoisted(() => ({
-  headObjectMock: vi.fn(),
-  signBulkUploadUrlMock: vi.fn(),
-  signErrorsCsvDownloadUrlMock: vi.fn(),
+const { enqueueBulkFileProcessMock, loadConsentConfigMock } = vi.hoisted(() => ({
   enqueueBulkFileProcessMock: vi.fn(),
   loadConsentConfigMock: vi.fn(),
-}));
-
-vi.mock('../services/object-storage/index.js', () => ({
-  headObject: headObjectMock,
-  signBulkUploadUrl: signBulkUploadUrlMock,
-  signErrorsCsvDownloadUrl: signErrorsCsvDownloadUrlMock,
 }));
 
 vi.mock('../services/bulk-queue/index.js', () => ({
@@ -255,6 +243,7 @@ function buildUpload(overrides: Partial<BulkUpload> = {}): BulkUpload {
 }
 
 const AGG_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const UPLOAD_REF = { area: 'bulk-uploads', key: 'agg-a/upload-fixed/raw.csv' } as const;
 const AGG_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const AGG_BOTH = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const AGG_ALL = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
@@ -294,6 +283,7 @@ describe('bulk-uploads routes', () => {
   let consentLedger: ConsentLedgerFake;
   let redisHmget: ReturnType<typeof vi.fn>;
   let redisHget: ReturnType<typeof vi.fn>;
+  let storage: FakeObjectStorage;
 
   beforeEach(async () => {
     _resetJwks();
@@ -303,24 +293,11 @@ describe('bulk-uploads routes', () => {
     onboardingRows = [];
     dbUpdateSpy.mockClear();
 
-    headObjectMock.mockReset();
-    signBulkUploadUrlMock.mockReset();
-    signErrorsCsvDownloadUrlMock.mockReset();
     enqueueBulkFileProcessMock.mockReset().mockResolvedValue(undefined);
     loadConsentConfigMock.mockReset().mockResolvedValue(VALID_CONSENT_CFG);
 
-    signBulkUploadUrlMock.mockResolvedValue({
-      url: 'https://s3.example.invalid/put-url',
-      key: 'bulk-uploads/agg/upload-1/raw.csv',
-      expiresAt: '2026-08-01T01:00:00.000Z',
-      contentType: 'text/csv',
-      maxBytes: 10 * 1024 * 1024,
-    });
-    signErrorsCsvDownloadUrlMock.mockResolvedValue({
-      url: 'https://s3.example.invalid/get-url',
-      key: 'bulk-uploads/upload-1/errors.csv',
-      expiresAt: '2026-08-01T01:00:00.000Z',
-    });
+    storage = new FakeObjectStorage();
+    _setObjectStorage(storage);
 
     _setNetworkConfig(buildBlueDotConfig());
 
@@ -738,7 +715,7 @@ describe('bulk-uploads routes', () => {
       expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
     });
 
-    it('201s with a pre-signed PUT URL on success', async () => {
+    it('201s with upload instructions on success', async () => {
       const res = await app.inject({
         method: 'POST',
         url: '/v1/bulk-uploads',
@@ -747,12 +724,23 @@ describe('bulk-uploads routes', () => {
       });
       expect(res.statusCode).toBe(201);
       const body = res.json() as Record<string, unknown>;
-      expect(body.upload_url).toBe('https://s3.example.invalid/put-url');
+      const upload = body.upload as {
+        method: string;
+        url: string;
+        headers: Record<string, string>;
+        form_fields: Record<string, string>;
+      };
+      expect(upload.method).toBe('PUT');
+      expect(upload.headers['Content-Type']).toBe('text/csv');
+      expect(upload.form_fields).toEqual({});
+      expect(body.upload_url).toBe(upload.url);
+      expect(body.content_type).toBe('text/csv');
+      expect(body.s3_key).toBe(`bulk-uploads/${AGG_A}/upload-1/raw.csv`);
       expect(body.status).toBe('pending');
       expect(body.schema_id).toBe('participant-seeker');
       expect(body.schema_version).toBe('v1');
       expect(dbUpdateSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ s3Key: 'bulk-uploads/agg/upload-1/raw.csv' }),
+        expect.objectContaining({ s3Key: `bulk-uploads/${AGG_A}/upload-1/raw.csv` }),
       );
     });
   });
@@ -812,7 +800,6 @@ describe('bulk-uploads routes', () => {
       });
       expect(res.statusCode).toBe(200);
       expect((res.json() as { status: string }).status).toBe('completed');
-      expect(headObjectMock).not.toHaveBeenCalled();
       expect(enqueueBulkFileProcessMock).not.toHaveBeenCalled();
     });
 
@@ -828,9 +815,8 @@ describe('bulk-uploads routes', () => {
       expect((res.json() as { error: { code: string } }).error.code).toBe('CONSENT_REQUIRED');
     });
 
-    it('400 SCHEMA_VALIDATION when the S3 object is missing', async () => {
+    it('400 SCHEMA_VALIDATION when the stored object is missing', async () => {
       store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
-      headObjectMock.mockResolvedValue(null);
       const res = await app.inject({
         method: 'POST',
         url: '/v1/bulk-uploads/upload-1/start',
@@ -841,9 +827,36 @@ describe('bulk-uploads routes', () => {
       expect((res.json() as { error: { detail: string } }).error.detail).toContain('not found');
     });
 
+    it('400 SCHEMA_VALIDATION when the stored key is still the pending placeholder', async () => {
+      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A, s3Key: 'pending' })]);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/bulk-uploads/upload-1/start',
+        headers: AUTH('seeker-approved'),
+        payload: { attestation: true },
+      });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error: { detail: string } }).error.detail).toContain('not found');
+    });
+
+    it('500 INTERNAL and the row stays pending when the storage stat fails', async () => {
+      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      storage.seed(UPLOAD_REF, Buffer.alloc(1000));
+      storage.failNext('stat', new UpstreamError('storage down'));
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/bulk-uploads/upload-1/start',
+        headers: AUTH('seeker-approved'),
+        payload: { attestation: true },
+      });
+      expect(res.statusCode).toBe(500);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('INTERNAL');
+      expect(store.get('upload-1')?.status).toBe('pending');
+    });
+
     it('400 SCHEMA_VALIDATION when the uploaded CSV is empty', async () => {
       store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
-      headObjectMock.mockResolvedValue({ etag: 'e1', contentLength: 0 });
+      storage.seed(UPLOAD_REF, Buffer.alloc(0));
       const res = await app.inject({
         method: 'POST',
         url: '/v1/bulk-uploads/upload-1/start',
@@ -856,7 +869,7 @@ describe('bulk-uploads routes', () => {
 
     it('400 SCHEMA_VALIDATION when the uploaded CSV exceeds the max size', async () => {
       store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
-      headObjectMock.mockResolvedValue({ etag: 'e1', contentLength: 999_999_999 });
+      storage.seed(UPLOAD_REF, Buffer.alloc(config.BULK_UPLOAD_MAX_BYTES + 1));
       const res = await app.inject({
         method: 'POST',
         url: '/v1/bulk-uploads/upload-1/start',
@@ -869,7 +882,7 @@ describe('bulk-uploads routes', () => {
 
     it('500 CONSENT_WRITE_FAILED when consent config fails to load (fail-closed)', async () => {
       store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
-      headObjectMock.mockResolvedValue({ etag: 'e1', contentLength: 1000 });
+      storage.seed(UPLOAD_REF, Buffer.alloc(1000));
       loadConsentConfigMock.mockRejectedValueOnce(new Error('config disk error'));
       const res = await app.inject({
         method: 'POST',
@@ -886,7 +899,7 @@ describe('bulk-uploads routes', () => {
 
     it('500 CONSENT_WRITE_FAILED when the bulk_upload_attestation document is not configured', async () => {
       store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
-      headObjectMock.mockResolvedValue({ etag: 'e1', contentLength: 1000 });
+      storage.seed(UPLOAD_REF, Buffer.alloc(1000));
       loadConsentConfigMock.mockResolvedValueOnce({
         audiences: {
           aggregator: {
@@ -906,7 +919,7 @@ describe('bulk-uploads routes', () => {
 
     it('500 CONSENT_WRITE_FAILED when the ledger write itself fails', async () => {
       store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
-      headObjectMock.mockResolvedValue({ etag: 'e1', contentLength: 1000 });
+      storage.seed(UPLOAD_REF, Buffer.alloc(1000));
       consentLedger.recordRegistrationConsent = async () => ({
         success: false as const,
         error: Object.assign(new Error('ledger down'), {
@@ -926,7 +939,7 @@ describe('bulk-uploads routes', () => {
 
     it('503 DB_UNAVAILABLE when markUploaded fails', async () => {
       store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
-      headObjectMock.mockResolvedValue({ etag: 'e1', contentLength: 1000 });
+      storage.seed(UPLOAD_REF, Buffer.alloc(1000));
       store.failOnce('markUploaded', 'DB_UNAVAILABLE');
       const res = await app.inject({
         method: 'POST',
@@ -939,7 +952,7 @@ describe('bulk-uploads routes', () => {
 
     it('500 INTERNAL when enqueue fails after the row is already marked uploaded', async () => {
       store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
-      headObjectMock.mockResolvedValue({ etag: 'e1', contentLength: 1000 });
+      storage.seed(UPLOAD_REF, Buffer.alloc(1000));
       enqueueBulkFileProcessMock.mockRejectedValueOnce(new Error('redis down'));
       const res = await app.inject({
         method: 'POST',
@@ -955,7 +968,7 @@ describe('bulk-uploads routes', () => {
 
     it('200s and enqueues the file-process job on success', async () => {
       store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
-      headObjectMock.mockResolvedValue({ etag: 'e1', contentLength: 1000 });
+      storage.seed(UPLOAD_REF, Buffer.alloc(1000));
       const res = await app.inject({
         method: 'POST',
         url: '/v1/bulk-uploads/upload-1/start',
@@ -966,7 +979,11 @@ describe('bulk-uploads routes', () => {
       const body = res.json() as { status: string; upload_id: string };
       expect(body.status).toBe('uploaded');
       expect(enqueueBulkFileProcessMock).toHaveBeenCalledWith(
-        expect.objectContaining({ uploadId: 'upload-1', aggregatorId: AGG_A }),
+        expect.objectContaining({
+          uploadId: 'upload-1',
+          aggregatorId: AGG_A,
+          s3Key: 'bulk-uploads/agg-a/upload-fixed/raw.csv',
+        }),
       );
       const ledgerRows = consentLedger.list();
       expect(ledgerRows).toHaveLength(1);
@@ -1231,7 +1248,6 @@ describe('bulk-uploads routes', () => {
         headers: AUTH('seeker-approved'),
       });
       expect(res.statusCode).toBe(404);
-      expect(signErrorsCsvDownloadUrlMock).not.toHaveBeenCalled();
     });
 
     it('200s with a signed download URL + final counts on success', async () => {
@@ -1255,7 +1271,7 @@ describe('bulk-uploads routes', () => {
         s3_key: string;
         counts: { total_rows: number | null; failed: number };
       };
-      expect(body.url).toBe('https://s3.example.invalid/get-url');
+      expect(body.url).toBe('fake://bulk-uploads/upload-1/errors.csv?filename=errors.csv');
       expect(body.s3_key).toBe('bulk-uploads/upload-1/errors.csv');
       expect(body.counts.total_rows).toBe(5);
       expect(body.counts.failed).toBe(2);

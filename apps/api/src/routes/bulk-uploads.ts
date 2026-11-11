@@ -2,11 +2,11 @@
  * Bulk uploads endpoints.
  *
  *   POST /v1/bulk-uploads
- *     Reserves a `pending` upload row and returns a pre-signed S3 PUT URL.
- *     The browser uploads the CSV directly to S3.
+ *     Reserves a `pending` upload row and returns pre-signed upload
+ *     instructions. The browser uploads the CSV directly to object storage.
  *
  *   POST /v1/bulk-uploads/:id/start
- *     Called after the S3 PUT. Checks the object exists, marks the row
+ *     Called after the upload. Checks the object exists, marks the row
  *     `uploaded` and enqueues the file-processing job.
  *
  *   GET /v1/bulk-uploads/:id
@@ -25,10 +25,11 @@ import { requireApproved, type AuthContext } from '../services/auth/access-token
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
 import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
 import {
-  headObject,
-  signBulkUploadUrl,
-  signErrorsCsvDownloadUrl,
-} from '../services/object-storage/index.js';
+  fromStoredKey,
+  getObjectStorage,
+  toStoredKey,
+  type ObjectRef,
+} from '@aggregator-dpg/object-storage';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { checkBulkTemplateRate, checkBulkUploadRate } from '../services/bulk-upload-rate.js';
@@ -162,14 +163,20 @@ const BulkUploadResponseSchema = z
   })
   .passthrough();
 
-/** 201 payload for POST /v1/bulk-uploads — pre-signed S3 PUT reservation. */
+/** 201 payload for POST /v1/bulk-uploads — pre-signed upload reservation. */
 const CreateBulkUploadResponseSchema = z
   .object({
     upload_id: z.string(),
-    upload_url: z.string(),
+    upload: z.object({
+      method: z.enum(['PUT', 'POST']),
+      url: z.string(),
+      headers: z.record(z.string(), z.string()),
+      form_fields: z.record(z.string(), z.string()),
+    }),
+    upload_url: z.string().describe('Deprecated: use upload.url.'),
     s3_key: z.string(),
     expires_at: z.string(),
-    content_type: z.string(),
+    content_type: z.string().describe('Deprecated: use upload.headers["Content-Type"].'),
     max_bytes: z.number(),
     schema_id: z.string(),
     schema_version: z.string(),
@@ -294,7 +301,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         tags: ['bulk-uploads'],
         summary: 'Create a new bulk-upload job',
         description:
-          'Reserves a pending bulk-upload job for the caller aggregator and returns a pre-signed S3 PUT URL. The browser uploads CSV bytes directly to S3, then calls /start. `participant_type` is validated against the active network config at request time.',
+          'Reserves a pending bulk-upload job for the caller aggregator and returns pre-signed upload instructions. The browser uploads CSV bytes directly to object storage, then calls /start. `participant_type` is validated against the active network config at request time.',
         security: [{ bearerAuth: [] }],
         body: CreateBulkUploadBodySchema,
         response: {
@@ -353,10 +360,19 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
       }
 
       const uploadId = created.value.id;
-      const signed = await signBulkUploadUrl({
-        uploadId,
-        aggregatorId: auth.aggregatorId,
+      const ref: ObjectRef = {
+        area: 'bulk-uploads',
+        key: `${auth.aggregatorId}/${uploadId}/raw.csv`,
+      };
+      const storedKey = toStoredKey(ref);
+      const signed = await getObjectStorage().createUpload({
+        ref,
+        contentType: 'text/csv',
+        maxBytes: config.BULK_UPLOAD_MAX_BYTES,
+        expiresInSeconds: config.BULK_UPLOAD_URL_TTL_SECONDS,
       });
+      if (!signed.success) throw signed.error;
+      const instructions = signed.value;
 
       // Store the real key. The store has no method for this, so use Drizzle directly.
       const { getDb } = await import('../db/client.js');
@@ -364,7 +380,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
       const { eq } = await import('drizzle-orm');
       await getDb()
         .update(bulkUploads)
-        .set({ s3Key: signed.key, updatedAt: new Date() })
+        .set({ s3Key: storedKey, updatedAt: new Date() })
         .where(eq(bulkUploads.id, uploadId));
 
       log.info({
@@ -376,11 +392,17 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
 
       return reply.code(201).send({
         upload_id: uploadId,
-        upload_url: signed.url,
-        s3_key: signed.key,
-        expires_at: signed.expiresAt,
-        content_type: signed.contentType,
-        max_bytes: signed.maxBytes,
+        upload: {
+          method: instructions.method,
+          url: instructions.url,
+          headers: instructions.headers,
+          form_fields: instructions.formFields,
+        },
+        upload_url: instructions.url,
+        s3_key: storedKey,
+        expires_at: instructions.expiresAt,
+        content_type: 'text/csv',
+        max_bytes: config.BULK_UPLOAD_MAX_BYTES,
         schema_id: schemaId,
         schema_version: schemaVersion,
         status: 'pending',
@@ -441,7 +463,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
       }
 
       // The aggregator must attest permission to submit these participants.
-      // Checked before any S3 call or state change.
+      // Checked before any storage call or state change.
       if (body.attestation !== true) {
         throw httpError('CONSENT_REQUIRED', {
           detail: 'You must confirm authority to upload before starting.',
@@ -449,32 +471,34 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         });
       }
 
-      const head = await headObject(upload.s3Key);
+      const parsedRef = fromStoredKey('bulk-uploads', upload.s3Key);
+      const statResult = parsedRef.success ? await getObjectStorage().stat(parsedRef.value) : null;
+      if (statResult && !statResult.success) throw statResult.error;
+      const head = statResult?.value ?? null;
       if (!head) {
         log.warn({
           status: 'failure',
-          reason: 's3_object_missing',
-          s3_key: upload.s3Key,
+          reason: 'storage_object_missing',
+          storage_key: upload.s3Key,
           latency_ms: Date.now() - start,
         });
         throw httpError('SCHEMA_VALIDATION', {
           detail: 'CSV upload not found in object storage. Complete the PUT and retry.',
         });
       }
-      if (head.contentLength === 0) {
+      if (head.size === 0) {
         throw httpError('SCHEMA_VALIDATION', { detail: 'Uploaded CSV is empty.' });
       }
-      if (head.contentLength > config.BULK_UPLOAD_MAX_BYTES) {
-        // The signed PUT does not cap size, so check it before enqueueing.
+      if (head.size > config.BULK_UPLOAD_MAX_BYTES) {
         log.warn({
           status: 'failure',
           reason: 'object_too_large',
-          s3_key: upload.s3Key,
-          content_length: head.contentLength,
+          storage_key: upload.s3Key,
+          content_length: head.size,
           max_bytes: config.BULK_UPLOAD_MAX_BYTES,
         });
         throw httpError('SCHEMA_VALIDATION', {
-          detail: `Uploaded CSV is too large (${head.contentLength} bytes; max ${config.BULK_UPLOAD_MAX_BYTES}).`,
+          detail: `Uploaded CSV is too large (${head.size} bytes; max ${config.BULK_UPLOAD_MAX_BYTES}).`,
         });
       }
 
@@ -492,7 +516,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
       }
 
       // Re-uploading the same file is allowed, so a failure here is never a duplicate.
-      const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.etag);
+      const marked = await store.markUploaded(uploadId, auth.aggregatorId, head.fingerprint);
       if (!marked.ok) {
         throw httpError('DB_UNAVAILABLE', { cause: new Error(marked.error.message) });
       }
@@ -519,8 +543,8 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
-        etag: head.etag,
-        content_length: head.contentLength,
+        fingerprint: head.fingerprint,
+        content_length: head.size,
         next_status: marked.value.status,
       });
 
@@ -610,7 +634,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         tags: ['bulk-uploads'],
         summary: 'Download per-row error CSV',
         description:
-          'Returns a JSON payload carrying a short-lived pre-signed S3 GET URL for the errors.csv report (rows that failed validation/onboarding with reason + offending fields), plus the final counters. Only available once the upload is completed and at least one row failed.',
+          'Returns a JSON payload carrying a short-lived pre-signed download URL for the errors.csv report (rows that failed validation/onboarding with reason + offending fields), plus the final counters. Only available once the upload is completed and at least one row failed.',
         security: [{ bearerAuth: [] }],
         params: BulkUploadParamsSchema,
         response: {
@@ -668,25 +692,35 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         log.error({
           status: 'failure',
           reason: 'errors_csv_key_invalid',
-          s3_key: upload.errorsCsvS3Key,
+          storage_key: upload.errorsCsvS3Key,
         });
         throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
       }
 
-      const signed = await signErrorsCsvDownloadUrl(upload.errorsCsvS3Key);
+      const errorsRef = fromStoredKey('bulk-uploads', upload.errorsCsvS3Key);
+      if (!errorsRef.success) {
+        throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
+      }
+      const signed = await getObjectStorage().createDownloadUrl({
+        ref: errorsRef.value,
+        expiresInSeconds: config.BULK_UPLOAD_URL_TTL_SECONDS,
+        filename: 'errors.csv',
+        contentType: 'text/csv',
+      });
+      if (!signed.success) throw signed.error;
 
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
-        s3_key: upload.errorsCsvS3Key,
+        storage_key: upload.errorsCsvS3Key,
       });
 
       const counts = await loadCounts(upload.id, upload.status);
       return reply.send({
         upload_id: upload.id,
-        url: signed.url,
-        s3_key: signed.key,
-        expires_at: signed.expiresAt,
+        url: signed.value.url,
+        s3_key: upload.errorsCsvS3Key,
+        expires_at: signed.value.expiresAt,
         content_type: 'text/csv',
         counts: {
           total_rows: counts.totalRows,
