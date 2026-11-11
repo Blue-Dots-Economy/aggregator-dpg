@@ -1,5 +1,6 @@
 import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
-import { beforeAll, describe } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { storageConfigFields } from '../../../config.js';
 import { runObjectStorageContract } from '../../../contract-suite.js';
@@ -44,5 +45,30 @@ describe.skipIf(!endpoint)('S3ObjectStorage against a live S3-compatible endpoin
         if (!result.success) throw result.error;
       },
     };
+  });
+
+  it('serves a download URL with the bytes and an attachment filename', async () => {
+    const storage = new S3ObjectStorage(cfg);
+    const ref = { area: 'bulk-uploads', key: `contract/${randomUUID()}/errors.csv` } as const;
+    const bytes = Buffer.from('row,error\n1,bad\n');
+    const put = await storage.put({ ref, body: bytes, contentType: 'text/csv' });
+    if (!put.success) throw put.error;
+    try {
+      const download = await storage.createDownloadUrl({
+        ref,
+        expiresInSeconds: 60,
+        filename: 'upload-errors.csv',
+        contentType: 'text/csv',
+      });
+      if (!download.success) throw download.error;
+      const response = await fetch(download.value.url);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-disposition')).toBe(
+        'attachment; filename="upload-errors.csv"',
+      );
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+    } finally {
+      await storage.delete(ref);
+    }
   });
 });

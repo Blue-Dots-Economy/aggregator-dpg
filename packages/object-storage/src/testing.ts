@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok, type Result } from '@aggregator-dpg/shared-primitives/result';
-import { toStoredKey } from './areas.js';
+import { resolveStoredKey, toStoredKey } from './areas.js';
 import {
   ObjectStorageBase,
   type CreateDownloadInput,
@@ -56,11 +56,13 @@ export class FakeObjectStorage extends ObjectStorageBase {
   }
 
   async createUpload(input: CreateUploadInput): Promise<Result<UploadInstructions, BaseError>> {
+    const stored = resolveStoredKey(input.ref);
+    if (!stored.success) return stored;
     const failure = this.takeFailure('createUpload');
     if (failure) return err(failure);
     return ok({
       method: 'PUT',
-      url: `fake://${toStoredKey(input.ref)}`,
+      url: `fake://${stored.value}`,
       headers: { 'Content-Type': input.contentType },
       formFields: {},
       expiresAt: new Date(Date.now() + input.expiresInSeconds * 1000).toISOString(),
@@ -68,18 +70,22 @@ export class FakeObjectStorage extends ObjectStorageBase {
   }
 
   async createDownloadUrl(input: CreateDownloadInput): Promise<Result<DownloadUrl, BaseError>> {
+    const stored = resolveStoredKey(input.ref);
+    if (!stored.success) return stored;
     const failure = this.takeFailure('createDownloadUrl');
     if (failure) return err(failure);
     return ok({
-      url: `fake://${toStoredKey(input.ref)}?filename=${encodeURIComponent(input.filename)}`,
+      url: `fake://${stored.value}?filename=${encodeURIComponent(input.filename)}`,
       expiresAt: new Date(Date.now() + input.expiresInSeconds * 1000).toISOString(),
     });
   }
 
   async stat(ref: ObjectRef): Promise<Result<ObjectStat | null, BaseError>> {
+    const stored = resolveStoredKey(ref);
+    if (!stored.success) return stored;
     const failure = this.takeFailure('stat');
     if (failure) return err(failure);
-    const found = this.objects.get(toStoredKey(ref));
+    const found = this.objects.get(stored.value);
     if (!found) return ok(null);
     return ok({
       size: found.bytes.length,
@@ -88,18 +94,22 @@ export class FakeObjectStorage extends ObjectStorageBase {
   }
 
   async openReadStream(ref: ObjectRef): Promise<Result<Readable | null, BaseError>> {
+    const stored = resolveStoredKey(ref);
+    if (!stored.success) return stored;
     const failure = this.takeFailure('openReadStream');
     if (failure) return err(failure);
-    const found = this.objects.get(toStoredKey(ref));
+    const found = this.objects.get(stored.value);
     return ok(found ? Readable.from([Buffer.from(found.bytes)]) : null);
   }
 
   async put(input: PutInput): Promise<Result<void, BaseError>> {
+    const stored = resolveStoredKey(input.ref);
+    if (!stored.success) return stored;
     const failure = this.takeFailure('put');
     if (failure) return err(failure);
     try {
       const bytes = await collect(input.body);
-      this.objects.set(toStoredKey(input.ref), { bytes, contentType: input.contentType });
+      this.objects.set(stored.value, { bytes, contentType: input.contentType });
       return ok(undefined);
     } catch (cause) {
       return err(new UpstreamError('object storage put failed', { cause }));
@@ -107,9 +117,11 @@ export class FakeObjectStorage extends ObjectStorageBase {
   }
 
   async delete(ref: ObjectRef): Promise<Result<void, BaseError>> {
+    const stored = resolveStoredKey(ref);
+    if (!stored.success) return stored;
     const failure = this.takeFailure('delete');
     if (failure) return err(failure);
-    this.objects.delete(toStoredKey(ref));
+    this.objects.delete(stored.value);
     return ok(undefined);
   }
 

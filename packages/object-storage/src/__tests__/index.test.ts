@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { ConfigError, ValidationError } from '@aggregator-dpg/shared-primitives/errors';
-import { fromStoredKey, toStoredKey } from '../areas.js';
+import { fromStoredKey, resolveStoredKey, toStoredKey } from '../areas.js';
 import { storageConfigFields } from '../config.js';
+import type { ObjectRef } from '../interface.js';
 import { runObjectStorageContract } from '../contract-suite.js';
 import { FakeObjectStorage } from '../testing.js';
 import { _setObjectStorage, getObjectStorage, initObjectStorage } from '../index.js';
@@ -21,6 +22,16 @@ describe('areas', () => {
   it('parses a stored key back into a ref', () => {
     const result = fromStoredKey('bulk-uploads', 'bulk-uploads/x/errors.csv');
     expect(result.success && result.value).toEqual({ area: 'bulk-uploads', key: 'x/errors.csv' });
+  });
+
+  it('resolves a known area to its stored key', () => {
+    const result = resolveStoredKey({ area: 'exports', key: 'o/j.csv' });
+    expect(result.success && result.value).toBe('campaign-exports/o/j.csv');
+  });
+
+  it.each(['nope', 'toString'])('rejects the unknown area %s', (area) => {
+    const result = resolveStoredKey({ area, key: 'x' } as unknown as ObjectRef);
+    expect(!result.success && result.error).toBeInstanceOf(ValidationError);
   });
 
   it.each(['pending', 'campaign-exports/x', 'bulk-uploads/'])('rejects %s', (stored) => {

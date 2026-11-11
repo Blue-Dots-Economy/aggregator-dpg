@@ -11,7 +11,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Readable } from 'node:stream';
 import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok, type Result } from '@aggregator-dpg/shared-primitives/result';
-import { toStoredKey } from '../../areas.js';
+import { resolveStoredKey } from '../../areas.js';
 import type { StorageConfig } from '../../config.js';
 import {
   ObjectStorageBase,
@@ -62,12 +62,14 @@ export class S3ObjectStorage extends ObjectStorageBase {
   }
 
   async createUpload(input: CreateUploadInput): Promise<Result<UploadInstructions, BaseError>> {
+    const stored = resolveStoredKey(input.ref);
+    if (!stored.success) return stored;
     try {
       const url = await getSignedUrl(
         this.presigner,
         new PutObjectCommand({
           Bucket: this.cfg.S3_BUCKET,
-          Key: toStoredKey(input.ref),
+          Key: stored.value,
           ContentType: input.contentType,
         }),
         { expiresIn: input.expiresInSeconds },
@@ -85,12 +87,14 @@ export class S3ObjectStorage extends ObjectStorageBase {
   }
 
   async createDownloadUrl(input: CreateDownloadInput): Promise<Result<DownloadUrl, BaseError>> {
+    const stored = resolveStoredKey(input.ref);
+    if (!stored.success) return stored;
     try {
       const url = await getSignedUrl(
         this.presigner,
         new GetObjectCommand({
           Bucket: this.cfg.S3_BUCKET,
-          Key: toStoredKey(input.ref),
+          Key: stored.value,
           ResponseContentDisposition: `attachment; filename="${input.filename}"`,
           ResponseContentType: input.contentType,
         }),
@@ -106,9 +110,11 @@ export class S3ObjectStorage extends ObjectStorageBase {
   }
 
   async stat(ref: ObjectRef): Promise<Result<ObjectStat | null, BaseError>> {
+    const stored = resolveStoredKey(ref);
+    if (!stored.success) return stored;
     try {
       const head = await this.client.send(
-        new HeadObjectCommand({ Bucket: this.cfg.S3_BUCKET, Key: toStoredKey(ref) }),
+        new HeadObjectCommand({ Bucket: this.cfg.S3_BUCKET, Key: stored.value }),
       );
       if (!head.ETag) return ok(null);
       return ok({
@@ -123,9 +129,11 @@ export class S3ObjectStorage extends ObjectStorageBase {
   }
 
   async openReadStream(ref: ObjectRef): Promise<Result<Readable | null, BaseError>> {
+    const stored = resolveStoredKey(ref);
+    if (!stored.success) return stored;
     try {
       const object = await this.client.send(
-        new GetObjectCommand({ Bucket: this.cfg.S3_BUCKET, Key: toStoredKey(ref) }),
+        new GetObjectCommand({ Bucket: this.cfg.S3_BUCKET, Key: stored.value }),
       );
       if (!(object.Body instanceof Readable)) {
         return failed('openReadStream', new Error('object body is not a Node stream'));
@@ -138,9 +146,11 @@ export class S3ObjectStorage extends ObjectStorageBase {
   }
 
   async put(input: PutInput): Promise<Result<void, BaseError>> {
+    const stored = resolveStoredKey(input.ref);
+    if (!stored.success) return stored;
     const params = {
       Bucket: this.cfg.S3_BUCKET,
-      Key: toStoredKey(input.ref),
+      Key: stored.value,
       ContentType: input.contentType,
     };
     try {
@@ -161,9 +171,11 @@ export class S3ObjectStorage extends ObjectStorageBase {
   }
 
   async delete(ref: ObjectRef): Promise<Result<void, BaseError>> {
+    const stored = resolveStoredKey(ref);
+    if (!stored.success) return stored;
     try {
       await this.client.send(
-        new DeleteObjectCommand({ Bucket: this.cfg.S3_BUCKET, Key: toStoredKey(ref) }),
+        new DeleteObjectCommand({ Bucket: this.cfg.S3_BUCKET, Key: stored.value }),
       );
       return ok(undefined);
     } catch (cause) {

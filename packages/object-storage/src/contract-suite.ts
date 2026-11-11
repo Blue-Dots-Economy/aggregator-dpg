@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
+import {
+  UpstreamError,
+  ValidationError,
+  type BaseError,
+} from '@aggregator-dpg/shared-primitives/errors';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
 import type { ObjectRef, ObjectStorageBase } from './interface.js';
 
@@ -149,6 +153,32 @@ export function runObjectStorageContract(name: string, make: () => Promise<Contr
       );
       expect(unwrap(await storage.stat(ref))).toBeNull();
       expect(unwrap(await storage.stat(exportsRef))).not.toBeNull();
+    });
+
+    it('rejects an unknown area with a ValidationError', async () => {
+      const unknown: ObjectRef = { ...ref };
+      Reflect.set(unknown, 'area', 'nope');
+      const results = [
+        await storage.createUpload({
+          ref: unknown,
+          contentType: 'text/csv',
+          maxBytes: 1024,
+          expiresInSeconds: 300,
+        }),
+        await storage.createDownloadUrl({
+          ref: unknown,
+          expiresInSeconds: 300,
+          filename: 'errors.csv',
+          contentType: 'text/csv',
+        }),
+        await storage.stat(unknown),
+        await storage.openReadStream(unknown),
+        await storage.put({ ref: unknown, body: Buffer.from('x'), contentType: 'text/csv' }),
+        await storage.delete(unknown),
+      ];
+      for (const result of results) {
+        expect(!result.success && result.error).toBeInstanceOf(ValidationError);
+      }
     });
 
     it('reports healthy', async () => {
