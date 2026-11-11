@@ -279,7 +279,7 @@ describe('onboardingService', () => {
   });
 
   describe('uploadCsv', () => {
-    it('runs the full presign -> S3 PUT -> start flow', async () => {
+    it('runs the full presign -> storage PUT -> start flow', async () => {
       const file = new File(['a,b\n1,2'], 'rows.csv', { type: 'text/csv' });
       const fetchSpy = vi
         .spyOn(globalThis, 'fetch')
@@ -409,7 +409,7 @@ describe('onboardingService', () => {
       expect(err).toMatchObject({ uploadId: 'u5' });
     });
 
-    it('throws when the S3 PUT fails', async () => {
+    it('throws when the storage PUT fails', async () => {
       const file = new File(['a,b'], 'rows.csv', { type: 'text/csv' });
       vi.spyOn(globalThis, 'fetch')
         .mockResolvedValueOnce(

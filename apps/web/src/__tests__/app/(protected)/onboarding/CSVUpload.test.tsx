@@ -298,14 +298,14 @@ describe('<CSVUpload />', () => {
   });
 
   it('shows a plain message, not the error text, when the upload fails', async () => {
-    mutateAsync.mockRejectedValue(new Error('S3 PUT failed (500): <Error>…</Error>'));
+    mutateAsync.mockRejectedValue(new Error('File upload failed (500): <Error>…</Error>'));
     const user = userEvent.setup();
     renderUpload();
     await pickAndAttest(user);
     await user.click(screen.getByRole('button', { name: 'Upload' }));
 
     expect(await screen.findByText(messages.onboarding.csv.upload_failed)).toBeInTheDocument();
-    expect(screen.queryByText(/S3 PUT failed/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/File upload failed/)).not.toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
   });
 

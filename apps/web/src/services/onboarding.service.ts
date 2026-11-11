@@ -91,6 +91,14 @@ export type OnboardingBySource = z.infer<typeof OnboardingBySourceSchema>;
 
 export const BulkUploadCreateResponseSchema = z.object({
   upload_id: z.string(),
+  upload: z
+    .object({
+      method: z.enum(['PUT', 'POST']),
+      url: z.string(),
+      headers: z.record(z.string(), z.string()),
+      form_fields: z.record(z.string(), z.string()),
+    })
+    .optional(),
   upload_url: z.string(),
   s3_key: z.string(),
   expires_at: z.string(),
@@ -271,7 +279,7 @@ export const onboardingService = {
   },
 
   /**
-   * Runs a bulk upload: presign, PUT to S3, then start.
+   * Runs a bulk upload: presign, upload to storage, then start.
    *
    * `duplicate` is true when the file matches a prior upload; the existing run is returned.
    * When `/start` accepts the upload but its reply cannot be read, the status
@@ -282,7 +290,7 @@ export const onboardingService = {
    * @param attestation - Whether the coordinator accepted the attestation.
    * @returns The upload id and status.
    * @throws {BulkUploadStartUnreadError} If `/start` accepted the upload and its status could not be read.
-   * @throws {Error} If the S3 upload or an API call fails.
+   * @throws {Error} If the storage upload or an API call fails.
    */
   async uploadCsv(
     file: File,
@@ -295,14 +303,7 @@ export const onboardingService = {
     message?: string;
   }> {
     const presigned = await this.createBulkUpload(participantType);
-    const put = await fetch(presigned.upload_url, {
-      method: 'PUT',
-      body: file,
-      headers: { 'Content-Type': presigned.content_type },
-    });
-    if (!put.ok) {
-      throw new Error(`S3 PUT failed (${put.status}): ${await put.text().catch(() => '')}`);
-    }
+    await uploadFile(file, presigned);
     let status: BulkUploadStartResult;
     try {
       status = await this.startBulkUpload(presigned.upload_id, attestation);
@@ -331,6 +332,33 @@ export const onboardingService = {
     return out;
   },
 };
+
+/**
+ * Sends the file as the api's upload instructions say, or to `upload_url` on older api builds.
+ *
+ * @param file - The CSV file.
+ * @param created - The reservation returned by the api.
+ * @throws {Error} If storage answers with a non-2xx status.
+ */
+async function uploadFile(file: File, created: BulkUploadCreateResponse): Promise<void> {
+  const { upload } = created;
+  let res: Response;
+  if (!upload) {
+    res = await fetch(created.upload_url, {
+      method: 'PUT',
+      body: file,
+      headers: { 'Content-Type': created.content_type },
+    });
+  } else if (upload.method === 'POST') {
+    const form = new FormData();
+    for (const [name, value] of Object.entries(upload.form_fields)) form.append(name, value);
+    form.append('file', file);
+    res = await fetch(upload.url, { method: 'POST', body: form, headers: upload.headers });
+  } else {
+    res = await fetch(upload.url, { method: 'PUT', body: file, headers: upload.headers });
+  }
+  if (!res.ok) throw new Error(`File upload failed (${res.status})`);
+}
 
 /**
  * Reads the status of an upload that `/start` accepted.
