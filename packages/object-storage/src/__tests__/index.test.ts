@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { ValidationError } from '@aggregator-dpg/shared-primitives/errors';
 import { fromStoredKey, toStoredKey } from '../areas.js';
 import { storageConfigFields } from '../config.js';
+import { runObjectStorageContract } from '../contract-suite.js';
+import { FakeObjectStorage } from '../testing.js';
 
 describe('areas', () => {
   it('maps bulk-uploads refs to the bulk-uploads prefix', () => {
@@ -43,5 +45,51 @@ describe('storageConfigFields', () => {
 
   it('rejects an unknown provider', () => {
     expect(() => schema.parse({ STORAGE_PROVIDER: 'azure' })).toThrow();
+  });
+});
+
+runObjectStorageContract('fake', async () => {
+  const storage = new FakeObjectStorage();
+  return {
+    storage,
+    seed: async (ref, bytes) => {
+      storage.seed(ref, bytes);
+    },
+  };
+});
+
+describe('FakeObjectStorage', () => {
+  const ref = { area: 'bulk-uploads', key: 'a/raw.csv' } as const;
+
+  it('fails the next call once with the given error, then recovers', async () => {
+    const storage = new FakeObjectStorage();
+    const failure = new ValidationError('boom');
+    storage.failNext('stat', failure);
+    const first = await storage.stat(ref);
+    expect(!first.success && first.error).toBe(failure);
+    const second = await storage.stat(ref);
+    expect(second.success && second.value).toBeNull();
+  });
+
+  it('exposes seeded bytes through read', () => {
+    const storage = new FakeObjectStorage();
+    storage.seed(ref, Buffer.from('hi'));
+    expect(storage.read(ref)?.toString()).toBe('hi');
+    expect(storage.read({ area: 'exports', key: 'a/raw.csv' })).toBeUndefined();
+  });
+
+  it('builds fake:// upload instructions on the stored key', async () => {
+    const result = await new FakeObjectStorage().createUpload({
+      ref,
+      contentType: 'text/csv',
+      maxBytes: 10,
+      expiresInSeconds: 60,
+    });
+    expect(result.success && result.value).toMatchObject({
+      method: 'PUT',
+      url: 'fake://bulk-uploads/a/raw.csv',
+      headers: { 'Content-Type': 'text/csv' },
+      formFields: {},
+    });
   });
 });
