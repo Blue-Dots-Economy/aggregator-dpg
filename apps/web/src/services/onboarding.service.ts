@@ -159,6 +159,16 @@ function withQuery(path: string, params: URLSearchParams): string {
   return qs ? `${path}?${qs}` : path;
 }
 
+/** Thrown when the file is larger than the limit the api reported for the upload. */
+export class BulkUploadTooLargeError extends Error {
+  override readonly name = 'BulkUploadTooLargeError';
+
+  /** @param maxBytes - The largest file the api accepts. */
+  constructor(readonly maxBytes: number) {
+    super(`file is larger than ${maxBytes} bytes`);
+  }
+}
+
 /**
  * Thrown when `/start` answered OK with an unreadable body and the upload's
  * status could not be read again either.
@@ -289,6 +299,7 @@ export const onboardingService = {
    * @param participantType - Domain of the rows.
    * @param attestation - Whether the coordinator accepted the attestation.
    * @returns The upload id and status.
+   * @throws {BulkUploadTooLargeError} If the file is larger than the limit the api reported.
    * @throws {BulkUploadStartUnreadError} If `/start` accepted the upload and its status could not be read.
    * @throws {Error} If the storage upload or an API call fails.
    */
@@ -303,6 +314,7 @@ export const onboardingService = {
     message?: string;
   }> {
     const presigned = await this.createBulkUpload(participantType);
+    if (file.size > presigned.max_bytes) throw new BulkUploadTooLargeError(presigned.max_bytes);
     await uploadFile(file, presigned);
     let status: BulkUploadStartResult;
     try {

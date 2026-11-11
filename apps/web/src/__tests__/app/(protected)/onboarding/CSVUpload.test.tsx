@@ -21,7 +21,7 @@ import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { BulkUploadStatus } from '@/services/onboarding.service';
-import { BulkUploadStartUnreadError } from '@/services/onboarding.service';
+import { BulkUploadStartUnreadError, BulkUploadTooLargeError } from '@/services/onboarding.service';
 import type * as OnboardingServiceModule from '@/services/onboarding.service';
 import { ResponseShapeError } from '@/lib/response-shape-error';
 import { HttpError } from '@/services/http';
@@ -331,6 +331,19 @@ describe('<CSVUpload />', () => {
     expect(screen.queryByText(/could not be read/)).not.toBeInTheDocument();
     expect(refetch).toHaveBeenCalled();
     expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('shows the size limit in MB and keeps the picked file when the file is too large', async () => {
+    mutateAsync.mockRejectedValue(new BulkUploadTooLargeError(10485760));
+    const user = userEvent.setup();
+    renderUpload();
+    await pickAndAttest(user);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    expect(
+      await screen.findByText('This file is larger than 10 MB. Upload a smaller file.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('roster.csv')).toBeInTheDocument();
   });
 
   it('shows a plain message instead of the raw text for an unreadable reply', async () => {

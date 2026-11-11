@@ -14,6 +14,7 @@ import { DomainSelect } from '../../../../components/ui/DomainSelect';
 import type { BulkUploadStatus } from '../../../../services/onboarding.service';
 import {
   BulkUploadStartUnreadError,
+  BulkUploadTooLargeError,
   onboardingService,
 } from '../../../../services/onboarding.service';
 import type { BulkAttestationContent } from '../../../../lib/bulk-attestation.server';
@@ -128,6 +129,12 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
         if (fileInputRef.current) fileInputRef.current.value = '';
         setUploadNotice(t('csv.start_unconfirmed'));
         recent.refetch();
+        return;
+      }
+      if (err instanceof BulkUploadTooLargeError) {
+        setUploadError(
+          t('csv.too_large', { maxMb: Math.round((err.maxBytes / 1048576) * 10) / 10 }),
+        );
         return;
       }
       setUploadError(

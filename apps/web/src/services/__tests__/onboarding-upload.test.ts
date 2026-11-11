@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { onboardingService } from '../onboarding.service';
+import { BulkUploadTooLargeError, onboardingService } from '../onboarding.service';
 
 const created = (extra: Record<string, unknown> = {}) =>
   new Response(
@@ -111,5 +111,25 @@ describe('bulk upload follows the upload instructions', () => {
     await expect(onboardingService.uploadCsv(file, 'seeker', true)).rejects.toThrow(
       /^File upload failed \(403\)$/,
     );
+  });
+
+  it('rejects a file over max_bytes before any upload request', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(created({ max_bytes: 10 }));
+    const big = new File(['x'.repeat(11)], 'big.csv', { type: 'text/csv' });
+    const err = await onboardingService.uploadCsv(big, 'seeker', true).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BulkUploadTooLargeError);
+    expect((err as BulkUploadTooLargeError).maxBytes).toBe(10);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('uploads a file of exactly max_bytes', async () => {
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(created({ max_bytes: 10 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(started());
+    const exact = new File(['x'.repeat(10)], 'exact.csv', { type: 'text/csv' });
+    await onboardingService.uploadCsv(exact, 'seeker', true);
+    expect(spy).toHaveBeenCalledTimes(3);
   });
 });
