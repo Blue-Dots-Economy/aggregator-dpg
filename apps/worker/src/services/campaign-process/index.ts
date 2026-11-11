@@ -23,7 +23,7 @@ import type {
 } from '@aggregator-dpg/signalstack-writer/interface';
 import type { SendInput, SendOk, MailerResult } from '@aggregator-dpg/mailer/interface';
 import { buildContactExportCsv, buildDecryptedProfilesCsv } from '@aggregator-dpg/profile-csv';
-import type { SignedDownloadUrl } from '../../object-storage.js';
+import type { DownloadUrl } from '@aggregator-dpg/object-storage';
 import { TERMINAL_JOB_STATUSES, toAuditCounts } from '../campaign-job-client.js';
 import type {
   CampaignJobItemStatus,
@@ -81,7 +81,7 @@ export interface ExportCollaborators {
     q: SignalStackFetchDecryptedProfilesQuery,
   ) => Promise<Result<SignalStackDecryptedProfiles, BaseError>>;
   putObject: (key: string, body: Buffer, contentType: string) => Promise<void>;
-  signDownloadUrl: (key: string) => Promise<SignedDownloadUrl>;
+  signDownloadUrl: (key: string) => Promise<DownloadUrl>;
   sendMail: (input: SendInput) => Promise<MailerResult<SendOk>>;
 }
 

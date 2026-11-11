@@ -4,7 +4,10 @@
  *
  * @module @aggregator-dpg/worker
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FakeObjectStorage } from '@aggregator-dpg/object-storage/testing';
+import { _setObjectStorage } from '@aggregator-dpg/object-storage';
+import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 
 const runCampaignJobMock = vi.fn();
 const getWriterMock = vi.fn();
@@ -13,10 +16,6 @@ const sendMock = vi.fn();
 vi.mock('../services/campaign-process/index.js', () => ({ runCampaignJob: runCampaignJobMock }));
 vi.mock('../services/signalstack.js', () => ({ getSignalStackWriter: getWriterMock }));
 vi.mock('@aggregator-dpg/mailer', () => ({ getMailer: () => ({ send: sendMock }) }));
-vi.mock('../object-storage.js', () => ({
-  putObject: vi.fn(),
-  signExportDownloadUrl: vi.fn(),
-}));
 vi.mock('../logger.js', () => ({
   logger: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
 }));
@@ -26,13 +25,50 @@ vi.mock('../config.js', () => ({
     CAMPAIGN_EXPORT_FIELDS: 'contact',
     CAMPAIGN_EXPORT_RECIPIENT: 'network_admin',
     EXPORT_NETWORK_ADMIN_EMAIL: 'admin@network.example',
+    EXPORT_URL_TTL_SECONDS: 900,
   },
 }));
 
 const { processCampaignJob } = await import('./campaign-process.js');
 
 describe('processCampaignJob', () => {
+  const fake = new FakeObjectStorage();
+  beforeEach(() => _setObjectStorage(fake));
   afterEach(() => vi.clearAllMocks());
+
+  async function exportCollaborators() {
+    getWriterMock.mockReturnValue({ fetchDecryptedProfiles: vi.fn() });
+    runCampaignJobMock.mockResolvedValue(undefined);
+    await processCampaignJob({ jobId: 'job-1' });
+    return runCampaignJobMock.mock.calls[0]![1].export;
+  }
+
+  it('writes the export under campaign-exports and signs a download link', async () => {
+    const exp = await exportCollaborators();
+    await exp.putObject('campaign-exports/org-1/job-1.csv', Buffer.from('a,b'), 'text/csv');
+    expect(fake.read({ area: 'exports', key: 'org-1/job-1.csv' })?.toString('utf8')).toBe('a,b');
+    const signed = await exp.signDownloadUrl('campaign-exports/org-1/job-1.csv');
+    expect(signed.url).toContain('campaign-exports/org-1/job-1.csv');
+    expect(signed.url).toContain('participant-export.csv');
+    expect(Date.parse(signed.expiresAt)).toBeGreaterThan(Date.now());
+  });
+
+  it('throws when the export write or signing fails so the job retries', async () => {
+    const exp = await exportCollaborators();
+    fake.failNext('put', new UpstreamError('storage down'));
+    await expect(
+      exp.putObject('campaign-exports/org-1/job-1.csv', Buffer.from('x'), 'text/csv'),
+    ).rejects.toThrow('storage down');
+    fake.failNext('createDownloadUrl', new UpstreamError('sign down'));
+    await expect(exp.signDownloadUrl('campaign-exports/org-1/job-1.csv')).rejects.toThrow(
+      'sign down',
+    );
+  });
+
+  it('throws on an export key outside the exports area', async () => {
+    const exp = await exportCollaborators();
+    await expect(exp.signDownloadUrl('other/x.csv')).rejects.toThrow('not a valid exports key');
+  });
 
   it('throws when the signalstack client is not configured', async () => {
     getWriterMock.mockReturnValue(null);

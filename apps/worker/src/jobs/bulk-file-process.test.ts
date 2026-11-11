@@ -12,7 +12,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { Readable } from 'node:stream';
+import { FakeObjectStorage } from '@aggregator-dpg/object-storage/testing';
+import { _setObjectStorage } from '@aggregator-dpg/object-storage';
+import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 
 // ─── Mocks (declared before importing the SUT) ──────────────────────────────
 
@@ -53,11 +55,6 @@ vi.mock('../db.js', () => ({
 }));
 vi.mock('../services/redis.js', () => ({ getRedis: () => ({ hset, expire }) }));
 vi.mock('../services/bulk-queue.js', () => ({ enqueueRowProcessBulk }));
-vi.mock('../object-storage.js', () => ({
-  getCsvStream: vi.fn(async () =>
-    Readable.from([Buffer.from('name,email\nAsha,a@x.io\nRavi,r@x.io', 'utf8')]),
-  ),
-}));
 const getValidator = vi.fn(async () => ({ success: true, value: {} }));
 const getSchema = vi.fn(async () => ({
   success: true,
@@ -65,6 +62,10 @@ const getSchema = vi.fn(async () => ({
 }));
 vi.mock('../services/schema-loader.js', () => ({
   getSchemaLoader: () => ({ getValidator, getSchema }),
+}));
+const logError = vi.hoisted(() => vi.fn());
+vi.mock('../logger.js', () => ({
+  logger: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: logError }) },
 }));
 vi.mock('../config.js', () => ({
   config: {
@@ -87,7 +88,15 @@ const JOB = {
   schemaVersion: 'v1',
 };
 
+const fake = new FakeObjectStorage();
+
+function seedCsv(content: string): void {
+  fake.seed({ area: 'bulk-uploads', key: 'up-1/source.csv' }, Buffer.from(content, 'utf8'));
+}
+
 beforeEach(() => {
+  _setObjectStorage(fake);
+  seedCsv('name,email\nAsha,a@x.io\nRavi,r@x.io');
   calls.length = 0;
   updates.length = 0;
   uploadRow.status = 'uploaded';
@@ -125,10 +134,7 @@ describe('processBulkFile — success path', () => {
     // 2,001 rows → three chunks (ENQUEUE_CHUNK = 1000). Each chunk is awaited before
     // the next starts: lines, enqueue, lines, enqueue, lines, enqueue.
     const body = ['name,email', ...Array.from({ length: 2001 }, (_, i) => `P${i},p${i}@x.io`)];
-    const { getCsvStream } = await import('../object-storage.js');
-    vi.mocked(getCsvStream).mockResolvedValueOnce(
-      Readable.from([Buffer.from(body.join('\n'), 'utf8')]),
-    );
+    seedCsv(body.join('\n'));
     await processBulkFile(JOB);
     const order = calls.filter((c) => c === 'lines' || c === 'enqueue');
     expect(order).toEqual(['lines', 'enqueue', 'lines', 'enqueue', 'lines', 'enqueue']);
@@ -136,10 +142,7 @@ describe('processBulkFile — success path', () => {
 
   it('stops at a failed chunk: later chunks never run and the row total is never published', async () => {
     const body = ['name,email', ...Array.from({ length: 2001 }, (_, i) => `P${i},p${i}@x.io`)];
-    const { getCsvStream } = await import('../object-storage.js');
-    vi.mocked(getCsvStream).mockResolvedValueOnce(
-      Readable.from([Buffer.from(body.join('\n'), 'utf8')]),
-    );
+    seedCsv(body.join('\n'));
     enqueueRowProcessBulk
       .mockImplementationOnce(async () => {
         calls.push('enqueue');
@@ -180,10 +183,7 @@ describe('processBulkFile — idempotency + failure', () => {
   });
 
   it('marks file_failed and enqueues nothing on header mismatch', async () => {
-    const { getCsvStream } = await import('../object-storage.js');
-    vi.mocked(getCsvStream).mockResolvedValueOnce(
-      Readable.from([Buffer.from('name,phone\nAsha,123', 'utf8')]),
-    );
+    seedCsv('name,phone\nAsha,123');
     const res = await processBulkFile(JOB);
     expect(res.status).toBe('failed');
     expect(res.reason).toBe('header_mismatch');
@@ -197,10 +197,7 @@ describe('processBulkFile — idempotency + failure', () => {
     // check rejects the column as unknown and the WHOLE file onboards zero
     // rows — so every CSV downloaded from the new template would fail, and
     // none of the row-level behaviour is ever reached.
-    const { getCsvStream } = await import('../object-storage.js');
-    vi.mocked(getCsvStream).mockResolvedValueOnce(
-      Readable.from([Buffer.from('name,email,geo_location\nAsha,a@b.c,12.9352|77.6245', 'utf8')]),
-    );
+    seedCsv('name,email,geo_location\nAsha,a@b.c,12.9352|77.6245');
     const res = await processBulkFile(JOB);
     expect(res.status).not.toBe('failed');
     expect(enqueueRowProcessBulk).toHaveBeenCalled();
@@ -209,18 +206,14 @@ describe('processBulkFile — idempotency + failure', () => {
   it('still rejects a genuinely unknown column', async () => {
     // The allowlist is a union, not a bypass — anything outside the schema's
     // properties and the well-known set must still fail the file.
-    const { getCsvStream } = await import('../object-storage.js');
-    vi.mocked(getCsvStream).mockResolvedValueOnce(
-      Readable.from([Buffer.from('name,email,not_a_column\nAsha,a@b.c,x', 'utf8')]),
-    );
+    seedCsv('name,email,not_a_column\nAsha,a@b.c,x');
     const res = await processBulkFile(JOB);
     expect(res.status).toBe('failed');
     expect(res.reason).toBe('header_mismatch');
   });
 
   it('marks file_failed with a bare (non-detailed) reason for a failure kind that carries no detail', async () => {
-    const { getCsvStream } = await import('../object-storage.js');
-    vi.mocked(getCsvStream).mockResolvedValueOnce(Readable.from([Buffer.from('', 'utf8')]));
+    seedCsv('');
     const res = await processBulkFile(JOB);
     expect(res.status).toBe('failed');
     expect(res.reason).toBe('empty_csv');
@@ -264,14 +257,28 @@ describe('processBulkFile — idempotency + failure', () => {
     ).toBe(true);
   });
 
-  it('marks file_failed with system_error when the S3 GetObject call throws', async () => {
-    const { getCsvStream } = await import('../object-storage.js');
-    vi.mocked(getCsvStream).mockRejectedValueOnce(new Error('s3 timeout'));
+  it('marks file_failed with system_error when the storage read fails', async () => {
+    fake.failNext('openReadStream', new UpstreamError('storage timeout'));
     const res = await processBulkFile(JOB);
     expect(res).toEqual({ status: 'failed', reason: 'system_error' });
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({ sub: 'storage.get', error: 'storage timeout' }),
+    );
     expect(enqueueRowProcessBulk).not.toHaveBeenCalled();
     expect(
       updates.some((u) => u['status'] === 'file_failed' && u['statusReason'] === 'system_error'),
     ).toBe(true);
+  });
+
+  it('fails with system_error and logs storage.get when the object is missing', async () => {
+    await processBulkFile({ ...JOB, s3Key: 'bulk-uploads/up-1/absent.csv' });
+    expect(logError).toHaveBeenCalledWith(expect.objectContaining({ sub: 'storage.get' }));
+    expect(enqueueRowProcessBulk).not.toHaveBeenCalled();
+  });
+
+  it('fails with system_error when the stored key is outside the bulk-uploads area', async () => {
+    const res = await processBulkFile({ ...JOB, s3Key: 'elsewhere/up-1/source.csv' });
+    expect(res).toEqual({ status: 'failed', reason: 'system_error' });
+    expect(logError).toHaveBeenCalledWith(expect.objectContaining({ sub: 'storage.get' }));
   });
 });

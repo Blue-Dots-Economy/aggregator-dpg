@@ -12,10 +12,11 @@
  * Replays are skipped once the upload is at `row_processing` or later.
  */
 
+import type { Readable } from 'node:stream';
 import { eq } from 'drizzle-orm';
+import { fromStoredKey, getObjectStorage } from '@aggregator-dpg/object-storage';
 import type { BulkFileProcessJob } from '@aggregator-dpg/queue';
 import { schema, getDb } from '../db.js';
-import { getCsvStream } from '../object-storage.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { getSchemaLoader } from '../services/schema-loader.js';
@@ -35,6 +36,15 @@ interface ProcessOutcome {
   totalRows?: number;
   reason?: FileFailureReason;
   detail?: string;
+}
+
+async function openCsvStream(storedKey: string): Promise<Readable> {
+  const ref = fromStoredKey('bulk-uploads', storedKey);
+  if (!ref.success) throw ref.error;
+  const opened = await getObjectStorage().openReadStream(ref.value);
+  if (!opened.success) throw opened.error;
+  if (!opened.value) throw new Error(`empty body for stored key: ${storedKey}`);
+  return opened.value;
 }
 
 /** Builds the `status_reason` text for a file-level failure. */
@@ -96,14 +106,14 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     return { status: 'failed', reason: 'schema_unavailable' };
   }
 
-  // 2. Stream-parse the S3 body. No rows are returned on failure.
-  let stream;
+  // 2. Stream-parse the stored object. No rows are returned on failure.
+  let stream: Readable;
   try {
-    stream = await getCsvStream(job.s3Key);
+    stream = await openCsvStream(job.s3Key);
   } catch (err) {
     log.error({
       status: 'failure',
-      sub: 's3.get',
+      sub: 'storage.get',
       error: errorMessage(err),
       error_type: errorType(err),
     });

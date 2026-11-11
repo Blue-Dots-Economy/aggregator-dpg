@@ -14,11 +14,11 @@
 import { and, eq } from 'drizzle-orm';
 import Papa from 'papaparse';
 import { z } from 'zod';
+import { getObjectStorage, toStoredKey } from '@aggregator-dpg/object-storage';
 import { type BulkFinaliseJob, bulkRedisKeys } from '@aggregator-dpg/queue';
 import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 import { schema, getDb } from '../db.js';
 import { getRedis } from '../services/redis.js';
-import { putObject } from '../object-storage.js';
 import { logger } from '../logger.js';
 import { CSV_FIELD_DELIMITER } from './bulk-file-stream.js';
 
@@ -121,13 +121,19 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
       ];
     });
     const csvBody = Papa.unparse({ fields: csvHeader, data: csvRows });
-    errorsKey = `bulk-uploads/${job.uploadId}/errors.csv`;
+    const errorsRef = { area: 'bulk-uploads', key: `${job.uploadId}/errors.csv` } as const;
+    errorsKey = toStoredKey(errorsRef);
     try {
-      await putObject(errorsKey, Buffer.from(csvBody, 'utf8'), 'text/csv');
+      const put = await getObjectStorage().put({
+        ref: errorsRef,
+        body: Buffer.from(csvBody, 'utf8'),
+        contentType: 'text/csv',
+      });
+      if (!put.success) throw put.error;
     } catch (err) {
       log.error({
         status: 'failure',
-        sub: 's3.put',
+        sub: 'storage.put',
         error: errorMessage(err),
         error_type: errorType(err),
       });

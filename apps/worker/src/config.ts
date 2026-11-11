@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod';
+import { storageConfigFields } from '@aggregator-dpg/object-storage/config';
 import {
   assertSignalStackClientIdentity,
   assertTlsPosture,
@@ -32,21 +33,7 @@ const ConfigSchema = z.object({
   /** Liveness endpoint port, see health.ts. */
   HEALTH_PORT: z.coerce.number().int().positive().default(8080),
 
-  // ─── Object storage ─────────────────────────────────────────────────────
-  S3_ENDPOINT: z.string().optional(),
-  /**
-   * Browser-reachable S3 host, used only to sign download URLs.
-   * Falls back to `S3_ENDPOINT` when unset.
-   */
-  S3_PUBLIC_ENDPOINT: z.string().optional(),
-  S3_REGION: z.string().default('us-east-1'),
-  S3_BUCKET: z.string().default('aggregator-bulk-uploads'),
-  S3_ACCESS_KEY_ID: z.string().optional(),
-  S3_SECRET_ACCESS_KEY: z.string().optional(),
-  S3_FORCE_PATH_STYLE: z
-    .enum(['true', 'false'])
-    .default('true')
-    .transform((v) => v === 'true'),
+  ...storageConfigFields,
 
   // ─── Schema loader ──────────────────────────────────────────────────────
   /** Absolute or relative path to `config/schemas/`. */

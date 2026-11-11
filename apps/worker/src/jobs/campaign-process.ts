@@ -6,12 +6,12 @@
  */
 import type { CampaignProcessJob } from '@aggregator-dpg/queue';
 import { getMailer } from '@aggregator-dpg/mailer';
+import { fromStoredKey, getObjectStorage, type DownloadUrl } from '@aggregator-dpg/object-storage';
 import { logger } from '../logger.js';
 import { config } from '../config.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { getVoiceProvider } from '../services/voice-provider.js';
 import { getCampaignAuditWriter } from '../services/campaign-audit.js';
-import { putObject, signExportDownloadUrl } from '../object-storage.js';
 import * as jobClient from '../services/campaign-job-client.js';
 import { runCampaignJob } from '../services/campaign-process/index.js';
 
@@ -21,6 +21,28 @@ export interface CampaignAttempt {
   attempt: number;
   /** Total attempts BullMQ will make before giving up. */
   maxAttempts: number;
+}
+
+function exportRef(key: string) {
+  const ref = fromStoredKey('exports', key);
+  if (!ref.success) throw ref.error;
+  return ref.value;
+}
+
+async function putExport(key: string, body: Buffer, contentType: string): Promise<void> {
+  const put = await getObjectStorage().put({ ref: exportRef(key), body, contentType });
+  if (!put.success) throw put.error;
+}
+
+async function signExportDownloadUrl(key: string): Promise<DownloadUrl> {
+  const signed = await getObjectStorage().createDownloadUrl({
+    ref: exportRef(key),
+    expiresInSeconds: config.EXPORT_URL_TTL_SECONDS,
+    filename: 'participant-export.csv',
+    contentType: 'text/csv',
+  });
+  if (!signed.success) throw signed.error;
+  return signed.value;
 }
 
 /**
@@ -49,7 +71,7 @@ export async function processCampaignJob(
     client: jobClient,
     export: {
       fetchDecryptedProfiles: (q) => ss.fetchDecryptedProfiles(q),
-      putObject,
+      putObject: putExport,
       signDownloadUrl: signExportDownloadUrl,
       sendMail: (input) => getMailer().send(input),
     },
