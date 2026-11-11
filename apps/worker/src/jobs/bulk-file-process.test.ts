@@ -276,7 +276,12 @@ describe('processBulkFile — idempotency + failure', () => {
     expect(
       updates.some((u) => u['status'] === 'file_failed' && u['statusReason'] === 'system_error'),
     ).toBe(true);
-    expect(logError).toHaveBeenCalledWith(expect.objectContaining({ sub: 'storage.get' }));
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sub: 'storage.get',
+        error: 'object not found for stored key: bulk-uploads/up-1/absent.csv',
+      }),
+    );
     expect(enqueueRowProcessBulk).not.toHaveBeenCalled();
   });
 

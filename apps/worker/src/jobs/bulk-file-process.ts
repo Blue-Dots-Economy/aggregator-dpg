@@ -43,7 +43,7 @@ async function openCsvStream(storedKey: string): Promise<Readable> {
   if (!ref.success) throw ref.error;
   const opened = await getObjectStorage().openReadStream(ref.value);
   if (!opened.success) throw opened.error;
-  if (!opened.value) throw new Error(`empty body for stored key: ${storedKey}`);
+  if (!opened.value) throw new Error(`object not found for stored key: ${storedKey}`);
   return opened.value;
 }
 
