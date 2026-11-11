@@ -126,11 +126,11 @@ class BulkUploadsStoreFake extends BulkUploadsStoreBase {
       id: `upload-${this.seq}`,
       aggregatorId: input.aggregatorId,
       participantType: input.participantType,
-      s3Key: input.s3Key,
-      s3Etag: null,
+      storageKey: input.storageKey,
+      contentFingerprint: null,
       status: 'pending',
       statusReason: null,
-      errorsCsvS3Key: null,
+      errorsCsvStorageKey: null,
       schemaId: input.schemaId,
       schemaVersion: input.schemaVersion,
       uploadedBy: input.uploadedBy,
@@ -149,18 +149,6 @@ class BulkUploadsStoreFake extends BulkUploadsStoreBase {
     const row = this.rows.get(id);
     if (!row || row.aggregatorId !== aggregatorId) return { ok: true, value: null };
     return { ok: true, value: row };
-  }
-
-  async findByAggregatorAndEtag(
-    aggregatorId: string,
-    s3Etag: string,
-  ): Promise<StoreResult<BulkUpload | null>> {
-    for (const row of this.rows.values()) {
-      if (row.aggregatorId === aggregatorId && row.s3Etag === s3Etag) {
-        return { ok: true, value: row };
-      }
-    }
-    return { ok: true, value: null };
   }
 
   async list(
@@ -184,7 +172,7 @@ class BulkUploadsStoreFake extends BulkUploadsStoreBase {
   async markUploaded(
     id: string,
     aggregatorId: string,
-    s3Etag: string,
+    contentFingerprint: string,
   ): Promise<StoreResult<BulkUpload>> {
     const fail = this.takeFailure('markUploaded');
     if (fail) return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'db down' } };
@@ -195,7 +183,12 @@ class BulkUploadsStoreFake extends BulkUploadsStoreBase {
     if (row.status !== 'pending' && row.status !== 'uploaded') {
       return { ok: false, error: { code: 'INVALID_TRANSITION', message: 'bad transition' } };
     }
-    const updated: BulkUpload = { ...row, status: 'uploaded', s3Etag, updatedAt: new Date() };
+    const updated: BulkUpload = {
+      ...row,
+      status: 'uploaded',
+      contentFingerprint,
+      updatedAt: new Date(),
+    };
     this.rows.set(id, updated);
     return { ok: true, value: updated };
   }
@@ -226,11 +219,11 @@ function buildUpload(overrides: Partial<BulkUpload> = {}): BulkUpload {
     id: 'upload-fixed',
     aggregatorId: AGG_A,
     participantType: 'seeker',
-    s3Key: 'bulk-uploads/agg-a/upload-fixed/raw.csv',
-    s3Etag: null,
+    storageKey: 'bulk-uploads/agg-a/upload-fixed/raw.csv',
+    contentFingerprint: null,
     status: 'pending',
     statusReason: null,
-    errorsCsvS3Key: null,
+    errorsCsvStorageKey: null,
     schemaId: 'participant-seeker',
     schemaVersion: 'v1',
     uploadedBy: 'kc-1',
@@ -790,8 +783,9 @@ describe('bulk-uploads routes', () => {
       expect(res.statusCode).toBe(403);
     });
 
-    it('is idempotent (200, no S3/enqueue work) when already past pending/uploaded', async () => {
+    it('is idempotent (200, no storage/enqueue work) when already past pending/uploaded', async () => {
       store.seed([buildUpload({ id: 'upload-done', aggregatorId: AGG_A, status: 'completed' })]);
+      storage.failNext('stat', new UpstreamError('must not be called'));
       const res = await app.inject({
         method: 'POST',
         url: '/v1/bulk-uploads/upload-done/start',
@@ -828,7 +822,7 @@ describe('bulk-uploads routes', () => {
     });
 
     it('400 SCHEMA_VALIDATION when the stored key is still the pending placeholder', async () => {
-      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A, s3Key: 'pending' })]);
+      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A, storageKey: 'pending' })]);
       const res = await app.inject({
         method: 'POST',
         url: '/v1/bulk-uploads/upload-1/start',
@@ -1221,7 +1215,7 @@ describe('bulk-uploads routes', () => {
           id: 'upload-1',
           aggregatorId: AGG_A,
           status: 'completed',
-          errorsCsvS3Key: null,
+          errorsCsvStorageKey: null,
         }),
       ]);
       const res = await app.inject({
@@ -1239,9 +1233,10 @@ describe('bulk-uploads routes', () => {
           id: 'upload-1',
           aggregatorId: AGG_A,
           status: 'completed',
-          errorsCsvS3Key: 'some/other/path.csv',
+          errorsCsvStorageKey: 'some/other/path.csv',
         }),
       ]);
+      storage.failNext('createDownloadUrl', new UpstreamError('must not be called'));
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/upload-1/errors.csv',
@@ -1256,7 +1251,7 @@ describe('bulk-uploads routes', () => {
           id: 'upload-1',
           aggregatorId: AGG_A,
           status: 'completed',
-          errorsCsvS3Key: 'bulk-uploads/upload-1/errors.csv',
+          errorsCsvStorageKey: 'bulk-uploads/upload-1/errors.csv',
         }),
       ]);
       onboardingRows = [{ batchId: 'upload-1', total: 5, passed: 3, failed: 2, skipped: 0 }];

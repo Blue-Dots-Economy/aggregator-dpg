@@ -345,7 +345,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         aggregatorId: auth.aggregatorId,
         participantType,
         // Placeholder; the real key needs the row id and is set below.
-        s3Key: 'pending',
+        storageKey: 'pending',
         schemaId,
         schemaVersion,
         uploadedBy: auth.userId,
@@ -471,7 +471,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         });
       }
 
-      const parsedRef = fromStoredKey('bulk-uploads', upload.s3Key);
+      const parsedRef = fromStoredKey('bulk-uploads', upload.storageKey);
       const statResult = parsedRef.success ? await getObjectStorage().stat(parsedRef.value) : null;
       if (statResult && !statResult.success) throw statResult.error;
       const head = statResult?.value ?? null;
@@ -479,7 +479,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         log.warn({
           status: 'failure',
           reason: 'storage_object_missing',
-          storage_key: upload.s3Key,
+          storage_key: upload.storageKey,
           latency_ms: Date.now() - start,
         });
         throw httpError('SCHEMA_VALIDATION', {
@@ -493,7 +493,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         log.warn({
           status: 'failure',
           reason: 'object_too_large',
-          storage_key: upload.s3Key,
+          storage_key: upload.storageKey,
           content_length: head.size,
           max_bytes: config.BULK_UPLOAD_MAX_BYTES,
         });
@@ -525,7 +525,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         await enqueueBulkFileProcess({
           uploadId: marked.value.id,
           aggregatorId: auth.aggregatorId,
-          s3Key: marked.value.s3Key,
+          s3Key: marked.value.storageKey,
           participantType: marked.value.participantType,
           schemaId: marked.value.schemaId,
           schemaVersion: marked.value.schemaVersion,
@@ -676,7 +676,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
           detail: `Upload is in status '${upload.status}'. The errors report is generated only after finalisation.`,
         });
       }
-      if (!upload.errorsCsvS3Key) {
+      if (!upload.errorsCsvStorageKey) {
         // No key on a completed run means every row passed; there is no errors.csv.
         log.info({
           status: 'skipped',
@@ -688,16 +688,16 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
       }
       // Only sign keys that match the errors.csv layout, never an arbitrary object.
       const expectedKey = `bulk-uploads/${upload.id}/errors.csv`;
-      if (upload.errorsCsvS3Key !== expectedKey) {
+      if (upload.errorsCsvStorageKey !== expectedKey) {
         log.error({
           status: 'failure',
           reason: 'errors_csv_key_invalid',
-          storage_key: upload.errorsCsvS3Key,
+          storage_key: upload.errorsCsvStorageKey,
         });
         throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
       }
 
-      const errorsRef = fromStoredKey('bulk-uploads', upload.errorsCsvS3Key);
+      const errorsRef = fromStoredKey('bulk-uploads', upload.errorsCsvStorageKey);
       if (!errorsRef.success) {
         throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
       }
@@ -712,14 +712,14 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
       log.info({
         status: 'success',
         latency_ms: Date.now() - start,
-        storage_key: upload.errorsCsvS3Key,
+        storage_key: upload.errorsCsvStorageKey,
       });
 
       const counts = await loadCounts(upload.id, upload.status);
       return reply.send({
         upload_id: upload.id,
         url: signed.value.url,
-        s3_key: upload.errorsCsvS3Key,
+        s3_key: upload.errorsCsvStorageKey,
         expires_at: signed.value.expiresAt,
         content_type: 'text/csv',
         counts: {
@@ -763,7 +763,7 @@ interface UploadShape {
   status: string;
   statusReason: string | null;
   participantType: string;
-  errorsCsvS3Key: string | null;
+  errorsCsvStorageKey: string | null;
   schemaId: string;
   schemaVersion: string;
   createdAt: Date;
@@ -783,7 +783,7 @@ function toResponse(
     passed: counts.passed,
     failed: counts.failed,
     skipped: counts.skipped,
-    errors_csv_s3_key: upload.errorsCsvS3Key,
+    errors_csv_s3_key: upload.errorsCsvStorageKey,
     schema_id: upload.schemaId,
     schema_version: upload.schemaVersion,
     created_at: upload.createdAt.toISOString(),

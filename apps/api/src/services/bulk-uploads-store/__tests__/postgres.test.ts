@@ -16,7 +16,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { PostgresBulkUploadsStore } from '../postgres.js';
 import { _setDbClients } from '../../../db/client.js';
-import type { BulkUpload, CreateBulkUploadInput } from '../interface.js';
+import type { BulkUploadRow } from '../../../db/schema.js';
+import type { CreateBulkUploadInput } from '../interface.js';
 
 // ─── Fake Drizzle chain ─────────────────────────────────────────────────────
 
@@ -66,11 +67,12 @@ afterEach(() => {
   _setDbClients(null, null);
 });
 
-function makeRow(overrides: Partial<BulkUpload> = {}): BulkUpload {
+function makeRow(overrides: Partial<BulkUploadRow> = {}): BulkUploadRow {
   const createdAt = overrides.createdAt ?? new Date('2026-01-01T00:00:00Z');
   return {
     id: 'upload-1',
-    aggregatorId: 'agg-1',
+    userId: 'agg-1',
+    orgId: 'org-1',
     participantType: 'seeker',
     s3Key: 'uploads/upload-1.csv',
     s3Etag: null,
@@ -92,7 +94,7 @@ function makeInput(overrides: Partial<CreateBulkUploadInput> = {}): CreateBulkUp
   return {
     aggregatorId: 'agg-1',
     participantType: 'seeker',
-    s3Key: 'uploads/upload-1.csv',
+    storageKey: 'uploads/upload-1.csv',
     schemaId: 'seeker_profile',
     schemaVersion: '1.0',
     uploadedBy: 'coordinator-1',
@@ -152,7 +154,7 @@ describe('PostgresBulkUploadsStore.create', () => {
   });
 });
 
-// ─── findById / findByAggregatorAndEtag ────────────────────────────────────
+// ─── findById ───────────────────────────────────────────────────────────────
 
 describe('PostgresBulkUploadsStore.findById', () => {
   it('returns the mapped row scoped to the aggregator', async () => {
@@ -186,43 +188,6 @@ describe('PostgresBulkUploadsStore.findById', () => {
 
     const result = await store.findById('upload-1', 'agg-1');
     expect(result.ok).toBe(false);
-  });
-});
-
-describe('PostgresBulkUploadsStore.findByAggregatorAndEtag', () => {
-  it('returns the mapped row when an existing upload has the etag', async () => {
-    const db = makeFakeDb(() => [makeRow({ s3Etag: 'etag-1' })]);
-    _setDbClients(null, db as never);
-    const store = new PostgresBulkUploadsStore();
-
-    const result = await store.findByAggregatorAndEtag('agg-1', 'etag-1');
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value?.s3Etag).toBe('etag-1');
-  });
-
-  it('returns null when no upload matches', async () => {
-    const db = makeFakeDb(() => []);
-    _setDbClients(null, db as never);
-    const store = new PostgresBulkUploadsStore();
-
-    const result = await store.findByAggregatorAndEtag('agg-1', 'missing-etag');
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value).toBeNull();
-  });
-
-  it('returns DB_UNAVAILABLE when the driver throws', async () => {
-    const db = makeFakeDb(() => {
-      throw new Error('boom');
-    });
-    _setDbClients(null, db as never);
-    const store = new PostgresBulkUploadsStore();
-
-    const result = await store.findByAggregatorAndEtag('agg-1', 'etag-1');
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe('DB_UNAVAILABLE');
   });
 });
 
@@ -393,7 +358,7 @@ describe('PostgresBulkUploadsStore.markUploaded', () => {
     const result = await store.markUploaded('upload-1', 'agg-1', 'etag-2');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.s3Etag).toBe('etag-2');
+    expect(result.value.contentFingerprint).toBe('etag-2');
     expect(hasCall(updateChain, 'update')).toBe(true);
   });
 
@@ -409,39 +374,6 @@ describe('PostgresBulkUploadsStore.markUploaded', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('INVALID_TRANSITION');
-  });
-
-  it('maps a unique violation on the write to DUPLICATE_ETAG', async () => {
-    const db = makeFakeDb((chain) => {
-      if (hasCall(chain, 'update')) {
-        throw Object.assign(new Error('duplicate'), { code: '23505' });
-      }
-      return [makeRow({ status: 'pending' })];
-    });
-    _setDbClients(null, db as never);
-    const store = new PostgresBulkUploadsStore();
-
-    const result = await store.markUploaded('upload-1', 'agg-1', 'etag-1');
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe('DUPLICATE_ETAG');
-  });
-
-  it('maps a Drizzle-wrapped unique violation (code on .cause) to DUPLICATE_ETAG', async () => {
-    const db = makeFakeDb((chain) => {
-      if (hasCall(chain, 'update')) {
-        const driverErr = Object.assign(new Error('duplicate key value'), { code: '23505' });
-        throw new Error('Failed query: update bulk_uploads ...', { cause: driverErr });
-      }
-      return [makeRow({ status: 'pending' })];
-    });
-    _setDbClients(null, db as never);
-    const store = new PostgresBulkUploadsStore();
-
-    const result = await store.markUploaded('upload-1', 'agg-1', 'etag-1');
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe('DUPLICATE_ETAG');
   });
 
   it('maps any other write error to DB_UNAVAILABLE', async () => {

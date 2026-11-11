@@ -36,6 +36,7 @@ import {
 } from '../services/registration-links-store/index.js';
 import type { UpdateDraftInput } from '../services/registration-links-store/interface.js';
 import { _setDbClients } from '../db/client.js';
+import { _setObjectStorage } from '@aggregator-dpg/object-storage';
 
 const AGG_ID = '11111111-1111-1111-1111-111111111111';
 const ORG_ID = 'org-signalstack-1';
@@ -44,7 +45,7 @@ const USER_ID = 'kc-user-1';
 
 /**
  * Tracking stub: records every create input and returns a synthetic row.
- * Status forced to 'draft' to keep the route off the QR/S3 path.
+ * Status forced to 'draft' to keep the route off the QR/object-storage path.
  */
 class TrackingRegistrationLinksStore extends RegistrationLinksStoreBase {
   readonly creates: CreateRegistrationLinkInput[] = [];
@@ -343,7 +344,7 @@ describe('PATCH /v1/links/:id — registration_mode immutability', () => {
 // ---------------------------------------------------------------------------
 // Full CRUD lifecycle — create/list/read/patch/activate/deactivate against a
 // stateful in-memory fake, covering the auth wrapper, aggregator-type
-// enforcement, slug-collision retries, QR/S3 side effects, and every
+// enforcement, slug-collision retries, QR/object-storage side effects, and every
 // upstream-failure branch. `TrackingRegistrationLinksStore` above stays
 // scoped to the registration_mode-specific tests; this fake models the full
 // abstract contract so the rest of the route file's branches are exercised.
@@ -1162,12 +1163,13 @@ describe('object storage independence', () => {
   let store: FullRegistrationLinksStore;
 
   beforeEach(async () => {
+    _setObjectStorage(null);
     store = new FullRegistrationLinksStore();
     app = await bootFullApp({ store });
   });
   afterEach(async () => teardownFullApp(app));
 
-  it('creates a live link with S3 unreachable — 201, qr_url null', async () => {
+  it('creates a live link without object storage — 201, qr_url null', async () => {
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
@@ -1181,7 +1183,7 @@ describe('object storage independence', () => {
     expect(body.qr_url).toBeNull();
   });
 
-  it('activates a draft with S3 unreachable — 200, qr_url null', async () => {
+  it('activates a draft without object storage — 200, qr_url null', async () => {
     store.seed([buildLink({ id: 'link-draft', slug: 'act-nos3', status: 'draft' })]);
     const r = await app.inject({
       method: 'POST',

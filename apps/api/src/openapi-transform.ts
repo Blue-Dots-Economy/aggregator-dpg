@@ -1,6 +1,7 @@
 import { jsonSchemaTransform } from 'fastify-type-provider-zod';
 
 const DEPRECATED_PREFIX = 'Deprecated';
+const EXAMPLE_KEYS = new Set(['example', 'examples', 'default']);
 
 function markDeprecated(node: unknown): void {
   if (Array.isArray(node)) {
@@ -12,7 +13,9 @@ function markDeprecated(node: unknown): void {
   if (typeof schema.description === 'string' && schema.description.startsWith(DEPRECATED_PREFIX)) {
     schema.deprecated = true;
   }
-  Object.values(schema).forEach(markDeprecated);
+  for (const [key, value] of Object.entries(schema)) {
+    if (!EXAMPLE_KEYS.has(key)) markDeprecated(value);
+  }
 }
 
 /** Zod-to-JSON-schema transform that also flags fields described as "Deprecated..." with `deprecated: true`. */
