@@ -202,6 +202,18 @@ export function runObjectStorageContract(name: string, make: () => Promise<Contr
       expect(unwrap(await storage.stat(ref))).toBeNull();
     });
 
+    it('issues a plain signed PUT without a size limit when maxBytes is absent', async () => {
+      const instructions = unwrap(
+        await storage.createUpload({ ref, contentType: 'text/csv', expiresInSeconds: 300 }),
+      );
+      expect(instructions.method).toBe('PUT');
+      expect(instructions.headers['Content-Type']).toBe('text/csv');
+      const status = await upload(instructions, Buffer.alloc(4096, 'a'));
+      expect(status).toBeGreaterThanOrEqual(200);
+      expect(status).toBeLessThan(300);
+      expect(unwrap(await storage.stat(ref))?.size).toBe(4096);
+    });
+
     const outside: Array<[string, ObjectRef]> = [
       ['another area', { area: 'exports', key: 'bulk-uploads/contract/raw.csv' }],
       ['no area prefix', { area: 'bulk-uploads', key: 'contract/raw.csv' }],

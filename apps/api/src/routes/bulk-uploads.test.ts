@@ -744,7 +744,7 @@ describe('bulk-uploads routes', () => {
       expect(upload.method).toBe('POST');
       expect(upload.headers).toEqual({});
       expect(upload.form_fields['Content-Type']).toBe('text/csv');
-      expect(body.upload_url).toBe(upload.url);
+      expect(body.upload_url).not.toBe(upload.url);
       expect(body.content_type).toBe('text/csv');
       expect(body.s3_key).toBe(`bulk-uploads/${AGG_A}/upload-1/raw.csv`);
       expect(body.status).toBe('pending');
@@ -752,6 +752,30 @@ describe('bulk-uploads routes', () => {
       expect(body.schema_version).toBe('v1');
       expect(dbUpdateSpy).toHaveBeenCalledWith(
         expect.objectContaining({ s3Key: `bulk-uploads/${AGG_A}/upload-1/raw.csv` }),
+      );
+    });
+    it('keeps upload_url as a working PUT URL on the same key', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/bulk-uploads',
+        headers: AUTH('seeker-approved'),
+        payload: { participant_type: 'seeker' },
+      });
+      expect(res.statusCode).toBe(201);
+      const body = res.json() as { upload_url: string; s3_key: string };
+      const status = storage.upload(
+        {
+          method: 'PUT',
+          url: body.upload_url,
+          headers: { 'Content-Type': 'text/csv' },
+          formFields: {},
+          expiresAt: '',
+        },
+        Buffer.alloc(config.BULK_UPLOAD_MAX_BYTES + 1),
+      );
+      expect(status).toBe(204);
+      expect(storage.read({ area: 'bulk-uploads', key: body.s3_key })?.length).toBe(
+        config.BULK_UPLOAD_MAX_BYTES + 1,
       );
     });
   });

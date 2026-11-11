@@ -22,7 +22,8 @@ export interface UploadInstructions {
 export interface CreateUploadInput {
   ref: ObjectRef;
   contentType: string;
-  maxBytes: number;
+  /** Size limit in bytes; without it the instructions are a plain signed PUT with no limit. */
+  maxBytes?: number;
   expiresInSeconds: number;
 }
 

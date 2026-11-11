@@ -98,11 +98,11 @@ CSV-driven, async, signed-URL upload, worker-fanout processing.
    │                │                    │ (status=pending)  │                │
    │                │ ◄──signed upload   │                   │                │
    │                │                                        │                │
-   │                │ ──── PUT raw.csv ─────────────────────►│                │
-   │                │ ◄────── 200 OK (ETag) ─────────────────│                │
+   │                │ ── signed POST raw.csv ───────────────►│                │
+   │                │ ◄────── 204 No Content ────────────────│                │
    │                │                                                         │
    │                │ POST /:id/start    │                                    │
-   │                │ ─────────────────► │ HEAD object (verify ETag)          │
+   │                │ ─────────────────► │ stat object (size, fingerprint)    │
    │                │                    │ status=uploaded   │                │
    │                │                    │ enqueue file-process ─────────────►│
    │                │ ◄──202 + status    │                   │                │

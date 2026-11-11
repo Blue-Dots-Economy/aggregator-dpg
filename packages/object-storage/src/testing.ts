@@ -32,7 +32,7 @@ async function collect(body: Buffer | Readable): Promise<Buffer> {
 export class FakeObjectStorage extends ObjectStorageBase {
   private readonly issued = new Map<
     string,
-    { ref: ObjectRef; maxBytes: number; contentType: string }
+    { ref: ObjectRef; maxBytes: number | undefined; contentType: string }
   >();
   private readonly objects = new Map<string, StoredObject>();
   private readonly failures = new Map<keyof ObjectStorageBase, BaseError>();
@@ -64,17 +64,18 @@ export class FakeObjectStorage extends ObjectStorageBase {
     if (!stored.success) return stored;
     const failure = this.takeFailure('createUpload');
     if (failure) return err(failure);
-    const url = `fake://${stored.value}`;
+    const put = input.maxBytes === undefined;
+    const url = put ? `fake://${stored.value}?method=PUT` : `fake://${stored.value}`;
     this.issued.set(url, {
       ref: input.ref,
       maxBytes: input.maxBytes,
       contentType: input.contentType,
     });
     return ok({
-      method: 'POST',
+      method: put ? 'PUT' : 'POST',
       url,
-      headers: {},
-      formFields: { 'Content-Type': input.contentType },
+      headers: put ? { 'Content-Type': input.contentType } : {},
+      formFields: put ? {} : { 'Content-Type': input.contentType },
       expiresAt: new Date(Date.now() + input.expiresInSeconds * 1000).toISOString(),
     });
   }
@@ -82,7 +83,8 @@ export class FakeObjectStorage extends ObjectStorageBase {
   /** Mimics the browser upload: returns 204 and stores the bytes, or 400 when they exceed the issued limit. */
   upload(instructions: UploadInstructions, bytes: Buffer): number {
     const grant = this.issued.get(instructions.url);
-    if (!grant || bytes.length > grant.maxBytes) return 400;
+    if (!grant) return 400;
+    if (grant.maxBytes !== undefined && bytes.length > grant.maxBytes) return 400;
     this.objects.set(grant.ref.key, {
       bytes: Buffer.from(bytes),
       contentType: grant.contentType,

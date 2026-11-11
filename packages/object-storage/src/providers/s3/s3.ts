@@ -65,7 +65,26 @@ export class S3ObjectStorage extends ObjectStorageBase {
   async createUpload(input: CreateUploadInput): Promise<Result<UploadInstructions, BaseError>> {
     const stored = checkRef(input.ref);
     if (!stored.success) return stored;
+    const expiresAt = new Date(Date.now() + input.expiresInSeconds * 1000).toISOString();
     try {
+      if (input.maxBytes === undefined) {
+        const url = await getSignedUrl(
+          this.presigner,
+          new PutObjectCommand({
+            Bucket: this.cfg.S3_BUCKET,
+            Key: stored.value,
+            ContentType: input.contentType,
+          }),
+          { expiresIn: input.expiresInSeconds },
+        );
+        return ok({
+          method: 'PUT',
+          url,
+          headers: { 'Content-Type': input.contentType },
+          formFields: {},
+          expiresAt,
+        });
+      }
       const { url, fields } = await createPresignedPost(this.presigner, {
         Bucket: this.cfg.S3_BUCKET,
         Key: stored.value,
@@ -76,13 +95,7 @@ export class S3ObjectStorage extends ObjectStorageBase {
         Fields: { 'Content-Type': input.contentType },
         Expires: input.expiresInSeconds,
       });
-      return ok({
-        method: 'POST',
-        url,
-        headers: {},
-        formFields: fields,
-        expiresAt: new Date(Date.now() + input.expiresInSeconds * 1000).toISOString(),
-      });
+      return ok({ method: 'POST', url, headers: {}, formFields: fields, expiresAt });
     } catch (cause) {
       return failed('createUpload', cause);
     }

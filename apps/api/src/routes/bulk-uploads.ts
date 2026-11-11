@@ -170,7 +170,7 @@ const CreateBulkUploadResponseSchema = z
     }),
     upload_url: z
       .string()
-      .describe('Deprecated: follow `upload` instead; a bare PUT to this URL no longer works.'),
+      .describe('Deprecated: a signed PUT URL without the size limit; follow `upload` instead.'),
     s3_key: z.string(),
     expires_at: z.string(),
     content_type: z.string().describe('Deprecated: the content type is in `upload`.'),
@@ -358,13 +358,23 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
 
       const uploadId = created.value.id;
       const storedKey = buildKey('bulk-uploads', auth.aggregatorId, uploadId, 'raw.csv');
-      const signed = await getObjectStorage().createUpload({
-        ref: { area: 'bulk-uploads', key: storedKey },
-        contentType: 'text/csv',
-        maxBytes: config.BULK_UPLOAD_MAX_BYTES,
-        expiresInSeconds: config.BULK_UPLOAD_URL_TTL_SECONDS,
-      });
+      const rawRef: ObjectRef = { area: 'bulk-uploads', key: storedKey };
+      const storage = getObjectStorage();
+      const [signed, signedPut] = await Promise.all([
+        storage.createUpload({
+          ref: rawRef,
+          contentType: 'text/csv',
+          maxBytes: config.BULK_UPLOAD_MAX_BYTES,
+          expiresInSeconds: config.BULK_UPLOAD_URL_TTL_SECONDS,
+        }),
+        storage.createUpload({
+          ref: rawRef,
+          contentType: 'text/csv',
+          expiresInSeconds: config.BULK_UPLOAD_URL_TTL_SECONDS,
+        }),
+      ]);
       if (!signed.success) throw signed.error;
+      if (!signedPut.success) throw signedPut.error;
       const instructions = signed.value;
 
       // Store the real key. The store has no method for this, so use Drizzle directly.
@@ -391,7 +401,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
           headers: instructions.headers,
           form_fields: instructions.formFields,
         },
-        upload_url: instructions.url,
+        upload_url: signedPut.value.url,
         s3_key: storedKey,
         expires_at: instructions.expiresAt,
         content_type: 'text/csv',

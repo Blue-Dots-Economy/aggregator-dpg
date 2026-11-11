@@ -156,6 +156,30 @@ describe('S3ObjectStorage', () => {
       });
     });
 
+    it('signs a plain PUT with the content type when maxBytes is absent', async () => {
+      const result = await build({
+        S3_ENDPOINT: 'http://internal:9000',
+        S3_PUBLIC_ENDPOINT: 'http://public.example:9000',
+      }).createUpload({ ref, contentType: 'text/csv', expiresInSeconds: 300 });
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(new URL(result.value.url).host).toBe('public.example:9000');
+      expect(result.value).toMatchObject({
+        method: 'PUT',
+        headers: { 'Content-Type': 'text/csv' },
+        formFields: {},
+      });
+      const call = vi.mocked(getSignedUrl).mock.calls.at(-1);
+      expect(call?.[1]).toMatchObject({
+        input: {
+          Bucket: 'aggregator-bulk-uploads',
+          Key: 'bulk-uploads/x/raw.csv',
+          ContentType: 'text/csv',
+        },
+      });
+      expect(call?.[2]).toEqual({ expiresIn: 300 });
+    });
+
     it('falls back to the internal endpoint when no public endpoint is set', async () => {
       const result = await build({ S3_ENDPOINT: 'http://internal:9000' }).createUpload({
         ref,

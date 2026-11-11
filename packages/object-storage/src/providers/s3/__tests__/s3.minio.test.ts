@@ -47,6 +47,14 @@ describe.skipIf(!endpoint)('S3ObjectStorage against a live S3-compatible endpoin
         if (!result.success) throw result.error;
       },
       upload: async (instructions, bytes) => {
+        if (instructions.method === 'PUT') {
+          const response = await fetch(instructions.url, {
+            method: 'PUT',
+            headers: instructions.headers,
+            body: new Uint8Array(bytes),
+          });
+          return response.status;
+        }
         const form = new FormData();
         for (const [name, value] of Object.entries(instructions.formFields))
           form.append(name, value);

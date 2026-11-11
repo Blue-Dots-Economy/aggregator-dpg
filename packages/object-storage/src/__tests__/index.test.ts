@@ -105,6 +105,20 @@ describe('FakeObjectStorage', () => {
       formFields: { 'Content-Type': 'text/csv' },
     });
   });
+
+  it('builds a distinct fake:// PUT instruction when maxBytes is absent', async () => {
+    const result = await new FakeObjectStorage().createUpload({
+      ref,
+      contentType: 'text/csv',
+      expiresInSeconds: 60,
+    });
+    expect(result.success && result.value).toMatchObject({
+      method: 'PUT',
+      url: 'fake://bulk-uploads/a/raw.csv?method=PUT',
+      headers: { 'Content-Type': 'text/csv' },
+      formFields: {},
+    });
+  });
 });
 
 describe('FakeObjectStorage upload', () => {

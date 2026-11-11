@@ -13932,7 +13932,7 @@
                     },
                     "upload_url": {
                       "type": "string",
-                      "description": "Deprecated: follow `upload` instead; a bare PUT to this URL no longer works.",
+                      "description": "Deprecated: a signed PUT URL without the size limit; follow `upload` instead.",
                       "deprecated": true
                     },
                     "s3_key": {
