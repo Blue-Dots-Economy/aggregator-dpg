@@ -13932,7 +13932,7 @@
                     },
                     "upload_url": {
                       "type": "string",
-                      "description": "Deprecated: use upload.url.",
+                      "description": "Deprecated: follow `upload` instead; a bare PUT to this URL no longer works.",
                       "deprecated": true
                     },
                     "s3_key": {
@@ -13943,7 +13943,7 @@
                     },
                     "content_type": {
                       "type": "string",
-                      "description": "Deprecated: use upload.headers[\"Content-Type\"].",
+                      "description": "Deprecated: the content type is in `upload`.",
                       "deprecated": true
                     },
                     "max_bytes": {

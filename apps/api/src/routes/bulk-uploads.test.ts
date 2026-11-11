@@ -240,6 +240,7 @@ const UPLOAD_REF = {
   area: 'bulk-uploads',
   key: 'bulk-uploads/agg-a/upload-fixed/raw.csv',
 } as const;
+const ERRORS_REF = { area: 'bulk-uploads', key: 'bulk-uploads/upload-1/errors.csv' } as const;
 const AGG_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const AGG_BOTH = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const AGG_ALL = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
@@ -740,9 +741,9 @@ describe('bulk-uploads routes', () => {
         headers: Record<string, string>;
         form_fields: Record<string, string>;
       };
-      expect(upload.method).toBe('PUT');
-      expect(upload.headers['Content-Type']).toBe('text/csv');
-      expect(upload.form_fields).toEqual({});
+      expect(upload.method).toBe('POST');
+      expect(upload.headers).toEqual({});
+      expect(upload.form_fields['Content-Type']).toBe('text/csv');
       expect(body.upload_url).toBe(upload.url);
       expect(body.content_type).toBe('text/csv');
       expect(body.s3_key).toBe(`bulk-uploads/${AGG_A}/upload-1/raw.csv`);
@@ -876,6 +877,7 @@ describe('bulk-uploads routes', () => {
       });
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: { detail: string } }).error.detail).toContain('empty');
+      expect(storage.read(UPLOAD_REF)).toBeUndefined();
     });
 
     it('400 SCHEMA_VALIDATION when the uploaded CSV exceeds the max size', async () => {
@@ -889,6 +891,49 @@ describe('bulk-uploads routes', () => {
       });
       expect(res.statusCode).toBe(400);
       expect((res.json() as { error: { detail: string } }).error.detail).toContain('too large');
+      expect(storage.read(UPLOAD_REF)).toBeUndefined();
+    });
+
+    it('still answers 400 too large and logs a warning when deleting the rejected file fails', async () => {
+      const warn = vi.fn();
+      const child = app.log.child.bind(app.log);
+      vi.spyOn(app.log, 'child').mockImplementation(((...args: Parameters<typeof child>) => {
+        const logger = child(...args);
+        logger.warn = warn as never;
+        return logger;
+      }) as never);
+      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      storage.seed(UPLOAD_REF, Buffer.alloc(config.BULK_UPLOAD_MAX_BYTES + 1));
+      storage.failNext('delete', new UpstreamError('delete failed'));
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/bulk-uploads/upload-1/start',
+        headers: AUTH('seeker-approved'),
+        payload: { attestation: true },
+      });
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as { error: { detail: string } }).error.detail).toContain('too large');
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'failure',
+          reason: 'rejected_upload_delete_failed',
+          storage_key: UPLOAD_REF.key,
+          error: 'delete failed',
+        }),
+      );
+    });
+
+    it('accepts a file of exactly the max size', async () => {
+      store.seed([buildUpload({ id: 'upload-1', aggregatorId: AGG_A })]);
+      storage.seed(UPLOAD_REF, Buffer.alloc(config.BULK_UPLOAD_MAX_BYTES));
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/bulk-uploads/upload-1/start',
+        headers: AUTH('seeker-approved'),
+        payload: { attestation: true },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(storage.read(UPLOAD_REF)).toBeDefined();
     });
 
     it('500 CONSENT_WRITE_FAILED when consent config fails to load (fail-closed)', async () => {
@@ -1290,6 +1335,7 @@ describe('bulk-uploads routes', () => {
           errorsCsvStorageKey: key,
         }),
       ]);
+      storage.seed({ area: 'bulk-uploads', key }, Buffer.from('row,error\n'));
       const res = await app.inject({
         method: 'GET',
         url: '/v1/bulk-uploads/upload-1/errors.csv',
@@ -1301,6 +1347,47 @@ describe('bulk-uploads routes', () => {
       expect(body.s3_key).toBe(key);
     });
 
+    it('404 NOT_FOUND when the errors report is no longer in storage', async () => {
+      store.seed([
+        buildUpload({
+          id: 'upload-1',
+          aggregatorId: AGG_A,
+          status: 'completed',
+          errorsCsvStorageKey: 'bulk-uploads/upload-1/errors.csv',
+        }),
+      ]);
+      const createDownloadUrl = vi.spyOn(storage, 'createDownloadUrl');
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/upload-1/errors.csv',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(404);
+      const error = (res.json() as { error: { code: string; detail: string } }).error;
+      expect(error.code).toBe('NOT_FOUND');
+      expect(error.detail).toBe('This errors report is no longer available.');
+      expect(createDownloadUrl).not.toHaveBeenCalled();
+    });
+
+    it('500 when checking the errors report in storage fails', async () => {
+      store.seed([
+        buildUpload({
+          id: 'upload-1',
+          aggregatorId: AGG_A,
+          status: 'completed',
+          errorsCsvStorageKey: 'bulk-uploads/upload-1/errors.csv',
+        }),
+      ]);
+      storage.failNext('stat', new UpstreamError('storage down'));
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads/upload-1/errors.csv',
+        headers: AUTH('seeker-approved'),
+      });
+      expect(res.statusCode).toBe(500);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('INTERNAL');
+    });
+
     it('500 INTERNAL when signing the download URL fails', async () => {
       store.seed([
         buildUpload({
@@ -1310,6 +1397,7 @@ describe('bulk-uploads routes', () => {
           errorsCsvStorageKey: 'bulk-uploads/upload-1/errors.csv',
         }),
       ]);
+      storage.seed(ERRORS_REF, Buffer.from('row,error\n'));
       storage.failNext('createDownloadUrl', new UpstreamError('storage down'));
       const res = await app.inject({
         method: 'GET',
@@ -1329,6 +1417,7 @@ describe('bulk-uploads routes', () => {
           errorsCsvStorageKey: 'bulk-uploads/upload-1/errors.csv',
         }),
       ]);
+      storage.seed(ERRORS_REF, Buffer.from('row,error\n'));
       onboardingRows = [{ batchId: 'upload-1', total: 5, passed: 3, failed: 2, skipped: 0 }];
       const res = await app.inject({
         method: 'GET',

@@ -16,7 +16,7 @@
  * aggregator's upload answers 403. Belongs to `@aggregator-dpg/api`.
  */
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import type { JsonSchema } from '@aggregator-dpg/schema-loader/interface';
 import { z } from 'zod';
@@ -24,7 +24,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { requireApproved, type AuthContext } from '../services/auth/access-token.js';
 import { getBulkUploadsStore } from '../services/bulk-uploads-store/index.js';
 import { enqueueBulkFileProcess } from '../services/bulk-queue/index.js';
-import { buildKey, getObjectStorage } from '@aggregator-dpg/object-storage';
+import { buildKey, getObjectStorage, type ObjectRef } from '@aggregator-dpg/object-storage';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { checkBulkTemplateRate, checkBulkUploadRate } from '../services/bulk-upload-rate.js';
@@ -168,10 +168,12 @@ const CreateBulkUploadResponseSchema = z
       headers: z.record(z.string(), z.string()),
       form_fields: z.record(z.string(), z.string()),
     }),
-    upload_url: z.string().describe('Deprecated: use upload.url.'),
+    upload_url: z
+      .string()
+      .describe('Deprecated: follow `upload` instead; a bare PUT to this URL no longer works.'),
     s3_key: z.string(),
     expires_at: z.string(),
-    content_type: z.string().describe('Deprecated: use upload.headers["Content-Type"].'),
+    content_type: z.string().describe('Deprecated: the content type is in `upload`.'),
     max_bytes: z.number(),
     schema_id: z.string(),
     schema_version: z.string(),
@@ -462,10 +464,8 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         });
       }
 
-      const statResult = await getObjectStorage().stat({
-        area: 'bulk-uploads',
-        key: upload.storageKey,
-      });
+      const uploadRef: ObjectRef = { area: 'bulk-uploads', key: upload.storageKey };
+      const statResult = await getObjectStorage().stat(uploadRef);
       if (!statResult.success && !(statResult.error instanceof ValidationError)) {
         throw statResult.error;
       }
@@ -482,9 +482,11 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         });
       }
       if (head.size === 0) {
+        await deleteRejectedUpload(uploadRef, log);
         throw httpError('SCHEMA_VALIDATION', { detail: 'Uploaded CSV is empty.' });
       }
       if (head.size > config.BULK_UPLOAD_MAX_BYTES) {
+        await deleteRejectedUpload(uploadRef, log);
         log.warn({
           status: 'failure',
           reason: 'object_too_large',
@@ -695,8 +697,19 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
         throw httpError('NOT_FOUND', { detail: 'Errors report not available for this upload.' });
       }
 
+      const errorsRef: ObjectRef = { area: 'bulk-uploads', key: upload.errorsCsvStorageKey };
+      const errorsStat = await getObjectStorage().stat(errorsRef);
+      if (!errorsStat.success) throw errorsStat.error;
+      if (!errorsStat.value) {
+        log.warn({
+          status: 'failure',
+          reason: 'errors_csv_expired',
+          storage_key: upload.errorsCsvStorageKey,
+        });
+        throw httpError('NOT_FOUND', { detail: 'This errors report is no longer available.' });
+      }
       const signed = await getObjectStorage().createDownloadUrl({
-        ref: { area: 'bulk-uploads', key: upload.errorsCsvStorageKey },
+        ref: errorsRef,
         expiresInSeconds: config.BULK_UPLOAD_URL_TTL_SECONDS,
         filename: 'errors.csv',
         contentType: 'text/csv',
@@ -790,6 +803,17 @@ function toResponse(
  *
  * Returns ZERO_COUNTS when the keys are missing.
  */
+async function deleteRejectedUpload(ref: ObjectRef, log: FastifyBaseLogger): Promise<void> {
+  const deleted = await getObjectStorage().delete(ref);
+  if (deleted.success) return;
+  log.warn({
+    status: 'failure',
+    reason: 'rejected_upload_delete_failed',
+    storage_key: ref.key,
+    error: deleted.error.message,
+  });
+}
+
 async function loadCountsFromRedis(uploadId: string): Promise<UploadCounts> {
   try {
     const redis = getRedis();
