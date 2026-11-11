@@ -2,8 +2,10 @@ import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { buildKey } from '../../../areas.js';
 import { storageConfigFields } from '../../../config.js';
 import { runObjectStorageContract } from '../../../contract-suite.js';
+import type { ObjectRef } from '../../../interface.js';
 import { S3ObjectStorage } from '../s3.js';
 
 const endpoint = process.env.OBJECT_STORAGE_IT_ENDPOINT;
@@ -49,7 +51,10 @@ describe.skipIf(!endpoint)('S3ObjectStorage against a live S3-compatible endpoin
 
   it('serves a download URL with the bytes and an attachment filename', async () => {
     const storage = new S3ObjectStorage(cfg);
-    const ref = { area: 'bulk-uploads', key: `contract/${randomUUID()}/errors.csv` } as const;
+    const ref: ObjectRef = {
+      area: 'bulk-uploads',
+      key: buildKey('bulk-uploads', 'contract', randomUUID(), 'errors.csv'),
+    };
     const bytes = Buffer.from('row,error\n1,bad\n');
     const put = await storage.put({ ref, body: bytes, contentType: 'text/csv' });
     if (!put.success) throw put.error;

@@ -1,7 +1,8 @@
 import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
+import { UpstreamError, ValidationError } from '@aggregator-dpg/shared-primitives/errors';
 import { storageConfigFields } from '../../../config.js';
+import type { ObjectRef } from '../../../interface.js';
 import { z } from 'zod';
 
 const h = vi.hoisted(() => ({
@@ -53,7 +54,7 @@ const { S3ObjectStorage } = await import('../s3.js');
 const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
 
 const schema = z.object(storageConfigFields);
-const ref = { area: 'bulk-uploads', key: 'x/raw.csv' } as const;
+const ref: ObjectRef = { area: 'bulk-uploads', key: 'bulk-uploads/x/raw.csv' };
 
 function build(env: Record<string, string> = {}) {
   return new S3ObjectStorage(schema.parse(env));
@@ -197,7 +198,7 @@ describe('S3ObjectStorage', () => {
 
   it('deletes the full stored key', async () => {
     h.sendImpl.mockResolvedValue({});
-    const result = await build().delete({ area: 'bulk-uploads', key: 'x/raw.csv' });
+    const result = await build().delete(ref);
     expect(result.success).toBe(true);
     const [command] = h.sendImpl.mock.calls[0] ?? [];
     expect(command.name).toBe('DeleteObject');
@@ -285,6 +286,33 @@ describe('S3ObjectStorage', () => {
     h.sendImpl.mockResolvedValue({});
     expect((await build().checkHealth()).success).toBe(true);
     expect(h.sendImpl.mock.calls[0]?.[0].name).toBe('HeadBucket');
+  });
+
+  it('rejects a key outside its area on every operation without calling storage', async () => {
+    const storage = build();
+    const outside: ObjectRef = { area: 'exports', key: 'bulk-uploads/x/raw.csv' };
+    const results = [
+      await storage.createUpload({
+        ref: outside,
+        contentType: 'text/csv',
+        maxBytes: 5,
+        expiresInSeconds: 300,
+      }),
+      await storage.createDownloadUrl({
+        ref: outside,
+        expiresInSeconds: 60,
+        filename: 'errors.csv',
+        contentType: 'text/csv',
+      }),
+      await storage.stat(outside),
+      await storage.openReadStream(outside),
+      await storage.put({ ref: outside, body: Buffer.from('x'), contentType: 'text/csv' }),
+      await storage.delete(outside),
+    ];
+    for (const result of results) {
+      expect(!result.success && result.error).toBeInstanceOf(ValidationError);
+    }
+    expect(h.sendImpl).not.toHaveBeenCalled();
   });
 
   describe('client construction', () => {

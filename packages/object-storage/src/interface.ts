@@ -5,7 +5,7 @@ import type { Result } from '@aggregator-dpg/shared-primitives/result';
 /** Logical storage area; each maps to a key prefix. */
 export type StorageArea = 'bulk-uploads' | 'exports';
 
-/** Reference to one object; `key` is relative to the area prefix. */
+/** Reference to one object; `key` is the full stored key, inside the area prefix. */
 export interface ObjectRef {
   area: StorageArea;
   key: string;

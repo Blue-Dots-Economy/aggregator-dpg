@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { ConfigError, ValidationError } from '@aggregator-dpg/shared-primitives/errors';
-import { fromStoredKey, resolveStoredKey, toStoredKey } from '../areas.js';
+import { buildKey, checkRef } from '../areas.js';
 import { storageConfigFields } from '../config.js';
 import type { ObjectRef } from '../interface.js';
 import { runObjectStorageContract } from '../contract-suite.js';
@@ -9,35 +9,35 @@ import { FakeObjectStorage } from '../testing.js';
 import { _setObjectStorage, getObjectStorage, initObjectStorage } from '../index.js';
 
 describe('areas', () => {
-  it('maps bulk-uploads refs to the bulk-uploads prefix', () => {
-    expect(toStoredKey({ area: 'bulk-uploads', key: 'a/b/raw.csv' })).toBe(
-      'bulk-uploads/a/b/raw.csv',
+  it('builds bulk-uploads keys with the owner first', () => {
+    expect(buildKey('bulk-uploads', 'agg-1', 'up-1', 'raw.csv')).toBe(
+      'bulk-uploads/agg-1/up-1/raw.csv',
     );
   });
 
-  it('maps exports refs to the campaign-exports prefix', () => {
-    expect(toStoredKey({ area: 'exports', key: 'o/j.csv' })).toBe('campaign-exports/o/j.csv');
+  it('builds exports keys under the campaign-exports prefix', () => {
+    expect(buildKey('exports', 'org-1', 'job-1.csv')).toBe('campaign-exports/org-1/job-1.csv');
   });
 
-  it('parses a stored key back into a ref', () => {
-    const result = fromStoredKey('bulk-uploads', 'bulk-uploads/x/errors.csv');
-    expect(result.success && result.value).toEqual({ area: 'bulk-uploads', key: 'x/errors.csv' });
-  });
-
-  it('resolves a known area to its stored key', () => {
-    const result = resolveStoredKey({ area: 'exports', key: 'o/j.csv' });
+  it('accepts a key inside its area', () => {
+    const result = checkRef({ area: 'exports', key: 'campaign-exports/o/j.csv' });
     expect(result.success && result.value).toBe('campaign-exports/o/j.csv');
   });
 
   it.each(['nope', 'toString'])('rejects the unknown area %s', (area) => {
-    const result = resolveStoredKey({ area, key: 'x' } as unknown as ObjectRef);
+    const ref: ObjectRef = { area: 'exports', key: 'campaign-exports/o/j.csv' };
+    Reflect.set(ref, 'area', area);
+    const result = checkRef(ref);
     expect(!result.success && result.error).toBeInstanceOf(ValidationError);
   });
 
-  it.each(['pending', 'campaign-exports/x', 'bulk-uploads/'])('rejects %s', (stored) => {
-    const result = fromStoredKey('bulk-uploads', stored);
-    expect(!result.success && result.error).toBeInstanceOf(ValidationError);
-  });
+  it.each(['pending', 'campaign-exports/x', 'bulk-uploads/', 'x/bulk-uploads/a'])(
+    'rejects the bulk-uploads key %s',
+    (key) => {
+      const result = checkRef({ area: 'bulk-uploads', key });
+      expect(!result.success && result.error).toBeInstanceOf(ValidationError);
+    },
+  );
 });
 
 describe('storageConfigFields', () => {
@@ -71,7 +71,7 @@ runObjectStorageContract('fake', async () => {
 });
 
 describe('FakeObjectStorage', () => {
-  const ref = { area: 'bulk-uploads', key: 'a/raw.csv' } as const;
+  const ref: ObjectRef = { area: 'bulk-uploads', key: 'bulk-uploads/a/raw.csv' };
 
   it('fails the next call once with the given error, then recovers', async () => {
     const storage = new FakeObjectStorage();
@@ -87,7 +87,7 @@ describe('FakeObjectStorage', () => {
     const storage = new FakeObjectStorage();
     storage.seed(ref, Buffer.from('hi'));
     expect(storage.read(ref)?.toString()).toBe('hi');
-    expect(storage.read({ area: 'exports', key: 'a/raw.csv' })).toBeUndefined();
+    expect(storage.read({ area: 'bulk-uploads', key: 'bulk-uploads/b/raw.csv' })).toBeUndefined();
   });
 
   it('builds fake:// upload instructions on the stored key', async () => {

@@ -7,27 +7,19 @@ export const AREAS: Readonly<Record<StorageArea, { prefix: string; visibility: '
   exports: { prefix: 'campaign-exports/', visibility: 'private' },
 };
 
-/** Returns the full stored key: the area prefix followed by the relative key. */
-export function toStoredKey(ref: ObjectRef): string {
-  return AREAS[ref.area].prefix + ref.key;
+/** Builds a new object key `<area prefix><ownerId>/<segments>`; every key starts with its owner. */
+export function buildKey(area: StorageArea, ownerId: string, ...segments: string[]): string {
+  return `${AREAS[area].prefix}${[ownerId, ...segments].join('/')}`;
 }
 
-/** Returns the full stored key, or a ValidationError when the area is unknown. */
-export function resolveStoredKey(ref: ObjectRef): Result<string, ValidationError> {
+/** Returns the ref's key, or a ValidationError when the area is unknown or the key lies outside it. */
+export function checkRef(ref: ObjectRef): Result<string, ValidationError> {
   if (!Object.hasOwn(AREAS, ref.area)) {
     return err(new ValidationError(`Unknown storage area: ${String(ref.area)}`));
   }
-  return ok(toStoredKey(ref));
-}
-
-/** Parses a stored key back into a reference; fails when the prefix or remainder is missing. */
-export function fromStoredKey(
-  area: StorageArea,
-  stored: string,
-): Result<ObjectRef, ValidationError> {
-  const { prefix } = AREAS[area];
-  if (!stored.startsWith(prefix) || stored.length === prefix.length) {
-    return err(new ValidationError(`Stored key is not a valid ${area} key`));
+  const { prefix } = AREAS[ref.area];
+  if (!ref.key.startsWith(prefix) || ref.key.length === prefix.length) {
+    return err(new ValidationError(`Key is not inside the ${ref.area} area`));
   }
-  return ok({ area, key: stored.slice(prefix.length) });
+  return ok(ref.key);
 }

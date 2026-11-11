@@ -7,6 +7,7 @@ import {
   type BaseError,
 } from '@aggregator-dpg/shared-primitives/errors';
 import type { Result } from '@aggregator-dpg/shared-primitives/result';
+import { buildKey } from './areas.js';
 import type { ObjectRef, ObjectStorageBase } from './interface.js';
 
 interface ContractHarness {
@@ -35,16 +36,37 @@ export function runObjectStorageContract(name: string, make: () => Promise<Contr
     let ref: ObjectRef;
     let created: ObjectRef[];
 
-    function track(area: ObjectRef['area'], key: string): ObjectRef {
-      const tracked: ObjectRef = { area, key };
+    function track(area: ObjectRef['area'], file: string): ObjectRef {
+      const tracked: ObjectRef = { area, key: buildKey(area, 'contract', randomUUID(), file) };
       created.push(tracked);
       return tracked;
+    }
+
+    async function everyOperation(target: ObjectRef): Promise<Array<Result<unknown, BaseError>>> {
+      return [
+        await storage.createUpload({
+          ref: target,
+          contentType: 'text/csv',
+          maxBytes: 1024,
+          expiresInSeconds: 300,
+        }),
+        await storage.createDownloadUrl({
+          ref: target,
+          expiresInSeconds: 300,
+          filename: 'errors.csv',
+          contentType: 'text/csv',
+        }),
+        await storage.stat(target),
+        await storage.openReadStream(target),
+        await storage.put({ ref: target, body: Buffer.from('x'), contentType: 'text/csv' }),
+        await storage.delete(target),
+      ];
     }
 
     beforeEach(async () => {
       ({ storage, seed } = await make());
       created = [];
-      ref = track('bulk-uploads', `contract/${randomUUID()}/raw.csv`);
+      ref = track('bulk-uploads', 'raw.csv');
     });
 
     afterEach(async () => {
@@ -82,7 +104,7 @@ export function runObjectStorageContract(name: string, make: () => Promise<Contr
     });
 
     it('gives equal fingerprints for equal bytes and different ones otherwise', async () => {
-      const other = track('bulk-uploads', `contract/${randomUUID()}/other.csv`);
+      const other = track('bulk-uploads', 'other.csv');
       unwrap(await storage.put({ ref, body: Buffer.from('same'), contentType: 'text/csv' }));
       const first = unwrap(await storage.stat(ref));
       unwrap(await storage.put({ ref, body: Buffer.from('same'), contentType: 'text/csv' }));
@@ -146,37 +168,22 @@ export function runObjectStorageContract(name: string, make: () => Promise<Contr
       expect(upload.headers['Content-Type'] ?? upload.formFields['Content-Type']).toBe('text/csv');
     });
 
-    it('keeps areas isolated for the same relative key', async () => {
-      const exportsRef = track('exports', ref.key);
-      unwrap(
-        await storage.put({ ref: exportsRef, body: Buffer.from('x'), contentType: 'text/csv' }),
-      );
-      expect(unwrap(await storage.stat(ref))).toBeNull();
-      expect(unwrap(await storage.stat(exportsRef))).not.toBeNull();
+    const outside: Array<[string, ObjectRef]> = [
+      ['another area', { area: 'exports', key: 'bulk-uploads/contract/raw.csv' }],
+      ['no area prefix', { area: 'bulk-uploads', key: 'contract/raw.csv' }],
+      ['only the area prefix', { area: 'bulk-uploads', key: 'bulk-uploads/' }],
+    ];
+
+    it.each(outside)('rejects a key with %s with a ValidationError', async (_case, target) => {
+      for (const result of await everyOperation(target)) {
+        expect(!result.success && result.error).toBeInstanceOf(ValidationError);
+      }
     });
 
     it('rejects an unknown area with a ValidationError', async () => {
       const unknown: ObjectRef = { ...ref };
       Reflect.set(unknown, 'area', 'nope');
-      const results = [
-        await storage.createUpload({
-          ref: unknown,
-          contentType: 'text/csv',
-          maxBytes: 1024,
-          expiresInSeconds: 300,
-        }),
-        await storage.createDownloadUrl({
-          ref: unknown,
-          expiresInSeconds: 300,
-          filename: 'errors.csv',
-          contentType: 'text/csv',
-        }),
-        await storage.stat(unknown),
-        await storage.openReadStream(unknown),
-        await storage.put({ ref: unknown, body: Buffer.from('x'), contentType: 'text/csv' }),
-        await storage.delete(unknown),
-      ];
-      for (const result of results) {
+      for (const result of await everyOperation(unknown)) {
         expect(!result.success && result.error).toBeInstanceOf(ValidationError);
       }
     });

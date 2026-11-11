@@ -11,7 +11,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Readable } from 'node:stream';
 import { UpstreamError, type BaseError } from '@aggregator-dpg/shared-primitives/errors';
 import { err, ok, type Result } from '@aggregator-dpg/shared-primitives/result';
-import { resolveStoredKey } from '../../areas.js';
+import { checkRef } from '../../areas.js';
 import type { StorageConfig } from '../../config.js';
 import {
   ObjectStorageBase,
@@ -62,7 +62,7 @@ export class S3ObjectStorage extends ObjectStorageBase {
   }
 
   async createUpload(input: CreateUploadInput): Promise<Result<UploadInstructions, BaseError>> {
-    const stored = resolveStoredKey(input.ref);
+    const stored = checkRef(input.ref);
     if (!stored.success) return stored;
     try {
       const url = await getSignedUrl(
@@ -87,7 +87,7 @@ export class S3ObjectStorage extends ObjectStorageBase {
   }
 
   async createDownloadUrl(input: CreateDownloadInput): Promise<Result<DownloadUrl, BaseError>> {
-    const stored = resolveStoredKey(input.ref);
+    const stored = checkRef(input.ref);
     if (!stored.success) return stored;
     try {
       const url = await getSignedUrl(
@@ -110,7 +110,7 @@ export class S3ObjectStorage extends ObjectStorageBase {
   }
 
   async stat(ref: ObjectRef): Promise<Result<ObjectStat | null, BaseError>> {
-    const stored = resolveStoredKey(ref);
+    const stored = checkRef(ref);
     if (!stored.success) return stored;
     try {
       const head = await this.client.send(
@@ -129,7 +129,7 @@ export class S3ObjectStorage extends ObjectStorageBase {
   }
 
   async openReadStream(ref: ObjectRef): Promise<Result<Readable | null, BaseError>> {
-    const stored = resolveStoredKey(ref);
+    const stored = checkRef(ref);
     if (!stored.success) return stored;
     try {
       const object = await this.client.send(
@@ -146,7 +146,7 @@ export class S3ObjectStorage extends ObjectStorageBase {
   }
 
   async put(input: PutInput): Promise<Result<void, BaseError>> {
-    const stored = resolveStoredKey(input.ref);
+    const stored = checkRef(input.ref);
     if (!stored.success) return stored;
     const params = {
       Bucket: this.cfg.S3_BUCKET,
@@ -171,7 +171,7 @@ export class S3ObjectStorage extends ObjectStorageBase {
   }
 
   async delete(ref: ObjectRef): Promise<Result<void, BaseError>> {
-    const stored = resolveStoredKey(ref);
+    const stored = checkRef(ref);
     if (!stored.success) return stored;
     try {
       await this.client.send(
