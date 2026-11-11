@@ -490,12 +490,12 @@ export const bulkUploads = pgTable(
       .$defaultFn(() => sql`NULL`),
     // A domain id of the active network. The application validates it.
     participantType: text('participant_type').notNull(),
-    s3Key: text('s3_key').notNull(),
+    storageKey: text('s3_key').notNull(),
     // ETag read on upload confirmation (POST /:id/start). NULL while pending.
-    s3Etag: text('s3_etag'),
+    contentFingerprint: text('s3_etag'),
     status: bulkUploadStatusEnum('status').notNull().default('pending'),
     statusReason: text('status_reason'),
-    errorsCsvS3Key: text('errors_csv_s3_key'),
+    errorsCsvStorageKey: text('errors_csv_s3_key'),
     schemaId: text('schema_id').notNull(),
     schemaVersion: text('schema_version').notNull(),
     uploadedBy: uuid('uploaded_by').notNull(),

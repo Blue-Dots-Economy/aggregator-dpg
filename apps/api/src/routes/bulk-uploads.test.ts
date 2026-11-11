@@ -775,7 +775,7 @@ describe('bulk-uploads routes', () => {
       expect(body.schema_id).toBe('participant-seeker');
       expect(body.schema_version).toBe('v1');
       expect(dbUpdateSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ s3Key: `bulk-uploads/${AGG_A}/upload-1/raw.csv` }),
+        expect.objectContaining({ storageKey: `bulk-uploads/${AGG_A}/upload-1/raw.csv` }),
       );
     });
     it('keeps upload_url as a working PUT URL on the same key', async () => {

@@ -195,7 +195,7 @@ describe('finaliseBulk — normal completion', () => {
     expect(res).toEqual({ status: 'completed', total: 3, passed: 3, failed: 0, skipped: 0 });
     expect(outsideTxUpdates[0]).toMatchObject({ status: 'finalising' });
     expect(fake.read(ERRORS_REF)).toBeUndefined();
-    expect(txUpdates[0]).toMatchObject({ status: 'completed', errorsCsvS3Key: null });
+    expect(txUpdates[0]).toMatchObject({ status: 'completed', errorsCsvStorageKey: null });
     expect(insertedOnboarding).toHaveLength(1);
     expect(insertedOnboarding[0]).toMatchObject({
       userId: 'agg-1',
@@ -240,7 +240,7 @@ describe('finaliseBulk — normal completion', () => {
     expect(csv).toContain('bad email');
     expect(txUpdates[0]).toMatchObject({
       status: 'completed',
-      errorsCsvS3Key: 'bulk-uploads/agg-1/up-1/errors.csv',
+      errorsCsvStorageKey: 'bulk-uploads/agg-1/up-1/errors.csv',
     });
   });
 

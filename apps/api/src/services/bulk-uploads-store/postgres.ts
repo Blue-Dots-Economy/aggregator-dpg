@@ -28,7 +28,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
         .values({
           userId: input.aggregatorId,
           participantType: input.participantType,
-          s3Key: input.storageKey,
+          storageKey: input.storageKey,
           schemaId: input.schemaId,
           schemaVersion: input.schemaVersion,
           uploadedBy: input.uploadedBy,
@@ -160,7 +160,7 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
       // The status guard stops a concurrent caller moving a later row back to `uploaded`.
       const rows = await getDb()
         .update(bulkUploads)
-        .set({ status: 'uploaded', s3Etag: contentFingerprint, updatedAt: new Date() })
+        .set({ status: 'uploaded', contentFingerprint, updatedAt: new Date() })
         .where(
           and(
             eq(bulkUploads.id, id),
@@ -204,11 +204,11 @@ function toDomain(row: BulkUploadRow): BulkUpload {
     id: row.id,
     aggregatorId: row.userId,
     participantType: row.participantType,
-    storageKey: row.s3Key,
-    contentFingerprint: row.s3Etag,
+    storageKey: row.storageKey,
+    contentFingerprint: row.contentFingerprint,
     status: row.status,
     statusReason: row.statusReason,
-    errorsCsvStorageKey: row.errorsCsvS3Key,
+    errorsCsvStorageKey: row.errorsCsvStorageKey,
     schemaId: row.schemaId,
     schemaVersion: row.schemaVersion,
     uploadedBy: row.uploadedBy,

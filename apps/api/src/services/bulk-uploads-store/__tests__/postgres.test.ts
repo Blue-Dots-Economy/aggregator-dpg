@@ -74,11 +74,11 @@ function makeRow(overrides: Partial<BulkUploadRow> = {}): BulkUploadRow {
     userId: 'agg-1',
     orgId: 'org-1',
     participantType: 'seeker',
-    s3Key: 'uploads/upload-1.csv',
-    s3Etag: null,
+    storageKey: 'uploads/upload-1.csv',
+    contentFingerprint: null,
     status: 'pending',
     statusReason: null,
-    errorsCsvS3Key: null,
+    errorsCsvStorageKey: null,
     schemaId: 'seeker_profile',
     schemaVersion: '1.0',
     uploadedBy: 'coordinator-1',
@@ -121,7 +121,7 @@ describe('PostgresBulkUploadsStore.create', () => {
     expect(callArgs(captured, 'values')?.[0]).toMatchObject({
       userId: 'agg-1',
       participantType: 'seeker',
-      s3Key: 'uploads/upload-1.csv',
+      storageKey: 'uploads/upload-1.csv',
       schemaId: 'seeker_profile',
       schemaVersion: '1.0',
       uploadedBy: 'coordinator-1',
@@ -279,7 +279,7 @@ describe('PostgresBulkUploadsStore.markUploaded', () => {
     const db = makeFakeDb((chain) => {
       if (hasCall(chain, 'update')) {
         updateChain = chain;
-        return [makeRow({ status: 'uploaded', s3Etag: 'etag-1' })];
+        return [makeRow({ status: 'uploaded', contentFingerprint: 'etag-1' })];
       }
       // findById lookup — currently pending.
       return [makeRow({ status: 'pending' })];
@@ -293,7 +293,7 @@ describe('PostgresBulkUploadsStore.markUploaded', () => {
     expect(result.value.status).toBe('uploaded');
     expect(callArgs(updateChain, 'set')?.[0]).toMatchObject({
       status: 'uploaded',
-      s3Etag: 'etag-1',
+      contentFingerprint: 'etag-1',
     });
   });
 
@@ -333,7 +333,7 @@ describe('PostgresBulkUploadsStore.markUploaded', () => {
   });
 
   it('is idempotent: re-marking uploaded with the same etag is a no-op success', async () => {
-    const db = makeFakeDb(() => [makeRow({ status: 'uploaded', s3Etag: 'etag-1' })]);
+    const db = makeFakeDb(() => [makeRow({ status: 'uploaded', contentFingerprint: 'etag-1' })]);
     _setDbClients(null, db as never);
     const store = new PostgresBulkUploadsStore();
 
@@ -348,9 +348,9 @@ describe('PostgresBulkUploadsStore.markUploaded', () => {
     const db = makeFakeDb((chain) => {
       if (hasCall(chain, 'update')) {
         updateChain = chain;
-        return [makeRow({ status: 'uploaded', s3Etag: 'etag-2' })];
+        return [makeRow({ status: 'uploaded', contentFingerprint: 'etag-2' })];
       }
-      return [makeRow({ status: 'uploaded', s3Etag: 'etag-1' })];
+      return [makeRow({ status: 'uploaded', contentFingerprint: 'etag-1' })];
     });
     _setDbClients(null, db as never);
     const store = new PostgresBulkUploadsStore();

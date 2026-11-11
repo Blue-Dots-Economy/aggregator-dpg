@@ -383,7 +383,7 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
       const { eq } = await import('drizzle-orm');
       await getDb()
         .update(bulkUploads)
-        .set({ s3Key: storedKey, updatedAt: new Date() })
+        .set({ storageKey: storedKey, updatedAt: new Date() })
         .where(eq(bulkUploads.id, uploadId));
 
       log.info({
