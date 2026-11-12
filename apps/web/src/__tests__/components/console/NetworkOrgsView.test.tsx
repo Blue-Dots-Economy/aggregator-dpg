@@ -46,7 +46,13 @@ const orgs = [
 function renderView(props: Partial<Parameters<typeof NetworkOrgsView>[0]> = {}) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <NetworkOrgsView rootName="Blue Dots" orgs={orgs} more={false} {...props} />
+      <NetworkOrgsView
+        rootName="Blue Dots"
+        orgs={orgs}
+        more={false}
+        roleLabel="Super Admin"
+        {...props}
+      />
     </NextIntlClientProvider>,
   );
 }
@@ -77,7 +83,7 @@ describe('NetworkOrgsView', () => {
     renderView({ orgs: [defaultOrg, ...orgs] });
     expect(filter(/^All organisations\s*4/)).toHaveTextContent('Default not counted');
     expect(
-      screen.getByRole('heading', { level: 2, name: /^Organisations\s*5$/ }),
+      screen.getByRole('heading', { level: 2, name: /^Onboarded Organisations\s*5$/ }),
     ).toBeInTheDocument();
     expect(orgLinks().at(-1)).toHaveTextContent('Default');
     expect(orgLinks().map((a) => a.textContent)).toEqual(
@@ -121,7 +127,7 @@ describe('NetworkOrgsView', () => {
 
   it('filters by status from the summary and clears the filter from its chip', () => {
     renderView();
-    fireEvent.click(filter(/Pending review\s*1/));
+    fireEvent.click(filter(/Invited\s*1/));
     expect(orgLinks()).toHaveLength(1);
     expect(screen.getByRole('link', { name: /Cotton Co/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.clear_filter }));

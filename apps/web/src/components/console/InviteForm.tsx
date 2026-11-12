@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * Invites coordinators to an organisation. Addresses are typed or pasted into
+ * Invites coordinators to an organisation, or (`target.kind = 'org'`) other
+ * organisations to register under it. Addresses are typed or pasted into
  * a chip box, up to the per-send cap; each valid address can carry an optional
  * name for the email greeting. Invalid addresses block sending until they are
  * fixed or removed; reloading or closing the page with unsent emails asks
@@ -39,6 +40,15 @@ interface NotSent {
   email: string;
   reason: string;
 }
+
+/** Who is being invited: coordinators, or organisations shown with `roleLabel`. */
+export type InviteTarget = { kind: 'user' } | { kind: 'org'; roleLabel: string };
+
+/** Message namespace of each kind's help card. */
+const HELP_NS: Readonly<Record<InviteTarget['kind'], string>> = {
+  user: 'invite.help',
+  org: 'invite.org.help',
+};
 
 /** The steps in the help card, in order. The first is the sender's own step. */
 const HELP_STEPS = [
@@ -111,6 +121,7 @@ function notSentOf(res: UserInviteResponse): NotSent[] {
  */
 function failureKey(r: { status: number; error: ConsoleError }): string {
   if (r.status === 400 && r.error.fields?.field === 'recipients') return 'invite.too_many';
+  if (r.status === 409 && r.error.code?.startsWith('ORG_')) return 'invite.org.error_limit';
   if (r.status === 0) return 'invite.error.network';
   if (r.status === 400) return 'invite.error.invalid';
   if (r.status === 401) return 'invite.error.signed_out';
@@ -146,12 +157,14 @@ export function InviteForm({
   orgs,
   maxRecipients = DEFAULT_MAX_INVITES,
   coordinatorsHref = null,
+  target = { kind: 'user' },
 }: Readonly<{
   orgs: Array<{ id: string; name: string }>;
   /** Per-send cap (`INVITE_MAX_RECIPIENTS`), read by the page on the server. */
   maxRecipients?: number;
-  /** Link to the coordinators list, or `null` when the actor cannot open it. */
+  /** Link to the list the invitees join, or `null` when the actor cannot open it. */
   coordinatorsHref?: string | null;
+  target?: InviteTarget;
 }>) {
   const t = useTranslations('console');
   const [orgId, setOrgId] = useState(orgs[0]?.id ?? '');
@@ -236,12 +249,19 @@ export function InviteForm({
     }
     setBusy(true);
     setError(null);
-    const r = await sendConsole<UserInviteResponse>('/api/console/user/invite', 'POST', {
-      org_id: orgId,
-      recipients: all.map((x) =>
-        x.name.trim() ? { email: x.email, name: x.name.trim() } : { email: x.email },
-      ),
-    });
+    const recipientsBody = all.map((x) =>
+      x.name.trim() ? { email: x.email, name: x.name.trim() } : { email: x.email },
+    );
+    const r =
+      target.kind === 'org'
+        ? await sendConsole<UserInviteResponse>('/api/console/org/invite', 'POST', {
+            parent_id: orgId,
+            recipients: recipientsBody,
+          })
+        : await sendConsole<UserInviteResponse>('/api/console/user/invite', 'POST', {
+            org_id: orgId,
+            recipients: recipientsBody,
+          });
     setBusy(false);
     if (r.ok) {
       setResult({ sent: r.data.sent + r.data.resent, notSent: notSentOf(r.data) });
@@ -269,7 +289,16 @@ export function InviteForm({
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
       <ConsoleSection flush className="min-w-0 overflow-visible">
         <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col text-[13.5px]" noValidate>
-          <OrgHeader orgs={orgs} orgId={orgId} onChange={setOrgId} />
+          <OrgHeader
+            orgs={orgs}
+            orgId={orgId}
+            onChange={setOrgId}
+            role={
+              target.kind === 'org'
+                ? t('invite.org.role_pill', { role: target.roleLabel })
+                : t('invite.role')
+            }
+          />
 
           <div className="flex flex-1 flex-col gap-2.5 p-[22px]">
             {result ? <ResultBanner result={result} onDismiss={() => setResult(null)} /> : null}
@@ -339,6 +368,8 @@ export function InviteForm({
 
             {valid.length ? <NamesList people={valid} onName={setName} onRemove={remove} /> : null}
 
+            {target.kind === 'org' ? <OrgCapabilities roleLabel={target.roleLabel} /> : null}
+
             {error ? (
               <p role="alert" className="text-rose-700">
                 {error}
@@ -378,7 +409,11 @@ export function InviteForm({
         </form>
       </ConsoleSection>
 
-      <HelpCard maxRecipients={maxRecipients} coordinatorsHref={coordinatorsHref} />
+      <HelpCard
+        maxRecipients={maxRecipients}
+        coordinatorsHref={coordinatorsHref}
+        ns={HELP_NS[target.kind]}
+      />
     </div>
   );
 }
@@ -388,10 +423,12 @@ function OrgHeader({
   orgs,
   orgId,
   onChange,
+  role,
 }: Readonly<{
   orgs: Array<{ id: string; name: string }>;
   orgId: string;
   onChange: (id: string) => void;
+  role: string;
 }>) {
   const t = useTranslations('console');
   const single = orgs.length === 1 ? orgs[0] : null;
@@ -418,7 +455,7 @@ function OrgHeader({
         </label>
       )}
       <span className="ml-auto rounded-full bg-(--bd-bg) px-2.5 py-1 text-[12px] font-semibold text-ink-700">
-        {t('invite.role')}
+        {role}
       </span>
     </header>
   );
@@ -569,7 +606,8 @@ function NamesList({
 function HelpCard({
   maxRecipients,
   coordinatorsHref,
-}: Readonly<{ maxRecipients: number; coordinatorsHref: string | null }>) {
+  ns,
+}: Readonly<{ maxRecipients: number; coordinatorsHref: string | null; ns: string }>) {
   const t = useTranslations('console');
   return (
     <ConsoleSection flush>
@@ -605,12 +643,12 @@ function HelpCard({
                 </span>
                 <span className="min-w-0">
                   <span className="block pt-[5px] text-[13.5px] font-bold text-ink-900">
-                    {t(`invite.help.${key}.title`)}
+                    {t(`${ns}.${key}.title`)}
                   </span>
                   <span className="block text-[13px] text-ink-500">
                     {key === 'approve'
-                      ? t.rich('invite.help.approve.body', { link: linkTo(coordinatorsHref) })
-                      : t(`invite.help.${key}.body`)}
+                      ? t.rich(`${ns}.approve.body`, { link: linkTo(coordinatorsHref) })
+                      : t(`${ns}.${key}.body`)}
                   </span>
                 </span>
               </li>
@@ -622,5 +660,55 @@ function HelpCard({
         </p>
       </aside>
     </ConsoleSection>
+  );
+}
+
+/** What an invited organisation can do, fixed for now, and the role it is shown with. */
+function OrgCapabilities({ roleLabel }: Readonly<{ roleLabel: string }>) {
+  const t = useTranslations('console');
+  const items = [
+    { key: 'orgs', label: t('invite.org.can_orgs'), hint: t('invite.org.can_orgs_hint') },
+    {
+      key: 'participants',
+      label: t('invite.org.can_participants'),
+      hint: t('invite.org.can_participants_hint'),
+    },
+  ];
+  return (
+    <div className="mt-2 flex flex-col gap-4">
+      <fieldset className="flex flex-col gap-3">
+        <legend className="mb-2 text-[14px] font-bold text-ink-900">
+          {t('invite.org.can_do')}
+        </legend>
+        {items.map((item) => (
+          <div key={item.key} className="flex items-start gap-3">
+            <input
+              id={`invite-can-${item.key}-box`}
+              type="checkbox"
+              checked
+              disabled
+              readOnly
+              aria-describedby={`invite-can-${item.key}`}
+              className="mt-0.5 h-[18px] w-[18px] shrink-0 accent-(--bd-primary)"
+            />
+            <span className="flex flex-col gap-0.5">
+              <label htmlFor={`invite-can-${item.key}-box`} className="font-semibold text-ink-900">
+                {item.label}
+              </label>
+              <span id={`invite-can-${item.key}`} className="text-[12.5px] text-ink-500">
+                {item.hint}
+              </span>
+            </span>
+          </div>
+        ))}
+      </fieldset>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="invite-role" className="text-[14px] font-bold text-ink-900">
+          {t('invite.org.role_label')}
+        </label>
+        <input id="invite-role" className="bd-input sm:max-w-xs" value={roleLabel} readOnly />
+        <span className="text-[12.5px] text-ink-500">{t('invite.org.role_hint')}</span>
+      </div>
+    </div>
   );
 }

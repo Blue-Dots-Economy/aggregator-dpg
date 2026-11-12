@@ -15,12 +15,14 @@ import { logger } from './logger';
 /** Deploy-time capability flags surfaced by `GET /v1/aggregator-config`. */
 export interface AggregatorFeatures {
   custom_roles: boolean;
+  /** The role an invited organisation is shown with; `null` when the api does not say. */
+  invite_role_label: string | null;
 }
 
 const FETCH_TIMEOUT_MS = 5000;
 
 /** Fail-safe default when the api is unreachable or omits the field. */
-const DEFAULT_FEATURES: AggregatorFeatures = { custom_roles: false };
+const DEFAULT_FEATURES: AggregatorFeatures = { custom_roles: false, invite_role_label: null };
 
 /**
  * Logs a warning without ever throwing.
@@ -65,8 +67,15 @@ export const getAggregatorFeatures = cache(
         });
         return DEFAULT_FEATURES;
       }
-      const cfg = (await res.json()) as { features?: { custom_roles?: unknown } };
-      return { custom_roles: cfg.features?.custom_roles === true };
+      const cfg = (await res.json()) as {
+        features?: { custom_roles?: unknown };
+        organisation?: { invite_role_label?: unknown };
+      };
+      const label = cfg.organisation?.invite_role_label;
+      return {
+        custom_roles: cfg.features?.custom_roles === true,
+        invite_role_label: typeof label === 'string' && label.length > 0 ? label : null,
+      };
     } catch (err) {
       warnSafe({
         operation: 'features.getAggregatorFeatures',

@@ -5,6 +5,7 @@ import {
   canManageOrg,
   canViewCoordinators,
   coordinatorsHref,
+  ownProfileOrgId,
 } from '@/lib/capabilities';
 
 describe('can', () => {
@@ -130,5 +131,37 @@ describe('coordinatorsHref', () => {
     expect(
       coordinatorsHref({ is_network_admin: false, orgs: [org('d', { is_default: true })] }),
     ).toBe('/console/coordinators');
+  });
+});
+
+describe('ownProfileOrgId', () => {
+  const org = (id: string, over: { org_type?: string; is_default?: boolean } = {}) => ({
+    id,
+    org_type: 'aggregator',
+    is_default: false,
+    ...over,
+  });
+
+  it('is the one organisation an owner owns, Default left out', () => {
+    expect(
+      ownProfileOrgId({
+        is_network_admin: false,
+        capabilities: null,
+        orgs: [org('a'), org('d', { is_default: true })],
+      }),
+    ).toBe('a');
+  });
+
+  it('is null for the network admin and for an owner of several organisations', () => {
+    expect(
+      ownProfileOrgId({
+        is_network_admin: true,
+        capabilities: null,
+        orgs: [org('root', { org_type: 'network_facilitator' })],
+      }),
+    ).toBeNull();
+    expect(
+      ownProfileOrgId({ is_network_admin: false, capabilities: null, orgs: [org('a'), org('b')] }),
+    ).toBeNull();
   });
 });

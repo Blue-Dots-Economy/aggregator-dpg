@@ -86,6 +86,21 @@ export function canViewCoordinators(
   return can(me.capabilities, 'org.manage');
 }
 
+/**
+ * The organisation shown as the caller's profile: the one non-Default
+ * organisation an owner owns. `null` for the network admin, or an owner of several.
+ *
+ * @param me - The caller's `read/me` answer.
+ * @returns The organisation id, or `null`.
+ */
+export function ownProfileOrgId(
+  me: ManageScopeSource & { is_network_admin: boolean },
+): string | null {
+  if (me.is_network_admin) return null;
+  const owned = me.orgs.filter((o) => o.org_type === 'aggregator' && !o.is_default);
+  return owned.length === 1 ? (owned[0]?.id ?? null) : null;
+}
+
 /** The console home page. */
 export const CONSOLE_HOME_HREF = '/console';
 const COORDINATORS_LIST_HREF = '/console/coordinators';

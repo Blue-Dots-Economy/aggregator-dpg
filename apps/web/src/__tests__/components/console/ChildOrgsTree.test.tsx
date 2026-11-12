@@ -124,7 +124,7 @@ describe('<ChildOrgsTree />', () => {
     const aggItem = screen.getByText('Agg One').closest('li') as HTMLElement;
     expect(within(aggItem).getByText('old_key')).toBeInTheDocument();
     expect(within(aggItem).getByText('Level 2')).toBeInTheDocument();
-    expect(within(aggItem).getByTestId('status-pill')).toHaveTextContent('Pending');
+    expect(within(aggItem).getByTestId('status-pill')).toHaveTextContent('Invited');
   });
 
   it('shows names as plain text for an owner', () => {

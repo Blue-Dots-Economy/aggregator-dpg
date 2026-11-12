@@ -33,7 +33,22 @@ describe('features.server', () => {
         json({ features: { custom_roles: true } }),
       ) as unknown as typeof fetch;
     await expect(customRolesEnabled()).resolves.toBe(true);
-    await expect(getAggregatorFeatures()).resolves.toEqual({ custom_roles: true });
+    await expect(getAggregatorFeatures()).resolves.toEqual({
+      custom_roles: true,
+      invite_role_label: null,
+    });
+  });
+
+  it("reads the instance's role name for an invited organisation", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        json({ features: { custom_roles: false }, organisation: { invite_role_label: 'Lead' } }),
+      ) as unknown as typeof fetch;
+    await expect(getAggregatorFeatures()).resolves.toEqual({
+      custom_roles: false,
+      invite_role_label: 'Lead',
+    });
   });
 
   it('reports custom roles off when the api flag is false', async () => {
@@ -71,7 +86,10 @@ describe('features.server', () => {
     globalThis.fetch = vi
       .fn()
       .mockRejectedValue(new Error('ECONNREFUSED')) as unknown as typeof fetch;
-    await expect(getAggregatorFeatures()).resolves.toEqual({ custom_roles: false });
+    await expect(getAggregatorFeatures()).resolves.toEqual({
+      custom_roles: false,
+      invite_role_label: null,
+    });
     warn.mockReset();
   });
 
@@ -82,7 +100,10 @@ describe('features.server', () => {
     globalThis.fetch = vi
       .fn()
       .mockResolvedValue(new Response('nope', { status: 503 })) as unknown as typeof fetch;
-    await expect(getAggregatorFeatures()).resolves.toEqual({ custom_roles: false });
+    await expect(getAggregatorFeatures()).resolves.toEqual({
+      custom_roles: false,
+      invite_role_label: null,
+    });
     warn.mockReset();
   });
 });

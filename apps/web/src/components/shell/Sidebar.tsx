@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -31,6 +31,8 @@ export interface NavItem {
   exact?: boolean;
   /** Path whose subtree marks the link active, when it differs from `to`. */
   match?: string;
+  /** Heading of the group the link sits in; consecutive links with the same heading share it. */
+  section?: string;
 }
 
 /** The account card at the foot of the sidebar. */
@@ -184,36 +186,44 @@ function SidebarPanel({
           {t('overview')}
         </div>
         <nav className="flex flex-col gap-0.5">
-          {nav.map((n) => {
+          {nav.map((n, i) => {
             const Ic = I[n.icon];
             const isActive = isNavActive(n, pathname);
+            const opensSection = n.section !== undefined && n.section !== nav[i - 1]?.section;
             return (
-              <Link
-                key={n.to}
-                href={n.to}
-                {...(onNavigate ? { onClick: onNavigate } : {})}
-                className={cn(
-                  'group flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium transition-all',
-                  isActive
-                    ? 'nav-active'
-                    : 'text-(--bd-fg-muted) hover:bg-(--bd-border-soft) hover:text-(--bd-fg)',
-                )}
-              >
-                <Ic size={18} stroke={isActive ? 2 : 1.7} />
-                <span>{n.label}</span>
-                {n.badge !== undefined && (
-                  <span
-                    className={cn(
-                      'ml-auto text-[11px] font-semibold px-1.5 py-0.5 rounded-md',
-                      isActive
-                        ? 'bg-(--bd-card) text-primary-600'
-                        : 'bg-(--bd-border-soft) text-(--bd-fg-muted)',
-                    )}
-                  >
-                    {n.badge}
-                  </span>
-                )}
-              </Link>
+              <Fragment key={n.to}>
+                {opensSection ? (
+                  <div className="px-3 pt-2.5 pb-1 text-[12px] font-semibold text-(--bd-fg-muted)">
+                    {n.section}
+                  </div>
+                ) : null}
+                <Link
+                  href={n.to}
+                  {...(onNavigate ? { onClick: onNavigate } : {})}
+                  className={cn(
+                    'group flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium transition-all',
+                    n.section !== undefined && 'pl-6',
+                    isActive
+                      ? 'nav-active'
+                      : 'text-(--bd-fg-muted) hover:bg-(--bd-border-soft) hover:text-(--bd-fg)',
+                  )}
+                >
+                  <Ic size={18} stroke={isActive ? 2 : 1.7} />
+                  <span>{n.label}</span>
+                  {n.badge !== undefined && (
+                    <span
+                      className={cn(
+                        'ml-auto text-[11px] font-semibold px-1.5 py-0.5 rounded-md',
+                        isActive
+                          ? 'bg-(--bd-card) text-primary-600'
+                          : 'bg-(--bd-border-soft) text-(--bd-fg-muted)',
+                      )}
+                    >
+                      {n.badge}
+                    </span>
+                  )}
+                </Link>
+              </Fragment>
             );
           })}
         </nav>
