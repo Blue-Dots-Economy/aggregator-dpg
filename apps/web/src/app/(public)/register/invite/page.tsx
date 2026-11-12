@@ -1,9 +1,8 @@
 import type { Metadata } from 'next';
-import { notFound, redirect } from 'next/navigation';
+import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { getSession } from '../../../../lib/server-session';
-import { resolveMaxInvites } from '../../../../lib/invite-limit';
-import { OwnerInviteView } from './OwnerInviteView';
+import { InviteUnavailable } from '../InviteUnavailable';
 
 /**
  * Sets the page title.
@@ -11,28 +10,20 @@ import { OwnerInviteView } from './OwnerInviteView';
  * @returns The page metadata.
  */
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslations('register.owner_invite');
-  return { title: t('page_title') };
+  const t = await getTranslations('register');
+  return { title: t('invite_heading_invalid') };
 }
 
 export const dynamic = 'force-dynamic';
 
-interface OwnerInvitePageProps {
-  searchParams: Promise<{ grant?: string }>;
-}
-
 /**
- * Org-owner invite page: `/register/invite?grant=<jwt>`, linked from the owner's approval email.
+ * `/register/invite?grant=`: the link older approval emails carried. Owners now
+ * invite from the console, so the page asks them to sign in.
  *
- * An active session redirects to the dashboard. A missing `grant` returns
- * `notFound()`. The grant is not verified here; the invite POST verifies it,
- * so an expired grant shows the recovery action instead of a 404.
+ * An active session redirects to the console.
  */
-export default async function OwnerInvitePage({ searchParams }: Readonly<OwnerInvitePageProps>) {
+export default async function OwnerGrantLinkPage() {
   const session = await getSession();
-  if (session) redirect('/dashboard');
-  const { grant } = await searchParams;
-  if (!grant) notFound();
-
-  return <OwnerInviteView grant={grant} maxInvites={resolveMaxInvites()} />;
+  if (session) redirect('/console');
+  return <InviteUnavailable reason="grant_retired" />;
 }

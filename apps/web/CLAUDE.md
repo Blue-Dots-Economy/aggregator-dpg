@@ -4,7 +4,7 @@ Guidance specific to working inside `apps/web`. Read the root `CLAUDE.md` first 
 
 ## Two auth helpers, disjoint usage today — nothing in code stops you picking the wrong one
 
-- **Anonymous**: `getServiceAccessToken()` (`lib/service-token.ts`) does a Keycloak `client_credentials` grant, cached in-process until ~30s before expiry. It's wrapped by `proxyServiceRequest()` (`lib/bff-service-proxy.ts`) and used by 6 routes today: `api/aggregator/register`, `api/org/register`, `api/orgs`, `api/orgs/parents`, `api/invite/user/accept`, `api/invite/org/accept` — genuinely pre-session (registration/listing) endpoints. `lib/invite-read.server.ts` uses it too, from the invite pages' server render.
+- **Anonymous**: `getServiceAccessToken()` (`lib/service-token.ts`) does a Keycloak `client_credentials` grant, cached in-process until ~30s before expiry. It's wrapped by `proxyServiceRequest()` (`lib/bff-service-proxy.ts`) and used by 2 routes today: `api/invite/user/accept` and `api/invite/org/accept` — genuinely pre-session registration endpoints. `lib/invite-read.server.ts` uses it too, from the invite pages' server render.
 - **Authenticated**: `callApi()` (`lib/upstream-client.ts`) reads the Redis session, transparently refreshes the access token 60s before expiry (killing the session on refresh failure), and attaches the caller's own Bearer token. Used by all other API routes plus the protected layout.
 
 **This split is convention-enforced only.** A new authenticated data route wired to `proxyServiceRequest`/`getServiceAccessToken` instead of `callApi` would authorize with the aggregator-wide service-account token rather than the caller's own — the concrete cross-aggregator data-leak shape to watch for. When adding a route: if it needs to know _which_ aggregator/coordinator is calling, it must use `callApi`; only genuinely pre-session registration/lookup endpoints should use the service-token path.
@@ -17,7 +17,7 @@ Guidance specific to working inside `apps/web`. Read the root `CLAUDE.md` first 
 
 ## Invite links: register, sign in with an email code, activate
 
-`/register/coordinator?invite=` and `/register/owner?invite=` read the invite on the server (`readInvite`), lock the invited email (`withReadonlyField`) and post to `api/invite/{user,org}/accept`. On `201` the browser goes to `/api/auth/login?login_hint=<email>`, which forwards `login_hint` to Keycloak. The callback sees `decision_made = invited` in the access token, calls `POST /v1/user/activate` with that token (`lib/invite-activation.ts`, no session exists yet), refreshes the tokens so the new access applies, then routes as usual. A sign-in that did not use the email code comes back as `?error=invite_email_not_verified`.
+Onboarding is by invitation only: `/register`, and `/register/owner` without `?invite=`, say so; the old owner grant link `/register/invite?grant=` asks the owner to sign in. `/register/coordinator?invite=` and `/register/owner?invite=` read the invite on the server (`readInvite`), lock the invited email (`withReadonlyField`) and post to `api/invite/{user,org}/accept`. On `201` the browser goes to `/api/auth/login?login_hint=<email>`, which forwards `login_hint` to Keycloak. The callback sees `decision_made = invited` in the access token, calls `POST /v1/user/activate` with that token (`lib/invite-activation.ts`, no session exists yet), refreshes the tokens so the new access applies, then routes as usual. A sign-in that did not use the email code comes back as `?error=invite_email_not_verified`.
 
 ## The organisation console (`(console)/console`, Phase 5)
 
@@ -31,7 +31,7 @@ Org owners and the network admin sign in to the same app and land on `/console` 
 
 ## `aggregator-schema.server.ts` is the single source for both editable and read-only rendering
 
-Both `/register` and `/profile` call `loadRegistrationSchema()`, which loads `registration.v1.json` + `.ui.json` from `config/schemas/aggregator/` (three-candidate path resolution for dev vs Docker cwd) and patches the `type` enum from `GET /v1/aggregator-config` (falls back silently on error). **The same schema/uiSchema objects** feed both modes:
+Both `/register/coordinator` and `/profile` call `loadRegistrationSchema()`, which loads `registration.v1.json` + `.ui.json` from `config/schemas/aggregator/` (three-candidate path resolution for dev vs Docker cwd) and patches the `type` enum from `GET /v1/aggregator-config` (falls back silently on error). **The same schema/uiSchema objects** feed both modes:
 
 - **Editable** (`/register`) — rendered as-is.
 - **Read-only** (`/profile`, `ProfileFormView.tsx`) — achieved via RJSF's `readonly` prop (not per-field `ui:disabled`), plus a locally-built `readonlyUiSchema` that hides the `consent` block and empties the submit button's children.
@@ -40,7 +40,7 @@ Both `/register` and `/profile` call `loadRegistrationSchema()`, which loads `re
 
 ## The public registration flow is more than the form — four config-gated surfaces wrap it
 
-`(public)/register` (self-serve) and `[org]/[slug]` (`PublicRegistrationView`, per-link) surround the RJSF form with surfaces that only appear when config enables them; don't assume the form is the whole flow:
+`[org]/[slug]` (`PublicRegistrationView`, per-link participant registration) surrounds the RJSF form with surfaces that only appear when config enables them; don't assume the form is the whole flow:
 
 - **Pre-form "Already Registered — Sign In" chooser** (#652) — on first open, whenever the Signals hand-off is configured for this domain/mode, the participant chooses **Register** or is sent to the Signals UI to sign in (`SignalsSignInCta`). Config-gated by the same `signals_cta` rule as the hand-off.
 - **Post-submit hand-off to the Signals UI** (#654) — on a successful full-profile submission the view redirects to the per-domain Signals login URL from the api's `SIGNALS_UI_URLS` map (parsed + URL-validated at api boot, frozen, surfaced via `/v1/aggregator-config`); no in-app "registration complete" dead-end.
@@ -53,7 +53,7 @@ Both `/register` and `/profile` call `loadRegistrationSchema()`, which loads `re
 
 ## Consent content has no API round-trip
 
-`(public)/register/page.tsx` loads consent **server-side** via `@aggregator-dpg/config-loader/fs`'s `loadConsentConfig(network, brand)`, extracts each audience's `current_version` doc, and passes typed `ConsentDocContent` as props through `RegisterView` → forms → `ConsentModal`/`MarkdownContent`. Failure degrades to `null` (forms fall back to plain-text labels) rather than throwing — this resolves once per server render, no client-side caching/loading state to reason about.
+The invite registration pages (`register/coordinator`, `register/owner`) load consent **server-side** via `@aggregator-dpg/config-loader/fs`'s `loadConsentConfig(network, brand)`, extracts each audience's `current_version` doc, and passes typed `ConsentDocContent` as props through `RegisterView` → forms → `ConsentModal`/`MarkdownContent`. Failure degrades to `null` (forms fall back to plain-text labels) rather than throwing — this resolves once per server render, no client-side caching/loading state to reason about.
 
 ## This app mostly doesn't follow the packages' abstract-class pattern
 

@@ -42,7 +42,7 @@ export interface ServiceProxyOptions {
   path: string;
   /** HTTP method. */
   method: 'GET' | 'POST';
-  /** Route label for structured logs, e.g. `POST /api/org/register`. */
+  /** Route label for structured logs, e.g. `POST /api/invite/org/accept`. */
   route: string;
   /** Parse + forward a JSON request body (POST). Ignored for GET. */
   forwardJsonBody?: boolean;

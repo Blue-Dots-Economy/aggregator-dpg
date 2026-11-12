@@ -17,8 +17,8 @@ export interface OwnerRegisterViewProps {
    * the widget then shows plain text.
    */
   orgConsentContent?: ConsentDocContent | null;
-  /** Set when the owner arrived through an org invite. */
-  invite?: OrgFormInvite;
+  /** The org invite the owner arrived with. */
+  invite: OrgFormInvite;
 }
 
 /**
@@ -44,7 +44,7 @@ export function OwnerRegisterView({
         schema={schema}
         uiSchema={uiSchema}
         {...(orgConsentContent ? { consentContent: orgConsentContent } : {})}
-        {...(invite ? { invite } : {})}
+        invite={invite}
       />
     </RegisterPageShell>
   );

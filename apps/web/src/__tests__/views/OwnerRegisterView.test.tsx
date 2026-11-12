@@ -4,7 +4,7 @@
  * Owner (organisation) registration used to be a tab on RegisterView; it now
  * has its own view/route. Covers: the org form renders, the consent block is
  * stripped from the schema handed to RJSF, submit opens the gate (posts
- * nothing) then accepting posts to /api/org/register, and a failed consent copy
+ * nothing) then accepting posts to /api/invite/org/accept, and a failed consent copy
  * surfaces a visible error without posting.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
@@ -98,6 +98,7 @@ function renderView(props: Record<string, unknown> = {}) {
           schema={orgSchema}
           uiSchema={{}}
           orgConsentContent={consentContentFixture}
+          invite={{ token: 'tok-1', email: 'ravi@enable.org', parentName: 'Parent Org' }}
           {...props}
         />
       </NextIntlClientProvider>
@@ -154,11 +155,11 @@ describe('OwnerRegisterView', () => {
     expect(rendered.required).not.toContain('consent');
   });
 
-  it('submitting opens the gate, posts nothing, then accepting posts consent.value:true to /api/org/register', async () => {
+  it('submitting opens the gate, posts nothing, then accepting posts consent.value:true to the org invite accept route', async () => {
     const calls: { url: string; body: string }[] = [];
     globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
       const url = String(input);
-      if (url.includes('/api/org/register')) {
+      if (url.includes('/api/invite/org/accept')) {
         calls.push({ url, body: init?.body ?? '' });
         return new Response(JSON.stringify({ slug: 'acme-org' }), {
           status: 200,
@@ -189,7 +190,7 @@ describe('OwnerRegisterView', () => {
     const registerCalls: string[] = [];
     globalThis.fetch = vi.fn(async (input: unknown) => {
       const url = String(input);
-      if (url.includes('/api/org/register')) registerCalls.push(url);
+      if (url.includes('/api/invite/org/accept')) registerCalls.push(url);
       return new Response('{}', { status: 200 });
     }) as unknown as typeof fetch;
 

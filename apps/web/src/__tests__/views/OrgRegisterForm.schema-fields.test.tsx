@@ -73,7 +73,12 @@ function renderForm() {
   render(
     <QueryClientProvider client={client}>
       <NextIntlClientProvider locale="en" messages={messages}>
-        <OrgRegisterForm schema={schema} uiSchema={uiSchema} consentContent={CONSENT} />
+        <OrgRegisterForm
+          schema={schema}
+          uiSchema={uiSchema}
+          consentContent={CONSENT}
+          invite={{ token: 'tok-1', email: 'ravi@enable.org', parentName: 'Parent Org' }}
+        />
       </NextIntlClientProvider>
     </QueryClientProvider>,
   );
