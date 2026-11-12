@@ -122,27 +122,8 @@ export function OrgRegisterForm({
   );
   // Coordinate from the address widget; RJSF does not write it into `formData`.
   const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
-  // Selected parent org. Required when the picker shows; empty until picked.
-  const [parentId, setParentId] = useState<string>('');
-  const parentsQuery = useQuery({
-    queryKey: ['org-parents'],
-    queryFn: () => jsonFetch<ParentsResponse>('/api/orgs/parents'),
-    enabled: !invite,
-    staleTime: 30_000,
-  });
-  const parents = parentsQuery.data?.parents ?? [];
-  // The picker shows when an org other than the root can take a child.
-  const showPicker = !invite && parents.some((p) => !p.is_root);
-  const chosen = showPicker ? parents.find((p) => p.id === parentId) : parents[0];
-  const childName = invite ? null : (chosen?.child_known_as_name ?? null);
-  const parentReady =
-    Boolean(invite) || (parentsQuery.data !== undefined && (!showPicker || parentId !== ''));
-  // The network first, then each org with its own "known as" value on the right.
-  const parentOptions: SearchableOption[] = parents.map((p: ParentOption) => ({
-    value: p.id,
-    label: p.name,
-    hint: p.is_root ? t('parent_top_level') : p.known_as_name,
-  }));
+  const { parentsQuery, parentId, setParentId, showPicker, childName, parentReady, parentOptions } =
+    useParentChoice(Boolean(invite));
   const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
   const { gateOpen, setGateOpen, pendingRef, handleSubmit } = useConsentGateSubmit(
     consentDocs,
@@ -326,4 +307,36 @@ export function OrgRegisterForm({
       />
     </div>
   );
+}
+
+/**
+ * Loads the orgs that can take a child and tracks the chosen parent; an invite fixes the parent.
+ *
+ * @param invited - Whether the form registers from an invite.
+ * @returns The parent query, the choice and what the form shows for it.
+ */
+function useParentChoice(invited: boolean) {
+  const t = useTranslations('register');
+  // Selected parent org. Required when the picker shows; empty until picked.
+  const [parentId, setParentId] = useState<string>('');
+  const parentsQuery = useQuery({
+    queryKey: ['org-parents'],
+    queryFn: () => jsonFetch<ParentsResponse>('/api/orgs/parents'),
+    enabled: !invited,
+    staleTime: 30_000,
+  });
+  const parents = parentsQuery.data?.parents ?? [];
+  // The picker shows when an org other than the root can take a child.
+  const showPicker = !invited && parents.some((p) => !p.is_root);
+  const chosen = showPicker ? parents.find((p) => p.id === parentId) : parents[0];
+  const childName = invited ? null : (chosen?.child_known_as_name ?? null);
+  const parentReady =
+    invited || (parentsQuery.data !== undefined && (!showPicker || parentId !== ''));
+  // The network first, then each org with its own "known as" value on the right.
+  const parentOptions: SearchableOption[] = parents.map((p: ParentOption) => ({
+    value: p.id,
+    label: p.name,
+    hint: p.is_root ? t('parent_top_level') : p.known_as_name,
+  }));
+  return { parentsQuery, parentId, setParentId, showPicker, childName, parentReady, parentOptions };
 }

@@ -184,7 +184,7 @@ export function CoordinatorRegisterForm({
     if (!inheritsFromOrg) return locked;
     return {
       ...locked,
-      name: { ...((locked['name'] as Record<string, unknown>) ?? {}), 'ui:widget': 'hidden' },
+      name: { ...(locked['name'] as Record<string, unknown> | undefined), 'ui:widget': 'hidden' },
     };
   }, [uiSchema, formSchema, inheritsFromOrg, inviteMode]);
 
