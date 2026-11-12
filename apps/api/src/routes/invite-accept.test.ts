@@ -288,7 +288,7 @@ describe('invite read and accept routes', () => {
 
     it('gives the invite back when Keycloak is down', async () => {
       const token = await inviteToken('coordinator');
-      idp.failNext = { code: 'NETWORK', message: 'down' };
+      idp.failOnce({ code: 'IDP_UNAVAILABLE', message: 'down' });
       const res = await accept('/v1/user/invite/accept', { ...coordinatorBody, invite: token });
       expect(res.statusCode).toBeGreaterThanOrEqual(500);
       expect(await inviteStatus('inv-coordinator')).toBe('pending');
