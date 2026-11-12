@@ -424,12 +424,18 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     return Promise.resolve({ ok: true, value: stale });
   }
 
-  async approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
-    return this.casFromPending(id, 'active', updatedBy);
-  }
-
-  async reject(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
-    return this.casFromPending(id, 'inactive', updatedBy);
+  approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
+    const existing = this.byId.get(id);
+    if (!existing) return Promise.resolve(err('NOT_FOUND', id));
+    if (existing.status !== 'pending') return Promise.resolve({ ok: true, value: null });
+    const updated: Organisation = {
+      ...existing,
+      status: 'active',
+      updatedAt: new Date(),
+      updatedBy,
+    };
+    this.byId.set(id, updated);
+    return Promise.resolve({ ok: true, value: this.view(updated) });
   }
 
   listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<Organisation[]>> {
@@ -600,26 +606,6 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
   private descendantIdsOf(id: string): Set<string> {
     const below = subtree(this.treeSnapshot(), id, DESCENDANT_LEVEL_CAP).slice(1);
     return new Set(below.map((n) => n.id));
-  }
-
-  private casFromPending(
-    id: string,
-    next: Organisation['status'],
-    updatedBy: string,
-  ): Promise<OrgStoreResult<Organisation | null>> {
-    const existing = this.byId.get(id);
-    if (!existing) return Promise.resolve(err('NOT_FOUND', id));
-    if (existing.status !== 'pending') return Promise.resolve({ ok: true, value: null });
-    const updated: Organisation = {
-      ...existing,
-      status: next,
-      updatedAt: new Date(),
-      updatedBy,
-      // Stamp the write-once rejected_at on reject only.
-      ...(next === 'inactive' ? { rejectedAt: new Date() } : {}),
-    };
-    this.byId.set(id, updated);
-    return Promise.resolve({ ok: true, value: this.view(updated) });
   }
 }
 

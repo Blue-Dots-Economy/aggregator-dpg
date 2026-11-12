@@ -302,13 +302,6 @@ export class InMemoryUserStore extends UserStoreBase {
     return Promise.resolve({ ok: true, value: undefined });
   }
 
-  async rejectFromPending(id: string, updatedBy: string): Promise<StoreResult<Coordinator | null>> {
-    const existing = this.byId.get(id);
-    // Only pending → inactive; anything else means already decided.
-    if (existing?.status !== 'pending') return { ok: true, value: null };
-    return this.update(id, { status: 'inactive', rejectedAt: new Date(), updatedBy });
-  }
-
   async deleteIfPending(
     id: string,
     cutoff: Date,

@@ -81,7 +81,8 @@ describe('InMemoryOrganisationStore', () => {
       },
       permissiveTreeRules(),
     );
-    if (first.ok) await store.reject(first.value.id, 'admin');
+    if (first.ok)
+      await store.update(first.value.id, { status: 'inactive', rejectedAt: new Date() });
     const second = await store.create(
       {
         recordConsent: NO_CONSENT_WRITE,
@@ -154,17 +155,8 @@ describe('InMemoryOrganisationStore', () => {
     expect(patched.ok && patched.value.ownerKcSub).toBe('kc-1');
   });
 
-  it('reject stamps write-once rejected_at; approve leaves it null (#726)', async () => {
+  it('approve moves a pending org to active and leaves rejected_at null', async () => {
     const store = new InMemoryOrganisationStore();
-    const rej = await store.create(
-      {
-        recordConsent: NO_CONSENT_WRITE,
-        slug: 'r',
-        displayName: 'R',
-        ownerEmail: 'r@x.org',
-      },
-      permissiveTreeRules(),
-    );
     const app = await store.create(
       {
         recordConsent: NO_CONSENT_WRITE,
@@ -174,13 +166,7 @@ describe('InMemoryOrganisationStore', () => {
       },
       permissiveTreeRules(),
     );
-    if (!rej.ok || !app.ok) return;
-    expect(rej.value.rejectedAt).toBeNull();
-
-    const rejected = await store.reject(rej.value.id, 'admin');
-    expect(rejected.ok && rejected.value?.status).toBe('inactive');
-    expect(rejected.ok && rejected.value?.rejectedAt).toBeInstanceOf(Date);
-
+    if (!app.ok) return;
     const approved = await store.approve(app.value.id, 'admin');
     expect(approved.ok && approved.value?.status).toBe('active');
     expect(approved.ok && approved.value?.rejectedAt).toBeNull();
@@ -198,7 +184,7 @@ describe('InMemoryOrganisationStore', () => {
       permissiveTreeRules(),
     );
     if (!a.ok) return;
-    await store.reject(a.value.id, 'admin');
+    await store.update(a.value.id, { status: 'inactive', rejectedAt: new Date() });
     const revived = await store.update(a.value.id, { status: 'pending', rejectedAt: null });
     expect(revived.ok && revived.value.status).toBe('pending');
     expect(revived.ok && revived.value.rejectedAt).toBeNull();
@@ -238,12 +224,11 @@ describe('InMemoryOrganisationStore contact rules', () => {
     expect(found.ok && found.value?.id).toBe(r.ok && r.value.id);
   });
 
-  it('returns NOT_FOUND from update / approve / reject for an unknown id', async () => {
+  it('returns NOT_FOUND from update / approve for an unknown id', async () => {
     const store = new InMemoryOrganisationStore();
     const results = [
       await store.update('missing', { status: 'active' }),
       await store.approve('missing', 'admin'),
-      await store.reject('missing', 'admin'),
     ];
     for (const r of results) expect(r.ok || r.error.code).toBe('NOT_FOUND');
   });
@@ -302,7 +287,7 @@ describe('InMemoryOrganisationStore owners (0027)', () => {
       permissiveTreeRules(),
     );
     if (!old.ok) throw new Error('seed');
-    await store.reject(old.value.id, 'admin');
+    await store.update(old.value.id, { status: 'inactive', rejectedAt: new Date() });
     const fresh = await store.create(
       {
         recordConsent: NO_CONSENT_WRITE,

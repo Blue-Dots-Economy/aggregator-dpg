@@ -592,11 +592,17 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
   }
 
   async approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
-    return this.casFromPending(id, 'active', updatedBy);
-  }
-
-  async reject(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
-    return this.casFromPending(id, 'inactive', updatedBy);
+    try {
+      const [row] = await getDb()
+        .update(organisations)
+        .set({ status: 'active', updatedAt: new Date(), updatedBy })
+        .where(scoped(and(eq(organisations.id, id), eq(organisations.status, 'pending'))))
+        .returning({ id: organisations.id });
+      if (!row) return { ok: true, value: null };
+    } catch (e) {
+      return mapDbError('orgStore.approve', e);
+    }
+    return this.findOne(eq(organisations.id, id));
   }
 
   async listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<Organisation[]>> {
@@ -732,30 +738,6 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       if (e === ABORT) return { ok: true, value: 'aborted' };
       return mapDbError('orgStore.deleteIfPending', e);
     }
-  }
-
-  private async casFromPending(
-    id: string,
-    next: 'active' | 'inactive',
-    updatedBy: string,
-  ): Promise<OrgStoreResult<Organisation | null>> {
-    try {
-      const [row] = await getDb()
-        .update(organisations)
-        // Stamp the write-once rejected_at on reject only.
-        .set({
-          status: next,
-          updatedAt: new Date(),
-          updatedBy,
-          ...(next === 'inactive' ? { rejectedAt: new Date() } : {}),
-        })
-        .where(scoped(and(eq(organisations.id, id), eq(organisations.status, 'pending'))))
-        .returning({ id: organisations.id });
-      if (!row) return { ok: true, value: null };
-    } catch (e) {
-      return mapDbError('orgStore.casFromPending', e);
-    }
-    return this.findOne(eq(organisations.id, id));
   }
 
   /**

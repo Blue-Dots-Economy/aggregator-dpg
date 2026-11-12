@@ -284,19 +284,6 @@ export abstract class UserStoreBase {
   ): Promise<StoreResult<Coordinator>>;
   abstract deleteById(id: string): Promise<StoreResult<void>>;
   /**
-   * Atomic compare-and-set `pending` to `inactive`, stamping a write-once `rejected_at`.
-   *
-   * Only the winner gets the row, so only it sends the rejection email.
-   *
-   * @param id - Coordinator id.
-   * @param updatedBy - The deciding actor (an admin user id, or `'admin'` for a signed link).
-   * @returns The rejected row, or `null` when it was not pending.
-   */
-  abstract rejectFromPending(
-    id: string,
-    updatedBy: string,
-  ): Promise<StoreResult<Coordinator | null>>;
-  /**
    * Deletes a coordinator only while it is still `pending` and older than `cutoff`.
    *
    * The row stays locked while `beforeCommit` (the Keycloak delete) runs, so a

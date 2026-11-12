@@ -410,19 +410,10 @@ export abstract class OrganisationStoreBase {
    * Moves the org from pending to active with an atomic compare-and-set.
    *
    * @param id - The org id.
-   * @param updatedBy - The decider, written in the same statement (`'admin'`
-   *   for an emailed link, else the admin's user id).
-   * @returns The updated row, or `null` when the row was not pending (another decision won).
+   * @param updatedBy - Written to `updated_by` in the same statement.
+   * @returns The updated row, or `null` when the row was no longer pending.
    */
   abstract approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>>;
-  /**
-   * Moves the org from pending to inactive (rejected) with an atomic compare-and-set.
-   *
-   * @param id - The org id.
-   * @param updatedBy - The decider (see {@link approve}).
-   * @returns The updated row, or `null` when the row was not pending.
-   */
-  abstract reject(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>>;
   /**
    * Lists the aggregator orgs (Default included) an admin account owns.
    *

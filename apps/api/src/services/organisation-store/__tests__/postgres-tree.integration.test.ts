@@ -70,7 +70,8 @@ suite('organisation store tree rules (Postgres)', () => {
     const r = await store.create(input(slug, parentId), permissiveTreeRules({ maxDepth: 64 }));
     if (!r.ok) throw new Error(`seed ${slug} failed: ${r.error.code}`);
     if (status === 'active') await store.approve(r.value.id, 'test');
-    if (status === 'inactive') await store.reject(r.value.id, 'test');
+    if (status === 'inactive')
+      await store.update(r.value.id, { status: 'inactive', rejectedAt: new Date() });
     return r.value.id;
   }
 

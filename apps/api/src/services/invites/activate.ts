@@ -4,9 +4,8 @@
  * An invite accept leaves the coordinator or the org `pending`, with a
  * Keycloak user that is enabled, unverified and `decision_made = invited`.
  * Signing in with an email code marks the email verified, which proves the
- * invitee owns the invited address. Activation then runs the same approve
- * step an owner's decision runs, without its mail, and tells the inviting
- * org's owner that the invitee joined.
+ * invitee owns the invited address. Activation then approves the account and
+ * tells the inviting org's owner that the invitee joined.
  */
 
 import type { FastifyBaseLogger } from 'fastify';
@@ -14,8 +13,8 @@ import { getMailer } from '@aggregator-dpg/mailer';
 import { getIdpAdmin, KC_ATTR, type IdpUser } from '../idp-admin/index.js';
 import { getUserStore, type Coordinator } from '../user-store/index.js';
 import { getOrganisationStore, type Organisation } from '../organisation-store/index.js';
-import { decideCoordinator } from '../decisions/coordinator.js';
-import { decideOrg, grantOwnerAccess, type OwnerAccessResult } from '../decisions/org.js';
+import { approveCoordinator } from '../decisions/coordinator.js';
+import { approveOrg, grantOwnerAccess, type OwnerAccessResult } from '../decisions/org.js';
 import { renderCoordinatorJoined, renderOrgJoined } from '../email-templates/index.js';
 import { config } from '../../config.js';
 
@@ -111,17 +110,14 @@ async function activateCoordinator(
   }
   if (org === null) return { kind: 'org_inactive' };
 
-  const outcome = await decideCoordinator({
+  const outcome = await approveCoordinator({
     aggregatorId: row.id,
-    decision: 'approve',
     decidedBy: `invite:${org.ownerUserId}`,
-    notify: false,
-    undoAs: 'invited',
     requestId,
     log,
   });
   switch (outcome.kind) {
-    case 'decided':
+    case 'approved':
       break;
     case 'already_decided':
       return outcome.status === 'active'
@@ -204,11 +200,9 @@ async function activateOrg(
   }
   if (parent === null) return { kind: 'org_inactive' };
 
-  const outcome = await decideOrg({
+  const outcome = await approveOrg({
     orgId: org.id,
-    decision: 'approve',
     decidedBy: `invite:${parent.ownerUserId}`,
-    notify: false,
     log,
   });
   if (outcome.kind === 'already_decided') {
@@ -216,7 +210,7 @@ async function activateOrg(
       ? { kind: 'already_active', account: 'org_owner' }
       : { kind: 'not_invited' };
   }
-  if (outcome.kind !== 'decided') return outcome;
+  if (outcome.kind !== 'approved') return outcome;
   if (outcome.ownerAccess.status === 'partial') {
     return refused(
       log,

@@ -1,10 +1,9 @@
 /**
- * Organisation registration decision and owner access (`@aggregator-dpg/api`).
+ * Organisation approval and owner access (`@aggregator-dpg/api`).
  *
- * `decideOrg` is the one place a pending aggregator org is approved or
- * rejected, used by the emailed review link (`routes/aggregator-org-approvals.ts`)
- * and the console (`POST /v1/org/decision/:id`). Both are a compare-and-set
- * from `pending` first; only the winner provisions and mails.
+ * `approveOrg` is the one place a pending aggregator org becomes active, run
+ * by invite activation. It is a compare-and-set from `pending` first; only
+ * the winner grants owner access.
  *
  * `grantOwnerAccess` lets an owner sign in: enables their Keycloak user,
  * grants the `org_owner` realm role and adds the org's group. It runs at
@@ -12,51 +11,26 @@
  */
 
 import type { FastifyBaseLogger } from 'fastify';
-import { getMailer } from '@aggregator-dpg/mailer';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
-import { config } from '../../config.js';
 import { getOrganisationStore, type Organisation } from '../organisation-store/index.js';
 import { getIdpAdmin, OWNER_REALM_ROLE } from '../idp-admin/index.js';
-import { renderApplicantRejected, renderOrgOwnerApproved } from '../email-templates/index.js';
-import { deciderOf, type Decision } from './coordinator.js';
 import { requestTokenRolesSync } from '../authz/token-roles.js';
-
-/** The `already_decided` outcome of a decided org. */
-function alreadyDecided(org: Organisation): OrgDecisionOutcome {
-  return {
-    kind: 'already_decided',
-    status: org.status,
-    decidedAt: org.status === 'inactive' ? (org.rejectedAt ?? org.updatedAt) : org.updatedAt,
-    decidedBy: deciderOf(org.updatedBy),
-  };
-}
 
 /** The realm role the portal gate admits owners by. */
 export const OWNER_ROLE = OWNER_REALM_ROLE;
 
-/** The result of an org decision. */
-export type OrgDecisionOutcome =
-  | { kind: 'decided'; decision: Decision; notified: boolean; ownerAccess: OwnerAccessResult }
-  | {
-      kind: 'already_decided';
-      status: AggregatorStatus;
-      decidedAt: Date;
-      /** How it was decided, when the row still says (see `deciderOf`). */
-      decidedBy: 'link' | 'console' | null;
-    }
+/** The result of an org approval. */
+export type OrgApprovalOutcome =
+  | { kind: 'approved'; ownerAccess: OwnerAccessResult }
+  | { kind: 'already_decided'; status: AggregatorStatus }
   | { kind: 'not_found' }
   | { kind: 'unavailable'; dependency: 'db' };
 
-/** Inputs of {@link decideOrg}. */
-export interface OrgDecisionInput {
+/** Inputs of {@link approveOrg}. */
+export interface OrgApprovalInput {
   orgId: string;
-  decision: Decision;
-  /** Shown to the owner on reject; never logged or stored. */
-  reason?: string;
-  /** The deciding admin's user id, `'admin'` for an emailed link, or `invite:<inviter id>`. */
+  /** Written to `updated_by`: `invite:<inviter id>`. */
   decidedBy: string;
-  /** Defaults to `true`; `false` skips the owner's approval mail, for an invitee who is already signed in. */
-  notify?: boolean;
   log: FastifyBaseLogger;
 }
 
@@ -70,11 +44,6 @@ export interface OwnerAccessResult {
   enable: OwnerAccessStepResult;
   role: OwnerAccessStepResult;
   group: OwnerAccessStepResult;
-}
-
-/** The sign-in link owners are sent (the console is reached after sign-in). */
-export function ownerSignInUrl(): string {
-  return `${config.PUBLIC_PORTAL_URL}/login`;
 }
 
 /**
@@ -137,109 +106,38 @@ export async function grantOwnerAccess( // NOSONAR typescript:S3776 — inherent
 }
 
 /**
- * Approves or rejects a pending aggregator org.
+ * Approves a pending aggregator org and gives its owner sign-in access.
  *
- * @param input - The org, the decision and who takes it.
+ * @param input - The org and who approves it.
  * @returns The outcome; never throws.
  */
-export async function decideOrg(input: OrgDecisionInput): Promise<OrgDecisionOutcome> {
-  // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
-  const log = input.log.child({ operation: 'org-decision', org_id: input.orgId });
+export async function approveOrg(input: OrgApprovalInput): Promise<OrgApprovalOutcome> {
+  const log = input.log.child({ operation: 'org-approval', org_id: input.orgId });
   const store = getOrganisationStore();
   const found = await store.findById(input.orgId);
   if (!found.ok) return { kind: 'unavailable', dependency: 'db' };
   if (!found.value || found.value.isDefault) return { kind: 'not_found' };
   const org = found.value;
-  if (org.status !== 'pending') return alreadyDecided(org);
+  if (org.status !== 'pending') return { kind: 'already_decided', status: org.status };
 
-  const cas =
-    input.decision === 'approve'
-      ? await store.approve(org.id, input.decidedBy)
-      : await store.reject(org.id, input.decidedBy);
+  const cas = await store.approve(org.id, input.decidedBy);
   if (!cas.ok) {
-    log.error({
-      status: 'failure',
-      sub_operation: `store.${input.decision}`,
-      code: cas.error.code,
-    });
+    log.error({ status: 'failure', sub_operation: 'store.approve', code: cas.error.code });
     return { kind: 'unavailable', dependency: 'db' };
   }
   if (cas.value === null) {
     const now = await store.findById(org.id);
     if (!now.ok) return { kind: 'unavailable', dependency: 'db' };
     if (!now.value) return { kind: 'not_found' };
-    return alreadyDecided(now.value);
-  }
-  if (input.decision === 'reject') {
-    const mail = renderApplicantRejected({
-      association: org.displayName,
-      entityLabel: 'organisation',
-      ...(input.reason ? { reason: input.reason } : {}),
-    });
-    const sent = await getMailer().send({
-      to: org.ownerEmail,
-      subject: mail.subject,
-      html: mail.html,
-      text: mail.text,
-    });
-    if (!sent.ok)
-      log.warn({
-        status: 'failure',
-        sub_operation: 'mailer.send.orgRejected',
-        code: sent.error.code,
-      });
-    // Never log the reason; it is free text.
-    log.info({ status: 'success', decision: 'reject', decided_by: input.decidedBy });
-    return {
-      kind: 'decided',
-      decision: 'reject',
-      notified: sent.ok,
-      ownerAccess: { status: 'no_login', enable: 'skipped', role: 'skipped', group: 'skipped' },
-    };
+    return { kind: 'already_decided', status: now.value.status };
   }
 
-  // Approved: give the owner sign-in access. Soft-fail per step; "repair access" re-runs it.
   const ownerAccess = await grantOwnerAccess(org, log);
-  // RBAC edge: the owner now holds Org Admin in this organisation.
   requestTokenRolesSync([org.ownerUserId], 'org_approved');
-  const notified = await mailOwnerApproved(org, input.notify, log);
   log.info({
     status: 'success',
-    decision: 'approve',
     decided_by: input.decidedBy,
     owner_access: ownerAccess.status,
   });
-  return { kind: 'decided', decision: 'approve', notified, ownerAccess };
-}
-
-/**
- * Mails the owner of an approved org a sign-in link, unless `notify` is `false`; a failed send is logged.
- *
- * @returns Whether the mail was sent.
- */
-async function mailOwnerApproved(
-  org: Organisation,
-  notify: boolean | undefined,
-  log: FastifyBaseLogger,
-): Promise<boolean> {
-  if (notify === false) return false;
-  const mail = renderOrgOwnerApproved({
-    orgName: org.displayName,
-    ownerEmail: org.ownerEmail,
-    inviteUrl: ownerSignInUrl(),
-  });
-  const sent = await getMailer().send({
-    to: org.ownerEmail,
-    subject: mail.subject,
-    html: mail.html,
-    text: mail.text,
-  });
-  if (!sent.ok) {
-    log.warn({
-      status: 'failure',
-      sub_operation: 'mailer.send.orgOwnerApproved',
-      code: sent.error.code,
-    });
-  }
-  return sent.ok;
+  return { kind: 'approved', ownerAccess };
 }

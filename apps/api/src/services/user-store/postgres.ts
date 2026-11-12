@@ -332,22 +332,6 @@ export class PostgresUserStore extends UserStoreBase {
     }
   }
 
-  async rejectFromPending(id: string, updatedBy: string): Promise<StoreResult<Coordinator | null>> {
-    try {
-      const now = new Date();
-      const rows = await getDb()
-        .update(users)
-        .set({ status: 'inactive', rejectedAt: now, updatedBy, updatedAt: now })
-        .where(coordinator(eq(users.id, id), eq(users.status, 'pending')))
-        .returning({ id: users.id });
-      // No row: not pending, already decided.
-      if (!rows[0]) return { ok: true, value: null };
-      return this.reread('userStore.rejectFromPending', id);
-    } catch (err: unknown) {
-      return this.mapWriteError('userStore.rejectFromPending', err, id, Date.now());
-    }
-  }
-
   async deleteIfPending(
     id: string,
     cutoff: Date,

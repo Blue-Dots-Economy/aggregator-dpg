@@ -584,9 +584,9 @@ describe('PostgresOrganisationStore.deleteById', () => {
   });
 });
 
-// ─── approve / reject (casFromPending) ──────────────────────────────────────
+// ─── approve ────────────────────────────────────────────────────────────────
 
-describe('PostgresOrganisationStore.approve / reject', () => {
+describe('PostgresOrganisationStore.approve', () => {
   it('approve returns the updated row on a successful CAS', async () => {
     let captured: ChainCall[] = [];
     const db = makeFakeDb((chain) => {
@@ -611,35 +611,6 @@ describe('PostgresOrganisationStore.approve / reject', () => {
     const store = new PostgresOrganisationStore();
 
     const result = await store.approve('org-1', 'admin');
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value).toBeNull();
-  });
-
-  it('reject returns the updated row with status=inactive', async () => {
-    let captured: ChainCall[] = [];
-    const db = makeFakeDb((chain) => {
-      // A write runs contact statements, then the org statement, then a
-      // joined re-read; keep the org write (or the first read).
-      if (isOrgWrite(chain) || captured.length === 0) captured = chain;
-      return [makeRow({ status: 'inactive' })];
-    });
-    _setDbClients(null, db as never);
-    const store = new PostgresOrganisationStore();
-
-    const result = await store.reject('org-1', 'admin');
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value?.status).toBe('inactive');
-    expect(callArgs(captured, 'set')?.[0]).toMatchObject({ status: 'inactive' });
-  });
-
-  it('reject returns ok(null) when the row was not pending', async () => {
-    const db = makeFakeDb(() => []);
-    _setDbClients(null, db as never);
-    const store = new PostgresOrganisationStore();
-
-    const result = await store.reject('org-1', 'admin');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value).toBeNull();
