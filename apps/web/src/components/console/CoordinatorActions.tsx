@@ -33,6 +33,16 @@ function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((x) => b.includes(x));
 }
 
+/** The domains shown ticked; an empty `serves` means every domain. */
+function tickedIds(serves: readonly string[], domains: ReadonlyArray<{ id: string }>): string[] {
+  return serves.length ? [...serves] : domains.map((d) => d.id);
+}
+
+/** The list with `id` added, or removed when it is already there. */
+function toggled(list: readonly string[], id: string): string[] {
+  return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+}
+
 export function CoordinatorActions({
   user,
   domains,
@@ -44,9 +54,7 @@ export function CoordinatorActions({
   readOnly?: boolean;
 }>) {
   const t = useTranslations('console');
-  // An empty `serves` means every domain, shown as all of them ticked.
-  const ticked = (serves: readonly string[]) =>
-    serves.length ? [...serves] : domains.map((d) => d.id);
+  const ticked = (serves: readonly string[]) => tickedIds(serves, domains);
   const [saved, setSaved] = useState<string[]>(() => ticked(user.serves));
   const [chosen, setChosen] = useState<string[]>(() => ticked(user.serves));
   const [servesNote, setServesNote] = useState<string | null>(null);
@@ -57,7 +65,7 @@ export function CoordinatorActions({
 
   function toggle(id: string) {
     setServesNote(null);
-    setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
+    setChosen((c) => toggled(c, id));
   }
 
   function discard() {
@@ -99,60 +107,23 @@ export function CoordinatorActions({
                   aria-label={t('coordinator.domains')}
                   className="m-0 min-w-0 border-0 p-0 grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2.5"
                 >
-                  {domains.map((d) => {
-                    const on = chosen.includes(d.id);
-                    return (
-                      <label
-                        key={d.id}
-                        className={cn(
-                          'flex cursor-pointer items-center gap-3 rounded-[12px] border-[1.5px] border-(--bd-border) bg-(--bd-card) p-3.5 transition-colors hover:border-ink-400 focus-within:shadow-[0_0_0_3px_var(--bd-primary-50)]',
-                          on &&
-                            'border-(--bd-primary) bg-(--bd-primary-50) hover:border-(--bd-primary)',
-                        )}
-                      >
-                        <input
-                          type="checkbox"
-                          className="sr-only"
-                          checked={on}
-                          onChange={() => toggle(d.id)}
-                        />
-                        <span
-                          aria-hidden="true"
-                          className={cn(
-                            'grid h-5 w-5 flex-none place-items-center rounded-md border-[1.5px] border-(--bd-border) bg-(--bd-card) text-white',
-                            on && 'border-(--bd-primary) bg-(--bd-primary)',
-                          )}
-                        >
-                          {on ? <Check size={12} strokeWidth={3.2} /> : null}
-                        </span>
-                        <Tag
-                          size={17}
-                          aria-hidden="true"
-                          className="flex-none text-(--bd-primary-600)"
-                        />
-                        <span className="font-bold text-ink-900">{d.label}</span>
-                      </label>
-                    );
-                  })}
+                  {domains.map((d) => (
+                    <DomainOption
+                      key={d.id}
+                      label={d.label}
+                      on={chosen.includes(d.id)}
+                      onToggle={() => toggle(d.id)}
+                    />
+                  ))}
                 </fieldset>
 
                 {dirty ? (
-                  <div className="flex flex-wrap items-center gap-2.5 rounded-[12px] border border-(--bd-border-soft) bg-(--bd-bg) px-3 py-2.5">
-                    <span
-                      className={cn(
-                        'mr-auto text-[13px]',
-                        empty ? 'text-rose-700' : 'text-ink-500',
-                      )}
-                    >
-                      {empty ? t('coordinator.domains_empty') : t('coordinator.unsaved')}
-                    </span>
-                    <Button kind="ghost" disabled={busy} onClick={discard}>
-                      {t('coordinator.discard')}
-                    </Button>
-                    <Button disabled={busy || empty} onClick={() => void saveServes()}>
-                      {t('coordinator.save_domains')}
-                    </Button>
-                  </div>
+                  <SaveBar
+                    empty={empty}
+                    busy={busy}
+                    onDiscard={discard}
+                    onSave={() => void saveServes()}
+                  />
                 ) : null}
                 {servesNote ? (
                   <output className="text-[13px] text-ink-600">{servesNote}</output>
@@ -162,6 +133,58 @@ export function CoordinatorActions({
           </div>
         </section>
       ) : null}
+    </div>
+  );
+}
+
+/** One domain as a ticked or unticked card in the editable list. */
+function DomainOption({
+  label,
+  on,
+  onToggle,
+}: Readonly<{ label: string; on: boolean; onToggle: () => void }>) {
+  return (
+    <label
+      className={cn(
+        'flex cursor-pointer items-center gap-3 rounded-[12px] border-[1.5px] border-(--bd-border) bg-(--bd-card) p-3.5 transition-colors hover:border-ink-400 focus-within:shadow-[0_0_0_3px_var(--bd-primary-50)]',
+        on && 'border-(--bd-primary) bg-(--bd-primary-50) hover:border-(--bd-primary)',
+      )}
+    >
+      <input type="checkbox" className="sr-only" checked={on} onChange={onToggle} />
+      <span
+        aria-hidden="true"
+        className={cn(
+          'grid h-5 w-5 flex-none place-items-center rounded-md border-[1.5px] border-(--bd-border) bg-(--bd-card) text-white',
+          on && 'border-(--bd-primary) bg-(--bd-primary)',
+        )}
+      >
+        {on ? <Check size={12} strokeWidth={3.2} /> : null}
+      </span>
+      <Tag size={17} aria-hidden="true" className="flex-none text-(--bd-primary-600)" />
+      <span className="font-bold text-ink-900">{label}</span>
+    </label>
+  );
+}
+
+/** The bar shown while the domain choice is unsaved; at least one domain must stay ticked. */
+function SaveBar({
+  empty,
+  busy,
+  onDiscard,
+  onSave,
+}: Readonly<{ empty: boolean; busy: boolean; onDiscard: () => void; onSave: () => void }>) {
+  const t = useTranslations('console');
+  return (
+    <div className="flex flex-wrap items-center gap-2.5 rounded-[12px] border border-(--bd-border-soft) bg-(--bd-bg) px-3 py-2.5">
+      <span className={cn('mr-auto text-[13px]', empty ? 'text-rose-700' : 'text-ink-500')}>
+        {empty ? t('coordinator.domains_empty') : t('coordinator.unsaved')}
+      </span>
+      <Button kind="ghost" disabled={busy} onClick={onDiscard}>
+        {t('coordinator.discard')}
+      </Button>
+      <Button disabled={busy || empty} onClick={onSave}>
+        {t('coordinator.save_domains')}
+      </Button>
     </div>
   );
 }
