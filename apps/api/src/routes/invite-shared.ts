@@ -1,5 +1,5 @@
 /**
- * Invite-link checks shared by the invite read and accept routes of `@aggregator-dpg/api`.
+ * Invite-link checks and the unused-invite list shared by the invite routes of `@aggregator-dpg/api`.
  *
  * An invite link is usable when its token verifies for the expected role, its
  * row is still pending and unexpired, and the inviting org is the root or an
@@ -7,11 +7,15 @@
  */
 
 import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from 'fastify';
-import type { z } from 'zod';
-import type { InviteReadQuerySchema } from '@aggregator-dpg/shared-primitives/user-org';
+import { z } from 'zod';
+import type {
+  InviteReadQuerySchema,
+  InviteSearchResponse,
+} from '@aggregator-dpg/shared-primitives/user-org';
 import { httpError } from '../errors/http-error.js';
 import { authenticateAny } from '../services/auth/access-token.js';
 import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
+import { decodeUserCursor, encodeUserCursor } from './console-shared.js';
 import { verifyInviteToken, type InviteRole } from '../services/invite-token.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { getOrganisationStore } from '../services/organisation-store/index.js';
@@ -153,4 +157,56 @@ export async function authenticateCaller(req: FastifyRequest): Promise<void> {
     });
   }
   await recordRouteCaller(req, callerFromAny(auth.context));
+}
+/** Page size when the request names none. */
+const DEFAULT_INVITE_PAGE = 50;
+
+/**
+ * Lists the unused invites of an org and role, newest first, keyset paged.
+ *
+ * @param orgId - The org the invites were sent from.
+ * @param role - `coordinator` or `org_owner`.
+ * @param page - Opaque cursor and page size from the request.
+ * @returns The wire page; `next_cursor` is null on the last page.
+ * @throws {HttpError} SCHEMA_VALIDATION for a bad cursor, or DB_UNAVAILABLE.
+ */
+export async function searchOpenInvites(
+  orgId: string,
+  role: InviteRole,
+  page: { cursor?: string | undefined; limit?: number | undefined },
+): Promise<InviteSearchResponse> {
+  const limit = page.limit ?? DEFAULT_INVITE_PAGE;
+  let after: { createdAt: Date; jti: string } | undefined;
+  if (page.cursor) {
+    const c = decodeUserCursor(page.cursor);
+    if (!z.string().uuid().safeParse(c.id).success) {
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: 'cursor is invalid',
+        fields: { field: 'cursor' },
+      });
+    }
+    after = { createdAt: c.createdAt, jti: c.id };
+  }
+  const rows = await getRegistrationInvitesStore().listOpen({
+    orgId,
+    role,
+    limit: limit + 1,
+    ...(after ? { after } : {}),
+  });
+  if (!rows.ok) dbDown('inviteStore.listOpen', rows.error.message);
+  const items = rows.value.slice(0, limit);
+  const last = items.at(-1);
+  const now = Date.now();
+  return {
+    invites: items.map((i) => ({
+      email: i.email,
+      status: i.status === 'pending' && i.expiresAt.getTime() > now ? 'pending' : 'expired',
+      created_at: i.createdAt.toISOString(),
+      expires_at: i.expiresAt.toISOString(),
+    })),
+    next_cursor:
+      rows.value.length > limit && last
+        ? encodeUserCursor({ createdAt: last.createdAt, id: last.jti })
+        : null,
+  };
 }

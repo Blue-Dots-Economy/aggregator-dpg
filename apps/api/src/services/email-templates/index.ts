@@ -5,6 +5,12 @@ export { renderOrgOwnerApproved, type OrgOwnerApprovedVars } from './org-owner-a
 export { renderCoordinatorInvite, type CoordinatorInviteVars } from './coordinator-invite.js';
 export { renderOrgInvite, type OrgInviteVars } from './org-invite.js';
 export {
+  renderCoordinatorJoined,
+  renderOrgJoined,
+  type CoordinatorJoinedVars,
+  type OrgJoinedVars,
+} from './invite-joined.js';
+export {
   renderOrgAlreadyRegistered,
   type OrgAlreadyRegisteredVars,
 } from './org-already-registered.js';

@@ -6,6 +6,8 @@
  *   POST  /v1/user/search                coordinators within reach, keyset paged
  *   POST  /v1/user/create                invite coordinators into an org
  *   POST  /v1/user/invite                invite coordinators into an org (replaces create)
+ *   POST  /v1/user/invite/search         unused coordinator invites of an org
+ *   POST  /v1/user/activate              activate the caller's invited account after an email sign-in
  *   POST  /v1/user/decision/:id          approve / reject a pending coordinator
  *   PATCH /v1/user/metadata/update/:id   change a coordinator's domains
  *
@@ -23,6 +25,9 @@ import {
   MeResponseSchema,
   UserInviteRequestSchema,
   UserInviteResponseSchema,
+  UserInviteSearchRequestSchema,
+  ActivateResponseSchema,
+  InviteSearchResponseSchema,
   UserMetadataUpdateRequestSchema,
   UserSchema,
   UserSearchRequestSchema,
@@ -51,6 +56,9 @@ import {
 } from '../services/authz/manage-scope.js';
 import { decideCoordinator } from '../services/decisions/coordinator.js';
 import { mintInviteBatch } from '../services/invites/mint.js';
+import { searchOpenInvites } from './invite-shared.js';
+import { activateInvitedAccount } from '../services/invites/activate.js';
+import { authenticateAny } from '../services/auth/access-token.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { getSignalStackWriter } from '../services/signalstack.js';
 import { getNetworkConfig } from '../services/network-config.js';
@@ -427,6 +435,80 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
   app.post('/v1/user/create', inviteRouteOptions, inviteCoordinators);
 
   app.post('/v1/user/invite', inviteRouteOptions, inviteCoordinators);
+
+  app.post(
+    '/v1/user/invite/search',
+    {
+      config: { rbac: { capability: 'org.manage' } },
+      schema: {
+        tags: ['console'],
+        summary: 'List the unused coordinator invites of an organisation',
+        description:
+          'Invites nobody has registered with yet, newest first, keyset paged. `expired` invites no longer work. An invitee who registered is a coordinator (`POST /v1/user/search`), pending until they verify their email.',
+        body: UserInviteSearchRequestSchema,
+        response: {
+          200: InviteSearchResponseSchema,
+          ...errorResponses(400, 401, 403, 404, 503),
+        },
+      },
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const { actor } = await requireActor(req);
+      const body = req.body as z.infer<typeof UserInviteSearchRequestSchema>;
+      if (!inManageScope(await manageScope(req, actor), body.org_id)) throw httpError('NOT_FOUND');
+      return reply.status(200).send(await searchOpenInvites(body.org_id, 'coordinator', body));
+    },
+  );
+
+  app.post(
+    '/v1/user/activate',
+    {
+      // An invitee holds no role until this call, and the edge refuses role-less tokens elsewhere.
+      config: { rbac: { access: 'public' } },
+      schema: {
+        tags: ['console'],
+        summary: "Activate the caller's invited account",
+        description:
+          "Called by the portal right after an invitee's first sign-in. The account must come from an invite (`decision_made = invited`) and the sign-in must have verified the email (an email code). Runs the approve step without its mail and tells the inviting organisation's owner; an invited organisation becomes active with its owner. Already active answers 200 with `activated: false`. The caller refreshes its token afterwards to pick up the new access.",
+        response: {
+          200: ActivateResponseSchema,
+          ...errorResponses(401, 403, 404, 409, 502, 503),
+        },
+      },
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const auth = await authenticateAny(req);
+      if (!auth.ok) {
+        if (auth.error.code === 'AZP_NOT_ALLOWED') throw httpError('FORBIDDEN');
+        throw httpError('UNAUTHORIZED', { detail: auth.error.message });
+      }
+      if (auth.context.preferredUsername?.startsWith('service-account-')) {
+        throw httpError('FORBIDDEN', { detail: 'activation requires a signed-in user' });
+      }
+      const outcome = await activateInvitedAccount(auth.context.subject, req.log, req.id);
+      switch (outcome.kind) {
+        case 'activated':
+        case 'already_active':
+          return reply.status(200).send({
+            status: 'active',
+            account: outcome.account,
+            activated: outcome.kind === 'activated',
+          });
+        case 'not_found':
+          throw httpError('NOT_FOUND');
+        case 'not_invited':
+          throw httpError('NOT_INVITED');
+        case 'email_not_verified':
+          throw httpError('EMAIL_NOT_VERIFIED');
+        case 'org_inactive':
+          throw httpError('TARGET_ORG_INACTIVE');
+        case 'unavailable':
+          if (outcome.dependency === 'idp') throw httpError('IDP_UNAVAILABLE');
+          if (outcome.dependency === 'signalstack') throw httpError('SIGNALSTACK_PUSH_FAILED');
+          throw httpError('DB_UNAVAILABLE');
+      }
+    },
+  );
 
   app.post(
     '/v1/user/decision/:id',

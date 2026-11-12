@@ -53,8 +53,10 @@ export interface OrgDecisionInput {
   decision: Decision;
   /** Shown to the owner on reject; never logged or stored. */
   reason?: string;
-  /** The deciding admin's user id, or `'admin'` for an emailed link. */
+  /** The deciding admin's user id, `'admin'` for an emailed link, or `invite:<inviter id>`. */
   decidedBy: string;
+  /** Defaults to `true`; `false` skips the owner's approval mail, for an invitee who is already signed in. */
+  notify?: boolean;
   log: FastifyBaseLogger;
 }
 
@@ -200,6 +202,15 @@ export async function decideOrg(input: OrgDecisionInput): Promise<OrgDecisionOut
   const ownerAccess = await grantOwnerAccess(org, log);
   // RBAC edge: the owner now holds Org Admin in this organisation.
   requestTokenRolesSync([org.ownerUserId], 'org_approved');
+  if (input.notify === false) {
+    log.info({
+      status: 'success',
+      decision: 'approve',
+      decided_by: input.decidedBy,
+      owner_access: ownerAccess.status,
+    });
+    return { kind: 'decided', decision: 'approve', notified: false, ownerAccess };
+  }
   const mail = renderOrgOwnerApproved({
     orgName: org.displayName,
     ownerEmail: org.ownerEmail,

@@ -489,6 +489,13 @@
     },
     {
       "method": "POST",
+      "path": "/v1/org/invite/search",
+      "access": {
+        "capability": "orgs.onboard"
+      }
+    },
+    {
+      "method": "POST",
       "path": "/v1/org/search",
       "access": {
         "anyCapability": [
@@ -529,6 +536,13 @@
     },
     {
       "method": "POST",
+      "path": "/v1/user/activate",
+      "access": {
+        "access": "public"
+      }
+    },
+    {
+      "method": "POST",
       "path": "/v1/user/create",
       "access": {
         "capability": "org.manage"
@@ -553,6 +567,13 @@
       "path": "/v1/user/invite/accept",
       "access": {
         "access": "service"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/user/invite/search",
+      "access": {
+        "capability": "org.manage"
       }
     },
     {

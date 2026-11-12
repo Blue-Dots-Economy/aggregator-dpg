@@ -12,6 +12,7 @@
  *   POST  /v1/org/access/repair/:id     re-apply the owner's sign-in access (its parent's owner)
  *   GET   /v1/org/hierarchy             the network, its "known as" values and the tree limits (network admin)
  *   POST  /v1/org/invite                invite orgs to register under an org the actor owns
+ *   POST  /v1/org/invite/search         unused org invites of an org the actor owns
  *
  * Every handler calls `requireActor` first (admins only). A target out of
  * reach answers 404; a route the actor's kind cannot use answers 403. The
@@ -28,6 +29,8 @@ import {
   OrgHierarchyResponseSchema,
   OrgInviteRequestSchema,
   OrgInviteResponseSchema,
+  OrgInviteSearchRequestSchema,
+  InviteSearchResponseSchema,
   OrgKnownAsUpdateRequestSchema,
   OrgKnownAsUpdateResponseSchema,
   OrgMetadataUpdateRequestSchema,
@@ -56,6 +59,7 @@ import type { OrganisationConfig } from '@aggregator-dpg/network-config/interfac
 import { treeRules } from '../services/known-as.js';
 import { newChildRefusal } from '../services/organisation-store/tree.js';
 import { mintInviteBatch } from '../services/invites/mint.js';
+import { searchOpenInvites } from './invite-shared.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { getMailer } from '@aggregator-dpg/mailer';
 import { config } from '../config.js';
@@ -799,6 +803,30 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
         invalid: summary.invalid.length,
       });
       return reply.status(200).send(summary);
+    },
+  );
+
+  app.post(
+    '/v1/org/invite/search',
+    {
+      config: { rbac: { capability: 'orgs.onboard' } },
+      schema: {
+        tags: ['console'],
+        summary: 'List the unused organisation invites of an organisation',
+        description:
+          'Invites to register under `parent_id` that nobody has used yet, newest first, keyset paged: the root for the network admin, else an organisation the caller owns. `expired` invites no longer work. An invited organisation that registered is in `POST /v1/org/search`, pending until its owner verifies the email.',
+        body: OrgInviteSearchRequestSchema,
+        response: {
+          200: InviteSearchResponseSchema,
+          ...errorResponses(400, 401, 403, 404, 503),
+        },
+      },
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const { actor } = await requireActor(req);
+      const body = req.body as z.infer<typeof OrgInviteSearchRequestSchema>;
+      const parent = await invitingParent(req, actor, body.parent_id);
+      return reply.status(200).send(await searchOpenInvites(parent.id, 'org_owner', body));
     },
   );
 

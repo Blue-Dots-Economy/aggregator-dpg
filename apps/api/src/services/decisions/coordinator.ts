@@ -52,8 +52,10 @@ export interface CoordinatorDecisionInput {
   decision: Decision;
   /** Shown to the applicant on reject; never logged or stored. */
   reason?: string;
-  /** The deciding admin's user id, or {@link LINK_DECIDER} for an emailed link. */
+  /** The deciding admin's user id, {@link LINK_DECIDER} for an emailed link, or `invite:<inviter id>`. */
   decidedBy: string;
+  /** Defaults to `true`; `false` skips the applicant's mail, for an invitee who is already signed in. */
+  notify?: boolean;
   requestId?: string;
   log: FastifyBaseLogger;
 }
@@ -253,6 +255,10 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
       });
   }
 
+  if (input.notify === false) {
+    log.info({ status: 'success', decision: 'approve', decided_by: input.decidedBy });
+    return { kind: 'decided', decision: 'approve', notified: false };
+  }
   const mail = renderApplicantApproved({
     contactName: applicantName(aggregator, kcUser),
     association: aggregator.name,

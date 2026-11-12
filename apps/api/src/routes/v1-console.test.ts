@@ -714,6 +714,54 @@ describe('console routes /v1/user, /v1/org', () => {
     });
   });
 
+  describe('invite search', () => {
+    type Page = { invites: Array<{ email: string; status: string }>; next_cursor: string | null };
+
+    it('lists an org’s unused coordinator invites, newest first, and pages them', async () => {
+      for (const email of ['one@x.org', 'two@x.org', 'three@x.org']) {
+        await post('/v1/user/invite', 'a', { org_id: ORG_A, recipients: [{ email }] });
+      }
+      const first = (
+        await post('/v1/user/invite/search', 'a', { org_id: ORG_A, limit: 2 })
+      ).json() as Page;
+      expect(first.invites).toHaveLength(2);
+      expect(first.invites.every((i) => i.status === 'pending')).toBe(true);
+      expect(first.next_cursor).not.toBeNull();
+      const second = (
+        await post('/v1/user/invite/search', 'a', {
+          org_id: ORG_A,
+          limit: 2,
+          cursor: first.next_cursor,
+        })
+      ).json() as Page;
+      expect(second.next_cursor).toBeNull();
+      expect([...first.invites, ...second.invites].map((i) => i.email).sort()).toEqual(
+        ['one@x.org', 'three@x.org', 'two@x.org'].sort(),
+      );
+    });
+
+    it('keeps org invites out of the coordinator list and lists them separately', async () => {
+      useHierarchy();
+      await post('/v1/org/invite', 'a', { parent_id: ORG_A, recipients: [{ email: 'org@x.org' }] });
+      const users = (await post('/v1/user/invite/search', 'a', { org_id: ORG_A })).json() as Page;
+      expect(users.invites).toEqual([]);
+      const orgsPage = (
+        await post('/v1/org/invite/search', 'a', { parent_id: ORG_A })
+      ).json() as Page;
+      expect(orgsPage.invites.map((i) => i.email)).toEqual(['org@x.org']);
+    });
+
+    it('answers 404 for an org out of reach', async () => {
+      expect((await post('/v1/user/invite/search', 'a', { org_id: ORG_B })).statusCode).toBe(404);
+      expect((await post('/v1/org/invite/search', 'a', { parent_id: ORG_B })).statusCode).toBe(404);
+    });
+
+    it('refuses a malformed cursor with 400', async () => {
+      const res = await post('/v1/user/invite/search', 'a', { org_id: ORG_A, cursor: 'nope' });
+      expect(res.statusCode).toBe(400);
+    });
+  });
+
   describe('POST /v1/org/search', () => {
     const ids = (res: { json: () => unknown }) =>
       (res.json() as { orgs: Array<{ id: string }> }).orgs.map((o) => o.id).sort();

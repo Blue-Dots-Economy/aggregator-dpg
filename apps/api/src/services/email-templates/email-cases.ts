@@ -133,6 +133,24 @@ export const EMAIL_CASES: Readonly<Record<string, EmailCaseDef>> = {
 
   org_invite: INVITE_CASE,
 
+  coordinator_joined: {
+    tokens: { joinerName: 'text', joinerEmail: 'text', orgName: 'text', consoleUrl: 'text' },
+    layout: [
+      { block: 'heading', key: 'heading' },
+      { block: 'paraLast', key: 'intro' },
+      { block: 'cta', key: 'cta', href: 'consoleUrl' },
+    ],
+  },
+
+  org_joined: {
+    tokens: { orgName: 'text', ownerEmail: 'text', parentName: 'text', consoleUrl: 'text' },
+    layout: [
+      { block: 'heading', key: 'heading' },
+      { block: 'paraLast', key: 'intro' },
+      { block: 'cta', key: 'cta', href: 'consoleUrl' },
+    ],
+  },
+
   org_owner_approved: {
     tokens: { orgName: 'text', ownerEmail: 'text', inviteUrl: 'text' },
     layout: [

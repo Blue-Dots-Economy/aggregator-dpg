@@ -33,6 +33,21 @@ export interface CreateInviteInput {
   role?: InviteRole;
 }
 
+/** Keyset position in a list of open invites, newest first. */
+export interface InviteCursor {
+  createdAt: Date;
+  jti: string;
+}
+
+/** Input of {@link RegistrationInvitesStoreBase.listOpen}. */
+export interface ListOpenInvitesInput {
+  orgId: string;
+  role: InviteRole;
+  /** Rows strictly after this position. */
+  after?: InviteCursor;
+  limit: number;
+}
+
 export interface RefreshInviteInput {
   expiresAt: Date;
   createdBy: string;
@@ -64,6 +79,14 @@ export abstract class RegistrationInvitesStoreBase {
     role: InviteRole,
     email: string,
   ): Promise<InviteStoreResult<RegistrationInvite | null>>;
+
+  /**
+   * Lists the invites of an org and role that nobody has used yet (pending or
+   * expired), newest first by `(created_at, jti)`.
+   *
+   * @returns Up to `limit` rows.
+   */
+  abstract listOpen(input: ListOpenInvitesInput): Promise<InviteStoreResult<RegistrationInvite[]>>;
 
   /**
    * Updates a pending invite's expiry and creator, for a re-invite.

@@ -28,6 +28,8 @@ export type {
   RegistrationInviteStatus,
   InviteRole,
   CreateInviteInput,
+  InviteCursor,
+  ListOpenInvitesInput,
   RefreshInviteInput,
   InviteStoreError,
   InviteStoreResult,
