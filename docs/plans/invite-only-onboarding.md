@@ -6,13 +6,13 @@ Orgs and coordinators join only by invite. An invite sent by an org owner or adm
 
 ## Highlights
 
-| Item              | Change                                                              |
-| ----------------- | ------------------------------------------------------------------- |
-| Self-registration | Removed for orgs (`/register/owner`) and coordinators (`/register`) |
-| Approval hop      | Removed; the invitee is OTP-verified instead of approved            |
-| APIs              | One invite API for both kinds: `create`, `read`, `accept`           |
-| Email             | Locked to the invited address                                       |
-| Sign-in           | Form submit → Keycloak OTP, email channel by default → portal       |
+| Item              | Change                                                                            |
+| ----------------- | --------------------------------------------------------------------------------- |
+| Self-registration | Removed for orgs (`/register/owner`) and coordinators (`/register`)               |
+| Approval hop      | Removed; the invitee is OTP-verified instead of approved                          |
+| APIs              | Separate invites: `/v1/org/invite` (org + owner), `/v1/user/invite` (coordinator) |
+| Email             | Locked to the invited address                                                     |
+| Sign-in           | Form submit → Keycloak OTP, email channel by default → portal                     |
 
 ## 1. Scope
 
@@ -48,69 +48,72 @@ sequenceDiagram
   participant A as API
   participant K as Keycloak
   actor N as Invitee
-  I->>W: 1. Invite (kind, org, emails)
-  W->>A: POST /v1/invite/create
+  I->>W: 1. Invite org or coordinator
+  W->>A: POST /v1/{org|user}/invite
   A->>N: 2. Invite email
   N->>W: 3. Open link, fill form
-  W->>A: POST /v1/invite/accept
+  W->>A: POST …/invite/accept
   Note over A: 4. Create account, unverified
   A->>W: 201 + login hint
   W->>K: 5. Authorize, login_hint=email
   K->>N: 6. OTP by email only
   N->>K: Enter OTP
   K->>W: 7. Tokens
-  W->>A: 8. POST /v1/invite/activate
+  W->>A: 8. POST /v1/user/activate
   Note over A: Activate account
   A->>W: 9. Active → portal
 ```
 
-| Step | What happens                                                                                              |
-| ---- | --------------------------------------------------------------------------------------------------------- |
-| 1    | Inviter picks the kind (`org` or `coordinator`) and the target org in the console                         |
-| 2    | One invite per recipient (existing mint logic, 14-day TTL from `INVITE_TOKEN_TTL_SECONDS`)                |
-| 3    | One accept page renders the org or coordinator form by kind; the email is read-only                       |
-| 4    | Creates the account with status `invited`; Keycloak user enabled with `decision_made = invited`, no roles |
-| 5    | Web forwards `login_hint` so the identifier step is skipped                                               |
-| 6    | An `invited` user gets the email channel only, so a passed OTP proves the invited email                   |
-| 7    | The portal gate admits `invited` users this far                                                           |
-| 8    | The auth callback sees an unverified account and calls `activate` with the new token                      |
-| 9    | API runs the existing approve step; the session is refreshed so the new roles apply                       |
+| Step | What happens                                                                                     |
+| ---- | ------------------------------------------------------------------------------------------------ |
+| 1    | Inviter invites an org (child of their org) or a coordinator (into their org) from the console   |
+| 2    | One invite per recipient (existing mint logic, 14-day TTL from `INVITE_TOKEN_TTL_SECONDS`)       |
+| 3    | The accept page for that invite type renders its form; the email is read-only                    |
+| 4    | Creates the account as `pending`; Keycloak user enabled with `decision_made = invited`, no roles |
+| 5    | Web forwards `login_hint` so the identifier step is skipped                                      |
+| 6    | An `invited` user gets the email channel only, so a passed OTP proves the invited email          |
+| 7    | The portal gate admits `invited` users this far                                                  |
+| 8    | The auth callback sees an unverified account and calls `activate` with the new token             |
+| 9    | API runs the existing approve step; the session is refreshed so the new roles apply              |
 
 ```mermaid
 stateDiagram-v2
-  [*] --> invited: invite accepted
-  invited --> active: first email OTP
-  invited --> [*]: unverified, pruned
+  [*] --> pending: invite accepted
+  pending --> active: first email OTP
+  pending --> [*]: unverified, pruned
 ```
 
-`invited` means "form submitted, email not yet verified". New accounts never pass through `pending`. Later sign-ins are normal and may use either channel.
+`pending` now means "accepted, email not yet verified". Later sign-ins are normal and may use either channel.
 
-## 3. One invite API for both kinds
+## 3. Invite APIs
 
-`registration_invites` already has a `role` column and the invite token already carries a `role` claim. Both kinds share the mint, token, consume and release logic; only the form schema and the provisioning step differ.
+Org and coordinator invites are separate APIs. An org invite creates an org and onboards its owner. A coordinator invite creates one user. Both follow the same steps; the owner and the coordinator differ only in user type.
 
-| Endpoint                     | Auth                                                           | Purpose                                                                                        |
-| ---------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `POST /v1/invite/create`     | `org.manage` (coordinator) or `orgs.onboard` (org) in `org_id` | Mint and email invites. Body `{ kind, org_id, recipients[] }`. Replaces `POST /v1/user/create` |
-| `GET /v1/invite/read?token=` | Invite token                                                   | Kind, org name, locked email, expiry. Feeds the accept page                                    |
-| `POST /v1/invite/accept`     | Invite token                                                   | Validate by kind, create the `invited` account, return `login_hint`                            |
-| `POST /v1/invite/activate`   | User token (after email OTP)                                   | Activate the caller's own `invited` account; no-op when already active                         |
+| Endpoint                          | Auth                          | Purpose                                                                                              |
+| --------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `POST /v1/org/invite`             | `orgs.onboard` in `parent_id` | Mint and email org invites. Body `{ parent_id, recipients[] }`                                       |
+| `GET /v1/org/invite/read?token=`  | Invite token                  | Parent org name, locked email, expiry                                                                |
+| `POST /v1/org/invite/accept`      | Invite token                  | Create the org, its Keycloak group and the owner user, all `pending`; return `login_hint`            |
+| `POST /v1/user/invite`            | `org.manage` in `org_id`      | Mint and email coordinator invites. Body `{ org_id, recipients[] }`. Replaces `POST /v1/user/create` |
+| `GET /v1/user/invite/read?token=` | Invite token                  | Org name, locked email, expiry                                                                       |
+| `POST /v1/user/invite/accept`     | Invite token                  | Create the coordinator user, `pending`; return `login_hint`                                          |
+| `POST /v1/user/activate`          | User token (after email OTP)  | Activate the caller's own `pending` account; for an owner, also its org. No-op when already active   |
 
-For an `org` invite, `org_id` is the parent; tree limits are checked at mint and again at accept.
+|                  | Org invite                                                                     | Coordinator invite                                                                        |
+| ---------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| Invite row       | `registration_invites`, `role = org_owner`, `org_id` = parent                  | `registration_invites`, `role = coordinator`, `org_id` = target org                       |
+| `accept` creates | Org + Keycloak group + owner user (existing `POST /v1/orgs/create` logic)      | Coordinator user (existing `POST /v1/aggregator-registrations/create` logic)              |
+| `activate` runs  | `decideOrg(approve)`: `grantOwnerAccess` (`org_owner`, group), CAS to `active` | `decideCoordinator(approve)`: Signals upsert, `decision_made = approved`, CAS to `active` |
+| Limits           | Org tree limits checked at invite and again at accept                          | -                                                                                         |
 
-| Kind          | `accept` (existing create logic, moved into a service) | `activate` (existing approve logic)                                                       |
-| ------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| `coordinator` | Body of `POST /v1/aggregator-registrations/create`     | `decideCoordinator(approve)`: Signals upsert, `decision_made = approved`, CAS to `active` |
-| `org`         | Body of `POST /v1/orgs/create`                         | `decideOrg(approve)`: `grantOwnerAccess` (`org_owner`, group), CAS to `active`            |
-
-The decider is recorded as `invite:<inviter id>`. A failed `activate` leaves the account `invited`; the next sign-in retries it.
+Token minting, consume and release stay shared services (`services/invites/`) under both APIs. The decider is recorded as `invite:<inviter id>`. A failed `activate` leaves the account `pending`; the next sign-in retries it.
 
 ### Retired
 
 | Endpoint                                                                                                   | When                                        |
 | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | `POST /v1/orgs/create`, `POST /v1/aggregator-registrations/create`                                         | At cut-over                                 |
-| `POST /v1/user/create`                                                                                     | At cut-over (moved to `/v1/invite/create`)  |
+| `POST /v1/user/create`                                                                                     | At cut-over (moved to `/v1/user/invite`)    |
 | `POST /admin/v1/invites` (owner grant)                                                                     | At cut-over; owners invite from the console |
 | `/admin/v1/orgs/{read,decision,renew}/:id`, `/admin/v1/aggregator-registrations/{read,decision,renew}/:id` | After the pending backlog is drained        |
 | `POST /v1/user/decision/:id`, `POST /v1/org/decision/:id`                                                  | After the pending backlog is drained        |
@@ -119,36 +122,37 @@ The decider is recorded as `invite:<inviter id>`. A failed `activate` leaves the
 
 ### Database
 
-| Item                                   | Change                                                                                       |
-| -------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `registration_invites.role`            | Accept `org_owner` alongside `coordinator`                                                   |
-| `registration_invites_pending_unique`  | `(org_id, email)` → `(org_id, role, email)`                                                  |
-| `users.status`, `organisations.status` | Add `invited` to `registration_status`; activation is a compare-and-set `invited` → `active` |
-| Data migration                         | None                                                                                         |
+| Item                                   | Change                                                   |
+| -------------------------------------- | -------------------------------------------------------- |
+| `registration_invites.role`            | Accept `org_owner` alongside `coordinator`               |
+| `registration_invites_pending_unique`  | `(org_id, email)` → `(org_id, role, email)`              |
+| `users.status`, `organisations.status` | No enum change; `pending` means awaiting first email OTP |
+| Data migration                         | None                                                     |
 
 ### API
 
-| Item                                | Change                                                                             |
-| ----------------------------------- | ---------------------------------------------------------------------------------- |
-| Invite routes                       | `routes/invites.ts` rewritten to hold the three endpoints above                    |
-| Email lock                          | Reject when the submitted email differs from the invite (`INVITE_EMAIL_MISMATCH`)  |
-| Review emails                       | Removed (`sendAdminReviewEmail`, `sendOrgReviewEmail`)                             |
-| Stale prune                         | `cleanup-stale` also deletes `invited` accounts not verified within the invite TTL |
-| Approved emails and grant mail      | Removed; the invitee signs in directly                                             |
-| RBAC route table and `openapi.json` | Regenerated                                                                        |
+| Item                                | Change                                                                                                                     |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Invite routes                       | Org invite routes in `v1-org.ts`, user invite and activate routes in `v1-user.ts`; grant route `routes/invites.ts` removed |
+| Email lock                          | Reject when the submitted email differs from the invite (`INVITE_EMAIL_MISMATCH`)                                          |
+| Review emails                       | Removed (`sendAdminReviewEmail`, `sendOrgReviewEmail`)                                                                     |
+| Stale prune                         | `cleanup-stale` also deletes `pending` invited accounts not verified within the invite TTL                                 |
+| Approved emails and grant mail      | Removed; the invitee signs in directly                                                                                     |
+| RBAC route table and `openapi.json` | Regenerated                                                                                                                |
 
 ### Web
 
-| Item                                     | Change                                                                       |
-| ---------------------------------------- | ---------------------------------------------------------------------------- |
-| `/register`, `/register/owner`           | Removed; show "Onboarding is by invite only"                                 |
-| `/register/coordinator?invite=`          | Becomes `/register/accept?invite=`, one page for both kinds                  |
-| `/register/invite?grant=`                | Removed                                                                      |
-| Console `invite` page                    | Add the kind choice; org list filtered by `orgs.onboard` or `org.manage`     |
-| Console pending lists and decide buttons | Removed after the backlog is drained                                         |
-| `/api/auth/login`                        | Forward `login_hint` to the authorize URL                                    |
-| Accept submit                            | Redirect to `/api/auth/login?login_hint=<email>`                             |
-| `/api/auth/callback`                     | Call `/v1/invite/activate` for an unverified account, then refresh the token |
+| Item                                     | Change                                                                                                     |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `/register`                              | Removed; show "Onboarding is by invite only"                                                               |
+| `/register/owner`                        | Opens only with `?invite=`; calls `/v1/org/invite/accept`                                                  |
+| `/register/coordinator?invite=`          | Calls `/v1/user/invite/accept`                                                                             |
+| `/register/invite?grant=`                | Removed                                                                                                    |
+| Console invites                          | Existing coordinator invite page uses `/v1/user/invite`; new "Invite organisation" action on the orgs page |
+| Console pending lists and decide buttons | Removed after the backlog is drained                                                                       |
+| `/api/auth/login`                        | Forward `login_hint` to the authorize URL                                                                  |
+| Accept submit                            | Redirect to `/api/auth/login?login_hint=<email>`                                                           |
+| `/api/auth/callback`                     | Call `/v1/user/activate` for an unverified account, then refresh the token                                 |
 
 ### Keycloak
 
