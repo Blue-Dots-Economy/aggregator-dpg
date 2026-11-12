@@ -90,11 +90,13 @@ export function useBulkUpload() {
       file,
       participantType,
       attestation,
+      maxBytes,
     }: {
       file: File;
       participantType: string;
       attestation: boolean;
-    }) => onboardingService.uploadCsv(file, participantType, attestation),
+      maxBytes?: number | undefined;
+    }) => onboardingService.uploadCsv(file, participantType, attestation, maxBytes),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['onboarding', 'summary'] });
     },

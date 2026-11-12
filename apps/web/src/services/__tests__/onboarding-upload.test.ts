@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BulkUploadTooLargeError, onboardingService } from '../onboarding.service';
+import {
+  BulkUploadEmptyError,
+  BulkUploadTooLargeError,
+  onboardingService,
+} from '../onboarding.service';
 
 const created = (extra: Record<string, unknown> = {}) =>
   new Response(
@@ -120,6 +124,35 @@ describe('bulk upload follows the upload instructions', () => {
     expect(err).toBeInstanceOf(BulkUploadTooLargeError);
     expect((err as BulkUploadTooLargeError).maxBytes).toBe(10);
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a file over the configured limit without creating an upload', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch');
+    const big = new File(['x'.repeat(11)], 'big.csv', { type: 'text/csv' });
+    const err = await onboardingService.uploadCsv(big, 'seeker', true, 10).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BulkUploadTooLargeError);
+    expect(err).toMatchObject({ maxBytes: 10 });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('rejects an empty file without creating an upload', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch');
+    const empty = new File([], 'empty.csv', { type: 'text/csv' });
+    await expect(onboardingService.uploadCsv(empty, 'seeker', true, 10)).rejects.toBeInstanceOf(
+      BulkUploadEmptyError,
+    );
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('uploads a file of exactly the configured limit', async () => {
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(created({ max_bytes: 10 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(started());
+    const exact = new File(['x'.repeat(10)], 'exact.csv', { type: 'text/csv' });
+    await onboardingService.uploadCsv(exact, 'seeker', true, 10);
+    expect(spy).toHaveBeenCalledTimes(3);
   });
 
   it('uploads a file of exactly max_bytes', async () => {

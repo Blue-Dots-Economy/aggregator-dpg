@@ -21,7 +21,11 @@ import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { BulkUploadStatus } from '@/services/onboarding.service';
-import { BulkUploadStartUnreadError, BulkUploadTooLargeError } from '@/services/onboarding.service';
+import {
+  BulkUploadEmptyError,
+  BulkUploadStartUnreadError,
+  BulkUploadTooLargeError,
+} from '@/services/onboarding.service';
 import type * as OnboardingServiceModule from '@/services/onboarding.service';
 import { ResponseShapeError } from '@/lib/response-shape-error';
 import { HttpError } from '@/services/http';
@@ -139,7 +143,7 @@ describe('<CSVUpload />', () => {
     pushMock.mockClear();
     mutateAsync.mockReset();
     refetch.mockClear();
-    useAggregatorConfig.mockReturnValue({ data: cfg });
+    useAggregatorConfig.mockReturnValue({ data: { ...cfg, bulk_upload_max_bytes: 10485760 } });
     useProfileRaw.mockReturnValue({ data: { type: 'seeker', serves: ['seeker'] } });
     useBulkUpload.mockReturnValue({ mutateAsync, isPending: false });
     useRecentBulkUploads.mockReturnValue({ data: { items: [] }, isLoading: false, refetch });
@@ -258,6 +262,7 @@ describe('<CSVUpload />', () => {
       file: expect.any(File),
       participantType: 'seeker',
       attestation: true,
+      maxBytes: 10485760,
     });
     await waitFor(() => expect(screen.queryByText('roster.csv')).not.toBeInTheDocument());
     expect(
@@ -317,6 +322,27 @@ describe('<CSVUpload />', () => {
     await user.click(screen.getByRole('button', { name: 'Upload' }));
 
     expect(await screen.findByText(messages.access.domain_not_served)).toBeInTheDocument();
+  });
+
+  it('says the upload limit was reached when the api answers RATE_LIMITED', async () => {
+    mutateAsync.mockRejectedValue(new HttpError(429, 'RATE_LIMITED'));
+    const user = userEvent.setup();
+    renderUpload();
+    await pickAndAttest(user);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    expect(await screen.findByText(messages.onboarding.csv.rate_limited)).toBeInTheDocument();
+    expect(screen.queryByText(messages.onboarding.csv.upload_failed)).not.toBeInTheDocument();
+  });
+
+  it('says the file is empty', async () => {
+    mutateAsync.mockRejectedValue(new BulkUploadEmptyError());
+    const user = userEvent.setup();
+    renderUpload();
+    await pickAndAttest(user);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    expect(await screen.findByText(messages.onboarding.csv.empty)).toBeInTheDocument();
   });
 
   it('says the file was received, clears it and re-reads the list when /start cannot be confirmed', async () => {
@@ -578,6 +604,29 @@ describe('<RecentUploadsBody />', () => {
     await user.click(screen.getByText('errors.csv'));
     await waitFor(() => expect(warnSpy).toHaveBeenCalled());
     expect(screen.getByText('errors.csv')).toBeInTheDocument(); // downloading flag reset, button back to normal label
+    expect(
+      await screen.findByText(messages.onboarding.csv.recent.errors_download_failed),
+    ).toBeInTheDocument();
+    warnSpy.mockRestore();
+  });
+
+  it('says the errors report is no longer available when the api answers 404', async () => {
+    errorsCsvUrl.mockRejectedValue(new HttpError(404, 'NOT_FOUND'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const user = userEvent.setup();
+    useRecentBulkUploads.mockReturnValue({
+      data: {
+        items: [baseUpload({ status: 'completed', failed: 3, errors_csv_s3_key: 'k1' })],
+      },
+      isLoading: false,
+      error: null,
+    });
+    renderRecent();
+
+    await user.click(screen.getByText('errors.csv'));
+    expect(
+      await screen.findByText(messages.onboarding.csv.recent.errors_unavailable),
+    ).toBeInTheDocument();
     warnSpy.mockRestore();
   });
 

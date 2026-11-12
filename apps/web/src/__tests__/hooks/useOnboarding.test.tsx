@@ -122,9 +122,14 @@ describe('useOnboarding hooks', () => {
     const { result } = renderHook(() => useBulkUpload(), { wrapper });
     const file = new File(['a,b'], 'x.csv', { type: 'text/csv' });
     await act(async () => {
-      await result.current.mutateAsync({ file, participantType: 'seeker', attestation: true });
+      await result.current.mutateAsync({
+        file,
+        participantType: 'seeker',
+        attestation: true,
+        maxBytes: 1000,
+      });
     });
-    expect(svc.uploadCsv).toHaveBeenCalledWith(file, 'seeker', true);
+    expect(svc.uploadCsv).toHaveBeenCalledWith(file, 'seeker', true, 1000);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['onboarding', 'summary'] });
   });
 

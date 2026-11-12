@@ -169,6 +169,15 @@ export class BulkUploadTooLargeError extends Error {
   }
 }
 
+/** Thrown when the file has no content. */
+export class BulkUploadEmptyError extends Error {
+  override readonly name = 'BulkUploadEmptyError';
+
+  constructor() {
+    super('file is empty');
+  }
+}
+
 /**
  * Thrown when `/start` answered OK with an unreadable body and the upload's
  * status could not be read again either.
@@ -298,8 +307,10 @@ export const onboardingService = {
    * @param file - The CSV file.
    * @param participantType - Domain of the rows.
    * @param attestation - Whether the coordinator accepted the attestation.
+   * @param maxBytes - The size limit from the aggregator config; when unknown, the limit in the api's upload reply applies.
    * @returns The upload id and status.
-   * @throws {BulkUploadTooLargeError} If the file is larger than the limit the api reported.
+   * @throws {BulkUploadEmptyError} If the file is empty.
+   * @throws {BulkUploadTooLargeError} If the file is larger than the limit.
    * @throws {BulkUploadStartUnreadError} If `/start` accepted the upload and its status could not be read.
    * @throws {Error} If the storage upload or an API call fails.
    */
@@ -307,12 +318,15 @@ export const onboardingService = {
     file: File,
     participantType: string,
     attestation: boolean,
+    maxBytes?: number,
   ): Promise<{
     uploadId: string;
     status: BulkUploadStatus;
     duplicate?: boolean;
     message?: string;
   }> {
+    if (file.size === 0) throw new BulkUploadEmptyError();
+    if (maxBytes !== undefined && file.size > maxBytes) throw new BulkUploadTooLargeError(maxBytes);
     const presigned = await this.createBulkUpload(participantType);
     if (file.size > presigned.max_bytes) throw new BulkUploadTooLargeError(presigned.max_bytes);
     await uploadFile(file, presigned);

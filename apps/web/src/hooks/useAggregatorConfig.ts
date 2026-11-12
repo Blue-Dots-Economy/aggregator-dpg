@@ -115,6 +115,8 @@ export const AggregatorConfigPayloadSchema = z.object({
   registration_modes: z.record(RegistrationModeConfigSchema).optional(),
   /** Per-domain Signals UI login URLs. A domain without a URL has no Signals hand-off. */
   signals_ui_urls: z.record(z.string()).optional(),
+  /** Largest bulk-upload CSV the api accepts, in bytes. */
+  bulk_upload_max_bytes: z.number().int().positive().optional(),
 });
 export type AggregatorConfigPayload = z.infer<typeof AggregatorConfigPayloadSchema>;
 
