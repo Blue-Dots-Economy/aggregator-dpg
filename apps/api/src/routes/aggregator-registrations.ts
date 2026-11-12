@@ -57,12 +57,10 @@ import { resolveProfileRef } from '../services/schema-ref.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
 import { slugFromName } from '../services/slug.js';
-import { authenticateAny } from '../services/auth/access-token.js';
 import { KC_ATTR } from '../services/idp-admin/index.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import type { ErrorCode } from '../errors/codes.js';
-import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
 
 const SLUG_RETRIES = 3;
 
@@ -146,282 +144,44 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
     async (req: FastifyRequest, reply: FastifyReply) => {
       const log = req.log.child({ operation: 'aggregator-registration.create' });
       const start = Date.now();
+      await authenticateCaller(req);
+      const body = req.body as z.infer<typeof CoordinatorRegistrationBodySchema>;
+      const { org_id: _orgIdField, invite: _inviteField, ...formBody } = body;
+      const { contact, phoneE164, consent } = await checkCoordinatorSubmission(
+        req,
+        reply,
+        body,
+        formBody,
+      );
+      const userStore = getUserStore();
 
       // Invite claimed by this request, before anything is created. Unless the
       // registration completes, the `finally` below gives it back.
-      let inviteJti: string | null = null;
-      let inviteCommitted = false;
+      const claim: InviteClaim = { jti: null };
+      let committed = false;
       try {
-        // Re-sends the review link for an existing pending or revived record
-        // using stored values. The anonymous submit never changes the record: it
-        // carries no proof of identity, so a stranger must not overwrite it.
-        const reclaimReview = async (row: Coordinator): Promise<FastifyReply> => {
-          await sendAdminReviewEmail(
-            {
-              aggregatorId: row.id,
-              applicantName: row.name,
-              applicantEmail: row.contact.email,
-              applicantPhone: row.contactPhone,
-              ...(row.inviteEmail ? { invitedEmail: row.inviteEmail } : {}),
-              ...(await resolveOwnerRouting(row.parentOrgId)),
-            },
-            log,
-          );
-          log.info(
-            {
-              status: 'success',
-              latency_ms: Date.now() - start,
-              aggregator_id: row.id,
-              reclaim: true,
-            },
-            'registration re-submitted — review link re-sent (no field change)',
-          );
-          // Consent is recorded only on a fresh registration, not here.
-          return reply.status(200).send({
-            aggregator_id: row.id,
-            org_slug: row.orgSlug,
-            status: 'pending',
-            message: 'Registration re-submitted. A fresh approval link has been sent for review.',
-          });
-        };
-
-        // The BFF calls this with a service-account token, so no
-        // `aggregator_id` claim is required.
-        const auth = await authenticateAny(req);
-        if (!auth.ok) {
-          throw httpError('UNAUTHORIZED', {
-            detail: auth.error.message,
-            fields: { reason: auth.error.code },
-          });
-        }
-        await recordRouteCaller(req, callerFromAny(auth.context));
-
-        // Already validated and parsed by the route schema.
-        const body = req.body as z.infer<typeof RegistrationPayloadSchema>;
-
-        // `org_id` and `invite` are not form fields; strip them before Ajv.
-        const {
-          org_id: _orgIdField,
-          invite: _inviteField,
-          ...formBody
-        } = req.body as Record<string, unknown>;
-        const {
-          contact,
-          phoneE164,
-          consent: serverConsent,
-        } = await checkCoordinatorSubmission(req, reply, body, formBody);
-        const userStore = getUserStore();
+        const target = await selfRegistrationOrg(body, contact.email, claim);
+        const ownOrgDetails = selfRegistrationOrgDetails(body, target.orgIsDefault);
+        const existing = await reclaimableRegistration(userStore, contact.email, phoneE164);
+        if (existing) return reclaimReview(reply, existing, log, start);
         const idp = getIdpAdmin();
-
-        // The coordinator's org; must be active.
-        let parentOrgId: string;
-        let orgIsDefault = false;
-        // The invited email. The coordinator may register with another one;
-        // this is kept so the approving owner can see it.
-        let inviteEmailClaim: string | null = null;
-        {
-          const orgStore = getOrganisationStore();
-          const reqInvite = (req.body as { invite?: string }).invite;
-
-          // Invite path: the org comes from the token claim, re-checked against
-          // the database, and the invite is claimed before anything is created.
-          if (reqInvite) {
-            const verified = await verifyInviteToken(reqInvite);
-            if (!verified.ok) {
-              throw httpError(
-                verified.error.code === 'EXPIRED' ? 'INVITE_EXPIRED' : 'INVITE_INVALID',
-              );
-            }
-            // The invited email is recorded, not enforced.
-            inviteEmailClaim = verified.email.trim().toLowerCase();
-            if (verified.role !== 'coordinator') throw httpError('INVITE_INVALID');
-            const inviteStore = getRegistrationInvitesStore();
-            const org = await orgStore.findById(verified.org);
-            if (!org.ok) {
-              throw httpError('DB_UNAVAILABLE', {
-                cause: new Error(org.error.message),
-                fields: { sub_operation: 'orgStore.findById' },
-              });
-            }
-            // The Default org takes no invites.
-            if (org.value?.status !== 'active' || org.value.isDefault) {
-              throw httpError('TARGET_ORG_INACTIVE');
-            }
-            const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
-            if (ownerMatch.ok && ownerMatch.value) {
-              throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
-            }
-            // Claim the invite now, before anything is created, so concurrent
-            // submits on one link create at most one registration.
-            const claimed = await inviteStore.consume(verified.jti);
-            if (!claimed.ok) {
-              throw httpError('DB_UNAVAILABLE', {
-                cause: new Error(claimed.error.message),
-                fields: { sub_operation: 'inviteStore.consume' },
-              });
-            }
-            if (claimed.value === null) {
-              throw httpError('INVITE_ALREADY_USED', { fields: { email: contact.email } });
-            }
-            inviteJti = verified.jti;
-            parentOrgId = verified.org;
-          } else {
-            // Selector path: the coordinator picks an active org. `org_id` is required.
-            const reqOrgId = (req.body as { org_id?: string }).org_id;
-            if (!reqOrgId) {
-              throw httpError('SCHEMA_VALIDATION', {
-                detail: 'org_id is required.',
-                fields: { field: 'org_id' },
-              });
-            }
-            const org = await orgStore.findById(reqOrgId);
-            if (!org.ok) {
-              throw httpError('DB_UNAVAILABLE', {
-                cause: new Error(org.error.message),
-                fields: { sub_operation: 'orgStore.findById' },
-              });
-            }
-            if (org.value?.status !== 'active') {
-              throw httpError('TARGET_ORG_INACTIVE');
-            }
-            // An org owner cannot also register as a coordinator.
-            const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
-            if (ownerMatch.ok && ownerMatch.value) {
-              throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
-            }
-            // The Default org is selectable only while it is the only active org.
-            if (org.value.isDefault) {
-              const active = await orgStore.listActive();
-              if (!active.ok) {
-                throw httpError('DB_UNAVAILABLE', {
-                  cause: new Error(active.error.message),
-                  fields: { sub_operation: 'orgStore.listActive' },
-                });
-              }
-              if (active.value.some((o) => !o.isDefault)) {
-                throw httpError('TARGET_ORG_INACTIVE');
-              }
-            }
-            parentOrgId = org.value.id;
-            orgIsDefault = org.value.isDefault;
-          }
-        }
-
-        // A Default-org coordinator names its own organisation, never "Default".
-        if (orgIsDefault && body.name.trim().toLowerCase() === 'default') {
-          throw httpError('SCHEMA_VALIDATION', {
-            detail: 'The organisation name cannot be "Default".',
-            fields: { field: 'name' },
-          });
-        }
-
-        // `url` and `locations` belong to a real org, so sending them is refused.
-        // A Default-org coordinator keeps its own as `legacy_org_details`.
-        const submittedLocations = (body.locations ?? []).filter(hasLocationContent);
-        const ownOrgDetails: LegacyOrgDetails = {
-          ...(body.url?.trim() ? { url: body.url.trim() } : {}),
-          ...(submittedLocations.length > 0 ? { locations: submittedLocations } : {}),
-        };
-        if (!orgIsDefault && Object.keys(ownOrgDetails).length > 0) {
-          throw httpError('ORG_DETAILS_READ_ONLY', {
-            fields: { fields: Object.keys(ownOrgDetails) },
-          });
-        }
-
-        // Check email and phone uniqueness in the database and Keycloak.
-        const dbEmail = await userStore.findByContactEmail(contact.email);
-        if (!dbEmail.ok) {
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(dbEmail.error.message),
-            fields: { sub_operation: 'userStore.findByContactEmail' },
-          });
-        }
-        if (dbEmail.value !== null) {
-          const existing = dbEmail.value;
-          if (existing.status === 'inactive') {
-            // Rejected: refuse until the cooling window from `rejected_at` ends,
-            // then revive the same row to pending and re-send the review link.
-            const retryAfter = coolingRetryAfter(existing.rejectedAt, existing.updatedAt);
-            if (retryAfter) {
-              throw httpError('REGISTRATION_COOLING', {
-                fields: { email: contact.email, retry_after: retryAfter },
-              });
-            }
-            const revived = await userStore.update(existing.id, {
-              status: 'pending',
-              rejectedAt: null,
-              updatedBy: 'self',
-            });
-            if (!revived.ok) {
-              throw httpError('DB_UNAVAILABLE', {
-                cause: new Error(revived.error.message),
-                fields: { sub_operation: 'userStore.reviveRejected' },
-              });
-            }
-            return reclaimReview(existing);
-          }
-          if (existing.status !== 'pending') {
-            // Active or retired: the email is taken.
-            throw httpError('USER_EXISTS', { fields: { email: contact.email } });
-          }
-          // Pending: re-send the review link.
-          return reclaimReview(existing);
-        }
-
-        const dbPhone = await userStore.findByContactPhone(phoneE164);
-        if (!dbPhone.ok) {
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(dbPhone.error.message),
-            fields: { sub_operation: 'userStore.findByContactPhone' },
-          });
-        }
-        if (dbPhone.value !== null) {
-          const existingPhone = dbPhone.value;
-          if (existingPhone.status === 'inactive') {
-            // Same cooling window for a rejected record that owns this phone.
-            const retryAfter = coolingRetryAfter(existingPhone.rejectedAt, existingPhone.updatedAt);
-            if (retryAfter) {
-              throw httpError('REGISTRATION_COOLING', {
-                fields: { phone: phoneE164, retry_after: retryAfter },
-              });
-            }
-            const revived = await userStore.update(existingPhone.id, {
-              status: 'pending',
-              rejectedAt: null,
-              updatedBy: 'self',
-            });
-            if (!revived.ok) {
-              throw httpError('DB_UNAVAILABLE', {
-                cause: new Error(revived.error.message),
-                fields: { sub_operation: 'userStore.reviveRejected' },
-              });
-            }
-            return reclaimReview(existingPhone);
-          }
-          throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
-        }
-
         await assertNotInKeycloak(idp, contact.email, phoneE164);
 
         const { aggregatorId, orgSlug } = await createCoordinatorRow(userStore, body, {
           contact,
-          consent: serverConsent,
-          orgId: parentOrgId,
-          legacyOrgDetails:
-            orgIsDefault && Object.keys(ownOrgDetails).length > 0 ? ownOrgDetails : null,
-          inviteId: inviteJti,
+          consent,
+          orgId: target.parentOrgId,
+          legacyOrgDetails: ownOrgDetails,
+          inviteId: claim.jti,
           log,
         });
-
         const keycloakUserId = await createCoordinatorLogin(userStore, idp, {
           aggregatorId,
           type: body.type,
           contact,
           invited: false,
         });
-
-        // Fully provisioned: keep the invite consumed.
-        inviteCommitted = true;
+        committed = true;
 
         await sendAdminReviewEmail(
           {
@@ -429,12 +189,11 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
             applicantName: body.name,
             applicantEmail: contact.email,
             applicantPhone: phoneE164,
-            ...(inviteEmailClaim ? { invitedEmail: inviteEmailClaim } : {}),
-            ...(await resolveOwnerRouting(parentOrgId)),
+            ...(target.inviteEmail ? { invitedEmail: target.inviteEmail } : {}),
+            ...(await resolveOwnerRouting(target.parentOrgId)),
           },
           log,
         );
-
         log.info(
           {
             status: 'success',
@@ -445,7 +204,6 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           },
           'aggregator registration submitted',
         );
-
         return reply.status(201).send({
           aggregator_id: aggregatorId,
           org_slug: orgSlug,
@@ -453,12 +211,11 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
           message: 'Registration submitted. You will receive credentials by email after approval.',
         });
       } finally {
-        // Give the invite back on any exit that did not create a registration.
-        // Only releases the claim this request took.
-        if (inviteJti && !inviteCommitted) await releaseInvite(inviteJti, log);
+        if (claim.jti && !committed) await releaseInvite(claim.jti, log);
       }
     },
   );
+
   app.post(
     '/v1/user/invite/accept',
     {
@@ -562,6 +319,244 @@ async function checkCoordinatorSubmission(
     });
   }
   return { contact, phoneE164, consent };
+}
+
+/** The invite a public submit claimed, so an incomplete registration can give it back. */
+interface InviteClaim {
+  jti: string | null;
+}
+
+/** The org a public submit registers under, and the email its invite was sent to. */
+interface SelfRegistrationTarget {
+  parentOrgId: string;
+  orgIsDefault: boolean;
+  /** Recorded for the approving owner; the coordinator may register with another email. */
+  inviteEmail: string | null;
+}
+
+/**
+ * Resolves the org of a public submit: from its invite, or the org picked on the form.
+ *
+ * @throws {HttpError} On an unusable invite or org.
+ */
+async function selfRegistrationOrg(
+  body: z.infer<typeof CoordinatorRegistrationBodySchema>,
+  email: string,
+  claim: InviteClaim,
+): Promise<SelfRegistrationTarget> {
+  if (body.invite) return invitedOrg(body.invite, email, claim);
+  return selectedOrg(body.org_id, email);
+}
+
+/**
+ * Checks a public submit's invite and claims it before anything is created.
+ *
+ * @throws {HttpError} INVITE_INVALID, INVITE_EXPIRED, INVITE_ALREADY_USED, TARGET_ORG_INACTIVE,
+ *   OWNER_ALREADY_REGISTERED or DB_UNAVAILABLE.
+ */
+async function invitedOrg(
+  token: string,
+  email: string,
+  claim: InviteClaim,
+): Promise<SelfRegistrationTarget> {
+  const verified = await verifyInviteToken(token);
+  if (!verified.ok) {
+    throw httpError(verified.error.code === 'EXPIRED' ? 'INVITE_EXPIRED' : 'INVITE_INVALID');
+  }
+  if (verified.role !== 'coordinator') throw httpError('INVITE_INVALID');
+  const org = await getOrganisationStore().findById(verified.org);
+  if (!org.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(org.error.message),
+      fields: { sub_operation: 'orgStore.findById' },
+    });
+  }
+  if (org.value?.status !== 'active' || org.value.isDefault) {
+    throw httpError('TARGET_ORG_INACTIVE');
+  }
+  await assertNotOrgOwner(email);
+  const claimed = await getRegistrationInvitesStore().consume(verified.jti);
+  if (!claimed.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(claimed.error.message),
+      fields: { sub_operation: 'inviteStore.consume' },
+    });
+  }
+  if (claimed.value === null) throw httpError('INVITE_ALREADY_USED', { fields: { email } });
+  claim.jti = verified.jti;
+  return {
+    parentOrgId: verified.org,
+    orgIsDefault: false,
+    inviteEmail: verified.email.trim().toLowerCase(),
+  };
+}
+
+/**
+ * Checks the org picked on the public form; the Default org only while it is the only active org.
+ *
+ * @throws {HttpError} SCHEMA_VALIDATION, TARGET_ORG_INACTIVE, OWNER_ALREADY_REGISTERED or DB_UNAVAILABLE.
+ */
+async function selectedOrg(
+  orgId: string | undefined,
+  email: string,
+): Promise<SelfRegistrationTarget> {
+  if (!orgId) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'org_id is required.',
+      fields: { field: 'org_id' },
+    });
+  }
+  const orgStore = getOrganisationStore();
+  const org = await orgStore.findById(orgId);
+  if (!org.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(org.error.message),
+      fields: { sub_operation: 'orgStore.findById' },
+    });
+  }
+  if (org.value?.status !== 'active') throw httpError('TARGET_ORG_INACTIVE');
+  await assertNotOrgOwner(email);
+  if (org.value.isDefault) {
+    const active = await orgStore.listActive();
+    if (!active.ok) {
+      throw httpError('DB_UNAVAILABLE', {
+        cause: new Error(active.error.message),
+        fields: { sub_operation: 'orgStore.listActive' },
+      });
+    }
+    if (active.value.some((o) => !o.isDefault)) throw httpError('TARGET_ORG_INACTIVE');
+  }
+  return { parentOrgId: org.value.id, orgIsDefault: org.value.isDefault, inviteEmail: null };
+}
+
+/**
+ * Checks the org details a public submit sends: refused for a real org, kept for a Default-org coordinator.
+ *
+ * @returns The details to keep as `legacy_org_details`, or `null`.
+ * @throws {HttpError} SCHEMA_VALIDATION or ORG_DETAILS_READ_ONLY.
+ */
+function selfRegistrationOrgDetails(
+  body: RegistrationPayload,
+  orgIsDefault: boolean,
+): LegacyOrgDetails | null {
+  if (orgIsDefault && body.name.trim().toLowerCase() === 'default') {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'The organisation name cannot be "Default".',
+      fields: { field: 'name' },
+    });
+  }
+  const submittedLocations = (body.locations ?? []).filter(hasLocationContent);
+  const details: LegacyOrgDetails = {
+    ...(body.url?.trim() ? { url: body.url.trim() } : {}),
+    ...(submittedLocations.length > 0 ? { locations: submittedLocations } : {}),
+  };
+  const sent = Object.keys(details);
+  if (sent.length === 0) return null;
+  if (!orgIsDefault) throw httpError('ORG_DETAILS_READ_ONLY', { fields: { fields: sent } });
+  return details;
+}
+
+/**
+ * Finds a registration a public submit re-sends the review link for, reviving a rejected one.
+ *
+ * The submit carries no proof of identity, so the stored record is never changed beyond its status.
+ *
+ * @returns The pending or revived registration, or `null` when the email and phone are free.
+ * @throws {HttpError} USER_EXISTS, PHONE_EXISTS, REGISTRATION_COOLING or DB_UNAVAILABLE.
+ */
+async function reclaimableRegistration(
+  userStore: ReturnType<typeof getUserStore>,
+  email: string,
+  phoneE164: string,
+): Promise<Coordinator | null> {
+  const dbEmail = await userStore.findByContactEmail(email);
+  if (!dbEmail.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(dbEmail.error.message),
+      fields: { sub_operation: 'userStore.findByContactEmail' },
+    });
+  }
+  const byEmail = dbEmail.value;
+  if (byEmail?.status === 'inactive') return reviveRejected(userStore, byEmail, { email });
+  if (byEmail?.status === 'pending') return byEmail;
+  if (byEmail) throw httpError('USER_EXISTS', { fields: { email } });
+
+  const dbPhone = await userStore.findByContactPhone(phoneE164);
+  if (!dbPhone.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(dbPhone.error.message),
+      fields: { sub_operation: 'userStore.findByContactPhone' },
+    });
+  }
+  const byPhone = dbPhone.value;
+  if (byPhone?.status === 'inactive') {
+    return reviveRejected(userStore, byPhone, { phone: phoneE164 });
+  }
+  if (byPhone) throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+  return null;
+}
+
+/**
+ * Sets a rejected registration back to pending once its cooling window from `rejected_at` has ended.
+ *
+ * @param field - The submitted email or phone that matched, named in a refusal.
+ * @throws {HttpError} REGISTRATION_COOLING or DB_UNAVAILABLE.
+ */
+async function reviveRejected(
+  userStore: ReturnType<typeof getUserStore>,
+  row: Coordinator,
+  field: { email: string } | { phone: string },
+): Promise<Coordinator> {
+  const retryAfter = coolingRetryAfter(row.rejectedAt, row.updatedAt);
+  if (retryAfter) {
+    throw httpError('REGISTRATION_COOLING', { fields: { ...field, retry_after: retryAfter } });
+  }
+  const revived = await userStore.update(row.id, {
+    status: 'pending',
+    rejectedAt: null,
+    updatedBy: 'self',
+  });
+  if (!revived.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(revived.error.message),
+      fields: { sub_operation: 'userStore.reviveRejected' },
+    });
+  }
+  return row;
+}
+
+/**
+ * Re-sends the review link for a pending or revived registration, from its stored values.
+ *
+ * Consent is recorded only on a fresh registration, not here.
+ */
+async function reclaimReview(
+  reply: FastifyReply,
+  row: Coordinator,
+  log: RequestLog,
+  start: number,
+): Promise<FastifyReply> {
+  await sendAdminReviewEmail(
+    {
+      aggregatorId: row.id,
+      applicantName: row.name,
+      applicantEmail: row.contact.email,
+      applicantPhone: row.contactPhone,
+      ...(row.inviteEmail ? { invitedEmail: row.inviteEmail } : {}),
+      ...(await resolveOwnerRouting(row.parentOrgId)),
+    },
+    log,
+  );
+  log.info(
+    { status: 'success', latency_ms: Date.now() - start, aggregator_id: row.id, reclaim: true },
+    'registration re-submitted — review link re-sent (no field change)',
+  );
+  return reply.status(200).send({
+    aggregator_id: row.id,
+    org_slug: row.orgSlug,
+    status: 'pending',
+    message: 'Registration re-submitted. A fresh approval link has been sent for review.',
+  });
 }
 
 /**

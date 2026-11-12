@@ -219,15 +219,7 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
       const log = req.log.child({ operation: 'org-registration.create' });
       const start = Date.now();
 
-      const auth = await authenticateAny(req);
-      if (!auth.ok) {
-        throw httpError('UNAUTHORIZED', {
-          detail: auth.error.message,
-          fields: { reason: auth.error.code },
-        });
-      }
-      await recordRouteCaller(req, callerFromAny(auth.context));
-
+      await authenticateCaller(req);
       const body = req.body as z.infer<typeof OrgCreateBodySchema>;
 
       const { schemaValues, phoneE164 } = await checkOrgSubmission(body);
@@ -237,100 +229,6 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
       const ownerEmail = body.owner.email.toLowerCase();
       // Looked up before any write, so a failure here leaves nothing half created.
       const reviewers = await orgReviewRecipients(body.parent_id ?? null, log);
-
-      // Re-sends the review link for an existing pending or revived org.
-      // The row, the Keycloak owner and the group are reused unchanged.
-      const reclaimOrgReview = async (row: Organisation): Promise<FastifyReply> => {
-        await sendOrgReviewEmail(
-          {
-            orgId: row.id,
-            displayName: row.displayName,
-            ownerEmail: row.ownerEmail,
-            ownerPhone: row.ownerPhone ?? '',
-            parentId: row.parentId,
-            parentName: row.parentName,
-          },
-          log,
-        );
-        log.info(
-          { status: 'success', latency_ms: Date.now() - start, org_id: row.id, reclaim: true },
-          'org re-submitted — review link re-sent (no field change)',
-        );
-        // Consent is recorded only on a fresh registration, not here.
-        return reply.status(200).send({
-          org_id: row.id,
-          slug: row.slug,
-          status: 'pending',
-          message: 'Organisation re-submitted. A fresh approval link has been sent for review.',
-        });
-      };
-
-      // Mails the owner of an approved org a sign-in link. A failed send is
-      // logged, not raised. The row is not changed.
-      const resendOwnerInvite = async (row: Organisation): Promise<FastifyReply> => {
-        // Rate-limited per owner address and fails closed. Not the route's shared
-        // submit limiter: that one is keyed on IP and fails open.
-        const resendRate = await checkOrgInviteResendRate(row.ownerEmail);
-        if (!resendRate.allowed) {
-          void reply.header('Retry-After', String(resendRate.retryAfterSeconds));
-          log.warn(
-            {
-              status: 'skipped',
-              org_id: row.id,
-              reason: 'resend_rate_limited',
-              retry_after_seconds: resendRate.retryAfterSeconds,
-            },
-            'invite-link resend throttled for this owner address',
-          );
-          throw httpError('RATE_LIMITED', {
-            detail: `Retry in ${resendRate.retryAfterSeconds}s.`,
-            fields: { retry_after_seconds: resendRate.retryAfterSeconds },
-          });
-        }
-
-        const mail = renderOrgAlreadyRegistered({
-          orgName: row.displayName,
-          inviteUrl: ownerSignInUrl(),
-        });
-        const send = await getMailer().send({
-          to: row.ownerEmail,
-          subject: mail.subject,
-          html: mail.html,
-          text: mail.text,
-        });
-        if (!send.ok) {
-          log.warn(
-            {
-              status: 'failure',
-              sub_operation: 'mailer.send.orgAlreadyRegistered',
-              org_id: row.id,
-              code: send.error.code,
-              cause: send.error.message,
-            },
-            'already-registered invite link could not be delivered',
-          );
-        }
-        log.info(
-          {
-            status: 'success',
-            latency_ms: Date.now() - start,
-            org_id: row.id,
-            already_registered: true,
-            mail_sent: send.ok,
-          },
-          'org already active — sign-in link sent to the owner on file',
-        );
-        // Report a failed send so the owner knows to contact support.
-        return reply.status(200).send({
-          org_id: row.id,
-          slug: row.slug,
-          status: 'active',
-          mail_sent: send.ok,
-          message: send.ok
-            ? 'This organisation is already registered. The coordinator invitation link has been sent to the owner email on file.'
-            : 'This organisation is already registered, but the coordinator invitation link could not be emailed just now. Please try again shortly, or contact support.',
-        });
-      };
 
       // Rate limit per (ip, owner email), like the coordinator submit.
       const rl = await checkSubmitRate(`${req.ip}|${ownerEmail}`);
@@ -352,49 +250,12 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
         });
       }
       if (existing.value) {
-        const prior = existing.value;
-        // Never write the submitted fields: the submit is anonymous, so an
-        // email match alone must not change the org. Stored values are used.
-        // The parent is the one exception: a rejected org is revived under the
-        // submitted parent, and it stays pending until an admin approves it.
-        if (prior.status === 'inactive') {
-          // Rejected: refuse until the cooling window from `rejected_at` ends,
-          // then revive the same row to pending and re-send the review link.
-          const retryAfter = coolingRetryAfter(prior.rejectedAt, prior.updatedAt);
-          if (retryAfter) {
-            throw httpError('REGISTRATION_COOLING', {
-              fields: { email: body.owner.email, retry_after: retryAfter },
-            });
-          }
-          const rules = treeRules((await getNetworkConfig()).aggregator.organisation);
-          const revived = await orgStore.revive(prior.id, body.parent_id, rules);
-          if (!revived.ok) {
-            throwTreeRefusal(revived.error, { parent_id: body.parent_id ?? null });
-            // The row stopped being a rejected org after it was read.
-            if (revived.error.code === 'NOT_FOUND') {
-              throw httpError('CONFLICT', {
-                detail: 'The organisation changed while it was being registered again. Try again.',
-              });
-            }
-            throw httpError('DB_UNAVAILABLE', {
-              cause: new Error(revived.error.message),
-              fields: { sub_operation: 'orgStore.revive' },
-            });
-          }
-          // The revived row: it may sit under a new parent now.
-          return reclaimOrgReview(revived.value);
-        }
-        if (prior.status === 'active') {
-          // Approved: re-send the sign-in link. Mail goes to the stored owner
-          // email, never the submitted one, since this submit is anonymous.
-          return resendOwnerInvite(prior);
-        }
-        if (prior.status !== 'pending') {
-          // Retired: never send a credential.
-          throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: body.owner.email } });
-        }
-        // Pending: re-send the review link.
-        return reclaimOrgReview(prior);
+        return answerExistingOwner(reply, existing.value, {
+          email: body.owner.email,
+          parentId: body.parent_id,
+          log,
+          start,
+        });
       }
 
       // One person per email and per phone across coordinators and org owners.
@@ -1021,6 +882,177 @@ async function assertOwnerFree(
   const contactClash = await findOwnerContactClash(ownerEmail, phoneE164);
   if (contactClash === 'email') throw httpError('USER_EXISTS', { fields: { email } });
   if (contactClash === 'phone') throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+}
+
+/**
+ * Answers a public submit by an owner who already has an org, from that org's status; no org is created.
+ *
+ * Never writes the submitted fields: the submit is anonymous, so an email match
+ * alone must not change the org. The parent is the one exception: a rejected org
+ * is revived under the submitted parent, and it stays pending until an admin
+ * approves it.
+ *
+ * @throws {HttpError} REGISTRATION_COOLING, a tree limit, CONFLICT, OWNER_ALREADY_REGISTERED,
+ *   RATE_LIMITED or DB_UNAVAILABLE.
+ */
+async function answerExistingOwner(
+  reply: FastifyReply,
+  prior: Organisation,
+  submit: { email: string; parentId: string | undefined; log: RequestLog; start: number },
+): Promise<FastifyReply> {
+  const { log, start } = submit;
+  if (prior.status === 'inactive') {
+    const revived = await reviveRejectedOrg(prior, submit.email, submit.parentId);
+    return reclaimOrgReview(reply, revived, log, start);
+  }
+  // Approved: mail goes to the stored owner email, never the submitted one.
+  if (prior.status === 'active') return resendOwnerInvite(reply, prior, log, start);
+  // Retired: never send a credential.
+  if (prior.status !== 'pending') {
+    throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: submit.email } });
+  }
+  return reclaimOrgReview(reply, prior, log, start);
+}
+
+/**
+ * Sets a rejected org back to pending under the submitted parent, once its cooling window has ended.
+ *
+ * @returns The revived org; it may sit under a new parent now.
+ * @throws {HttpError} REGISTRATION_COOLING, a tree limit, CONFLICT or DB_UNAVAILABLE.
+ */
+async function reviveRejectedOrg(
+  prior: Organisation,
+  email: string,
+  parentId: string | undefined,
+): Promise<Organisation> {
+  const retryAfter = coolingRetryAfter(prior.rejectedAt, prior.updatedAt);
+  if (retryAfter) {
+    throw httpError('REGISTRATION_COOLING', { fields: { email, retry_after: retryAfter } });
+  }
+  const rules = treeRules((await getNetworkConfig()).aggregator.organisation);
+  const revived = await getOrganisationStore().revive(prior.id, parentId, rules);
+  if (revived.ok) return revived.value;
+  throwTreeRefusal(revived.error, { parent_id: parentId ?? null });
+  // The row stopped being a rejected org after it was read.
+  if (revived.error.code === 'NOT_FOUND') {
+    throw httpError('CONFLICT', {
+      detail: 'The organisation changed while it was being registered again. Try again.',
+    });
+  }
+  throw httpError('DB_UNAVAILABLE', {
+    cause: new Error(revived.error.message),
+    fields: { sub_operation: 'orgStore.revive' },
+  });
+}
+
+/**
+ * Re-sends the review link for an existing pending or revived org.
+ *
+ * The row, the Keycloak owner and the group are reused unchanged.
+ */
+async function reclaimOrgReview(
+  reply: FastifyReply,
+  row: Organisation,
+  log: RequestLog,
+  start: number,
+): Promise<FastifyReply> {
+  await sendOrgReviewEmail(
+    {
+      orgId: row.id,
+      displayName: row.displayName,
+      ownerEmail: row.ownerEmail,
+      ownerPhone: row.ownerPhone ?? '',
+      parentId: row.parentId,
+      parentName: row.parentName,
+    },
+    log,
+  );
+  log.info(
+    { status: 'success', latency_ms: Date.now() - start, org_id: row.id, reclaim: true },
+    'org re-submitted — review link re-sent (no field change)',
+  );
+  // Consent is recorded only on a fresh registration, not here.
+  return reply.status(200).send({
+    org_id: row.id,
+    slug: row.slug,
+    status: 'pending',
+    message: 'Organisation re-submitted. A fresh approval link has been sent for review.',
+  });
+}
+
+/**
+ * Mails the owner of an approved org a sign-in link; a failed send is logged, not raised.
+ *
+ * The row is not changed.
+ */
+async function resendOwnerInvite(
+  reply: FastifyReply,
+  row: Organisation,
+  log: RequestLog,
+  start: number,
+): Promise<FastifyReply> {
+  // Rate-limited per owner address and fails closed. Not the route's shared
+  // submit limiter: that one is keyed on IP and fails open.
+  const resendRate = await checkOrgInviteResendRate(row.ownerEmail);
+  if (!resendRate.allowed) {
+    void reply.header('Retry-After', String(resendRate.retryAfterSeconds));
+    log.warn(
+      {
+        status: 'skipped',
+        org_id: row.id,
+        reason: 'resend_rate_limited',
+        retry_after_seconds: resendRate.retryAfterSeconds,
+      },
+      'invite-link resend throttled for this owner address',
+    );
+    throw httpError('RATE_LIMITED', {
+      detail: `Retry in ${resendRate.retryAfterSeconds}s.`,
+      fields: { retry_after_seconds: resendRate.retryAfterSeconds },
+    });
+  }
+
+  const mail = renderOrgAlreadyRegistered({
+    orgName: row.displayName,
+    inviteUrl: ownerSignInUrl(),
+  });
+  const send = await getMailer().send({
+    to: row.ownerEmail,
+    subject: mail.subject,
+    html: mail.html,
+    text: mail.text,
+  });
+  if (!send.ok) {
+    log.warn(
+      {
+        status: 'failure',
+        sub_operation: 'mailer.send.orgAlreadyRegistered',
+        org_id: row.id,
+        code: send.error.code,
+        cause: send.error.message,
+      },
+      'already-registered invite link could not be delivered',
+    );
+  }
+  log.info(
+    {
+      status: 'success',
+      latency_ms: Date.now() - start,
+      org_id: row.id,
+      already_registered: true,
+      mail_sent: send.ok,
+    },
+    'org already active — sign-in link sent to the owner on file',
+  );
+  // Report a failed send so the owner knows to contact support.
+  return reply.status(200).send({
+    org_id: row.id,
+    slug: row.slug,
+    status: 'active',
+    mail_sent: send.ok,
+    message: send.ok
+      ? 'This organisation is already registered. The coordinator invitation link has been sent to the owner email on file.'
+      : 'This organisation is already registered, but the coordinator invitation link could not be emailed just now. Please try again shortly, or contact support.',
+  });
 }
 
 /**
