@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -139,5 +139,51 @@ describe('useOnboarding hooks', () => {
     const { result } = renderHook(() => useRecentBulkUploads(5), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(svc.listBulkUploads).toHaveBeenCalledWith({ limit: 5 });
+  });
+
+  describe('useRecentBulkUploads polling', () => {
+    const POLL_MS = 3000;
+
+    async function pollCallsAfterInitialFetch(statuses: string[]) {
+      svc.listBulkUploads!.mockResolvedValue({
+        items: statuses.map((status, i) => ({ upload_id: `u${i}`, status })),
+        total: statuses.length,
+        limit: 10,
+        offset: 0,
+      });
+      const { wrapper } = makeWrapper();
+      renderHook(() => useRecentBulkUploads(), { wrapper });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(svc.listBulkUploads).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLL_MS * 3);
+      });
+      return svc.listBulkUploads!.mock.calls.length - 1;
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it.each(['uploaded', 'file_validating', 'row_processing', 'finalising'])(
+      'refetches on the interval while an upload is %s',
+      async (status) => {
+        expect(await pollCallsAfterInitialFetch([status])).toBe(3);
+      },
+    );
+
+    it('does not refetch on the interval when the only unfinished uploads are pending', async () => {
+      expect(await pollCallsAfterInitialFetch(['pending', 'completed', 'failed'])).toBe(0);
+    });
+
+    it('does not refetch on the interval when every upload is completed or failed', async () => {
+      expect(await pollCallsAfterInitialFetch(['completed', 'failed'])).toBe(0);
+    });
   });
 });

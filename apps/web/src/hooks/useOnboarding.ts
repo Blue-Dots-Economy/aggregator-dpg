@@ -108,9 +108,7 @@ export function useRecentBulkUploads(limit = 10) {
     refetchInterval: (q) => {
       const items = q.state.data?.items ?? [];
       const inFlight = items.some((it) =>
-        ['pending', 'uploaded', 'file_validating', 'row_processing', 'finalising'].includes(
-          it.status,
-        ),
+        ['uploaded', 'file_validating', 'row_processing', 'finalising'].includes(it.status),
       );
       return inFlight ? 3000 : false;
     },
