@@ -80,11 +80,6 @@ describe('console orgs page — hierarchy settings', () => {
     });
   });
 
-  it('shows the review box even when nothing is waiting, with where requests appear', async () => {
-    render(await ConsoleOrgsPage({ searchParams: Promise.resolve({}) }));
-    expect(screen.getByText(/orgs\.empty_pending.*orgs\.review_hint/)).toBeInTheDocument();
-  });
-
   it("reads the hierarchy with the network's values and passes them to the settings", async () => {
     render(await ConsoleOrgsPage({ searchParams: Promise.resolve({}) }));
     expect(consoleRead).toHaveBeenCalledWith('/v1/org/hierarchy?fields=known_as_values');

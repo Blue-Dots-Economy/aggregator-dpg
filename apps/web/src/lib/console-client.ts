@@ -26,7 +26,7 @@ export type ConsoleSendResult<T> =
 /**
  * Calls a console BFF route.
  *
- * @param url - BFF path, e.g. `/api/console/user/decision/<id>`.
+ * @param url - BFF path, e.g. `/api/console/user/metadata/<id>`.
  * @param method - `POST` or `PATCH`.
  * @param body - JSON body.
  * @returns The outcome; never throws on an HTTP error.

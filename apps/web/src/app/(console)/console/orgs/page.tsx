@@ -28,12 +28,11 @@ import { getAggregatorFeatures } from '@/lib/features.server';
 import { consoleRead } from '@/lib/console-api.server';
 import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
 import { orgsBelow, topmostOwned } from '@/lib/console-org-options';
-import { OrgsTable } from '@/components/console/OrgsTable';
 import { HierarchySettings } from '@/components/console/HierarchySettings';
 import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
 import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
 import { ORG_FILTERS, type OrgFilter } from '@/lib/org-filters';
-import { ConsoleSection, EmptyState } from '@/components/console/ConsoleUi';
+import { ConsoleSection } from '@/components/console/ConsoleUi';
 import { OpenInvites } from '@/components/console/OpenInvites';
 import { readOpenInvites } from '@/lib/console-invites.server';
 import { Topbar } from '@/components/shell/Topbar';
@@ -69,7 +68,6 @@ export default async function ConsoleOrgsPage({
     readOpenInvites('org', hierarchy.network.id),
     getAggregatorFeatures(),
   ]);
-  const pending = network.orgs.filter((o) => o.status === 'pending');
   return (
     <>
       <Topbar
@@ -78,7 +76,6 @@ export default async function ConsoleOrgsPage({
         right={canInviteOrgs ? inviteOrgsLink(t) : null}
       />
       <div className="flex flex-col gap-6">
-        {pendingReview(pending, t)}
         <NetworkOrgsView
           rootName={hierarchy.network.name}
           orgs={network.orgs}
@@ -120,7 +117,6 @@ async function OwnerOrgs({
       roots.map(async (root) => [root.id, await knownAsValuesToEdit(root, ownerIds)] as const),
     ),
   );
-  const pending = orgs.filter((o) => o.status === 'pending' && !ownedIds.includes(o.id));
   const invitesById = new Map(
     await Promise.all(
       roots.map(async (root) => [root.id, await readOpenInvites('org', root.id)] as const),
@@ -134,7 +130,6 @@ async function OwnerOrgs({
         right={canInviteOrgs ? inviteOrgsLink(t) : null}
       />
       <div className="flex flex-col gap-6">
-        {pendingReview(pending, t)}
         {roots.map((root) => (
           <Fragment key={root.id}>
             <ConsoleSection
@@ -197,31 +192,5 @@ function inviteOrgsLink(t: Awaited<ReturnType<typeof getTranslations<'console'>>
       <I.mail size={16} />
       {t('orgs.invite')}
     </Link>
-  );
-}
-
-/**
- * The organisations waiting for the viewer's decision. Shown even when empty,
- * so the viewer knows where new registrations under its organisations appear.
- *
- * @param pending - The pending organisations the viewer decides.
- * @param t - The console translator.
- */
-function pendingReview(
-  pending: OrgRow[],
-  t: Awaited<ReturnType<typeof getTranslations<'console'>>>,
-) {
-  return (
-    <div id="pending" className="scroll-mt-6">
-      <ConsoleSection title={t('orgs.review_heading', { count: pending.length })} flush>
-        {pending.length > 0 ? (
-          <OrgsTable orgs={pending} />
-        ) : (
-          <EmptyState>
-            {t('orgs.empty_pending')} {t('orgs.review_hint')}
-          </EmptyState>
-        )}
-      </ConsoleSection>
-    </div>
   );
 }
