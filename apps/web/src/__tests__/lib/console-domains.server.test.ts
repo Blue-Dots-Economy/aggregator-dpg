@@ -11,9 +11,23 @@ describe('servedDomains', () => {
     expect(servedDomains([], domains)).toEqual([]);
   });
 
-  it('labels the served ids and keeps an unknown id as its own label', () => {
+  it('labels the served ids and leaves out an id the network does not have', () => {
     expect(servedDomains(['service_provider', 'tutor'], domains)).toEqual([
       { id: 'service_provider', label: 'Service providers' },
+    ]);
+  });
+
+  it('returns the served domains in network order', () => {
+    expect(servedDomains(['service_provider', 'seeker'], domains)).toEqual(domains);
+  });
+
+  it('returns nothing when no served id is in the network', () => {
+    expect(servedDomains(['tutor'], domains)).toEqual([]);
+  });
+
+  it('shows the stored ids as they are when the network domains could not be read', () => {
+    expect(servedDomains(['seeker', 'tutor'], [])).toEqual([
+      { id: 'seeker', label: 'seeker' },
       { id: 'tutor', label: 'tutor' },
     ]);
   });

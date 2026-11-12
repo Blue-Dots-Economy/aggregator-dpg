@@ -6,6 +6,7 @@
  * @module apps/web/src/lib/console-domains.server
  */
 
+import { servedDomainIds } from '@aggregator-dpg/shared-primitives/aggregator';
 import { readDomainLabels, type DomainLabel } from './aggregator-config-domains';
 
 /** One network domain. */
@@ -29,15 +30,23 @@ export async function networkDomains(): Promise<ConsoleDomain[]> {
 }
 
 /**
- * The domains a coordinator serves, with their labels.
+ * The network domains a coordinator serves, with their labels, in network
+ * order. Ids the network does not have are left out, as the portal and the API
+ * do. When the network's domains could not be read, the stored ids are shown
+ * as they are.
  *
  * @param serves - Domain ids served; empty means none.
- * @param domains - From {@link networkDomains}.
- * @returns The served domains (an unknown id keeps its id as the label).
+ * @param domains - From {@link networkDomains}; empty when they could not be read.
+ * @returns The served domains.
  */
 export function servedDomains(
   serves: readonly string[],
   domains: readonly ConsoleDomain[],
 ): ConsoleDomain[] {
-  return serves.map((id) => ({ id, label: domains.find((d) => d.id === id)?.label ?? id }));
+  if (domains.length === 0) return serves.map((id) => ({ id, label: id }));
+  const ids = servedDomainIds(
+    serves,
+    domains.map((d) => d.id),
+  );
+  return domains.filter((d) => ids.includes(d.id));
 }

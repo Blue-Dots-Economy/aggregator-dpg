@@ -41,9 +41,9 @@ export const ProfileApiResponseSchema = z.object({
   org_name: z.string(),
   actor_type: ActorTypeSchema,
   // Domain id from the network config; any network domain is possible.
-  // The first entry of `serves`, or null when it serves every domain.
+  // The first entry of `serves`, or null when it serves none.
   type: z.string().nullable(),
-  // Every domain the coordinator serves; empty means every domain.
+  // Every profile type the coordinator serves; empty means none.
   serves: z.array(z.string()),
   url: z.string().nullable(),
   contact: BecknContactSchema,

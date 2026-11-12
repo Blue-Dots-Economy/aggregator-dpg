@@ -19,6 +19,7 @@ import { useProfile, useProfileRaw } from '../../../../hooks/useProfile';
 import { useAggregatorConfig } from '../../../../hooks/useAggregatorConfig';
 import { useIsClient } from '@/hooks/useIsClient';
 import { useActiveDomain } from '@/hooks/useActiveDomain';
+import { useRequestErrorText } from '@/hooks/useRequestErrorText';
 import { DomainSelect } from '@/components/ui/DomainSelect';
 import type { ApiRegistrationLink } from '../../../../services/onboarding.service';
 import { SelectField } from '@/components/ui/SelectField';
@@ -244,6 +245,7 @@ function Field({
 
 export function CreateLinkSection() {
   const t = useTranslations('onboarding');
+  const requestErrorText = useRequestErrorText();
   // Root translator for registration mode keys from network config.
   const tRoot = useTranslations();
   const router = useRouter();
@@ -341,7 +343,7 @@ export function CreateLinkSection() {
       setToast(t('create_link.link_created'));
       router.push(`/onboarding?new=${encodeURIComponent(created.link_id)}`);
     } catch (err) {
-      setCreateError((err as Error).message);
+      setCreateError(requestErrorText(err, t('create_link.save_failed')));
     }
   };
 
@@ -519,6 +521,7 @@ function LinkCard({
   highlight?: boolean;
 }>) {
   const t = useTranslations('onboarding');
+  const requestErrorText = useRequestErrorText();
   const format = useFormatter();
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -615,7 +618,7 @@ function LinkCard({
       });
       setEditing(false);
     } catch (err) {
-      setEditError((err as Error).message);
+      setEditError(requestErrorText(err, t('create_link.save_failed')));
     }
   };
 
@@ -829,6 +832,7 @@ function LinkCard({
  */
 export function YourLinksBody() {
   const t = useTranslations('onboarding');
+  const requestErrorText = useRequestErrorText();
   // `?new=<link_id>` is set by the create flow to highlight the new draft.
   const newLinkId = useSearchParams().get('new');
   // Show the create confirmation here, after navigation from the create page.
@@ -862,7 +866,7 @@ export function YourLinksBody() {
           <div className="text-center py-8 text-ink-400 text-[13px]">{t('your_links.loading')}</div>
         ) : error ? (
           <div className="text-center py-8 text-rose-600 text-[13px]">
-            {(error as Error).message}
+            {requestErrorText(error, t('your_links.load_failed'))}
           </div>
         ) : links.length === 0 ? (
           <div className="text-center py-8 text-ink-400 text-[13px]">

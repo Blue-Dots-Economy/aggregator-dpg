@@ -18,6 +18,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { ApiRegistrationLink } from '@/services/onboarding.service';
 import { chooseOption } from '@/__tests__/test-utils';
+import { HttpError } from '@/services/http';
 
 const { pushMock, searchParamsRef } = vi.hoisted(() => ({
   pushMock: vi.fn(),
@@ -84,6 +85,7 @@ async function pickDomain(name: RegExp): Promise<void> {
 const testMessages = {
   common: messages.common,
   onboarding: messages.onboarding,
+  access: messages.access,
   regmode: { form: 'Form', voice: 'Voice' },
 };
 
@@ -268,18 +270,32 @@ describe('<CreateLinkSection />', () => {
     expect(input.slug).toBeUndefined();
   });
 
-  it('surfaces the mutation error inline when create fails', async () => {
-    createMutateAsync.mockRejectedValue(new Error('Domain mismatch'));
+  async function submitFilledForm(): Promise<void> {
     const user = userEvent.setup();
     renderCreate();
-
     await user.type(screen.getByPlaceholderText('State'), 'Karnataka');
     await user.type(screen.getByPlaceholderText('District'), 'Dharwad');
     await user.type(screen.getByPlaceholderText('Campaign or event name'), 'Field Drive');
     await user.click(screen.getByRole('button', { name: 'Create link' }));
+  }
 
-    expect(await screen.findByText('Domain mismatch')).toBeInTheDocument();
+  it('shows a plain message, not the error text, when create fails', async () => {
+    createMutateAsync.mockRejectedValue(new Error('request failed (500): {"error":{}}'));
+    await submitFilledForm();
+
+    expect(
+      await screen.findByText(messages.onboarding.create_link.save_failed),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/request failed/)).not.toBeInTheDocument();
     expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('explains a refused profile type when create answers DOMAIN_NOT_SERVED', async () => {
+    createMutateAsync.mockRejectedValue(new HttpError(403, 'DOMAIN_NOT_SERVED'));
+    await submitFilledForm();
+
+    expect(await screen.findByText(messages.access.domain_not_served)).toBeInTheDocument();
+    expect(screen.queryByText(/DOMAIN_NOT_SERVED|request failed/)).not.toBeInTheDocument();
   });
 
   it('lets a multi-domain coordinator pick the link domain', async () => {
@@ -378,14 +394,25 @@ describe('<YourLinksBody />', () => {
     expect(screen.getByText('Loading links…')).toBeInTheDocument();
   });
 
-  it('shows an error state', () => {
+  it('shows a plain error state, not the error text', () => {
     useRegistrationLinks.mockReturnValue({
       data: undefined,
       isLoading: false,
       error: new Error('links unavailable'),
     });
     renderLinks();
-    expect(screen.getByText('links unavailable')).toBeInTheDocument();
+    expect(screen.getByText(messages.onboarding.your_links.load_failed)).toBeInTheDocument();
+    expect(screen.queryByText('links unavailable')).not.toBeInTheDocument();
+  });
+
+  it('explains a refused profile type when the list answers DOMAIN_NOT_SERVED', () => {
+    useRegistrationLinks.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new HttpError(403, 'DOMAIN_NOT_SERVED'),
+    });
+    renderLinks();
+    expect(screen.getByText(messages.access.domain_not_served)).toBeInTheDocument();
   });
 
   it('shows an empty state scoped to the aggregator type', () => {
@@ -543,7 +570,10 @@ describe('<YourLinksBody />', () => {
     await user.click(screen.getByRole('button', { name: 'Edit' }));
     await user.click(screen.getByRole('button', { name: 'Save Draft' }));
 
-    expect(await screen.findByText('conflict')).toBeInTheDocument();
+    expect(
+      await screen.findByText(messages.onboarding.create_link.save_failed),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('conflict')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save Draft' })).toBeInTheDocument();
   });
 

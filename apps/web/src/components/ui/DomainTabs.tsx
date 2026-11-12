@@ -3,8 +3,7 @@
 /**
  * Domain tabs for coordinators who serve more than one domain, in `apps/web`.
  *
- * Renders nothing for a coordinator with a single domain, so their screens
- * look the same as before.
+ * Renders nothing for a single domain.
  */
 
 import { useRef, type JSX, type KeyboardEvent } from 'react';

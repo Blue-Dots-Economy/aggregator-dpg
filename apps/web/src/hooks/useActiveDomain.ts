@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { servedDomainIds } from '@aggregator-dpg/shared-primitives/aggregator';
 import { useProfileRaw } from './useProfile';
 import {
   DEFAULT_AGGREGATOR_CONFIG,
@@ -78,7 +79,11 @@ export function servedNetworkDomains(
   serves: readonly string[],
   networkDomains: readonly AggregatorConfigDomain[],
 ): AggregatorConfigDomain[] {
-  return networkDomains.filter((d) => serves.includes(d.id));
+  const ids = servedDomainIds(
+    serves,
+    networkDomains.map((d) => d.id),
+  );
+  return networkDomains.filter((d) => ids.includes(d.id));
 }
 
 /**
