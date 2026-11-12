@@ -156,6 +156,56 @@ describe('POST /v1/user/activate', () => {
       expect(row.ok && row.value?.status).toBe('pending');
     });
 
+    it('still activates when the mail to the inviting owner fails', async () => {
+      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      mailer.failOnce({ code: 'TRANSPORT_FAILED', message: 'down' });
+      const res = await activate('coord');
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ activated: true });
+    });
+
+    it('answers TARGET_ORG_INACTIVE when the coordinator’s org is no longer active', async () => {
+      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      await orgs.update(PARENT, { status: 'inactive' });
+      const res = await activate('coord');
+      expect(errorCode(res)).toBe('TARGET_ORG_INACTIVE');
+      const row = await users.findById(COORD);
+      expect(row.ok && row.value?.status).toBe('pending');
+    });
+
+    it('answers TARGET_ORG_INACTIVE when the coordinator’s org is gone', async () => {
+      users.seed([
+        buildCoordinator({
+          id: COORD,
+          parentOrgId: '00000000-0000-4000-8000-0000000000ff',
+          isDefaultOrg: false,
+          status: 'pending',
+          contact: { name: 'Asha', email: COORD_EMAIL, phone: '+919876543210' },
+        }),
+      ]);
+      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      expect(errorCode(await activate('coord'))).toBe('TARGET_ORG_INACTIVE');
+    });
+
+    it('answers 503 IDP_UNAVAILABLE when Keycloak cannot be read', async () => {
+      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      idp.findById = async () => ({ ok: false, error: { code: 'BAD_REQUEST', message: 'x' } });
+      const res = await activate('coord');
+      expect(res.statusCode).toBe(503);
+      expect(errorCode(res)).toBe('IDP_UNAVAILABLE');
+    });
+
+    it('answers 503 DB_UNAVAILABLE when the coordinator cannot be read', async () => {
+      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      users.findById = async () => ({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'x' },
+      });
+      const res = await activate('coord');
+      expect(res.statusCode).toBe(503);
+      expect(errorCode(res)).toBe('DB_UNAVAILABLE');
+    });
+
     it('refuses a self-registered pending coordinator with 403 NOT_INVITED', async () => {
       subjects.coord = await login(COORD_EMAIL, {
         verified: true,
@@ -195,6 +245,44 @@ describe('POST /v1/user/activate', () => {
       const roles = await idp.listRealmRoles(subjects.owner);
       expect(roles.ok && roles.value).toContain('org_owner');
       expect(mailer.outbox.map((m) => m.to)).toEqual(['owner@parent.org']);
+    });
+
+    it('still activates when the owner’s decision stamp fails', async () => {
+      subjects.owner = await seedChild();
+      idp.setUserDecision = async () => ({
+        ok: false,
+        error: { code: 'BAD_REQUEST', message: 'x' },
+      });
+      const res = await activate('owner');
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ account: 'org_owner', activated: true });
+    });
+
+    it('answers 503 DB_UNAVAILABLE when the owned org cannot be read', async () => {
+      subjects.owner = await seedChild();
+      orgs.findByOwnerEmail = async () => ({
+        ok: false,
+        error: { code: 'DB_UNAVAILABLE', message: 'x' },
+      });
+      const res = await activate('owner');
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('answers TARGET_ORG_INACTIVE when the parent org is gone', async () => {
+      const sub = await login(OWNER_EMAIL, { verified: true });
+      orgs.seed([
+        buildOrganisation({
+          id: CHILD,
+          parentId: '00000000-0000-4000-8000-0000000000ff',
+          slug: 'child',
+          displayName: 'Child Org',
+          status: 'pending',
+          ownerEmail: OWNER_EMAIL,
+          ownerKcSub: sub,
+        }),
+      ]);
+      subjects.owner = sub;
+      expect(errorCode(await activate('owner'))).toBe('TARGET_ORG_INACTIVE');
     });
 
     it('does not activate an org whose owner login is someone else', async () => {

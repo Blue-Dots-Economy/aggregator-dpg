@@ -760,6 +760,14 @@ describe('console routes /v1/user, /v1/org', () => {
       const res = await post('/v1/user/invite/search', 'a', { org_id: ORG_A, cursor: 'nope' });
       expect(res.statusCode).toBe(400);
     });
+
+    it('refuses a cursor whose id is not a uuid with 400', async () => {
+      const cursor = Buffer.from(JSON.stringify({ c: new Date().toISOString(), i: 'x' })).toString(
+        'base64url',
+      );
+      const res = await post('/v1/user/invite/search', 'a', { org_id: ORG_A, cursor });
+      expect(res.statusCode).toBe(400);
+    });
   });
 
   describe('POST /v1/org/search', () => {

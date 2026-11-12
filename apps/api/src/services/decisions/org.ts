@@ -202,15 +202,27 @@ export async function decideOrg(input: OrgDecisionInput): Promise<OrgDecisionOut
   const ownerAccess = await grantOwnerAccess(org, log);
   // RBAC edge: the owner now holds Org Admin in this organisation.
   requestTokenRolesSync([org.ownerUserId], 'org_approved');
-  if (input.notify === false) {
-    log.info({
-      status: 'success',
-      decision: 'approve',
-      decided_by: input.decidedBy,
-      owner_access: ownerAccess.status,
-    });
-    return { kind: 'decided', decision: 'approve', notified: false, ownerAccess };
-  }
+  const notified = await mailOwnerApproved(org, input.notify, log);
+  log.info({
+    status: 'success',
+    decision: 'approve',
+    decided_by: input.decidedBy,
+    owner_access: ownerAccess.status,
+  });
+  return { kind: 'decided', decision: 'approve', notified, ownerAccess };
+}
+
+/**
+ * Mails the owner of an approved org a sign-in link, unless `notify` is `false`; a failed send is logged.
+ *
+ * @returns Whether the mail was sent.
+ */
+async function mailOwnerApproved(
+  org: Organisation,
+  notify: boolean | undefined,
+  log: FastifyBaseLogger,
+): Promise<boolean> {
+  if (notify === false) return false;
   const mail = renderOrgOwnerApproved({
     orgName: org.displayName,
     ownerEmail: org.ownerEmail,
@@ -222,17 +234,12 @@ export async function decideOrg(input: OrgDecisionInput): Promise<OrgDecisionOut
     html: mail.html,
     text: mail.text,
   });
-  if (!sent.ok)
+  if (!sent.ok) {
     log.warn({
       status: 'failure',
       sub_operation: 'mailer.send.orgOwnerApproved',
       code: sent.error.code,
     });
-  log.info({
-    status: 'success',
-    decision: 'approve',
-    decided_by: input.decidedBy,
-    owner_access: ownerAccess.status,
-  });
-  return { kind: 'decided', decision: 'approve', notified: sent.ok, ownerAccess };
+  }
+  return sent.ok;
 }
