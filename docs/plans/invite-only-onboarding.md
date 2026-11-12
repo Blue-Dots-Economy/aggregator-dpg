@@ -152,10 +152,13 @@ The decider is recorded as `invite:<inviter id>`. A failed `activate` leaves the
 
 ### Keycloak
 
+> [!IMPORTANT]
+> The OTP login changes are made in the [`sanketika-labs/keycloak-otp-authenticator`](https://github.com/sanketika-labs/keycloak-otp-authenticator) repo, not here. Two features are needed: use the pre-filled email (`login_hint`), and send the code to email only for `invited` users. Check what the authenticator supports today before the Keycloak phase starts.
+
 | Item                      | Change                                                                                                  | Where                                                       |
 | ------------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `otp-identifier-form`     | Use `login_hint` and skip the identifier step                                                           | OTP SPI repo                                                |
-| `otp-channel-choice-form` | New `otpChoice.defaultChannel=email`; skip the choice screen. Email only when `decision_made = invited` | OTP SPI repo + realm config                                 |
+| `otp-identifier-form`     | Use `login_hint` and skip the identifier step                                                           | `keycloak-otp-authenticator`                                |
+| `otp-channel-choice-form` | New `otpChoice.defaultChannel=email`; skip the choice screen. Email only when `decision_made = invited` | `keycloak-otp-authenticator` + realm config                 |
 | Portal gate               | Admit `decision_made = invited` as well as `approved`                                                   | `apply-portal-gate.py` + its verifier test                  |
 | `decision_made`           | New value `invited`; stays admin-only                                                                   | `apply-user-profile.sh` (no change if values are free text) |
 | Deployment realm          | Same config                                                                                             | bluedots-automation                                         |
