@@ -41,6 +41,8 @@ export interface IdClaims {
   phoneNumberVerified?: boolean;
   name?: string;
   preferredUsername?: string;
+  /** The IdP's session id. Its back-channel logout names this session. */
+  sid?: string;
 }
 
 export interface LogoutUrlInput {
@@ -62,7 +64,9 @@ export type OidcError =
   | { code: 'STATE_MISMATCH'; message: string }
   | { code: 'TOKEN_EXCHANGE_FAILED'; message: string }
   | { code: 'TOKEN_VERIFY_FAILED'; message: string }
-  | { code: 'REFRESH_FAILED'; message: string };
+  | { code: 'REFRESH_FAILED'; message: string }
+  | { code: 'LOGOUT_TOKEN_INVALID'; message: string }
+  | { code: 'KEYS_UNAVAILABLE'; message: string };
 
 /**
  * Abstract identity-provider port.
@@ -74,4 +78,11 @@ export abstract class IdentityProviderAdapter {
   ): Promise<OidcResult<{ tokens: TokenSet; claims: IdClaims }>>;
   abstract refresh(refreshToken: string): Promise<OidcResult<TokenSet>>;
   abstract buildLogoutUrl(input: LogoutUrlInput): Promise<string>;
+  /**
+   * Verifies a back-channel logout token sent by the IdP.
+   *
+   * @param logoutToken - The `logout_token` from the IdP's request.
+   * @returns The IdP session id the token ends.
+   */
+  abstract verifyLogoutToken(logoutToken: string): Promise<OidcResult<{ sid: string }>>;
 }

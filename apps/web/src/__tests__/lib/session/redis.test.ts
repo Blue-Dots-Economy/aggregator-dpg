@@ -9,10 +9,15 @@ interface FakeRedis {
   get: ReturnType<typeof vi.fn>;
   expire: ReturnType<typeof vi.fn>;
   del: ReturnType<typeof vi.fn>;
+  getdel: ReturnType<typeof vi.fn>;
+  sadd: ReturnType<typeof vi.fn>;
+  smembers: ReturnType<typeof vi.fn>;
+  sets: Map<string, Set<string>>;
 }
 
 function makeFakeRedis(): FakeRedis {
   const store = new Map<string, string>();
+  const sets = new Map<string, Set<string>>();
   return {
     store,
     set: vi.fn(async (key: string, value: string, _mode?: string, _ttl?: number) => {
@@ -21,11 +26,26 @@ function makeFakeRedis(): FakeRedis {
     }),
     get: vi.fn(async (key: string) => store.get(key) ?? null),
     expire: vi.fn(async () => 1),
-    del: vi.fn(async (key: string) => {
-      const had = store.has(key);
-      store.delete(key);
-      return had ? 1 : 0;
+    del: vi.fn(async (...keys: string[]) => {
+      let removed = 0;
+      for (const key of keys) {
+        if (store.delete(key) || sets.delete(key)) removed += 1;
+      }
+      return removed;
     }),
+    getdel: vi.fn(async (key: string) => {
+      const value = store.get(key) ?? null;
+      store.delete(key);
+      return value;
+    }),
+    sets,
+    sadd: vi.fn(async (key: string, member: string) => {
+      const set = sets.get(key) ?? new Set<string>();
+      set.add(member);
+      sets.set(key, set);
+      return 1;
+    }),
+    smembers: vi.fn(async (key: string) => [...(sets.get(key) ?? [])]),
   };
 }
 
@@ -140,5 +160,63 @@ describe('RedisSessionStore', () => {
   it('destroy of empty sid is no-op', async () => {
     await expect(s.destroy('')).resolves.toBeUndefined();
     expect(fake.del).not.toHaveBeenCalled();
+  });
+
+  it('remembers a sign-in and its browser under a hash of its state, with the given TTL', async () => {
+    await s.rememberSignIn('the-state', 'the-browser', 300);
+    const [key, value, mode, ttl] = fake.set.mock.calls[0] ?? [];
+    expect(key).toMatch(/^signin:[0-9a-f]{64}$/);
+    expect(key).not.toContain('the-state');
+    expect([value, mode, ttl]).toEqual(['the-browser', 'EX', 300]);
+  });
+
+  it('takes a remembered sign-in once, returning the browser that started it', async () => {
+    await s.rememberSignIn('the-state', 'the-browser', 300);
+    expect(await s.takeSignIn('the-state')).toBe('the-browser');
+    expect(await s.takeSignIn('the-state')).toBeNull();
+  });
+
+  it('treats a Redis failure as no sign-in, and never throws on remember', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    fake.set.mockRejectedValueOnce(new Error('down'));
+    fake.getdel.mockRejectedValueOnce(new Error('down'));
+    await expect(s.rememberSignIn('the-state', 'the-browser', 300)).resolves.toBeUndefined();
+    expect(await s.takeSignIn('the-state')).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
+
+  it('lists a session under its hashed IdP session id, with the session TTL', async () => {
+    const sid = await s.create(buildSessionData({ idpSid: 'kc-1' }));
+    const [index, member] = fake.sadd.mock.calls[0] ?? [];
+    expect(index).toMatch(/^sessionidp:[0-9a-f]{64}$/);
+    expect(member).toBe(sid);
+    expect(fake.expire).toHaveBeenCalledWith(index, 30);
+  });
+
+  it('slides the IdP index with the session on read', async () => {
+    const sid = await s.create(buildSessionData({ idpSid: 'kc-1' }));
+    const [index] = fake.sadd.mock.calls[0] ?? [];
+    fake.expire.mockClear();
+    await s.get(sid);
+    expect(fake.expire).toHaveBeenCalledWith(`session:${sid}`, 30);
+    expect(fake.expire).toHaveBeenCalledWith(index, 30);
+  });
+
+  it('destroys every session under an IdP session, and only those', async () => {
+    const a = await s.create(buildSessionData({ idpSid: 'kc-1' }));
+    const b = await s.create(buildSessionData({ idpSid: 'kc-1' }));
+    const other = await s.create(buildSessionData({ idpSid: 'kc-2' }));
+
+    expect(await s.destroyByIdpSession('kc-1')).toBe(2);
+
+    expect((await s.get(a)).ok).toBe(false);
+    expect((await s.get(b)).ok).toBe(false);
+    expect((await s.get(other)).ok).toBe(true);
+  });
+
+  it('does not index a session without an IdP session id', async () => {
+    await s.create(buildSessionData());
+    expect(fake.sadd).not.toHaveBeenCalled();
   });
 });

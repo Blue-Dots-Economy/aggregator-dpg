@@ -66,6 +66,27 @@ describe('MemorySessionStore', () => {
     const got = await store.get(sid);
     expect(got.ok).toBe(false);
   });
+  it('destroys every session under an IdP session, and only those', async () => {
+    const a = await store.create(buildSessionData({ idpSid: 'kc-1' }));
+    const other = await store.create(buildSessionData({ idpSid: 'kc-2' }));
+
+    expect(await store.destroyByIdpSession('kc-1')).toBe(1);
+
+    expect((await store.get(a)).ok).toBe(false);
+    expect((await store.get(other)).ok).toBe(true);
+  });
+
+  it('takes a remembered sign-in once, returning the browser that started it', async () => {
+    await store.rememberSignIn('state-1', 'browser-1', 60);
+    expect(await store.takeSignIn('state-1')).toBe('browser-1');
+    expect(await store.takeSignIn('state-1')).toBeNull();
+  });
+
+  it('does not take an unknown or expired sign-in', async () => {
+    expect(await store.takeSignIn('unknown')).toBeNull();
+    await store.rememberSignIn('state-2', 'browser-1', -1);
+    expect(await store.takeSignIn('state-2')).toBeNull();
+  });
 });
 
 describe('SessionStoreFake', () => {

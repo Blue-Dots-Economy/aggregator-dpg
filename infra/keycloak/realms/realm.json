@@ -443,6 +443,8 @@
       ],
       "attributes": {
         "post.logout.redirect.uris": "http://localhost:3000/##http://localhost:3000/login##http://localhost:3100/##http://localhost:3100/login##http://localhost/##http://localhost/login##__PUBLIC_BASE_URL__/##__PUBLIC_BASE_URL__/login",
+        "backchannel.logout.url": "__PORTAL_BACKCHANNEL_LOGOUT_URL__",
+        "backchannel.logout.session.required": "true",
         "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [
@@ -618,7 +620,9 @@
       "webOrigins": ["http://localhost:5173", "http://localhost:2742", "__PUBLIC_BASE_URL__"],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:5173/##http://localhost:5173/auth/login##__PUBLIC_BASE_URL__/##__PUBLIC_BASE_URL__/auth/login",
+        "post.logout.redirect.uris": "http://localhost:5173/##http://localhost:5173/auth/login##http://localhost:2742/##__PUBLIC_BASE_URL__/##__PUBLIC_BASE_URL__/auth/login",
+        "backchannel.logout.url": "__SIGNALS_BACKCHANNEL_LOGOUT_URL__",
+        "backchannel.logout.session.required": "true",
         "login_theme": "signals"
       },
       "protocolMappers": [

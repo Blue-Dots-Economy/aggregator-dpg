@@ -14,7 +14,15 @@ import { z } from 'zod';
 export const SESSION_COOKIE = process.env.SESSION_COOKIE_NAME ?? 'sid';
 export const OIDC_FLOW_COOKIE = 'oidc_flow';
 
-const FIVE_MIN = 60 * 5;
+/** Lifetime of an in-progress sign-in: the handshake cookie and its Redis record. */
+export const OIDC_FLOW_TTL_SECONDS = 60 * 5;
+
+/**
+ * Identifies the browser across its sign-ins, so the account switch can tell a
+ * sign-in this browser started from one started elsewhere. Unlike the
+ * handshake cookie, a second sign-in in the same browser keeps it.
+ */
+export const SIGNIN_BROWSER_COOKIE = 'bd_signin_browser';
 
 function cookieSecure(): boolean {
   const v = process.env.COOKIE_SECURE;
@@ -43,6 +51,31 @@ export function sessionCookieOptions(): {
 }
 
 /**
+ * Returns cookie attributes for the browser cookie: a session cookie (no
+ * `maxAge`), because it only has to outlive the sign-ins in progress. Lax,
+ * because the account switch is a top-level GET from Keycloak's error page.
+ */
+export function signinBrowserCookieOptions(): {
+  httpOnly: true;
+  secure: boolean;
+  sameSite: 'lax';
+  path: string;
+} {
+  return { httpOnly: true, secure: cookieSecure(), sameSite: 'lax', path: '/' };
+}
+
+/**
+ * Compares two strings in constant time.
+ *
+ * @returns Whether they are equal.
+ */
+export function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
+
+/**
  * Returns cookie attributes for the short-lived OIDC handshake cookie.
  */
 export function oidcFlowCookieOptions(): {
@@ -57,7 +90,7 @@ export function oidcFlowCookieOptions(): {
     secure: cookieSecure(),
     sameSite: 'lax',
     path: '/',
-    maxAge: FIVE_MIN,
+    maxAge: OIDC_FLOW_TTL_SECONDS,
   };
 }
 

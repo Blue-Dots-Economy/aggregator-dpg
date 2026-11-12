@@ -282,6 +282,8 @@ services:
       # match KEYCLOAK_API_CLIENT_SECRET below; aggregator-dpg's must match
       # SIGNALSTACK_CLIENT_SECRET on aggregator-api/worker (same var).
       SIGNALS_API_SECRET: ${SIGNALS_API_CLIENT_SECRET:-signals-api-local-dev-secret}
+      # Keycloak calls the portal's back-channel logout on this compose's service name.
+      PORTAL_BACKCHANNEL_LOGOUT_URL: http://aggregator-web:3000/api/auth/backchannel-logout
       SIGNALSTACK_CLIENT_SECRET: ${SIGNALSTACK_CLIENT_SECRET:-aggregator-dpg-signals-local-dev-secret}
       VOICE_DPG_SIGNALS_SECRET: ${VOICE_DPG_SIGNALS_SECRET:-voice-dpg-signals-local-dev-secret}
       # Realm name substituted into the realm JSON's "realm" field by

@@ -19,6 +19,7 @@ import {
   type OidcResult,
   type TokenSet,
 } from './interface';
+import { createRemoteJWKSet, errors as joseErrors, jwtVerify, type JWTPayload } from 'jose';
 import { logger } from '../logger';
 import { decodeJwtClaims } from '../jwt';
 
@@ -29,8 +30,18 @@ export interface KeycloakAdapterOptions {
   defaultScope?: string;
 }
 
+/** The `events` member that marks a back-channel logout token (OIDC Back-Channel Logout 1.0, §2.4). */
+const BACKCHANNEL_LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout'; // NOSONAR typescript:S5332 — an event name fixed by the OIDC spec, never fetched
+
+/**
+ * Oldest logout token accepted, by its `iat`. Keycloak sends the token the
+ * moment a session ends, so anything older is a replay, not a delivery.
+ */
+const LOGOUT_TOKEN_MAX_AGE_SECONDS = 120;
+
 export class KeycloakAdapter extends IdentityProviderAdapter {
   private clientPromise: Promise<Client> | null = null;
+  private jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
   private readonly defaultScope: string;
 
   constructor(private readonly opts: KeycloakAdapterOptions) {
@@ -204,6 +215,64 @@ export class KeycloakAdapter extends IdentityProviderAdapter {
     });
   }
 
+  /**
+   * Verifies a Keycloak back-channel logout token: signature against the
+   * realm's published keys, `iss`, an `aud` naming this client, a recent
+   * `iat`, the logout event, and no `nonce` (OIDC Back-Channel Logout 1.0, §2.6). Only a token
+   * naming a Keycloak session (`sid`) is accepted, because sessions are looked
+   * up by it.
+   */
+  async verifyLogoutToken(logoutToken: string): Promise<OidcResult<{ sid: string }>> {
+    let payload: JWTPayload;
+    try {
+      const client = await this.getClient();
+      const { issuer, jwks_uri: jwksUri } = client.issuer.metadata;
+      if (!jwksUri) {
+        return {
+          ok: false,
+          error: { code: 'KEYS_UNAVAILABLE', message: 'issuer publishes no jwks_uri' },
+        };
+      }
+      this.jwks ??= createRemoteJWKSet(new URL(jwksUri), { timeoutDuration: HTTP_TIMEOUT_MS });
+      ({ payload } = await jwtVerify(logoutToken, this.jwks, {
+        issuer,
+        audience: this.opts.clientId,
+        requiredClaims: ['iat', 'jti'],
+        maxTokenAge: LOGOUT_TOKEN_MAX_AGE_SECONDS,
+      }));
+    } catch (err) {
+      const unavailable =
+        err instanceof joseErrors.JWKSTimeout ||
+        err instanceof joseErrors.JWKSInvalid ||
+        !(err instanceof joseErrors.JOSEError);
+      return {
+        ok: false,
+        error: {
+          code: unavailable ? 'KEYS_UNAVAILABLE' : 'LOGOUT_TOKEN_INVALID',
+          message: err instanceof Error ? err.message : 'logout token rejected',
+        },
+      };
+    }
+
+    const events = payload.events;
+    if (typeof events !== 'object' || events === null || !(BACKCHANNEL_LOGOUT_EVENT in events)) {
+      return { ok: false, error: { code: 'LOGOUT_TOKEN_INVALID', message: 'not a logout event' } };
+    }
+    if ('nonce' in payload) {
+      return {
+        ok: false,
+        error: { code: 'LOGOUT_TOKEN_INVALID', message: 'logout token carries a nonce' },
+      };
+    }
+    if (typeof payload.sid !== 'string' || !payload.sid) {
+      return {
+        ok: false,
+        error: { code: 'LOGOUT_TOKEN_INVALID', message: 'logout token has no sid' },
+      };
+    }
+    return { ok: true, value: { sid: payload.sid } };
+  }
+
   /** Test helper — exposes the underlying issuer metadata once discovered. */
   async _issuerMetadata(): Promise<IssuerMetadata> {
     const client = await this.getClient();
@@ -249,5 +318,6 @@ function mapClaims(claims: Record<string, unknown>): IdClaims {
   if (typeof claims.name === 'string') out.name = claims.name;
   if (typeof claims.preferred_username === 'string')
     out.preferredUsername = claims.preferred_username;
+  if (typeof claims.sid === 'string') out.sid = claims.sid;
   return out;
 }
