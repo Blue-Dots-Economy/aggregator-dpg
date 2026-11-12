@@ -64,26 +64,26 @@ sequenceDiagram
   A->>W: 9. Active → portal
 ```
 
-| Step | What happens                                                                                     |
-| ---- | ------------------------------------------------------------------------------------------------ |
-| 1    | Inviter picks the kind (`org` or `coordinator`) and the target org in the console                |
-| 2    | One invite per recipient (existing mint logic, 14-day TTL from `INVITE_TOKEN_TTL_SECONDS`)       |
-| 3    | One accept page renders the org or coordinator form by kind; the email is read-only              |
-| 4    | Creates the account as `pending`; Keycloak user enabled with `decision_made = invited`, no roles |
-| 5    | Web forwards `login_hint` so the identifier step is skipped                                      |
-| 6    | An `invited` user gets the email channel only, so a passed OTP proves the invited email          |
-| 7    | The portal gate admits `invited` users this far                                                  |
-| 8    | The auth callback sees an unverified account and calls `activate` with the new token             |
-| 9    | API runs the existing approve step; the session is refreshed so the new roles apply              |
+| Step | What happens                                                                                              |
+| ---- | --------------------------------------------------------------------------------------------------------- |
+| 1    | Inviter picks the kind (`org` or `coordinator`) and the target org in the console                         |
+| 2    | One invite per recipient (existing mint logic, 14-day TTL from `INVITE_TOKEN_TTL_SECONDS`)                |
+| 3    | One accept page renders the org or coordinator form by kind; the email is read-only                       |
+| 4    | Creates the account with status `invited`; Keycloak user enabled with `decision_made = invited`, no roles |
+| 5    | Web forwards `login_hint` so the identifier step is skipped                                               |
+| 6    | An `invited` user gets the email channel only, so a passed OTP proves the invited email                   |
+| 7    | The portal gate admits `invited` users this far                                                           |
+| 8    | The auth callback sees an unverified account and calls `activate` with the new token                      |
+| 9    | API runs the existing approve step; the session is refreshed so the new roles apply                       |
 
 ```mermaid
 stateDiagram-v2
-  [*] --> pending: invite accepted
-  pending --> active: first email OTP
-  pending --> [*]: unverified, pruned
+  [*] --> invited: invite accepted
+  invited --> active: first email OTP
+  invited --> [*]: unverified, pruned
 ```
 
-`pending` now means "accepted, email not yet verified". Later sign-ins are normal and may use either channel.
+`invited` means "form submitted, email not yet verified". New accounts never pass through `pending`. Later sign-ins are normal and may use either channel.
 
 ## 3. One invite API for both kinds
 
@@ -93,8 +93,8 @@ stateDiagram-v2
 | ---------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `POST /v1/invite/create`     | `org.manage` (coordinator) or `orgs.onboard` (org) in `org_id` | Mint and email invites. Body `{ kind, org_id, recipients[] }`. Replaces `POST /v1/user/create` |
 | `GET /v1/invite/read?token=` | Invite token                                                   | Kind, org name, locked email, expiry. Feeds the accept page                                    |
-| `POST /v1/invite/accept`     | Invite token                                                   | Validate by kind, create the `pending` account, return `login_hint`                            |
-| `POST /v1/invite/activate`   | User token (after email OTP)                                   | Activate the caller's own `pending` invited account; no-op when already active                 |
+| `POST /v1/invite/accept`     | Invite token                                                   | Validate by kind, create the `invited` account, return `login_hint`                            |
+| `POST /v1/invite/activate`   | User token (after email OTP)                                   | Activate the caller's own `invited` account; no-op when already active                         |
 
 For an `org` invite, `org_id` is the parent; tree limits are checked at mint and again at accept.
 
@@ -103,7 +103,7 @@ For an `org` invite, `org_id` is the parent; tree limits are checked at mint and
 | `coordinator` | Body of `POST /v1/aggregator-registrations/create`     | `decideCoordinator(approve)`: Signals upsert, `decision_made = approved`, CAS to `active` |
 | `org`         | Body of `POST /v1/orgs/create`                         | `decideOrg(approve)`: `grantOwnerAccess` (`org_owner`, group), CAS to `active`            |
 
-The decider is recorded as `invite:<inviter id>`. A failed `activate` leaves the account `pending`; the next sign-in retries it.
+The decider is recorded as `invite:<inviter id>`. A failed `activate` leaves the account `invited`; the next sign-in retries it.
 
 ### Retired
 
@@ -119,23 +119,23 @@ The decider is recorded as `invite:<inviter id>`. A failed `activate` leaves the
 
 ### Database
 
-| Item                                   | Change                                                   |
-| -------------------------------------- | -------------------------------------------------------- |
-| `registration_invites.role`            | Accept `org_owner` alongside `coordinator`               |
-| `registration_invites_pending_unique`  | `(org_id, email)` → `(org_id, role, email)`              |
-| `users.status`, `organisations.status` | No enum change; `pending` means awaiting first email OTP |
-| Data migration                         | None                                                     |
+| Item                                   | Change                                                                                       |
+| -------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `registration_invites.role`            | Accept `org_owner` alongside `coordinator`                                                   |
+| `registration_invites_pending_unique`  | `(org_id, email)` → `(org_id, role, email)`                                                  |
+| `users.status`, `organisations.status` | Add `invited` to `registration_status`; activation is a compare-and-set `invited` → `active` |
+| Data migration                         | None                                                                                         |
 
 ### API
 
-| Item                                | Change                                                                                     |
-| ----------------------------------- | ------------------------------------------------------------------------------------------ |
-| Invite routes                       | `routes/invites.ts` rewritten to hold the three endpoints above                            |
-| Email lock                          | Reject when the submitted email differs from the invite (`INVITE_EMAIL_MISMATCH`)          |
-| Review emails                       | Removed (`sendAdminReviewEmail`, `sendOrgReviewEmail`)                                     |
-| Stale prune                         | `cleanup-stale` also deletes `pending` invited accounts not verified within the invite TTL |
-| Approved emails and grant mail      | Removed; the invitee signs in directly                                                     |
-| RBAC route table and `openapi.json` | Regenerated                                                                                |
+| Item                                | Change                                                                             |
+| ----------------------------------- | ---------------------------------------------------------------------------------- |
+| Invite routes                       | `routes/invites.ts` rewritten to hold the three endpoints above                    |
+| Email lock                          | Reject when the submitted email differs from the invite (`INVITE_EMAIL_MISMATCH`)  |
+| Review emails                       | Removed (`sendAdminReviewEmail`, `sendOrgReviewEmail`)                             |
+| Stale prune                         | `cleanup-stale` also deletes `invited` accounts not verified within the invite TTL |
+| Approved emails and grant mail      | Removed; the invitee signs in directly                                             |
+| RBAC route table and `openapi.json` | Regenerated                                                                        |
 
 ### Web
 
