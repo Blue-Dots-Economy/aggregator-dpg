@@ -25,7 +25,13 @@ import {
   InviteReadQuerySchema,
   InviteReadResponseSchema,
 } from '@aggregator-dpg/shared-primitives/user-org';
-import { usableInvite } from './invite-shared.js';
+import {
+  authenticateCaller,
+  claimInvite,
+  inviteReadHandler,
+  releaseInvite,
+  usableInvite,
+} from './invite-shared.js';
 import type { BecknContact, BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
 import { getRegistrationValidator } from '../services/registration-validator.js';
 import { getUserStore } from '../services/user-store/index.js';
@@ -137,9 +143,322 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         },
       },
     },
-    (req: FastifyRequest, reply: FastifyReply) => submitCoordinatorRegistration(req, reply, 'self'),
-  );
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const log = req.log.child({ operation: 'aggregator-registration.create' });
+      const start = Date.now();
 
+      // Invite claimed by this request, before anything is created. Unless the
+      // registration completes, the `finally` below gives it back.
+      let inviteJti: string | null = null;
+      let inviteCommitted = false;
+      try {
+        // Re-sends the review link for an existing pending or revived record
+        // using stored values. The anonymous submit never changes the record: it
+        // carries no proof of identity, so a stranger must not overwrite it.
+        const reclaimReview = async (row: Coordinator): Promise<FastifyReply> => {
+          await sendAdminReviewEmail(
+            {
+              aggregatorId: row.id,
+              applicantName: row.name,
+              applicantEmail: row.contact.email,
+              applicantPhone: row.contactPhone,
+              ...(row.inviteEmail ? { invitedEmail: row.inviteEmail } : {}),
+              ...(await resolveOwnerRouting(row.parentOrgId)),
+            },
+            log,
+          );
+          log.info(
+            {
+              status: 'success',
+              latency_ms: Date.now() - start,
+              aggregator_id: row.id,
+              reclaim: true,
+            },
+            'registration re-submitted — review link re-sent (no field change)',
+          );
+          // Consent is recorded only on a fresh registration, not here.
+          return reply.status(200).send({
+            aggregator_id: row.id,
+            org_slug: row.orgSlug,
+            status: 'pending',
+            message: 'Registration re-submitted. A fresh approval link has been sent for review.',
+          });
+        };
+
+        // The BFF calls this with a service-account token, so no
+        // `aggregator_id` claim is required.
+        const auth = await authenticateAny(req);
+        if (!auth.ok) {
+          throw httpError('UNAUTHORIZED', {
+            detail: auth.error.message,
+            fields: { reason: auth.error.code },
+          });
+        }
+        await recordRouteCaller(req, callerFromAny(auth.context));
+
+        // Already validated and parsed by the route schema.
+        const body = req.body as z.infer<typeof RegistrationPayloadSchema>;
+
+        // `org_id` and `invite` are not form fields; strip them before Ajv.
+        const {
+          org_id: _orgIdField,
+          invite: _inviteField,
+          ...formBody
+        } = req.body as Record<string, unknown>;
+        const {
+          contact,
+          phoneE164,
+          consent: serverConsent,
+        } = await checkCoordinatorSubmission(req, reply, body, formBody);
+        const userStore = getUserStore();
+        const idp = getIdpAdmin();
+
+        // The coordinator's org; must be active.
+        let parentOrgId: string;
+        let orgIsDefault = false;
+        // The invited email. The coordinator may register with another one;
+        // this is kept so the approving owner can see it.
+        let inviteEmailClaim: string | null = null;
+        {
+          const orgStore = getOrganisationStore();
+          const reqInvite = (req.body as { invite?: string }).invite;
+
+          // Invite path: the org comes from the token claim, re-checked against
+          // the database, and the invite is claimed before anything is created.
+          if (reqInvite) {
+            const verified = await verifyInviteToken(reqInvite);
+            if (!verified.ok) {
+              throw httpError(
+                verified.error.code === 'EXPIRED' ? 'INVITE_EXPIRED' : 'INVITE_INVALID',
+              );
+            }
+            // The invited email is recorded, not enforced.
+            inviteEmailClaim = verified.email.trim().toLowerCase();
+            if (verified.role !== 'coordinator') throw httpError('INVITE_INVALID');
+            const inviteStore = getRegistrationInvitesStore();
+            const org = await orgStore.findById(verified.org);
+            if (!org.ok) {
+              throw httpError('DB_UNAVAILABLE', {
+                cause: new Error(org.error.message),
+                fields: { sub_operation: 'orgStore.findById' },
+              });
+            }
+            // The Default org takes no invites.
+            if (org.value?.status !== 'active' || org.value.isDefault) {
+              throw httpError('TARGET_ORG_INACTIVE');
+            }
+            const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
+            if (ownerMatch.ok && ownerMatch.value) {
+              throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
+            }
+            // Claim the invite now, before anything is created, so concurrent
+            // submits on one link create at most one registration.
+            const claimed = await inviteStore.consume(verified.jti);
+            if (!claimed.ok) {
+              throw httpError('DB_UNAVAILABLE', {
+                cause: new Error(claimed.error.message),
+                fields: { sub_operation: 'inviteStore.consume' },
+              });
+            }
+            if (claimed.value === null) {
+              throw httpError('INVITE_ALREADY_USED', { fields: { email: contact.email } });
+            }
+            inviteJti = verified.jti;
+            parentOrgId = verified.org;
+          } else {
+            // Selector path: the coordinator picks an active org. `org_id` is required.
+            const reqOrgId = (req.body as { org_id?: string }).org_id;
+            if (!reqOrgId) {
+              throw httpError('SCHEMA_VALIDATION', {
+                detail: 'org_id is required.',
+                fields: { field: 'org_id' },
+              });
+            }
+            const org = await orgStore.findById(reqOrgId);
+            if (!org.ok) {
+              throw httpError('DB_UNAVAILABLE', {
+                cause: new Error(org.error.message),
+                fields: { sub_operation: 'orgStore.findById' },
+              });
+            }
+            if (org.value?.status !== 'active') {
+              throw httpError('TARGET_ORG_INACTIVE');
+            }
+            // An org owner cannot also register as a coordinator.
+            const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
+            if (ownerMatch.ok && ownerMatch.value) {
+              throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
+            }
+            // The Default org is selectable only while it is the only active org.
+            if (org.value.isDefault) {
+              const active = await orgStore.listActive();
+              if (!active.ok) {
+                throw httpError('DB_UNAVAILABLE', {
+                  cause: new Error(active.error.message),
+                  fields: { sub_operation: 'orgStore.listActive' },
+                });
+              }
+              if (active.value.some((o) => !o.isDefault)) {
+                throw httpError('TARGET_ORG_INACTIVE');
+              }
+            }
+            parentOrgId = org.value.id;
+            orgIsDefault = org.value.isDefault;
+          }
+        }
+
+        // A Default-org coordinator names its own organisation, never "Default".
+        if (orgIsDefault && body.name.trim().toLowerCase() === 'default') {
+          throw httpError('SCHEMA_VALIDATION', {
+            detail: 'The organisation name cannot be "Default".',
+            fields: { field: 'name' },
+          });
+        }
+
+        // `url` and `locations` belong to a real org, so sending them is refused.
+        // A Default-org coordinator keeps its own as `legacy_org_details`.
+        const submittedLocations = (body.locations ?? []).filter(hasLocationContent);
+        const ownOrgDetails: LegacyOrgDetails = {
+          ...(body.url?.trim() ? { url: body.url.trim() } : {}),
+          ...(submittedLocations.length > 0 ? { locations: submittedLocations } : {}),
+        };
+        if (!orgIsDefault && Object.keys(ownOrgDetails).length > 0) {
+          throw httpError('ORG_DETAILS_READ_ONLY', {
+            fields: { fields: Object.keys(ownOrgDetails) },
+          });
+        }
+
+        // Check email and phone uniqueness in the database and Keycloak.
+        const dbEmail = await userStore.findByContactEmail(contact.email);
+        if (!dbEmail.ok) {
+          throw httpError('DB_UNAVAILABLE', {
+            cause: new Error(dbEmail.error.message),
+            fields: { sub_operation: 'userStore.findByContactEmail' },
+          });
+        }
+        if (dbEmail.value !== null) {
+          const existing = dbEmail.value;
+          if (existing.status === 'inactive') {
+            // Rejected: refuse until the cooling window from `rejected_at` ends,
+            // then revive the same row to pending and re-send the review link.
+            const retryAfter = coolingRetryAfter(existing.rejectedAt, existing.updatedAt);
+            if (retryAfter) {
+              throw httpError('REGISTRATION_COOLING', {
+                fields: { email: contact.email, retry_after: retryAfter },
+              });
+            }
+            const revived = await userStore.update(existing.id, {
+              status: 'pending',
+              rejectedAt: null,
+              updatedBy: 'self',
+            });
+            if (!revived.ok) {
+              throw httpError('DB_UNAVAILABLE', {
+                cause: new Error(revived.error.message),
+                fields: { sub_operation: 'userStore.reviveRejected' },
+              });
+            }
+            return reclaimReview(existing);
+          }
+          if (existing.status !== 'pending') {
+            // Active or retired: the email is taken.
+            throw httpError('USER_EXISTS', { fields: { email: contact.email } });
+          }
+          // Pending: re-send the review link.
+          return reclaimReview(existing);
+        }
+
+        const dbPhone = await userStore.findByContactPhone(phoneE164);
+        if (!dbPhone.ok) {
+          throw httpError('DB_UNAVAILABLE', {
+            cause: new Error(dbPhone.error.message),
+            fields: { sub_operation: 'userStore.findByContactPhone' },
+          });
+        }
+        if (dbPhone.value !== null) {
+          const existingPhone = dbPhone.value;
+          if (existingPhone.status === 'inactive') {
+            // Same cooling window for a rejected record that owns this phone.
+            const retryAfter = coolingRetryAfter(existingPhone.rejectedAt, existingPhone.updatedAt);
+            if (retryAfter) {
+              throw httpError('REGISTRATION_COOLING', {
+                fields: { phone: phoneE164, retry_after: retryAfter },
+              });
+            }
+            const revived = await userStore.update(existingPhone.id, {
+              status: 'pending',
+              rejectedAt: null,
+              updatedBy: 'self',
+            });
+            if (!revived.ok) {
+              throw httpError('DB_UNAVAILABLE', {
+                cause: new Error(revived.error.message),
+                fields: { sub_operation: 'userStore.reviveRejected' },
+              });
+            }
+            return reclaimReview(existingPhone);
+          }
+          throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+        }
+
+        await assertNotInKeycloak(idp, contact.email, phoneE164);
+
+        const { aggregatorId, orgSlug } = await createCoordinatorRow(userStore, body, {
+          contact,
+          consent: serverConsent,
+          orgId: parentOrgId,
+          legacyOrgDetails:
+            orgIsDefault && Object.keys(ownOrgDetails).length > 0 ? ownOrgDetails : null,
+          inviteId: inviteJti,
+          log,
+        });
+
+        const keycloakUserId = await createCoordinatorLogin(userStore, idp, {
+          aggregatorId,
+          type: body.type,
+          contact,
+          invited: false,
+        });
+
+        // Fully provisioned: keep the invite consumed.
+        inviteCommitted = true;
+
+        await sendAdminReviewEmail(
+          {
+            aggregatorId,
+            applicantName: body.name,
+            applicantEmail: contact.email,
+            applicantPhone: phoneE164,
+            ...(inviteEmailClaim ? { invitedEmail: inviteEmailClaim } : {}),
+            ...(await resolveOwnerRouting(parentOrgId)),
+          },
+          log,
+        );
+
+        log.info(
+          {
+            status: 'success',
+            latency_ms: Date.now() - start,
+            aggregator_id: aggregatorId,
+            org_slug: orgSlug,
+            keycloak_user_id: keycloakUserId,
+          },
+          'aggregator registration submitted',
+        );
+
+        return reply.status(201).send({
+          aggregator_id: aggregatorId,
+          org_slug: orgSlug,
+          status: 'pending',
+          message: 'Registration submitted. You will receive credentials by email after approval.',
+        });
+      } finally {
+        // Give the invite back on any exit that did not create a registration.
+        // Only releases the claim this request took.
+        if (inviteJti && !inviteCommitted) await releaseInvite(inviteJti, log);
+      }
+    },
+  );
   app.post(
     '/v1/user/invite/accept',
     {
@@ -156,8 +475,7 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         },
       },
     },
-    (req: FastifyRequest, reply: FastifyReply) =>
-      submitCoordinatorRegistration(req, reply, 'invite'),
+    acceptCoordinatorInvite,
   );
 
   app.get(
@@ -176,507 +494,324 @@ export async function registerAggregatorRegistrationRoutes(app: FastifyInstance)
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const auth = await authenticateAny(req);
-      if (!auth.ok) {
-        throw httpError('UNAUTHORIZED', {
-          detail: auth.error.message,
-          fields: { reason: auth.error.code },
-        });
-      }
-      await recordRouteCaller(req, callerFromAny(auth.context));
-      const { token } = req.query as z.infer<typeof InviteReadQuerySchema>;
-      const invite = await usableInvite(token, 'coordinator');
-      return reply.status(200).send({
-        email: invite.email,
-        expires_at: invite.expiresAt.toISOString(),
-        org: { id: invite.org.id, name: invite.org.name },
-      });
-    },
+    inviteReadHandler('coordinator'),
   );
 }
 
-/** `self`: the public form, reviewed by the org owner. `invite`: an invited coordinator, verified by email code. */
-type RegistrationMode = 'self' | 'invite';
+/** A checked coordinator form: its contact with the E.164 phone, and the server-stamped consent. */
+interface CoordinatorSubmission {
+  contact: BecknContact;
+  phoneE164: string;
+  consent: RegistrationPayload['consent'];
+}
+
+type RegistrationPayload = z.infer<typeof RegistrationPayloadSchema>;
+type RequestLog = ReturnType<FastifyRequest['log']['child']>;
 
 /**
- * Validates and creates a coordinator registration.
+ * Checks a coordinator form, normalises its phone, stamps its consent and applies the submit rate limit.
+ *
+ * @param body - The parsed payload.
+ * @param formBody - The form fields only, validated against the registration JSON Schema.
+ * @throws {HttpError} SCHEMA_VALIDATION, INVALID_PHONE or RATE_LIMITED.
+ */
+async function checkCoordinatorSubmission(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  body: RegistrationPayload,
+  formBody: Record<string, unknown>,
+): Promise<CoordinatorSubmission> {
+  const networkCfg = await getNetworkConfig();
+  if (!networkCfg.domainIds.includes(body.type)) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: `unknown type '${body.type}' — valid: ${networkCfg.domainIds.join(', ')}`,
+      fields: { type: 'invalid' },
+    });
+  }
+  const validate = await getRegistrationValidator();
+  if (!validate(formBody)) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'Payload failed JSON Schema validation.',
+      fields: { issues: validate.errors ?? [] },
+    });
+  }
+  const phoneResult = normalisePhone(body.contact.phone);
+  if (!phoneResult.ok) {
+    throw httpError('INVALID_PHONE', {
+      detail: phoneResult.error.message,
+      fields: { phone: body.contact.phone },
+    });
+  }
+  const phoneE164 = phoneResult.value;
+  const contact: BecknContact = { ...body.contact, phone: phoneE164 };
+
+  const consent = stampConsent(body.consent);
+  if (!consent) {
+    throw httpError('SCHEMA_VALIDATION', {
+      detail: 'consent.valid_till must be in the future.',
+      fields: { 'consent.valid_till': 'invalid' },
+    });
+  }
+
+  const rl = await checkSubmitRate(`${req.ip}|${contact.email}`);
+  if (!rl.allowed) {
+    void reply.header('Retry-After', String(rl.retryAfterSeconds));
+    throw httpError('RATE_LIMITED', {
+      detail: `Retry in ${rl.retryAfterSeconds}s.`,
+      fields: { retry_after_seconds: rl.retryAfterSeconds },
+    });
+  }
+  return { contact, phoneE164, consent };
+}
+
+/**
+ * Registers a coordinator from an invite.
+ *
+ * The email must be the invited one. The coordinator is created `pending`
+ * with a Keycloak user that is enabled, unverified and `decision_made = invited`;
+ * it is activated by `POST /v1/user/activate` after an email sign-in. The
+ * invite is claimed before anything is created and given back if the
+ * registration does not complete.
  *
  * @throws {HttpError} On any refusal; the error code names the reason.
  */
-async function submitCoordinatorRegistration(
+async function acceptCoordinatorInvite(
   req: FastifyRequest,
   reply: FastifyReply,
-  mode: RegistrationMode,
 ): Promise<FastifyReply> {
-  const log = req.log.child({ operation: 'aggregator-registration.create' });
+  const log = req.log.child({ operation: 'invite.user.accept' });
   const start = Date.now();
+  await authenticateCaller(req);
 
-  // Invite claimed by this request, before anything is created. Unless the
-  // registration completes, the `finally` below gives it back.
-  let inviteJti: string | null = null;
-  let inviteCommitted = false;
+  const { invite: token, ...body } = req.body as z.infer<typeof CoordinatorInviteAcceptBodySchema>;
+  const { contact, phoneE164, consent } = await checkCoordinatorSubmission(req, reply, body, body);
+  const invite = await usableInvite(token, 'coordinator');
+  if (contact.email !== invite.email) throw httpError('INVITE_EMAIL_MISMATCH');
+  await assertNotOrgOwner(contact.email);
+  assertNoOrgDetails(body);
+
+  const userStore = getUserStore();
+  const idp = getIdpAdmin();
+  await assertContactFree(userStore, idp, contact.email, phoneE164);
+
+  await claimInvite(invite.jti);
+  let committed = false;
   try {
-    // Re-sends the review link for an existing pending or revived record
-    // using stored values. The anonymous submit never changes the record: it
-    // carries no proof of identity, so a stranger must not overwrite it.
-    const reclaimReview = async (row: Coordinator): Promise<FastifyReply> => {
-      await sendAdminReviewEmail(
-        {
-          aggregatorId: row.id,
-          applicantName: row.name,
-          applicantEmail: row.contact.email,
-          applicantPhone: row.contactPhone,
-          ...(row.inviteEmail ? { invitedEmail: row.inviteEmail } : {}),
-          ...(await resolveOwnerRouting(row.parentOrgId)),
-        },
-        log,
-      );
-      log.info(
-        {
-          status: 'success',
-          latency_ms: Date.now() - start,
-          aggregator_id: row.id,
-          reclaim: true,
-        },
-        'registration re-submitted — review link re-sent (no field change)',
-      );
-      // Consent is recorded only on a fresh registration, not here.
-      return reply.status(200).send({
-        aggregator_id: row.id,
-        org_slug: row.orgSlug,
-        status: 'pending',
-        message: 'Registration re-submitted. A fresh approval link has been sent for review.',
-      });
-    };
-
-    // The BFF calls this with a service-account token, so no
-    // `aggregator_id` claim is required.
-    const auth = await authenticateAny(req);
-    if (!auth.ok) {
-      throw httpError('UNAUTHORIZED', {
-        detail: auth.error.message,
-        fields: { reason: auth.error.code },
-      });
-    }
-    await recordRouteCaller(req, callerFromAny(auth.context));
-
-    // Already validated and parsed by the route schema.
-    const body = req.body as z.infer<typeof RegistrationPayloadSchema>;
-
-    // `type` must be one of the network's domain ids.
-    const networkCfg = await getNetworkConfig();
-    if (!networkCfg.domainIds.includes(body.type)) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: `unknown type '${body.type}' — valid: ${networkCfg.domainIds.join(', ')}`,
-        fields: { type: 'invalid' },
-      });
-    }
-
-    // `org_id` and `invite` are not form fields; strip them before Ajv.
-    const {
-      org_id: _orgIdField,
-      invite: _inviteField,
-      ...formBody
-    } = req.body as Record<string, unknown>;
-
-    const validate = await getRegistrationValidator();
-    if (!validate(formBody)) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'Payload failed JSON Schema validation.',
-        fields: { issues: validate.errors ?? [] },
-      });
-    }
-    const phoneResult = normalisePhone(body.contact.phone);
-    if (!phoneResult.ok) {
-      throw httpError('INVALID_PHONE', {
-        detail: phoneResult.error.message,
-        // Keyed `phone` so the logger redacts it.
-        fields: { phone: body.contact.phone },
-      });
-    }
-    const phoneE164 = phoneResult.value;
-    // Store the E.164 phone. Zod has already lowercased the email.
-    const contact: BecknContact = {
-      ...body.contact,
-      phone: phoneE164,
-    };
-
-    const userStore = getUserStore();
-    const idp = getIdpAdmin();
-
-    // Stamp consent with the server time. `valid_till` is clamped to a maximum.
-    const serverConsent = stampConsent(body.consent);
-    if (!serverConsent) {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'consent.valid_till must be in the future.',
-        fields: { 'consent.valid_till': 'invalid' },
-      });
-    }
-
-    // Rate limit per (ip, email). Fails open so a Redis outage does not block registration.
-    const rl = await checkSubmitRate(`${req.ip}|${contact.email}`);
-    if (!rl.allowed) {
-      void reply.header('Retry-After', String(rl.retryAfterSeconds));
-      throw httpError('RATE_LIMITED', {
-        detail: `Retry in ${rl.retryAfterSeconds}s.`,
-        fields: { retry_after_seconds: rl.retryAfterSeconds },
-      });
-    }
-
-    // The coordinator's org; must be active.
-    let parentOrgId: string;
-    let orgIsDefault = false;
-    // The invited email. The coordinator may register with another one;
-    // this is kept so the approving owner can see it.
-    let inviteEmailClaim: string | null = null;
-    {
-      const orgStore = getOrganisationStore();
-      const reqInvite = (req.body as { invite?: string }).invite;
-
-      // Invite path: the org comes from the token claim, re-checked against
-      // the database, and the invite is claimed before anything is created.
-      if (reqInvite) {
-        const verified = await verifyInviteToken(reqInvite);
-        if (!verified.ok) {
-          throw httpError(verified.error.code === 'EXPIRED' ? 'INVITE_EXPIRED' : 'INVITE_INVALID');
-        }
-        // Recorded on the public form; enforced on an invite accept.
-        inviteEmailClaim = verified.email.trim().toLowerCase();
-        if (verified.role !== 'coordinator') throw httpError('INVITE_INVALID');
-        if (mode === 'invite' && contact.email !== inviteEmailClaim) {
-          throw httpError('INVITE_EMAIL_MISMATCH');
-        }
-        const inviteStore = getRegistrationInvitesStore();
-        const org = await orgStore.findById(verified.org);
-        if (!org.ok) {
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(org.error.message),
-            fields: { sub_operation: 'orgStore.findById' },
-          });
-        }
-        // The Default org takes no invites.
-        if (org.value?.status !== 'active' || org.value.isDefault) {
-          throw httpError('TARGET_ORG_INACTIVE');
-        }
-        const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
-        if (ownerMatch.ok && ownerMatch.value) {
-          throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
-        }
-        // Claim the invite now, before anything is created, so concurrent
-        // submits on one link create at most one registration.
-        const claimed = await inviteStore.consume(verified.jti);
-        if (!claimed.ok) {
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(claimed.error.message),
-            fields: { sub_operation: 'inviteStore.consume' },
-          });
-        }
-        if (claimed.value === null) {
-          throw httpError('INVITE_ALREADY_USED', { fields: { email: contact.email } });
-        }
-        inviteJti = verified.jti;
-        parentOrgId = verified.org;
-      } else {
-        // Selector path: the coordinator picks an active org. `org_id` is required.
-        const reqOrgId = (req.body as { org_id?: string }).org_id;
-        if (!reqOrgId) {
-          throw httpError('SCHEMA_VALIDATION', {
-            detail: 'org_id is required.',
-            fields: { field: 'org_id' },
-          });
-        }
-        const org = await orgStore.findById(reqOrgId);
-        if (!org.ok) {
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(org.error.message),
-            fields: { sub_operation: 'orgStore.findById' },
-          });
-        }
-        if (org.value?.status !== 'active') {
-          throw httpError('TARGET_ORG_INACTIVE');
-        }
-        // An org owner cannot also register as a coordinator.
-        const ownerMatch = await orgStore.findByOwnerEmail(contact.email);
-        if (ownerMatch.ok && ownerMatch.value) {
-          throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: contact.email } });
-        }
-        // The Default org is selectable only while it is the only active org.
-        if (org.value.isDefault) {
-          const active = await orgStore.listActive();
-          if (!active.ok) {
-            throw httpError('DB_UNAVAILABLE', {
-              cause: new Error(active.error.message),
-              fields: { sub_operation: 'orgStore.listActive' },
-            });
-          }
-          if (active.value.some((o) => !o.isDefault)) {
-            throw httpError('TARGET_ORG_INACTIVE');
-          }
-        }
-        parentOrgId = org.value.id;
-        orgIsDefault = org.value.isDefault;
-      }
-    }
-
-    // A Default-org coordinator names its own organisation, never "Default".
-    if (orgIsDefault && body.name.trim().toLowerCase() === 'default') {
-      throw httpError('SCHEMA_VALIDATION', {
-        detail: 'The organisation name cannot be "Default".',
-        fields: { field: 'name' },
-      });
-    }
-
-    // `url` and `locations` belong to a real org, so sending them is refused.
-    // A Default-org coordinator keeps its own as `legacy_org_details`.
-    const submittedLocations = (body.locations ?? []).filter(hasLocationContent);
-    const ownOrgDetails: LegacyOrgDetails = {
-      ...(body.url?.trim() ? { url: body.url.trim() } : {}),
-      ...(submittedLocations.length > 0 ? { locations: submittedLocations } : {}),
-    };
-    if (!orgIsDefault && Object.keys(ownOrgDetails).length > 0) {
-      throw httpError('ORG_DETAILS_READ_ONLY', {
-        fields: { fields: Object.keys(ownOrgDetails) },
-      });
-    }
-
-    // Check email and phone uniqueness in the database and Keycloak.
-    const dbEmail = await userStore.findByContactEmail(contact.email);
-    if (!dbEmail.ok) {
-      throw httpError('DB_UNAVAILABLE', {
-        cause: new Error(dbEmail.error.message),
-        fields: { sub_operation: 'userStore.findByContactEmail' },
-      });
-    }
-    if (dbEmail.value !== null) {
-      if (mode === 'invite') throw httpError('USER_EXISTS', { fields: { email: contact.email } });
-      const existing = dbEmail.value;
-      if (existing.status === 'inactive') {
-        // Rejected: refuse until the cooling window from `rejected_at` ends,
-        // then revive the same row to pending and re-send the review link.
-        const retryAfter = coolingRetryAfter(existing.rejectedAt, existing.updatedAt);
-        if (retryAfter) {
-          throw httpError('REGISTRATION_COOLING', {
-            fields: { email: contact.email, retry_after: retryAfter },
-          });
-        }
-        const revived = await userStore.update(existing.id, {
-          status: 'pending',
-          rejectedAt: null,
-          updatedBy: 'self',
-        });
-        if (!revived.ok) {
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(revived.error.message),
-            fields: { sub_operation: 'userStore.reviveRejected' },
-          });
-        }
-        return reclaimReview(existing);
-      }
-      if (existing.status !== 'pending') {
-        // Active or retired: the email is taken.
-        throw httpError('USER_EXISTS', { fields: { email: contact.email } });
-      }
-      // Pending: re-send the review link.
-      return reclaimReview(existing);
-    }
-
-    const dbPhone = await userStore.findByContactPhone(phoneE164);
-    if (!dbPhone.ok) {
-      throw httpError('DB_UNAVAILABLE', {
-        cause: new Error(dbPhone.error.message),
-        fields: { sub_operation: 'userStore.findByContactPhone' },
-      });
-    }
-    if (dbPhone.value !== null) {
-      if (mode === 'invite') throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
-      const existingPhone = dbPhone.value;
-      if (existingPhone.status === 'inactive') {
-        // Same cooling window for a rejected record that owns this phone.
-        const retryAfter = coolingRetryAfter(existingPhone.rejectedAt, existingPhone.updatedAt);
-        if (retryAfter) {
-          throw httpError('REGISTRATION_COOLING', {
-            fields: { phone: phoneE164, retry_after: retryAfter },
-          });
-        }
-        const revived = await userStore.update(existingPhone.id, {
-          status: 'pending',
-          rejectedAt: null,
-          updatedBy: 'self',
-        });
-        if (!revived.ok) {
-          throw httpError('DB_UNAVAILABLE', {
-            cause: new Error(revived.error.message),
-            fields: { sub_operation: 'userStore.reviveRejected' },
-          });
-        }
-        return reclaimReview(existingPhone);
-      }
-      throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
-    }
-
-    const kcEmail = await idp.findByEmail(contact.email);
-    if (!kcEmail.ok) {
-      throw httpError('IDP_UNAVAILABLE', {
-        cause: kcEmail.error,
-        fields: { sub_operation: 'idp.findByEmail' },
-      });
-    }
-    if (kcEmail.value !== null) {
-      throw httpError('USER_EXISTS', { fields: { email: contact.email } });
-    }
-
-    // The phone is the OTP login key, so it must be unique in Keycloak too.
-    const kcPhone = await idp.findByAttribute(KC_ATTR.PHONE_NUMBER, phoneE164);
-    if (!kcPhone.ok) {
-      throw httpError('IDP_UNAVAILABLE', {
-        cause: kcPhone.error,
-        fields: { sub_operation: 'idp.findByAttribute.phoneNumber' },
-      });
-    }
-    if (kcPhone.value !== null) {
-      throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
-    }
-
-    // Consent is written in the same transaction as the coordinator row,
-    // before any Keycloak call. No coordinator exists without a consent record.
-    const recordConsent = await aggregatorConsentWriter({
-      consent: serverConsent,
+    const { aggregatorId, orgSlug } = await createCoordinatorRow(userStore, body, {
+      contact,
+      consent,
+      orgId: invite.org.id,
+      legacyOrgDetails: null,
+      inviteId: invite.jti,
       log,
     });
-
-    const aggregator = await createAggregatorWithSlug(userStore, body.name, {
+    const keycloakUserId = await createCoordinatorLogin(userStore, idp, {
+      aggregatorId,
       type: body.type,
       contact,
-      consent: serverConsent,
-      recordConsent,
-      orgId: parentOrgId,
-      legacyOrgDetails:
-        orgIsDefault && Object.keys(ownOrgDetails).length > 0 ? ownOrgDetails : null,
-      inviteId: inviteJti,
-      profile: buildAggregatorProfile(body as unknown as Record<string, unknown>),
-      profileRef: resolveProfileRef('registration.v1.json'),
+      invited: true,
     });
-    if (!aggregator.ok) {
-      const code = mapStoreCreateError(aggregator.error.code);
-      throw httpError(code, {
-        cause: new Error(aggregator.error.message),
-        ...(code === 'CONSENT_WRITE_FAILED'
-          ? { fields: { sub_operation: 'recordAggregatorConsent', rolled_back: true } }
-          : {}),
-      });
-    }
-    const { id: aggregatorId, orgSlug } = aggregator.value;
-
-    // Keycloak attributes:
-    //   - aggregator_id    the coordinator's row id
-    //   - aggregator_type  participant focus
-    //   - phoneNumber      OTP login key
-    //   - decision_made    login gate
-    const kcAttributes: Record<string, string> = {
-      [KC_ATTR.AGGREGATOR_ID]: aggregatorId,
-      [KC_ATTR.AGGREGATOR_TYPE]: body.type,
-      [KC_ATTR.PHONE_NUMBER]: phoneE164,
-      [KC_ATTR.DECISION_MADE]: mode === 'invite' ? 'invited' : 'pending',
-    };
-
-    // Split the name into first and last for Keycloak.
-    const { firstName, lastName } = splitName(contact.name);
-    const kcResult = await idp.createUser({
-      email: contact.email,
-      username: contact.email,
-      phone: phoneE164,
-      enabled: mode === 'invite',
-      emailVerified: mode !== 'invite',
-      firstName,
-      lastName,
-      attributes: kcAttributes,
-    });
-    if (!kcResult.ok) {
-      await userStore.deleteById(aggregatorId);
-      if (kcResult.error.code === 'USER_EXISTS') {
-        throw httpError('USER_EXISTS', {
-          cause: kcResult.error,
-          fields: { email: contact.email, rolled_back: true },
-        });
-      }
-      if (kcResult.error.code === 'INVALID_NAME') {
-        throw httpError('NAME_INVALID_CHARACTERS', {
-          fields: { name: 'contact.name', rolled_back: true },
-        });
-      }
-      throw httpError('IDP_UNAVAILABLE', {
-        cause: kcResult.error,
-        fields: { sub_operation: 'idp.createUser', rolled_back: true },
-      });
-    }
-
-    // Fully provisioned: keep the invite consumed.
-    inviteCommitted = true;
-
-    if (mode === 'invite') {
-      log.info(
-        {
-          status: 'success',
-          latency_ms: Date.now() - start,
-          aggregator_id: aggregatorId,
-          org_slug: orgSlug,
-          keycloak_user_id: kcResult.value.id,
-          mode,
-        },
-        'invited coordinator registered; awaiting email verification',
-      );
-      return reply.status(201).send({
-        aggregator_id: aggregatorId,
-        org_slug: orgSlug,
-        status: 'pending',
-        message: 'Registration received. Sign in with the code we email you to finish.',
-        login_hint: contact.email,
-      });
-    }
-
-    await sendAdminReviewEmail(
-      {
-        aggregatorId,
-        applicantName: body.name,
-        applicantEmail: contact.email,
-        applicantPhone: phoneE164,
-        ...(inviteEmailClaim ? { invitedEmail: inviteEmailClaim } : {}),
-        ...(await resolveOwnerRouting(parentOrgId)),
-      },
-      log,
-    );
-
+    committed = true;
     log.info(
       {
         status: 'success',
         latency_ms: Date.now() - start,
         aggregator_id: aggregatorId,
         org_slug: orgSlug,
-        keycloak_user_id: kcResult.value.id,
+        keycloak_user_id: keycloakUserId,
       },
-      'aggregator registration submitted',
+      'invited coordinator registered; awaiting email verification',
     );
-
     return reply.status(201).send({
       aggregator_id: aggregatorId,
       org_slug: orgSlug,
       status: 'pending',
-      message: 'Registration submitted. You will receive credentials by email after approval.',
+      message: 'Registration received. Sign in with the code we email you to finish.',
+      login_hint: contact.email,
     });
   } finally {
-    // Give the invite back on any exit that did not create a registration.
-    // Only releases the claim this request took.
-    if (inviteJti && !inviteCommitted) {
-      const released = await getRegistrationInvitesStore().release(inviteJti);
-      if (!released.ok || released.value === null) {
-        log.warn(
-          { status: 'failure', sub_operation: 'inviteStore.release', invite_jti: inviteJti },
-          'invite release after an incomplete registration did not commit',
-        );
-      }
-    }
+    if (!committed) await releaseInvite(invite.jti, log);
   }
+}
+
+/**
+ * Refuses an email that already owns an organisation.
+ *
+ * @throws {HttpError} OWNER_ALREADY_REGISTERED.
+ */
+async function assertNotOrgOwner(email: string): Promise<void> {
+  const ownerMatch = await getOrganisationStore().findByOwnerEmail(email);
+  if (ownerMatch.ok && ownerMatch.value) {
+    throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email } });
+  }
+}
+
+/**
+ * Refuses `url` and `locations`, which belong to the coordinator's org.
+ *
+ * @throws {HttpError} ORG_DETAILS_READ_ONLY.
+ */
+function assertNoOrgDetails(body: RegistrationPayload): void {
+  const sent = [
+    ...(body.url?.trim() ? ['url'] : []),
+    ...((body.locations ?? []).some(hasLocationContent) ? ['locations'] : []),
+  ];
+  if (sent.length > 0) throw httpError('ORG_DETAILS_READ_ONLY', { fields: { fields: sent } });
+}
+
+/**
+ * Refuses an email or phone that already belongs to an account, in the database or Keycloak.
+ *
+ * @throws {HttpError} USER_EXISTS, PHONE_EXISTS, DB_UNAVAILABLE or IDP_UNAVAILABLE.
+ */
+async function assertContactFree(
+  userStore: ReturnType<typeof getUserStore>,
+  idp: ReturnType<typeof getIdpAdmin>,
+  email: string,
+  phoneE164: string,
+): Promise<void> {
+  const [dbEmail, dbPhone] = await Promise.all([
+    userStore.findByContactEmail(email),
+    userStore.findByContactPhone(phoneE164),
+  ]);
+  if (!dbEmail.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(dbEmail.error.message),
+      fields: { sub_operation: 'userStore.findByContactEmail' },
+    });
+  }
+  if (dbEmail.value !== null) throw httpError('USER_EXISTS', { fields: { email } });
+  if (!dbPhone.ok) {
+    throw httpError('DB_UNAVAILABLE', {
+      cause: new Error(dbPhone.error.message),
+      fields: { sub_operation: 'userStore.findByContactPhone' },
+    });
+  }
+  if (dbPhone.value !== null) throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+  await assertNotInKeycloak(idp, email, phoneE164);
+}
+
+/**
+ * Refuses an email or phone that a Keycloak user already holds; the phone is the OTP login key.
+ *
+ * @throws {HttpError} USER_EXISTS, PHONE_EXISTS or IDP_UNAVAILABLE.
+ */
+async function assertNotInKeycloak(
+  idp: ReturnType<typeof getIdpAdmin>,
+  email: string,
+  phoneE164: string,
+): Promise<void> {
+  const kcEmail = await idp.findByEmail(email);
+  if (!kcEmail.ok) {
+    throw httpError('IDP_UNAVAILABLE', {
+      cause: kcEmail.error,
+      fields: { sub_operation: 'idp.findByEmail' },
+    });
+  }
+  if (kcEmail.value !== null) throw httpError('USER_EXISTS', { fields: { email } });
+  const kcPhone = await idp.findByAttribute(KC_ATTR.PHONE_NUMBER, phoneE164);
+  if (!kcPhone.ok) {
+    throw httpError('IDP_UNAVAILABLE', {
+      cause: kcPhone.error,
+      fields: { sub_operation: 'idp.findByAttribute.phoneNumber' },
+    });
+  }
+  if (kcPhone.value !== null) throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
+}
+
+/**
+ * Inserts the coordinator and its consent row in one transaction.
+ *
+ * @throws {HttpError} The mapped store error; CONSENT_WRITE_FAILED rolls the insert back.
+ */
+async function createCoordinatorRow(
+  userStore: ReturnType<typeof getUserStore>,
+  body: RegistrationPayload,
+  row: {
+    contact: BecknContact;
+    consent: RegistrationPayload['consent'];
+    orgId: string;
+    legacyOrgDetails: LegacyOrgDetails | null;
+    inviteId: string | null;
+    log: RequestLog;
+  },
+): Promise<{ aggregatorId: string; orgSlug: string }> {
+  const recordConsent = await aggregatorConsentWriter({ consent: row.consent, log: row.log });
+  const created = await createAggregatorWithSlug(userStore, body.name, {
+    type: body.type,
+    contact: row.contact,
+    consent: row.consent,
+    recordConsent,
+    orgId: row.orgId,
+    legacyOrgDetails: row.legacyOrgDetails,
+    inviteId: row.inviteId,
+    profile: buildAggregatorProfile(body),
+    profileRef: resolveProfileRef('registration.v1.json'),
+  });
+  if (!created.ok) {
+    const code = mapStoreCreateError(created.error.code);
+    throw httpError(code, {
+      cause: new Error(created.error.message),
+      ...(code === 'CONSENT_WRITE_FAILED'
+        ? { fields: { sub_operation: 'recordAggregatorConsent', rolled_back: true } }
+        : {}),
+    });
+  }
+  return { aggregatorId: created.value.id, orgSlug: created.value.orgSlug };
+}
+
+/**
+ * Creates the coordinator's Keycloak user; on failure deletes the coordinator row.
+ *
+ * A self-registered user is disabled until approval. An invited user is
+ * enabled and unverified, and verifies by email code.
+ *
+ * @returns The Keycloak user id.
+ * @throws {HttpError} USER_EXISTS, NAME_INVALID_CHARACTERS or IDP_UNAVAILABLE.
+ */
+async function createCoordinatorLogin(
+  userStore: ReturnType<typeof getUserStore>,
+  idp: ReturnType<typeof getIdpAdmin>,
+  user: {
+    aggregatorId: string;
+    type: RegistrationPayload['type'];
+    contact: BecknContact;
+    invited: boolean;
+  },
+): Promise<string> {
+  const { firstName, lastName } = splitName(user.contact.name);
+  const created = await idp.createUser({
+    email: user.contact.email,
+    username: user.contact.email,
+    phone: user.contact.phone,
+    enabled: user.invited,
+    emailVerified: !user.invited,
+    firstName,
+    lastName,
+    attributes: {
+      [KC_ATTR.AGGREGATOR_ID]: user.aggregatorId,
+      [KC_ATTR.AGGREGATOR_TYPE]: user.type,
+      [KC_ATTR.PHONE_NUMBER]: user.contact.phone,
+      [KC_ATTR.DECISION_MADE]: user.invited ? 'invited' : 'pending',
+    },
+  });
+  if (created.ok) return created.value.id;
+  await userStore.deleteById(user.aggregatorId);
+  if (created.error.code === 'USER_EXISTS') {
+    throw httpError('USER_EXISTS', {
+      cause: created.error,
+      fields: { email: user.contact.email, rolled_back: true },
+    });
+  }
+  if (created.error.code === 'INVALID_NAME') {
+    throw httpError('NAME_INVALID_CHARACTERS', {
+      fields: { name: 'contact.name', rolled_back: true },
+    });
+  }
+  throw httpError('IDP_UNAVAILABLE', {
+    cause: created.error,
+    fields: { sub_operation: 'idp.createUser', rolled_back: true },
+  });
 }
 
 /**

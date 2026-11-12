@@ -6,7 +6,12 @@
  * active, non-Default aggregator org.
  */
 
+import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from 'fastify';
+import type { z } from 'zod';
+import type { InviteReadQuerySchema } from '@aggregator-dpg/shared-primitives/user-org';
 import { httpError } from '../errors/http-error.js';
+import { authenticateAny } from '../services/auth/access-token.js';
+import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
 import { verifyInviteToken, type InviteRole } from '../services/invite-token.js';
 import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
 import { getOrganisationStore } from '../services/organisation-store/index.js';
@@ -67,11 +72,12 @@ export async function usableInvite(token: string, role: InviteRole): Promise<Usa
   if (verified.role !== role) throw httpError('INVITE_INVALID');
   const row = await getRegistrationInvitesStore().findByJti(verified.jti);
   if (!row.ok) dbDown('inviteStore.findByJti', row.error.message);
-  if (!row.value || row.value.parentOrgId !== verified.org || row.value.status === 'revoked') {
+  const stored = row.value;
+  if (stored?.parentOrgId !== verified.org || stored.status === 'revoked') {
     throw httpError('INVITE_INVALID');
   }
-  if (row.value.status === 'consumed') throw httpError('INVITE_ALREADY_USED');
-  if (row.value.status === 'expired' || row.value.expiresAt.getTime() <= Date.now()) {
+  if (stored.status === 'consumed') throw httpError('INVITE_ALREADY_USED');
+  if (stored.status === 'expired' || stored.expiresAt.getTime() <= Date.now()) {
     throw httpError('INVITE_EXPIRED');
   }
   const org = await inviteOrg(verified.org);
@@ -80,7 +86,7 @@ export async function usableInvite(token: string, role: InviteRole): Promise<Usa
     jti: verified.jti,
     role,
     email: verified.email.trim().toLowerCase(),
-    expiresAt: row.value.expiresAt,
+    expiresAt: stored.expiresAt,
     org,
   };
 }
@@ -94,4 +100,57 @@ export async function claimInvite(jti: string): Promise<void> {
   const claimed = await getRegistrationInvitesStore().consume(jti);
   if (!claimed.ok) dbDown('inviteStore.consume', claimed.error.message);
   if (claimed.value === null) throw httpError('INVITE_ALREADY_USED');
+}
+
+/**
+ * Gives a claimed invite back after a registration that did not complete; a failure is logged.
+ *
+ * @param jti - The claimed invite's id.
+ * @param log - Request-scoped logger.
+ */
+export async function releaseInvite(jti: string, log: FastifyBaseLogger): Promise<void> {
+  const released = await getRegistrationInvitesStore().release(jti);
+  if (!released.ok || released.value === null) {
+    log.warn(
+      { status: 'failure', sub_operation: 'inviteStore.release', invite_jti: jti },
+      'invite release after an incomplete registration did not commit',
+    );
+  }
+}
+
+/**
+ * Builds the handler of `GET /v1/{user,org}/invite/read`: checks the link without using it up.
+ *
+ * @param role - The role the route serves.
+ * @returns The route handler; the BFF calls it with a service-account token.
+ */
+export function inviteReadHandler(
+  role: InviteRole,
+): (req: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply> {
+  return async (req, reply) => {
+    await authenticateCaller(req);
+    const { token } = req.query as z.infer<typeof InviteReadQuerySchema>;
+    const invite = await usableInvite(token, role);
+    return reply.status(200).send({
+      email: invite.email,
+      expires_at: invite.expiresAt.toISOString(),
+      org: { id: invite.org.id, name: invite.org.name },
+    });
+  };
+}
+
+/**
+ * Verifies the caller's token; the BFF calls the invite routes with a service-account token.
+ *
+ * @throws {HttpError} UNAUTHORIZED.
+ */
+export async function authenticateCaller(req: FastifyRequest): Promise<void> {
+  const auth = await authenticateAny(req);
+  if (!auth.ok) {
+    throw httpError('UNAUTHORIZED', {
+      detail: auth.error.message,
+      fields: { reason: auth.error.code },
+    });
+  }
+  await recordRouteCaller(req, callerFromAny(auth.context));
 }

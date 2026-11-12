@@ -230,24 +230,29 @@ async function invitingParent(
   if (ownedOrgIds(actor).includes(parentId)) {
     const found = await store.findById(parentId);
     if (!found.ok) dbDown('orgStore.findById', found.error.message);
-    if (!found.value || found.value.isDefault || found.value.status !== 'active') {
-      throw httpError('NOT_FOUND');
-    }
-    if (getRbacRuntime()?.mode === 'enforce') {
-      const root = await store.findRoot();
-      if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
-      const perms = await permissionsByOrg(req, actor, root.value?.id ?? null);
-      if (perms !== null && !(perms[parentId] ?? []).includes('orgs.onboard')) {
-        throw httpError('NOT_FOUND');
-      }
-    }
-    return found.value;
+    const org = found.value;
+    if (!org || org.isDefault || org.status !== 'active') throw httpError('NOT_FOUND');
+    if (!(await onboardsIn(req, actor, parentId))) throw httpError('NOT_FOUND');
+    return org;
   }
   if (!isNetworkAdmin(actor)) throw httpError('NOT_FOUND');
   const root = await store.findRoot();
   if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
   if (root.value?.id !== parentId) throw httpError('NOT_FOUND');
   return root.value;
+}
+
+/**
+ * Whether the actor holds `orgs.onboard` in an org; always true unless access control is enforced.
+ *
+ * @throws {HttpError} DB_UNAVAILABLE.
+ */
+async function onboardsIn(req: FastifyRequest, actor: Actor, orgId: string): Promise<boolean> {
+  if (getRbacRuntime()?.mode !== 'enforce') return true;
+  const root = await getOrganisationStore().findRoot();
+  if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
+  const perms = await permissionsByOrg(req, actor, root.value?.id ?? null);
+  return perms === null || (perms[orgId] ?? []).includes('orgs.onboard');
 }
 
 /**

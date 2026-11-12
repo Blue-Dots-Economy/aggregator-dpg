@@ -409,43 +409,24 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
     return reply.status(200).send(summary);
   };
 
-  app.post(
-    '/v1/user/create',
-    {
-      config: { rbac: { capability: 'org.manage' } },
-      schema: {
-        tags: ['console'],
-        summary: 'Invite coordinators into an organisation',
-        description:
-          'Mints and mails a 14-day invite per address (the invitee registers and consents themselves). The Default org takes no invites. An address already registered in this org is reported under `existing`; any other existing account is mailed a sign-in note and counted as sent.',
-        body: UserInviteRequestSchema,
-        response: {
-          200: UserInviteResponseSchema,
-          ...errorResponses(400, 401, 403, 404, 409, 503),
-        },
+  const inviteRouteOptions = {
+    config: { rbac: { capability: 'org.manage' } },
+    schema: {
+      tags: ['console'],
+      summary: 'Invite coordinators into an organisation',
+      description:
+        'Mints and mails a 14-day invite per address (the invitee registers and consents themselves). The Default org takes no invites. An address already registered in this org is reported under `existing`; any other existing account is mailed a sign-in note and counted as sent.',
+      body: UserInviteRequestSchema,
+      response: {
+        200: UserInviteResponseSchema,
+        ...errorResponses(400, 401, 403, 404, 409, 503),
       },
     },
-    inviteCoordinators,
-  );
+  } as const;
 
-  app.post(
-    '/v1/user/invite',
-    {
-      config: { rbac: { capability: 'org.manage' } },
-      schema: {
-        tags: ['console'],
-        summary: 'Invite coordinators into an organisation',
-        description:
-          'Mints and mails a 14-day invite per address (the invitee registers and consents themselves). The Default org takes no invites. An address already registered in this org is reported under `existing`; any other existing account is mailed a sign-in note and counted as sent.',
-        body: UserInviteRequestSchema,
-        response: {
-          200: UserInviteResponseSchema,
-          ...errorResponses(400, 401, 403, 404, 409, 503),
-        },
-      },
-    },
-    inviteCoordinators,
-  );
+  app.post('/v1/user/create', inviteRouteOptions, inviteCoordinators);
+
+  app.post('/v1/user/invite', inviteRouteOptions, inviteCoordinators);
 
   app.post(
     '/v1/user/decision/:id',

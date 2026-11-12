@@ -70,6 +70,31 @@ export interface EmailCaseDef {
   signOff?: boolean;
 }
 
+/** The coordinator and organisation invites share one layout; only their copy differs. */
+const INVITE_CASE: EmailCaseDef = {
+  tokens: {
+    orgName: 'text',
+    inviterEmail: 'text',
+    recipientName: 'text',
+    expiresOn: 'text',
+    inviteUrl: 'text',
+    // Resolved from the greeting alternation below, so already escaped.
+    greeting: 'html',
+  },
+  derivedTokens: {
+    greeting: [{ key: 'greeting', requires: ['recipientName'] }, { key: 'greeting_anonymous' }],
+  },
+  layout: [
+    { block: 'heading', key: 'heading' },
+    { block: 'para', key: 'intro' },
+    { block: 'para', key: 'role' },
+    { block: 'cta', key: 'cta', href: 'inviteUrl' },
+    { block: 'para', key: 'expiry' },
+    { block: 'paraLast', key: 'next' },
+    { block: 'note', key: 'footnote' },
+  ],
+};
+
 export const EMAIL_CASES: Readonly<Record<string, EmailCaseDef>> = {
   applicant_approved: {
     tokens: { contactName: 'text', association: 'text', identifier: 'text', signInUrl: 'text' },
@@ -104,52 +129,9 @@ export const EMAIL_CASES: Readonly<Record<string, EmailCaseDef>> = {
     ],
   },
 
-  coordinator_invite: {
-    tokens: {
-      orgName: 'text',
-      inviterEmail: 'text',
-      recipientName: 'text',
-      expiresOn: 'text',
-      inviteUrl: 'text',
-      // Resolved from the greeting alternation below, so already escaped.
-      greeting: 'html',
-    },
-    derivedTokens: {
-      greeting: [{ key: 'greeting', requires: ['recipientName'] }, { key: 'greeting_anonymous' }],
-    },
-    layout: [
-      { block: 'heading', key: 'heading' },
-      { block: 'para', key: 'intro' },
-      { block: 'para', key: 'role' },
-      { block: 'cta', key: 'cta', href: 'inviteUrl' },
-      { block: 'para', key: 'expiry' },
-      { block: 'paraLast', key: 'next' },
-      { block: 'note', key: 'footnote' },
-    ],
-  },
+  coordinator_invite: INVITE_CASE,
 
-  org_invite: {
-    tokens: {
-      orgName: 'text',
-      inviterEmail: 'text',
-      recipientName: 'text',
-      expiresOn: 'text',
-      inviteUrl: 'text',
-      greeting: 'html',
-    },
-    derivedTokens: {
-      greeting: [{ key: 'greeting', requires: ['recipientName'] }, { key: 'greeting_anonymous' }],
-    },
-    layout: [
-      { block: 'heading', key: 'heading' },
-      { block: 'para', key: 'intro' },
-      { block: 'para', key: 'role' },
-      { block: 'cta', key: 'cta', href: 'inviteUrl' },
-      { block: 'para', key: 'expiry' },
-      { block: 'paraLast', key: 'next' },
-      { block: 'note', key: 'footnote' },
-    ],
-  },
+  org_invite: INVITE_CASE,
 
   org_owner_approved: {
     tokens: { orgName: 'text', ownerEmail: 'text', inviteUrl: 'text' },
