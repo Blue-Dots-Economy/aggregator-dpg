@@ -3,6 +3,8 @@
  *
  * - Reads the signed flow cookie set by `/api/auth/login`.
  * - Verifies state, exchanges the auth code (with PKCE verifier) for tokens.
+ * - For an invited account (`decision_made = invited`), activates it and
+ *   refreshes the tokens so the new access applies.
  * - Persists the session in Redis.
  * - Drops the `sid` cookie.
  * - Redirects to the original `returnTo` path.
@@ -22,7 +24,13 @@ import {
   verifyFlowState,
 } from '@/lib/cookies';
 import { logger, pickRequestId } from '@/lib/logger';
-import { PORTAL_GATE_REASON, classifyNonCoordinator, tokenAggregatorId } from '@/lib/jwt';
+import {
+  PORTAL_GATE_REASON,
+  classifyNonCoordinator,
+  decodeJwtClaims,
+  tokenAggregatorId,
+} from '@/lib/jwt';
+import { activateInvitee } from '@/lib/invite-activation';
 
 export const runtime = 'nodejs';
 
@@ -94,7 +102,33 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return failure(req, `exchange_${exchanged.error.code.toLowerCase()}`);
   }
 
-  const { tokens, claims } = exchanged.value;
+  const { claims } = exchanged.value;
+  let { tokens } = exchanged.value;
+
+  if (decodeJwtClaims(tokens.accessToken)?.['decision_made'] === 'invited') {
+    const activation = await activateInvitee(tokens.accessToken, log);
+    if (activation !== 'active') {
+      return failure(
+        req,
+        activation === 'email_not_verified'
+          ? 'invite_email_not_verified'
+          : 'invite_activation_failed',
+      );
+    }
+    const refreshed = await adapter.refresh(tokens.refreshToken);
+    if (!refreshed.ok) {
+      log.error(
+        {
+          code: refreshed.error.code,
+          sub_operation: 'oidc.refresh',
+          cause: refreshed.error.message,
+        },
+        'token refresh after invite activation failed',
+      );
+      return failure(req, 'invite_activation_failed');
+    }
+    tokens = refreshed.value;
+  }
 
   // A coordinator (token has `aggregator_id`) lands in the portal. An org owner
   // or the network admin (realm role `org_owner`) lands in the console.

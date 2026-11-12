@@ -4,7 +4,7 @@ import { type JSX } from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { RegisterPageShell } from '../RegisterPageShell';
-import { OrgRegisterForm } from '../OrgRegisterForm';
+import { OrgRegisterForm, type OrgFormInvite } from '../OrgRegisterForm';
 import type { ConsentDocContent } from '../../../../components/consent/consent-types';
 
 export interface OwnerRegisterViewProps {
@@ -17,6 +17,8 @@ export interface OwnerRegisterViewProps {
    * the widget then shows plain text.
    */
   orgConsentContent?: ConsentDocContent | null;
+  /** Set when the owner arrived through an org invite. */
+  invite?: OrgFormInvite;
 }
 
 /**
@@ -32,6 +34,7 @@ export function OwnerRegisterView({
   schema,
   uiSchema,
   orgConsentContent,
+  invite,
 }: Readonly<OwnerRegisterViewProps>): JSX.Element {
   const t = useTranslations('register');
 
@@ -41,6 +44,7 @@ export function OwnerRegisterView({
         schema={schema}
         uiSchema={uiSchema}
         {...(orgConsentContent ? { consentContent: orgConsentContent } : {})}
+        {...(invite ? { invite } : {})}
       />
     </RegisterPageShell>
   );

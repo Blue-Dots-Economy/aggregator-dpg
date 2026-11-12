@@ -12,11 +12,13 @@ import { toConsentDocs } from '../../../components/consent/consent-docs';
 import { SearchableSelect, type SearchableOption } from '../../../components/ui/SearchableSelect';
 import { jsonFetch } from '../../../services/http';
 import {
+  inviteSignInUrl,
   stampConsent,
   stripConsentBlock,
   stripFormChrome,
   submitRegistration,
   withOrgCoordinates,
+  withReadonlyField,
   type SubmitError,
 } from './registration-shared';
 import {
@@ -81,6 +83,17 @@ export interface OrgRegisterFormProps {
    * at submit. Omit when loading failed; submit then shows an error.
    */
   consentContent?: ConsentDocContent;
+  /** An org invite: the parent is fixed and the owner email locked. */
+  invite?: OrgFormInvite;
+}
+
+/** The invite an invited owner registers with. */
+export interface OrgFormInvite {
+  token: string;
+  /** The invited owner email. */
+  email: string;
+  /** The inviting org, which the new org registers under. */
+  parentName: string;
 }
 
 /**
@@ -90,7 +103,8 @@ export interface OrgRegisterFormProps {
  * when an org other than the network root can take a child; otherwise the org
  * is registered under the root and no `parent_id` is sent. When registration
  * is closed the form is replaced by a notice. A new org stays `pending` until
- * a network admin approves it.
+ * a network admin approves it. With an `invite`, the form posts to the invite
+ * accept endpoint, under the inviting org, and then goes to sign-in.
  *
  * @param props - The org JSON Schema + UI schema.
  * @returns The org registration content block (form, success, or error state).
@@ -99,10 +113,13 @@ export function OrgRegisterForm({
   schema,
   uiSchema,
   consentContent,
+  invite,
 }: OrgRegisterFormProps): JSX.Element {
   const t = useTranslations('register');
   const { state, setState, setCanSubmit, errorRef } = useRegistrationFormState();
-  const [formData, setFormData] = useState<Record<string, unknown>>({});
+  const [formData, setFormData] = useState<Record<string, unknown>>(() =>
+    invite ? { owner: { email: invite.email } } : {},
+  );
   // Coordinate from the address widget; RJSF does not write it into `formData`.
   const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
   // Selected parent org. Required when the picker shows; empty until picked.
@@ -110,14 +127,16 @@ export function OrgRegisterForm({
   const parentsQuery = useQuery({
     queryKey: ['org-parents'],
     queryFn: () => jsonFetch<ParentsResponse>('/api/orgs/parents'),
+    enabled: !invite,
     staleTime: 30_000,
   });
   const parents = parentsQuery.data?.parents ?? [];
   // The picker shows when an org other than the root can take a child.
-  const showPicker = parents.some((p) => !p.is_root);
+  const showPicker = !invite && parents.some((p) => !p.is_root);
   const chosen = showPicker ? parents.find((p) => p.id === parentId) : parents[0];
-  const childName = chosen?.child_known_as_name ?? null;
-  const parentReady = parentsQuery.data !== undefined && (!showPicker || parentId !== '');
+  const childName = invite ? null : (chosen?.child_known_as_name ?? null);
+  const parentReady =
+    Boolean(invite) || (parentsQuery.data !== undefined && (!showPicker || parentId !== ''));
   // The network first, then each org with its own "known as" value on the right.
   const parentOptions: SearchableOption[] = parents.map((p: ParentOption) => ({
     value: p.id,
@@ -131,10 +150,10 @@ export function OrgRegisterForm({
   );
 
   const formSchema = useMemo(() => stripConsentBlock(stripFormChrome(schema)), [schema]);
-  const formUiSchema = useMemo(
-    () => withPhoneWidget(uiSchema, formSchema as Record<string, unknown>),
-    [uiSchema, formSchema],
-  );
+  const formUiSchema = useMemo(() => {
+    const withPhone = withPhoneWidget(uiSchema, formSchema as Record<string, unknown>);
+    return invite ? withReadonlyField(withPhone, ['owner', 'email']) : withPhone;
+  }, [uiSchema, formSchema, invite]);
   const customValidate = useMemo(() => gstinCustomValidate(formSchema), [formSchema]);
 
   const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
@@ -162,9 +181,18 @@ export function OrgRegisterForm({
       ...pendingRef.current,
       consent: stampConsent({ value: true }),
       ...(showPicker ? { parent_id: parentId } : {}),
+      ...(invite ? { invite: invite.token } : {}),
     };
     const payload = withOrgCoordinates(body, resolvedPlace);
-    const result = await submitRegistration('/api/org/register', payload);
+    const result = await submitRegistration(
+      invite ? '/api/invite/org/accept' : '/api/org/register',
+      payload,
+    );
+    if (result.ok && invite) {
+      setState({ status: 'signing_in' });
+      window.location.assign(inviteSignInUrl(result.body, '/console'));
+      return;
+    }
     if (!result.ok) {
       const key = treeErrorKey(result.error);
       setState(
@@ -229,6 +257,11 @@ export function OrgRegisterForm({
           </button>
         </div>
       ) : null}
+      {invite ? (
+        <output className="mb-5 block text-[13.5px] text-ink-500">
+          {t('invite_org_under', { parent: invite.parentName })}
+        </output>
+      ) : null}
       {showPicker ? (
         <div className="form-group mb-4">
           <label className="bd-label" htmlFor="org-parent">
@@ -276,9 +309,9 @@ export function OrgRegisterForm({
         {/* Never disabled by a bad field: a click runs the form's checks and
             shows each field's message, so the owner sees what to fix. */}
         <RegistrationSubmitButton
-          submitting={state.status === 'submitting'}
+          submitting={state.status === 'submitting' || state.status === 'signing_in'}
           // Never disabled for an invalid field: a click shows what to fix.
-          canSubmit={parentsQuery.data !== undefined}
+          canSubmit={Boolean(invite) || parentsQuery.data !== undefined}
           label={t('org_submit')}
           submittingLabel={t('submitting')}
         />

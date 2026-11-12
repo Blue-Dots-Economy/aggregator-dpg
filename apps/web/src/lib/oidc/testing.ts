@@ -53,6 +53,7 @@ export class IdentityProviderFake extends IdentityProviderAdapter {
     url.searchParams.set('code_challenge', input.codeChallenge);
     url.searchParams.set('redirect_uri', input.redirectUri);
     url.searchParams.set('scope', input.scope ?? 'openid profile email');
+    if (input.loginHint) url.searchParams.set('login_hint', input.loginHint);
     return url.toString();
   }
 

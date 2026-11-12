@@ -100,7 +100,15 @@
       "modal_close": "Close",
       "load_failed_title": "Terms unavailable",
       "load_failed_detail": "We could not load the Terms of Service and Privacy Policy, so your consent cannot be recorded. Please reload the page and try again."
-    }
+    },
+    "invite_heading_invalid": "Invitation",
+    "invite_invalid": "This invitation link is not valid. Use the link from your invitation email, or sign in if you already have an account.",
+    "invite_expired": "This invitation has expired. Ask the person who invited you to send a new one.",
+    "invite_used": "This invitation has already been used. If you registered with it, sign in.",
+    "invite_org_inactive": "This invitation can't be used right now. Contact the person who invited you.",
+    "invite_unavailable": "We couldn't load your invitation. Please try again in a moment.",
+    "invite_sign_in": "Sign in",
+    "invite_org_under": "Your [[org]] will be registered under {parent}."
   },
   "dashboard": {
     "buckets": {
@@ -596,7 +604,9 @@
       "exchange_token_exchange_failed": "token exchange failed",
       "exchange_state_mismatch": "security check failed (state mismatch)",
       "exchange_token_verify_failed": "security check failed (token verification)",
-      "unknown": "unexpected sign-in error"
+      "unknown": "unexpected sign-in error",
+      "invite_email_not_verified": "sign in with the code sent to your email to finish registering",
+      "invite_activation_failed": "we could not finish your registration; sign in again to retry"
     }
   },
   "support": {
@@ -741,7 +751,7 @@
       "known_as_values_more": "+{count} more",
       "known_as_values_new": "New value",
       "known_as_values_placeholder": "Add a value, e.g. District",
-      "known_as_values_exists": "\u201c{name}\u201d is already in the list.",
+      "known_as_values_exists": "“{name}” is already in the list.",
       "known_as_values_notes_heading": "How it works",
       "known_as_values_unchanged": "No changes",
       "known_as_values_unsaved": "Unsaved changes",
@@ -888,7 +898,7 @@
     },
     "invite": {
       "heading": "Invite [[users]]",
-      "subtitle": "Add their email addresses. Each person gets a registration link, and joins once you approve them.",
+      "subtitle": "Add their email addresses. Each person gets a registration link, and joins once they verify their email with a one-time code.",
       "org": "[[Org]]",
       "inviting_to": "Inviting to",
       "recipients": "Email addresses",
@@ -909,7 +919,7 @@
       "not_sent": "Not sent:",
       "reason": {
         "active": "already a [[user]] here",
-        "pending": "already registered, waiting for your approval",
+        "pending": "already registered, waiting to verify their email",
         "inactive": "previously rejected",
         "retired": "account deactivated",
         "invalid_email": "not a valid email address",
@@ -930,8 +940,8 @@
           "body": "They open the link and fill in the registration form."
         },
         "approve": {
-          "title": "You approve",
-          "body": "Review them under <link>[[Users]]</link>. Once approved, they can sign in."
+          "title": "They verify their email",
+          "body": "They sign in with the code we email them and are added to <link>[[Users]]</link>. No approval is needed."
         },
         "limits": "Up to {max} emails per send."
       },

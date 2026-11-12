@@ -71,6 +71,7 @@ export class KeycloakAdapter extends IdentityProviderAdapter {
       code_challenge: input.codeChallenge,
       code_challenge_method: 'S256',
       redirect_uri: input.redirectUri,
+      ...(input.loginHint ? { login_hint: input.loginHint } : {}),
     });
   }
 

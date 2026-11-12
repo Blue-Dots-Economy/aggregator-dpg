@@ -6,12 +6,13 @@
  *   cookie so they survive the Keycloak redirect.
  * - Redirects the browser to Keycloak's `/authorize` endpoint.
  *
- * GET /api/auth/login?returnTo=/dashboard
+ * GET /api/auth/login?returnTo=/dashboard&login_hint=<email>
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
 import { getOidcAdapter, oidcGenerators } from '@/lib/oidc';
 import { OIDC_FLOW_COOKIE, oidcFlowCookieOptions, signFlowState } from '@/lib/cookies';
+import { isEmailAddress } from '@aggregator-dpg/shared-primitives/phone';
 
 export const runtime = 'nodejs';
 
@@ -37,8 +38,18 @@ function isSafeReturnTo(value: string | null): string {
   }
 }
 
+/** Longest email address accepted as a `login_hint`. */
+const MAX_LOGIN_HINT_LENGTH = 320;
+
+/** A `login_hint` is forwarded only when it is a plausible email address. */
+function safeLoginHint(value: string | null): string | null {
+  const hint = value?.trim().toLowerCase() ?? '';
+  return hint.length <= MAX_LOGIN_HINT_LENGTH && isEmailAddress(hint) ? hint : null;
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const returnTo = isSafeReturnTo(req.nextUrl.searchParams.get('returnTo'));
+  const loginHint = safeLoginHint(req.nextUrl.searchParams.get('login_hint'));
 
   const state = oidcGenerators.state();
   const nonce = oidcGenerators.nonce();
@@ -61,6 +72,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     nonce,
     codeChallenge,
     redirectUri,
+    ...(loginHint ? { loginHint } : {}),
   });
 
   const res = NextResponse.redirect(authUrl, { status: 302 });

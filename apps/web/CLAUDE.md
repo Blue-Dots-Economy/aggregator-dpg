@@ -4,7 +4,7 @@ Guidance specific to working inside `apps/web`. Read the root `CLAUDE.md` first 
 
 ## Two auth helpers, disjoint usage today — nothing in code stops you picking the wrong one
 
-- **Anonymous**: `getServiceAccessToken()` (`lib/service-token.ts`) does a Keycloak `client_credentials` grant, cached in-process until ~30s before expiry. It's wrapped by `proxyServiceRequest()` (`lib/bff-service-proxy.ts`) and used by exactly 4 routes today: `api/aggregator/register`, `api/org/register`, `api/orgs`, `api/orgs/parents` — genuinely pre-session (registration/listing) endpoints.
+- **Anonymous**: `getServiceAccessToken()` (`lib/service-token.ts`) does a Keycloak `client_credentials` grant, cached in-process until ~30s before expiry. It's wrapped by `proxyServiceRequest()` (`lib/bff-service-proxy.ts`) and used by 6 routes today: `api/aggregator/register`, `api/org/register`, `api/orgs`, `api/orgs/parents`, `api/invite/user/accept`, `api/invite/org/accept` — genuinely pre-session (registration/listing) endpoints. `lib/invite-read.server.ts` uses it too, from the invite pages' server render.
 - **Authenticated**: `callApi()` (`lib/upstream-client.ts`) reads the Redis session, transparently refreshes the access token 60s before expiry (killing the session on refresh failure), and attaches the caller's own Bearer token. Used by all other API routes plus the protected layout.
 
 **This split is convention-enforced only.** A new authenticated data route wired to `proxyServiceRequest`/`getServiceAccessToken` instead of `callApi` would authorize with the aggregator-wide service-account token rather than the caller's own — the concrete cross-aggregator data-leak shape to watch for. When adding a route: if it needs to know _which_ aggregator/coordinator is calling, it must use `callApi`; only genuinely pre-session registration/lookup endpoints should use the service-token path.
@@ -14,6 +14,10 @@ Guidance specific to working inside `apps/web`. Read the root `CLAUDE.md` first 
 `SessionStoreBase` (abstract class) has `RedisSessionStore` (prod) + `MemorySessionStore` (test), both taking a `ttlSec` — **`SESSION_TTL_SECONDS` env var, defaulting to 12h** (`lib/session/index.ts:24`), sliding (refreshed on every `get`). `SessionData` holds `sub/email/phone/name` + `accessToken/refreshToken/idToken` + their expiries + `createdAt/lastSeenAt`. `server-session.ts` wraps `getSession()` in React's `cache()` so one Redis hit is shared per request tree.
 
 **`auth-context` is populated server-side, not by a client fetch.** `(protected)/layout.tsx` calls `getSession()` + `tokenAggregatorId()` (a token without `aggregator_id` is not a coordinator: an org owner is redirected to `/console`) + `fetchSupportEnabled()` (`GET /v1/support/config` via `callApi`, fails safe to `false`), then passes both as props into `<AuthProvider initialUser supportEnabled>`. If you're debugging why the UI shows stale auth/support state, look at the layout's server render, not a client-side refetch — there isn't one.
+
+## Invite links: register, sign in with an email code, activate
+
+`/register/coordinator?invite=` and `/register/owner?invite=` read the invite on the server (`readInvite`), lock the invited email (`withReadonlyField`) and post to `api/invite/{user,org}/accept`. On `201` the browser goes to `/api/auth/login?login_hint=<email>`, which forwards `login_hint` to Keycloak. The callback sees `decision_made = invited` in the access token, calls `POST /v1/user/activate` with that token (`lib/invite-activation.ts`, no session exists yet), refreshes the tokens so the new access applies, then routes as usual. A sign-in that did not use the email code comes back as `?error=invite_email_not_verified`.
 
 ## The organisation console (`(console)/console`, Phase 5)
 

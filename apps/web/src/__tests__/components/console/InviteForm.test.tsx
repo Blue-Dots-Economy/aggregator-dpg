@@ -234,7 +234,7 @@ describe('<InviteForm />', () => {
     expect(help).toHaveTextContent('You send the invite');
     expect(help).toHaveTextContent('They open the link and fill in the registration form.');
     expect(help).toHaveTextContent(
-      `Review them under ${term('Users')}. Once approved, they can sign in.`,
+      `They sign in with the code we email them and are added to ${term('Users')}. No approval is needed.`,
     );
     expect(help).toHaveTextContent('Up to 5 emails per send.');
   });

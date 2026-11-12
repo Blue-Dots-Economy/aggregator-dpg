@@ -20,10 +20,12 @@ import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/u
 import { withPhoneWidget } from '../../../lib/phone-ui-schema';
 import { jsonFetch } from '../../../services/http';
 import {
+  inviteSignInUrl,
   stampConsent,
   stripConsentBlock,
   stripFormChrome,
   submitRegistration,
+  withReadonlyField,
   withResolvedCoordinates,
 } from './registration-shared';
 import {
@@ -178,13 +180,13 @@ export function CoordinatorRegisterForm({
   // For a real org, hide the `name` field; the name comes from the org.
   const formUiSchema = useMemo<Record<string, unknown>>(() => {
     const withPhone = withPhoneWidget(uiSchema, formSchema as Record<string, unknown>);
-    if (!inheritsFromOrg) return withPhone;
-    // The invite email stays editable; the owner sees any mismatch at approval.
+    const locked = inviteMode ? withReadonlyField(withPhone, ['contact', 'email']) : withPhone;
+    if (!inheritsFromOrg) return locked;
     return {
-      ...withPhone,
-      name: { ...((withPhone['name'] as Record<string, unknown>) ?? {}), 'ui:widget': 'hidden' },
+      ...locked,
+      name: { ...((locked['name'] as Record<string, unknown>) ?? {}), 'ui:widget': 'hidden' },
     };
-  }, [uiSchema, formSchema, inheritsFromOrg]);
+  }, [uiSchema, formSchema, inheritsFromOrg, inviteMode]);
 
   /** Opens the consent gate, or says that an organisation must be chosen first. */
   const submitWithOrg = (e: IChangeEvent<Record<string, unknown>>): void => {
@@ -224,7 +226,15 @@ export function CoordinatorRegisterForm({
       delete payload['url'];
       delete payload['locations'];
     }
-    const result = await submitRegistration('/api/aggregator/register', payload);
+    const result = await submitRegistration(
+      inviteMode ? '/api/invite/user/accept' : '/api/aggregator/register',
+      payload,
+    );
+    if (result.ok && inviteMode) {
+      setState({ status: 'signing_in' });
+      window.location.assign(inviteSignInUrl(result.body, '/dashboard'));
+      return;
+    }
     setState(
       result.ok
         ? { status: 'done', refId: String(result.body['aggregator_id'] ?? '') }
@@ -317,7 +327,7 @@ export function CoordinatorRegisterForm({
         })}
       >
         <RegistrationSubmitButton
-          submitting={state.status === 'submitting'}
+          submitting={state.status === 'submitting' || state.status === 'signing_in'}
           // Never disabled for an invalid field: a click shows what to fix.
           canSubmit
           label={t('submit')}

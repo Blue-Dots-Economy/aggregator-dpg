@@ -58,6 +58,27 @@ describe('GET /api/auth/login', () => {
     expect(setCookie).toContain('oidc_flow=');
   });
 
+  it.each([
+    ['an email address', 'Asha@Trrain.org', 'asha@trrain.org'],
+    ['something that is not an email', 'not-an-email', undefined],
+    ['an over-long value', `${'a'.repeat(320)}@x.org`, undefined],
+  ])('forwards login_hint only for %s', async (_label, hint, expected) => {
+    const build = vi.fn(async () => 'https://kc.test/auth');
+    mockGetOidcAdapter.mockReturnValue({
+      buildAuthorizationUrl: build,
+      exchangeCode: vi.fn(),
+      refresh: vi.fn(),
+      buildLogoutUrl: vi.fn(),
+    } as never);
+    const req = new NextRequest(
+      `http://localhost/api/auth/login?login_hint=${encodeURIComponent(hint)}`,
+    );
+    await GET(req);
+    const input: unknown = build.mock.calls[0]?.at(0);
+    expect(input).toBeDefined();
+    expect((input as { loginHint?: string }).loginHint).toBe(expected);
+  });
+
   it('defaults returnTo to / when absent', async () => {
     const req = new NextRequest('http://localhost/api/auth/login');
     const res = await GET(req);
