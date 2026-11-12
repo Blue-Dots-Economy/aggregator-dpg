@@ -1,38 +1,29 @@
 /**
- * Org registration endpoints.
+ * Org invite endpoints of `@aggregator-dpg/api`.
  *
- * Orgs live in `organisations` (`org_type = 'aggregator'`):
+ *   GET  /v1/org/invite/read     check an org invite link for its registration page
+ *   POST /v1/org/invite/accept   register the invited org and its owner under the inviting org
  *
- *   POST /v1/orgs/create
- *     Inserts a `pending` org, creates its Keycloak group and a disabled owner
- *     user, and emails the network admin a signed review link. No Signals org.
- *
- *   GET /v1/orgs
- *     Lists active orgs for the coordinator-registration dropdown. Reads the
- *     database only, not Keycloak.
- *
- * Belongs to `@aggregator-dpg/api`.
+ * Orgs live in `organisations` (`org_type = 'aggregator'`). No Signals org is created.
  */
 
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { coolingRetryAfter } from '../services/registration-cooling.js';
 import { getOrganisationStore } from '../services/organisation-store/index.js';
-import { getUserStore } from '../services/user-store/index.js';
 import type { Organisation, OrgStoreError } from '../services/organisation-store/interface.js';
+import { getUserStore } from '../services/user-store/index.js';
 import { resolveProfileRef } from '../services/schema-ref.js';
 import { getIdpAdmin, KC_ATTR, OWNER_CREATED_BY } from '../services/idp-admin/index.js';
-import { orgReviewRecipients, sendOrgReviewEmail } from '../services/org-registration-notify.js';
-import { getMailer } from '@aggregator-dpg/mailer';
-import { renderOrgAlreadyRegistered } from '../services/email-templates/index.js';
-import { ownerSignInUrl } from '../services/decisions/org.js';
 import { normalisePhone } from '@aggregator-dpg/shared-primitives/phone';
 import { splitName } from '../services/name.js';
 import { checkSubmitRate } from '../services/submit-rate.js';
-import { checkOrgInviteResendRate } from '../services/org-invite-resend-rate.js';
 import { slugFromName } from '../services/slug.js';
 import { orgLocationsFrom } from '../services/org-location.js';
 import { validateOrgRegistration } from '../services/org-schema-validator.js';
+import {
+  InviteReadQuerySchema,
+  InviteReadResponseSchema,
+} from '@aggregator-dpg/shared-primitives/user-org';
 import {
   authenticateCaller,
   claimInvite,
@@ -43,38 +34,27 @@ import {
 
 /** Attempts at a fresh random-suffixed slug when one collides. */
 const ORG_SLUG_RETRIES = 3;
-import { authenticateAny } from '../services/auth/access-token.js';
 import { httpError } from '../errors/http-error.js';
 import { errorResponses } from '../errors/openapi.js';
 import { throwTreeRefusal } from './console-shared.js';
-import { newChildRefusal } from '../services/organisation-store/tree.js';
 import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { getConsentLedger } from '../services/consent-ledger/index.js';
 import type { RecordConsentHook } from '../services/consent-ledger/hook.js';
 import { stampConsent } from '../services/registration-consent.js';
 import { resolveActiveNetwork } from '@aggregator-dpg/network-config/paths';
 import { getNetworkConfig } from '../services/network-config.js';
-import {
-  InviteReadQuerySchema,
-  InviteReadResponseSchema,
-  SYSTEM_KNOWN_AS,
-} from '@aggregator-dpg/shared-primitives/user-org';
 import { treeRules } from '../services/known-as.js';
-import { callerFromAny, recordRouteCaller } from '../services/authz/index.js';
 
 /**
- * The fixed parts of an org-registration body. Every other key is a field of
+ * The fixed parts of an org invite accept body. Every other key is a field of
  * the deployment's org-registration schema: it passes through here and is
  * checked by {@link validateOrgRegistration}, so a schema field needs no code.
+ * The parent is the inviting org, never the body.
  */
-const OrgCreateBodySchema = z
+const OrgInviteAcceptBodySchema = z
   .object({
+    invite: z.string().min(1).max(4096),
     display_name: z.string().min(1).max(200),
-    /**
-     * Parent org: the root or an active, non-Default aggregator org (`GET /v1/orgs/parents`).
-     * The root when omitted.
-     */
-    parent_id: z.string().uuid().optional(),
     state: z.string().max(200).optional(),
     owner: z.object({
       name: z.string().min(1).max(200),
@@ -117,7 +97,7 @@ const OrgCreateBodySchema = z
  */
 const ORG_COLUMN_BACKED_KEYS: ReadonlySet<string> = new Set([
   'display_name',
-  'parent_id',
+  'invite',
   'state',
   'owner',
   'consent',
@@ -136,7 +116,7 @@ const ORG_COLUMN_BACKED_KEYS: ReadonlySet<string> = new Set([
  */
 function buildOrgProfile(
   schemaValues: Record<string, unknown>,
-  address: z.infer<typeof OrgCreateBodySchema>['address'],
+  address: z.infer<typeof OrgInviteAcceptBodySchema>['address'],
   coordinates: readonly [number, number] | undefined,
 ): Record<string, unknown> {
   const profile = Object.fromEntries(
@@ -149,19 +129,6 @@ function buildOrgProfile(
   return profile;
 }
 
-const OrgCreatedResponseSchema = z
-  .object({
-    org_id: z.string(),
-    slug: z.string(),
-    status: z.string(),
-    message: z.string(),
-  })
-  .passthrough();
-
-const OrgInviteAcceptBodySchema = OrgCreateBodySchema.omit({ parent_id: true }).extend({
-  invite: z.string().min(1).max(4096),
-});
-
 /** `201` of an org invite accept: pending until the owner enters the email code. */
 const OrgInviteAcceptedResponseSchema = z.object({
   org_id: z.string(),
@@ -172,152 +139,12 @@ const OrgInviteAcceptedResponseSchema = z.object({
   login_hint: z.string(),
 });
 
-const OrgParentsResponseSchema = z.object({
-  /** False when the instance is at `max_total_orgs` or no org can take a child. */
-  accepting: z.boolean(),
-  /** Orgs that can take a child now. */
-  parents: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      /** True for the network root. */
-      is_root: z.boolean(),
-      /** The name of the org's "known as" value, from its parent's list; null for the root. */
-      known_as_name: z.string().nullable(),
-      /** The name of the "known as" value an org registered under this one gets. */
-      child_known_as_name: z.string().nullable(),
-    }),
-  ),
-});
-
-const OrgListResponseSchema = z
-  .object({
-    orgs: z.array(z.object({ id: z.string(), slug: z.string(), display_name: z.string() })),
-  })
-  .passthrough();
-
 /**
  * Registers the org registration + dropdown routes.
  *
  * @param app - Fastify instance to attach the routes to.
  */
 export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
-  app.post(
-    '/v1/orgs/create',
-    {
-      config: { rbac: { access: 'service' } },
-      schema: {
-        tags: ['aggregator-orgs'],
-        summary: 'Submit a new parent-org registration',
-        description:
-          'Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link. A rejected org registering again is set back to pending under the parent in this request, with the same checks. 409 ORG_DEPTH_LIMIT or ORG_CHILD_LIMIT (with fields.parent_id) when the parent cannot take the org; 409 ORG_TOTAL_LIMIT when the instance is full.',
-        body: OrgCreateBodySchema,
-        response: { 201: OrgCreatedResponseSchema, ...errorResponses(400, 401, 409, 500, 503) },
-      },
-    },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const log = req.log.child({ operation: 'org-registration.create' });
-      const start = Date.now();
-
-      await authenticateCaller(req);
-      const body = req.body as z.infer<typeof OrgCreateBodySchema>;
-
-      const { schemaValues, phoneE164 } = await checkOrgSubmission(body);
-
-      const orgStore = getOrganisationStore();
-      const idp = getIdpAdmin();
-      const ownerEmail = body.owner.email.toLowerCase();
-      // Looked up before any write, so a failure here leaves nothing half created.
-      const reviewers = await orgReviewRecipients(body.parent_id ?? null, log);
-
-      // Rate limit per (ip, owner email), like the coordinator submit.
-      const rl = await checkSubmitRate(`${req.ip}|${ownerEmail}`);
-      if (!rl.allowed) {
-        void reply.header('Retry-After', String(rl.retryAfterSeconds));
-        throw httpError('RATE_LIMITED', {
-          detail: `Retry in ${rl.retryAfterSeconds}s.`,
-          fields: { retry_after_seconds: rl.retryAfterSeconds },
-        });
-      }
-
-      // A resubmit by an owner who already has an org is answered from that
-      // org's status; no new org is created.
-      const existing = await orgStore.findByOwnerEmail(ownerEmail);
-      if (!existing.ok) {
-        throw httpError('DB_UNAVAILABLE', {
-          cause: new Error(existing.error.message),
-          fields: { sub_operation: 'orgStore.findByOwnerEmail' },
-        });
-      }
-      if (existing.value) {
-        return answerExistingOwner(reply, existing.value, {
-          email: body.owner.email,
-          parentId: body.parent_id,
-          log,
-          start,
-        });
-      }
-
-      // One person per email and per phone across coordinators and org owners.
-      // Checked before any write. The phone is the OTP login key.
-      const contactClash = await findOwnerContactClash(ownerEmail, phoneE164);
-      // The email belongs to another account; an owner's is handled above.
-      if (contactClash === 'email') {
-        throw httpError('USER_EXISTS', { fields: { email: body.owner.email } });
-      }
-      if (contactClash === 'phone') {
-        throw httpError('PHONE_EXISTS', { fields: { phone: phoneE164 } });
-      }
-
-      const { org, slug } = await createOrgRecord(orgStore, body, {
-        phoneE164,
-        ownerEmail,
-        schemaValues,
-        parentId: body.parent_id,
-        log,
-      });
-      const { groupId } = await provisionOrgLogin(orgStore, idp, {
-        org,
-        slug,
-        owner: body.owner,
-        phoneE164,
-        invited: false,
-        log,
-      });
-
-      await sendOrgReviewEmail(
-        {
-          orgId: org.id,
-          displayName: body.display_name,
-          ownerEmail: body.owner.email,
-          ownerPhone: phoneE164,
-          parentId: org.parentId,
-          parentName: org.parentName,
-          recipients: reviewers,
-        },
-        log,
-      );
-
-      log.info(
-        {
-          status: 'success',
-          latency_ms: Date.now() - start,
-          org_id: org.id,
-          slug,
-          kc_group_id: groupId,
-        },
-        'org registration submitted',
-      );
-
-      return reply.status(201).send({
-        org_id: org.id,
-        slug,
-        status: 'pending',
-        message: 'Organisation submitted. A reviewer will approve it before coordinators can join.',
-      });
-    },
-  );
-
   app.post(
     '/v1/org/invite/accept',
     {
@@ -354,129 +181,6 @@ export function registerAggregatorOrgRoutes(app: FastifyInstance): void {
       },
     },
     inviteReadHandler('org_owner'),
-  );
-
-  app.get(
-    '/v1/orgs/parents',
-    {
-      config: { rbac: { access: 'service' } },
-      schema: {
-        tags: ['aggregator-orgs'],
-        summary: 'List the orgs a new org can register under',
-        description:
-          'Returns the network root first, then active aggregator orgs other than the Default org, sorted by name, that can take a child now; each with its "known as" name and the name an org registered under it would get. `accepting` is false when the instance is full or no org can take a child.',
-        response: { 200: OrgParentsResponseSchema, ...errorResponses(401, 500, 503) },
-      },
-    },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const auth = await authenticateAny(req);
-      if (!auth.ok) {
-        throw httpError('UNAUTHORIZED', {
-          detail: auth.error.message,
-          fields: { reason: auth.error.code },
-        });
-      }
-      await recordRouteCaller(req, callerFromAny(auth.context));
-      const store = getOrganisationStore();
-      const [root, active, total] = await Promise.all([
-        store.findRoot(),
-        store.listActive(),
-        store.countTotal(),
-      ]);
-      if (!root.ok) {
-        throw httpError('DB_UNAVAILABLE', {
-          cause: new Error(root.error.message),
-          fields: { sub_operation: 'orgStore.findRoot' },
-        });
-      }
-      if (!active.ok) {
-        throw httpError('DB_UNAVAILABLE', {
-          cause: new Error(active.error.message),
-          fields: { sub_operation: 'orgStore.listActive' },
-        });
-      }
-      if (!total.ok) {
-        throw httpError('DB_UNAVAILABLE', {
-          cause: new Error(total.error.message),
-          fields: { sub_operation: 'orgStore.countTotal' },
-        });
-      }
-      const candidates = [
-        ...(root.value ? [root.value] : []),
-        ...active.value.filter((o) => !o.isDefault),
-      ];
-      const children = await store.childCounts(candidates.map((o) => o.id));
-      if (!children.ok) {
-        throw httpError('DB_UNAVAILABLE', {
-          cause: new Error(children.error.message),
-          fields: { sub_operation: 'orgStore.childCounts' },
-        });
-      }
-      const childNames = await store.defaultKnownAsNames(candidates.map((o) => o.id));
-      if (!childNames.ok) {
-        throw httpError('DB_UNAVAILABLE', {
-          cause: new Error(childNames.error.message),
-          fields: { sub_operation: 'orgStore.defaultKnownAsNames' },
-        });
-      }
-      const org = (await getNetworkConfig()).aggregator.organisation;
-      const rules = treeRules(org);
-      // The instance total is reported by `accepting`, not per parent.
-      const parents = candidates
-        .filter((o) => {
-          const refused = newChildRefusal(o.depth, children.value[o.id] ?? 0, total.value, rules);
-          return refused === null || refused === 'TOTAL_LIMIT';
-        })
-        .map((o) => {
-          const isRoot = o.id === root.value?.id;
-          return {
-            id: o.id,
-            name: o.displayName,
-            is_root: isRoot,
-            known_as_name: isRoot ? null : o.knownAsName,
-            child_known_as_name: childNames.value[o.id] ?? SYSTEM_KNOWN_AS.name,
-          };
-        });
-      const accepting = total.value < rules.maxTotalOrgs && parents.length > 0;
-      return reply.status(200).send({ accepting, parents });
-    },
-  );
-
-  app.get(
-    '/v1/orgs',
-    {
-      config: { rbac: { access: 'service' } },
-      schema: {
-        tags: ['aggregator-orgs'],
-        summary: 'List active orgs for the coordinator-registration dropdown',
-        description:
-          'Returns active aggregator orgs sorted by name (plain SQL, no Keycloak admin API). The Default org is listed only while it is the only active org.',
-        response: { 200: OrgListResponseSchema, ...errorResponses(401, 500, 503) },
-      },
-    },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const auth = await authenticateAny(req);
-      if (!auth.ok) {
-        throw httpError('UNAUTHORIZED', {
-          detail: auth.error.message,
-          fields: { reason: auth.error.code },
-        });
-      }
-      await recordRouteCaller(req, callerFromAny(auth.context));
-      const page = await getOrganisationStore().listActive();
-      if (!page.ok) {
-        throw httpError('DB_UNAVAILABLE', {
-          cause: new Error(page.error.message),
-          fields: { sub_operation: 'orgStore.listActive' },
-        });
-      }
-      // The Default org is listed only while no other org is active.
-      const hasRealOrg = page.value.some((o) => !o.isDefault);
-      const listed = hasRealOrg ? page.value.filter((o) => !o.isDefault) : page.value;
-      return reply.status(200).send({
-        orgs: listed.map((o) => ({ id: o.id, slug: o.slug, display_name: o.displayName })),
-      });
-    },
   );
 }
 
@@ -635,11 +339,7 @@ async function discardHalfCreatedOrg(
   }
 }
 
-type OrgSubmission = z.infer<typeof OrgCreateBodySchema>;
-type OrgForm = Pick<
-  OrgSubmission,
-  'display_name' | 'state' | 'owner' | 'consent' | 'address' | 'coordinates'
->;
+type OrgForm = z.infer<typeof OrgInviteAcceptBodySchema>;
 type RequestLog = ReturnType<FastifyRequest['log']['child']>;
 
 /**
@@ -770,11 +470,9 @@ function throwOrgCreateError(
 }
 
 /**
- * Creates the org's Keycloak group and owner user and records them on the org.
+ * Creates the org's Keycloak group and its invited owner, enabled and unverified, and records them on the org.
  *
- * A self-registered owner is disabled until approval. An invited owner is
- * enabled and unverified, and verifies by email code. Any failure removes
- * what was created, the org included, so a retry can succeed.
+ * Any failure removes what was created, the org included, so a retry can succeed.
  *
  * @returns The Keycloak group id.
  * @throws {HttpError} USER_EXISTS, NAME_INVALID_CHARACTERS, IDP_UNAVAILABLE or DB_UNAVAILABLE.
@@ -785,9 +483,8 @@ async function provisionOrgLogin(
   input: {
     org: Organisation;
     slug: string;
-    owner: OrgSubmission['owner'];
+    owner: OrgForm['owner'];
     phoneE164: string;
-    invited: boolean;
     log: RequestLog;
   },
 ): Promise<{ groupId: string }> {
@@ -809,13 +506,13 @@ async function provisionOrgLogin(
     email: owner.email,
     username: owner.email,
     phone: input.phoneE164,
-    enabled: input.invited,
-    emailVerified: !input.invited,
+    enabled: true,
+    emailVerified: false,
     firstName,
     lastName,
     attributes: {
       [KC_ATTR.PHONE_NUMBER]: input.phoneE164,
-      [KC_ATTR.DECISION_MADE]: input.invited ? 'invited' : 'pending',
+      [KC_ATTR.DECISION_MADE]: 'invited',
       [KC_ATTR.CREATED_BY]: OWNER_CREATED_BY,
     },
   });
@@ -885,177 +582,6 @@ async function assertOwnerFree(
 }
 
 /**
- * Answers a public submit by an owner who already has an org, from that org's status; no org is created.
- *
- * Never writes the submitted fields: the submit is anonymous, so an email match
- * alone must not change the org. The parent is the one exception: a rejected org
- * is revived under the submitted parent, and it stays pending until an admin
- * approves it.
- *
- * @throws {HttpError} REGISTRATION_COOLING, a tree limit, CONFLICT, OWNER_ALREADY_REGISTERED,
- *   RATE_LIMITED or DB_UNAVAILABLE.
- */
-async function answerExistingOwner(
-  reply: FastifyReply,
-  prior: Organisation,
-  submit: { email: string; parentId: string | undefined; log: RequestLog; start: number },
-): Promise<FastifyReply> {
-  const { log, start } = submit;
-  if (prior.status === 'inactive') {
-    const revived = await reviveRejectedOrg(prior, submit.email, submit.parentId);
-    return reclaimOrgReview(reply, revived, log, start);
-  }
-  // Approved: mail goes to the stored owner email, never the submitted one.
-  if (prior.status === 'active') return resendOwnerInvite(reply, prior, log, start);
-  // Retired: never send a credential.
-  if (prior.status !== 'pending') {
-    throw httpError('OWNER_ALREADY_REGISTERED', { fields: { email: submit.email } });
-  }
-  return reclaimOrgReview(reply, prior, log, start);
-}
-
-/**
- * Sets a rejected org back to pending under the submitted parent, once its cooling window has ended.
- *
- * @returns The revived org; it may sit under a new parent now.
- * @throws {HttpError} REGISTRATION_COOLING, a tree limit, CONFLICT or DB_UNAVAILABLE.
- */
-async function reviveRejectedOrg(
-  prior: Organisation,
-  email: string,
-  parentId: string | undefined,
-): Promise<Organisation> {
-  const retryAfter = coolingRetryAfter(prior.rejectedAt, prior.updatedAt);
-  if (retryAfter) {
-    throw httpError('REGISTRATION_COOLING', { fields: { email, retry_after: retryAfter } });
-  }
-  const rules = treeRules((await getNetworkConfig()).aggregator.organisation);
-  const revived = await getOrganisationStore().revive(prior.id, parentId, rules);
-  if (revived.ok) return revived.value;
-  throwTreeRefusal(revived.error, { parent_id: parentId ?? null });
-  // The row stopped being a rejected org after it was read.
-  if (revived.error.code === 'NOT_FOUND') {
-    throw httpError('CONFLICT', {
-      detail: 'The organisation changed while it was being registered again. Try again.',
-    });
-  }
-  throw httpError('DB_UNAVAILABLE', {
-    cause: new Error(revived.error.message),
-    fields: { sub_operation: 'orgStore.revive' },
-  });
-}
-
-/**
- * Re-sends the review link for an existing pending or revived org.
- *
- * The row, the Keycloak owner and the group are reused unchanged.
- */
-async function reclaimOrgReview(
-  reply: FastifyReply,
-  row: Organisation,
-  log: RequestLog,
-  start: number,
-): Promise<FastifyReply> {
-  await sendOrgReviewEmail(
-    {
-      orgId: row.id,
-      displayName: row.displayName,
-      ownerEmail: row.ownerEmail,
-      ownerPhone: row.ownerPhone ?? '',
-      parentId: row.parentId,
-      parentName: row.parentName,
-    },
-    log,
-  );
-  log.info(
-    { status: 'success', latency_ms: Date.now() - start, org_id: row.id, reclaim: true },
-    'org re-submitted — review link re-sent (no field change)',
-  );
-  // Consent is recorded only on a fresh registration, not here.
-  return reply.status(200).send({
-    org_id: row.id,
-    slug: row.slug,
-    status: 'pending',
-    message: 'Organisation re-submitted. A fresh approval link has been sent for review.',
-  });
-}
-
-/**
- * Mails the owner of an approved org a sign-in link; a failed send is logged, not raised.
- *
- * The row is not changed.
- */
-async function resendOwnerInvite(
-  reply: FastifyReply,
-  row: Organisation,
-  log: RequestLog,
-  start: number,
-): Promise<FastifyReply> {
-  // Rate-limited per owner address and fails closed. Not the route's shared
-  // submit limiter: that one is keyed on IP and fails open.
-  const resendRate = await checkOrgInviteResendRate(row.ownerEmail);
-  if (!resendRate.allowed) {
-    void reply.header('Retry-After', String(resendRate.retryAfterSeconds));
-    log.warn(
-      {
-        status: 'skipped',
-        org_id: row.id,
-        reason: 'resend_rate_limited',
-        retry_after_seconds: resendRate.retryAfterSeconds,
-      },
-      'invite-link resend throttled for this owner address',
-    );
-    throw httpError('RATE_LIMITED', {
-      detail: `Retry in ${resendRate.retryAfterSeconds}s.`,
-      fields: { retry_after_seconds: resendRate.retryAfterSeconds },
-    });
-  }
-
-  const mail = renderOrgAlreadyRegistered({
-    orgName: row.displayName,
-    inviteUrl: ownerSignInUrl(),
-  });
-  const send = await getMailer().send({
-    to: row.ownerEmail,
-    subject: mail.subject,
-    html: mail.html,
-    text: mail.text,
-  });
-  if (!send.ok) {
-    log.warn(
-      {
-        status: 'failure',
-        sub_operation: 'mailer.send.orgAlreadyRegistered',
-        org_id: row.id,
-        code: send.error.code,
-        cause: send.error.message,
-      },
-      'already-registered invite link could not be delivered',
-    );
-  }
-  log.info(
-    {
-      status: 'success',
-      latency_ms: Date.now() - start,
-      org_id: row.id,
-      already_registered: true,
-      mail_sent: send.ok,
-    },
-    'org already active — sign-in link sent to the owner on file',
-  );
-  // Report a failed send so the owner knows to contact support.
-  return reply.status(200).send({
-    org_id: row.id,
-    slug: row.slug,
-    status: 'active',
-    mail_sent: send.ok,
-    message: send.ok
-      ? 'This organisation is already registered. The coordinator invitation link has been sent to the owner email on file.'
-      : 'This organisation is already registered, but the coordinator invitation link could not be emailed just now. Please try again shortly, or contact support.',
-  });
-}
-
-/**
  * Registers an organisation from an invite.
  *
  * The owner email must be the invited one. The org is created `pending` under
@@ -1103,7 +629,6 @@ async function acceptOrgInvite(req: FastifyRequest, reply: FastifyReply): Promis
       slug,
       owner: body.owner,
       phoneE164,
-      invited: true,
       log,
     });
     committed = true;

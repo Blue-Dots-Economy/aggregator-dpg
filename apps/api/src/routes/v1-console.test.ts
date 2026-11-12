@@ -35,7 +35,6 @@ import {
   RegistrationInvitesStoreFake,
   _setRegistrationInvitesStore,
 } from '../services/registration-invites-store/index.js';
-import { _setInviteIpRateChecker } from '../services/invite-mint-rate.js';
 import { err } from '@aggregator-dpg/shared-primitives/result';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 
@@ -236,7 +235,6 @@ describe('console routes /v1/user, /v1/org', () => {
     _setSignalStackWriter(new SignalStackWriterFake());
     _setRegistrationInvitesStore(new RegistrationInvitesStoreFake());
     _setConsoleWriteRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
-    _setInviteIpRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
     _setAccessTokenVerifier(async (token) => {
       const claims = TOKENS[token];
       if (!claims) throw new Error('invalid token');
@@ -256,7 +254,6 @@ describe('console routes /v1/user, /v1/org', () => {
     _setSignalStackWriter(null);
     _setRegistrationInvitesStore(null);
     _setConsoleWriteRateChecker(null);
-    _setInviteIpRateChecker(null);
     _setAccessTokenVerifier(null);
     config.RBAC_CUSTOM_ROLES_ENABLED = savedCustomRoles;
   });
@@ -609,9 +606,9 @@ describe('console routes /v1/user, /v1/org', () => {
     });
   });
 
-  describe('POST /v1/user/create (invite)', () => {
+  describe('POST /v1/user/invite (Default org)', () => {
     it('invites into the owner’s org', async () => {
-      const res = await post('/v1/user/create', 'a', {
+      const res = await post('/v1/user/invite', 'a', {
         org_id: ORG_A,
         recipients: [{ email: 'new@x.org' }],
       });
@@ -620,7 +617,7 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('answers 404 for an org out of reach', async () => {
-      const res = await post('/v1/user/create', 'a', {
+      const res = await post('/v1/user/invite', 'a', {
         org_id: ORG_B,
         recipients: [{ email: 'new@x.org' }],
       });
@@ -628,7 +625,7 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('refuses the Default org, even for the network admin (R8)', async () => {
-      const res = await post('/v1/user/create', 'na', {
+      const res = await post('/v1/user/invite', 'na', {
         org_id: DEFAULT,
         recipients: [{ email: 'new@x.org' }],
       });
@@ -1842,7 +1839,7 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('404 when inviting into an org that does not exist (loadOrg)', async () => {
-      const res = await post('/v1/user/create', 'na', {
+      const res = await post('/v1/user/invite', 'na', {
         org_id: ORG_X,
         recipients: [{ email: 'new@x.org' }],
       });
@@ -1851,7 +1848,7 @@ describe('console routes /v1/user, /v1/org', () => {
 
     it('503 when loading the invite org fails (loadOrg)', async () => {
       orgs.findById = async () => storeErr();
-      const res = await post('/v1/user/create', 'na', {
+      const res = await post('/v1/user/invite', 'na', {
         org_id: DEFAULT,
         recipients: [{ email: 'new@x.org' }],
       });
@@ -1946,7 +1943,7 @@ describe('console routes /v1/user, /v1/org', () => {
   describe('v1-user: too-many-recipients', () => {
     it('400 when a request carries more than the per-request recipient cap', async () => {
       const recipients = Array.from({ length: 11 }, (_, i) => ({ email: `r${i}@x.org` }));
-      const res = await post('/v1/user/create', 'a', { org_id: ORG_A, recipients });
+      const res = await post('/v1/user/invite', 'a', { org_id: ORG_A, recipients });
       expect(res.statusCode).toBe(400);
     });
   });
@@ -2586,7 +2583,7 @@ describe('console routes /v1/user, /v1/org', () => {
         expect(
           (await patch(`/v1/user/metadata/update/${C3}`, 'na', { serves: [] })).statusCode,
         ).toBe(404);
-        const invite = await post('/v1/user/create', 'na', {
+        const invite = await post('/v1/user/invite', 'na', {
           org_id: ORG_A,
           recipients: [{ email: 'new@x.org' }],
         });

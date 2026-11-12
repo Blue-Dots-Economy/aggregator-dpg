@@ -199,27 +199,11 @@ const ConfigSchema = z.object({
     .positive()
     .default(14 * 24 * 60 * 60),
 
-  /** Org-owner grant-token lifetime. Default 90 days. */
-  GRANT_TOKEN_TTL_SECONDS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(90 * 24 * 60 * 60),
-
   // Per-actor limit on console decisions and edits. Fails open.
   CONSOLE_WRITE_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   CONSOLE_WRITE_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(60),
   /** Max recipients per mint request. Default 10. */
   INVITE_MINT_MAX_RECIPIENTS: z.coerce.number().int().positive().default(10),
-
-  /**
-   * Window and cap for re-sending an approved org's link when its owner
-   * re-submits the form. Keyed on the stored owner email (not the client IP)
-   * and fails closed even when Redis is down, because every admitted call mints
-   * another 90-day link.
-   */
-  ORG_INVITE_RESEND_RATE_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
-  ORG_INVITE_RESEND_RATE_MAX_PER_WINDOW: z.coerce.number().int().positive().default(3),
 
   /**
    * Extra grace beyond the approval-token TTL before a still-pending
@@ -230,9 +214,6 @@ const ConfigSchema = z.object({
     .int()
     .positive()
     .default(24 * 60 * 60 * 1000),
-
-  /** Minutes after a rejection before the same owner or coordinator may re-register. Default 720 (12h). */
-  REGISTRATION_COOLING_MINUTES: z.coerce.number().int().positive().default(720),
 
   // ─── Schema loader ──────────────────────────────────────────────────────
   /** Absolute or relative path to `config/schemas/`. Used by link-submit Ajv. */

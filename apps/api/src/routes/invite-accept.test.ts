@@ -286,6 +286,54 @@ describe('invite read and accept routes', () => {
       expect(again.statusCode).toBe(409);
     });
 
+    it('refuses an org owner as a coordinator with 409 OWNER_ALREADY_REGISTERED', async () => {
+      orgStore.seed([
+        buildOrganisation({
+          id: '00000000-0000-4000-8000-0000000000d2',
+          parentId: ROOT,
+          slug: 'owned',
+          status: 'active',
+          ownerEmail: COORD_EMAIL,
+        }),
+      ]);
+      const token = await inviteToken('coordinator');
+      const res = await accept('/v1/user/invite/accept', { ...coordinatorBody, invite: token });
+      expect(res.statusCode).toBe(409);
+      expect(errorCode(res)).toBe('OWNER_ALREADY_REGISTERED');
+      expect(await inviteStatus('inv-coordinator')).toBe('pending');
+    });
+
+    it("refuses the org's url and locations with 409 ORG_DETAILS_READ_ONLY", async () => {
+      const token = await inviteToken('coordinator');
+      const res = await accept('/v1/user/invite/accept', {
+        ...coordinatorBody,
+        url: 'https://trrain.org',
+        invite: token,
+      });
+      expect(res.statusCode).toBe(409);
+      expect(errorCode(res)).toBe('ORG_DETAILS_READ_ONLY');
+    });
+
+    it.each([
+      ['expired', { status: 'expired' as const }, 410],
+      ['already used', { status: 'consumed' as const }, 409],
+      ['revoked', { status: 'revoked' as const }, 400],
+    ])('refuses an %s invite', async (_label, overrides, status) => {
+      const token = await inviteToken('coordinator', overrides);
+      const res = await accept('/v1/user/invite/accept', { ...coordinatorBody, invite: token });
+      expect(res.statusCode).toBe(status);
+    });
+
+    it('refuses a tampered token with 400 INVITE_INVALID', async () => {
+      const token = await inviteToken('coordinator');
+      const res = await accept('/v1/user/invite/accept', {
+        ...coordinatorBody,
+        invite: `${token.slice(0, -2)}xx`,
+      });
+      expect(res.statusCode).toBe(400);
+      expect(errorCode(res)).toBe('INVITE_INVALID');
+    });
+
     it('gives the invite back when Keycloak is down', async () => {
       const token = await inviteToken('coordinator');
       idp.failOnce({ code: 'IDP_UNAVAILABLE', message: 'down' });

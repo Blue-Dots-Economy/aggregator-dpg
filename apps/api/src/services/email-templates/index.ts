@@ -1,4 +1,3 @@
-export { renderAdminReview, type AdminReviewVars } from './admin-review.js';
 export { renderApplicantApproved, type ApplicantApprovedVars } from './applicant-approved.js';
 export { renderApplicantRejected, type ApplicantRejectedVars } from './applicant-rejected.js';
 export { renderOrgOwnerApproved, type OrgOwnerApprovedVars } from './org-owner-approved.js';
@@ -10,14 +9,6 @@ export {
   type CoordinatorJoinedVars,
   type OrgJoinedVars,
 } from './invite-joined.js';
-export {
-  renderOrgAlreadyRegistered,
-  type OrgAlreadyRegisteredVars,
-} from './org-already-registered.js';
-export {
-  renderOwnerGrantRefreshed,
-  type OwnerGrantRefreshedVars,
-} from './owner-grant-refreshed.js';
 export {
   renderInviteExistingAccount,
   type InviteExistingAccountVars,

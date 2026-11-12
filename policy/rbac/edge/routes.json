@@ -206,20 +206,6 @@
     },
     {
       "method": "GET",
-      "path": "/v1/orgs",
-      "access": {
-        "access": "service"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/v1/orgs/parents",
-      "access": {
-        "access": "service"
-      }
-    },
-    {
-      "method": "GET",
       "path": "/v1/participant-consent",
       "access": {
         "access": "public"
@@ -363,13 +349,6 @@
     },
     {
       "method": "POST",
-      "path": "/admin/v1/invites",
-      "access": {
-        "access": "link_token"
-      }
-    },
-    {
-      "method": "POST",
       "path": "/admin/v1/orgs/decision/:id",
       "access": {
         "access": "link_token"
@@ -387,13 +366,6 @@
       "path": "/public/v1/aggregators/:orgSlug/registrations/:slug",
       "access": {
         "access": "public"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/v1/aggregator-registrations/create",
-      "access": {
-        "access": "service"
       }
     },
     {
@@ -506,13 +478,6 @@
     },
     {
       "method": "POST",
-      "path": "/v1/orgs/create",
-      "access": {
-        "access": "service"
-      }
-    },
-    {
-      "method": "POST",
       "path": "/v1/roles/create",
       "access": {
         "capability": "network.administer",
@@ -539,13 +504,6 @@
       "path": "/v1/user/activate",
       "access": {
         "access": "public"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/v1/user/create",
-      "access": {
-        "capability": "org.manage"
       }
     },
     {

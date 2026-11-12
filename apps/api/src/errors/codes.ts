@@ -445,14 +445,6 @@ export const ERR = {
     detail: 'An organisation cannot be moved under itself or an organisation below it.',
     hint: 'Store PARENT_CYCLE: the requested parent is the org or one of its descendants.',
   },
-  REGISTRATION_COOLING: {
-    code: 'REGISTRATION_COOLING',
-    status: 409,
-    title: 'Please try again later',
-    detail:
-      'A recent registration with these details was declined. You can register again after the cooling period.',
-    hint: 'A rejected record for this email/phone/owner_email exists and now - rejected_at < REGISTRATION_COOLING_MINUTES. See response.error.fields.retry_after for the ISO timestamp.',
-  },
   TARGET_ORG_INACTIVE: {
     code: 'TARGET_ORG_INACTIVE',
     status: 409,
@@ -513,20 +505,6 @@ export const ERR = {
     title: 'Nothing to activate',
     detail: 'This account was not created from an invitation, or it has already been decided.',
     hint: 'Keycloak decision_made is not "invited", or the coordinator / org row is not pending.',
-  },
-  GRANT_INVALID: {
-    code: 'GRANT_INVALID',
-    status: 400,
-    title: 'Invalid link',
-    detail: 'This invite-management link is not valid. Use the link from your approval email.',
-    hint: 'grant-token signature/audience/sub verify failed (aggregator-grant).',
-  },
-  GRANT_EXPIRED: {
-    code: 'GRANT_EXPIRED',
-    status: 410,
-    title: 'Link expired',
-    detail: 'This invite-management link has expired. Request a fresh link to continue.',
-    hint: 'grant-token exp elapsed (GRANT_TOKEN_TTL_SECONDS). Recovery re-mails a fresh grant to the registered owner (§6).',
   },
 
   // ── Bulk uploads ────────────────────────────────────────────────────────

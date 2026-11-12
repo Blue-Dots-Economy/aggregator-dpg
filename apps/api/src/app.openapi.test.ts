@@ -53,7 +53,7 @@ describe('OpenAPI spec generation', () => {
 
   it('documents a request body on every body-taking route', () => {
     const expectBody = [
-      ['post', '/v1/aggregator-registrations/create'],
+      ['post', '/v1/user/invite/accept'],
       ['patch', '/v1/aggregators/profile/me'],
       ['post', '/v1/bulk-uploads'],
       ['post', '/v1/links/create'],
