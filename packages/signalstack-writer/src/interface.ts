@@ -162,7 +162,7 @@ export interface SignalStackUpsertAggregatorInput {
   /**
    * Signalstack domain ids this aggregator org serves (`seeker`, `provider`, …).
    * The dashboard returns `NO_DOMAINS_CONFIGURED` when this is empty. Pass
-   * every domain of the active network.
+   * the network domains the coordinator serves.
    */
   domains?: string[];
   metadata?: Record<string, unknown>;

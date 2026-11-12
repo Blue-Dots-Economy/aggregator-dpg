@@ -22,7 +22,7 @@
 export const KC_ATTR = {
   /** Postgres aggregator UUID — reverse pointer from KC to our DB. */
   AGGREGATOR_ID: 'aggregator_id',
-  /** `seeker` or `provider`. Limits an aggregator to its registered participant type. */
+  /** Multivalued: the network domain ids the coordinator serves. Absent when it serves none. */
   AGGREGATOR_TYPE: 'aggregator_type',
   /** Applicant phone in E.164. Read by the OTP login authenticator. */
   PHONE_NUMBER: 'phoneNumber',

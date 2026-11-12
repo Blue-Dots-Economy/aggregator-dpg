@@ -309,6 +309,16 @@ export async function registerAggregatorApprovalRoutes(base: FastifyInstance): P
               message: ERR.TARGET_ORG_INACTIVE.detail,
             }),
           );
+        case 'no_profile_types':
+          return sendHtml(
+            reply,
+            409,
+            renderResultPage({
+              status: 'error',
+              title: ERR.NO_PROFILE_TYPES.title,
+              message: ERR.NO_PROFILE_TYPES.detail,
+            }),
+          );
         case 'unavailable': {
           let message = 'Database unavailable. Please try again shortly.';
           if (outcome.dependency === 'signalstack') {

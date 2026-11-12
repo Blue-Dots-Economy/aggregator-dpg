@@ -45,6 +45,8 @@ export type DecisionOutcome =
   | { kind: 'not_found' }
   /** The coordinator's org is no longer active (approve only). */
   | { kind: 'org_inactive' }
+  /** The coordinator serves no profile type of the network (approve only). */
+  | { kind: 'no_profile_types' }
   | { kind: 'unavailable'; dependency: 'signalstack' | 'idp' | 'db' };
 
 /** Inputs of {@link decideCoordinator}. */
@@ -167,25 +169,26 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
     if (org.value?.status !== 'active') return { kind: 'org_inactive' };
   }
 
+  // A coordinator with no profile type in the network could act on nothing,
+  // so it is not approved until an owner sets its types.
+  const networkCfg = await getNetworkConfig();
+  const served = servedDomains(aggregator.serves, networkCfg.domainIds);
+  if (served.length === 0) {
+    log.info({ status: 'skipped', reason: 'no_profile_types' });
+    return { kind: 'no_profile_types' };
+  }
+
   // 1. Signals first. Until it succeeds the row stays pending; a retry is safe
   //    (idempotent on external_id).
   const signalstack = getSignalStackWriter();
   let signalstackOrgId: string | null = null;
   if (signalstack) {
     const started = Date.now();
-    const networkCfg = await getNetworkConfig();
-    // The coordinator's profile types still in the network. With none, the
-    // domains are not sent: the coordinator can act on nothing until an owner
-    // sets its types.
-    const served = servedDomains(aggregator.serves, networkCfg.domainIds);
-    if (served.length === 0) {
-      log.warn({ status: 'skipped', sub_operation: 'signalstack.upsertAggregator.domains' });
-    }
     const upsert = await signalstack.upsertAggregator({
       external_id: aggregator.id,
       name: aggregator.name,
       slug: aggregator.orgSlug,
-      ...(served.length > 0 ? { domains: served } : {}),
+      domains: served,
       ...(input.requestId ? { requestId: input.requestId } : {}),
     });
     if (!upsert.success) {

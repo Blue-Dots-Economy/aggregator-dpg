@@ -219,6 +219,8 @@ export function throwDecisionFailure(
       throw httpError('NOT_FOUND');
     case 'org_inactive':
       throw httpError('TARGET_ORG_INACTIVE');
+    case 'no_profile_types':
+      throw httpError('NO_PROFILE_TYPES');
     case 'unavailable':
       if (outcome.dependency === 'signalstack') throw httpError('SIGNALSTACK_PUSH_FAILED');
       if (outcome.dependency === 'idp') throw httpError('IDP_UNAVAILABLE');

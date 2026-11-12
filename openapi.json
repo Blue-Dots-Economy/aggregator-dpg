@@ -4803,7 +4803,7 @@
         "tags": [
           "console"
         ],
-        "description": "The same compare-and-set decision service as the emailed review link. A decision already made answers 409 ALREADY_DECIDED with status, decided_at and decided_by.",
+        "description": "The same compare-and-set decision service as the emailed review link. A decision already made answers 409 ALREADY_DECIDED with status, decided_at and decided_by. Approving a coordinator that serves no profile type of the network answers 409 NO_PROFILE_TYPES.",
         "requestBody": {
           "required": true,
           "content": {

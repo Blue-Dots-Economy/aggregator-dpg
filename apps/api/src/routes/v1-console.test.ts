@@ -108,6 +108,7 @@ describe('console routes /v1/user, /v1/org', () => {
       id,
       orgSlug: `coord-${n}`,
       name: `Coordinator ${n}`,
+      type: 'seeker',
       parentOrgId: orgId,
       isDefaultOrg: false,
       status,
@@ -1902,10 +1903,54 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(idp.logouts.get(kc.id)).toBeUndefined();
     });
 
-    it('503 when the metadata store update fails', async () => {
+    it('503 when the metadata store update fails, and Keycloak and Signals get the old types back', async () => {
+      const kc = await kcUserOf(C3);
+      await idp.setAttributes(kc.id, { [KC_ATTR.AGGREGATOR_TYPE]: ['provider'] });
+      const found = await coordinators.findById(C3);
+      if (!found.ok || !found.value) throw new Error('seed');
+      coordinators.seed([{ ...found.value, serves: ['provider'], type: 'provider' }]);
+      const ss = new SignalStackWriterFake();
+      const upsert = vi.spyOn(ss, 'upsertAggregator');
+      _setSignalStackWriter(ss);
       coordinators.update = async () => storeErr();
       const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: ['seeker'] });
       expect(res.statusCode).toBe(503);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('DB_UNAVAILABLE');
+      expect((await kcUserOf(C3)).attributes?.[KC_ATTR.AGGREGATOR_TYPE]).toEqual(['provider']);
+      expect(upsert.mock.calls.map(([input]) => input.domains)).toEqual([['seeker'], ['provider']]);
+      expect(idp.logouts.get(kc.id)).toBeUndefined();
+    });
+
+    it('503 on a store failure for a pending coordinator: Keycloak restored, Signals untouched', async () => {
+      coordinators.seed([{ ...coordinator(C5, ORG_A, 'pending', 5), serves: ['provider'] }]);
+      await idp.createUser({
+        email: 'c5@x.org',
+        enabled: false,
+        attributes: { [KC_ATTR.AGGREGATOR_ID]: C5, [KC_ATTR.AGGREGATOR_TYPE]: ['provider'] },
+      });
+      const ss = new SignalStackWriterFake();
+      const upsert = vi.spyOn(ss, 'upsertAggregator');
+      _setSignalStackWriter(ss);
+      coordinators.update = async () => storeErr();
+      const res = await patch(`/v1/user/metadata/update/${C5}`, 'a', { serves: ['seeker'] });
+      expect(res.statusCode).toBe(503);
+      expect((await kcUserOf(C5)).attributes?.[KC_ATTR.AGGREGATOR_TYPE]).toEqual(['provider']);
+      expect(upsert).not.toHaveBeenCalled();
+    });
+
+    it('removes the Keycloak attribute on rollback when the old types were empty', async () => {
+      const found = await coordinators.findById(C3);
+      if (!found.ok || !found.value) throw new Error('seed');
+      coordinators.seed([{ ...found.value, serves: [], type: null }]);
+      const ss = new SignalStackWriterFake();
+      const upsert = vi.spyOn(ss, 'upsertAggregator');
+      _setSignalStackWriter(ss);
+      coordinators.update = async () => storeErr();
+      const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: ['seeker'] });
+      expect(res.statusCode).toBe(503);
+      expect((await kcUserOf(C3)).attributes?.[KC_ATTR.AGGREGATOR_TYPE]).toBeUndefined();
+      // Signals is not sent an empty list.
+      expect(upsert).toHaveBeenCalledTimes(1);
     });
 
     it('502 when a coordinator is approved mid-update and the re-push fails', async () => {
@@ -1927,6 +1972,8 @@ describe('console routes /v1/user, /v1/org', () => {
       expect((res.json() as { error: { code: string } }).error.code).toBe(
         'SIGNALSTACK_PUSH_FAILED',
       );
+      // The types were saved, so the sessions are still ended.
+      expect(idp.logouts.get((await kcUserOf(C5)).id)).toBe(1);
     });
   });
 
@@ -1973,6 +2020,17 @@ describe('console routes /v1/user, /v1/org', () => {
       coordinators.approveFromPending = async () => storeErr();
       const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
       expect(res.statusCode).toBe(503);
+    });
+
+    it('409 NO_PROFILE_TYPES when the coordinator serves no profile type', async () => {
+      const found = await coordinators.findById(C1);
+      if (!found.ok || !found.value) throw new Error('seed');
+      coordinators.seed([{ ...found.value, serves: [], type: null }]);
+      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('NO_PROFILE_TYPES');
+      const row = await coordinators.findById(C1);
+      expect(row.ok && row.value?.status).toBe('pending');
     });
 
     it('404 NOT_FOUND when the identity record is missing at decision time', async () => {

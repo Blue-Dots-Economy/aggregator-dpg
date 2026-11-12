@@ -453,6 +453,13 @@ export const ERR = {
       'The selected organisation is not accepting coordinators. Contact the organisation owner.',
     hint: 'Coordinator submit/approval against an org whose status != active (spec §6.2 re-validate).',
   },
+  NO_PROFILE_TYPES: {
+    code: 'NO_PROFILE_TYPES',
+    status: 409,
+    title: 'No profile types set',
+    detail: "Set the coordinator's profile types before approving.",
+    hint: "The coordinator's serves holds no domain id of this network. Set it with PATCH /v1/user/metadata/update/:id, then approve.",
+  },
 
   ORG_DETAILS_READ_ONLY: {
     code: 'ORG_DETAILS_READ_ONLY',
