@@ -14,7 +14,7 @@ import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 import type { ReactNode } from 'react';
 import { getSession } from '@/lib/server-session';
-import { getConsoleActor } from '@/lib/console-actor';
+import { getConsoleActor, type ConsoleActorFailure } from '@/lib/console-actor';
 import { getTranslations } from 'next-intl/server';
 import { ConsoleSidebar } from '@/components/console/ConsoleSidebar';
 import { AuthProvider } from '@/lib/auth-context';
@@ -29,16 +29,7 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
   }
 
   const actor = await getConsoleActor();
-  if (!actor.ok) {
-    if (actor.reason === 'no_session') {
-      redirect(`/api/auth/login?returnTo=${encodeURIComponent(path)}`);
-    }
-    if (actor.reason === 'not_approved') redirect('/dashboard');
-    if (actor.reason === 'unavailable') throw new Error('console unavailable');
-    redirect(
-      `/api/auth/logout?reason=${actor.reason === 'no_org' ? 'console_no_org' : 'console_not_provisioned'}`,
-    );
-  }
+  if (!actor.ok) leaveConsole(actor.reason, path);
   if (actor.me.kind === 'coordinator') redirect('/dashboard');
 
   const t = await getTranslations('console');
@@ -79,5 +70,19 @@ export default async function ConsoleLayout({ children }: Readonly<{ children: R
         </main>
       </div>
     </AuthProvider>
+  );
+}
+
+/**
+ * Sends a caller who cannot use the console to sign-in, the coordinator portal or sign-out.
+ *
+ * @throws {Error} When the console cannot be read.
+ */
+function leaveConsole(reason: ConsoleActorFailure, path: string): never {
+  if (reason === 'no_session') redirect(`/api/auth/login?returnTo=${encodeURIComponent(path)}`);
+  if (reason === 'not_approved') redirect('/dashboard');
+  if (reason === 'unavailable') throw new Error('console unavailable');
+  redirect(
+    `/api/auth/logout?reason=${reason === 'no_org' ? 'console_no_org' : 'console_not_provisioned'}`,
   );
 }

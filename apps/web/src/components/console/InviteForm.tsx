@@ -141,6 +141,29 @@ function renderKbd(chunks: ReactNode) {
   );
 }
 
+/** The role pill text: the coordinator role, or the invited organisation's role name. */
+function roleText(t: ReturnType<typeof useTranslations<'console'>>, target: InviteTarget): string {
+  return target.kind === 'org'
+    ? t('invite.org.role_pill', { role: target.roleLabel })
+    : t('invite.role');
+}
+
+/** Sends one batch of invites: coordinators into the org, or organisations under it. */
+function sendInvites(target: InviteTarget, orgId: string, recipients: Recipient[]) {
+  const body = recipients.map((x) =>
+    x.name.trim() ? { email: x.email, name: x.name.trim() } : { email: x.email },
+  );
+  return target.kind === 'org'
+    ? sendConsole<UserInviteResponse>('/api/console/org/invite', 'POST', {
+        parent_id: orgId,
+        recipients: body,
+      })
+    : sendConsole<UserInviteResponse>('/api/console/user/invite', 'POST', {
+        org_id: orgId,
+        recipients: body,
+      });
+}
+
 /** Renders a `<link>` chunk as a link to `href`, or as plain text without one. */
 function linkTo(href: string | null) {
   return function renderLink(chunks: ReactNode) {
@@ -249,19 +272,7 @@ export function InviteForm({
     }
     setBusy(true);
     setError(null);
-    const recipientsBody = all.map((x) =>
-      x.name.trim() ? { email: x.email, name: x.name.trim() } : { email: x.email },
-    );
-    const r =
-      target.kind === 'org'
-        ? await sendConsole<UserInviteResponse>('/api/console/org/invite', 'POST', {
-            parent_id: orgId,
-            recipients: recipientsBody,
-          })
-        : await sendConsole<UserInviteResponse>('/api/console/user/invite', 'POST', {
-            org_id: orgId,
-            recipients: recipientsBody,
-          });
+    const r = await sendInvites(target, orgId, all);
     setBusy(false);
     if (r.ok) {
       setResult({ sent: r.data.sent + r.data.resent, notSent: notSentOf(r.data) });
@@ -289,16 +300,7 @@ export function InviteForm({
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
       <ConsoleSection flush className="min-w-0 overflow-visible">
         <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col text-[13.5px]" noValidate>
-          <OrgHeader
-            orgs={orgs}
-            orgId={orgId}
-            onChange={setOrgId}
-            role={
-              target.kind === 'org'
-                ? t('invite.org.role_pill', { role: target.roleLabel })
-                : t('invite.role')
-            }
-          />
+          <OrgHeader orgs={orgs} orgId={orgId} onChange={setOrgId} role={roleText(t, target)} />
 
           <div className="flex flex-1 flex-col gap-2.5 p-[22px]">
             {result ? <ResultBanner result={result} onDismiss={() => setResult(null)} /> : null}
@@ -368,7 +370,7 @@ export function InviteForm({
 
             {valid.length ? <NamesList people={valid} onName={setName} onRemove={remove} /> : null}
 
-            {target.kind === 'org' ? <OrgCapabilities roleLabel={target.roleLabel} /> : null}
+            <OrgCapabilities target={target} />
 
             {error ? (
               <p role="alert" className="text-rose-700">
@@ -663,9 +665,11 @@ function HelpCard({
   );
 }
 
-/** What an invited organisation can do, fixed for now, and the role it is shown with. */
-function OrgCapabilities({ roleLabel }: Readonly<{ roleLabel: string }>) {
+/** What an invited organisation can do, fixed for now, and the role it is shown with; nothing for coordinators. */
+function OrgCapabilities({ target }: Readonly<{ target: InviteTarget }>) {
   const t = useTranslations('console');
+  if (target.kind !== 'org') return null;
+  const { roleLabel } = target;
   const items = [
     { key: 'orgs', label: t('invite.org.can_orgs'), hint: t('invite.org.can_orgs_hint') },
     {
