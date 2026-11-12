@@ -64,7 +64,7 @@ rebuild-web: ## Rebuild the web image and restart only the web container.
 	pnpm stack:rebuild-web
 
 KC_PLUGIN_REPO ?= ../keycloak-otp-authenticator
-KC_PLUGIN_JAR  := keycloak-otp-1.0.0-SNAPSHOT.jar
+KC_PLUGIN_JAR  := keycloak-otp-1.3.0-SNAPSHOT.jar
 
 kc-plugin: ## Build the Keycloak OTP plugin JAR and copy into infra/keycloak/providers.
 	cd $(KC_PLUGIN_REPO) && ./mvnw -q clean package -DskipTests
