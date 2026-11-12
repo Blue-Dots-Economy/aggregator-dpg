@@ -17,7 +17,7 @@
  * store + the in-memory aggregator fake. Auth is stubbed via
  * `_setAccessTokenVerifier`.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
@@ -35,25 +35,8 @@ import {
   type StoreResult,
 } from '../services/registration-links-store/index.js';
 import type { UpdateDraftInput } from '../services/registration-links-store/interface.js';
-import type * as ObjectStorageModule from '../services/object-storage/index.js';
 import { _setDbClients } from '../db/client.js';
-
-// #650 regression guard: the QR is no longer persisted — create/activate must
-// never touch object storage. Force the QR write primitives to REJECT (while
-// keeping the real bulk-upload helpers via importActual, so buildApp's other
-// routes still boot). If a putObject/signQrDownloadUrl call is ever
-// reintroduced into the link routes, the "S3 independence" tests below fail.
-vi.mock('../services/object-storage/index.js', async (importActual) => {
-  const actual = await importActual<typeof ObjectStorageModule>();
-  const rejectS3 = () =>
-    Promise.reject(new Error('S3 must not be on the link create/activate path'));
-  return {
-    ...actual,
-    putObject: vi.fn(rejectS3),
-    // Removed in #650; re-declared as a rejecting stub in case it's re-added.
-    signQrDownloadUrl: vi.fn(rejectS3),
-  };
-});
+import { _setObjectStorage } from '@aggregator-dpg/object-storage';
 
 const AGG_ID = '11111111-1111-1111-1111-111111111111';
 const ORG_ID = 'org-signalstack-1';
@@ -62,7 +45,7 @@ const USER_ID = 'kc-user-1';
 
 /**
  * Tracking stub: records every create input and returns a synthetic row.
- * Status forced to 'draft' to keep the route off the QR/S3 path.
+ * Status forced to 'draft' to keep the route off the QR/object-storage path.
  */
 class TrackingRegistrationLinksStore extends RegistrationLinksStoreBase {
   readonly creates: CreateRegistrationLinkInput[] = [];
@@ -361,7 +344,7 @@ describe('PATCH /v1/links/:id — registration_mode immutability', () => {
 // ---------------------------------------------------------------------------
 // Full CRUD lifecycle — create/list/read/patch/activate/deactivate against a
 // stateful in-memory fake, covering the auth wrapper, aggregator-type
-// enforcement, slug-collision retries, QR/S3 side effects, and every
+// enforcement, slug-collision retries, QR/object-storage side effects, and every
 // upstream-failure branch. `TrackingRegistrationLinksStore` above stays
 // scoped to the registration_mode-specific tests; this fake models the full
 // abstract contract so the rest of the route file's branches are exercised.
@@ -1175,22 +1158,18 @@ describe('POST /v1/links/:id/activate', () => {
   });
 });
 
-// #650: object storage is mocked to REJECT for this whole file (see the
-// vi.mock at the top). These assert the central promise deterministically:
-// activation is independent of S3 — a create-live and a draft activation both
-// succeed even though every object-storage write would throw. If a QR→S3 write
-// is reintroduced into either path, these fail with 500 INTERNAL.
-describe('S3 independence (#650)', () => {
+describe('object storage independence', () => {
   let app: FastifyInstance;
   let store: FullRegistrationLinksStore;
 
   beforeEach(async () => {
+    _setObjectStorage(null);
     store = new FullRegistrationLinksStore();
     app = await bootFullApp({ store });
   });
   afterEach(async () => teardownFullApp(app));
 
-  it('creates a live link with S3 unreachable — 201, qr_url null', async () => {
+  it('creates a live link without object storage — 201, qr_url null', async () => {
     const r = await app.inject({
       method: 'POST',
       url: '/v1/links/create',
@@ -1204,7 +1183,7 @@ describe('S3 independence (#650)', () => {
     expect(body.qr_url).toBeNull();
   });
 
-  it('activates a draft with S3 unreachable — 200, qr_url null', async () => {
+  it('activates a draft without object storage — 200, qr_url null', async () => {
     store.seed([buildLink({ id: 'link-draft', slug: 'act-nos3', status: 'draft' })]);
     const r = await app.inject({
       method: 'POST',

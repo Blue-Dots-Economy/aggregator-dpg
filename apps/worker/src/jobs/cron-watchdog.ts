@@ -9,7 +9,7 @@
  *   - retention: bulk_uploads and link_submissions older than RETENTION_DAYS
  *     are deleted. Onboarding rollups are kept.
  *
- * S3 objects are removed by bucket lifecycle rules, not by the worker.
+ * Stored objects are removed by bucket lifecycle rules, not by the worker.
  */
 
 import { and, eq, inArray, isNotNull, lt } from 'drizzle-orm';

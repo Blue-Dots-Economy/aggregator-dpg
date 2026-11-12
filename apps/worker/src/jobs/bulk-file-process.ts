@@ -3,7 +3,7 @@
  *
  * Steps:
  *   1. Load the JSON Schema for the upload.
- *   2. Stream-parse the S3 object (UTF-8, header check, per-row limits).
+ *   2. Stream-parse the stored object (UTF-8, header check, per-row limits).
  *   3. Set status to `row_processing`, save headers and row cells for the
  *      finaliser, and enqueue one job per row.
  *   4. Publish total_rows and reader_done only after every row job is enqueued.
@@ -12,10 +12,11 @@
  * Replays are skipped once the upload is at `row_processing` or later.
  */
 
+import type { Readable } from 'node:stream';
 import { eq } from 'drizzle-orm';
+import { getObjectStorage } from '@aggregator-dpg/object-storage';
 import type { BulkFileProcessJob } from '@aggregator-dpg/queue';
 import { schema, getDb } from '../db.js';
-import { getCsvStream } from '../object-storage.js';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { getSchemaLoader } from '../services/schema-loader.js';
@@ -35,6 +36,13 @@ interface ProcessOutcome {
   totalRows?: number;
   reason?: FileFailureReason;
   detail?: string;
+}
+
+async function openCsvStream(storedKey: string): Promise<Readable> {
+  const opened = await getObjectStorage().openReadStream({ area: 'bulk-uploads', key: storedKey });
+  if (!opened.success) throw opened.error;
+  if (!opened.value) throw new Error(`object not found for stored key: ${storedKey}`);
+  return opened.value;
 }
 
 /** Builds the `status_reason` text for a file-level failure. */
@@ -96,14 +104,14 @@ export async function processBulkFile(job: BulkFileProcessJob): Promise<ProcessO
     return { status: 'failed', reason: 'schema_unavailable' };
   }
 
-  // 2. Stream-parse the S3 body. No rows are returned on failure.
-  let stream;
+  // 2. Stream-parse the stored object. No rows are returned on failure.
+  let stream: Readable;
   try {
-    stream = await getCsvStream(job.s3Key);
+    stream = await openCsvStream(job.s3Key);
   } catch (err) {
     log.error({
       status: 'failure',
-      sub: 's3.get',
+      sub: 'storage.get',
       error: errorMessage(err),
       error_type: errorType(err),
     });

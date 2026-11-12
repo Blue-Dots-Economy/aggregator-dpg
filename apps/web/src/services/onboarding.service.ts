@@ -91,6 +91,14 @@ export type OnboardingBySource = z.infer<typeof OnboardingBySourceSchema>;
 
 export const BulkUploadCreateResponseSchema = z.object({
   upload_id: z.string(),
+  upload: z
+    .object({
+      method: z.enum(['PUT', 'POST']),
+      url: z.string(),
+      headers: z.record(z.string(), z.string()),
+      form_fields: z.record(z.string(), z.string()),
+    })
+    .optional(),
   upload_url: z.string(),
   s3_key: z.string(),
   expires_at: z.string(),
@@ -149,6 +157,25 @@ export type BulkUploadErrorsResponse = z.infer<typeof BulkUploadErrorsResponseSc
 function withQuery(path: string, params: URLSearchParams): string {
   const qs = params.toString();
   return qs ? `${path}?${qs}` : path;
+}
+
+/** Thrown when the file is larger than the limit the api reported for the upload. */
+export class BulkUploadTooLargeError extends Error {
+  override readonly name = 'BulkUploadTooLargeError';
+
+  /** @param maxBytes - The largest file the api accepts. */
+  constructor(readonly maxBytes: number) {
+    super(`file is larger than ${maxBytes} bytes`);
+  }
+}
+
+/** Thrown when the file has no content. */
+export class BulkUploadEmptyError extends Error {
+  override readonly name = 'BulkUploadEmptyError';
+
+  constructor() {
+    super('file is empty');
+  }
 }
 
 /**
@@ -271,7 +298,7 @@ export const onboardingService = {
   },
 
   /**
-   * Runs a bulk upload: presign, PUT to S3, then start.
+   * Runs a bulk upload: presign, upload to storage, then start.
    *
    * `duplicate` is true when the file matches a prior upload; the existing run is returned.
    * When `/start` accepts the upload but its reply cannot be read, the status
@@ -280,29 +307,29 @@ export const onboardingService = {
    * @param file - The CSV file.
    * @param participantType - Domain of the rows.
    * @param attestation - Whether the coordinator accepted the attestation.
+   * @param maxBytes - The size limit from the aggregator config; when unknown, the limit in the api's upload reply applies.
    * @returns The upload id and status.
+   * @throws {BulkUploadEmptyError} If the file is empty.
+   * @throws {BulkUploadTooLargeError} If the file is larger than the limit.
    * @throws {BulkUploadStartUnreadError} If `/start` accepted the upload and its status could not be read.
-   * @throws {Error} If the S3 upload or an API call fails.
+   * @throws {Error} If the storage upload or an API call fails.
    */
   async uploadCsv(
     file: File,
     participantType: string,
     attestation: boolean,
+    maxBytes?: number,
   ): Promise<{
     uploadId: string;
     status: BulkUploadStatus;
     duplicate?: boolean;
     message?: string;
   }> {
+    if (file.size === 0) throw new BulkUploadEmptyError();
+    if (maxBytes !== undefined && file.size > maxBytes) throw new BulkUploadTooLargeError(maxBytes);
     const presigned = await this.createBulkUpload(participantType);
-    const put = await fetch(presigned.upload_url, {
-      method: 'PUT',
-      body: file,
-      headers: { 'Content-Type': presigned.content_type },
-    });
-    if (!put.ok) {
-      throw new Error(`S3 PUT failed (${put.status}): ${await put.text().catch(() => '')}`);
-    }
+    if (file.size > presigned.max_bytes) throw new BulkUploadTooLargeError(presigned.max_bytes);
+    await uploadFile(file, presigned);
     let status: BulkUploadStartResult;
     try {
       status = await this.startBulkUpload(presigned.upload_id, attestation);
@@ -331,6 +358,27 @@ export const onboardingService = {
     return out;
   },
 };
+
+/** Sends the file as the api's upload instructions say, or to `upload_url` on older api builds. */
+async function uploadFile(file: File, created: BulkUploadCreateResponse): Promise<void> {
+  const { upload } = created;
+  let res: Response;
+  if (!upload) {
+    res = await fetch(created.upload_url, {
+      method: 'PUT',
+      body: file,
+      headers: { 'Content-Type': created.content_type },
+    });
+  } else if (upload.method === 'POST') {
+    const form = new FormData();
+    for (const [name, value] of Object.entries(upload.form_fields)) form.append(name, value);
+    form.append('file', file);
+    res = await fetch(upload.url, { method: 'POST', body: form, headers: upload.headers });
+  } else {
+    res = await fetch(upload.url, { method: 'PUT', body: file, headers: upload.headers });
+  }
+  if (!res.ok) throw new Error(`File upload failed (${res.status})`);
+}
 
 /**
  * Reads the status of an upload that `/start` accepted.

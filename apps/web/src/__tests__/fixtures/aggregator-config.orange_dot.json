@@ -220,5 +220,6 @@
   "signals_ui_urls": {},
   "features": {
     "custom_roles": false
-  }
+  },
+  "bulk_upload_max_bytes": 10485760
 }

@@ -2,23 +2,23 @@
  * Bulk finaliser: writes the run summary for a bulk upload in the worker app.
  *
  * Steps:
- *   1. Read row errors from `bu:{id}:errors` and write errors.csv to S3
+ *   1. Read row errors from `bu:{id}:errors` and write errors.csv to object storage
  *      (original header columns + error_category + error_reason).
  *   2. Mark the upload completed and insert the onboarding rollup row.
  *   3. Delete the `bu:{id}:*` Redis keys after the DB writes succeed.
  *
- * Idempotent: the jobId `${uploadId}__finalise` dedups triggers, the S3 key is
+ * Idempotent: the jobId `${uploadId}__finalise` dedups triggers, the storage key is
  * fixed, and the onboarding insert is skipped if the row already exists.
  */
 
 import { and, eq } from 'drizzle-orm';
 import Papa from 'papaparse';
 import { z } from 'zod';
+import { buildKey, getObjectStorage } from '@aggregator-dpg/object-storage';
 import { type BulkFinaliseJob, bulkRedisKeys } from '@aggregator-dpg/queue';
 import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 import { schema, getDb } from '../db.js';
 import { getRedis } from '../services/redis.js';
-import { putObject } from '../object-storage.js';
 import { logger } from '../logger.js';
 import { CSV_FIELD_DELIMITER } from './bulk-file-stream.js';
 
@@ -121,13 +121,18 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
       ];
     });
     const csvBody = Papa.unparse({ fields: csvHeader, data: csvRows });
-    errorsKey = `bulk-uploads/${job.uploadId}/errors.csv`;
+    errorsKey = buildKey('bulk-uploads', upload.userId, job.uploadId, 'errors.csv');
     try {
-      await putObject(errorsKey, Buffer.from(csvBody, 'utf8'), 'text/csv');
+      const put = await getObjectStorage().put({
+        ref: { area: 'bulk-uploads', key: errorsKey },
+        body: Buffer.from(csvBody, 'utf8'),
+        contentType: 'text/csv',
+      });
+      if (!put.success) throw put.error;
     } catch (err) {
       log.error({
         status: 'failure',
-        sub: 's3.put',
+        sub: 'storage.put',
         error: errorMessage(err),
         error_type: errorType(err),
       });
@@ -143,7 +148,7 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
       .update(schema.bulkUploads)
       .set({
         status: 'completed',
-        errorsCsvS3Key: errorsKey,
+        errorsCsvStorageKey: errorsKey,
         completedAt,
         lastProgressAt: completedAt,
         updatedAt: completedAt,

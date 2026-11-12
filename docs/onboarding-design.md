@@ -83,12 +83,12 @@ All `participants` writes are **synchronous** at the boundary that owns each sou
 
 ## 1. Bulk Upload
 
-CSV-driven, async, signed-URL S3 upload, worker-fanout processing.
+CSV-driven, async, signed-URL upload, worker-fanout processing.
 
 ### Flow
 
 ```
- User              Web             API (Fastify)        S3 (MinIO)     Worker (BullMQ)
+ User              Web             API (Fastify)        Object storage (S3/MinIO)  Worker (BullMQ)
    │                │                    │                   │                │
    │ click "Upload" │                    │                   │                │
    │ select CSV     │                    │                   │                │
@@ -96,13 +96,13 @@ CSV-driven, async, signed-URL S3 upload, worker-fanout processing.
    │                │  uploads           │                   │                │
    │                │ ─────────────────► │ insert bulk_uploads                │
    │                │                    │ (status=pending)  │                │
-   │                │ ◄──signed PUT URL  │                   │                │
+   │                │ ◄──signed upload   │                   │                │
    │                │                                        │                │
-   │                │ ──── PUT raw.csv ─────────────────────►│                │
-   │                │ ◄────── 200 OK (ETag) ─────────────────│                │
+   │                │ ── signed POST raw.csv ───────────────►│                │
+   │                │ ◄────── 204 No Content ────────────────│                │
    │                │                                                         │
    │                │ POST /:id/start    │                                    │
-   │                │ ─────────────────► │ HEAD object (verify ETag)          │
+   │                │ ─────────────────► │ stat object (size, fingerprint)    │
    │                │                    │ status=uploaded   │                │
    │                │                    │ enqueue file-process ─────────────►│
    │                │ ◄──202 + status    │                   │                │
@@ -121,7 +121,7 @@ CSV-driven, async, signed-URL S3 upload, worker-fanout processing.
    │                │                                                         │
    │                │                                                         │ finalise:
    │                │                                                         │  status=completed
-   │                │                                                         │  errors.csv → S3
+   │                │                                                         │  errors.csv → object storage
    │ ◄──"done"──────│ GET /:id returns status=completed                       │
    │   show errors  │                                                         │
    │   if any       │                                                         │
@@ -132,7 +132,7 @@ CSV-driven, async, signed-URL S3 upload, worker-fanout processing.
 | Method | Path                              | Purpose                                               |
 | ------ | --------------------------------- | ----------------------------------------------------- |
 | GET    | `/v1/bulk-uploads/template`       | Download CSV header template for a participant_type   |
-| POST   | `/v1/bulk-uploads`                | Reserve row + signed S3 PUT URL                       |
+| POST   | `/v1/bulk-uploads`                | Reserve row + signed upload URL                       |
 | POST   | `/v1/bulk-uploads/:id/start`      | HEAD object → confirm upload → enqueue File Processor |
 | GET    | `/v1/bulk-uploads`                | List per-aggregator uploads (status, counters)        |
 | GET    | `/v1/bulk-uploads/:id`            | Single status read for UI polling                     |
@@ -146,7 +146,7 @@ All endpoints scope by `aggregator_id` JWT claim. Cross-aggregator access → 40
 | ------------------- | ----------------------- | --------------------------------------------------------------------------- |
 | `bulk-file-process` | `/start` enqueues       | Download CSV, parse, schema-validate, fan out row jobs                      |
 | `bulk-row-process`  | Per row                 | Upsert `participants` row (dedup on agg+type+participant_id), bump counters |
-| `bulk-finalise`     | When `processed==total` | Status=`completed`/`failed`, write errors.csv to S3                         |
+| `bulk-finalise`     | When `processed==total` | Status=`completed`/`failed`, write errors.csv to object storage             |
 
 ### `bulk_uploads` state machine
 
@@ -170,7 +170,7 @@ Aggregator creates a public link (with QR PNG); the participant fills a public f
 ### Flow
 
 ```
-Aggregator           API                  S3              Public user            Worker
+Aggregator           API                  Storage         Public user            Worker
     │                 │                    │                   │                    │
     │ POST /v1/links/ │                    │                   │                    │
     │  create         │                    │                   │                    │
@@ -221,7 +221,7 @@ Aggregator           API                  S3              Public user           
 
 | Method | Path                       | Purpose                                                |
 | ------ | -------------------------- | ------------------------------------------------------ |
-| POST   | `/v1/links/create`         | Create link (draft) + generate QR PNG to S3            |
+| POST   | `/v1/links/create`         | Create link (draft) + generate QR PNG to storage       |
 | GET    | `/v1/links`                | List links scoped to aggregator with rolled-up metrics |
 | GET    | `/v1/links/:id`            | Single link + signed QR URL                            |
 | POST   | `/v1/links/:id/activate`   | draft → live (idempotent)                              |
@@ -252,7 +252,7 @@ https://<portal>/r/<org_slug>/<link_slug>
 
 ### QR PNG
 
-- Key: `qr/<aggregator_id>/<link_id>.png` in S3.
+- Key: `qr/<aggregator_id>/<link_id>.png` in object storage.
 - Generated once at link create. Returned via short-lived signed GET URL on every read (never embedded inline).
 - Same key reused on re-issue → idempotent.
 
@@ -301,7 +301,7 @@ Dashboard queries `onboarding` only — no joins across `link_submissions` + `bu
 | `participants`       |  ✓   |  ✓   | Dedup'd unified roster. Bulk: `bulk-row-process` worker. Link: API public POST handler (sync UPSERT). |
 | `onboarding`         |  ✓   |  ✓   | Unified metrics rollup. Bulk: `bulk-finalise`. Link: `link-metrics-rollup` cron (metrics-only).       |
 
-S3 keys:
+Object keys:
 
 | Path                                                  | Path of                             |
 | ----------------------------------------------------- | ----------------------------------- |
@@ -448,7 +448,7 @@ Constraints:
 
 - **Aggregator endpoints** require approved JWT; every row write filters by `aggregator_id` claim — cross-tenant access is structurally impossible.
 - **Public endpoints** scope by `(org_slug, link_slug)` lookup and require `status='live'` + `expires_at` check. No auth, but rate-limited per IP.
-- **Signed S3 URLs** are content-type + size constrained at sign time (PUT) and short-TTL (5 min default) for GET.
+- **Signed URLs** are content-type + size constrained at sign time (PUT) and short-TTL (5 min default) for GET.
 - Phone / email never logged. Submission body redacted at the logger boundary.
 
 ---
@@ -463,7 +463,7 @@ apps/api/src/routes/
   onboarding.ts                      metrics read endpoints
 
 apps/api/src/services/
-  object-storage/                    S3 client + signed URL helpers
+  packages/object-storage            storage interface, S3 provider, signed URLs
   bulk-uploads-store/                Drizzle repo for bulk_uploads
   registration-links-store/          Drizzle repo for registration_links
   bulk-queue/                        BullMQ producer (enqueueBulkFileProcess)

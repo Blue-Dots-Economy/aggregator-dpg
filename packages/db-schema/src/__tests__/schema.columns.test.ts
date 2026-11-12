@@ -105,11 +105,11 @@ describe('bulk_uploads columns', () => {
     expect(bulkUploads.participantType.name).toBe('participant_type');
     expect(bulkUploads.participantType.notNull).toBe(true);
 
-    expect(bulkUploads.s3Key.name).toBe('s3_key');
-    expect(bulkUploads.s3Key.notNull).toBe(true);
+    expect(bulkUploads.storageKey.name).toBe('s3_key');
+    expect(bulkUploads.storageKey.notNull).toBe(true);
     // ETag is NULL while status='pending' — cannot be notNull.
-    expect(bulkUploads.s3Etag.name).toBe('s3_etag');
-    expect(bulkUploads.s3Etag.notNull).toBe(false);
+    expect(bulkUploads.contentFingerprint.name).toBe('s3_etag');
+    expect(bulkUploads.contentFingerprint.notNull).toBe(false);
 
     expect(bulkUploads.status.name).toBe('status');
     expect(bulkUploads.status.notNull).toBe(true);

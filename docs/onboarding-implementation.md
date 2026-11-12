@@ -46,7 +46,7 @@ Asymmetric API stance is intentional: API stays lightweight for bulk (the volume
 ┌───────────────────────────┐                 ┌──────────────────────────────┐
 │  SOURCE A — BULK UPLOAD   │                 │  SOURCE B — REGISTRATION LINK │
 │                           │                 │                              │
-│  Browser → S3 (PUT)       │                 │  Browser → BFF → API         │
+│  Browser → storage (PUT)  │                 │  Browser → BFF → API         │
 │  Browser → API: /start    │                 │  POST /public/v1/            │
 │                           │                 │   registrations/create/{slug}│
 │  ─ API writes bulk_upload │                 │                              │
@@ -70,7 +70,7 @@ Asymmetric API stance is intentional: API stays lightweight for bulk (the volume
 │             │              │                 │ - mark rolled_up_at        │
 │             ▼              │                 └────────────┬───────────────┘
 │  Finalise (inline):        │                              │
-│  - errors.csv → S3         │                              │
+│  - errors.csv → storage    │                              │
 │  - INSERT onboarding row   │                              │
 │  - DEL Redis               │                              │
 └─────────────┬──────────────┘                              │
@@ -92,17 +92,17 @@ JSON Schema is a configuration resource the API and workers load at startup. Not
 
 ## 3. Source A — Bulk CSV Upload
 
-### 3.1 Browser → S3
+### 3.1 Browser → object storage
 
-1. API issues a pre-signed S3 PUT URL with constraints baked in: `Content-Type: text/csv`, `Content-Length-Range: 0..10MB`, TTL 15 minutes.
-2. Browser uploads CSV directly to S3.
-3. Browser calls `POST /v1/bulk-uploads/:id/start`. API HEADs the S3 object, captures the ETag, transitions `bulk_upload.status = 'uploaded'`, and enqueues a `bulk-file-process` job.
+1. API issues a pre-signed upload URL with constraints baked in: `Content-Type: text/csv`, `Content-Length-Range: 0..10MB`, TTL 15 minutes.
+2. Browser uploads CSV directly to object storage.
+3. Browser calls `POST /v1/bulk-uploads/:id/start`. API checks the stored object, captures the ETag, transitions `bulk_upload.status = 'uploaded'`, and enqueues a `bulk-file-process` job.
 
 ### 3.2 File Processor (Worker 1)
 
 File-level checks only. One job per upload.
 
-1. Download CSV from S3.
+1. Download CSV from object storage.
 2. Detect BOM and reject non-UTF-8 with reason `encoding_unsupported`.
 3. Parse header row; validate against active schema for `participant_type`. Reject with reason `header_mismatch` if required columns missing or unknown columns present.
 4. Pin `bulk_upload.schema_id` + `schema_version` for this run.
@@ -129,14 +129,14 @@ Per-row processing. Many jobs per upload, processed in parallel.
 
 Triggered once per upload via the dedicated `bulk-finalise` queue.
 
-1. `HSCAN bu:{id}:errors` (cursor-based, memory-bounded) → stream into `errors.csv` on S3 multipart upload. Key: `bulk-uploads/{upload_id}/errors.csv` (deterministic; replay overwrites identical bytes).
+1. `HSCAN bu:{id}:errors` (cursor-based, memory-bounded) → stream into `errors.csv` as a multipart upload. Key: `bulk-uploads/{aggregator_id}/{upload_id}/errors.csv` (deterministic; replay overwrites identical bytes).
 2. CSV format: original CSV header columns + `error_category` + `error_reason`.
 3. UPDATE `bulk_upload`: `status='completed'`, final counters from Redis `counters` HASH, `errors_csv_s3_key`, `completed_at`.
 4. INSERT `onboarding` summary row: `source='bulk', batch_id=upload_id, total/passed/failed/skipped`.
 5. `DEL bu:{upload_id}:*` — clean Redis (only after steps 1-4 succeed).
 6. Emit AUDIT telemetry summarising the run (idempotent on `upload_id`).
 
-Finaliser is its own queue (concurrency 1 per upload) — separated from row processors so a slow S3 multipart write doesn't block a row-worker slot.
+Finaliser is its own queue (concurrency 1 per upload) — separated from row processors so a slow multipart write doesn't block a row-worker slot.
 
 ---
 
@@ -146,7 +146,7 @@ Finaliser is its own queue (concurrency 1 per upload) — separated from row pro
 
 Aggregator creates a link via authenticated API. Stored in `registration_link` (slug, status, context). Status lifecycle: `draft → live → retired`. Only `live` links accept submissions; `draft` 404s, `retired` returns 410 Gone.
 
-QR code is **not persisted** (#650). It is a deterministic function of `public_url`, so the admin UI generates the PNG in the browser (`qrcode`) and downloads it on demand — no S3 write, no presigned URL, no TTL expiry. Activating a link therefore does no object-storage work and never fails on an unreachable bucket. The nullable `qr_object_key` column and the `qr_url`/`qr_expires_at` response fields (always `null`) remain for one release for backward compatibility and will be dropped in a follow-up.
+QR code is **not persisted** (#650). It is a deterministic function of `public_url`, so the admin UI generates the PNG in the browser (`qrcode`) and downloads it on demand — no object storage write, no presigned URL, no TTL expiry. Activating a link therefore does no object-storage work and never fails on an unreachable bucket. The nullable `qr_object_key` column and the `qr_url`/`qr_expires_at` response fields (always `null`) remain for one release for backward compatibility and will be dropped in a follow-up.
 
 ### 4.2 Public Submission (sync API)
 
@@ -199,8 +199,8 @@ Idempotent. Restart-safe via `rolled_up_at IS NULL` filter.
 id                    UUID PK    (= upload_id)
 aggregator_id         UUID FK
 participant_type      seeker | provider
-s3_key                TEXT       (S3 path of original CSV)
-s3_etag               TEXT       (S3 ETag, captured at /start)
+s3_key                TEXT       (storage path of original CSV)
+s3_etag               TEXT       (storage ETag, captured at /start)
 status                pending | uploaded | file_validating | file_failed
                       | row_processing | finalising | completed | failed
 status_reason         TEXT NULL
@@ -334,12 +334,12 @@ All keys namespaced `bu:{upload_id}:`. Link path doesn't use Redis — it's sync
 
 ## 8. Worker Boundaries (concise)
 
-| Worker                 | Inputs                   | Side effects                                                    | Outputs                                 |
-| ---------------------- | ------------------------ | --------------------------------------------------------------- | --------------------------------------- |
-| **File Processor**     | S3 CSV object key        | UPDATE bulk_upload status, schema pin                           | enqueues N row jobs OR terminal failure |
-| **Row Processor**      | per-row payload          | INSERT participant; Redis Lua atomic write                      | enqueues finaliser when last row        |
-| **Finaliser**          | upload_id                | S3 errors.csv; UPDATE bulk_upload; INSERT onboarding; DEL Redis | telemetry                               |
-| **Metrics Aggregator** | new link_submission rows | INSERT onboarding; UPDATE rolled_up_at                          | none                                    |
+| Worker                 | Inputs                   | Side effects                                                            | Outputs                                 |
+| ---------------------- | ------------------------ | ----------------------------------------------------------------------- | --------------------------------------- |
+| **File Processor**     | CSV object key           | UPDATE bulk_upload status, schema pin                                   | enqueues N row jobs OR terminal failure |
+| **Row Processor**      | per-row payload          | INSERT participant; Redis Lua atomic write                              | enqueues finaliser when last row        |
+| **Finaliser**          | upload_id                | errors.csv in storage; UPDATE bulk_upload; INSERT onboarding; DEL Redis | telemetry                               |
+| **Metrics Aggregator** | new link_submission rows | INSERT onboarding; UPDATE rolled_up_at                                  | none                                    |
 
 Schema validation and Ajv compile live in worker bootstrap (not API). API never reads Redis.
 
@@ -395,7 +395,7 @@ Cached via `EVALSHA`. Reload on `NOSCRIPT`.
 | Same CSV uploaded twice                      | `bulk_upload` UNIQUE `(aggregator_id, s3_etag)` — second upload returns existing row                  |
 | Same person twice (any source)               | `participant` UNIQUE `(aggregator_id, participant_id)` + ON CONFLICT DO NOTHING; counted as `skipped` |
 | Multiple processors hit `processed == total` | BullMQ `jobId = ${upload_id}:finalise` — exactly-one finaliser                                        |
-| Finaliser dies mid-write                     | Replay overwrites deterministic S3 key; UPDATE + DEL idempotent                                       |
+| Finaliser dies mid-write                     | Replay overwrites deterministic storage key; UPDATE + DEL idempotent                                  |
 | Reader crash mid-enqueue                     | `total_rows` + `reader_done` set ONLY after all enqueues; finalise can't trigger early                |
 | Redis restart                                | AOF restores keys; `everysec` may lose <1s; row jobs replay safely via Lua dedup                      |
 | Link submission retry                        | Client `Idempotency-Key` header → API caches response 24h                                             |
@@ -409,7 +409,7 @@ All endpoints validate `req.auth.aggregator_id` matches the resource. Mismatch �
 
 ```
 Bulk:
-  POST   /v1/bulk-uploads                       → pre-signed PUT URL
+  POST   /v1/bulk-uploads                       → signed upload instructions
   POST   /v1/bulk-uploads/:id/start             → confirms ETag, enqueues
   GET    /v1/bulk-uploads/:id                   → DB read only
   GET    /v1/bulk-uploads/:id/errors.csv        → pre-signed download (410 if not completed)
@@ -432,12 +432,12 @@ API never reads Redis. Row Processor flushes counters to `bulk_upload` every 500
 
 ## 12. Errors (bulk only)
 
-Single-pipeline: Redis HASH during processing → S3 `errors.csv` at finalisation. No durable Postgres errors table.
+Single-pipeline: Redis HASH during processing → `errors.csv` in object storage at finalisation. No durable Postgres errors table.
 
 | Stage          | Where                                          | Purpose                                    |
 | -------------- | ---------------------------------------------- | ------------------------------------------ |
 | During run     | Redis HASH `bu:{id}:errors` + SET `error_rows` | Fast atomic ingest via Lua                 |
-| At finalise    | S3 `errors.csv`                                | Single artefact for "fix and re-upload" UX |
+| At finalise    | `errors.csv` in storage                        | Single artefact for "fix and re-upload" UX |
 | After finalise | DEL Redis                                      | Cleanup                                    |
 
 Categories:
@@ -470,7 +470,7 @@ Link path has no errors.csv — single submissions return validation/dedup error
 | 0-row CSV                                                        | File Processor rejects; reason `empty_csv`; empty errors.csv materialised             |
 | Row count > `BULK_MAX_ROWS`                                      | File Processor rejects; reason `row_cap_exceeded`                                     |
 | Single row > 64KB                                                | File Processor rejects whole upload; reason `row_size_exceeded`                       |
-| S3 PUT exceeds 10MB or wrong Content-Type                        | S3 rejects directly; client sees signing error                                        |
+| Upload exceeds 10MB or wrong Content-Type                        | Storage rejects directly; client sees signing error                                   |
 | Same CSV re-uploaded                                             | UNIQUE `(aggregator_id, s3_etag)` returns existing `upload_id`                        |
 | Concurrent uploads, same aggregator, overlapping participant_ids | UNIQUE `(aggregator_id, participant_id)` → second batch reports overlaps as `skipped` |
 | Cross-aggregator API access                                      | 403; row-level security as defence-in-depth                                           |
@@ -478,7 +478,7 @@ Link path has no errors.csv — single submissions return validation/dedup error
 | Processing stuck                                                 | Watchdog sweeps `processing/finalising > 30 min stalled` → `failed:processing_stuck`  |
 | Reader crash mid-enqueue                                         | BullMQ retries; row jobIds dedupe; `total_rows` set only after last enqueue           |
 | Processor crash mid-row                                          | Lua atomicity → safe; replay → SADD returns 0 → exit                                  |
-| Finaliser crash mid-write                                        | Job retried; deterministic S3 key overwrites; UPDATE + INSERT idempotent              |
+| Finaliser crash mid-write                                        | Job retried; deterministic storage key overwrites; UPDATE + INSERT idempotent         |
 | Redis crash with AOF lag                                         | <1s of SADD/INCR lost; missing rows replay via BullMQ                                 |
 | Link submit, validation fails                                    | API returns 400 with field-level errors                                               |
 | Link submit, duplicate participant_id                            | API returns 409 with "already registered"                                             |
@@ -498,8 +498,8 @@ Link path has no errors.csv — single submissions return validation/dedup error
 | `registration_link` rows       | Soft-retire; never auto-delete                      | Manual admin action                     |
 | `onboarding` rows              | Forever (rollup data)                               | n/a                                     |
 | `participant` rows             | Forever (manual delete only)                        | n/a                                     |
-| Original CSV in S3             | 30 days                                             | S3 lifecycle on `bulk-uploads/` prefix  |
-| `errors.csv` in S3             | 30 days                                             | Same lifecycle rule                     |
+| Original CSV in object storage | 30 days                                             | S3 lifecycle on `bulk-uploads/` prefix  |
+| `errors.csv` in object storage | 30 days                                             | Same lifecycle rule                     |
 | QR PNGs                        | Not stored (#650) — generated client-side on demand | n/a (no sweep needed)                   |
 
 ### Stuck-job watchdog (hourly cron)
@@ -525,21 +525,21 @@ sweep 2: stalled in-flight
 - One worker for link metrics: **Metrics Aggregator**. Cron + threshold trigger.
 - No chunking at MVP. One BullMQ job per CSV row.
 - Atomic Lua script (`bulk_row_commit.lua`) for SADD + INCR + HSET — closes counter-inflation race.
-- Errors are transient in Redis HASH during run; flushed to S3 `errors.csv` at finalisation. No durable Postgres errors table.
+- Errors are transient in Redis HASH during run; flushed to `errors.csv` in object storage at finalisation. No durable Postgres errors table.
 - `errors.csv` is the only durable error artefact; up to 1s loss tolerated under Redis AOF lag.
 - Mid-run errors not exposed via API. Detailed errors visible only via `errors.csv` download after `status='completed'`.
 - Error categories: `validation`, `normalisation`, `duplicate`, `system_error`. `duplicate` counts as `skipped`.
 - Status reads are DB-only. Row Processor flushes counters every 500 rows.
 - Person dedup is `(aggregator_id, participant_id)` UNIQUE on `participant`. `participant_id` is a schema-required field provided by the data source. Same person can register under different aggregators.
 - `(aggregator_id, s3_etag)` UNIQUE on `bulk_upload` — re-upload idempotency.
-- Pre-signed S3 PUT URL signed with `Content-Type: text/csv`, `Content-Length-Range: 0..10MB`, TTL 15 min.
+- Pre-signed upload URL signed with `Content-Type: text/csv`, `Content-Length-Range: 0..10MB`, TTL 15 min.
 - File Processor validates CSV header against active schema BEFORE enqueueing any row jobs.
 - File Processor pins `schema_id` + `schema_version` on `bulk_upload` at start. Mid-run schema deploys do not affect in-flight uploads.
 - Stuck-job watchdog runs hourly: `pending > 24h → upload_abandoned`; `processing > 30 min stalled → processing_stuck`.
 - Every API endpoint validates JWT `aggregator_id` matches the resource. Postgres row-level security on `bulk_upload`, `participant`, `link_submission`, `onboarding`.
 - Schema fetch and Ajv compile live in worker bootstrap (and API for the link sync path), not in any request hot path otherwise.
 - Redis AOF persistence required (`appendonly yes`, `appendfsync everysec`).
-- QR is derived data (#650): generated client-side from `public_url` on demand, never persisted — activation does no S3 work.
+- QR is derived data (#650): generated client-side from `public_url` on demand, never persisted — activation does no object storage work.
 - Registration links are immutable post-create; status flip (`draft → live → retired`) is the only allowed change.
 - Both bulk and link sources write to the same `participant` table and the same `onboarding` metrics table.
 - `onboarding` rows: bulk = one per upload (Finaliser); link = one per (aggregator, hour-bucket) (Metrics Aggregator UPSERT).
@@ -554,7 +554,7 @@ sweep 2: stalled in-flight
 4. `link_submission` table migration.
 5. `onboarding` table migration.
 6. SchemaLoader + Ajv compile cache (shared package consumed by API and workers).
-7. `POST /v1/bulk-uploads` (pre-signed S3 URL with constraints) and `POST /v1/bulk-uploads/:id/start`.
+7. `POST /v1/bulk-uploads` (pre-signed upload URL with constraints) and `POST /v1/bulk-uploads/:id/start`.
 8. `GET /v1/bulk-uploads/:id` — DB-only status read.
 9. File Processor worker (`bulk-file-process`) — file-level checks, header validation, schema pinning.
 10. `bulk_row_commit.lua` script + EVALSHA wrapper.
@@ -580,8 +580,8 @@ sweep 2: stalled in-flight
 | ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
 | Uploads > 50K rows                                     | Reintroduce chunking (one chunk = 500 rows = one job batch)                            |
 | Many concurrent batches                                | Separate `bulk-row-process` queue per aggregator for fairness                          |
-| Redis memory pressure                                  | Switch to per-worker S3 chunk files concatenated at finalise                           |
-| Audit / regulatory demand for queryable per-row errors | Add durable `bulk_upload_errors` table; Finaliser writes both PG and S3                |
+| Redis memory pressure                                  | Switch to per-worker chunk files in object storage concatenated at finalise            |
+| Audit / regulatory demand for queryable per-row errors | Add durable `bulk_upload_errors` table; Finaliser writes both PG and object storage    |
 | Multi-region                                           | Replicate `bulk_upload`, `participant`, `link_submission`, `onboarding` across regions |
 | Link traffic spike                                     | Move link submission to async (enqueue + poll); BFF holds 3s for fast paths            |
 | QR generation burst                                    | N/A since #650 — QR is generated client-side, no server load                           |

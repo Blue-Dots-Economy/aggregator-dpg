@@ -90,7 +90,7 @@ class ParseFailure extends Error {
  *
  * A leading BOM is stripped.
  *
- * @returns A Transform suitable for piping an S3 object body through.
+ * @returns A Transform suitable for piping a stored object body through.
  */
 export function createUtf8DecodeStream(): Transform {
   // `fatal` throws on malformed input. `stream: true` keeps state so a
@@ -122,7 +122,7 @@ export function createUtf8DecodeStream(): Transform {
  * Checks run in order: encoding, header, empty file, per-row limits.
  * On any failure no rows are returned.
  *
- * @param input - The CSV as a Node byte stream (e.g. an S3 body) or a string.
+ * @param input - The CSV as a Node byte stream (e.g. a storage body) or a string.
  * @param options - Required/allowed columns and the row-count / row-byte caps.
  * @returns `ok` with validated rows + headers, or a typed `failed` result.
  */

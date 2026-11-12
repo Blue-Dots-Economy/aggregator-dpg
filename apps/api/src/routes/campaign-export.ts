@@ -5,7 +5,7 @@
  *
  * Uses the shared submit flow in `../campaign/submit-job.ts`: creates a
  * `campaign_job` with one item per id and enqueues a `campaign-process` job.
- * The worker builds the CSV, uploads it to S3 and emails the link.
+ * The worker builds the CSV, uploads it to object storage and emails the link.
  *
  * Auth is a campaign-manager Bearer token; the aggregator must be active. The
  * recipient is the token's `email` claim, else the aggregator's contact email,

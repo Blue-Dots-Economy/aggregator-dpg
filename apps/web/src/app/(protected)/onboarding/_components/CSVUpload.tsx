@@ -10,10 +10,14 @@ import { I } from '../../../../icons';
 import { useBulkUpload, useRecentBulkUploads } from '../../../../hooks/useOnboarding';
 import { useActiveDomain } from '../../../../hooks/useActiveDomain';
 import { useRequestErrorText } from '@/hooks/useRequestErrorText';
+import { useAggregatorConfig } from '@/hooks/useAggregatorConfig';
+import { HttpError } from '@/services/http';
 import { DomainSelect } from '../../../../components/ui/DomainSelect';
 import type { BulkUploadStatus } from '../../../../services/onboarding.service';
 import {
+  BulkUploadEmptyError,
   BulkUploadStartUnreadError,
+  BulkUploadTooLargeError,
   onboardingService,
 } from '../../../../services/onboarding.service';
 import type { BulkAttestationContent } from '../../../../lib/bulk-attestation.server';
@@ -54,6 +58,7 @@ export interface CSVUploadProps {
 export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
   const t = useTranslations('onboarding');
   const requestErrorText = useRequestErrorText();
+  const aggregatorConfig = useAggregatorConfig();
   const [attested, setAttested] = useState(false);
   // Participant type: the active domain. Empty until the profile loads; the
   // API checks it against the domains the coordinator serves.
@@ -106,6 +111,7 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
         file: pickedFile,
         participantType,
         attestation: true,
+        maxBytes: aggregatorConfig.data?.bulk_upload_max_bytes,
       });
       setPickedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -130,11 +136,23 @@ export function CSVUpload({ attestation = null }: CSVUploadProps = {}) {
         recent.refetch();
         return;
       }
+      if (err instanceof BulkUploadEmptyError) {
+        setUploadError(t('csv.empty'));
+        return;
+      }
+      if (err instanceof BulkUploadTooLargeError) {
+        setUploadError(
+          t('csv.too_large', { maxMb: Math.round((err.maxBytes / 1048576) * 10) / 10 }),
+        );
+        return;
+      }
       setUploadError(
         uploadErrorText(
           err,
           t('csv.reply_unreadable'),
-          requestErrorText(err, t('csv.upload_failed')),
+          isRateLimited(err)
+            ? t('csv.rate_limited')
+            : requestErrorText(err, t('csv.upload_failed')),
         ),
       );
     }
@@ -348,14 +366,21 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
   const format = useFormatter();
   const can = useCan();
   const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const onDownloadErrors = async () => {
     setDownloading(true);
+    setDownloadError(null);
     try {
       const res = await onboardingService.errorsCsvUrl(upload.upload_id);
       window.open(res.url, '_blank', 'noopener,noreferrer');
     } catch (err) {
       console.warn('errors download failed', err);
+      setDownloadError(
+        err instanceof HttpError && err.status === 404
+          ? t('csv.recent.errors_unavailable')
+          : t('csv.recent.errors_download_failed'),
+      );
     } finally {
       setDownloading(false);
     }
@@ -405,15 +430,22 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
         {upload.status === 'completed' && upload.failed > 0 && upload.errors_csv_s3_key ? (
           // The report carries submitted contact data: PII Access only.
           can('profiles.view_pii') ? (
-            <button
-              type="button"
-              onClick={onDownloadErrors}
-              disabled={downloading}
-              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-(--bd-primary-50) text-primary-600 font-semibold hover:bg-(--bd-primary-100) disabled:opacity-60"
-            >
-              <I.download size={12} />
-              {downloading ? t('csv.recent.signing') : 'errors.csv'}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={onDownloadErrors}
+                disabled={downloading}
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-[8px] bg-(--bd-primary-50) text-primary-600 font-semibold hover:bg-(--bd-primary-100) disabled:opacity-60"
+              >
+                <I.download size={12} />
+                {downloading ? t('csv.recent.signing') : 'errors.csv'}
+              </button>
+              {downloadError && (
+                <span role="alert" className="block mt-1 text-rose-600 leading-snug max-w-[240px]">
+                  {downloadError}
+                </span>
+              )}
+            </>
           ) : (
             <span className="text-ink-300">—</span>
           )
@@ -432,6 +464,15 @@ function UploadRow({ upload }: { upload: BulkUploadStatus }) {
       </td>
     </tr>
   );
+}
+
+/**
+ * Whether the api refused the call because the coordinator reached the upload limit.
+ *
+ * @param err - The failure.
+ */
+function isRateLimited(err: unknown): boolean {
+  return err instanceof HttpError && err.code === 'RATE_LIMITED';
 }
 
 /**

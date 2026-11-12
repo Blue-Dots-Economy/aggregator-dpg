@@ -3,17 +3,20 @@
  *
  * `finaliseBulk` is a queue-consumer job that touches Postgres (via a
  * hand-built chainable Drizzle stub, matching the pattern already used by
- * `bulk-file-process.test.ts`), Redis (counters/errors/lines HASHes), and S3
- * (errors.csv upload). All three are faked here — no real DB/Redis/S3 in this
+ * `bulk-file-process.test.ts`), Redis (counters/errors/lines HASHes), and object storage
+ * (errors.csv upload). All three are faked here — no real DB/Redis/storage in this
  * suite. Covers: normal completion (with and without a failed-row errors.csv),
  * every idempotency short-circuit, the idempotent-onboarding-exists replay,
- * and S3 failure propagation.
+ * and storage failure propagation.
  *
  * @module @aggregator-dpg/worker
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Papa from 'papaparse';
+import { FakeObjectStorage } from '@aggregator-dpg/object-storage/testing';
+import { _setObjectStorage } from '@aggregator-dpg/object-storage';
+import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 
 // ─── Mutable fixtures read by the mocked db/redis/object-storage below ──────
 
@@ -106,10 +109,17 @@ function makeRedis() {
 
 vi.mock('../services/redis.js', () => ({ getRedis: () => makeRedis() }));
 
-// ─── Object storage (S3) fake ────────────────────────────────────────────────
+const fake = new FakeObjectStorage();
+const putSpy = vi.spyOn(fake, 'put');
+const ERRORS_REF = { area: 'bulk-uploads', key: 'bulk-uploads/agg-1/up-1/errors.csv' } as const;
 
-const putObject = vi.fn(async (_key: string, _body: Buffer, _contentType: string) => undefined);
-vi.mock('../object-storage.js', () => ({ putObject }));
+function errorsCsv(): string {
+  return fake.read(ERRORS_REF)!.toString('utf8');
+}
+const logError = vi.hoisted(() => vi.fn());
+vi.mock('../logger.js', () => ({
+  logger: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: logError }) },
+}));
 
 // ─── Config (only pulled in transitively via logger.js) ─────────────────────
 
@@ -123,6 +133,8 @@ const JOB = { uploadId: 'up-1' };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  fake.delete(ERRORS_REF);
+  _setObjectStorage(fake);
   uploadRow = {
     upload: {
       id: 'up-1',
@@ -141,7 +153,6 @@ beforeEach(() => {
   headersJson = null;
   hmgetReturn = [];
   delCalls.length = 0;
-  putObject.mockResolvedValue(undefined);
 });
 
 describe('finaliseBulk — idempotency short-circuits', () => {
@@ -183,8 +194,8 @@ describe('finaliseBulk — normal completion', () => {
 
     expect(res).toEqual({ status: 'completed', total: 3, passed: 3, failed: 0, skipped: 0 });
     expect(outsideTxUpdates[0]).toMatchObject({ status: 'finalising' });
-    expect(putObject).not.toHaveBeenCalled();
-    expect(txUpdates[0]).toMatchObject({ status: 'completed', errorsCsvS3Key: null });
+    expect(fake.read(ERRORS_REF)).toBeUndefined();
+    expect(txUpdates[0]).toMatchObject({ status: 'completed', errorsCsvStorageKey: null });
     expect(insertedOnboarding).toHaveLength(1);
     expect(insertedOnboarding[0]).toMatchObject({
       userId: 'agg-1',
@@ -217,11 +228,10 @@ describe('finaliseBulk — normal completion', () => {
     const res = await finaliseBulk(JOB);
 
     expect(res).toEqual({ status: 'completed', total: 2, passed: 1, failed: 1, skipped: 0 });
-    expect(putObject).toHaveBeenCalledTimes(1);
-    const [key, body, contentType] = putObject.mock.calls[0]!;
-    expect(key).toBe('bulk-uploads/up-1/errors.csv');
-    expect(contentType).toBe('text/csv');
-    const csv = (body as Buffer).toString('utf8');
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ ref: ERRORS_REF, contentType: 'text/csv' }),
+    );
+    const csv = errorsCsv();
     expect(csv).toContain('name');
     expect(csv).toContain('email');
     expect(csv).toContain('error_category');
@@ -230,7 +240,7 @@ describe('finaliseBulk — normal completion', () => {
     expect(csv).toContain('bad email');
     expect(txUpdates[0]).toMatchObject({
       status: 'completed',
-      errorsCsvS3Key: 'bulk-uploads/up-1/errors.csv',
+      errorsCsvStorageKey: 'bulk-uploads/agg-1/up-1/errors.csv',
     });
   });
 
@@ -262,8 +272,8 @@ describe('finaliseBulk — normal completion', () => {
     expect(res.failed).toBe(1);
     // The single error record was malformed and dropped, so no row_index to
     // hmget for — indices is empty and hmget must not be called at all.
-    expect(putObject).toHaveBeenCalledTimes(1);
-    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    expect(fake.read(ERRORS_REF)).toBeDefined();
+    const csv = errorsCsv();
     // No stashed headers -> only the two synthetic columns appear.
     expect(csv.split('\n')[0]!.trim()).toBe('error_category,error_reason');
   });
@@ -289,7 +299,7 @@ describe('finaliseBulk — normal completion', () => {
     const res = await finaliseBulk(JOB);
 
     expect(res.status).toBe('completed');
-    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const csv = errorsCsv();
     const lines = csv.trim().split('\n');
     expect(lines).toHaveLength(2);
     expect(lines[1]!.trim()).toBe('Asha,,bad phone');
@@ -311,7 +321,7 @@ describe('finaliseBulk — normal completion', () => {
 
     const res = await finaliseBulk(JOB);
     expect(res.failed).toBe(1);
-    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const csv = errorsCsv();
     const dataLine = csv.split('\n')[1]!;
     // name,email,city(padded-empty),error_category,error_reason
     expect(dataLine).toBe('Asha,asha@x.io,,validation,missing city');
@@ -334,7 +344,7 @@ describe('finaliseBulk — normal completion', () => {
     ];
 
     await finaliseBulk(JOB);
-    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const csv = errorsCsv();
     const [cells] = Papa.parse<string[]>(csv.split('\n')[1]!, { delimiter: ',' }).data;
     expect(cells).toEqual([
       'Asha',
@@ -354,7 +364,7 @@ describe('finaliseBulk — normal completion', () => {
     hmgetReturn = [JSON.stringify(['Asha', 'extra'])];
 
     await finaliseBulk(JOB);
-    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const csv = errorsCsv();
     const [cells] = Papa.parse<string[]>(csv.split('\n')[1]!, { delimiter: ',' }).data;
     expect(cells!.slice(0, 2)).toEqual(['Asha', 'v']);
     expect(cells![2]).toMatch(/^bad; row has 2 cells but the header has 1 columns/);
@@ -378,7 +388,7 @@ describe('finaliseBulk — normal completion', () => {
     hmgetReturn = ['Asha,Blindness|Deaf|Low Vision|Dwarfism|Hemophilia|Thalassemia,Basti'];
 
     await finaliseBulk(JOB);
-    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const csv = errorsCsv();
     expect(csv.split('\n')[1]!.trim()).toBe(
       'Asha,Blindness|Deaf|Low Vision|Dwarfism|Hemophilia|Thalassemia,Basti,validation,bad category',
     );
@@ -399,7 +409,7 @@ describe('finaliseBulk — normal completion', () => {
     hmgetReturn = ['Asha,Basti,extra one,extra two'];
 
     await finaliseBulk(JOB);
-    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const csv = errorsCsv();
     const [cells] = Papa.parse<string[]>(csv.split('\n')[1]!, { delimiter: ',' }).data;
     expect(cells).toHaveLength(4);
     expect(cells!.slice(0, 3)).toEqual(['Asha', 'Basti', 'validation']);
@@ -419,7 +429,7 @@ describe('finaliseBulk — normal completion', () => {
 
     const res = await finaliseBulk(JOB);
     expect(res.failed).toBe(1);
-    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const csv = errorsCsv();
     // The raw cell value is preserved but prefixed with a quote so a
     // spreadsheet app renders it as inert text, not a formula.
     expect(csv).toContain(`'=SUM(A1:A10)`);
@@ -435,7 +445,7 @@ describe('finaliseBulk — normal completion', () => {
 
     const res = await finaliseBulk(JOB);
     expect(res.failed).toBe(1);
-    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const csv = errorsCsv();
     expect(csv.split('\n')[0]!.trim()).toBe('error_category,error_reason');
   });
 
@@ -448,7 +458,7 @@ describe('finaliseBulk — normal completion', () => {
 
     const res = await finaliseBulk(JOB);
     expect(res.failed).toBe(1);
-    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const csv = errorsCsv();
     expect(csv.split('\n')[0]!.trim()).toBe('error_category,error_reason');
   });
 
@@ -462,7 +472,7 @@ describe('finaliseBulk — normal completion', () => {
 
     const res = await finaliseBulk(JOB);
     expect(res.failed).toBe(2);
-    const csv = (putObject.mock.calls[0]![1] as Buffer).toString('utf8');
+    const csv = errorsCsv();
     // No header was stashed, so only the error columns are written — one line
     // per failure from BOTH cursor pages. (This used to print `row0,x`: the raw
     // cell displaced the category and the reason fell off the end.)
@@ -472,14 +482,17 @@ describe('finaliseBulk — normal completion', () => {
 });
 
 describe('finaliseBulk — failure propagation', () => {
-  it('re-throws (does not swallow) an S3 put failure and never reaches the completion transaction', async () => {
+  it('re-throws (does not swallow) a storage put failure and never reaches the completion transaction', async () => {
     counters = { passed: '0', failed: '1', skipped: '0' };
     hscanPages = [
       ['0', ['err-0', JSON.stringify({ row_index: 0, reasons: ['bad'], error_category: 'x' })]],
     ];
-    putObject.mockRejectedValueOnce(new Error('s3 unreachable'));
+    fake.failNext('put', new UpstreamError('storage unreachable'));
 
-    await expect(finaliseBulk(JOB)).rejects.toThrow('s3 unreachable');
+    await expect(finaliseBulk(JOB)).rejects.toThrow('storage unreachable');
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({ sub: 'storage.put', error: 'storage unreachable' }),
+    );
     expect(txUpdates).toHaveLength(0);
     expect(insertedOnboarding).toHaveLength(0);
   });

@@ -19,6 +19,7 @@ import {
   type CronWatchdogJob,
   type LinkMetricsRollupJob,
 } from '@aggregator-dpg/queue';
+import { initObjectStorage } from '@aggregator-dpg/object-storage';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { closeDb } from './db.js';
@@ -35,6 +36,7 @@ import { startHealthServer } from './health.js';
 import { errorType, toError } from '@aggregator-dpg/shared-primitives/errors';
 
 async function main(): Promise<void> {
+  initObjectStorage(config);
   const connection = getRedis();
   const healthServer = startHealthServer(config.HEALTH_PORT, connection);
   // Consumers this process runs. Unset means all.

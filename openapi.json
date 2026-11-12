@@ -13858,7 +13858,7 @@
         "tags": [
           "bulk-uploads"
         ],
-        "description": "Reserves a pending bulk-upload job for the caller aggregator and returns a pre-signed S3 PUT URL. The browser uploads CSV bytes directly to S3, then calls /start. `participant_type` is validated against the active network config at request time.",
+        "description": "Reserves a pending bulk-upload job for the caller aggregator and returns pre-signed upload instructions. The browser uploads CSV bytes directly to object storage, then calls /start. `participant_type` is validated against the active network config at request time.",
         "requestBody": {
           "required": true,
           "content": {
@@ -13896,8 +13896,44 @@
                     "upload_id": {
                       "type": "string"
                     },
+                    "upload": {
+                      "type": "object",
+                      "properties": {
+                        "method": {
+                          "type": "string",
+                          "enum": [
+                            "PUT",
+                            "POST"
+                          ]
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "headers": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        },
+                        "form_fields": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "url",
+                        "headers",
+                        "form_fields"
+                      ],
+                      "additionalProperties": false
+                    },
                     "upload_url": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "Deprecated: a signed PUT URL without the size limit; follow `upload` instead.",
+                      "deprecated": true
                     },
                     "s3_key": {
                       "type": "string"
@@ -13906,7 +13942,9 @@
                       "type": "string"
                     },
                     "content_type": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "Deprecated: the content type is in `upload`.",
+                      "deprecated": true
                     },
                     "max_bytes": {
                       "type": "number"
@@ -13923,6 +13961,7 @@
                   },
                   "required": [
                     "upload_id",
+                    "upload",
                     "upload_url",
                     "s3_key",
                     "expires_at",
@@ -14199,7 +14238,7 @@
         "tags": [
           "bulk-uploads"
         ],
-        "description": "Paginated list of bulk-upload jobs (newest first) for the caller aggregator.",
+        "description": "Paginated list of bulk-upload jobs (newest first) for the caller aggregator. Uploads that were never started (`pending`, or failed as `upload_abandoned`) are left out.",
         "parameters": [
           {
             "schema": {
@@ -15213,7 +15252,7 @@
         "tags": [
           "bulk-uploads"
         ],
-        "description": "Returns a JSON payload carrying a short-lived pre-signed S3 GET URL for the errors.csv report (rows that failed validation/onboarding with reason + offending fields), plus the final counters. Only available once the upload is completed and at least one row failed.",
+        "description": "Returns a JSON payload carrying a short-lived pre-signed download URL for the errors.csv report (rows that failed validation/onboarding with reason + offending fields), plus the final counters. Only available once the upload is completed and at least one row failed.",
         "parameters": [
           {
             "schema": {
@@ -15498,6 +15537,57 @@
             }
           },
           "410": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "500": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -20954,6 +21044,11 @@
                         "custom_roles"
                       ],
                       "additionalProperties": false
+                    },
+                    "bulk_upload_max_bytes": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0
                     }
                   },
                   "required": [
@@ -20963,7 +21058,8 @@
                     "domains",
                     "registration_modes",
                     "signals_ui_urls",
-                    "features"
+                    "features",
+                    "bulk_upload_max_bytes"
                   ],
                   "additionalProperties": false
                 }

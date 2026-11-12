@@ -31,6 +31,7 @@ import {
   loadEmailMessageOverrides,
   assertMessagesComplete,
 } from './services/email-templates/messages.js';
+import { initObjectStorage } from '@aggregator-dpg/object-storage';
 import { errorMessage, errorType } from '@aggregator-dpg/shared-primitives/errors';
 
 async function main(): Promise<void> {
@@ -43,6 +44,7 @@ async function main(): Promise<void> {
     }
   }
 
+  initObjectStorage(config);
   const app = await buildApp();
 
   // Load the RBAC role snapshot once. No-op with RBAC_MODE=off; otherwise an
