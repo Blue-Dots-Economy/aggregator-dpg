@@ -9,7 +9,6 @@ import {
   buildOrganisation,
 } from '../services/organisation-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
-import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { _setConsentLedger } from '../services/consent-ledger/index.js';
@@ -75,7 +74,6 @@ describe('POST /v1/user/invite/accept', () => {
   let consentLedger: ConsentLedgerFake;
 
   beforeEach(async () => {
-    _resetTokenKey();
     _resetInviteTokenKey();
     _resetJwks();
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);

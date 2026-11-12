@@ -16,7 +16,6 @@ import {
 import { IdpAdminFake, _setIdpAdmin } from '../services/idp-admin/index.js';
 import { UserStoreFake, buildCoordinator, _setUserStore } from '../services/user-store/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
-import { _resetTokenKey } from '../services/approval-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { ConsentLedgerFake } from '@aggregator-dpg/consent-ledger/testing';
 import { randomUUID } from 'node:crypto';
@@ -88,7 +87,6 @@ describe('aggregator-orgs routes', () => {
   }
 
   beforeEach(async () => {
-    _resetTokenKey();
     _resetInviteTokenKey();
     _resetJwks();
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);

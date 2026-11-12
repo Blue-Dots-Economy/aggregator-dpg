@@ -7,20 +7,6 @@
   "routes": [
     {
       "method": "GET",
-      "path": "/admin/v1/aggregator-registrations/read/:id",
-      "access": {
-        "access": "link_token"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/admin/v1/orgs/read/:id",
-      "access": {
-        "access": "link_token"
-      }
-    },
-    {
-      "method": "GET",
       "path": "/health/live",
       "access": {
         "access": "public"
@@ -335,34 +321,6 @@
     },
     {
       "method": "POST",
-      "path": "/admin/v1/aggregator-registrations/decision/:id",
-      "access": {
-        "access": "link_token"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/admin/v1/aggregator-registrations/renew/:id",
-      "access": {
-        "access": "link_token"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/admin/v1/orgs/decision/:id",
-      "access": {
-        "access": "link_token"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/admin/v1/orgs/renew/:id",
-      "access": {
-        "access": "link_token"
-      }
-    },
-    {
-      "method": "POST",
       "path": "/public/v1/aggregators/:orgSlug/registrations/:slug",
       "access": {
         "access": "public"
@@ -440,13 +398,6 @@
     },
     {
       "method": "POST",
-      "path": "/v1/org/decision/:id",
-      "access": {
-        "capability": "orgs.onboard"
-      }
-    },
-    {
-      "method": "POST",
       "path": "/v1/org/invite",
       "access": {
         "capability": "orgs.onboard"
@@ -504,13 +455,6 @@
       "path": "/v1/user/activate",
       "access": {
         "access": "public"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/v1/user/decision/:id",
-      "access": {
-        "capability": "org.manage"
       }
     },
     {

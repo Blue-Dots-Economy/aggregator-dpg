@@ -1,10 +1,9 @@
 /**
  * Invite-token mint and verify (`@aggregator-dpg/api`).
  *
- * Same scheme as `approval-token.ts`: HS256 via `jose`, issuer
- * `aggregator-api`, secret `APPROVAL_TOKEN_SECRET`. The audience
- * `aggregator-invite` stops other tokens sharing the secret from being
- * replayed as invites.
+ * HS256 via `jose`, issuer `aggregator-api`, secret `APPROVAL_TOKEN_SECRET`
+ * (`token-common.ts`). The audience `aggregator-invite` stops other tokens
+ * sharing the secret from being replayed as invites.
  *
  * Claims: `sub` (the `registration_invites` row `jti`), `role`, `org` and
  * `email`, the invited address. Single use is enforced by the DB row's

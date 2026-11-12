@@ -2,8 +2,6 @@
 
 exports[`declared route table > declares every route of the app 1`] = `
 {
-  "GET /admin/v1/aggregator-registrations/read/:id": "link_token",
-  "GET /admin/v1/orgs/read/:id": "link_token",
   "GET /health/live": "public",
   "GET /health/ready": "public",
   "GET /public/v1/aggregators/:orgSlug/links/:slug": "public",
@@ -47,10 +45,6 @@ exports[`declared route table > declares every route of the app 1`] = `
   "PATCH /v1/roles/update/:key": "network.administer (strict)",
   "PATCH /v1/user/metadata/update/:id": "org.manage",
   "POST /admin/v1/aggregator-registrations/cleanup-stale": "service",
-  "POST /admin/v1/aggregator-registrations/decision/:id": "link_token",
-  "POST /admin/v1/aggregator-registrations/renew/:id": "link_token",
-  "POST /admin/v1/orgs/decision/:id": "link_token",
-  "POST /admin/v1/orgs/renew/:id": "link_token",
   "POST /public/v1/aggregators/:orgSlug/registrations/:slug": "public",
   "POST /v1/bulk-uploads": "profiles.onboard",
   "POST /v1/bulk-uploads/:id/start": "profiles.onboard",
@@ -62,7 +56,6 @@ exports[`declared route table > declares every route of the app 1`] = `
   "POST /v1/links/:id/deactivate": "profiles.onboard",
   "POST /v1/links/create": "profiles.onboard",
   "POST /v1/org/access/repair/:id": "orgs.onboard",
-  "POST /v1/org/decision/:id": "orgs.onboard",
   "POST /v1/org/invite": "orgs.onboard",
   "POST /v1/org/invite/accept": "service",
   "POST /v1/org/invite/search": "orgs.onboard",
@@ -71,7 +64,6 @@ exports[`declared route table > declares every route of the app 1`] = `
   "POST /v1/roles/delete/:key": "network.administer (strict)",
   "POST /v1/support": "signed_in",
   "POST /v1/user/activate": "public",
-  "POST /v1/user/decision/:id": "org.manage",
   "POST /v1/user/invite": "org.manage",
   "POST /v1/user/invite/accept": "service",
   "POST /v1/user/invite/search": "org.manage",

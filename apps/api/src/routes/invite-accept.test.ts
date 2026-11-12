@@ -15,7 +15,6 @@ import {
 } from '../services/registration-invites-store/index.js';
 import { IdpAdminFake, _setIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
-import { _resetTokenKey } from '../services/approval-token.js';
 import { mintInviteToken, _resetInviteTokenKey } from '../services/invite-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { _setSubmitRateChecker } from '../services/submit-rate.js';
@@ -96,7 +95,6 @@ describe('invite read and accept routes', () => {
     (res.json() as { error: { code: string } }).error.code;
 
   beforeEach(async () => {
-    _resetTokenKey();
     _resetInviteTokenKey();
     _resetJwks();
     _setSubmitRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));

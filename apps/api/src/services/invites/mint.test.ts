@@ -25,7 +25,6 @@ import {
   buildRegistrationInvite,
 } from '../registration-invites-store/index.js';
 import { _resetInviteTokenKey } from '../invite-token.js';
-import { _resetTokenKey } from '../approval-token.js';
 import { mintInviteBatch, type MintBatchDeps, type InviteRecipient } from './mint.js';
 
 const log = pino({ level: 'silent' }) as unknown as FastifyBaseLogger;
@@ -39,7 +38,6 @@ describe('mintInviteBatch', () => {
 
   beforeEach(() => {
     _resetInviteTokenKey();
-    _resetTokenKey();
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
     invites = new RegistrationInvitesStoreFake();
     mailer = new FakeMailer();

@@ -7,7 +7,6 @@
  *   POST  /v1/user/invite                invite coordinators into an org
  *   POST  /v1/user/invite/search         unused coordinator invites of an org
  *   POST  /v1/user/activate              activate the caller's invited account after an email sign-in
- *   POST  /v1/user/decision/:id          approve / reject a pending coordinator
  *   PATCH /v1/user/metadata/update/:id   change a coordinator's domains
  *
  * Every handler calls `requireActor` first. Only `read/me` admits a
@@ -19,8 +18,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
-  DecisionRequestSchema,
-  DecisionResponseSchema,
   MeResponseSchema,
   UserInviteRequestSchema,
   UserInviteResponseSchema,
@@ -53,7 +50,6 @@ import {
   manageableOrgIds,
   type ScopePurpose,
 } from '../services/authz/manage-scope.js';
-import { decideCoordinator } from '../services/decisions/coordinator.js';
 import { mintInviteBatch } from '../services/invites/mint.js';
 import { searchOpenInvites } from './invite-shared.js';
 import { activateInvitedAccount } from '../services/invites/activate.js';
@@ -67,7 +63,6 @@ import {
   guardWriteRate,
   notifyOwnerOfAdminAction,
   ownerContact,
-  throwDecisionFailure,
   toWireUser,
 } from './console-shared.js';
 import {
@@ -506,59 +501,6 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
           if (outcome.dependency === 'signalstack') throw httpError('SIGNALSTACK_PUSH_FAILED');
           throw httpError('DB_UNAVAILABLE');
       }
-    },
-  );
-
-  app.post(
-    '/v1/user/decision/:id',
-    {
-      config: { rbac: { capability: 'org.manage' } },
-      schema: {
-        tags: ['console'],
-        summary: 'Approve or reject a pending coordinator',
-        description:
-          'The same compare-and-set decision service as the emailed review link. A decision already made answers 409 ALREADY_DECIDED with status, decided_at and decided_by.',
-        params: IdParamsSchema,
-        body: DecisionRequestSchema,
-        response: {
-          200: DecisionResponseSchema,
-          ...errorResponses(400, 401, 403, 404, 409, 429, 502, 503),
-        },
-      },
-    },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof DecisionRequestSchema>;
-      const row = await coordinatorInReach(req, actor, id);
-      await guardWriteRate(actor, reply);
-
-      const outcome = await decideCoordinator({
-        aggregatorId: row.id,
-        decision: body.decision,
-        ...(body.reason ? { reason: body.reason } : {}),
-        decidedBy: actor.userId,
-        requestId: req.id,
-        log: req.log.child({ actor_id: actor.userId }),
-      });
-      if (outcome.kind !== 'decided') throwDecisionFailure(outcome);
-
-      if (row.parentOrgId) {
-        const org = await getOrganisationStore().findById(row.parentOrgId);
-        if (org.ok && org.value) {
-          await notifyOwnerOfAdminAction(
-            actor,
-            org.value,
-            body.decision === 'approve' ? 'approved a coordinator' : 'rejected a coordinator',
-            req.log,
-          );
-        }
-      }
-      return reply.status(200).send({
-        id: row.id,
-        status: body.decision === 'approve' ? 'active' : 'inactive',
-        notified: outcome.notified,
-      });
     },
   );
 

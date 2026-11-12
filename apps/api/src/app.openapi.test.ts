@@ -67,12 +67,10 @@ describe('OpenAPI spec generation', () => {
     }
   });
 
-  it('keeps non-JSON replies schema-free (CSV/HTML exemptions)', () => {
+  it('keeps non-JSON replies schema-free (CSV exemptions)', () => {
     const exempt = [
       ['get', '/v1/bulk-uploads/template'],
       ['get', '/v1/dashboard/export'],
-      ['get', '/admin/v1/aggregator-registrations/read/{id}'],
-      ['post', '/admin/v1/aggregator-registrations/decision/{id}'],
     ] as const;
     for (const [method, path] of exempt) {
       const op = spec.paths[path]?.[method];
