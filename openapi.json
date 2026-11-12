@@ -14238,7 +14238,7 @@
         "tags": [
           "bulk-uploads"
         ],
-        "description": "Paginated list of bulk-upload jobs (newest first) for the caller aggregator.",
+        "description": "Paginated list of bulk-upload jobs (newest first) for the caller aggregator. Uploads that were never started (`pending`, or failed as `upload_abandoned`) are left out.",
         "parameters": [
           {
             "schema": {
@@ -21044,6 +21044,11 @@
                         "custom_roles"
                       ],
                       "additionalProperties": false
+                    },
+                    "bulk_upload_max_bytes": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0
                     }
                   },
                   "required": [
@@ -21053,7 +21058,8 @@
                     "domains",
                     "registration_modes",
                     "signals_ui_urls",
-                    "features"
+                    "features",
+                    "bulk_upload_max_bytes"
                   ],
                   "additionalProperties": false
                 }

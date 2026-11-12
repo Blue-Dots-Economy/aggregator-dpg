@@ -67,6 +67,9 @@ export abstract class BulkUploadsStoreBase {
   abstract findById(id: string, aggregatorId: string): Promise<StoreResult<BulkUpload | null>>;
   /**
    * Paginated list scoped to one aggregator. Most-recent first.
+   *
+   * Leaves out uploads that never started: `pending` ones, and the ones the
+   * worker's watchdog failed as `upload_abandoned`.
    */
   abstract list(
     aggregatorId: string,

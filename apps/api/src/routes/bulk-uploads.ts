@@ -566,7 +566,8 @@ export async function registerBulkUploadsRoutes(base: FastifyInstance): Promise<
       schema: {
         tags: ['bulk-uploads'],
         summary: 'List bulk-upload jobs',
-        description: 'Paginated list of bulk-upload jobs (newest first) for the caller aggregator.',
+        description:
+          'Paginated list of bulk-upload jobs (newest first) for the caller aggregator. Uploads that were never started (`pending`, or failed as `upload_abandoned`) are left out.',
         security: [{ bearerAuth: [] }],
         querystring: ListBulkUploadsQuerySchema,
         response: {

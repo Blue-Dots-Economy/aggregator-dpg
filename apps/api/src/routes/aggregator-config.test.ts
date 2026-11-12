@@ -201,6 +201,12 @@ describe('GET /v1/aggregator-config', () => {
     expect(body.features).toEqual({ custom_roles: false });
   });
 
+  it('exposes the bulk-upload size limit', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    const body = res.json() as { bulk_upload_max_bytes: number };
+    expect(body.bulk_upload_max_bytes).toBe(config.BULK_UPLOAD_MAX_BYTES);
+  });
+
   it('reports features.custom_roles=true when the flag is on', async () => {
     const prev = config.RBAC_CUSTOM_ROLES_ENABLED;
     config.RBAC_CUSTOM_ROLES_ENABLED = true;

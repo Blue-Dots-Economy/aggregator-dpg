@@ -5,7 +5,7 @@
  * `StoreError` codes.
  */
 
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
 import { bulkUploads, type BulkUploadRow } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
@@ -83,7 +83,11 @@ export class PostgresBulkUploadsStore extends BulkUploadsStoreBase {
     options: ListBulkUploadsOptions,
   ): Promise<StoreResult<ListBulkUploadsResult>> {
     try {
-      const where = eq(bulkUploads.userId, aggregatorId);
+      const where = and(
+        eq(bulkUploads.userId, aggregatorId),
+        ne(bulkUploads.status, 'pending'),
+        or(isNull(bulkUploads.statusReason), ne(bulkUploads.statusReason, 'upload_abandoned')),
+      );
       const [rows, totalRows] = await Promise.all([
         getDb()
           .select()

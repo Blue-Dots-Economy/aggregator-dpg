@@ -160,7 +160,12 @@ class BulkUploadsStoreFake extends BulkUploadsStoreBase {
     const fail = this.takeFailure('list');
     if (fail) return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'db down' } };
     const all = [...this.rows.values()]
-      .filter((r) => r.aggregatorId === aggregatorId)
+      .filter(
+        (r) =>
+          r.aggregatorId === aggregatorId &&
+          r.status !== 'pending' &&
+          r.statusReason !== 'upload_abandoned',
+      )
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     return {
       ok: true,
@@ -1136,7 +1141,7 @@ describe('bulk-uploads routes', () => {
 
     it('200s with per-row counters from the right source per status', async () => {
       store.seed([
-        buildUpload({ id: 'u-pending', aggregatorId: AGG_A, status: 'pending' }),
+        buildUpload({ id: 'u-uploaded', aggregatorId: AGG_A, status: 'uploaded' }),
         buildUpload({ id: 'u-live', aggregatorId: AGG_A, status: 'row_processing' }),
         buildUpload({ id: 'u-done', aggregatorId: AGG_A, status: 'completed' }),
       ]);
@@ -1160,15 +1165,15 @@ describe('bulk-uploads routes', () => {
       expect(body.limit).toBe(10);
       expect(body.offset).toBe(0);
       const byId = new Map(body.items.map((i) => [i.upload_id, i]));
-      expect(byId.get('u-pending')).toMatchObject({ total_rows: null, passed: 0 });
+      expect(byId.get('u-uploaded')).toMatchObject({ total_rows: null, passed: 0 });
       expect(byId.get('u-live')).toMatchObject({ total_rows: 4, passed: 3 });
       expect(byId.get('u-done')).toMatchObject({ total_rows: 10, passed: 8 });
     });
 
     it('only returns uploads scoped to the caller aggregator', async () => {
       store.seed([
-        buildUpload({ id: 'mine', aggregatorId: AGG_A }),
-        buildUpload({ id: 'theirs', aggregatorId: AGG_B }),
+        buildUpload({ id: 'mine', aggregatorId: AGG_A, status: 'completed' }),
+        buildUpload({ id: 'theirs', aggregatorId: AGG_B, status: 'completed' }),
       ]);
       const res = await app.inject({
         method: 'GET',
@@ -1177,6 +1182,27 @@ describe('bulk-uploads routes', () => {
       });
       const body = res.json() as { items: Array<{ upload_id: string }> };
       expect(body.items.map((i) => i.upload_id)).toEqual(['mine']);
+    });
+
+    it('leaves out uploads that were never started', async () => {
+      store.seed([
+        buildUpload({ id: 'never-started', aggregatorId: AGG_A, status: 'pending' }),
+        buildUpload({
+          id: 'abandoned',
+          aggregatorId: AGG_A,
+          status: 'failed',
+          statusReason: 'upload_abandoned',
+        }),
+        buildUpload({ id: 'started', aggregatorId: AGG_A, status: 'uploaded' }),
+      ]);
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/bulk-uploads',
+        headers: AUTH('seeker-approved'),
+      });
+      const body = res.json() as { items: Array<{ upload_id: string }>; total: number };
+      expect(body.items.map((i) => i.upload_id)).toEqual(['started']);
+      expect(body.total).toBe(1);
     });
   });
 

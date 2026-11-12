@@ -14,6 +14,8 @@
  * @module @aggregator-dpg/api
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import { PostgresBulkUploadsStore } from '../postgres.js';
 import { _setDbClients } from '../../../db/client.js';
 import type { BulkUploadRow } from '../../../db/schema.js';
@@ -213,6 +215,25 @@ describe('PostgresBulkUploadsStore.list', () => {
     expect(result.value.total).toBe(2);
     expect(callArgs(captured, 'limit')).toEqual([10]);
     expect(callArgs(captured, 'offset')).toEqual([0]);
+  });
+
+  it('leaves out pending and abandoned uploads', async () => {
+    let where: unknown;
+    const db = makeFakeDb((chain) => {
+      if (hasCall(chain, 'orderBy')) where = callArgs(chain, 'where')?.[0];
+      return [];
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresBulkUploadsStore();
+
+    await store.list('agg-1', { limit: 10, offset: 0 });
+    expect(where).toBeInstanceOf(SQL);
+    if (!(where instanceof SQL)) return;
+    const query = new PgDialect().sqlToQuery(where);
+    expect(query.sql).toContain('"status" <> $');
+    expect(query.params).toContain('pending');
+    expect(query.sql).toContain('"status_reason" is null or');
+    expect(query.params).toContain('upload_abandoned');
   });
 
   it('defaults total to 0 when the count query returns no row', async () => {
