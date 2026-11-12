@@ -3,6 +3,7 @@ export { renderApplicantApproved, type ApplicantApprovedVars } from './applicant
 export { renderApplicantRejected, type ApplicantRejectedVars } from './applicant-rejected.js';
 export { renderOrgOwnerApproved, type OrgOwnerApprovedVars } from './org-owner-approved.js';
 export { renderCoordinatorInvite, type CoordinatorInviteVars } from './coordinator-invite.js';
+export { renderOrgInvite, type OrgInviteVars } from './org-invite.js';
 export {
   renderOrgAlreadyRegistered,
   type OrgAlreadyRegisteredVars,

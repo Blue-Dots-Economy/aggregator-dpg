@@ -2,7 +2,7 @@
  * Postgres registration-invites store (`@aggregator-dpg/api`).
  *
  * Queries `registration_invites` and maps driver errors to `InviteStoreError`
- * codes. The unique index on pending (org_id, email) surfaces as
+ * codes. The unique index on pending (org_id, role, email) surfaces as
  * `DUPLICATE_PENDING`.
  */
 
@@ -14,6 +14,7 @@ import { PG_UNIQUE_VIOLATION, pgErrorCode } from '../../db/pg-error.js';
 import {
   RegistrationInvitesStoreBase,
   type CreateInviteInput,
+  type InviteRole,
   type InviteStoreResult,
   type RefreshInviteInput,
   type RegistrationInvite,
@@ -76,6 +77,7 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
 
   async findPendingByOrgAndEmail(
     parentOrgId: string,
+    role: InviteRole,
     email: string,
   ): Promise<InviteStoreResult<RegistrationInvite | null>> {
     try {
@@ -85,6 +87,7 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
         .where(
           and(
             eq(registrationInvites.orgId, parentOrgId),
+            eq(registrationInvites.role, role),
             eq(registrationInvites.email, email),
             eq(registrationInvites.status, 'pending'),
           ),

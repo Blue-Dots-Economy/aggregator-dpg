@@ -87,7 +87,7 @@ describe('invite mint routes', () => {
     expect(body.invalid).toEqual([]);
     expect(mailer.outbox.length).toBe(2);
     // Invite rows exist and are pending.
-    const a = await invites.findPendingByOrgAndEmail(ORG_ID, 'a@x.org');
+    const a = await invites.findPendingByOrgAndEmail(ORG_ID, 'coordinator', 'a@x.org');
     expect(a.ok && a.value?.status).toBe('pending');
   });
 
@@ -173,7 +173,7 @@ describe('invite mint routes', () => {
     expect(body.recovered).toBe(true);
     expect(body.sent).toBe(0);
     // No invite minted; a fresh grant link mailed to the REGISTERED owner.
-    const a = await invites.findPendingByOrgAndEmail(ORG_ID, 'a@x.org');
+    const a = await invites.findPendingByOrgAndEmail(ORG_ID, 'coordinator', 'a@x.org');
     expect(a.ok && a.value).toBeNull();
     expect(mailer.outbox.length).toBe(1);
     expect(mailer.outbox[0]?.to).toBe('owner@jfc.org');

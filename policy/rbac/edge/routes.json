@@ -182,6 +182,13 @@
     },
     {
       "method": "GET",
+      "path": "/v1/org/invite/read",
+      "access": {
+        "access": "service"
+      }
+    },
+    {
+      "method": "GET",
       "path": "/v1/org/parent/options/:id",
       "access": {
         "capability": "network.administer"
@@ -244,6 +251,13 @@
       "path": "/v1/support/config",
       "access": {
         "access": "signed_in"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v1/user/invite/read",
+      "access": {
+        "access": "service"
       }
     },
     {
@@ -461,6 +475,20 @@
     },
     {
       "method": "POST",
+      "path": "/v1/org/invite",
+      "access": {
+        "capability": "orgs.onboard"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/org/invite/accept",
+      "access": {
+        "access": "service"
+      }
+    },
+    {
+      "method": "POST",
       "path": "/v1/org/search",
       "access": {
         "anyCapability": [
@@ -511,6 +539,20 @@
       "path": "/v1/user/decision/:id",
       "access": {
         "capability": "org.manage"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/user/invite",
+      "access": {
+        "capability": "org.manage"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/user/invite/accept",
+      "access": {
+        "access": "service"
       }
     },
     {

@@ -5,6 +5,7 @@
  *   GET   /v1/user/read/:id              one coordinator within reach
  *   POST  /v1/user/search                coordinators within reach, keyset paged
  *   POST  /v1/user/create                invite coordinators into an org
+ *   POST  /v1/user/invite                invite coordinators into an org (replaces create)
  *   POST  /v1/user/decision/:id          approve / reject a pending coordinator
  *   PATCH /v1/user/metadata/update/:id   change a coordinator's domains
  *
@@ -365,6 +366,49 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
     },
   );
 
+  const inviteCoordinators = async (req: FastifyRequest, reply: FastifyReply) => {
+    const { actor } = await requireActor(req);
+    const body = req.body as z.infer<typeof UserInviteRequestSchema>;
+    if (!inManageScope(await manageScope(req, actor), body.org_id)) throw httpError('NOT_FOUND');
+    if (body.recipients.length > config.INVITE_MINT_MAX_RECIPIENTS) {
+      throw httpError('SCHEMA_VALIDATION', {
+        detail: `At most ${config.INVITE_MINT_MAX_RECIPIENTS} recipients per request.`,
+        fields: { field: 'recipients' },
+      });
+    }
+    const org = await loadOrg(body.org_id);
+    // The Default org takes no invites.
+    if (org.status !== 'active' || org.isDefault) throw httpError('TARGET_ORG_INACTIVE');
+
+    const log = req.log.child({ operation: 'console.user.invite', actor_id: actor.userId });
+    const summary = await mintInviteBatch({
+      invites: getRegistrationInvitesStore(),
+      role: 'coordinator',
+      mailer: getMailer(),
+      orgId: org.id,
+      orgName: org.displayName,
+      inviterEmail: org.ownerEmail,
+      recipients: body.recipients,
+      ttlSec: config.INVITE_TOKEN_TTL_SECONDS,
+      createdBy: actor.userId,
+      log,
+    });
+    log.info({
+      status: 'success',
+      org_id: org.id,
+      sent: summary.sent,
+      resent: summary.resent,
+      invalid: summary.invalid.length,
+      existing: summary.existing.length,
+    });
+    // The invite mail names the org's owner as the inviter, so tell the owner
+    // when the network admin sent it.
+    if (summary.sent + summary.resent > 0) {
+      await notifyOwnerOfAdminAction(actor, org, 'invited coordinators', req.log);
+    }
+    return reply.status(200).send(summary);
+  };
+
   app.post(
     '/v1/user/create',
     {
@@ -381,47 +425,26 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
         },
       },
     },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const { actor } = await requireActor(req);
-      const body = req.body as z.infer<typeof UserInviteRequestSchema>;
-      if (!inManageScope(await manageScope(req, actor), body.org_id)) throw httpError('NOT_FOUND');
-      if (body.recipients.length > config.INVITE_MINT_MAX_RECIPIENTS) {
-        throw httpError('SCHEMA_VALIDATION', {
-          detail: `At most ${config.INVITE_MINT_MAX_RECIPIENTS} recipients per request.`,
-          fields: { field: 'recipients' },
-        });
-      }
-      const org = await loadOrg(body.org_id);
-      // The Default org takes no invites.
-      if (org.status !== 'active' || org.isDefault) throw httpError('TARGET_ORG_INACTIVE');
+    inviteCoordinators,
+  );
 
-      const log = req.log.child({ operation: 'console.user.invite', actor_id: actor.userId });
-      const summary = await mintInviteBatch({
-        invites: getRegistrationInvitesStore(),
-        mailer: getMailer(),
-        orgId: org.id,
-        orgName: org.displayName,
-        inviterEmail: org.ownerEmail,
-        recipients: body.recipients,
-        ttlSec: config.INVITE_TOKEN_TTL_SECONDS,
-        createdBy: actor.userId,
-        log,
-      });
-      log.info({
-        status: 'success',
-        org_id: org.id,
-        sent: summary.sent,
-        resent: summary.resent,
-        invalid: summary.invalid.length,
-        existing: summary.existing.length,
-      });
-      // The invite mail names the org's owner as the inviter, so tell the owner
-      // when the network admin sent it.
-      if (summary.sent + summary.resent > 0) {
-        await notifyOwnerOfAdminAction(actor, org, 'invited coordinators', req.log);
-      }
-      return reply.status(200).send(summary);
+  app.post(
+    '/v1/user/invite',
+    {
+      config: { rbac: { capability: 'org.manage' } },
+      schema: {
+        tags: ['console'],
+        summary: 'Invite coordinators into an organisation',
+        description:
+          'Mints and mails a 14-day invite per address (the invitee registers and consents themselves). The Default org takes no invites. An address already registered in this org is reported under `existing`; any other existing account is mailed a sign-in note and counted as sent.',
+        body: UserInviteRequestSchema,
+        response: {
+          200: UserInviteResponseSchema,
+          ...errorResponses(400, 401, 403, 404, 409, 503),
+        },
+      },
     },
+    inviteCoordinators,
   );
 
   app.post(

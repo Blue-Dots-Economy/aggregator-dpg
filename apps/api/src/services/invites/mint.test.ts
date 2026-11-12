@@ -58,6 +58,7 @@ describe('mintInviteBatch', () => {
     mintInviteBatch({
       invites,
       mailer,
+      role: 'coordinator',
       orgId: ORG_ID,
       orgName: 'Enable India',
       inviterEmail: 'owner@enable.org',
@@ -109,6 +110,28 @@ describe('mintInviteBatch', () => {
     expect(s.existing).toEqual([{ email: 'Member@x.org', status: 'active' }]);
     expect(s.sent + s.resent).toBe(0);
     expect(mailer.outbox).toHaveLength(0);
+  });
+
+  it('mails an org invite with the org registration link', async () => {
+    const s = await run([{ email: 'child@x.org' }], { role: 'org_owner' });
+    expect(s.sent).toBe(1);
+    expect(mailer.outbox[0]?.html).toContain('/register/owner?invite=');
+    const row = await invites.findPendingByOrgAndEmail(ORG_ID, 'org_owner', 'child@x.org');
+    expect(row.ok && row.value?.role).toBe('org_owner');
+  });
+
+  it('treats an own-org coordinator as another account on an org invite (sent, not existing)', async () => {
+    coordStore.seed([
+      buildCoordinator({
+        id: 'c1',
+        contact: { name: 'Asha', email: 'member@x.org', phone: '+919000000001' },
+        parentOrgId: ORG_ID,
+        status: 'active',
+      }),
+    ]);
+    const s = await run([{ email: 'member@x.org' }], { role: 'org_owner' });
+    expect(s.existing).toEqual([]);
+    expect(s.sent).toBe(1);
   });
 
   it("another org's coordinator gets the you-already-have-an-account mail (sent)", async () => {

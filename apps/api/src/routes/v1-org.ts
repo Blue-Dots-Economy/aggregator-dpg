@@ -11,6 +11,7 @@
  *   POST  /v1/org/decision/:id          approve / reject a pending org (its parent's owner)
  *   POST  /v1/org/access/repair/:id     re-apply the owner's sign-in access (its parent's owner)
  *   GET   /v1/org/hierarchy             the network, its "known as" values and the tree limits (network admin)
+ *   POST  /v1/org/invite                invite orgs to register under an org the actor owns
  *
  * Every handler calls `requireActor` first (admins only). A target out of
  * reach answers 404; a route the actor's kind cannot use answers 403. The
@@ -25,6 +26,8 @@ import {
   OrgDecisionResponseSchema,
   OrgHierarchyQuerySchema,
   OrgHierarchyResponseSchema,
+  OrgInviteRequestSchema,
+  OrgInviteResponseSchema,
   OrgKnownAsUpdateRequestSchema,
   OrgKnownAsUpdateResponseSchema,
   OrgMetadataUpdateRequestSchema,
@@ -51,6 +54,11 @@ import { getUserStore } from '../services/user-store/index.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import type { OrganisationConfig } from '@aggregator-dpg/network-config/interface';
 import { treeRules } from '../services/known-as.js';
+import { newChildRefusal } from '../services/organisation-store/tree.js';
+import { mintInviteBatch } from '../services/invites/mint.js';
+import { getRegistrationInvitesStore } from '../services/registration-invites-store/index.js';
+import { getMailer } from '@aggregator-dpg/mailer';
+import { config } from '../config.js';
 import {
   getOrganisationStore,
   type Organisation,
@@ -204,6 +212,61 @@ async function decidesFor(req: FastifyRequest, actor: Actor, org: Organisation):
   const perms = await permissionsByOrg(req, actor, root.value?.id ?? null);
   if (perms === null) return true;
   return (perms[org.parentId] ?? []).includes('orgs.onboard');
+}
+
+/**
+ * The org the actor invites child orgs into: the root for the network admin,
+ * or an active, non-Default org it owns where, with access control enforced,
+ * it holds `orgs.onboard`.
+ *
+ * @throws {HttpError} NOT_FOUND or DB_UNAVAILABLE.
+ */
+async function invitingParent(
+  req: FastifyRequest,
+  actor: Actor,
+  parentId: string,
+): Promise<Organisation> {
+  const store = getOrganisationStore();
+  if (ownedOrgIds(actor).includes(parentId)) {
+    const found = await store.findById(parentId);
+    if (!found.ok) dbDown('orgStore.findById', found.error.message);
+    if (!found.value || found.value.isDefault || found.value.status !== 'active') {
+      throw httpError('NOT_FOUND');
+    }
+    if (getRbacRuntime()?.mode === 'enforce') {
+      const root = await store.findRoot();
+      if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
+      const perms = await permissionsByOrg(req, actor, root.value?.id ?? null);
+      if (perms !== null && !(perms[parentId] ?? []).includes('orgs.onboard')) {
+        throw httpError('NOT_FOUND');
+      }
+    }
+    return found.value;
+  }
+  if (!isNetworkAdmin(actor)) throw httpError('NOT_FOUND');
+  const root = await store.findRoot();
+  if (!root.ok) dbDown('orgStore.findRoot', root.error.message);
+  if (root.value?.id !== parentId) throw httpError('NOT_FOUND');
+  return root.value;
+}
+
+/**
+ * Refuses an invite the parent can no longer take: its depth, its children or the instance total.
+ *
+ * @throws {HttpError} ORG_DEPTH_LIMIT, ORG_CHILD_LIMIT, ORG_TOTAL_LIMIT or DB_UNAVAILABLE.
+ */
+async function assertCanTakeChild(parent: Organisation): Promise<void> {
+  const store = getOrganisationStore();
+  const [children, total] = await Promise.all([store.childCounts([parent.id]), store.countTotal()]);
+  if (!children.ok) dbDown('orgStore.childCounts', children.error.message);
+  if (!total.ok) dbDown('orgStore.countTotal', total.error.message);
+  const refused = newChildRefusal(
+    parent.depth,
+    children.value[parent.id] ?? 0,
+    total.value,
+    treeRules(await organisationConfig()),
+  );
+  if (refused) throwTreeRefusal({ code: refused, message: refused }, { parent_id: parent.id });
 }
 
 /**
@@ -679,6 +742,58 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
             reason,
           })),
       });
+    },
+  );
+
+  app.post(
+    '/v1/org/invite',
+    {
+      config: { rbac: { capability: 'orgs.onboard' } },
+      schema: {
+        tags: ['console'],
+        summary: 'Invite organisations to register under an organisation',
+        description:
+          'Mints and mails a 14-day invite per address to register an organisation under `parent_id`: the root for the network admin, else an active organisation the caller owns. The invitee registers, then verifies the invited email with a one-time code; there is no approval step. 409 ORG_DEPTH_LIMIT, ORG_CHILD_LIMIT or ORG_TOTAL_LIMIT when the parent cannot take another organisation. An address that already has an account is mailed a sign-in note and counted as sent.',
+        body: OrgInviteRequestSchema,
+        response: {
+          200: OrgInviteResponseSchema,
+          ...errorResponses(400, 401, 403, 404, 409, 503),
+        },
+      },
+    },
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const { actor } = await requireActor(req);
+      const body = req.body as z.infer<typeof OrgInviteRequestSchema>;
+      if (body.recipients.length > config.INVITE_MINT_MAX_RECIPIENTS) {
+        throw httpError('SCHEMA_VALIDATION', {
+          detail: `At most ${config.INVITE_MINT_MAX_RECIPIENTS} recipients per request.`,
+          fields: { field: 'recipients' },
+        });
+      }
+      const parent = await invitingParent(req, actor, body.parent_id);
+      await assertCanTakeChild(parent);
+
+      const log = req.log.child({ operation: 'console.org.invite', actor_id: actor.userId });
+      const summary = await mintInviteBatch({
+        invites: getRegistrationInvitesStore(),
+        role: 'org_owner',
+        mailer: getMailer(),
+        orgId: parent.id,
+        orgName: parent.displayName,
+        inviterEmail: parent.ownerEmail,
+        recipients: body.recipients,
+        ttlSec: config.INVITE_TOKEN_TTL_SECONDS,
+        createdBy: actor.userId,
+        log,
+      });
+      log.info({
+        status: 'success',
+        parent_id: parent.id,
+        sent: summary.sent,
+        resent: summary.resent,
+        invalid: summary.invalid.length,
+      });
+      return reply.status(200).send(summary);
     },
   );
 

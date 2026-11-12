@@ -85,6 +85,7 @@ export class IdpAdminFake extends IdpAdminAdapter {
       email: input.email,
       username: input.username ?? input.email,
       enabled: input.enabled ?? true,
+      emailVerified: input.emailVerified ?? true,
       ...(input.firstName ? { firstName: input.firstName } : {}),
       ...(input.lastName ? { lastName: input.lastName } : {}),
       attributes: attrs,

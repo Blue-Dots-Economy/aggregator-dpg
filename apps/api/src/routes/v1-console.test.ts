@@ -636,6 +636,84 @@ describe('console routes /v1/user, /v1/org', () => {
     });
   });
 
+  describe('POST /v1/user/invite', () => {
+    it('invites into the owner’s org with a coordinator registration link', async () => {
+      const res = await post('/v1/user/invite', 'a', {
+        org_id: ORG_A,
+        recipients: [{ email: 'new@x.org' }],
+      });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { sent: number }).sent).toBe(1);
+      expect(mailer.outbox.at(-1)?.html).toContain('/register/coordinator?invite=');
+    });
+
+    it('answers 404 for an org out of reach', async () => {
+      const res = await post('/v1/user/invite', 'a', {
+        org_id: ORG_B,
+        recipients: [{ email: 'new@x.org' }],
+      });
+      expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe('POST /v1/org/invite', () => {
+    it('lets an owner invite organisations under its org with an org registration link', async () => {
+      useHierarchy();
+      const res = await post('/v1/org/invite', 'a', {
+        parent_id: ORG_A,
+        recipients: [{ email: 'child@x.org' }, { email: 'bad' }],
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { sent: number; invalid: Array<{ reason: string }> };
+      expect(body.sent).toBe(1);
+      expect(body.invalid).toEqual([expect.objectContaining({ reason: 'invalid_email' })]);
+      expect(mailer.outbox.at(-1)?.html).toContain('/register/owner?invite=');
+    });
+
+    it('lets the network admin invite top-level organisations under the root', async () => {
+      useHierarchy();
+      const res = await post('/v1/org/invite', 'na', {
+        parent_id: ROOT,
+        recipients: [{ email: 'top@x.org' }],
+      });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { sent: number }).sent).toBe(1);
+    });
+
+    it.each([
+      ['an org the owner does not own', 'a', ORG_B],
+      ['the root for an owner', 'a', ROOT],
+      ['the Default org', 'na', DEFAULT],
+    ] as const)('answers 404 for %s', async (_label, who, parentId) => {
+      useHierarchy();
+      const res = await post('/v1/org/invite', who, {
+        parent_id: parentId,
+        recipients: [{ email: 'child@x.org' }],
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('refuses a parent at the deepest allowed level with 409 ORG_DEPTH_LIMIT', async () => {
+      useHierarchy({ max_depth: 1 });
+      const res = await post('/v1/org/invite', 'a', {
+        parent_id: ORG_A,
+        recipients: [{ email: 'child@x.org' }],
+      });
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: { code: string } }).error.code).toBe('ORG_DEPTH_LIMIT');
+      expect(mailer.outbox).toHaveLength(0);
+    });
+
+    it('refuses more recipients than the per-request cap with 400', async () => {
+      useHierarchy();
+      const recipients = Array.from({ length: config.INVITE_MINT_MAX_RECIPIENTS + 1 }, (_, i) => ({
+        email: `c${i}@x.org`,
+      }));
+      const res = await post('/v1/org/invite', 'a', { parent_id: ORG_A, recipients });
+      expect(res.statusCode).toBe(400);
+    });
+  });
+
   describe('POST /v1/org/search', () => {
     const ids = (res: { json: () => unknown }) =>
       (res.json() as { orgs: Array<{ id: string }> }).orgs.map((o) => o.id).sort();

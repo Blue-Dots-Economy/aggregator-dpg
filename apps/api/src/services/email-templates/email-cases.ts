@@ -128,6 +128,29 @@ export const EMAIL_CASES: Readonly<Record<string, EmailCaseDef>> = {
     ],
   },
 
+  org_invite: {
+    tokens: {
+      orgName: 'text',
+      inviterEmail: 'text',
+      recipientName: 'text',
+      expiresOn: 'text',
+      inviteUrl: 'text',
+      greeting: 'html',
+    },
+    derivedTokens: {
+      greeting: [{ key: 'greeting', requires: ['recipientName'] }, { key: 'greeting_anonymous' }],
+    },
+    layout: [
+      { block: 'heading', key: 'heading' },
+      { block: 'para', key: 'intro' },
+      { block: 'para', key: 'role' },
+      { block: 'cta', key: 'cta', href: 'inviteUrl' },
+      { block: 'para', key: 'expiry' },
+      { block: 'paraLast', key: 'next' },
+      { block: 'note', key: 'footnote' },
+    ],
+  },
+
   org_owner_approved: {
     tokens: { orgName: 'text', ownerEmail: 'text', inviteUrl: 'text' },
     layout: [

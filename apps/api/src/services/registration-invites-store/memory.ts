@@ -1,7 +1,7 @@
 /**
  * In-memory registration-invites store for unit tests (`@aggregator-dpg/api`).
  *
- * Behaves like the Postgres store: one pending invite per org and email,
+ * Behaves like the Postgres store: one pending invite per org, role and email,
  * atomic consume and revoke, refresh only while pending. Other modules use
  * `RegistrationInvitesStoreFake` from `./testing`.
  */
@@ -9,6 +9,7 @@
 import {
   RegistrationInvitesStoreBase,
   type CreateInviteInput,
+  type InviteRole,
   type InviteStoreResult,
   type RefreshInviteInput,
   type RegistrationInvite,
@@ -22,6 +23,7 @@ export class InMemoryRegistrationInvitesStore extends RegistrationInvitesStoreBa
     for (const inv of this.store.values()) {
       if (
         inv.parentOrgId === input.parentOrgId &&
+        inv.role === (input.role ?? 'coordinator') &&
         inv.email === input.email &&
         inv.status === 'pending'
       ) {
@@ -54,10 +56,16 @@ export class InMemoryRegistrationInvitesStore extends RegistrationInvitesStoreBa
 
   async findPendingByOrgAndEmail(
     parentOrgId: string,
+    role: InviteRole,
     email: string,
   ): Promise<InviteStoreResult<RegistrationInvite | null>> {
     for (const inv of this.store.values()) {
-      if (inv.parentOrgId === parentOrgId && inv.email === email && inv.status === 'pending') {
+      if (
+        inv.parentOrgId === parentOrgId &&
+        inv.role === role &&
+        inv.email === email &&
+        inv.status === 'pending'
+      ) {
         return { ok: true, value: { ...inv } };
       }
     }

@@ -30,6 +30,17 @@ describe('invite-token', () => {
     expect(res.role).toBe('coordinator');
   });
 
+  it('carries the org_owner role through a round trip', async () => {
+    const { token } = await mintInviteToken({
+      jti: JTI,
+      role: 'org_owner',
+      org: ORG,
+      email: EMAIL,
+    });
+    const res = await verifyInviteToken(token);
+    expect(res.ok && res.role).toBe('org_owner');
+  });
+
   it('defaults to a 14-day expiry', async () => {
     const { expiresAt } = await mintInviteToken({ jti: JTI, org: ORG, email: EMAIL });
     const days = (expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
