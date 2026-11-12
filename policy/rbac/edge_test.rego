@@ -250,9 +250,9 @@ test_real_table_pii_export_needs_pii_access if {
 	decide_real(req("POST", "/v1/dashboard/export/profiles", user(["coordinator", "pii_access"]))).allowed
 }
 
-test_real_table_decision_needs_org_manage if {
-	decide_real(req("POST", "/v1/user/decision/0b1c", user(["org_admin"]))).allowed
-	decide_real(req("POST", "/v1/user/decision/0b1c", user(["coordinator"]))).http_status == 403
+test_real_table_coordinator_edit_needs_org_manage if {
+	decide_real(req("PATCH", "/v1/user/metadata/update/0b1c", user(["org_admin"]))).allowed
+	decide_real(req("PATCH", "/v1/user/metadata/update/0b1c", user(["coordinator"]))).http_status == 403
 }
 
 test_real_table_me_is_signed_in if {
@@ -314,12 +314,12 @@ test_real_table_known_as_route_needs_org_manage_or_orgs_onboard if {
 }
 
 # Every owner decides and repairs its child orgs; which ones is the API's check.
-test_real_table_owner_decides_and_repairs_child_orgs if {
+test_real_table_owner_invites_and_repairs_child_orgs if {
 	decide_real(req("POST", "/v1/org/access/repair/0b1c", user(["org_admin"]))).allowed
-	decide_real(req("POST", "/v1/org/decision/0b1c", user(["org_admin"]))).allowed
+	decide_real(req("POST", "/v1/org/invite", user(["org_admin"]))).allowed
 	decide_real(req("POST", "/v1/org/access/repair/0b1c", user(["network_admin"]))).allowed
-	decide_real(req("POST", "/v1/org/decision/0b1c", user(["network_admin"]))).allowed
-	d := decide_real(req("POST", "/v1/org/decision/0b1c", user(["coordinator"])))
+	decide_real(req("POST", "/v1/org/invite", user(["network_admin"]))).allowed
+	d := decide_real(req("POST", "/v1/org/invite", user(["coordinator"])))
 	d.http_status == 403
 	body(d).fields.permission == "orgs.onboard"
 }
