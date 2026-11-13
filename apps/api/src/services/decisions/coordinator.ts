@@ -52,8 +52,12 @@ export interface CoordinatorDecisionInput {
   decision: Decision;
   /** Shown to the applicant on reject; never logged or stored. */
   reason?: string;
-  /** The deciding admin's user id, or {@link LINK_DECIDER} for an emailed link. */
+  /** The deciding admin's user id, {@link LINK_DECIDER} for an emailed link, or `invite:<inviter id>`. */
   decidedBy: string;
+  /** Defaults to `true`; `false` skips the applicant's mail, for an invitee who is already signed in. */
+  notify?: boolean;
+  /** What a failed approval leaves in Keycloak: `rejected` (default), or `invited` so the invitee can retry. */
+  undoAs?: 'rejected' | 'invited';
   requestId?: string;
   log: FastifyBaseLogger;
 }
@@ -225,7 +229,13 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
     // changes, so a user is never enabled while its row is not active.
     const now = await store.findById(aggregator.id);
     const current = now.ok ? now.value : null;
-    if (current?.status !== 'active') await compensate(kcUser.id, log);
+    if (current?.status !== 'active') {
+      if (input.undoAs === 'invited' && current?.status !== 'inactive') {
+        await restoreInvited(kcUser.id, log);
+      } else {
+        await compensate(kcUser.id, log);
+      }
+    }
     if (signalstackOrgId) {
       // The Signals org stays; a later approval reuses it.
       log.warn({ status: 'skipped', sub_operation: 'signalstack.orgLeftByLostApproval' });
@@ -253,6 +263,10 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
       });
   }
 
+  if (input.notify === false) {
+    log.info({ status: 'success', decision: 'approve', decided_by: input.decidedBy });
+    return { kind: 'decided', decision: 'approve', notified: false };
+  }
   const mail = renderApplicantApproved({
     contactName: applicantName(aggregator, kcUser),
     association: aggregator.name,
@@ -269,6 +283,18 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
     log.error({ status: 'failure', sub_operation: 'mailer.send.approved', code: sent.error.code });
   log.info({ status: 'success', decision: 'approve', decided_by: input.decidedBy });
   return { kind: 'decided', decision: 'approve', notified: sent.ok };
+}
+
+/** Stamps `invited` again after an invitee's failed activation, leaving the user enabled to retry. */
+async function restoreInvited(kcUserId: string, log: FastifyBaseLogger): Promise<void> {
+  const back = await getIdpAdmin().setUserDecision(kcUserId, 'invited');
+  if (!back.ok) {
+    log.error({
+      status: 'failure',
+      sub_operation: 'compensate.failedActivation',
+      code: back.error.code,
+    });
+  }
 }
 
 /** Disables the user and stamps `rejected` again (a lost or failed approval). */

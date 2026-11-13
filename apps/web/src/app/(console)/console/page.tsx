@@ -20,6 +20,8 @@ import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
 import { ConsoleStatusPill } from '@/components/console/ConsoleUi';
 import { OrgCoordinators, type OrgCoordinatorRow } from '@/components/console/OrgCoordinators';
+import { OpenInvites } from '@/components/console/OpenInvites';
+import { readOpenInvites } from '@/lib/console-invites.server';
 import { I } from '@/icons';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
@@ -49,12 +51,13 @@ export default async function ConsoleHomePage() {
 /** The owner's single organisation with its coordinators. */
 async function renderOrgHome(org: OrgRow, showInvite: boolean) {
   const t = await getTranslations('console');
-  const [page, domains] = await Promise.all([
+  const [page, domains, invites] = await Promise.all([
     consoleRead<UserSearchResponse>('/v1/user/search', {
       filter: { org_id: org.id },
       limit: ORG_HOME_LIMIT,
     }),
     networkDomains(),
+    readOpenInvites('user', org.id),
   ]);
   const rows: OrgCoordinatorRow[] = page.users.map((u) => ({
     id: u.id,
@@ -96,6 +99,7 @@ async function renderOrgHome(org: OrgRow, showInvite: boolean) {
           complete={page.next_cursor === null}
           allHref={`/console/coordinators?org_id=${org.id}`}
         />
+        {invites ? <OpenInvites page={invites} /> : null}
       </div>
     </>
   );

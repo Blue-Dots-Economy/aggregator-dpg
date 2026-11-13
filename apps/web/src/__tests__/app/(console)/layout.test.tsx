@@ -64,7 +64,7 @@ describe('<ConsoleLayout />', () => {
     expect(redirect).not.toHaveBeenCalled();
   });
 
-  it('gives the network admin no Users link in the sidebar', async () => {
+  it('gives the network admin no My Team and no Profile in the sidebar', async () => {
     vi.mocked(getSession).mockResolvedValue(session);
     vi.mocked(getConsoleActor).mockResolvedValue({
       ok: true,
@@ -86,7 +86,7 @@ describe('<ConsoleLayout />', () => {
     });
     const { render } = await import('@testing-library/react');
     render(await ConsoleLayout({ children: <p>child</p> }));
-    expect(sidebarProps.last).toMatchObject({ canManage: false, homeIsCoordinators: false });
+    expect(sidebarProps.last).toMatchObject({ teamHref: null, showProfile: false });
   });
 
   it('keeps the email row and drops an empty phone in the account card', async () => {

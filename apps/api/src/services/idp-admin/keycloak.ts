@@ -54,7 +54,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
     const payload = {
       username: input.username ?? input.email,
       email: input.email,
-      emailVerified: true,
+      emailVerified: input.emailVerified ?? true,
       enabled: input.enabled ?? true,
       ...(input.firstName ? { firstName: input.firstName } : {}),
       ...(input.lastName ? { lastName: input.lastName } : {}),
@@ -253,6 +253,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
       enabled: u.enabled,
       attributes: merged,
     };
+    if (u.emailVerified !== undefined) fullPayload.emailVerified = u.emailVerified;
     if (u.firstName !== undefined) fullPayload.firstName = u.firstName;
     if (u.lastName !== undefined) fullPayload.lastName = u.lastName;
 
@@ -285,7 +286,7 @@ export class KeycloakIdpAdmin extends IdpAdminAdapter {
 
   async setUserDecision(
     userId: string,
-    decision: 'pending' | 'approved' | 'rejected',
+    decision: 'pending' | 'approved' | 'rejected' | 'invited',
   ): Promise<IdpResult<void>> {
     return this.setAttributes(userId, { [KC_ATTR.DECISION_MADE]: decision });
   }
@@ -699,6 +700,7 @@ interface KcUserPayload {
   username: string;
   email?: string;
   enabled?: boolean;
+  emailVerified?: boolean;
   firstName?: string;
   lastName?: string;
   attributes?: Record<string, string[]>;
@@ -710,6 +712,7 @@ function toIdpUser(u: KcUserPayload, opts: { fallbackEmail?: string } = {}): Idp
     email: u.email ?? opts.fallbackEmail ?? '',
     username: u.username,
     enabled: u.enabled ?? false,
+    ...(u.emailVerified === undefined ? {} : { emailVerified: u.emailVerified }),
     ...(u.firstName ? { firstName: u.firstName } : {}),
     ...(u.lastName ? { lastName: u.lastName } : {}),
     ...(u.attributes ? { attributes: u.attributes } : {}),

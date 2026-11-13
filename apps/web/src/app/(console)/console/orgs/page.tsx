@@ -23,6 +23,8 @@ import type {
   OrgSearchResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
+import { canOnboardOrgsUnder } from '@/lib/capabilities';
+import { getAggregatorFeatures } from '@/lib/features.server';
 import { consoleRead } from '@/lib/console-api.server';
 import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
 import { orgsBelow, topmostOwned } from '@/lib/console-org-options';
@@ -32,6 +34,8 @@ import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
 import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
 import { ORG_FILTERS, type OrgFilter } from '@/lib/org-filters';
 import { ConsoleSection, EmptyState } from '@/components/console/ConsoleUi';
+import { OpenInvites } from '@/components/console/OpenInvites';
+import { readOpenInvites } from '@/lib/console-invites.server';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
 import { I } from '@/icons';
@@ -46,22 +50,33 @@ export default async function ConsoleOrgsPage({
   const initialFilter: OrgFilter = ORG_FILTERS.find((f) => f === params.status) ?? 'all';
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
-  if (!actor.me.is_network_admin) {
+  const me = actor.me;
+  const canInviteOrgs = me.orgs.some((o) => o.role === 'owner' && canOnboardOrgsUnder(me, o));
+  if (!me.is_network_admin) {
     return (
       <OwnerOrgs
-        ownedIds={actor.me.orgs.map((o) => o.id)}
-        ownerIds={actor.me.orgs.filter((o) => o.role === 'owner').map((o) => o.id)}
+        ownedIds={me.orgs.map((o) => o.id)}
+        ownerIds={me.orgs.filter((o) => o.role === 'owner').map((o) => o.id)}
+        canInviteOrgs={canInviteOrgs}
       />
     );
   }
   const hierarchy = await consoleRead<OrgHierarchyResponse>(
     '/v1/org/hierarchy?fields=known_as_values',
   );
-  const network = await readNetworkOrgs(hierarchy.network.id);
+  const [network, invites, features] = await Promise.all([
+    readNetworkOrgs(hierarchy.network.id),
+    readOpenInvites('org', hierarchy.network.id),
+    getAggregatorFeatures(),
+  ]);
   const pending = network.orgs.filter((o) => o.status === 'pending');
   return (
     <>
-      <Topbar title={t('orgs.heading')} subtitle={t('orgs.subtitle')} />
+      <Topbar
+        title={t('orgs.heading')}
+        subtitle={t('orgs.subtitle')}
+        right={canInviteOrgs ? inviteOrgsLink(t) : null}
+      />
       <div className="flex flex-col gap-6">
         {pendingReview(pending, t)}
         <NetworkOrgsView
@@ -69,7 +84,9 @@ export default async function ConsoleOrgsPage({
           orgs={network.orgs}
           more={network.more}
           initialFilter={initialFilter}
+          roleLabel={features.invite_role_label ?? t('invite.org.role_default')}
         />
+        {invites ? <OpenInvites page={invites} /> : null}
         <HierarchySettings
           orgId={hierarchy.network.id}
           orgName={hierarchy.network.name}
@@ -87,11 +104,13 @@ export default async function ConsoleOrgsPage({
  *
  * @param ownedIds - The organisations the viewer belongs to.
  * @param ownerIds - Those it owns, the only ones whose values it can edit.
+ * @param canInviteOrgs - Whether it may invite organisations under any of them.
  */
 async function OwnerOrgs({
   ownedIds,
   ownerIds,
-}: Readonly<{ ownedIds: string[]; ownerIds: string[] }>) {
+  canInviteOrgs,
+}: Readonly<{ ownedIds: string[]; ownerIds: string[]; canInviteOrgs: boolean }>) {
   const t = await getTranslations('console');
   const orgs = await readReachableOrgs();
   const roots = topmostOwned(ownedIds, orgs);
@@ -102,9 +121,18 @@ async function OwnerOrgs({
     ),
   );
   const pending = orgs.filter((o) => o.status === 'pending' && !ownedIds.includes(o.id));
+  const invitesById = new Map(
+    await Promise.all(
+      roots.map(async (root) => [root.id, await readOpenInvites('org', root.id)] as const),
+    ),
+  );
   return (
     <>
-      <Topbar title={t('orgs.heading')} subtitle={t('orgs.subtitle_owner')} />
+      <Topbar
+        title={t('orgs.heading')}
+        subtitle={t('orgs.subtitle_owner')}
+        right={canInviteOrgs ? inviteOrgsLink(t) : null}
+      />
       <div className="flex flex-col gap-6">
         {pendingReview(pending, t)}
         {roots.map((root) => (
@@ -128,6 +156,7 @@ async function OwnerOrgs({
                 more={false}
               />
             </ConsoleSection>
+            {invitesById.get(root.id) ? <OpenInvites page={invitesById.get(root.id)!} /> : null}
             {valuesById.get(root.id) ? (
               <HierarchySettings
                 orgId={root.id}
@@ -159,6 +188,16 @@ async function knownAsValuesToEdit(
     `/v1/org/read/${encodeURIComponent(root.id)}?fields=known_as_values`,
   );
   return read.org.known_as_values ?? null;
+}
+
+/** The link to the Invite organisations page. */
+function inviteOrgsLink(t: Awaited<ReturnType<typeof getTranslations<'console'>>>) {
+  return (
+    <Link className={buttonClass('primary')} href="/console/orgs/invite">
+      <I.mail size={16} />
+      {t('orgs.invite')}
+    </Link>
+  );
 }
 
 /**

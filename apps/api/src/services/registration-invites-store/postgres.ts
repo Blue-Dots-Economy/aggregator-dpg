@@ -2,11 +2,11 @@
  * Postgres registration-invites store (`@aggregator-dpg/api`).
  *
  * Queries `registration_invites` and maps driver errors to `InviteStoreError`
- * codes. The unique index on pending (org_id, email) surfaces as
+ * codes. The unique index on pending (org_id, role, email) surfaces as
  * `DUPLICATE_PENDING`.
  */
 
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 import { logger } from '../../logger.js';
 import { registrationInvites, type RegistrationInviteRow } from '../../db/schema.js';
 import { getDb } from '../../db/client.js';
@@ -14,6 +14,8 @@ import { PG_UNIQUE_VIOLATION, pgErrorCode } from '../../db/pg-error.js';
 import {
   RegistrationInvitesStoreBase,
   type CreateInviteInput,
+  type InviteRole,
+  type ListOpenInvitesInput,
   type InviteStoreResult,
   type RefreshInviteInput,
   type RegistrationInvite,
@@ -76,6 +78,7 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
 
   async findPendingByOrgAndEmail(
     parentOrgId: string,
+    role: InviteRole,
     email: string,
   ): Promise<InviteStoreResult<RegistrationInvite | null>> {
     try {
@@ -85,6 +88,7 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
         .where(
           and(
             eq(registrationInvites.orgId, parentOrgId),
+            eq(registrationInvites.role, role),
             eq(registrationInvites.email, email),
             eq(registrationInvites.status, 'pending'),
           ),
@@ -93,6 +97,35 @@ export class PostgresRegistrationInvitesStore extends RegistrationInvitesStoreBa
       return { ok: true, value: row ? toDomain(row) : null };
     } catch (err) {
       return this.mapDbError('inviteStore.findPendingByOrgAndEmail', err, Date.now());
+    }
+  }
+
+  async listOpen(input: ListOpenInvitesInput): Promise<InviteStoreResult<RegistrationInvite[]>> {
+    const start = Date.now();
+    try {
+      const { after } = input;
+      const createdMs = sql`date_trunc('milliseconds', ${registrationInvites.createdAt})`;
+      const rows = await getDb()
+        .select()
+        .from(registrationInvites)
+        .where(
+          and(
+            eq(registrationInvites.orgId, input.orgId),
+            eq(registrationInvites.role, input.role),
+            inArray(registrationInvites.status, ['pending', 'expired']),
+            after
+              ? or(
+                  lt(createdMs, after.createdAt),
+                  and(eq(createdMs, after.createdAt), lt(registrationInvites.jti, after.jti)),
+                )
+              : undefined,
+          ),
+        )
+        .orderBy(desc(createdMs), desc(registrationInvites.jti))
+        .limit(input.limit);
+      return { ok: true, value: rows.map(toDomain) };
+    } catch (err) {
+      return this.mapDbError('inviteStore.listOpen', err, start);
     }
   }
 

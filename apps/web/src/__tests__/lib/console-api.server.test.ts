@@ -34,13 +34,17 @@ describe('consoleRead (console-api.server)', () => {
 
   it('redirects to login when callApi throws (no session)', async () => {
     vi.mocked(callApi).mockRejectedValue(new Error('no active session'));
-    await expect(consoleRead('/v1/org/read/x')).rejects.toThrow('REDIRECT:/api/auth/login?returnTo=/console');
+    await expect(consoleRead('/v1/org/read/x')).rejects.toThrow(
+      'REDIRECT:/api/auth/login?returnTo=/console',
+    );
     expect(redirect).toHaveBeenCalledWith('/api/auth/login?returnTo=/console');
   });
 
   it('redirects to login on 401', async () => {
     vi.mocked(callApi).mockResolvedValue(json({}, 401));
-    await expect(consoleRead('/v1/org/read/x')).rejects.toThrow('REDIRECT:/api/auth/login?returnTo=/console');
+    await expect(consoleRead('/v1/org/read/x')).rejects.toThrow(
+      'REDIRECT:/api/auth/login?returnTo=/console',
+    );
     expect(redirect).toHaveBeenCalledWith('/api/auth/login?returnTo=/console');
   });
 

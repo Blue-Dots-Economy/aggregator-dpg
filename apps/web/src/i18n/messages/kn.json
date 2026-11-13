@@ -100,7 +100,15 @@
       "modal_close": "ಮುಚ್ಚಿ",
       "load_failed_title": "ನಿಯಮಗಳು ಲಭ್ಯವಿಲ್ಲ",
       "load_failed_detail": "ನಾವು ಸೇವಾ ನಿಯಮಗಳು ಮತ್ತು ಗೌಪ್ಯತಾ ನೀತಿಯನ್ನು ಲೋಡ್ ಮಾಡಲಾಗಲಿಲ್ಲ, ಆದ್ದರಿಂದ ನಿಮ್ಮ ಸಮ್ಮತಿಯನ್ನು ದಾಖಲಿಸಲಾಗುವುದಿಲ್ಲ. ದಯವಿಟ್ಟು ಪುಟವನ್ನು ಮರುಲೋಡ್ ಮಾಡಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
-    }
+    },
+    "invite_heading_invalid": "ಆಹ್ವಾನ",
+    "invite_invalid": "ಈ ಆಹ್ವಾನ ಲಿಂಕ್ ಮಾನ್ಯವಾಗಿಲ್ಲ. ನಿಮ್ಮ ಆಹ್ವಾನ ಇಮೇಲ್‌ನಲ್ಲಿರುವ ಲಿಂಕ್ ಬಳಸಿ, ಅಥವಾ ನಿಮಗೆ ಈಗಾಗಲೇ ಖಾತೆ ಇದ್ದರೆ ಸೈನ್ ಇನ್ ಮಾಡಿ.",
+    "invite_expired": "ಈ ಆಹ್ವಾನದ ಅವಧಿ ಮುಗಿದಿದೆ. ನಿಮ್ಮನ್ನು ಆಹ್ವಾನಿಸಿದವರಿಗೆ ಹೊಸ ಆಹ್ವಾನ ಕಳುಹಿಸಲು ಕೇಳಿ.",
+    "invite_used": "ಈ ಆಹ್ವಾನವನ್ನು ಈಗಾಗಲೇ ಬಳಸಲಾಗಿದೆ. ನೀವು ಇದರಿಂದ ನೋಂದಾಯಿಸಿದ್ದರೆ, ಸೈನ್ ಇನ್ ಮಾಡಿ.",
+    "invite_org_inactive": "ಈ ಆಹ್ವಾನವನ್ನು ಈಗ ಬಳಸಲು ಸಾಧ್ಯವಿಲ್ಲ. ನಿಮ್ಮನ್ನು ಆಹ್ವಾನಿಸಿದವರನ್ನು ಸಂಪರ್ಕಿಸಿ.",
+    "invite_unavailable": "ನಿಮ್ಮ ಆಹ್ವಾನವನ್ನು ಲೋಡ್ ಮಾಡಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ಸ್ವಲ್ಪ ಸಮಯದ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+    "invite_sign_in": "ಸೈನ್ ಇನ್ ಮಾಡಿ",
+    "invite_org_under": "ನಿಮ್ಮ [[org]] {parent} ಅಡಿಯಲ್ಲಿ ನೋಂದಾಯಿಸಲ್ಪಡುತ್ತದೆ."
   },
   "dashboard": {
     "buckets": {
@@ -596,7 +604,9 @@
       "exchange_token_exchange_failed": "ಟೋಕನ್ ವಿನಿಮಯ ವಿಫಲವಾಗಿದೆ",
       "exchange_state_mismatch": "ಭದ್ರತಾ ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ (ಸ್ಥಿತಿ ಹೊಂದಾಣಿಕೆಯಾಗಿಲ್ಲ)",
       "exchange_token_verify_failed": "ಭದ್ರತಾ ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ (ಟೋಕನ್ ಪರಿಶೀಲನೆ)",
-      "unknown": "ಅನಿರೀಕ್ಷಿತ ಸೈನ್ ಇನ್ ದೋಷ"
+      "unknown": "ಅನಿರೀಕ್ಷಿತ ಸೈನ್ ಇನ್ ದೋಷ",
+      "invite_email_not_verified": "ನೋಂದಣಿ ಪೂರ್ಣಗೊಳಿಸಲು ನಿಮ್ಮ ಇಮೇಲ್‌ಗೆ ಕಳುಹಿಸಿದ ಕೋಡ್‌ನಿಂದ ಸೈನ್ ಇನ್ ಮಾಡಿ",
+      "invite_activation_failed": "ನಿಮ್ಮ ನೋಂದಣಿಯನ್ನು ಪೂರ್ಣಗೊಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ; ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಲು ಮರಳಿ ಸೈನ್ ಇನ್ ಮಾಡಿ"
     }
   },
   "support": {
@@ -660,7 +670,7 @@
     "title": "[[Org]] console",
     "nav": {
       "home": "Home",
-      "organisations": "[[Orgs]]",
+      "organisations": "Onboarded [[Orgs]]",
       "coordinators": "[[Users]]",
       "invite": "Invite [[users]]",
       "roles": "Roles",
@@ -669,7 +679,11 @@
       "access": "Roles and permissions",
       "portal_label": "[[Org]] console",
       "network_admin": "Network admin",
-      "org_owner": "[[Org]] owner"
+      "org_owner": "[[Org]] owner",
+      "dashboard": "Dashboard",
+      "my_blue_dots": "My Blue Dots",
+      "my_team": "My Team",
+      "profile": "Profile"
     },
     "home": {
       "coordinators": "{count} [[users]]",
@@ -741,7 +755,7 @@
       "known_as_values_more": "+{count} more",
       "known_as_values_new": "New value",
       "known_as_values_placeholder": "Add a value, e.g. District",
-      "known_as_values_exists": "\u201c{name}\u201d is already in the list.",
+      "known_as_values_exists": "“{name}” is already in the list.",
       "known_as_values_notes_heading": "How it works",
       "known_as_values_unchanged": "No changes",
       "known_as_values_unsaved": "Unsaved changes",
@@ -765,7 +779,7 @@
       "known_as_values_name_repeated": "Each value needs a different name."
     },
     "orgs": {
-      "heading": "[[Orgs]]",
+      "heading": "Onboarded [[Orgs]]",
       "status_filter": "Status",
       "all": "All",
       "approve": "Approve",
@@ -775,7 +789,7 @@
       "repair": "Re-grant owner access",
       "repaired": "Owner access: {status}",
       "empty": "No [[orgs]] match.",
-      "subtitle": "The [[orgs]] directly under the network, and registrations waiting for your approval.",
+      "subtitle": "The [[orgs]] directly under the network, and the ones you have invited.",
       "col_name": "[[Org]]",
       "col_known_as": "Known as",
       "col_joined": "Joined",
@@ -784,7 +798,7 @@
       "col_actions": "Actions",
       "hierarchy": "Hierarchy settings",
       "col_parent": "Parent [[org]]",
-      "subtitle_owner": "Your [[orgs]] and the [[orgs]] directly under them, and registrations waiting for your approval.",
+      "subtitle_owner": "The [[orgs]] directly under yours, and the ones you have invited.",
       "hierarchy_description": "Choose what [[orgs]] directly under {name} are called.",
       "known_as_current": "Known as",
       "yours": "Your [[org]]",
@@ -799,9 +813,9 @@
           "sub": "ಅನುಮೋದಿತ ಮತ್ತು ಚಾಲನೆಯಲ್ಲಿದೆ"
         },
         "pending": {
-          "label": "ಪರಿಶೀಲನೆ ಬಾಕಿ",
-          "sub": "ನಿಮಗಾಗಿ ಕಾಯುತ್ತಿದೆ",
-          "none": "ಪರಿಶೀಲಿಸಲು ಏನೂ ಇಲ್ಲ"
+          "label": "ಆಹ್ವಾನಿತ",
+          "sub": "ಕೋಡ್ ಮೂಲಕ ಪರಿಶೀಲನೆ ಬಾಕಿ",
+          "none": "ಎಲ್ಲರೂ ಪರಿಶೀಲಿಸಿದ್ದಾರೆ"
         },
         "inactive": {
           "label": "ತಿರಸ್ಕರಿಸಲಾಗಿದೆ",
@@ -824,7 +838,11 @@
       "clear_filter": "ಫಿಲ್ಟರ್ ತೆರವುಗೊಳಿಸಿ",
       "empty_pending": "ಪರಿಶೀಲನೆಗಾಗಿ ಯಾವುದೇ [[org]] ಕಾಯುತ್ತಿಲ್ಲ.",
       "review_hint": "ನಿಮ್ಮ ಸಂಸ್ಥೆಯ ಅಡಿಯಲ್ಲಿ ಒಂದು [[org]] ನೋಂದಾಯಿಸಿದಾಗ, ಅನುಮೋದಿಸಲು ಅಥವಾ ತಿರಸ್ಕರಿಸಲು ಅದರ ವಿನಂತಿ ಇಲ್ಲಿ ಕಾಣಿಸುತ್ತದೆ.",
-      "open": "ತೆರೆಯಿರಿ"
+      "open": "ತೆರೆಯಿರಿ",
+      "invite": "Invite [[orgs]]",
+      "col_role": "Role",
+      "col_onboard_participants": "Onboard Seekers & Providers",
+      "col_onboard_orgs": "Onboard [[Orgs]]"
     },
     "coordinators": {
       "heading": "[[Users]]",
@@ -888,8 +906,36 @@
     },
     "invite": {
       "heading": "[[user]]ರನ್ನು ಆಹ್ವಾನಿಸಿ",
-      "subtitle": "ಅವರ ಇಮೇಲ್ ವಿಳಾಸಗಳನ್ನು ಸೇರಿಸಿ. ಪ್ರತಿಯೊಬ್ಬರಿಗೂ ನೋಂದಣಿ ಲಿಂಕ್ ಸಿಗುತ್ತದೆ, ಮತ್ತು ನೀವು ಅನುಮೋದಿಸಿದ ನಂತರ ಅವರು ಸೇರುತ್ತಾರೆ.",
-      "org": "[[org]]",
+      "subtitle": "ಅವರ ಇಮೇಲ್ ವಿಳಾಸಗಳನ್ನು ಸೇರಿಸಿ. ಪ್ರತಿಯೊಬ್ಬರಿಗೂ ನೋಂದಣಿ ಲಿಂಕ್ ಸಿಗುತ್ತದೆ, ಮತ್ತು ಒಂದು ಬಾರಿಯ ಕೋಡ್‌ನಿಂದ ಇಮೇಲ್ ಪರಿಶೀಲಿಸಿದ ನಂತರ ಅವರು ಸೇರುತ್ತಾರೆ.",
+      "org": {
+        "heading": "[[org]]ಗಳನ್ನು ಆಹ್ವಾನಿಸಿ",
+        "subtitle": "ಅವರ ಇಮೇಲ್ ವಿಳಾಸಗಳನ್ನು ಸೇರಿಸಿ. ಪ್ರತಿ [[org]]ಗೆ ನೋಂದಣಿ ಲಿಂಕ್ ಸಿಗುತ್ತದೆ, ಮತ್ತು ಅದರ ಮಾಲೀಕರು ಒಂದು ಬಾರಿಯ ಕೋಡ್‌ನಿಂದ ಇಮೇಲ್ ಪರಿಶೀಲಿಸಿದ ನಂತರ ಅದು ಸೇರುತ್ತದೆ.",
+        "role_pill": "ಪಾತ್ರ: {role}",
+        "can_do": "ಆಹ್ವಾನಿತ [[org]]ಗಳು ಏನು ಮಾಡಬಹುದು",
+        "can_orgs": "[[org]]ಗಳನ್ನು ಸೇರಿಸುವುದು",
+        "can_orgs_hint": "ಅವರು ತಮ್ಮ ಅಡಿಯಲ್ಲಿ ಇತರ [[org]]ಗಳನ್ನು ಸೇರಿಸಬಹುದು.",
+        "can_participants": "ಸೀಕರ್ ಮತ್ತು ಪ್ರೊವೈಡರ್‌ಗಳನ್ನು ಸೇರಿಸುವುದು",
+        "can_participants_hint": "ಯಾವಾಗಲೂ ಸೇರಿದೆ. ಇದನ್ನು ಅವರ ತಂಡದ [[user]]ರು ಮಾಡುತ್ತಾರೆ.",
+        "role_label": "ಪಾತ್ರ",
+        "role_hint": "ಆಹ್ವಾನಿತ [[org]]ಗಳು ಏನು ಮಾಡಬಹುದು ಎಂಬುದರಿಂದ ನಿರ್ಧಾರವಾಗುತ್ತದೆ. ಅವರ ಹೆಸರಿನ ಪಕ್ಕದಲ್ಲಿ ತೋರಿಸಲಾಗುತ್ತದೆ.",
+        "role_default": "Super Admin",
+        "error_limit": "ಈ [[org]] ತನ್ನ ಅಡಿಯಲ್ಲಿ ಇನ್ನಷ್ಟು [[org]]ಗಳನ್ನು ತೆಗೆದುಕೊಳ್ಳಲು ಸಾಧ್ಯವಿಲ್ಲ.",
+        "breadcrumb_parent": "ಸೇರಿಸಿದ [[org]]ಗಳು",
+        "help": {
+          "send": {
+            "title": "ನೀವು ಆಹ್ವಾನ ಕಳುಹಿಸುತ್ತೀರಿ",
+            "body": "ಪ್ರತಿ ವಿಳಾಸಕ್ಕೂ ಅದರದೇ ನೋಂದಣಿ ಲಿಂಕ್ ಇರುವ ಇಮೇಲ್ ಹೋಗುತ್ತದೆ."
+          },
+          "register": {
+            "title": "ಅವರು ನೋಂದಾಯಿಸುತ್ತಾರೆ",
+            "body": "ಅವರು ಲಿಂಕ್ ತೆರೆದು ತಮ್ಮ [[org]] ನೋಂದಾಯಿಸುತ್ತಾರೆ."
+          },
+          "approve": {
+            "title": "ಅವರು ತಮ್ಮ ಇಮೇಲ್ ಪರಿಶೀಲಿಸುತ್ತಾರೆ",
+            "body": "ನಾವು ಇಮೇಲ್ ಮಾಡುವ ಕೋಡ್‌ನಿಂದ ಅವರು ಸೈನ್ ಇನ್ ಮಾಡುತ್ತಾರೆ. [[org]] ನಿಮ್ಮ ಅಡಿಯಲ್ಲಿ <link>ಸೇರಿಸಿದ [[org]]ಗಳು</link> ವಿಭಾಗಕ್ಕೆ ಸೇರುತ್ತದೆ. ಯಾವುದೇ ಅನುಮೋದನೆ ಅಗತ್ಯವಿಲ್ಲ."
+          }
+        }
+      },
       "inviting_to": "ಈ [[org]]ಗೆ ಆಹ್ವಾನ",
       "recipients": "ಇಮೇಲ್ ವಿಳಾಸಗಳು",
       "recipients_hint": "ಪಟ್ಟಿಯನ್ನು ಅಂಟಿಸಿ, ಅಥವಾ ಟೈಪ್ ಮಾಡಿ <kbd>Enter</kbd> ಅಥವಾ <kbd>,</kbd> ಒತ್ತಿರಿ",
@@ -909,7 +955,7 @@
       "not_sent": "ಕಳುಹಿಸಿಲ್ಲ:",
       "reason": {
         "active": "ಈಗಾಗಲೇ ಇಲ್ಲಿ [[user]]ರಾಗಿದ್ದಾರೆ",
-        "pending": "ಈಗಾಗಲೇ ನೋಂದಾಯಿಸಿದ್ದಾರೆ, ನಿಮ್ಮ ಅನುಮೋದನೆಗಾಗಿ ಕಾಯುತ್ತಿದ್ದಾರೆ",
+        "pending": "ಈಗಾಗಲೇ ನೋಂದಾಯಿಸಲಾಗಿದೆ, ಇಮೇಲ್ ಪರಿಶೀಲನೆಗಾಗಿ ಕಾಯುತ್ತಿದೆ",
         "inactive": "ಹಿಂದೆ ತಿರಸ್ಕರಿಸಲಾಗಿದೆ",
         "retired": "ಖಾತೆ ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಲಾಗಿದೆ",
         "invalid_email": "ಮಾನ್ಯ ಇಮೇಲ್ ವಿಳಾಸವಲ್ಲ",
@@ -930,8 +976,8 @@
           "body": "ಅವರು ಲಿಂಕ್ ತೆರೆದು ನೋಂದಣಿ ಫಾರ್ಮ್ ಭರ್ತಿ ಮಾಡುತ್ತಾರೆ."
         },
         "approve": {
-          "title": "ನೀವು ಅನುಮೋದಿಸುತ್ತೀರಿ",
-          "body": "<link>[[user]]ರು</link> ವಿಭಾಗದಲ್ಲಿ ಅವರನ್ನು ಪರಿಶೀಲಿಸಿ. ಅನುಮೋದನೆಯ ನಂತರ ಅವರು ಸೈನ್ ಇನ್ ಮಾಡಬಹುದು."
+          "title": "ಅವರು ತಮ್ಮ ಇಮೇಲ್ ಪರಿಶೀಲಿಸುತ್ತಾರೆ",
+          "body": "ನಾವು ಇಮೇಲ್ ಮಾಡುವ ಕೋಡ್‌ನಿಂದ ಅವರು ಸೈನ್ ಇನ್ ಮಾಡುತ್ತಾರೆ ಮತ್ತು <link>[[user]]ರು</link> ವಿಭಾಗಕ್ಕೆ ಸೇರುತ್ತಾರೆ. ಯಾವುದೇ ಅನುಮೋದನೆ ಅಗತ್ಯವಿಲ್ಲ."
         },
         "limits": "ಒಮ್ಮೆಗೆ ಗರಿಷ್ಠ {max} ಇಮೇಲ್‌ಗಳು."
       },
@@ -966,7 +1012,7 @@
       "read_only": "Contact details can't be changed here yet."
     },
     "status": {
-      "pending": "Pending",
+      "pending": "Invited",
       "active": "Active",
       "inactive": "Rejected",
       "retired": "Retired"
@@ -1123,9 +1169,9 @@
           "sub": "ಸೈನ್ ಇನ್ ಮಾಡಬಹುದು"
         },
         "pending": {
-          "label": "ಪರಿಶೀಲನೆ ಬಾಕಿ",
-          "sub": "ನಿಮಗಾಗಿ ಕಾಯುತ್ತಿದೆ",
-          "none": "ಪರಿಶೀಲಿಸಲು ಏನೂ ಇಲ್ಲ"
+          "label": "ಆಹ್ವಾನಿತ",
+          "sub": "ಕೋಡ್ ಮೂಲಕ ಪರಿಶೀಲನೆ ಬಾಕಿ",
+          "none": "ಎಲ್ಲರೂ ಪರಿಶೀಲಿಸಿದ್ದಾರೆ"
         },
         "inactive": {
           "label": "ತಿರಸ್ಕರಿಸಲಾಗಿದೆ",
@@ -1161,6 +1207,27 @@
       "title": "ಅದು ಸಿಗಲಿಲ್ಲ",
       "body": "ಅದನ್ನು ತೆಗೆದುಹಾಕಿರಬಹುದು, ಅಥವಾ ನಿಮಗೆ ಅದರ ಪ್ರವೇಶವಿಲ್ಲದಿರಬಹುದು.",
       "home": "ಕನ್ಸೋಲ್‌ಗೆ ಹೋಗಿ"
+    },
+    "open_invites": {
+      "heading": "Invites not used yet",
+      "col_email": "Email",
+      "col_status": "Status",
+      "col_sent": "Sent",
+      "col_expires": "Expires",
+      "status_pending": "Invited",
+      "status_expired": "Expired, send again",
+      "empty": "Nobody is waiting on an invite.",
+      "more": "Showing the newest {count}."
+    },
+    "dashboard": {
+      "heading": "Dashboard",
+      "subtitle": "Numbers across your network will show here.",
+      "tab_label": "Dashboard view",
+      "tab_aggregated": "Aggregated View",
+      "tab_participants": "Seeker & Provider View",
+      "coming_soon": "Coming soon",
+      "aggregated_body": "Your dashboard is coming soon.",
+      "participants_body": "This works only if you have onboarded seekers and providers yourself."
     }
   }
 }

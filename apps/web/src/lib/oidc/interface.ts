@@ -11,6 +11,8 @@ export interface AuthorizationUrlInput {
   codeChallenge: string;
   redirectUri: string;
   scope?: string;
+  /** Pre-fills the sign-in identifier (OIDC `login_hint`). */
+  loginHint?: string;
 }
 
 export interface ExchangeCodeInput {

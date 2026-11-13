@@ -447,7 +447,7 @@ export const registrationInvites = pgTable(
   'registration_invites',
   {
     jti: uuid('jti').primaryKey().defaultRandom(),
-    /** Currently always `coordinator`. */
+    /** `coordinator` joins an existing org; `org_owner` creates a child org of `org_id`. */
     role: text('role').notNull().default('coordinator'),
     orgId: uuid('org_id')
       .notNull()
@@ -463,9 +463,8 @@ export const registrationInvites = pgTable(
   },
   (table) => [
     index('registration_invites_org_idx').on(table.orgId),
-    // One pending invite per (org, email). Finished invites do not block a new one.
     uniqueIndex('registration_invites_pending_unique')
-      .on(table.orgId, table.email)
+      .on(table.orgId, table.role, table.email)
       .where(sql`status = 'pending'`),
   ],
 );

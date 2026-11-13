@@ -230,21 +230,38 @@ export const UserSearchResponseSchema = z.object({
 });
 export type UserSearchResponse = z.infer<typeof UserSearchResponseSchema>;
 
-/** `POST /v1/user/create`: invite coordinators into an org. */
+/** The addresses of one invite request. */
+export const InviteRecipientsSchema = z
+  .array(
+    z.object({ email: z.string().min(3).max(320), name: z.string().max(200).optional() }).strict(),
+  )
+  .min(1)
+  .max(100);
+
+/** `POST /v1/user/invite` and `POST /v1/user/create`: invite coordinators into an org. */
 export const UserInviteRequestSchema = z
-  .object({
-    org_id: z.string().uuid(),
-    recipients: z
-      .array(
-        z
-          .object({ email: z.string().min(3).max(320), name: z.string().max(200).optional() })
-          .strict(),
-      )
-      .min(1)
-      .max(100),
-  })
+  .object({ org_id: z.string().uuid(), recipients: InviteRecipientsSchema })
   .strict();
 export type UserInviteRequest = z.infer<typeof UserInviteRequestSchema>;
+
+/** `POST /v1/org/invite`: invite organisations to register under `parent_id`. */
+export const OrgInviteRequestSchema = z
+  .object({ parent_id: z.string().uuid(), recipients: InviteRecipientsSchema })
+  .strict();
+export type OrgInviteRequest = z.infer<typeof OrgInviteRequestSchema>;
+
+/** `GET /v1/user/invite/read` and `GET /v1/org/invite/read` query. */
+export const InviteReadQuerySchema = z.object({ token: z.string().min(1).max(4096) });
+
+/** An invite as its registration page shows it. */
+export const InviteReadResponseSchema = z.object({
+  /** The invited address; the registration form locks it. */
+  email: z.string(),
+  expires_at: z.string(),
+  /** The org the coordinator joins, or the parent of the invited org. */
+  org: z.object({ id: z.string(), name: z.string() }),
+});
+export type InviteReadResponse = z.infer<typeof InviteReadResponseSchema>;
 
 export const UserInviteResponseSchema = z.object({
   sent: z.number().int(),
@@ -254,6 +271,53 @@ export const UserInviteResponseSchema = z.object({
   existing: z.array(z.object({ email: z.string(), status: z.string() })),
 });
 export type UserInviteResponse = z.infer<typeof UserInviteResponseSchema>;
+
+/** `POST /v1/user/invite/search`: unused invites into an org. */
+export const UserInviteSearchRequestSchema = z
+  .object({
+    org_id: z.string().uuid(),
+    cursor: CursorSchema.optional(),
+    limit: PageLimitSchema.optional(),
+  })
+  .strict();
+
+/** `POST /v1/org/invite/search`: unused invites to register under an org. */
+export const OrgInviteSearchRequestSchema = z
+  .object({
+    parent_id: z.string().uuid(),
+    cursor: CursorSchema.optional(),
+    limit: PageLimitSchema.optional(),
+  })
+  .strict();
+
+/** An invite nobody has used yet. */
+export const OpenInviteSchema = z.object({
+  email: z.string(),
+  /** `expired`: the link no longer works; send a new invite. */
+  status: z.enum(['pending', 'expired']),
+  created_at: z.string(),
+  expires_at: z.string(),
+});
+export type OpenInvite = z.infer<typeof OpenInviteSchema>;
+
+export const InviteSearchResponseSchema = z.object({
+  invites: z.array(OpenInviteSchema),
+  next_cursor: z.string().nullable(),
+});
+export type InviteSearchResponse = z.infer<typeof InviteSearchResponseSchema>;
+
+/** `POST /v1/user/activate`: the caller's invited account, now active. */
+export const ActivateResponseSchema = z.object({
+  status: z.literal('active'),
+  account: z.enum(['coordinator', 'org_owner']),
+  /** False when the account was already active. */
+  activated: z.boolean(),
+});
+export type ActivateResponse = z.infer<typeof ActivateResponseSchema>;
+
+/** `POST /v1/org/invite`; `existing` is always empty. */
+export const OrgInviteResponseSchema = UserInviteResponseSchema;
+export type OrgInviteResponse = z.infer<typeof OrgInviteResponseSchema>;
 
 /** `POST /v1/user/decision/:id` and `POST /v1/org/decision/:id`. */
 export const DecisionRequestSchema = z

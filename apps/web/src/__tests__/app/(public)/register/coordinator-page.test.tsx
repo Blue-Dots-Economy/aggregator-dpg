@@ -27,6 +27,8 @@ vi.mock('@/app/(public)/register/register-server', () => ({
   loadConsentContent,
 }));
 vi.mock('@/lib/aggregator-schema.server', () => ({ loadRegistrationSchema }));
+const { readInvite } = vi.hoisted(() => ({ readInvite: vi.fn() }));
+vi.mock('@/lib/invite-read.server', () => ({ readInvite }));
 
 import CoordinatorInvitePage from '@/app/(public)/register/coordinator/page';
 
@@ -37,6 +39,7 @@ beforeEach(() => {
   redirect.mockClear();
   notFound.mockClear();
   loadRegistrationSchema.mockReset().mockResolvedValue({ schema, uiSchema: {} });
+  readInvite.mockReset().mockResolvedValue({ ok: false, reason: 'expired' });
   loadConsentContent.mockReset().mockResolvedValue({
     aggregator: { terms: { version: 1, title: 'T', content: 'T' }, privacy: {} },
     org: { terms: {}, privacy: {} },
@@ -71,6 +74,8 @@ describe('CoordinatorInvitePage (server component)', () => {
 
   it('passes the invite token + schema to CoordinatorInviteView on the happy path', async () => {
     const el = await run('inv-jwt');
+    expect(readInvite).toHaveBeenCalledWith('user', 'inv-jwt');
+    expect(el.props.invite).toEqual({ ok: false, reason: 'expired' });
     expect(el.props.inviteToken).toBe('inv-jwt');
     expect(el.props.schema).toBe(schema);
     expect(el.props.aggregatorConsentContent).toEqual({

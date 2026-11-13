@@ -195,6 +195,27 @@ describe('GET /v1/aggregator-config', () => {
     expect(body.brand.typography?.primaryFont).toBe('Inter');
   });
 
+  it('names an invited organisation "Super Admin" when the instance names no role', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    const body = res.json() as { organisation: { invite_role_label: string } };
+    expect(body.organisation).toEqual({ invite_role_label: 'Super Admin' });
+  });
+
+  it('serves the instance’s own role name for an invited organisation', async () => {
+    const base = buildBlueDotConfig();
+    _setNetworkConfig(
+      buildBlueDotConfig({
+        aggregator: {
+          ...base.aggregator,
+          organisation: { ...base.aggregator.organisation, invite_role_label: 'Lead Partner' },
+        },
+      }),
+    );
+    const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
+    const body = res.json() as { organisation: { invite_role_label: string } };
+    expect(body.organisation.invite_role_label).toBe('Lead Partner');
+  });
+
   it('always exposes features.custom_roles, false by default (opt-in)', async () => {
     const res = await app.inject({ method: 'GET', url: '/v1/aggregator-config' });
     const body = res.json() as { features: { custom_roles: boolean } };

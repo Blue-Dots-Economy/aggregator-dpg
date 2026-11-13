@@ -69,7 +69,7 @@ describe('OrgCoordinators', () => {
     renderList();
     expect(tile(new RegExp(`^${term('Users')}\\s*3`))).toHaveAttribute('aria-pressed', 'true');
     expect(tile(/^Active\s*1\s*Can sign in/)).toBeInTheDocument();
-    expect(tile(/^Pending review\s*1\s*Waiting on you/)).toBeInTheDocument();
+    expect(tile(/^Invited\s*1\s*Yet to verify with a code/)).toBeInTheDocument();
     expect(tile(/^Rejected\s*1\s*Not approved/)).toBeInTheDocument();
     expect(tableRows()).toHaveLength(3);
     expect(tile(new RegExp(`^${term('Users')}`))).toHaveTextContent('Showing below');
@@ -123,15 +123,15 @@ describe('OrgCoordinators', () => {
 
   it('says when nothing is waiting for review', () => {
     renderList({ rows: rows.filter((r) => r.status !== 'pending'), total: 2, pending: 0 });
-    expect(tile(/^Pending review\s*0\s*Nothing to review/)).toBeInTheDocument();
-    fireEvent.click(tile(/^Pending review/));
+    expect(tile(/^Invited\s*0\s*Everyone has verified/)).toBeInTheDocument();
+    fireEvent.click(tile(/^Invited/));
     expect(screen.getByText(`No ${term('users')} waiting for review.`)).toBeInTheDocument();
   });
 
   it('marks counted tiles and links the full list when only part was loaded', () => {
     renderList({ total: 250, pending: 4, complete: false });
     expect(tile(new RegExp(`^${term('Users')}\\s*250`))).toBeInTheDocument();
-    expect(tile(/^Pending review\s*4/)).toBeInTheDocument();
+    expect(tile(/^Invited\s*4/)).toBeInTheDocument();
     expect(tile(/^Active\s*1\+/)).toBeInTheDocument();
     expect(screen.getByText(/Showing the newest 3\./)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: `See all ${term('users')}` })).toHaveAttribute(

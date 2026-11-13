@@ -26,7 +26,10 @@ export { RegistrationInvitesStoreBase } from './interface.js';
 export type {
   RegistrationInvite,
   RegistrationInviteStatus,
+  InviteRole,
   CreateInviteInput,
+  InviteCursor,
+  ListOpenInvitesInput,
   RefreshInviteInput,
   InviteStoreError,
   InviteStoreResult,

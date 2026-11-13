@@ -493,6 +493,27 @@ export const ERR = {
     detail: 'This invitation has already been used. If you already registered, sign in instead.',
     hint: 'Invite row not pending (consumed/revoked/expired) or the pending→consumed CAS lost a race (§4.4.6).',
   },
+  INVITE_EMAIL_MISMATCH: {
+    code: 'INVITE_EMAIL_MISMATCH',
+    status: 400,
+    title: 'Use the invited email',
+    detail: 'Register with the email address this invitation was sent to.',
+    hint: 'Submitted email differs from the invite token email claim; the invited address is enforced on accept.',
+  },
+  EMAIL_NOT_VERIFIED: {
+    code: 'EMAIL_NOT_VERIFIED',
+    status: 403,
+    title: 'Verify your email',
+    detail: 'Sign in with the code we email you to verify your email address, then try again.',
+    hint: 'Invited login has emailVerified=false: it signed in by phone, or the OTP authenticator does not mark the email verified.',
+  },
+  NOT_INVITED: {
+    code: 'NOT_INVITED',
+    status: 403,
+    title: 'Nothing to activate',
+    detail: 'This account was not created from an invitation, or it has already been decided.',
+    hint: 'Keycloak decision_made is not "invited", or the coordinator / org row is not pending.',
+  },
   GRANT_INVALID: {
     code: 'GRANT_INVALID',
     status: 400,

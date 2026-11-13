@@ -136,7 +136,7 @@ describe('coordinator submit with an invite token (#700)', () => {
     expect(inv.ok && inv.value?.status).toBe('consumed');
   });
 
-  it('allows registering with a different email and records the invited one (#701)', async () => {
+  it('refuses another email than the invited one and keeps the invite', async () => {
     const token = await seedInviteAndToken();
     userStore.seedInviteEmail('inv-1', INVITE_EMAIL);
     const res = await post({
@@ -144,18 +144,10 @@ describe('coordinator submit with an invite token (#700)', () => {
       contact: { ...validBody.contact, email: 'my-own@trrain.org' },
       invite: token,
     });
-    expect(res.statusCode).toBe(201);
-    const id = (res.json() as { aggregator_id: string }).aggregator_id;
-    const stored = await userStore.findById(id);
-    // Registered with the entered email; invited email kept as provenance.
-    expect(stored.ok && stored.value?.contact.email).toBe('my-own@trrain.org');
-    // The row links the consumed invite (0029); the invited address is read
-    // through it (the fake mirrors the Postgres join).
-    expect(stored.ok && stored.value?.inviteId).toBe('inv-1');
-    expect(stored.ok && stored.value?.inviteEmail).toBe(INVITE_EMAIL);
-    // Invite still consumed (single-use holds).
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: { code: string } }).error.code).toBe('INVITE_EMAIL_MISMATCH');
     const inv = await invites.findByJti('inv-1');
-    expect(inv.ok && inv.value?.status).toBe('consumed');
+    expect(inv.ok && inv.value?.status).toBe('pending');
   });
 
   it('rejects an expired invite (410)', async () => {
@@ -240,7 +232,7 @@ describe('coordinator submit with an invite token (#700)', () => {
     const bodyFor = (n: number) => ({
       ...validBody,
       name: `TRRAIN ${n}`,
-      contact: { name: `Person ${n}`, phone: `+91987654321${n}`, email: `p${n}@x.org` },
+      contact: { name: `Person ${n}`, phone: `+91987654321${n}`, email: INVITE_EMAIL },
       invite: token,
     });
     const rs = await Promise.all([1, 2, 3, 4, 5].map((n) => post(bodyFor(n))));
@@ -253,10 +245,8 @@ describe('coordinator submit with an invite token (#700)', () => {
       expect((r.json() as { error: { code: string } }).error.code).toBe('INVITE_ALREADY_USED');
     }
     // Only the winner's row exists — the other four created nothing.
-    const created = await Promise.all(
-      [1, 2, 3, 4, 5].map((n) => userStore.findByContactEmail(`p${n}@x.org`)),
-    );
-    expect(created.filter((r) => r.ok && r.value !== null)).toHaveLength(1);
+    const created = await userStore.findByContactEmail(INVITE_EMAIL);
+    expect(created.ok && created.value?.contact.phone).toMatch(/^\+91987654321[1-5]$/);
     const inv = await invites.findByJti('inv-1');
     expect(inv.ok && inv.value?.status).toBe('consumed');
   });

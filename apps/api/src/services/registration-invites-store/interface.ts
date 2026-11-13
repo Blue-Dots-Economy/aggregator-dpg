@@ -8,6 +8,9 @@
 
 export type RegistrationInviteStatus = 'pending' | 'consumed' | 'revoked' | 'expired';
 
+/** `coordinator` joins the invite's org; `org_owner` registers a child org of it. */
+export type InviteRole = 'coordinator' | 'org_owner';
+
 export interface RegistrationInvite {
   jti: string;
   role: string;
@@ -27,7 +30,22 @@ export interface CreateInviteInput {
   expiresAt: Date;
   createdBy: string;
   /** Defaults to `coordinator`. */
-  role?: string;
+  role?: InviteRole;
+}
+
+/** Keyset position in a list of open invites, newest first. */
+export interface InviteCursor {
+  createdAt: Date;
+  jti: string;
+}
+
+/** Input of {@link RegistrationInvitesStoreBase.listOpen}. */
+export interface ListOpenInvitesInput {
+  orgId: string;
+  role: InviteRole;
+  /** Rows strictly after this position. */
+  after?: InviteCursor;
+  limit: number;
 }
 
 export interface RefreshInviteInput {
@@ -37,7 +55,7 @@ export interface RefreshInviteInput {
 
 export type InviteStoreError =
   | { code: 'NOT_FOUND'; message: string }
-  /** A live (pending) invite already exists for this (org, email). */
+  /** A live (pending) invite already exists for this (org, role, email). */
   | { code: 'DUPLICATE_PENDING'; message: string }
   | { code: 'DB_UNAVAILABLE'; message: string };
 
@@ -47,19 +65,28 @@ export abstract class RegistrationInvitesStoreBase {
   /**
    * Inserts a new pending invite.
    *
-   * Returns `DUPLICATE_PENDING` when a live invite for the same org and email
-   * exists; the caller can then use {@link refresh}.
+   * Returns `DUPLICATE_PENDING` when a live invite for the same org, role and
+   * email exists; the caller can then use {@link refresh}.
    */
   abstract create(input: CreateInviteInput): Promise<InviteStoreResult<RegistrationInvite>>;
 
   /** Loads an invite by its `jti` (the token `sub`). */
   abstract findByJti(jti: string): Promise<InviteStoreResult<RegistrationInvite | null>>;
 
-  /** Finds the pending invite for an org and email, if any. */
+  /** Finds the pending invite for an org, role and email, if any. */
   abstract findPendingByOrgAndEmail(
     parentOrgId: string,
+    role: InviteRole,
     email: string,
   ): Promise<InviteStoreResult<RegistrationInvite | null>>;
+
+  /**
+   * Lists the invites of an org and role that nobody has used yet (pending or
+   * expired), newest first by `(created_at, jti)`.
+   *
+   * @returns Up to `limit` rows.
+   */
+  abstract listOpen(input: ListOpenInvitesInput): Promise<InviteStoreResult<RegistrationInvite[]>>;
 
   /**
    * Updates a pending invite's expiry and creator, for a re-invite.

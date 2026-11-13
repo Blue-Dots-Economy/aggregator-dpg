@@ -137,6 +137,7 @@ export async function registerInviteRoutes(app: FastifyInstance): Promise<void> 
 
       const summary = await mintInviteBatch({
         invites: getRegistrationInvitesStore(),
+        role: 'coordinator',
         mailer: getMailer(),
         orgId,
         orgName: orgRow.displayName,

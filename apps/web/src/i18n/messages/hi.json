@@ -100,7 +100,15 @@
       "modal_close": "बंद करें",
       "load_failed_title": "शर्तें उपलब्ध नहीं हैं",
       "load_failed_detail": "हम सेवा की शर्तें और गोपनीयता नीति लोड नहीं कर सके, इसलिए आपकी सहमति दर्ज नहीं की जा सकती। कृपया पृष्ठ पुनः लोड करें और फिर प्रयास करें।"
-    }
+    },
+    "invite_heading_invalid": "निमंत्रण",
+    "invite_invalid": "यह निमंत्रण लिंक मान्य नहीं है। अपने निमंत्रण ईमेल वाले लिंक का उपयोग करें, या यदि आपका पहले से खाता है तो साइन इन करें।",
+    "invite_expired": "यह निमंत्रण समाप्त हो गया है। जिसने आपको आमंत्रित किया है, उनसे नया निमंत्रण भेजने को कहें।",
+    "invite_used": "यह निमंत्रण पहले ही उपयोग हो चुका है। यदि आपने इससे पंजीकरण किया है, तो साइन इन करें।",
+    "invite_org_inactive": "यह निमंत्रण अभी उपयोग नहीं किया जा सकता। जिसने आपको आमंत्रित किया है, उनसे संपर्क करें।",
+    "invite_unavailable": "हम आपका निमंत्रण लोड नहीं कर सके। कृपया थोड़ी देर में फिर से प्रयास करें।",
+    "invite_sign_in": "साइन इन करें",
+    "invite_org_under": "आपका [[org]] {parent} के अंतर्गत पंजीकृत होगा।"
   },
   "dashboard": {
     "buckets": {
@@ -596,7 +604,9 @@
       "exchange_token_exchange_failed": "टोकन एक्सचेंज विफल रहा",
       "exchange_state_mismatch": "सुरक्षा जाँच विफल (स्थिति मेल नहीं खाई)",
       "exchange_token_verify_failed": "सुरक्षा जाँच विफल (टोकन सत्यापन)",
-      "unknown": "अप्रत्याशित साइन इन त्रुटि"
+      "unknown": "अप्रत्याशित साइन इन त्रुटि",
+      "invite_email_not_verified": "पंजीकरण पूरा करने के लिए अपने ईमेल पर भेजे गए कोड से साइन इन करें",
+      "invite_activation_failed": "हम आपका पंजीकरण पूरा नहीं कर सके; फिर से प्रयास करने के लिए दोबारा साइन इन करें"
     }
   },
   "support": {
@@ -660,7 +670,7 @@
     "title": "[[Org]] console",
     "nav": {
       "home": "Home",
-      "organisations": "[[Orgs]]",
+      "organisations": "Onboarded [[Orgs]]",
       "coordinators": "[[Users]]",
       "invite": "Invite [[users]]",
       "roles": "Roles",
@@ -669,7 +679,11 @@
       "access": "Roles and permissions",
       "portal_label": "[[Org]] console",
       "network_admin": "Network admin",
-      "org_owner": "[[Org]] owner"
+      "org_owner": "[[Org]] owner",
+      "dashboard": "Dashboard",
+      "my_blue_dots": "My Blue Dots",
+      "my_team": "My Team",
+      "profile": "Profile"
     },
     "home": {
       "coordinators": "{count} [[users]]",
@@ -741,7 +755,7 @@
       "known_as_values_more": "+{count} more",
       "known_as_values_new": "New value",
       "known_as_values_placeholder": "Add a value, e.g. District",
-      "known_as_values_exists": "\u201c{name}\u201d is already in the list.",
+      "known_as_values_exists": "“{name}” is already in the list.",
       "known_as_values_notes_heading": "How it works",
       "known_as_values_unchanged": "No changes",
       "known_as_values_unsaved": "Unsaved changes",
@@ -765,7 +779,7 @@
       "known_as_values_name_repeated": "Each value needs a different name."
     },
     "orgs": {
-      "heading": "[[Orgs]]",
+      "heading": "Onboarded [[Orgs]]",
       "status_filter": "Status",
       "all": "All",
       "approve": "Approve",
@@ -775,7 +789,7 @@
       "repair": "Re-grant owner access",
       "repaired": "Owner access: {status}",
       "empty": "No [[orgs]] match.",
-      "subtitle": "The [[orgs]] directly under the network, and registrations waiting for your approval.",
+      "subtitle": "The [[orgs]] directly under the network, and the ones you have invited.",
       "col_name": "[[Org]]",
       "col_known_as": "Known as",
       "col_joined": "Joined",
@@ -784,7 +798,7 @@
       "col_actions": "Actions",
       "hierarchy": "Hierarchy settings",
       "col_parent": "Parent [[org]]",
-      "subtitle_owner": "Your [[orgs]] and the [[orgs]] directly under them, and registrations waiting for your approval.",
+      "subtitle_owner": "The [[orgs]] directly under yours, and the ones you have invited.",
       "hierarchy_description": "Choose what [[orgs]] directly under {name} are called.",
       "known_as_current": "Known as",
       "yours": "Your [[org]]",
@@ -799,9 +813,9 @@
           "sub": "स्वीकृत और चालू"
         },
         "pending": {
-          "label": "समीक्षा बाकी",
-          "sub": "आपकी प्रतीक्षा में",
-          "none": "समीक्षा के लिए कुछ नहीं"
+          "label": "आमंत्रित",
+          "sub": "कोड से सत्यापन बाकी",
+          "none": "सभी ने सत्यापन कर लिया है"
         },
         "inactive": {
           "label": "अस्वीकृत",
@@ -824,7 +838,11 @@
       "clear_filter": "फ़िल्टर हटाएँ",
       "empty_pending": "कोई [[org]] समीक्षा की प्रतीक्षा में नहीं है।",
       "review_hint": "जब कोई [[org]] आपके संगठन के अंतर्गत पंजीकरण करता है, तो उसका अनुरोध यहाँ स्वीकृत या अस्वीकृत करने के लिए दिखाई देता है।",
-      "open": "खोलें"
+      "open": "खोलें",
+      "invite": "Invite [[orgs]]",
+      "col_role": "Role",
+      "col_onboard_participants": "Onboard Seekers & Providers",
+      "col_onboard_orgs": "Onboard [[Orgs]]"
     },
     "coordinators": {
       "heading": "[[Users]]",
@@ -888,8 +906,36 @@
     },
     "invite": {
       "heading": "[[users_obl]] को आमंत्रित करें",
-      "subtitle": "उनके ईमेल पते जोड़ें। हर व्यक्ति को पंजीकरण लिंक मिलेगा, और आपकी स्वीकृति के बाद वे जुड़ जाएँगे।",
-      "org": "[[org]]",
+      "subtitle": "उनके ईमेल पते जोड़ें। हर व्यक्ति को एक पंजीकरण लिंक मिलता है, और वे एक बार के कोड से अपना ईमेल सत्यापित करने के बाद जुड़ जाते हैं।",
+      "org": {
+        "heading": "[[org]] आमंत्रित करें",
+        "subtitle": "उनके ईमेल पते जोड़ें। हर [[org]] को एक पंजीकरण लिंक मिलता है, और उसके मालिक द्वारा एक बार के कोड से ईमेल सत्यापित करने के बाद वह जुड़ जाता है।",
+        "role_pill": "भूमिका: {role}",
+        "can_do": "आमंत्रित [[org]] क्या कर सकते हैं",
+        "can_orgs": "[[org]] जोड़ना",
+        "can_orgs_hint": "वे अपने अंतर्गत अन्य [[org]] जोड़ सकते हैं।",
+        "can_participants": "सीकर और प्रोवाइडर जोड़ना",
+        "can_participants_hint": "हमेशा शामिल। यह उनकी टीम के [[user]] करते हैं।",
+        "role_label": "भूमिका",
+        "role_hint": "आमंत्रित [[org]] क्या कर सकते हैं, उसी से तय होती है। उनके नाम के साथ दिखाई जाती है।",
+        "role_default": "Super Admin",
+        "error_limit": "यह [[org]] अपने अंतर्गत और [[org]] नहीं ले सकता।",
+        "breadcrumb_parent": "जोड़े गए [[org]]",
+        "help": {
+          "send": {
+            "title": "आप निमंत्रण भेजते हैं",
+            "body": "हर पते पर उसके अपने पंजीकरण लिंक वाला ईमेल जाता है।"
+          },
+          "register": {
+            "title": "वे पंजीकरण करते हैं",
+            "body": "वे लिंक खोलकर अपना [[org]] पंजीकृत करते हैं।"
+          },
+          "approve": {
+            "title": "वे अपना ईमेल सत्यापित करते हैं",
+            "body": "वे हमारे द्वारा ईमेल किए गए कोड से साइन इन करते हैं। [[org]] आपके अंतर्गत <link>जोड़े गए [[org]]</link> में जुड़ जाता है। किसी स्वीकृति की आवश्यकता नहीं है।"
+          }
+        }
+      },
       "inviting_to": "आमंत्रण इस [[org]] के लिए",
       "recipients": "ईमेल पते",
       "recipients_hint": "सूची पेस्ट करें, या टाइप करके <kbd>Enter</kbd> या <kbd>,</kbd> दबाएँ",
@@ -909,7 +955,7 @@
       "not_sent": "नहीं भेजे गए:",
       "reason": {
         "active": "पहले से यहाँ [[user]] है",
-        "pending": "पहले से पंजीकृत, आपकी स्वीकृति की प्रतीक्षा में",
+        "pending": "पहले से पंजीकृत, ईमेल सत्यापन की प्रतीक्षा में",
         "inactive": "पहले अस्वीकार किया गया",
         "retired": "खाता निष्क्रिय किया गया",
         "invalid_email": "मान्य ईमेल पता नहीं है",
@@ -930,8 +976,8 @@
           "body": "वे लिंक खोलकर पंजीकरण फ़ॉर्म भरते हैं।"
         },
         "approve": {
-          "title": "आप स्वीकृति देते हैं",
-          "body": "<link>[[user]]</link> में उनकी समीक्षा करें। स्वीकृति के बाद वे साइन इन कर सकते हैं।"
+          "title": "वे अपना ईमेल सत्यापित करते हैं",
+          "body": "वे हमारे द्वारा ईमेल किए गए कोड से साइन इन करते हैं और <link>[[user]]</link> में जुड़ जाते हैं। किसी स्वीकृति की आवश्यकता नहीं है।"
         },
         "limits": "एक बार में अधिकतम {max} ईमेल।"
       },
@@ -966,7 +1012,7 @@
       "read_only": "Contact details can't be changed here yet."
     },
     "status": {
-      "pending": "Pending",
+      "pending": "Invited",
       "active": "Active",
       "inactive": "Rejected",
       "retired": "Retired"
@@ -1123,9 +1169,9 @@
           "sub": "साइन इन कर सकते हैं"
         },
         "pending": {
-          "label": "समीक्षा बाकी",
-          "sub": "आपकी प्रतीक्षा में",
-          "none": "समीक्षा के लिए कुछ नहीं"
+          "label": "आमंत्रित",
+          "sub": "कोड से सत्यापन बाकी",
+          "none": "सभी ने सत्यापन कर लिया है"
         },
         "inactive": {
           "label": "अस्वीकृत",
@@ -1161,6 +1207,27 @@
       "title": "यह नहीं मिला",
       "body": "शायद इसे हटा दिया गया है, या आपके पास इसकी पहुँच नहीं है।",
       "home": "कंसोल पर जाएँ"
+    },
+    "open_invites": {
+      "heading": "Invites not used yet",
+      "col_email": "Email",
+      "col_status": "Status",
+      "col_sent": "Sent",
+      "col_expires": "Expires",
+      "status_pending": "Invited",
+      "status_expired": "Expired, send again",
+      "empty": "Nobody is waiting on an invite.",
+      "more": "Showing the newest {count}."
+    },
+    "dashboard": {
+      "heading": "Dashboard",
+      "subtitle": "Numbers across your network will show here.",
+      "tab_label": "Dashboard view",
+      "tab_aggregated": "Aggregated View",
+      "tab_participants": "Seeker & Provider View",
+      "coming_soon": "Coming soon",
+      "aggregated_body": "Your dashboard is coming soon.",
+      "participants_body": "This works only if you have onboarded seekers and providers yourself."
     }
   }
 }

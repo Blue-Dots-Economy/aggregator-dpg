@@ -21,6 +21,7 @@ import type {
   RegistrationMode,
   StatusRule,
 } from '@aggregator-dpg/network-config/interface';
+import { DEFAULT_INVITE_ROLE_LABEL } from '@aggregator-dpg/network-config/interface';
 import { errorResponses } from '../errors/openapi.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { config, enabledRegistrationModes, signalsUiUrls } from '../config.js';
@@ -77,6 +78,8 @@ interface PublicAggregatorConfig {
   signals_ui_urls: Readonly<Record<string, string>>;
   /** Feature flags, always present. `custom_roles` is `RBAC_CUSTOM_ROLES_ENABLED`. */
   features: { custom_roles: boolean };
+  /** The role name the console shows for an invited organisation. */
+  organisation: { invite_role_label: string };
 }
 
 const AggregatorConfigResponseSchema = z
@@ -145,6 +148,7 @@ const AggregatorConfigResponseSchema = z
     signals_ui_urls: z.record(z.string(), z.string()),
     // Always present.
     features: z.object({ custom_roles: z.boolean() }).passthrough(),
+    organisation: z.object({ invite_role_label: z.string() }),
   })
   .passthrough();
 
@@ -229,6 +233,10 @@ export async function registerAggregatorConfigRoutes(app: FastifyInstance): Prom
         ),
         signals_ui_urls: signalsUiUrls,
         features: { custom_roles: config.RBAC_CUSTOM_ROLES_ENABLED },
+        organisation: {
+          invite_role_label:
+            cfg.aggregator.organisation.invite_role_label ?? DEFAULT_INVITE_ROLE_LABEL,
+        },
       };
       return reply.header('Cache-Control', 'public, max-age=60').send(payload);
     },

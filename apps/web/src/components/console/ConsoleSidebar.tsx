@@ -1,57 +1,55 @@
 'use client';
 
 /**
- * The organisation console's sidebar (user & org Phase 5), in the same shell
- * as the coordinator portal's ({@link AppSidebar}). The organisations list is
- * the network admin's only; coordinators need `org.manage`, and the
- * read-only roles and permissions view `network.administer` (RBAC; the API
- * also checks them). Inviting coordinators is offered from the Coordinators
- * page itself (next to the status filter), not as its own sidebar entry.
- * "My account" has no nav entry either — its details open from the account
- * card at the foot of the sidebar (`SidebarAccount.details`).
+ * The organisation console's sidebar, in the same shell as the coordinator
+ * portal's ({@link AppSidebar}): Dashboard, My Team under My Blue Dots,
+ * Onboarded Organisations and Profile. My Team needs `org.manage` in an owned
+ * organisation (the API also checks it), so the network admin has none; Profile
+ * is the caller's own organisation. "My account" opens from the account card
+ * at the foot of the sidebar (`SidebarAccount.details`).
  */
 
 import { useTranslations } from 'next-intl';
 import { AppSidebar, type NavItem, type SidebarAccount } from '../shell/Sidebar';
 
+/** The dashboard page. */
+export const CONSOLE_DASHBOARD_HREF = '/console/dashboard';
+/** The caller's own organisation. */
+export const CONSOLE_PROFILE_HREF = '/console/profile';
+
 /**
  * Builds the console links for the actor and renders the shared sidebar.
  *
- * @param props.canManage - Holds `org.manage` (coordinators).
- * @param props.canViewAccess - May open the roles and permissions view.
+ * @param props.teamHref - The caller's team page, or `null` when it has no team to manage.
+ * @param props.showProfile - The caller owns one organisation to show as its profile.
  * @param props.account - The account card: the admin's name and role.
  */
 export function ConsoleSidebar({
-  canManage = true,
-  homeIsCoordinators = false,
-  canViewAccess = false,
+  teamHref,
+  showProfile,
   account,
 }: Readonly<{
-  canManage?: boolean;
-  /** The home page lists the caller's coordinators, so its link is named for them. */
-  homeIsCoordinators?: boolean;
-  canViewAccess?: boolean;
+  teamHref: string | null;
+  showProfile: boolean;
   account: SidebarAccount;
 }>) {
   const t = useTranslations('console');
-  // Organisations first, then users.
   const nav: NavItem[] = [
-    { to: '/console/orgs', label: t('nav.organisations'), icon: 'briefcase' as const },
-    ...(homeIsCoordinators
-      ? [{ to: '/console', label: t('nav.coordinators'), icon: 'users' as const, exact: true }]
-      : []),
-    ...(canManage
-      ? [{ to: '/console/coordinators', label: t('nav.coordinators'), icon: 'users' as const }]
-      : []),
-    ...(canViewAccess
+    { to: CONSOLE_DASHBOARD_HREF, label: t('nav.dashboard'), icon: 'trending' as const },
+    ...(teamHref
       ? [
           {
-            to: '/console/access/roles',
-            match: '/console/access',
-            label: t('nav.access'),
-            icon: 'shield' as const,
+            to: teamHref,
+            label: t('nav.my_team'),
+            icon: 'users' as const,
+            exact: teamHref === '/console',
+            section: t('nav.my_blue_dots'),
           },
         ]
+      : []),
+    { to: '/console/orgs', label: t('nav.organisations'), icon: 'briefcase' as const },
+    ...(showProfile
+      ? [{ to: CONSOLE_PROFILE_HREF, label: t('nav.profile'), icon: 'user' as const }]
       : []),
   ];
   return <AppSidebar nav={nav} portalLabel={t('nav.portal_label')} account={account} />;

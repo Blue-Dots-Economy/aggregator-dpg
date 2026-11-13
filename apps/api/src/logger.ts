@@ -51,3 +51,13 @@ export const loggerOptions: pino.LoggerOptions = {
 };
 
 export const logger = pino(loggerOptions);
+
+/**
+ * Masks the `token` query parameter of a request URL, so invite links never reach the log.
+ *
+ * @param url - The request URL as Fastify reports it.
+ * @returns The URL with every `token` value replaced.
+ */
+export function loggableUrl(url: string): string {
+  return url.replace(/([?&]token=)[^&#]*/g, '$1[REDACTED]');
+}

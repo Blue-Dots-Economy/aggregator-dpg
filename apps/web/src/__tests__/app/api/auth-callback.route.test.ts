@@ -24,6 +24,8 @@ vi.mock('@/lib/oidc', () => ({
 vi.mock('@/lib/session', () => ({
   getSessionStore: vi.fn(),
 }));
+const { activateInviteeMock } = vi.hoisted(() => ({ activateInviteeMock: vi.fn() }));
+vi.mock('@/lib/invite-activation', () => ({ activateInvitee: activateInviteeMock }));
 
 import { GET } from '@/app/api/auth/callback/route';
 import { getOidcAdapter } from '@/lib/oidc';
@@ -52,6 +54,7 @@ describe('GET /api/auth/callback', () => {
   let originalRedirectUri: string | undefined;
   let originalPublicUrl: string | undefined;
   const exchangeCode = vi.fn();
+  const refresh = vi.fn();
   const create = vi.fn(async () => 'new-sid');
 
   beforeEach(() => {
@@ -64,7 +67,7 @@ describe('GET /api/auth/callback', () => {
     mockGetOidcAdapter.mockReturnValue({
       buildAuthorizationUrl: vi.fn(),
       exchangeCode,
-      refresh: vi.fn(),
+      refresh,
       buildLogoutUrl: vi.fn(),
     } as never);
     mockGetSessionStore.mockReturnValue({
@@ -185,6 +188,71 @@ describe('GET /api/auth/callback', () => {
     });
     return GET(req);
   }
+
+  describe('an invited account', () => {
+    const tokenSet = (claims: Record<string, unknown>) => ({
+      accessToken: fakeJwt(claims),
+      refreshToken: 'refresh-1',
+      idToken: 'id-1',
+      accessTokenExp: Date.now() + 60_000,
+      refreshTokenExp: Date.now() + 60_000,
+    });
+
+    function signIn(): Promise<Response> {
+      exchangeCode.mockResolvedValue({
+        ok: true,
+        value: {
+          tokens: tokenSet({ sub: 'owner-1', decision_made: 'invited' }),
+          claims: { sub: 'owner-1' },
+        },
+      });
+      const req = new NextRequest('http://localhost/api/auth/callback?code=abc&state=state-1', {
+        headers: { cookie: `oidc_flow=${flowCookie('/console')}` },
+      });
+      return GET(req);
+    }
+
+    it('is activated, its tokens refreshed, and it lands with the new access', async () => {
+      activateInviteeMock.mockResolvedValue('active');
+      refresh.mockResolvedValue({
+        ok: true,
+        value: tokenSet({ sub: 'owner-1', realm_access: { roles: ['org_owner'] } }),
+      });
+      const res = await signIn();
+      expect(activateInviteeMock).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledWith('refresh-1');
+      expect(res.headers.get('location')).toBe('http://portal.test/console');
+      expect(create).toHaveBeenCalled();
+    });
+
+    it('goes back to sign-in when the email was not verified', async () => {
+      activateInviteeMock.mockResolvedValue('email_not_verified');
+      const res = await signIn();
+      expect(res.headers.get('location')).toBe(
+        'http://portal.test/login?error=invite_email_not_verified',
+      );
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('goes back to sign-in when activation fails', async () => {
+      activateInviteeMock.mockResolvedValue('failed');
+      const res = await signIn();
+      expect(res.headers.get('location')).toBe(
+        'http://portal.test/login?error=invite_activation_failed',
+      );
+      expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it('goes back to sign-in when the refresh after activation fails', async () => {
+      activateInviteeMock.mockResolvedValue('active');
+      refresh.mockResolvedValue({ ok: false, error: { code: 'REFRESH_FAILED', message: 'x' } });
+      const res = await signIn();
+      expect(res.headers.get('location')).toBe(
+        'http://portal.test/login?error=invite_activation_failed',
+      );
+      expect(create).not.toHaveBeenCalled();
+    });
+  });
 
   it('signs an org owner in and lands them on the console (Phase 5)', async () => {
     const res = await blockedWith(['org_owner']);

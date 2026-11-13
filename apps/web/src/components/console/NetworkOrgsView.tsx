@@ -38,7 +38,7 @@ const FILTER_TILE: Record<OrgFilter, { icon: LucideIcon; tone: TileTone }> = {
 
 /** Columns shared by the header and every row. */
 const COLS =
-  'grid grid-cols-[minmax(0,1fr)_auto_72px] items-center gap-3.5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_90px]';
+  'grid grid-cols-[minmax(0,1fr)_auto_72px] items-center gap-3.5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_96px_96px_90px]';
 
 /** Whether an organisation's name or "known as" contains the search text (lower-cased). */
 function matchesQuery(org: OrgRow, query: string): boolean {
@@ -51,12 +51,15 @@ export function NetworkOrgsView({
   orgs,
   more,
   initialFilter = 'all',
+  roleLabel,
 }: Readonly<{
   rootName: string;
   orgs: OrgRow[];
   /** More organisations exist than were loaded. */
   more: boolean;
   initialFilter?: OrgFilter;
+  /** The role every organisation under the network has, by what it can do. */
+  roleLabel: string;
 }>) {
   const t = useTranslations('console');
   const [filter, setFilter] = useState<OrgFilter>(initialFilter);
@@ -155,6 +158,13 @@ export function NetworkOrgsView({
           <span>{t('orgs.col_status')}</span>
           <span className="hidden lg:block">{t('orgs.col_known_as')}</span>
           <span className="hidden lg:block">{t('orgs.col_joined')}</span>
+          <span className="hidden lg:block">{t('orgs.col_role')}</span>
+          <span className="hidden normal-case tracking-normal lg:block">
+            {t('orgs.col_onboard_participants')}
+          </span>
+          <span className="hidden normal-case tracking-normal lg:block">
+            {t('orgs.col_onboard_orgs')}
+          </span>
           <span>
             <span className="sr-only">{t('orgs.col_view')}</span>
           </span>
@@ -166,7 +176,7 @@ export function NetworkOrgsView({
               {filter === 'pending' && !q ? t('orgs.empty_pending') : t('orgs.empty')}
             </p>
           ) : (
-            rows.map((org) => <OrgRowLink key={org.id} org={org} />)
+            rows.map((org) => <OrgRowLink key={org.id} org={org} roleLabel={roleLabel} />)
           )}
         </div>
         {more ? (
@@ -180,11 +190,12 @@ export function NetworkOrgsView({
 }
 
 /** One organisation, opening its page. */
-function OrgRowLink({ org }: Readonly<{ org: OrgRow }>) {
+function OrgRowLink({ org, roleLabel }: Readonly<{ org: OrgRow; roleLabel: string }>) {
   const t = useTranslations('console');
   const format = useFormatter();
   // No one can set a value for the Default organisation.
   const knownAs = org.is_default ? null : (org.known_as_name ?? org.known_as);
+  const holdsPermissions = !org.is_default && org.status === 'active';
   return (
     <Link
       href={`/console/orgs/${org.id}`}
@@ -212,10 +223,24 @@ function OrgRowLink({ org }: Readonly<{ org: OrgRow }>) {
           year: 'numeric',
         })}
       </span>
+      <span className="hidden text-[13px] font-semibold text-ink-700 lg:block">
+        {org.is_default ? '—' : roleLabel}
+      </span>
+      <CapabilityMark on={holdsPermissions} />
+      <CapabilityMark on={holdsPermissions} />
       <span className="flex items-center gap-1 justify-self-end rounded-lg px-2 py-1.5 text-[13px] font-semibold text-(--bd-primary-600) group-hover:bg-(--bd-primary-50)">
         {t('orgs.open')}
         <ArrowRight size={14} aria-hidden="true" />
       </span>
     </Link>
+  );
+}
+
+/** A tick for a permission the organisation has, a dash otherwise; desktop only. */
+function CapabilityMark({ on }: Readonly<{ on: boolean }>) {
+  return (
+    <span className="hidden text-[14px] font-bold lg:block" aria-hidden={!on}>
+      {on ? <span className="text-emerald-600">✓</span> : <span className="text-ink-400">—</span>}
+    </span>
   );
 }
