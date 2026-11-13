@@ -26,25 +26,32 @@ beforeAll(() => {
 /** What the RJSF shim submits; a test may replace it. */
 const shim = vi.hoisted(() => ({
   formData: { name: 'Enable India Coordinator' } as Record<string, unknown>,
+  /** The `formData` the form last passed to RJSF. */
+  rendered: undefined as Record<string, unknown> | undefined,
 }));
 
 vi.mock('@/components/forms/RjsfThemed', () => ({
   RjsfThemedForm: ({
     onSubmit,
     children,
+    formData,
   }: {
     onSubmit: (e: { formData: Record<string, unknown> }, ev: unknown) => void;
     children?: ReactNode;
+    formData?: Record<string, unknown>;
   }) => (
-    <form
-      data-testid="rjsf-shim"
-      onSubmit={(ev) => {
-        ev.preventDefault();
-        onSubmit({ formData: shim.formData }, ev);
-      }}
-    >
-      {children}
-    </form>
+    (shim.rendered = formData),
+    (
+      <form
+        data-testid="rjsf-shim"
+        onSubmit={(ev) => {
+          ev.preventDefault();
+          onSubmit({ formData: shim.formData }, ev);
+        }}
+      >
+        {children}
+      </form>
+    )
   ),
 }));
 
@@ -205,5 +212,34 @@ describe('<CoordinatorRegisterForm /> with the real ConsentGate', () => {
       globalThis.fetch = originalFetch;
       shim.formData = { name: 'Enable India Coordinator' };
     }
+  });
+
+  it.each([
+    ['shows one empty location when the schema asks for it', {}, 1],
+    ['adds no location when it is an org detail', { 'x-org-detail': true }, 0],
+  ])('%s', (_label, flag, count) => {
+    const schema = {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        locations: { type: 'array', maxItems: 1, items: { type: 'object' }, ...flag },
+      },
+    } as never;
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <NextIntlClientProvider locale="en" messages={messages}>
+          <CoordinatorRegisterForm
+            schema={schema}
+            uiSchema={{}}
+            consentContent={consentContentFixture}
+            inviteToken="tok-1"
+            lockedOrgName="TRRAIN"
+            lockedEmail="asha@trrain.org"
+          />
+        </NextIntlClientProvider>
+      </QueryClientProvider>,
+    );
+    const locations = shim.rendered?.['locations'] as unknown[] | undefined;
+    expect(locations?.length ?? 0).toBe(count);
   });
 });

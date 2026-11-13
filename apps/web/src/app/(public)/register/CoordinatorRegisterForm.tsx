@@ -64,6 +64,20 @@ function withoutOrgDetails(schema: RJSFSchema): RJSFSchema {
 }
 
 /**
+ * Reports whether the schema asks for the coordinator's own address: it has a
+ * `locations` property that is not marked `x-org-detail`.
+ *
+ * @param schema - The coordinator form schema.
+ * @returns `true` when the form shows the location field.
+ */
+function asksOwnLocation(schema: RJSFSchema): boolean {
+  const loc = (schema.properties as Record<string, Record<string, unknown>> | undefined)?.[
+    'locations'
+  ];
+  return loc !== undefined && loc['x-org-detail'] !== true;
+}
+
+/**
  * Renders the coordinator registration form for an invite.
  *
  * The org is fixed by the invite, so its name and url are not asked for, and
@@ -88,6 +102,12 @@ export function CoordinatorRegisterForm({
   const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
     name: lockedOrgName,
     contact: { email: lockedEmail },
+    // One empty entry, so the address field shows at once instead of an
+    // "Add location" button. `[0,0]` means "not resolved yet" (`geo` is
+    // required); the picked coordinate is added at submit.
+    ...(asksOwnLocation(schema)
+      ? { locations: [{ geo: { type: 'Point', coordinates: [0, 0] }, address: {} }] }
+      : {}),
   }));
   const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
   const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
