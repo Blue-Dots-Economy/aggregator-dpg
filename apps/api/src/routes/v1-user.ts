@@ -406,7 +406,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
     // The invite mail names the org's owner as the inviter, so tell the owner
     // when the network admin sent it.
     if (summary.sent + summary.resent > 0) {
-      await notifyOwnerOfAdminAction(actor, org, 'invited coordinators', req.log);
+      await notifyOwnerOfAdminAction(actor, org, 'invited users', req.log);
     }
     return reply.status(200).send(summary);
   };
@@ -581,12 +581,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       if (row.parentOrgId) {
         const org = await getOrganisationStore().findById(row.parentOrgId);
         if (org.ok && org.value) {
-          await notifyOwnerOfAdminAction(
-            actor,
-            org.value,
-            "changed a coordinator's domains",
-            req.log,
-          );
+          await notifyOwnerOfAdminAction(actor, org.value, "changed a user's domains", req.log);
         }
       }
       return reply.status(200).send(
