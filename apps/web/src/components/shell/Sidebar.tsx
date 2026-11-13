@@ -153,6 +153,14 @@ function SidebarPanel({
   // The title (an email when there is no name) already shows in a detail row.
   const titleRepeated = account.details?.some((d) => d.value === account.title) ?? false;
 
+  const [closedSections, setClosedSections] = useState<ReadonlySet<string>>(new Set());
+  const toggleSection = (section: string) =>
+    setClosedSections((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(section)) next.add(section);
+      return next;
+    });
+
   const [detailsOpen, setDetailsOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -190,39 +198,52 @@ function SidebarPanel({
             const Ic = I[n.icon];
             const isActive = isNavActive(n, pathname);
             const opensSection = n.section !== undefined && n.section !== nav[i - 1]?.section;
+            const sectionOpen = n.section === undefined || !closedSections.has(n.section);
             return (
               <Fragment key={n.to}>
-                {opensSection ? (
-                  <div className="px-3 pt-2.5 pb-1 text-[12px] font-semibold text-(--bd-fg-muted)">
+                {opensSection && n.section !== undefined ? (
+                  <button
+                    type="button"
+                    aria-expanded={sectionOpen}
+                    onClick={() => toggleSection(n.section ?? '')}
+                    className="flex w-full items-center justify-between rounded-[10px] px-3 pt-2.5 pb-1 text-left text-[12px] font-semibold text-(--bd-fg-muted) hover:text-(--bd-fg)"
+                  >
                     {n.section}
-                  </div>
+                    <I.chevD
+                      size={14}
+                      className={cn('transition-transform', !sectionOpen && '-rotate-90')}
+                    />
+                  </button>
                 ) : null}
-                <Link
-                  href={n.to}
-                  {...(onNavigate ? { onClick: onNavigate } : {})}
-                  className={cn(
-                    'group flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium transition-all',
-                    n.section !== undefined && 'pl-6',
-                    isActive
-                      ? 'nav-active'
-                      : 'text-(--bd-fg-muted) hover:bg-(--bd-border-soft) hover:text-(--bd-fg)',
-                  )}
-                >
-                  <Ic size={18} stroke={isActive ? 2 : 1.7} />
-                  <span>{n.label}</span>
-                  {n.badge !== undefined && (
-                    <span
-                      className={cn(
-                        'ml-auto text-[11px] font-semibold px-1.5 py-0.5 rounded-md',
-                        isActive
-                          ? 'bg-(--bd-card) text-primary-600'
-                          : 'bg-(--bd-border-soft) text-(--bd-fg-muted)',
-                      )}
-                    >
-                      {n.badge}
-                    </span>
-                  )}
-                </Link>
+                {sectionOpen ? (
+                  <Link
+                    href={n.to}
+                    {...(onNavigate ? { onClick: onNavigate } : {})}
+                    className={cn(
+                      'group flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium transition-all',
+                      n.section !== undefined &&
+                        "relative ml-5 before:absolute before:inset-y-0 before:-left-2 before:w-px before:bg-(--bd-border) before:content-['']",
+                      isActive
+                        ? 'nav-active'
+                        : 'text-(--bd-fg-muted) hover:bg-(--bd-border-soft) hover:text-(--bd-fg)',
+                    )}
+                  >
+                    <Ic size={18} stroke={isActive ? 2 : 1.7} />
+                    <span>{n.label}</span>
+                    {n.badge !== undefined && (
+                      <span
+                        className={cn(
+                          'ml-auto text-[11px] font-semibold px-1.5 py-0.5 rounded-md',
+                          isActive
+                            ? 'bg-(--bd-card) text-primary-600'
+                            : 'bg-(--bd-border-soft) text-(--bd-fg-muted)',
+                        )}
+                      >
+                        {n.badge}
+                      </span>
+                    )}
+                  </Link>
+                ) : null}
               </Fragment>
             );
           })}
