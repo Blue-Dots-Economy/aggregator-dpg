@@ -65,7 +65,17 @@ import { readOpenInvites } from '@/lib/console-invites.server';
 const NETWORK_ADMIN: MeResponse = {
   kind: 'admin',
   user: { id: 'na', contact: { name: null, email: 'na@x.org', phone: null } },
-  orgs: [],
+  orgs: [
+    {
+      id: 'root',
+      name: 'The Network',
+      slug: 'network',
+      org_type: 'network_facilitator',
+      role: 'owner',
+      is_default: false,
+      capabilities: ['orgs.onboard'],
+    },
+  ],
   is_network_admin: true,
 };
 
@@ -181,6 +191,20 @@ describe('console orgs page — owner view', () => {
   }
 
   beforeEach(() => vi.clearAllMocks());
+
+  it('hides Invite organisations from an owner without orgs.onboard', async () => {
+    mockOwner();
+    vi.mocked(getConsoleActor).mockResolvedValue({
+      ok: true,
+      me: {
+        ...owner(),
+        capabilities: ['org.manage'],
+        orgs: [{ ...owner().orgs[0]!, capabilities: ['org.manage'] }],
+      },
+    } as never);
+    await showOwner();
+    expect(screen.queryByRole('link', { name: /console\.orgs\.invite/ })).toBeNull();
+  });
 
   it('puts the Invite organisations button on the card of each owned organisation', async () => {
     mockOwner();
