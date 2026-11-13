@@ -3,6 +3,7 @@ import {
   can,
   canInvite,
   canManageOrg,
+  canOnboardOrgsUnder,
   canViewCoordinators,
   coordinatorsHref,
   ownProfileOrgId,
@@ -163,5 +164,44 @@ describe('ownProfileOrgId', () => {
     expect(
       ownProfileOrgId({ is_network_admin: false, capabilities: null, orgs: [org('a'), org('b')] }),
     ).toBeNull();
+  });
+});
+
+describe('canOnboardOrgsUnder', () => {
+  const root = { id: 'root', org_type: 'network_facilitator', capabilities: ['orgs.onboard'] };
+  const dflt = {
+    id: 'dflt',
+    org_type: 'aggregator',
+    is_default: true,
+    capabilities: ['orgs.onboard'],
+  };
+  const own = {
+    id: 'own',
+    org_type: 'aggregator',
+    is_default: false,
+    capabilities: ['orgs.onboard'],
+  };
+  const noOnboard = {
+    id: 'x',
+    org_type: 'aggregator',
+    is_default: false,
+    capabilities: ['org.manage'],
+  };
+
+  it('offers the network and an aggregator organisation that holds orgs.onboard', () => {
+    expect(canOnboardOrgsUnder({ capabilities: ['orgs.onboard'] }, root)).toBe(true);
+    expect(canOnboardOrgsUnder({ capabilities: ['orgs.onboard'] }, own)).toBe(true);
+  });
+
+  it('never offers the Default organisation', () => {
+    expect(canOnboardOrgsUnder({ capabilities: null }, dflt)).toBe(false);
+  });
+
+  it('does not offer an organisation without orgs.onboard', () => {
+    expect(canOnboardOrgsUnder({ capabilities: ['org.manage'] }, noOnboard)).toBe(false);
+  });
+
+  it('offers any organisation that takes invites when access control is off', () => {
+    expect(canOnboardOrgsUnder({ capabilities: null }, noOnboard)).toBe(true);
   });
 });

@@ -23,6 +23,7 @@ import type {
   OrgSearchResponse,
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
+import { canOnboardOrgsUnder } from '@/lib/capabilities';
 import { getAggregatorFeatures } from '@/lib/features.server';
 import { consoleRead } from '@/lib/console-api.server';
 import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
@@ -49,11 +50,14 @@ export default async function ConsoleOrgsPage({
   const initialFilter: OrgFilter = ORG_FILTERS.find((f) => f === params.status) ?? 'all';
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
-  if (!actor.me.is_network_admin) {
+  const me = actor.me;
+  const canInviteOrgs = me.orgs.some((o) => o.role === 'owner' && canOnboardOrgsUnder(me, o));
+  if (!me.is_network_admin) {
     return (
       <OwnerOrgs
-        ownedIds={actor.me.orgs.map((o) => o.id)}
-        ownerIds={actor.me.orgs.filter((o) => o.role === 'owner').map((o) => o.id)}
+        ownedIds={me.orgs.map((o) => o.id)}
+        ownerIds={me.orgs.filter((o) => o.role === 'owner').map((o) => o.id)}
+        canInviteOrgs={canInviteOrgs}
       />
     );
   }
@@ -68,7 +72,11 @@ export default async function ConsoleOrgsPage({
   const pending = network.orgs.filter((o) => o.status === 'pending');
   return (
     <>
-      <Topbar title={t('orgs.heading')} subtitle={t('orgs.subtitle')} right={inviteOrgsLink(t)} />
+      <Topbar
+        title={t('orgs.heading')}
+        subtitle={t('orgs.subtitle')}
+        right={canInviteOrgs ? inviteOrgsLink(t) : null}
+      />
       <div className="flex flex-col gap-6">
         {pendingReview(pending, t)}
         <NetworkOrgsView
@@ -96,11 +104,13 @@ export default async function ConsoleOrgsPage({
  *
  * @param ownedIds - The organisations the viewer belongs to.
  * @param ownerIds - Those it owns, the only ones whose values it can edit.
+ * @param canInviteOrgs - Whether it may invite organisations under any of them.
  */
 async function OwnerOrgs({
   ownedIds,
   ownerIds,
-}: Readonly<{ ownedIds: string[]; ownerIds: string[] }>) {
+  canInviteOrgs,
+}: Readonly<{ ownedIds: string[]; ownerIds: string[]; canInviteOrgs: boolean }>) {
   const t = await getTranslations('console');
   const orgs = await readReachableOrgs();
   const roots = topmostOwned(ownedIds, orgs);
@@ -121,7 +131,7 @@ async function OwnerOrgs({
       <Topbar
         title={t('orgs.heading')}
         subtitle={t('orgs.subtitle_owner')}
-        right={inviteOrgsLink(t)}
+        right={canInviteOrgs ? inviteOrgsLink(t) : null}
       />
       <div className="flex flex-col gap-6">
         {pendingReview(pending, t)}

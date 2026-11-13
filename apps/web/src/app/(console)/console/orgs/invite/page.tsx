@@ -6,6 +6,7 @@
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import { getConsoleActor } from '@/lib/console-actor';
+import { canOnboardOrgsUnder } from '@/lib/capabilities';
 import { getAggregatorFeatures } from '@/lib/features.server';
 import { resolveMaxInvites } from '@/lib/invite-limit';
 import { InviteForm } from '@/components/console/InviteForm';
@@ -20,11 +21,7 @@ export default async function ConsoleOrgInvitePage() {
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   const parents = actor.me.orgs
-    .filter(
-      (o) =>
-        o.role === 'owner' &&
-        (o.org_type === 'network_facilitator' || (o.org_type === 'aggregator' && !o.is_default)),
-    )
+    .filter((o) => o.role === 'owner' && canOnboardOrgsUnder(actor.me, o))
     .map((o) => ({ id: o.id, name: o.name }));
   const { invite_role_label: roleLabel } = await getAggregatorFeatures();
   return (

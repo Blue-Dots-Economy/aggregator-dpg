@@ -195,6 +195,7 @@ function OrgRowLink({ org, roleLabel }: Readonly<{ org: OrgRow; roleLabel: strin
   const format = useFormatter();
   // No one can set a value for the Default organisation.
   const knownAs = org.is_default ? null : (org.known_as_name ?? org.known_as);
+  const holdsPermissions = !org.is_default && org.status === 'active';
   return (
     <Link
       href={`/console/orgs/${org.id}`}
@@ -225,8 +226,8 @@ function OrgRowLink({ org, roleLabel }: Readonly<{ org: OrgRow; roleLabel: strin
       <span className="hidden text-[13px] font-semibold text-ink-700 lg:block">
         {org.is_default ? '—' : roleLabel}
       </span>
-      <CapabilityMark on={!org.is_default} />
-      <CapabilityMark on={!org.is_default} />
+      <CapabilityMark on={holdsPermissions} />
+      <CapabilityMark on={holdsPermissions} />
       <span className="flex items-center gap-1 justify-self-end rounded-lg px-2 py-1.5 text-[13px] font-semibold text-(--bd-primary-600) group-hover:bg-(--bd-primary-50)">
         {t('orgs.open')}
         <ArrowRight size={14} aria-hidden="true" />
