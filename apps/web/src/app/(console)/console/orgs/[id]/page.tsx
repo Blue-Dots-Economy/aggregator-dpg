@@ -6,11 +6,8 @@
  * of the parent org sets the org's "known as" value; the org's owner defines
  * the values for the organisations under it. Only the network admin can
  * re-grant an active org's owner access or move it under another parent. An
- * owner approves its child orgs by default, so no role is assigned here. An
- * owner also views, read-only, the organisations directly under its own, and
- * approves or rejects one that is pending; the
- * coordinators of such an organisation stay with its own owner. The
- * organisations directly under an aggregator org are listed read-only.
+ * owner also views, read-only, the organisations directly under its own; the
+ * users of such an organisation stay with its own owner.
  */
 
 import Link from 'next/link';
@@ -30,7 +27,6 @@ import { I } from '@/icons';
 import { OrgEditForm } from '@/components/console/OrgEditForm';
 import { KnownAsPicker } from '@/components/console/KnownAsPicker';
 import { OrgMoveDialog } from '@/components/console/OrgMoveDialog';
-import { OrgsTable } from '@/components/console/OrgsTable';
 import { OwnerAccessRepair } from '@/components/console/OwnerAccessRepair';
 import { can, canViewCoordinators } from '@/lib/capabilities';
 import { loadOrgSchema } from '@/lib/org-schema.server';
@@ -69,9 +65,9 @@ function orgPageAccess(me: Me, data: OrgData) {
     isOwner: owner.id === me.user.id,
     // The API sends `parent` only to the parent's owner, the one who repairs access.
     canRepair: parent !== null && org.status === 'active',
+    contactShown: own || (parent !== null && org.status === 'pending'),
     // The Default org and the root never move; only pending and active orgs can.
     movable: aggregatorOrg && (org.status === 'pending' || org.status === 'active'),
-    decidable: !own && aggregatorOrg && org.status === 'pending',
   };
 }
 
@@ -126,21 +122,7 @@ export default async function ConsoleOrgPage({
         />
       </div>
       <div className="flex flex-col gap-6">
-        {access.decidable ? (
-          <ConsoleSection title={t('orgs.review_heading', { count: 1 })} flush>
-            <OrgsTable
-              orgs={[
-                {
-                  ...org,
-                  coordinator_count: data.coordinator_count,
-                  child_count: data.child_count,
-                  pending_count: data.pending_count,
-                },
-              ]}
-            />
-          </ConsoleSection>
-        ) : null}
-        {ownerCard(data, access.canRepair, t)}
+        {ownerCard(data, access, t)}
         {orgTiles(data, access, hierarchy?.limits.max_children ?? null, t)}
         {access.parent ? (
           <ConsoleSection title={t('org.known_as_pick_title')}>
@@ -208,7 +190,7 @@ function orgSubtitle(data: OrgData, t: Translate, format: Format) {
 }
 
 /** The owner's name and email, with access repair for the parent's owner. */
-function ownerCard(data: OrgData, canRepair: boolean, t: Translate) {
+function ownerCard(data: OrgData, access: ReturnType<typeof orgPageAccess>, t: Translate) {
   const { org, owner } = data;
   const label = owner.contact.name ?? owner.contact.email;
   return (
@@ -225,10 +207,12 @@ function ownerCard(data: OrgData, canRepair: boolean, t: Translate) {
           <div className="truncate font-bold text-ink-900">{label}</div>
           <div className="flex items-center gap-1 text-[12.5px] text-ink-500">
             <span className="truncate">{owner.contact.email}</span>
-            <CopyButton value={owner.contact.email} label={t('coordinator.copy_email')} />
+            {access.contactShown ? (
+              <CopyButton value={owner.contact.email} label={t('coordinator.copy_email')} />
+            ) : null}
           </div>
         </div>
-        {canRepair ? (
+        {access.canRepair ? (
           <div className="w-full sm:ml-auto sm:w-auto">
             <OwnerAccessRepair orgId={org.id} />
           </div>
@@ -238,7 +222,7 @@ function ownerCard(data: OrgData, canRepair: boolean, t: Translate) {
   );
 }
 
-/** The users, pending, child and level tiles the viewer may see. */
+/** The users, invited, child and level tiles the viewer may see. */
 function orgTiles(
   data: OrgData,
   access: ReturnType<typeof orgPageAccess>,
@@ -250,7 +234,9 @@ function orgTiles(
     maxChildren === null
       ? t('org.tile.children_sub')
       : t('org.children_of_max', { count: data.child_count, max: maxChildren });
-  const pendingSub = data.pending_count ? t('org.tile.pending_sub') : t('org.tile.pending_none');
+  const pendingSub = data.pending_count
+    ? t('org_home.tile.pending.sub')
+    : t('org_home.tile.pending.none');
   return (
     <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
       {access.showUsers ? (
@@ -268,7 +254,7 @@ function orgTiles(
           <CountTile
             icon={<Clock size={20} strokeWidth={2} />}
             tone="amber"
-            label={t('org.tile.pending')}
+            label={t('org_home.tile.pending.label')}
             count={String(data.pending_count)}
             sub={pendingSub}
             muted={data.pending_count === 0}

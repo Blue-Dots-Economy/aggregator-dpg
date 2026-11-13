@@ -72,6 +72,24 @@ export function canInvite(me: ManageScopeSource): boolean {
 }
 
 /**
+ * Whether an organisation the caller owns can take organisation invites from it: the network,
+ * or a non-Default aggregator organisation, where the caller holds `orgs.onboard`.
+ *
+ * @param me - The caller's `read/me` answer.
+ * @param org - One of the caller's organisations.
+ * @returns True when that organisation should be offered as the parent.
+ */
+export function canOnboardOrgsUnder(
+  me: Pick<ManageScopeSource, 'capabilities'>,
+  org: ManageScopeSource['orgs'][number],
+): boolean {
+  const takesInvites =
+    org.org_type === 'network_facilitator' || (org.org_type === 'aggregator' && !org.is_default);
+  if (!takesInvites) return false;
+  return me.capabilities == null || (org.capabilities?.includes('orgs.onboard') ?? false);
+}
+
+/**
  * Whether the caller can see coordinators: an organisation's admin
  * (`org.manage`). The network admin has no users page, since it sees the
  * users of no organisation it does not own.
@@ -84,6 +102,21 @@ export function canViewCoordinators(
 ): boolean {
   if (me.is_network_admin) return false;
   return can(me.capabilities, 'org.manage');
+}
+
+/**
+ * The organisation shown as the caller's profile: the one non-Default
+ * organisation an owner owns. `null` for the network admin, or an owner of several.
+ *
+ * @param me - The caller's `read/me` answer.
+ * @returns The organisation id, or `null`.
+ */
+export function ownProfileOrgId(
+  me: ManageScopeSource & { is_network_admin: boolean },
+): string | null {
+  if (me.is_network_admin) return null;
+  const owned = me.orgs.filter((o) => o.org_type === 'aggregator' && !o.is_default);
+  return owned.length === 1 ? (owned[0]?.id ?? null) : null;
 }
 
 /** The console home page. */

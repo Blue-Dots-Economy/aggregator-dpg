@@ -54,7 +54,7 @@ export const KC_ATTR = {
 export type KcAttrName = (typeof KC_ATTR)[keyof typeof KC_ATTR];
 
 /** Decision values written to / read from `KC_ATTR.DECISION_MADE`. */
-export type DecisionMade = 'pending' | 'approved' | 'rejected';
+export type DecisionMade = 'pending' | 'approved' | 'rejected' | 'invited';
 
 /** The realm role the portal gate admits org owners by. */
 export const OWNER_REALM_ROLE = 'org_owner';

@@ -236,9 +236,31 @@ describe('PostgresUserStore.create', () => {
 
     const values = callArgs(captured, 'values')?.[0] as Record<string, unknown>;
     expect(values).not.toHaveProperty('url');
-    expect(values).not.toHaveProperty('locations');
     expect(values.legacyOrgDetails).toBeNull();
     expect(values.orgId).toBe('org-0');
+    // No address given: `users.locations` is written as `[]` (0037).
+    expect(values.locations).toEqual([]);
+  });
+
+  it("writes the coordinator's own address to users.locations (0037)", async () => {
+    let captured: ChainCall[] = [];
+    const db = makeFakeDb((chain) => {
+      if (isAggregatorWrite(chain) || captured.length === 0) captured = chain;
+      return [makeRow()];
+    });
+    _setDbClients(null, db as never);
+    const store = new PostgresUserStore();
+    const own = [
+      {
+        geo: { type: 'Point' as const, coordinates: [77.59, 12.97] },
+        address: { streetAddress: 'Bengaluru' },
+      },
+    ];
+
+    await store.create({ ...makeInput(), locations: own });
+
+    const values = callArgs(captured, 'values')?.[0] as Record<string, unknown>;
+    expect(values.locations).toEqual(own);
   });
 
   it('returns DB_UNAVAILABLE when insert returns no row', async () => {

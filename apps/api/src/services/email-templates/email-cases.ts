@@ -9,7 +9,6 @@
  * Block conditions:
  *
  *   - `requires` — include only when every named token has a value
- *   - `absent`   — include only when every named token has none
  *   - `oneOf`    — first alternative whose conditions hold
  *
  * `requiredMessageKeys()` derives the full key list from these layouts. A key
@@ -30,13 +29,12 @@ export const BRAND_TOKENS: TokenTypes = {
 };
 
 /** Block kinds `render-case.ts` knows how to render. */
-export type BlockKind = 'heading' | 'para' | 'paraLast' | 'paraSmall' | 'note' | 'callout' | 'cta';
+export type BlockKind = 'heading' | 'para' | 'paraLast' | 'note' | 'cta';
 
 /** One alternative of a `oneOf` block. */
 export interface BlockAlternative {
   key: string;
   requires?: readonly string[];
-  absent?: readonly string[];
 }
 
 /** One block of an email body. */
@@ -46,8 +44,6 @@ export interface BlockSpec {
   key: string;
   /** Include only when every named token has a value. */
   requires?: readonly string[];
-  /** Include only when every named token has no value. */
-  absent?: readonly string[];
   /** Alternatives; the first whose conditions hold is used. */
   oneOf?: readonly BlockAlternative[] | undefined;
   /** For `cta` blocks: the token holding the href. */
@@ -66,103 +62,53 @@ export interface EmailCaseDef {
   subjectKey?: string;
   /** Tokens resolved from a copy-key alternation before rendering, for mid-sentence phrases. */
   derivedTokens?: Readonly<Record<string, readonly BlockAlternative[]>>;
-  /** Append "Sent by <brand>." to the text part. Defaults to true. */
-  signOff?: boolean;
 }
 
+/** The coordinator and organisation invites share one layout; only their copy differs. */
+const INVITE_CASE: EmailCaseDef = {
+  tokens: {
+    orgName: 'text',
+    inviterEmail: 'text',
+    recipientName: 'text',
+    expiresOn: 'text',
+    inviteUrl: 'text',
+    // Resolved from the greeting alternation below, so already escaped.
+    greeting: 'html',
+  },
+  derivedTokens: {
+    greeting: [{ key: 'greeting', requires: ['recipientName'] }, { key: 'greeting_anonymous' }],
+  },
+  layout: [
+    { block: 'heading', key: 'heading' },
+    { block: 'para', key: 'intro' },
+    { block: 'para', key: 'role' },
+    { block: 'cta', key: 'cta', href: 'inviteUrl' },
+    { block: 'para', key: 'expiry' },
+    { block: 'paraLast', key: 'next' },
+    { block: 'note', key: 'footnote' },
+  ],
+};
+
 export const EMAIL_CASES: Readonly<Record<string, EmailCaseDef>> = {
-  applicant_approved: {
-    tokens: { contactName: 'text', association: 'text', identifier: 'text', signInUrl: 'text' },
+  coordinator_invite: INVITE_CASE,
+
+  org_invite: INVITE_CASE,
+
+  coordinator_joined: {
+    tokens: { joinerName: 'text', joinerEmail: 'text', orgName: 'text', consoleUrl: 'text' },
     layout: [
       { block: 'heading', key: 'heading' },
-      { block: 'para', key: 'intro' },
-      { block: 'paraLast', key: 'identifier' },
-      { block: 'cta', key: 'cta', href: 'signInUrl' },
-      { block: 'note', key: 'footnote' },
+      { block: 'paraLast', key: 'intro' },
+      { block: 'cta', key: 'cta', href: 'consoleUrl' },
     ],
   },
 
-  applicant_rejected: {
-    tokens: {
-      contactName: 'text',
-      association: 'text',
-      entityLabel: 'text',
-      reason: 'text',
-    },
-    // No sign-off: a decline ends on the appeal line.
-    signOff: false,
-    layout: [
-      {
-        block: 'heading',
-        key: 'greeting',
-        oneOf: [{ key: 'greeting', requires: ['contactName'] }, { key: 'greeting_anonymous' }],
-      },
-      { block: 'para', key: 'intro' },
-      { block: 'para', key: 'outcome' },
-      { block: 'callout', key: 'reason', requires: ['reason'] },
-      { block: 'paraSmall', key: 'appeal' },
-    ],
-  },
-
-  coordinator_invite: {
-    tokens: {
-      orgName: 'text',
-      inviterEmail: 'text',
-      recipientName: 'text',
-      expiresOn: 'text',
-      inviteUrl: 'text',
-      // Resolved from the greeting alternation below, so already escaped.
-      greeting: 'html',
-    },
-    derivedTokens: {
-      greeting: [{ key: 'greeting', requires: ['recipientName'] }, { key: 'greeting_anonymous' }],
-    },
+  org_joined: {
+    tokens: { orgName: 'text', ownerEmail: 'text', parentName: 'text', consoleUrl: 'text' },
     layout: [
       { block: 'heading', key: 'heading' },
-      { block: 'para', key: 'intro' },
-      { block: 'para', key: 'role' },
-      { block: 'cta', key: 'cta', href: 'inviteUrl' },
-      { block: 'para', key: 'expiry' },
-      { block: 'paraLast', key: 'next' },
-      { block: 'note', key: 'footnote' },
-    ],
-  },
-
-  org_owner_approved: {
-    tokens: { orgName: 'text', ownerEmail: 'text', inviteUrl: 'text' },
-    layout: [
-      { block: 'heading', key: 'heading' },
-      { block: 'para', key: 'intro' },
-      // With the grant link: lead, button, then the standing note.
-      { block: 'para', key: 'invite_lead', requires: ['inviteUrl'] },
-      // No `requires` needed: a cta block with an unset href is dropped.
-      { block: 'cta', key: 'cta', href: 'inviteUrl' },
-      { block: 'paraLast', key: 'invite_note', requires: ['inviteUrl'] },
-      // Without it: a heads-up that the link follows.
-      { block: 'paraLast', key: 'invite_pending', absent: ['inviteUrl'] },
-    ],
-  },
-
-  owner_grant_refreshed: {
-    tokens: { orgName: 'text', inviteUrl: 'text' },
-    layout: [
-      { block: 'heading', key: 'heading' },
-      { block: 'para', key: 'intro' },
-      { block: 'cta', key: 'cta', href: 'inviteUrl' },
-      { block: 'paraLast', key: 'note' },
-      { block: 'note', key: 'footnote' },
-    ],
-  },
-
-  org_already_registered: {
-    tokens: { orgName: 'text', inviteUrl: 'text' },
-    layout: [
-      { block: 'heading', key: 'heading' },
-      { block: 'para', key: 'intro' },
-      { block: 'para', key: 'reason' },
-      { block: 'cta', key: 'cta', href: 'inviteUrl' },
-      { block: 'paraLast', key: 'note' },
-      { block: 'note', key: 'footnote' },
+      { block: 'paraLast', key: 'intro' },
+      { block: 'cta', key: 'cta', href: 'consoleUrl' },
     ],
   },
 
@@ -204,7 +150,7 @@ export const EMAIL_CASE_IDS: readonly string[] = Object.keys(EMAIL_CASES);
 /**
  * Looks up a case definition.
  *
- * @param caseId - Case prefix, e.g. `applicant_approved`.
+ * @param caseId - Case prefix, e.g. `coordinator_invite`.
  * @returns The case definition.
  * @throws {Error} If the case is not registered.
  */
@@ -245,7 +191,7 @@ export function requiredMessageKeys(): string[] {
 /**
  * Declared token types for a case, including the shared brand tokens.
  *
- * @param caseId - Case prefix, e.g. `applicant_approved`.
+ * @param caseId - Case prefix, e.g. `coordinator_invite`.
  * @returns Token types for substitution.
  * @throws {Error} If the case is not registered.
  */

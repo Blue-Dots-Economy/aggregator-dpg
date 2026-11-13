@@ -363,5 +363,8 @@
   "features": {
     "custom_roles": false
   },
-  "bulk_upload_max_bytes": 10485760
+  "bulk_upload_max_bytes": 10485760,
+  "organisation": {
+    "invite_role_label": "Super Admin"
+  }
 }

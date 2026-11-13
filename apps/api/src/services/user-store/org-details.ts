@@ -1,9 +1,10 @@
 /**
  * Org-detail rendering for a coordinator (`@aggregator-dpg/api`).
  *
- * `url`, `locations`, company and GST number belong to the coordinator's org.
- * Each field comes from the org when set, else from `users.legacy_org_details`,
- * else empty. Shared by the Postgres and in-memory stores.
+ * `url`, company and GST number belong to the coordinator's org. Each comes
+ * from the org when set, else from `users.legacy_org_details`, else empty.
+ * `locations` is the coordinator's own address (`users.locations`, migration
+ * 0037), never the org's. Shared by the Postgres and in-memory stores.
  */
 
 import type { BecknLocation } from '@aggregator-dpg/shared-primitives/aggregator';
@@ -11,11 +12,10 @@ import type { LegacyOrgDetails } from './interface.js';
 
 /**
  * The org's own detail values: `url` and `gstNumber` are the `website` and
- * `gst_number` keys of `organisations.profile`; the others are columns.
+ * `gst_number` keys of `organisations.profile`; `legalName` is a column.
  */
 export interface OrgDetailColumns {
   url: string | null;
-  locations: BecknLocation[];
   legalName: string | null;
   gstNumber: string | null;
 }
@@ -23,7 +23,6 @@ export interface OrgDetailColumns {
 /** The rendered org details of one coordinator. */
 export interface RenderedOrgDetails {
   url: string | null;
-  locations: BecknLocation[];
   company: string | undefined;
   gstNumber: string | undefined;
 }
@@ -46,12 +45,25 @@ export function renderOrgDetails(
   legacy: LegacyOrgDetails | null | undefined,
 ): RenderedOrgDetails {
   const own = legacy ?? {};
-  const orgLocations = org?.locations ?? [];
-  const ownLocations = Array.isArray(own.locations) ? own.locations : [];
   return {
     url: present(org?.url) ?? present(own.url) ?? null,
-    locations: orgLocations.length > 0 ? orgLocations : ownLocations,
     company: present(org?.legalName) ?? present(own.company),
     gstNumber: present(org?.gstNumber) ?? present(own.gstNumber),
   };
+}
+
+/**
+ * The coordinator's own address: `users.locations`, else the address a
+ * Default-org coordinator kept in `legacy_org_details`. Never the org's.
+ *
+ * @param own - `users.locations`.
+ * @param legacy - The coordinator's `legacy_org_details`, or `null`.
+ * @returns The locations to put on the domain object; `[]` when none.
+ */
+export function coordinatorLocations(
+  own: BecknLocation[] | null | undefined,
+  legacy: LegacyOrgDetails | null | undefined,
+): BecknLocation[] {
+  if (Array.isArray(own) && own.length > 0) return own;
+  return Array.isArray(legacy?.locations) ? legacy.locations : [];
 }

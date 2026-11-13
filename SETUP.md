@@ -76,7 +76,7 @@ docker compose up -d
 docker compose ps   # wait until aggregator-keycloak is "healthy"
 ```
 
-The Keycloak realm is auto-imported from `infra/keycloak/realms/realm.json` on container start. The custom OTP authenticator SPI is bundled at `infra/keycloak/providers/keycloak-otp-1.0.0-SNAPSHOT.jar` and mounted into `/opt/keycloak/providers/` by Compose, so login-by-OTP works out of the box. The JAR is committed to the repo to keep first-time setup zero-friction; rebuild it from <https://github.com/sanketika-labs/keycloak-otp-authenticator> when you bump the version (`make kc-plugin`).
+The Keycloak realm is auto-imported from `infra/keycloak/realms/realm.json` on container start. The custom OTP authenticator SPI is bundled at `infra/keycloak/providers/keycloak-otp-1.4.0-SNAPSHOT.jar` and mounted into `/opt/keycloak/providers/` by Compose, so login-by-OTP works out of the box. The JAR is committed to the repo to keep first-time setup zero-friction; rebuild it from <https://github.com/Blue-Dots-Economy/keycloak-otp-authenticator> when you bump the version (`make kc-plugin`).
 
 > This JAR copy serves **local dev only**. The image that runs in real environments is built in the **bluedots-automation** repo (`dockerfiles/keycloak/` → `ghcr.io/<owner>/keycloak-server`), which bakes the SPI in and pre-runs `kc.sh build`. Keycloak is a shared common service for both DPGs, so bumping the JAR here does **not** change any deployment — that needs the same bump in bluedots-automation followed by an image rebuild. See `dockerfiles/keycloak/providers/README.md` there.
 
@@ -356,7 +356,7 @@ apps/
         client.ts          pg.Pool + Drizzle singleton
         migrate.ts         Migration runner
       routes/
-        aggregator-registrations.ts   POST /v1/aggregator-registrations/create
+        aggregator-registrations.ts   POST /v1/user/invite/accept, GET /v1/user/invite/read
         aggregator-approvals.ts       Admin-side review pages + decision POST
         aggregator-profile.ts         GET/PATCH /v1/aggregators/profile/me
         health.ts

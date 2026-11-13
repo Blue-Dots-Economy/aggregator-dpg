@@ -23,6 +23,7 @@ import {
   RegistrationModeSchema,
   StatusRuleSchema,
 } from '@aggregator-dpg/network-config/interface';
+import { DEFAULT_INVITE_ROLE_LABEL } from '@aggregator-dpg/network-config/interface';
 import { errorResponses } from '../errors/openapi.js';
 import { getNetworkConfig } from '../services/network-config.js';
 import { config, enabledRegistrationModes, signalsUiUrls } from '../config.js';
@@ -114,6 +115,8 @@ const AggregatorConfigResponseSchema = z.object({
   features: z.object({ custom_roles: z.boolean() }),
   /** Largest bulk-upload CSV the api accepts, in bytes (`BULK_UPLOAD_MAX_BYTES`). */
   bulk_upload_max_bytes: z.number().int().positive(),
+  /** The role name the console shows for an invited organisation. */
+  organisation: z.object({ invite_role_label: z.string() }),
 });
 
 /** Wire shape of `GET /v1/aggregator-config`. */
@@ -201,6 +204,10 @@ export async function registerAggregatorConfigRoutes(base: FastifyInstance): Pro
         signals_ui_urls: signalsUiUrls,
         features: { custom_roles: config.RBAC_CUSTOM_ROLES_ENABLED },
         bulk_upload_max_bytes: config.BULK_UPLOAD_MAX_BYTES,
+        organisation: {
+          invite_role_label:
+            cfg.aggregator.organisation.invite_role_label ?? DEFAULT_INVITE_ROLE_LABEL,
+        },
       };
       return reply.header('Cache-Control', 'public, max-age=60').send(payload);
     },

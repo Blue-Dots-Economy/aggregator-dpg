@@ -4,9 +4,6 @@ import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { User } from '@aggregator-dpg/shared-primitives/user-org';
 
-const refresh = vi.fn();
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
-
 import { CoordinatorActions } from '@/components/console/CoordinatorActions';
 
 const user: User = {
@@ -49,128 +46,6 @@ describe('<CoordinatorActions />', () => {
     global.fetch = original;
   });
 
-  it('approves and shows the new status', async () => {
-    global.fetch = respond({ id: user.id, status: 'active', notified: true }, 200) as never;
-    renderIt();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
-    await waitFor(() =>
-      expect(screen.getByTestId('coordinator-status')).toHaveTextContent(
-        messages.console.status.active,
-      ),
-    );
-    expect(global.fetch).toHaveBeenCalledWith(
-      `/api/console/user/decision/${user.id}`,
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ decision: 'approve' }) }),
-    );
-  });
-
-  it('updates in place when the decision was already made elsewhere (C10)', async () => {
-    global.fetch = respond(
-      { error: { code: 'ALREADY_DECIDED', fields: { status: 'inactive', decided_by: 'link' } } },
-      409,
-    ) as never;
-    renderIt();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
-    await waitFor(() =>
-      expect(screen.getByTestId('coordinator-status')).toHaveTextContent(
-        messages.console.status.inactive,
-      ),
-    );
-    expect(screen.queryByRole('button', { name: messages.console.coordinator.approve })).toBeNull();
-  });
-
-  it('shows the review prompt with the name and registration date', () => {
-    renderIt();
-    expect(screen.getByText(messages.console.coordinator.decision_title)).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'C1 registered on Jan 1, 2026. Approve to let them sign in, or reject the registration.',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole('textbox')).toBeNull();
-  });
-
-  it('asks for the optional reason only after Reject, and cancels back', () => {
-    renderIt();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.reject }));
-    expect(screen.getByRole('textbox')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: messages.console.coordinator.approve })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.cancel }));
-    expect(screen.queryByRole('textbox')).toBeNull();
-    expect(
-      screen.getByRole('button', { name: messages.console.coordinator.approve }),
-    ).toBeInTheDocument();
-  });
-
-  it('sends the optional reason with a reject', async () => {
-    global.fetch = respond({ id: user.id, status: 'inactive', notified: true }, 200) as never;
-    renderIt();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.reject }));
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'incomplete' } });
-    fireEvent.click(
-      screen.getByRole('button', { name: messages.console.coordinator.reject_confirm }),
-    );
-    expect(await screen.findByText(messages.console.coordinator.rejected_note)).toBeInTheDocument();
-    await waitFor(() =>
-      expect(global.fetch).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          body: JSON.stringify({ decision: 'reject', reason: 'incomplete' }),
-        }),
-      ),
-    );
-  });
-
-  it('shows the rate-limit message on 429', async () => {
-    global.fetch = respond({ error: { code: 'RATE_LIMITED' } }, 429) as never;
-    renderIt();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
-    expect(
-      await screen.findByText(messages.console.coordinator.error.rate_limited),
-    ).toBeInTheDocument();
-  });
-
-  it('explains a missing account in plain words', async () => {
-    global.fetch = respond({ error: { code: 'NOT_FOUND' } }, 404) as never;
-    renderIt();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
-    expect(
-      await screen.findByText(messages.console.coordinator.error.not_found),
-    ).toBeInTheDocument();
-  });
-
-  it('says when the organisation is not active', async () => {
-    global.fetch = respond({ error: { code: 'TARGET_ORG_INACTIVE' } }, 409) as never;
-    renderIt();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
-    expect(
-      await screen.findByText(messages.console.coordinator.error.org_inactive),
-    ).toBeInTheDocument();
-  });
-
-  it('asks for profile types when the approval is refused for having none', async () => {
-    global.fetch = respond({ error: { code: 'NO_PROFILE_TYPES' } }, 409) as never;
-    renderIt();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
-    expect(
-      await screen.findByText(messages.console.coordinator.error.no_profile_types),
-    ).toBeInTheDocument();
-  });
-
-  it('confirms the approval on success', async () => {
-    global.fetch = respond({ id: user.id, status: 'active', notified: true }, 200) as never;
-    renderIt();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
-    expect(await screen.findByText(messages.console.coordinator.approved_note)).toBeInTheDocument();
-  });
-
-  it('shows no decision card for a coordinator who is not pending', () => {
-    renderIt({ ...user, status: 'active' });
-    expect(screen.queryByRole('button', { name: messages.console.coordinator.approve })).toBeNull();
-    expect(screen.queryByText(messages.console.coordinator.decision_title)).toBeNull();
-    expect(screen.queryByTestId('coordinator-status')).toBeNull();
-  });
-
   const saveButton = () =>
     screen.getByRole('button', { name: messages.console.coordinator.save_domains });
 
@@ -184,31 +59,6 @@ describe('<CoordinatorActions />', () => {
     expect(
       screen.queryByRole('button', { name: messages.console.coordinator.save_domains }),
     ).toBeNull();
-  });
-
-  it('keeps the shown status when an already-decided reply names an unknown status', async () => {
-    global.fetch = respond(
-      { error: { code: 'ALREADY_DECIDED', fields: { status: 'archived' } } },
-      409,
-    ) as never;
-    renderIt();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
-    await waitFor(() =>
-      expect(
-        screen.getByText(messages.console.coordinator.already.replace('{status}', '').trim()),
-      ).toBeInTheDocument(),
-    );
-    // The coordinator is still shown as pending, so no decided-status pill renders.
-    expect(screen.queryByTestId('coordinator-status')).toBeNull();
-  });
-
-  it('says the reply could not be read when a decision reply has the wrong shape', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    global.fetch = respond({ id: user.id, status: 'approved' }, 200) as never;
-    renderIt();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
-    expect(await screen.findByText(messages.console.errors.response_shape)).toBeInTheDocument();
-    expect(refresh).toHaveBeenCalled();
   });
 
   it('narrows the domains and saves the chosen ones', async () => {
@@ -325,25 +175,6 @@ describe('<CoordinatorActions />', () => {
     expect(screen.queryByRole('textbox')).toBeNull();
   });
 
-  it('holds the decision until unsaved domain changes are saved or discarded', () => {
-    renderIt(user, [
-      { id: 'seeker', label: 'Seekers' },
-      { id: 'provider', label: 'Providers' },
-    ]);
-    fireEvent.click(screen.getByRole('checkbox', { name: /Providers/ }));
-    expect(screen.getByText(messages.console.coordinator.save_domains_first)).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: messages.console.coordinator.approve }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole('button', { name: messages.console.coordinator.reject }),
-    ).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.discard }));
-    expect(
-      screen.getByRole('button', { name: messages.console.coordinator.approve }),
-    ).toBeEnabled();
-  });
-
   it.each(['inactive', 'retired'] as const)(
     'shows the domains read-only for a %s coordinator',
     (status) => {
@@ -376,24 +207,6 @@ describe('<CoordinatorActions />', () => {
       `/api/console/user/metadata/${user.id}`,
       expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ serves: ['provider'] }) }),
     );
-  });
-
-  it('keeps the domains editable right after an approval', async () => {
-    global.fetch = respond({ id: user.id, status: 'active', notified: true }, 200) as never;
-    renderIt();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.approve }));
-    expect(await screen.findByText(messages.console.coordinator.approved_note)).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: /Seekers/ })).toBeInTheDocument();
-  });
-
-  it('stops editing domains right after a rejection', async () => {
-    global.fetch = respond({ id: user.id, status: 'inactive', notified: true }, 200) as never;
-    renderIt();
-    fireEvent.click(screen.getByRole('button', { name: messages.console.coordinator.reject }));
-    fireEvent.click(
-      screen.getByRole('button', { name: messages.console.coordinator.reject_confirm }),
-    );
-    await waitFor(() => expect(screen.queryByRole('checkbox')).toBeNull());
   });
 
   it('lists no domain when a read-only coordinator has none saved', () => {

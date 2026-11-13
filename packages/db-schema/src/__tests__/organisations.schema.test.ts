@@ -116,10 +116,15 @@ describe('users.org_id (migration 0028)', () => {
     expect(fk.onDelete).toBe('restrict');
   });
 
-  it('moves url / locations to the org and keeps legacy_org_details', () => {
+  it('moves url to the org and keeps legacy_org_details', () => {
     expect('url' in users).toBe(false);
-    expect('locations' in users).toBe(false);
     expect(users.legacyOrgDetails.name).toBe('legacy_org_details');
     expect(users.legacyOrgDetails.notNull).toBe(false);
+  });
+
+  it("stores the coordinator's own address in users.locations (0037)", () => {
+    expect(users.locations.name).toBe('locations');
+    expect(users.locations.notNull).toBe(true);
+    expect(users.locations.hasDefault).toBe(true);
   });
 });

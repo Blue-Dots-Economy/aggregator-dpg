@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { BlueDotsLogo } from '../../../components/ui/BlueDotsLogo';
 import { LegalLinksFooter } from '../../../components/legal/LegalLinksFooter';
 import { BrandPanel } from '../../../components/login/BrandPanel';
-import { I } from '../../../icons';
 import { useTranslations } from 'next-intl';
 import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 
@@ -83,12 +82,15 @@ export function RegisterPageShell({
             )}
           </header>
 
-          <Link
-            href="/login"
-            className="inline-flex items-center gap-2 text-[13.5px] text-ink-500 hover:text-ink-900 transition-colors"
-          >
-            <I.arrowL size={15} /> Back to sign in
-          </Link>
+          <p className="text-[13.5px] text-ink-500">
+            Already registered?{' '}
+            <Link
+              href="/login"
+              className="font-semibold text-(--bd-primary-600) hover:text-ink-900 transition-colors"
+            >
+              Sign in
+            </Link>
+          </p>
 
           <h1 className="font-display font-bold text-[28px] text-ink-900 tracking-tight leading-tight mt-3">
             {heading}

@@ -10,20 +10,6 @@ import { loadConsentConfig } from '@aggregator-dpg/config-loader/fs';
 import { logger } from '../../../lib/logger';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
 
-let legacyFlagWarned = false;
-
-/**
- * Logs once per process when `ORG_HIERARCHY_ENABLED` is set. The variable has no effect.
- */
-export function warnIfLegacyHierarchyFlag(): void {
-  if (legacyFlagWarned || process.env.ORG_HIERARCHY_ENABLED === undefined) return;
-  legacyFlagWarned = true;
-  logger.warn(
-    { operation: 'config.orgHierarchy', status: 'skipped' },
-    'ORG_HIERARCHY_ENABLED is ignored — organisations are always on; remove it from the environment',
-  );
-}
-
 /**
  * Loads the current consent documents for the `aggregator` and `org` audiences.
  *

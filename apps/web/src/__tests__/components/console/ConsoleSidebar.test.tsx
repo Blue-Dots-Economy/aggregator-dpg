@@ -58,54 +58,58 @@ beforeEach(() => {
 });
 
 describe('<ConsoleSidebar />', () => {
-  it('gives the network admin every console link, with the brand and portal label', () => {
-    render(<ConsoleSidebar canViewAccess account={account} />);
-    const links = within(aside())
+  const links = () =>
+    within(aside())
       .getAllByRole('link')
       .map((a) => [a.textContent, a.getAttribute('href')]);
-    expect(links).toEqual([
+
+  it('gives an owner Dashboard, My Team under My Blue Dots, Onboarded Organisations and Profile', () => {
+    render(<ConsoleSidebar teamHref="/console" showProfile account={account} />);
+    expect(links()).toEqual([
+      ['nav.dashboard', '/console/dashboard'],
+      ['nav.my_team', '/console'],
       ['nav.organisations', '/console/orgs'],
-      ['nav.coordinators', '/console/coordinators'],
-      ['nav.access', '/console/access/roles'],
+      ['nav.profile', '/console/profile'],
     ]);
+    expect(within(aside()).getByText('nav.my_blue_dots')).toBeInTheDocument();
     expect(within(aside()).getByText('Blue Dots')).toBeInTheDocument();
     expect(within(aside()).getByText('nav.portal_label')).toBeInTheDocument();
   });
 
-  it('gives every admin Organisations; leaves out roles and, without org.manage, coordinators', () => {
-    render(<ConsoleSidebar canManage={false} account={account} />);
-    const hrefs = within(aside())
-      .getAllByRole('link')
-      .map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual(['/console/orgs']);
+  it('folds My Blue Dots away and opens it again from its heading', () => {
+    render(<ConsoleSidebar teamHref="/console" showProfile account={account} />);
+    const group = within(aside()).getByRole('button', { name: 'nav.my_blue_dots' });
+    expect(group).toHaveAttribute('aria-expanded', 'true');
+    expect(within(aside()).queryByText('overview')).toBeNull();
+    fireEvent.click(group);
+    expect(group).toHaveAttribute('aria-expanded', 'false');
+    expect(within(aside()).queryByRole('link', { name: 'nav.my_team' })).toBeNull();
+    fireEvent.click(group);
+    expect(within(aside()).getByRole('link', { name: 'nav.my_team' })).toBeInTheDocument();
   });
 
-  it('lists Organisations first and names the home link Coordinators when it lists them', () => {
-    render(<ConsoleSidebar canManage={false} homeIsCoordinators account={account} />);
-    const links = within(aside()).getAllByRole('link');
-    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/console/orgs', '/console']);
-    expect(links[1]).toHaveAccessibleName('nav.coordinators');
+  it('gives the network admin no My Team and no Profile, and never roles and permissions', () => {
+    render(<ConsoleSidebar teamHref={null} showProfile={false} account={account} />);
+    expect(links()).toEqual([
+      ['nav.dashboard', '/console/dashboard'],
+      ['nav.organisations', '/console/orgs'],
+    ]);
+    expect(within(aside()).queryByText('nav.my_blue_dots')).toBeNull();
+    expect(within(aside()).queryByText('nav.access')).toBeNull();
+    expect(within(aside()).queryByText('overview')).toBeNull();
   });
 
-  it('marks the home link active only on /console itself', () => {
-    usePathname.mockReturnValue('/console/orgs/123');
-    render(<ConsoleSidebar canManage={false} homeIsCoordinators account={account} />);
-    expect(within(aside()).getByRole('link', { name: 'nav.coordinators' })).not.toHaveClass(
-      'nav-active',
-    );
-    expect(within(aside()).getByRole('link', { name: 'nav.organisations' })).toHaveClass(
-      'nav-active',
-    );
-  });
-
-  it('keeps the roles and permissions link active on the permissions table', () => {
-    usePathname.mockReturnValue('/console/access/permissions');
-    render(<ConsoleSidebar canViewAccess account={account} />);
-    expect(within(aside()).getByRole('link', { name: 'nav.access' })).toHaveClass('nav-active');
+  it('marks My Team active only on /console itself when it is the home page', () => {
+    usePathname.mockReturnValue('/console/orgs');
+    render(<ConsoleSidebar teamHref="/console" showProfile account={account} />);
+    const team = within(aside()).getByRole('link', { name: 'nav.my_team' });
+    const orgs = within(aside()).getByRole('link', { name: 'nav.organisations' });
+    expect(team.className).not.toContain('nav-active');
+    expect(orgs.className).toContain('nav-active');
   });
 
   it('shows the account card with the role, and sign-out, but no contact support', () => {
-    render(<ConsoleSidebar account={account} />);
+    render(<ConsoleSidebar teamHref={null} showProfile={false} account={account} />);
     expect(within(aside()).getByText('Asha Rao')).toBeInTheDocument();
     expect(within(aside()).getByText('AR')).toBeInTheDocument();
     expect(within(aside()).getByText('nav.network_admin')).toBeInTheDocument();
@@ -114,7 +118,7 @@ describe('<ConsoleSidebar />', () => {
   });
 
   it('has no account-details pop-up, and the card is plain text, without `details`', () => {
-    render(<ConsoleSidebar account={account} />);
+    render(<ConsoleSidebar teamHref={null} showProfile={false} account={account} />);
     expect(within(aside()).queryByRole('button', { name: /Asha Rao/ })).toBeNull();
   });
 
@@ -125,7 +129,7 @@ describe('<ConsoleSidebar />', () => {
       ...account,
       details: [{ label: 'Email', value: 'asha@example.org' }],
     };
-    render(<ConsoleSidebar account={withDetails} />);
+    render(<ConsoleSidebar teamHref={null} showProfile={false} account={withDetails} />);
     const toggle = within(aside()).getByRole('button', { name: /Asha Rao/ });
 
     expect(screen.queryByText('asha@example.org')).toBeNull();
@@ -141,12 +145,13 @@ describe('<ConsoleSidebar />', () => {
     expect(screen.queryByText('asha@example.org')).toBeNull();
   });
 
-  it('never offers Invite from the sidebar: it lives on the Coordinators page instead (#873)', () => {
-    render(<ConsoleSidebar canManage account={account} />);
+  it('never offers Invite from the sidebar: it lives on the team and organisation pages', () => {
+    render(<ConsoleSidebar teamHref="/console/coordinators" showProfile account={account} />);
     const hrefs = within(aside())
       .getAllByRole('link')
       .map((a) => a.getAttribute('href'));
     expect(hrefs).toContain('/console/coordinators');
     expect(hrefs).not.toContain('/console/invite');
+    expect(hrefs).not.toContain('/console/orgs/invite');
   });
 });

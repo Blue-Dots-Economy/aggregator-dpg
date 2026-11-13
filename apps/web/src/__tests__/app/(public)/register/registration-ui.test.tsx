@@ -1,7 +1,7 @@
 /**
  * Unit tests for the shared registration presentational pieces:
  * `useRegistrationFormState`, `RegistrationSubmitButton`,
- * `RegistrationErrorBanner`, and `RegistrationSuccessPanel`.
+ * and `RegistrationErrorBanner`.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, renderHook, act, fireEvent } from '@testing-library/react';
@@ -15,7 +15,6 @@ import {
   showsErrorBanner,
   RegistrationSubmitButton,
   RegistrationErrorBanner,
-  RegistrationSuccessPanel,
 } from '@/app/(public)/register/registration-ui';
 
 describe('useRegistrationFormState', () => {
@@ -103,26 +102,6 @@ describe('showsErrorBanner', () => {
     expect(showsErrorBanner(error('USER_EXISTS'))).toBe(true);
     expect(showsErrorBanner(error('CLIENT_VALIDATION'))).toBe(true);
     expect(showsErrorBanner({ status: 'idle' })).toBe(false);
-  });
-});
-
-describe('RegistrationSuccessPanel', () => {
-  it('renders heading, ref id, and message, with a link back to sign in', () => {
-    render(
-      <RegistrationSuccessPanel
-        heading="Registration received"
-        refLabel="Reference ID:"
-        refId="agg-123"
-        message="We will review your submission."
-      />,
-    );
-    expect(screen.getByText('Registration received')).toBeInTheDocument();
-    expect(screen.getByText('agg-123')).toBeInTheDocument();
-    expect(screen.getByText('We will review your submission.')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Back to sign in/i })).toHaveAttribute(
-      'href',
-      '/login',
-    );
   });
 });
 

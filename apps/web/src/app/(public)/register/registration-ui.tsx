@@ -7,13 +7,11 @@
  * @module apps/web/src/app/(public)/register/registration-ui
  */
 
-import Link from 'next/link';
 import { useEffect, useRef, useState, type RefObject, type JSX } from 'react';
 import { useTranslations } from 'next-intl';
 import type { IChangeEvent } from '@rjsf/core';
 import type { FormValidation } from '@rjsf/utils';
 import { refusedNameCharacters } from '@aggregator-dpg/shared-primitives/person-name';
-import { I } from '../../../icons';
 import type { ConsentDoc } from '../../../components/consent/consent-docs';
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
 import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
@@ -356,47 +354,6 @@ export function RegistrationErrorBanner({
             ))}
         </ul>
       ) : null}
-    </div>
-  );
-}
-
-export interface RegistrationSuccessPanelProps {
-  /** Panel heading. */
-  heading: string;
-  /** Label preceding the reference id (e.g. "Reference ID:"). */
-  refLabel: string;
-  /** The reference id (aggregator id or org slug). */
-  refId: string;
-  /** Body copy explaining next steps (review/approval). */
-  message: string;
-}
-
-/**
- * Emerald success panel shown after a registration submits, with the reference
- * id and a back-to-sign-in link.
- *
- * @param props - Heading, reference label + id, and next-steps copy.
- * @returns The success panel element.
- */
-export function RegistrationSuccessPanel({
-  heading,
-  refLabel,
-  refId,
-  message,
-}: RegistrationSuccessPanelProps): JSX.Element {
-  return (
-    <div className="mt-8 rounded-[14px] border border-emerald-200 bg-emerald-50 p-6">
-      <div className="font-display font-bold text-[18px] text-emerald-800">{heading}</div>
-      <p className="text-[14px] text-emerald-700 mt-2">
-        {refLabel} <code className="font-mono text-[12.5px]">{refId}</code>
-      </p>
-      <p className="text-[14px] text-emerald-700 mt-3">{message}</p>
-      <Link
-        href="/login"
-        className="mt-5 inline-flex items-center gap-2 text-[13.5px] text-primary-600 font-semibold hover:underline"
-      >
-        <I.arrowL size={15} /> Back to sign in
-      </Link>
     </div>
   );
 }

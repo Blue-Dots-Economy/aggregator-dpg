@@ -122,13 +122,13 @@
         }
       }
     },
-    "/v1/aggregator-registrations/create": {
+    "/v1/user/invite/accept": {
       "post": {
-        "summary": "Submit a new aggregator registration",
+        "summary": "Register a coordinator from an invite",
         "tags": [
           "aggregator-registrations"
         ],
-        "description": "Validates submission against config/schemas/aggregator/registration.v1.json, creates a disabled user (login enabled on admin approval), and pushes the org to signalstack. Reached via a non-aggregator Bearer token from Keycloak. 200 instead of 201 when a pending registration is submitted again: a fresh approval link is sent.",
+        "description": "Creates the invited coordinator as `pending` with a Keycloak user that can sign in but holds no access yet. The email must be the invited address. The account becomes active when the invitee signs in with an email code and calls `POST /v1/user/activate`; no owner approval. Reached with the web BFF service-account token.",
         "requestBody": {
           "required": true,
           "content": {
@@ -302,18 +302,18 @@
                     ],
                     "additionalProperties": false
                   },
-                  "org_id": {
-                    "type": "string"
-                  },
                   "invite": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
                   }
                 },
                 "required": [
                   "name",
                   "type",
                   "contact",
-                  "consent"
+                  "consent",
+                  "invite"
                 ],
                 "additionalProperties": false
               }
@@ -321,37 +321,6 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "aggregator_id": {
-                      "type": "string"
-                    },
-                    "org_slug": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "aggregator_id",
-                    "org_slug",
-                    "status",
-                    "message"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
           "201": {
             "description": "Default Response",
             "content": {
@@ -366,9 +335,15 @@
                       "type": "string"
                     },
                     "status": {
-                      "type": "string"
+                      "type": "string",
+                      "enum": [
+                        "pending"
+                      ]
                     },
                     "message": {
+                      "type": "string"
+                    },
+                    "login_hint": {
                       "type": "string"
                     }
                   },
@@ -376,9 +351,10 @@
                     "aggregator_id",
                     "org_slug",
                     "status",
-                    "message"
+                    "message",
+                    "login_hint"
                   ],
-                  "additionalProperties": true
+                  "additionalProperties": false
                 }
               }
             }
@@ -536,7 +512,376 @@
               }
             }
           },
+          "410": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
           "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/user/invite/read": {
+      "get": {
+        "summary": "Read a coordinator invite for its registration page",
+        "tags": [
+          "aggregator-registrations"
+        ],
+        "description": "Checks the invite link without using it up and returns the invited email and the org it is for. Reached with the web BFF service-account token.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "in": "query",
+            "name": "token",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "email": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    },
+                    "org": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "email",
+                    "expires_at",
+                    "org"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "410": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -849,13 +1194,13 @@
         }
       }
     },
-    "/v1/orgs/create": {
+    "/v1/org/invite/accept": {
       "post": {
-        "summary": "Submit a new parent-org registration",
+        "summary": "Register an organisation from an invite",
         "tags": [
           "aggregator-orgs"
         ],
-        "description": "Creates a pending org (system of record) + mirrored Keycloak group + disabled org-owner user, and emails the network admin a signed review link. A rejected org registering again is set back to pending under the parent in this request, with the same checks. 409 ORG_DEPTH_LIMIT or ORG_CHILD_LIMIT (with fields.parent_id) when the parent cannot take the org; 409 ORG_TOTAL_LIMIT when the instance is full. 200 instead of 201 when the org already exists: a pending org gets a fresh review link, the owner of an active org gets a sign-in link.",
+        "description": "Creates the invited org under the inviting org as `pending`, with its Keycloak group and an owner user that can sign in but holds no access yet. The owner email must be the invited address. The org becomes active when the owner signs in with an email code and calls `POST /v1/user/activate`; no approval. 409 ORG_DEPTH_LIMIT, ORG_CHILD_LIMIT or ORG_TOTAL_LIMIT when the inviting org can no longer take it. Reached with the web BFF service-account token.",
         "requestBody": {
           "required": true,
           "content": {
@@ -863,14 +1208,15 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "invite": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
                   "display_name": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 200
-                  },
-                  "parent_id": {
-                    "type": "string",
-                    "format": "uuid"
                   },
                   "state": {
                     "type": "string",
@@ -972,6 +1318,7 @@
                   }
                 },
                 "required": [
+                  "invite",
                   "display_name",
                   "owner",
                   "consent"
@@ -982,37 +1329,6 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "org_id": {
-                      "type": "string"
-                    },
-                    "slug": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "org_id",
-                    "slug",
-                    "status",
-                    "message"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
           "201": {
             "description": "Default Response",
             "content": {
@@ -1027,9 +1343,15 @@
                       "type": "string"
                     },
                     "status": {
-                      "type": "string"
+                      "type": "string",
+                      "enum": [
+                        "pending"
+                      ]
                     },
                     "message": {
+                      "type": "string"
+                    },
+                    "login_hint": {
                       "type": "string"
                     }
                   },
@@ -1037,9 +1359,10 @@
                     "org_id",
                     "slug",
                     "status",
-                    "message"
+                    "message",
+                    "login_hint"
                   ],
-                  "additionalProperties": true
+                  "additionalProperties": false
                 }
               }
             }
@@ -1197,173 +1520,7 @@
               }
             }
           },
-          "500": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string"
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "detail": {
-                          "type": "string"
-                        },
-                        "docs": {
-                          "type": "string"
-                        },
-                        "fields": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "requestId": {
-                          "type": "string"
-                        },
-                        "timestamp": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "title",
-                        "detail",
-                        "requestId",
-                        "timestamp"
-                      ],
-                      "additionalProperties": true
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string"
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "detail": {
-                          "type": "string"
-                        },
-                        "docs": {
-                          "type": "string"
-                        },
-                        "fields": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "requestId": {
-                          "type": "string"
-                        },
-                        "timestamp": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "title",
-                        "detail",
-                        "requestId",
-                        "timestamp"
-                      ],
-                      "additionalProperties": true
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/orgs/parents": {
-      "get": {
-        "summary": "List the orgs a new org can register under",
-        "tags": [
-          "aggregator-orgs"
-        ],
-        "description": "Returns the network root first, then active aggregator orgs other than the Default org, sorted by name, that can take a child now; each with its \"known as\" name and the name an org registered under it would get. `accepting` is false when the instance is full or no org can take a child.",
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "accepting": {
-                      "type": "boolean"
-                    },
-                    "parents": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "is_root": {
-                            "type": "boolean"
-                          },
-                          "known_as_name": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "child_known_as_name": {
-                            "type": "string",
-                            "nullable": true
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "name",
-                          "is_root",
-                          "known_as_name",
-                          "child_known_as_name"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "accepting",
-                    "parents"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "401": {
+          "410": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -1519,408 +1676,60 @@
         }
       }
     },
-    "/v1/orgs": {
+    "/v1/org/invite/read": {
       "get": {
-        "summary": "List active orgs for the coordinator-registration dropdown",
+        "summary": "Read an organisation invite for its registration page",
         "tags": [
           "aggregator-orgs"
         ],
-        "description": "Returns active aggregator orgs sorted by name (plain SQL, no Keycloak admin API). The Default org is listed only while it is the only active org.",
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "orgs": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "slug": {
-                            "type": "string"
-                          },
-                          "display_name": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "slug",
-                          "display_name"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "orgs"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string"
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "detail": {
-                          "type": "string"
-                        },
-                        "docs": {
-                          "type": "string"
-                        },
-                        "fields": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "requestId": {
-                          "type": "string"
-                        },
-                        "timestamp": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "title",
-                        "detail",
-                        "requestId",
-                        "timestamp"
-                      ],
-                      "additionalProperties": true
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string"
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "detail": {
-                          "type": "string"
-                        },
-                        "docs": {
-                          "type": "string"
-                        },
-                        "fields": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "requestId": {
-                          "type": "string"
-                        },
-                        "timestamp": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "title",
-                        "detail",
-                        "requestId",
-                        "timestamp"
-                      ],
-                      "additionalProperties": true
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string"
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "detail": {
-                          "type": "string"
-                        },
-                        "docs": {
-                          "type": "string"
-                        },
-                        "fields": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        },
-                        "requestId": {
-                          "type": "string"
-                        },
-                        "timestamp": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "title",
-                        "detail",
-                        "requestId",
-                        "timestamp"
-                      ],
-                      "additionalProperties": true
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "additionalProperties": true
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/admin/v1/orgs/read/{id}": {
-      "get": {
-        "summary": "Render the network-admin approve/reject page for an org",
-        "tags": [
-          "aggregator-orgs"
-        ],
-        "description": "HTML page reached from the network-admin notification email. All responses are text/html.",
+        "description": "Checks the invite link without using it up and returns the invited email and the inviting org. Reached with the web BFF service-account token.",
         "parameters": [
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
             },
             "in": "query",
             "name": "token",
-            "required": false
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "in": "query",
-            "name": "intent",
-            "required": false
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "in": "path",
-            "name": "id",
             "required": true
           }
         ],
         "responses": {
           "200": {
-            "description": "Default Response"
-          }
-        }
-      }
-    },
-    "/admin/v1/orgs/decision/{id}": {
-      "post": {
-        "summary": "Approve or reject a pending org",
-        "tags": [
-          "aggregator-orgs"
-        ],
-        "description": "Browser form flow; every response is text/html. Both decisions are an atomic status CAS from pending first; approve then enables the owner (Keycloak user, org_owner role, group) and mails a sign-in link; reject mails the owner.",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "in": "path",
-            "name": "id",
-            "required": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Default Response"
-          }
-        }
-      }
-    },
-    "/admin/v1/orgs/renew/{id}": {
-      "post": {
-        "summary": "Regenerate an expired org review link and show the confirm page",
-        "tags": [
-          "aggregator-orgs"
-        ],
-        "description": "Reached from the \"Regenerate & review\" button on the expired-link page. Accepts an expired-but-signature-valid token as proof the admin held a legitimate link, mints a fresh decision token, and renders the approve/reject confirm page inline (no email).",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "in": "path",
-            "name": "id",
-            "required": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Default Response"
-          }
-        }
-      }
-    },
-    "/admin/v1/invites": {
-      "post": {
-        "summary": "Mint coordinator invites (owner grant-authed)",
-        "tags": [
-          "invites"
-        ],
-        "description": "Authed by the owner grant token. A valid grant mints/refreshes one 14-day invite per recipient and emails each. An expired grant mints nothing and re-mails a fresh grant to the registered owner (recovery). Per-IP rate limited.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "grant": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "recipients": {
-                    "type": "array",
-                    "items": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "email": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    },
+                    "org": {
                       "type": "object",
                       "properties": {
-                        "email": {
-                          "type": "string",
-                          "minLength": 3
+                        "id": {
+                          "type": "string"
                         },
                         "name": {
                           "type": "string"
                         }
                       },
                       "required": [
-                        "email"
+                        "id",
+                        "name"
                       ],
                       "additionalProperties": false
-                    },
-                    "minItems": 1,
-                    "maxItems": 10
-                  }
-                },
-                "required": [
-                  "grant",
-                  "recipients"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Default Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "recovered": {
-                      "type": "boolean"
-                    },
-                    "sent": {
-                      "type": "integer"
-                    },
-                    "resent": {
-                      "type": "integer"
-                    },
-                    "invalid": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "email": {
-                            "type": "string"
-                          },
-                          "reason": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "email",
-                          "reason"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "existing": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "email": {
-                            "type": "string"
-                          },
-                          "status": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "email",
-                          "status"
-                        ],
-                        "additionalProperties": false
-                      }
                     }
                   },
                   "required": [
-                    "recovered",
-                    "sent",
-                    "resent",
-                    "invalid",
-                    "existing"
+                    "email",
+                    "expires_at",
+                    "org"
                   ],
                   "additionalProperties": false
                 }
@@ -1928,6 +1737,57 @@
             }
           },
           "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -2029,7 +1889,7 @@
               }
             }
           },
-          "429": {
+          "410": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -2130,94 +1990,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "/admin/v1/aggregator-registrations/read/{id}": {
-      "get": {
-        "summary": "Render the admin approve/reject page",
-        "tags": [
-          "aggregator-approvals"
-        ],
-        "description": "HTML page reached from the admin notification email. Verifies the signed token and renders the approval form for the given aggregator registration id. All responses (200, 400 invalid/missing token, 404 unknown aggregator, 503 backing service down) are text/html pages, so no JSON response schema is declared.",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "in": "query",
-            "name": "token",
-            "required": false
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "in": "query",
-            "name": "intent",
-            "required": false
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "in": "path",
-            "name": "id",
-            "required": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Default Response"
-          }
-        }
-      }
-    },
-    "/admin/v1/aggregator-registrations/decision/{id}": {
-      "post": {
-        "summary": "Approve or reject a pending aggregator",
-        "tags": [
-          "aggregator-approvals"
-        ],
-        "description": "Records the admin decision (approve/reject) for the registration id. On approve, enables the disabled Keycloak user and confirms the signalstack push. This is a browser form flow: every response (200 result page, 400 invalid token/body, 404 unknown aggregator, 503 backing service down) is a text/html page, so neither a body schema nor JSON response schemas are declared — the handler validates the form body itself (token, decision approve|reject, optional reason) and renders an HTML error page on failure. Body shape: { token: string, decision: \"approve\" | \"reject\", reason?: string }.",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "in": "path",
-            "name": "id",
-            "required": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Default Response"
-          }
-        }
-      }
-    },
-    "/admin/v1/aggregator-registrations/renew/{id}": {
-      "post": {
-        "summary": "Regenerate an expired approval link and show the confirm page",
-        "tags": [
-          "aggregator-approvals"
-        ],
-        "description": "Reached from the \"Regenerate & review\" button on the expired-link page. Accepts an expired-but-signature-valid token as proof the reviewer held a legitimate link, mints a fresh decision token (preserving the org binding), and renders the approve/reject confirm page inline — no email.",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "in": "path",
-            "name": "id",
-            "required": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Default Response"
           }
         }
       }
@@ -4373,7 +4145,7 @@
         }
       }
     },
-    "/v1/user/create": {
+    "/v1/user/invite": {
       "post": {
         "summary": "Invite coordinators into an organisation",
         "tags": [
@@ -4797,13 +4569,13 @@
         }
       }
     },
-    "/v1/user/decision/{id}": {
+    "/v1/user/invite/search": {
       "post": {
-        "summary": "Approve or reject a pending coordinator",
+        "summary": "List the unused coordinator invites of an organisation",
         "tags": [
           "console"
         ],
-        "description": "The same compare-and-set decision service as the emailed review link. A decision already made answers 409 ALREADY_DECIDED with status, decided_at and decided_by. Approving a coordinator that serves no profile type of the network answers 409 NO_PROFILE_TYPES.",
+        "description": "Invites nobody has registered with yet, newest first, keyset paged. `expired` invites no longer work. An invitee who registered is a coordinator (`POST /v1/user/search`), pending until they verify their email.",
         "requestBody": {
           "required": true,
           "content": {
@@ -4811,38 +4583,29 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "decision": {
+                  "org_id": {
                     "type": "string",
-                    "enum": [
-                      "approve",
-                      "reject"
-                    ]
+                    "format": "uuid"
                   },
-                  "reason": {
+                  "cursor": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 500
+                    "maxLength": 512
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
                   }
                 },
                 "required": [
-                  "decision"
+                  "org_id"
                 ],
                 "additionalProperties": false
               }
             }
           }
         },
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "in": "path",
-            "name": "id",
-            "required": true
-          }
-        ],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -4851,26 +4614,45 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "id": {
-                      "type": "string"
+                    "invites": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "email": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "expired"
+                            ]
+                          },
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "expires_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "email",
+                          "status",
+                          "created_at",
+                          "expires_at"
+                        ],
+                        "additionalProperties": false
+                      }
                     },
-                    "status": {
+                    "next_cursor": {
                       "type": "string",
-                      "enum": [
-                        "pending",
-                        "active",
-                        "inactive",
-                        "retired"
-                      ]
-                    },
-                    "notified": {
-                      "type": "boolean"
+                      "nullable": true
                     }
                   },
                   "required": [
-                    "id",
-                    "status",
-                    "notified"
+                    "invites",
+                    "next_cursor"
                   ],
                   "additionalProperties": false
                 }
@@ -5081,7 +4863,103 @@
               }
             }
           },
-          "409": {
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/user/activate": {
+      "post": {
+        "summary": "Activate the caller's invited account",
+        "tags": [
+          "console"
+        ],
+        "description": "Called by the portal right after an invitee's first sign-in. The account must come from an invite (`decision_made = invited`) and the sign-in must have verified the email (an email code). Runs the approve step without its mail and tells the inviting organisation's owner; an invited organisation becomes active with its owner. Already active answers 200 with `activated: false`. The caller refreshes its token afterwards to pick up the new access.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "active"
+                      ]
+                    },
+                    "account": {
+                      "type": "string",
+                      "enum": [
+                        "coordinator",
+                        "org_owner"
+                      ]
+                    },
+                    "activated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "account",
+                    "activated"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -5132,7 +5010,109 @@
               }
             }
           },
-          "429": {
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "409": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -8978,13 +8958,13 @@
         }
       }
     },
-    "/v1/org/decision/{id}": {
+    "/v1/org/invite": {
       "post": {
-        "summary": "Approve or reject a pending organisation (its parent's owner)",
+        "summary": "Invite organisations to register under an organisation",
         "tags": [
           "console"
         ],
-        "description": "Only the owner of the organisation's parent decides: the network admin for a top-level organisation, else the owner of the parent organisation. Anyone else gets 404. A rejection must give a reason (400 SCHEMA_VALIDATION otherwise). The same compare-and-set service as the emailed review link. Approval enables the owner's sign-in (owner_access reports how far it got; repair re-runs it).",
+        "description": "Mints and mails a 14-day invite per address to register an organisation under `parent_id`: the root for the network admin, else an active organisation the caller owns. The invitee registers, then verifies the invited email with a one-time code; there is no approval step. 409 ORG_DEPTH_LIMIT, ORG_CHILD_LIMIT or ORG_TOTAL_LIMIT when the parent cannot take another organisation. An address that already has an account is mailed a sign-in note and counted as sent.",
         "requestBody": {
           "required": true,
           "content": {
@@ -8992,38 +8972,43 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "decision": {
+                  "parent_id": {
                     "type": "string",
-                    "enum": [
-                      "approve",
-                      "reject"
-                    ]
+                    "format": "uuid"
                   },
-                  "reason": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
+                  "recipients": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "email": {
+                          "type": "string",
+                          "minLength": 3,
+                          "maxLength": 320
+                        },
+                        "name": {
+                          "type": "string",
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "email"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "maxItems": 100
                   }
                 },
                 "required": [
-                  "decision"
+                  "parent_id",
+                  "recipients"
                 ],
                 "additionalProperties": false
               }
             }
           }
         },
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "in": "path",
-            "name": "id",
-            "required": true
-          }
-        ],
         "responses": {
           "200": {
             "description": "Default Response",
@@ -9032,36 +9017,56 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "id": {
-                      "type": "string"
+                    "sent": {
+                      "type": "integer"
                     },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "pending",
-                        "active",
-                        "inactive",
-                        "retired"
-                      ]
+                    "resent": {
+                      "type": "integer"
                     },
-                    "notified": {
-                      "type": "boolean"
+                    "invalid": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "email": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "email",
+                          "reason"
+                        ],
+                        "additionalProperties": false
+                      }
                     },
-                    "owner_access": {
-                      "type": "string",
-                      "enum": [
-                        "granted",
-                        "partial",
-                        "no_login",
-                        "none"
-                      ]
+                    "existing": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "email": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "email",
+                          "status"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [
-                    "id",
-                    "status",
-                    "notified",
-                    "owner_access"
+                    "sent",
+                    "resent",
+                    "invalid",
+                    "existing"
                   ],
                   "additionalProperties": false
                 }
@@ -9323,7 +9328,304 @@
               }
             }
           },
-          "429": {
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/org/invite/search": {
+      "post": {
+        "summary": "List the unused organisation invites of an organisation",
+        "tags": [
+          "console"
+        ],
+        "description": "Invites to register under `parent_id` that nobody has used yet, newest first, keyset paged: the root for the network admin, else an organisation the caller owns. `expired` invites no longer work. An invited organisation that registered is in `POST /v1/org/search`, pending until its owner verifies the email.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "parent_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "cursor": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "parent_id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "invites": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "email": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "expired"
+                            ]
+                          },
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "expires_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "email",
+                          "status",
+                          "created_at",
+                          "expires_at"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "invites",
+                    "next_cursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        },
+                        "docs": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requestId": {
+                          "type": "string"
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "title",
+                        "detail",
+                        "requestId",
+                        "timestamp"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
             "description": "Default Response",
             "content": {
               "application/json": {
@@ -21049,6 +21351,18 @@
                       "type": "integer",
                       "exclusiveMinimum": true,
                       "minimum": 0
+                    },
+                    "organisation": {
+                      "type": "object",
+                      "properties": {
+                        "invite_role_label": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "invite_role_label"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -21059,7 +21373,8 @@
                     "registration_modes",
                     "signals_ui_urls",
                     "features",
-                    "bulk_upload_max_bytes"
+                    "bulk_upload_max_bytes",
+                    "organisation"
                   ],
                   "additionalProperties": false
                 }

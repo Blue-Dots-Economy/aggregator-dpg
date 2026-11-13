@@ -14,6 +14,8 @@ export interface CreateUserInput {
   lastName?: string;
   username?: string;
   enabled?: boolean;
+  /** Defaults to `true`; an invited user is created unverified and verifies by email code. */
+  emailVerified?: boolean;
   /** Free-form attributes. Existing fields take precedence. */
   attributes?: Record<string, string | string[]>;
   /**
@@ -28,6 +30,7 @@ export interface IdpUser {
   email: string;
   username: string;
   enabled: boolean;
+  emailVerified?: boolean;
   firstName?: string;
   lastName?: string;
   attributes?: Record<string, string[]>;
@@ -76,7 +79,7 @@ export abstract class IdpAdminAdapter {
    */
   abstract setUserDecision(
     userId: string,
-    decision: 'pending' | 'approved' | 'rejected',
+    decision: 'pending' | 'approved' | 'rejected' | 'invited',
   ): Promise<IdpResult<void>>;
 
   /**

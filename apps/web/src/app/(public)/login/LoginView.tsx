@@ -160,6 +160,8 @@ function humanizeError(code: string, t: TFunction): string {
     'exchange_token_exchange_failed',
     'exchange_state_mismatch',
     'exchange_token_verify_failed',
+    'invite_email_not_verified',
+    'invite_activation_failed',
   ] as const;
 
   type ErrorKey = (typeof knownKeys)[number];

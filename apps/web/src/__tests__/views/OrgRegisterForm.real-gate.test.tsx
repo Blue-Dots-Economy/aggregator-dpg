@@ -111,7 +111,12 @@ function renderForm() {
   return render(
     <QueryClientProvider client={client}>
       <NextIntlClientProvider locale="en" messages={messages}>
-        <OrgRegisterForm schema={orgSchema} uiSchema={{}} consentContent={consentContentFixture} />
+        <OrgRegisterForm
+          schema={orgSchema}
+          uiSchema={{}}
+          consentContent={consentContentFixture}
+          invite={{ token: 'tok-1', email: 'ravi@enable.org', parentName: 'Parent Org' }}
+        />
       </NextIntlClientProvider>
     </QueryClientProvider>,
   );
@@ -123,8 +128,8 @@ describe('<OrgRegisterForm /> with the real ConsentGate', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
       calls.push({ url: String(input), body: init?.body ?? '' });
-      return new Response(JSON.stringify({ slug: 'enable-india-ab12' }), {
-        status: 200,
+      return new Response(JSON.stringify({ status: 'pending', login_hint: 'ravi@enable.org' }), {
+        status: 201,
         headers: { 'content-type': 'application/json' },
       });
     }) as unknown as typeof fetch;
@@ -152,7 +157,8 @@ describe('<OrgRegisterForm /> with the real ConsentGate', () => {
       const body = JSON.parse(calls[0]!.body) as Record<string, unknown>;
       expect(body['display_name']).toBe('Enable India');
       expect(body['consent']).toMatchObject({ value: true });
-      expect(await screen.findByText('enable-india-ab12')).toBeInTheDocument();
+      expect(calls[0]!.url).toBe('/api/invite/org/accept');
+      expect(body['invite']).toBe('tok-1');
     } finally {
       globalThis.fetch = originalFetch;
       calls = [];

@@ -3,6 +3,8 @@
  *
  * - Reads the signed flow cookie set by `/api/auth/login`.
  * - Verifies state, exchanges the auth code (with PKCE verifier) for tokens.
+ * - For an invited account (`decision_made = invited`), activates it and
+ *   refreshes the tokens so the new access applies.
  * - Persists the session in Redis.
  * - Drops the `sid` cookie.
  * - Redirects to the original `returnTo` path.
@@ -11,7 +13,7 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
-import { getOidcAdapter } from '@/lib/oidc';
+import { getOidcAdapter, type IdentityProviderAdapter, type TokenSet } from '@/lib/oidc';
 import { getSessionStore, type SessionData } from '@/lib/session';
 import { resolveSignalsRealmRoles } from '@/lib/signals-roles';
 import {
@@ -22,7 +24,13 @@ import {
   verifyFlowState,
 } from '@/lib/cookies';
 import { logger, pickRequestId } from '@/lib/logger';
-import { PORTAL_GATE_REASON, classifyNonCoordinator, tokenAggregatorId } from '@/lib/jwt';
+import {
+  PORTAL_GATE_REASON,
+  classifyNonCoordinator,
+  decodeJwtClaims,
+  tokenAggregatorId,
+} from '@/lib/jwt';
+import { activateInvitee } from '@/lib/invite-activation';
 
 export const runtime = 'nodejs';
 
@@ -94,7 +102,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return failure(req, `exchange_${exchanged.error.code.toLowerCase()}`);
   }
 
-  const { tokens, claims } = exchanged.value;
+  const { claims } = exchanged.value;
+  const settled = await settleInvitedLogin(adapter, exchanged.value.tokens, log);
+  if (typeof settled === 'string') return failure(req, settled);
+  const tokens = settled;
 
   // A coordinator (token has `aggregator_id`) lands in the portal. An org owner
   // or the network admin (realm role `org_owner`) lands in the console.
@@ -173,4 +184,27 @@ function mustEnv(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`${name} must be set`);
   return v;
+}
+
+/**
+ * Activates an invited account (`decision_made = invited`) and refreshes its tokens; other logins pass through.
+ *
+ * @returns The tokens to keep, or the failure reason for the sign-in error page.
+ */
+async function settleInvitedLogin(
+  adapter: IdentityProviderAdapter,
+  tokens: TokenSet,
+  log: typeof logger,
+): Promise<TokenSet | string> {
+  if (decodeJwtClaims(tokens.accessToken)?.['decision_made'] !== 'invited') return tokens;
+  const activation = await activateInvitee(tokens.accessToken, log);
+  if (activation === 'email_not_verified') return 'invite_email_not_verified';
+  if (activation !== 'active') return 'invite_activation_failed';
+  const refreshed = await adapter.refresh(tokens.refreshToken);
+  if (refreshed.ok) return refreshed.value;
+  log.error(
+    { code: refreshed.error.code, sub_operation: 'oidc.refresh', cause: refreshed.error.message },
+    'token refresh after invite activation failed',
+  );
+  return 'invite_activation_failed';
 }

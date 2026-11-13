@@ -25,7 +25,7 @@ import {
   type UpdateCoordinatorPatch,
 } from './interface.js';
 import type { AggregatorStatus, BecknContact } from '@aggregator-dpg/shared-primitives/aggregator';
-import { renderOrgDetails, type OrgDetailColumns } from './org-details.js';
+import { coordinatorLocations, renderOrgDetails, type OrgDetailColumns } from './org-details.js';
 import { servesForCreate, servesOf } from './serves.js';
 
 /** The Default org's id in the in-memory store (matches `buildDefaultOrg`). */
@@ -54,6 +54,8 @@ export class InMemoryUserStore extends UserStoreBase {
   protected readonly orgDetails = new Map<string, OrgDetailColumns>();
   /** Each coordinator's own `legacy_org_details`. */
   protected readonly legacy = new Map<string, LegacyOrgDetails | null>();
+  /** Each coordinator's own `users.locations`. */
+  protected readonly ownLocations = new Map<string, Coordinator['locations']>();
   /** Which org id is the Default org. */
   protected defaultOrgId: string = MEMORY_DEFAULT_ORG_ID;
   /** Invite addresses by `jti` (the Postgres store reads them from `registration_invites`). */
@@ -67,12 +69,11 @@ export class InMemoryUserStore extends UserStoreBase {
     orgId: string,
     legacy: LegacyOrgDetails | null,
     submitted: BecknContact,
-  ): { url: string | null; locations: Coordinator['locations']; contact: BecknContact } {
+  ): { url: string | null; contact: BecknContact } {
     const d = renderOrgDetails(this.orgDetails.get(orgId) ?? null, legacy);
     const { name, email, phone, alternatePhone } = submitted;
     return {
       url: d.url,
-      locations: d.locations,
       contact: {
         name,
         email,
@@ -93,7 +94,10 @@ export class InMemoryUserStore extends UserStoreBase {
     const legacy = this.legacy.get(row.id) ?? null;
     if (!orgId || (!this.orgDetails.has(orgId) && !legacy)) return row;
     const rendered = this.render(orgId, legacy, row.contact);
-    return { ...row, url: rendered.url, locations: rendered.locations, contact: rendered.contact };
+    const locations = this.ownLocations.has(row.id)
+      ? coordinatorLocations(this.ownLocations.get(row.id), legacy)
+      : row.locations;
+    return { ...row, url: rendered.url, locations, contact: rendered.contact };
   }
 
   /** {@link view} for a possibly-missing row. */
@@ -129,6 +133,7 @@ export class InMemoryUserStore extends UserStoreBase {
 
     const now = new Date();
     this.legacy.set(id, input.legacyOrgDetails ?? null);
+    this.ownLocations.set(id, input.locations ?? []);
     const rendered = this.render(input.orgId, input.legacyOrgDetails ?? null, input.contact);
     const serves = servesForCreate(input);
     const row: Coordinator = {
@@ -143,7 +148,7 @@ export class InMemoryUserStore extends UserStoreBase {
       contact: rendered.contact,
       contactPhone: phone,
       contactEmail: email,
-      locations: rendered.locations,
+      locations: coordinatorLocations(input.locations, input.legacyOrgDetails),
       consent: input.consent,
       profile: input.profile ?? {},
       profileRef: input.profileRef ?? null,
@@ -300,13 +305,6 @@ export class InMemoryUserStore extends UserStoreBase {
     this.byPhone.delete(row.contactPhone);
     this.byEmail.delete(row.contactEmail);
     return Promise.resolve({ ok: true, value: undefined });
-  }
-
-  async rejectFromPending(id: string, updatedBy: string): Promise<StoreResult<Coordinator | null>> {
-    const existing = this.byId.get(id);
-    // Only pending → inactive; anything else means already decided.
-    if (existing?.status !== 'pending') return { ok: true, value: null };
-    return this.update(id, { status: 'inactive', rejectedAt: new Date(), updatedBy });
   }
 
   async deleteIfPending(

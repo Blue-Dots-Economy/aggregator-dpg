@@ -53,7 +53,7 @@ describe('OpenAPI spec generation', () => {
 
   it('documents a request body on every body-taking route', () => {
     const expectBody = [
-      ['post', '/v1/aggregator-registrations/create'],
+      ['post', '/v1/user/invite/accept'],
       ['patch', '/v1/aggregators/profile/me'],
       ['post', '/v1/bulk-uploads'],
       ['post', '/v1/links/create'],
@@ -67,12 +67,10 @@ describe('OpenAPI spec generation', () => {
     }
   });
 
-  it('keeps non-JSON replies schema-free (CSV/HTML exemptions)', () => {
+  it('keeps non-JSON replies schema-free (CSV exemptions)', () => {
     const exempt = [
       ['get', '/v1/bulk-uploads/template'],
       ['get', '/v1/dashboard/export'],
-      ['get', '/admin/v1/aggregator-registrations/read/{id}'],
-      ['post', '/admin/v1/aggregator-registrations/decision/{id}'],
     ] as const;
     for (const [method, path] of exempt) {
       const op = spec.paths[path]?.[method];
@@ -82,13 +80,6 @@ describe('OpenAPI spec generation', () => {
         twoHundred?.content,
         `${method.toUpperCase()} ${path} must not declare a 200 JSON schema`,
       ).toBeFalsy();
-    }
-  });
-
-  it('documents 200 and 201 on the registration routes that answer a re-submit with 200', () => {
-    for (const path of ['/v1/aggregator-registrations/create', '/v1/orgs/create']) {
-      const codes = Object.keys(spec.paths[path]?.['post']?.responses ?? {});
-      expect(codes, `POST ${path}`).toEqual(expect.arrayContaining(['200', '201']));
     }
   });
 

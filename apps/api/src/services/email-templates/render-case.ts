@@ -11,7 +11,6 @@
  */
 
 import {
-  callout,
   ctaButton,
   ctaRow,
   getEmailBrand,
@@ -19,7 +18,6 @@ import {
   note,
   para,
   paraLast,
-  paraSmall,
   renderShell,
 } from './shared.js';
 import { caseTokenTypes, getEmailCase, type BlockSpec, type EmailCaseDef } from './email-cases.js';
@@ -39,15 +37,11 @@ export interface RenderedEmail {
 /**
  * Decides whether a conditional block belongs in this render.
  *
- * `requires` keeps a block out unless every named token has a value;
- * `absent` keeps it out unless every named token has none.
+ * `requires` keeps a block out unless every named token has a value.
  */
 function blockApplies(spec: BlockSpec, values: CaseValues): boolean {
   for (const token of spec.requires ?? []) {
     if (values[token] === undefined || values[token] === '') return false;
-  }
-  for (const token of spec.absent ?? []) {
-    if (values[token] !== undefined && values[token] !== '') return false;
   }
   return true;
 }
@@ -56,9 +50,7 @@ const BLOCK_RENDERERS: Record<string, (html: string) => string> = {
   heading,
   para,
   paraLast,
-  paraSmall,
   note,
-  callout,
 };
 
 /**
@@ -147,7 +139,7 @@ function renderBlock(
 /**
  * Renders one externalised email case.
  *
- * @param caseId - Registry key, e.g. `applicant_approved`.
+ * @param caseId - Registry key, e.g. `coordinator_invite`.
  * @param values - Token values. Brand tokens are added automatically, and a
  *   token used for a CTA href is passed through unescaped by the button
  *   helper rather than substituted into copy.
@@ -178,11 +170,10 @@ export function renderCase(caseId: string, values: CaseValues): RenderedEmail {
   }
 
   const subject = toPlainText(copy(def.subjectKey ?? 'subject'));
-  const signOff = def.signOff === false ? '' : `\nSent by ${brand.long_name}.\n`;
 
   return {
     subject,
     html: renderShell({ preheader: subject, bodyHtml: htmlBlocks.join('\n') }),
-    text: `${textBlocks.join('\n\n')}\n${signOff}`,
+    text: `${textBlocks.join('\n\n')}\n\nSent by ${brand.long_name}.\n`,
   };
 }

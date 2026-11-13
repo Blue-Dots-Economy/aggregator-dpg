@@ -2,7 +2,7 @@
  * Browser-side caller of the console's BFF mutations.
  *
  * Sends same-origin JSON and returns the status and body instead of throwing,
- * so a view can update in place on `409 ALREADY_DECIDED`.
+ * so a view can show the error next to what failed.
  *
  * @module apps/web/src/lib/console-client
  */
@@ -77,7 +77,7 @@ async function readOkBody<S extends z.ZodTypeAny>(
 /**
  * Calls a console BFF route and checks the OK body with a schema.
  *
- * @param url - BFF path, e.g. `/api/console/user/decision/<id>`.
+ * @param url - BFF path, e.g. `/api/console/user/metadata/<id>`.
  * @param method - `POST` or `PATCH`.
  * @param schema - The expected OK body.
  * @param body - JSON body.

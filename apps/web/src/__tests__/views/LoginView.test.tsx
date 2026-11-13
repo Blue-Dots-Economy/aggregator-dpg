@@ -57,7 +57,7 @@ describe('<LoginView />', () => {
     expect(screen.getByText(messages.auth.welcome_heading)).toBeInTheDocument();
     expect(screen.getByText(messages.auth.existing_title)).toBeInTheDocument();
     // Registration is not linked from the login homepage anymore (#619).
-    expect(screen.queryByText(messages.auth.register_title)).toBeNull();
+    expect(screen.queryByRole('link', { name: /register/i })).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
     // Invite-only recovery line (#701) points a mis-linked coordinator at their org.
     expect(screen.getByText(/contact your organisation administrator/i)).toBeInTheDocument();
@@ -123,6 +123,14 @@ describe('<LoginView />', () => {
       messages.auth.errors.oidc_error_access_denied,
     );
   });
+
+  it.each(['invite_email_not_verified', 'invite_activation_failed'] as const)(
+    'explains the %s invite sign-in failure',
+    (code) => {
+      renderView({ error: code });
+      expect(screen.getByRole('alert')).toHaveTextContent(messages.auth.errors[code]);
+    },
+  );
 
   it('falls back to the generic unknown-error message for an unrecognised code', () => {
     renderView({ error: 'some_totally_unknown_code' });

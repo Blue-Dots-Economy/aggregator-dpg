@@ -16,6 +16,8 @@ import {
   stripConsentBlock,
   withResolvedCoordinates,
   withOrgCoordinates,
+  inviteSignInUrl,
+  withReadonlyField,
 } from '@/app/(public)/register/registration-shared';
 
 describe('titleCase', () => {
@@ -477,5 +479,28 @@ describe('withOrgCoordinates', () => {
     const body = { display_name: 'ABC Limited' };
     withOrgCoordinates(body, place);
     expect(body).not.toHaveProperty('coordinates');
+  });
+});
+
+describe('inviteSignInUrl', () => {
+  it('pre-fills the invited email and keeps the landing page', () => {
+    expect(inviteSignInUrl({ login_hint: 'a+b@x.org' }, '/console')).toBe(
+      '/api/auth/login?returnTo=%2Fconsole&login_hint=a%2Bb%40x.org',
+    );
+  });
+
+  it('leaves the hint out when the response has none', () => {
+    expect(inviteSignInUrl({}, '/dashboard')).toBe('/api/auth/login?returnTo=%2Fdashboard');
+  });
+});
+
+describe('withReadonlyField', () => {
+  it('locks a nested field and keeps the rest of the UI schema', () => {
+    const ui = { contact: { phone: { 'ui:widget': 'phone' } }, name: { 'ui:widget': 'hidden' } };
+    expect(withReadonlyField(ui, ['contact', 'email'])).toEqual({
+      contact: { phone: { 'ui:widget': 'phone' }, email: { 'ui:readonly': true } },
+      name: { 'ui:widget': 'hidden' },
+    });
+    expect(ui.contact).toEqual({ phone: { 'ui:widget': 'phone' } });
   });
 });

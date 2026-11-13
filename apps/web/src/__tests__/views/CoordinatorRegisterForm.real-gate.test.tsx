@@ -23,28 +23,40 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
+/** What the RJSF shim submits; a test may replace it. */
+const shim = vi.hoisted(() => ({
+  formData: { name: 'Enable India Coordinator' } as Record<string, unknown>,
+  /** The `formData` the form last passed to RJSF. */
+  rendered: undefined as Record<string, unknown> | undefined,
+}));
+
 vi.mock('@/components/forms/RjsfThemed', () => ({
   RjsfThemedForm: ({
     onSubmit,
     children,
+    formData,
   }: {
     onSubmit: (e: { formData: Record<string, unknown> }, ev: unknown) => void;
     children?: ReactNode;
+    formData?: Record<string, unknown>;
   }) => (
-    <form
-      data-testid="rjsf-shim"
-      onSubmit={(ev) => {
-        ev.preventDefault();
-        onSubmit({ formData: { name: 'Enable India Coordinator' } }, ev);
-      }}
-    >
-      {children}
-    </form>
+    (shim.rendered = formData),
+    (
+      <form
+        data-testid="rjsf-shim"
+        onSubmit={(ev) => {
+          ev.preventDefault();
+          onSubmit({ formData: shim.formData }, ev);
+        }}
+      >
+        {children}
+      </form>
+    )
   ),
 }));
 
 // useAggregatorConfig hits the BFF via react-query; CoordinatorRegisterForm
-// reads it for the brand name only (org-hierarchy off, so no /api/orgs call).
+// reads it for the brand name only.
 vi.mock('@/hooks/useAggregatorConfig', () => {
   const cfg = { brand: { short_name: 'Test' }, domains: [{ id: 'seeker', label: 'Seeker' }] };
   return {
@@ -115,6 +127,9 @@ function renderForm() {
           schema={coordSchema}
           uiSchema={{}}
           consentContent={consentContentFixture}
+          inviteToken="tok-1"
+          lockedOrgName="TRRAIN"
+          lockedEmail="asha@trrain.org"
         />
       </NextIntlClientProvider>
     </QueryClientProvider>,
@@ -126,19 +141,9 @@ describe('<CoordinatorRegisterForm /> with the real ConsentGate', () => {
     let calls: { url: string; body: string }[] = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
-      // Only the Default org is listed, so the form preselects it.
-      if (String(input).includes('/api/orgs')) {
-        return new Response(
-          JSON.stringify({ orgs: [{ id: 'd', slug: 'default', display_name: 'Default' }] }),
-          {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-          },
-        );
-      }
       calls.push({ url: String(input), body: init?.body ?? '' });
-      return new Response(JSON.stringify({ aggregator_id: 'agg-enable-india' }), {
-        status: 200,
+      return new Response(JSON.stringify({ status: 'pending', login_hint: 'asha@trrain.org' }), {
+        status: 201,
         headers: { 'content-type': 'application/json' },
       });
     }) as unknown as typeof fetch;
@@ -148,10 +153,7 @@ describe('<CoordinatorRegisterForm /> with the real ConsentGate', () => {
 
       // The gate is mounted CLOSED at first render — no dialog, no reader.
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-      // The only org (Default) is preselected once the list loads.
-      await screen.findByText('Default');
 
-      await screen.findByText('Default');
       // Submitting opens it: false -> true, in the DOM for the first time.
       fireEvent.submit(screen.getByTestId('rjsf-shim'));
       await screen.findByRole('dialog');
@@ -166,14 +168,78 @@ describe('<CoordinatorRegisterForm /> with the real ConsentGate', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Accept & continue' }));
 
       await waitFor(() => expect(calls.length).toBe(1));
-      expect(calls[0]!.url).toBe('/api/aggregator/register');
+      expect(calls[0]!.url).toBe('/api/invite/user/accept');
       const body = JSON.parse(calls[0]!.body) as Record<string, unknown>;
-      expect(body['name']).toBe('Enable India Coordinator');
+      expect(body).toMatchObject({ name: 'TRRAIN', invite: 'tok-1' });
       expect(body['consent']).toMatchObject({ value: true });
-      expect(await screen.findByText('agg-enable-india')).toBeInTheDocument();
     } finally {
       globalThis.fetch = originalFetch;
       calls = [];
     }
+  });
+
+  it("sends the coordinator's own address and drops the org's url", async () => {
+    const location = {
+      geo: { type: 'Point', coordinates: [0, 0] },
+      address: { streetAddress: 'Bengaluru, Karnataka, India' },
+    };
+    shim.formData = { name: 'x', url: 'https://org.example', locations: [location] };
+    const calls: { url: string; body: string }[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: unknown, init?: { body?: string }) => {
+      calls.push({ url: String(input), body: init?.body ?? '' });
+      return new Response(JSON.stringify({ status: 'pending', login_hint: 'asha@trrain.org' }), {
+        status: 201,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    try {
+      renderForm();
+      fireEvent.submit(screen.getByTestId('rjsf-shim'));
+      await screen.findByRole('dialog');
+      const checkbox = screen.getByRole('checkbox');
+      stubScrollerToMaxAndScroll();
+      await waitFor(() => expect(checkbox).toBeEnabled());
+      fireEvent.click(checkbox);
+      fireEvent.click(screen.getByRole('button', { name: 'Accept & continue' }));
+
+      await waitFor(() => expect(calls.length).toBe(1));
+      const body = JSON.parse(calls[0]!.body) as Record<string, unknown>;
+      expect(body['locations']).toEqual([location]);
+      expect(body).not.toHaveProperty('url');
+    } finally {
+      globalThis.fetch = originalFetch;
+      shim.formData = { name: 'Enable India Coordinator' };
+    }
+  });
+
+  it.each([
+    ['shows one empty location when the schema asks for it', {}, 1],
+    ['adds no location when it is an org detail', { 'x-org-detail': true }, 0],
+  ])('%s', (_label, flag, count) => {
+    const schema = {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        locations: { type: 'array', maxItems: 1, items: { type: 'object' }, ...flag },
+      },
+    } as never;
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <NextIntlClientProvider locale="en" messages={messages}>
+          <CoordinatorRegisterForm
+            schema={schema}
+            uiSchema={{}}
+            consentContent={consentContentFixture}
+            inviteToken="tok-1"
+            lockedOrgName="TRRAIN"
+            lockedEmail="asha@trrain.org"
+          />
+        </NextIntlClientProvider>
+      </QueryClientProvider>,
+    );
+    const locations = shim.rendered?.['locations'] as unknown[] | undefined;
+    expect(locations?.length ?? 0).toBe(count);
   });
 });

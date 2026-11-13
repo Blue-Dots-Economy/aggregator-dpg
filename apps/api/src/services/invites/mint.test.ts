@@ -25,7 +25,6 @@ import {
   buildRegistrationInvite,
 } from '../registration-invites-store/index.js';
 import { _resetInviteTokenKey } from '../invite-token.js';
-import { _resetTokenKey } from '../approval-token.js';
 import { mintInviteBatch, type MintBatchDeps, type InviteRecipient } from './mint.js';
 
 const log = pino({ level: 'silent' }) as unknown as FastifyBaseLogger;
@@ -39,7 +38,6 @@ describe('mintInviteBatch', () => {
 
   beforeEach(() => {
     _resetInviteTokenKey();
-    _resetTokenKey();
     process.env.APPROVAL_TOKEN_SECRET = 'k'.repeat(48);
     invites = new RegistrationInvitesStoreFake();
     mailer = new FakeMailer();
@@ -58,6 +56,7 @@ describe('mintInviteBatch', () => {
     mintInviteBatch({
       invites,
       mailer,
+      role: 'coordinator',
       orgId: ORG_ID,
       orgName: 'Enable India',
       inviterEmail: 'owner@enable.org',
@@ -111,6 +110,28 @@ describe('mintInviteBatch', () => {
     expect(mailer.outbox).toHaveLength(0);
   });
 
+  it('mails an org invite with the org registration link', async () => {
+    const s = await run([{ email: 'child@x.org' }], { role: 'org_owner' });
+    expect(s.sent).toBe(1);
+    expect(mailer.outbox[0]?.html).toContain('/register/owner?invite=');
+    const row = await invites.findPendingByOrgAndEmail(ORG_ID, 'org_owner', 'child@x.org');
+    expect(row.ok && row.value?.role).toBe('org_owner');
+  });
+
+  it('treats an own-org coordinator as another account on an org invite (sent, not existing)', async () => {
+    coordStore.seed([
+      buildCoordinator({
+        id: 'c1',
+        contact: { name: 'Asha', email: 'member@x.org', phone: '+919000000001' },
+        parentOrgId: ORG_ID,
+        status: 'active',
+      }),
+    ]);
+    const s = await run([{ email: 'member@x.org' }], { role: 'org_owner' });
+    expect(s.existing).toEqual([]);
+    expect(s.sent).toBe(1);
+  });
+
   it("another org's coordinator gets the you-already-have-an-account mail (sent)", async () => {
     coordStore.seed([
       buildCoordinator({
@@ -131,6 +152,22 @@ describe('mintInviteBatch', () => {
     const s = await run([{ email: 'owner2@x.org' }]);
     expect(s.sent).toBe(1);
     expect(mailer.outbox).toHaveLength(1);
+  });
+
+  it('reports the owner of an org directly under this one under existing on an org invite', async () => {
+    orgStore.seed([
+      buildOrganisation({
+        id: 'o1',
+        slug: 'o1',
+        parentId: ORG_ID,
+        status: 'inactive',
+        ownerEmail: 'owner2@x.org',
+      }),
+    ]);
+    const s = await run([{ email: 'owner2@x.org' }], { role: 'org_owner' });
+    expect(s.sent).toBe(0);
+    expect(s.existing).toEqual([{ email: 'owner2@x.org', status: 'inactive' }]);
+    expect(mailer.outbox).toHaveLength(0);
   });
 
   it('the root owner is treated as another account', async () => {

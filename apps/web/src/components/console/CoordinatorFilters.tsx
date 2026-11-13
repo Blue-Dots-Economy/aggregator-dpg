@@ -14,7 +14,7 @@ import { Building2, ChevronDown, CircleDot, Layers } from 'lucide-react';
 import { Button } from '../ui/Button';
 import type { OrgOption } from '../../lib/console-org-options';
 
-const STATUSES = ['pending', 'active', 'inactive', 'retired'] as const;
+const STATUSES = ['active', 'pending'] as const;
 
 /** Current filter values; empty means "all". */
 export interface CoordinatorFilterValues {

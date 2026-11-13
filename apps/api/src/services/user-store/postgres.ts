@@ -25,7 +25,7 @@ import {
   registrationInvites,
 } from '../../db/schema.js';
 import { DEFAULT_ORG_SLUG } from '../organisation-store/interface.js';
-import { renderOrgDetails } from './org-details.js';
+import { coordinatorLocations, renderOrgDetails } from './org-details.js';
 import { servesForCreate, servesOf } from './serves.js';
 import {
   changeContact,
@@ -91,6 +91,7 @@ export class PostgresUserStore extends UserStoreBase {
             updatedBy: input.updatedBy,
             orgId: input.orgId,
             legacyOrgDetails: input.legacyOrgDetails ?? null,
+            locations: input.locations ?? [],
             inviteId: input.inviteId ?? null,
             profile: input.profile ?? {},
             profileRef: input.profileRef ?? null,
@@ -333,22 +334,6 @@ export class PostgresUserStore extends UserStoreBase {
     }
   }
 
-  async rejectFromPending(id: string, updatedBy: string): Promise<StoreResult<Coordinator | null>> {
-    try {
-      const now = new Date();
-      const rows = await getDb()
-        .update(users)
-        .set({ status: 'inactive', rejectedAt: now, updatedBy, updatedAt: now })
-        .where(coordinator(eq(users.id, id), eq(users.status, 'pending')))
-        .returning({ id: users.id });
-      // No row: not pending, already decided.
-      if (!rows[0]) return { ok: true, value: null };
-      return this.reread('userStore.rejectFromPending', id);
-    } catch (err: unknown) {
-      return this.mapWriteError('userStore.rejectFromPending', err, id, Date.now());
-    }
-  }
-
   async deleteIfPending(
     id: string,
     cutoff: Date,
@@ -455,7 +440,6 @@ export class PostgresUserStore extends UserStoreBase {
           slug: organisations.slug,
           // Website and GST number are schema fields, stored in `profile`.
           url: sql<string | null>`${organisations.profile} ->> 'website'`,
-          locations: organisations.locations,
           legalName: organisations.legalName,
           gstNumber: sql<string | null>`${organisations.profile} ->> 'gst_number'`,
         },
@@ -595,7 +579,6 @@ type JoinedRow = {
   o: {
     slug: string;
     url: string | null;
-    locations: (typeof organisations.$inferSelect)['locations'];
     legalName: string | null;
     gstNumber: string | null;
   } | null;
@@ -652,7 +635,7 @@ function toDomain(row: JoinedRow): Coordinator {
     contact: composed,
     contactPhone: composed.phone,
     contactEmail: composed.email,
-    locations: details.locations,
+    locations: coordinatorLocations(a.locations, a.legacyOrgDetails),
     consent: composeConsent(row.consent),
     profile: a.profile ?? {},
     profileRef: a.profileRef,

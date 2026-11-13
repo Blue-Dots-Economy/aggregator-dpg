@@ -56,20 +56,31 @@ describe('org-detail rendering (0028)', () => {
     address: { streetAddress: street },
   });
 
-  it("renders the org's url / locations / company / GST", async () => {
+  it("renders the org's url / company / GST", async () => {
     const store = new UserStoreFake();
     store.seedOrgDetails('org-1', {
       url: 'https://org.example',
-      locations: [loc('Org street')],
       legalName: 'Org Pvt Ltd',
       gstNumber: '29ABCDE1234F1Z5',
     });
     const r = await store.create(buildCreateCoordinatorInput({ orgId: 'org-1' }));
     if (!r.ok) throw new Error('create failed');
     expect(r.value.url).toBe('https://org.example');
-    expect(r.value.locations).toEqual([loc('Org street')]);
+    expect(r.value.locations).toEqual([]);
     expect(r.value.contact.company).toBe('Org Pvt Ltd');
     expect(r.value.contact.gstNumber).toBe('29ABCDE1234F1Z5');
+  });
+
+  it("stores and returns the coordinator's own address, never the org's (0037)", async () => {
+    const store = new UserStoreFake();
+    store.seedOrgDetails('org-1', { url: 'https://org.example' });
+    const r = await store.create(
+      buildCreateCoordinatorInput({ orgId: 'org-1', locations: [loc('Own street')] }),
+    );
+    if (!r.ok) throw new Error('create failed');
+    expect(r.value.locations).toEqual([loc('Own street')]);
+    const again = await store.findById(r.value.id);
+    expect(again.ok && again.value?.locations).toEqual([loc('Own street')]);
   });
 
   it("falls back per field to the coordinator's own values when the org's are empty", async () => {
@@ -82,7 +93,7 @@ describe('org-detail rendering (0028)', () => {
       }),
     );
     if (!r.ok) throw new Error('create failed');
-    // The org has a url: it wins. It has no location: the coordinator's shows.
+    // The org has a url: it wins. The location is always the coordinator's own.
     expect(r.value.url).toBe('https://org.example');
     expect(r.value.locations).toEqual([loc('Own street')]);
     expect(r.value.contact.company).toBeUndefined();

@@ -27,17 +27,9 @@ export const OrgListResponseSchema = z.object({ orgs: z.array(OrgOptionSchema) }
 export type SubmitState =
   | { status: 'idle' }
   | { status: 'submitting' }
-  /**
-   * Submitted successfully. `outcome` separates a new pending registration
-   * from an already-approved org whose invite link was re-sent.
-   */
-  | {
-      status: 'done';
-      refId: string;
-      outcome?: 'pending' | 'already_registered';
-      mailSent?: boolean;
-    }
-  | { status: 'error'; title: string; detail: string; code: string; requestId: string };
+  | { status: 'error'; title: string; detail: string; code: string; requestId: string }
+  /** An invite was accepted; the browser is on its way to sign in. */
+  | { status: 'signing_in' };
 
 /** Ajv-shaped validation error as surfaced by RJSF's `onError`. */
 export interface AjvLikeError {
@@ -211,7 +203,7 @@ async function readSuccessBody(res: Response, endpoint: string): Promise<Record<
 /**
  * POSTs a registration payload to a BFF endpoint and normalises the outcome.
  *
- * @param endpoint - BFF route, e.g. `/api/aggregator/register`.
+ * @param endpoint - BFF route, e.g. `/api/invite/user/accept`.
  * @param payload - JSON body to send.
  * @returns A discriminated success/error result (never throws).
  */
@@ -243,6 +235,40 @@ export async function submitRegistration(
       },
     };
   }
+}
+
+/**
+ * The sign-in URL after an invite accept, with the invited email pre-filled.
+ *
+ * @param body - The accept response; `login_hint` is the invited email.
+ * @param returnTo - Where the session lands after sign-in.
+ * @returns A same-origin `/api/auth/login` URL.
+ */
+export function inviteSignInUrl(
+  body: Record<string, unknown>,
+  returnTo: '/dashboard' | '/console',
+): string {
+  const hint = typeof body['login_hint'] === 'string' ? body['login_hint'] : '';
+  const query = new URLSearchParams({ returnTo, ...(hint ? { login_hint: hint } : {}) });
+  return `/api/auth/login?${query.toString()}`;
+}
+
+/**
+ * Locks a field of an RJSF UI schema, for the invited email.
+ *
+ * @param uiSchema - The UI schema.
+ * @param path - The field path, e.g. `['contact', 'email']`.
+ * @returns A copy with `ui:readonly` set on that field.
+ */
+export function withReadonlyField(
+  uiSchema: Record<string, unknown>,
+  path: readonly string[],
+): Record<string, unknown> {
+  const [head, ...rest] = path;
+  if (head === undefined) return { ...uiSchema, 'ui:readonly': true };
+  const child = uiSchema[head];
+  const childUi = typeof child === 'object' && child !== null && !Array.isArray(child) ? child : {};
+  return { ...uiSchema, [head]: withReadonlyField({ ...childUi }, rest) };
 }
 
 /**

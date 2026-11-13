@@ -303,12 +303,14 @@ export const HierarchyConfigSchema = z.object({
 export type HierarchyConfig = z.infer<typeof HierarchyConfigSchema>;
 
 /**
- * Organisation settings: tree limits.
+ * Organisation settings: tree limits and the role name an invited organisation gets.
  *
  * The schema is not strict, so unknown keys in the block are ignored.
  */
 export const OrganisationConfigSchema = z.object({
   hierarchy: HierarchyConfigSchema.default({}),
+  /** Shown as the role of an invited organisation; {@link DEFAULT_INVITE_ROLE_LABEL} when unset. */
+  invite_role_label: z.string().trim().min(1).max(60).optional(),
   /**
    * Not used. Kept so the API can warn at boot that the block is ignored;
    * "known as" values are set in the console.
@@ -321,6 +323,9 @@ export type OrganisationConfig = z.infer<typeof OrganisationConfigSchema>;
 export const DEFAULT_ORGANISATION: OrganisationConfig = {
   hierarchy: { max_depth: 1, max_total_orgs: 50 },
 };
+
+/** The role an invited organisation is shown with when the instance names none. */
+export const DEFAULT_INVITE_ROLE_LABEL = 'Super Admin';
 
 /**
  * Root aggregator config — the YAML the operator edits per deployment.

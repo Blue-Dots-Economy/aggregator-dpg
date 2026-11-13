@@ -23,7 +23,6 @@ import {
 import { getIdpAdmin } from './services/idp-admin/index.js';
 import { getOrganisationStore } from './services/organisation-store/index.js';
 import { warnOrgTreeOverLimits } from './services/org-tree-warnings.js';
-import { setApprovalBrand } from './views/approval-pages.js';
 import { initRbac, stopRbacRefresh } from './services/authz/index.js';
 import { startTokenRolesRepair, stopTokenRolesRepair } from './services/authz/token-roles-sweep.js';
 import { setEmailBrand } from './services/email-templates/shared.js';
@@ -56,22 +55,15 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Give the approval HTML pages the deployment's brand (logo, palette).
   try {
     const cfg = await getNetworkConfig();
-    setApprovalBrand({
-      short_name: cfg.aggregator.brand.short_name,
-      long_name: cfg.aggregator.brand.long_name,
-      primary_color: cfg.aggregator.brand.primary_color ?? '#4f46e5',
-      portal_url: process.env.PUBLIC_PORTAL_URL ?? 'http://localhost:3000',
-    });
     setEmailBrand({
       short_name: cfg.aggregator.brand.short_name,
       long_name: cfg.aggregator.brand.long_name,
       primary_color: cfg.aggregator.brand.primary_color ?? '#4f46e5',
     });
   } catch (err) {
-    logger.warn({ err }, 'approval brand seed failed — falling back to default');
+    logger.warn({ err }, 'email brand seed failed — falling back to default');
   }
 
   // Replace the seeded placeholders for the network root and Default org with

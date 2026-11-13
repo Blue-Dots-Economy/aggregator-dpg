@@ -26,12 +26,11 @@ export class UserStoreFake extends InMemoryUserStore {
    * Seeds an org's detail columns, rendered for its coordinators.
    *
    * @param orgId - The org id.
-   * @param details - The org's `url` / `locations` / `legalName` / `gstNumber`.
+   * @param details - The org's `url` / `legalName` / `gstNumber`.
    */
   seedOrgDetails(orgId: string, details: Partial<OrgDetailColumns>): void {
     this.orgDetails.set(orgId, {
       url: null,
-      locations: [],
       legalName: null,
       gstNumber: null,
       ...details,

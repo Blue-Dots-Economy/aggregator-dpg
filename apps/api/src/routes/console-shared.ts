@@ -20,7 +20,6 @@ import type { OrgCursor } from '../services/organisation-store/interface.js';
 import { isNetworkAdmin, type Actor } from '../services/auth/actor/index.js';
 import { checkConsoleWriteRate } from '../services/console-rate.js';
 import { renderOrgAdminAction, renderOrgKnownAs } from '../services/email-templates/index.js';
-import type { DecisionOutcome } from '../services/decisions/coordinator.js';
 
 /** The console's landing URL, used in owner notices. */
 export function consoleUrl(): string {
@@ -195,37 +194,6 @@ export async function guardWriteRate(actor: Actor, reply: FastifyReply): Promise
     detail: `Retry in ${rl.retryAfterSeconds}s.`,
     fields: { retry_after_seconds: rl.retryAfterSeconds },
   });
-}
-
-/**
- * Throws the HTTP error of a coordinator decision that did not succeed.
- *
- * @param outcome - A non-`decided` outcome.
- * @throws {HttpError} Always.
- */
-export function throwDecisionFailure(
-  outcome: Exclude<DecisionOutcome, { kind: 'decided' }>,
-): never {
-  switch (outcome.kind) {
-    case 'already_decided':
-      throw httpError('ALREADY_DECIDED', {
-        fields: {
-          status: outcome.status,
-          decided_at: outcome.decidedAt.toISOString(),
-          decided_by: outcome.decidedBy,
-        },
-      });
-    case 'not_found':
-      throw httpError('NOT_FOUND');
-    case 'org_inactive':
-      throw httpError('TARGET_ORG_INACTIVE');
-    case 'no_profile_types':
-      throw httpError('NO_PROFILE_TYPES');
-    case 'unavailable':
-      if (outcome.dependency === 'signalstack') throw httpError('SIGNALSTACK_PUSH_FAILED');
-      if (outcome.dependency === 'idp') throw httpError('IDP_UNAVAILABLE');
-      throw httpError('DB_UNAVAILABLE');
-  }
 }
 
 /**

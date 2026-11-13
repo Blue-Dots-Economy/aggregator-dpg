@@ -81,7 +81,8 @@ describe('InMemoryOrganisationStore', () => {
       },
       permissiveTreeRules(),
     );
-    if (first.ok) await store.reject(first.value.id, 'admin');
+    if (first.ok)
+      await store.update(first.value.id, { status: 'inactive', rejectedAt: new Date() });
     const second = await store.create(
       {
         recordConsent: NO_CONSENT_WRITE,
@@ -154,17 +155,8 @@ describe('InMemoryOrganisationStore', () => {
     expect(patched.ok && patched.value.ownerKcSub).toBe('kc-1');
   });
 
-  it('reject stamps write-once rejected_at; approve leaves it null (#726)', async () => {
+  it('approve moves a pending org to active and leaves rejected_at null', async () => {
     const store = new InMemoryOrganisationStore();
-    const rej = await store.create(
-      {
-        recordConsent: NO_CONSENT_WRITE,
-        slug: 'r',
-        displayName: 'R',
-        ownerEmail: 'r@x.org',
-      },
-      permissiveTreeRules(),
-    );
     const app = await store.create(
       {
         recordConsent: NO_CONSENT_WRITE,
@@ -174,13 +166,7 @@ describe('InMemoryOrganisationStore', () => {
       },
       permissiveTreeRules(),
     );
-    if (!rej.ok || !app.ok) return;
-    expect(rej.value.rejectedAt).toBeNull();
-
-    const rejected = await store.reject(rej.value.id, 'admin');
-    expect(rejected.ok && rejected.value?.status).toBe('inactive');
-    expect(rejected.ok && rejected.value?.rejectedAt).toBeInstanceOf(Date);
-
+    if (!app.ok) return;
     const approved = await store.approve(app.value.id, 'admin');
     expect(approved.ok && approved.value?.status).toBe('active');
     expect(approved.ok && approved.value?.rejectedAt).toBeNull();
@@ -198,7 +184,7 @@ describe('InMemoryOrganisationStore', () => {
       permissiveTreeRules(),
     );
     if (!a.ok) return;
-    await store.reject(a.value.id, 'admin');
+    await store.update(a.value.id, { status: 'inactive', rejectedAt: new Date() });
     const revived = await store.update(a.value.id, { status: 'pending', rejectedAt: null });
     expect(revived.ok && revived.value.status).toBe('pending');
     expect(revived.ok && revived.value.rejectedAt).toBeNull();
@@ -238,12 +224,11 @@ describe('InMemoryOrganisationStore contact rules', () => {
     expect(found.ok && found.value?.id).toBe(r.ok && r.value.id);
   });
 
-  it('returns NOT_FOUND from update / approve / reject for an unknown id', async () => {
+  it('returns NOT_FOUND from update / approve for an unknown id', async () => {
     const store = new InMemoryOrganisationStore();
     const results = [
       await store.update('missing', { status: 'active' }),
       await store.approve('missing', 'admin'),
-      await store.reject('missing', 'admin'),
     ];
     for (const r of results) expect(r.ok || r.error.code).toBe('NOT_FOUND');
   });
@@ -302,7 +287,7 @@ describe('InMemoryOrganisationStore owners (0027)', () => {
       permissiveTreeRules(),
     );
     if (!old.ok) throw new Error('seed');
-    await store.reject(old.value.id, 'admin');
+    await store.update(old.value.id, { status: 'inactive', rejectedAt: new Date() });
     const fresh = await store.create(
       {
         recordConsent: NO_CONSENT_WRITE,
@@ -813,77 +798,6 @@ describe('InMemoryOrganisationStore — tree rules', () => {
         );
       const results = await Promise.all([make('r1'), make('r2')]);
       expect(results.map(code).sort()).toEqual(['CHILD_LIMIT', 'ok']);
-    });
-  });
-
-  describe('revive', () => {
-    it('sets a rejected org back to pending and clears rejected_at', async () => {
-      const store = tree();
-      seed(store, [org('x', 'c', 2, { status: 'inactive', rejectedAt: new Date() })]);
-      const r = await store.revive('x', 'c', rules());
-      expect(r.ok && [r.value.status, r.value.rejectedAt]).toEqual(['pending', null]);
-    });
-
-    it('revives under the submitted parent and sets parent and depth from it', async () => {
-      const store = tree();
-      seed(store, [org('x', 'c', 2, { status: 'inactive' })]);
-      const r = await store.revive('x', 'b', rules());
-      expect(r.ok && [r.value.parentId, r.value.parentName, r.value.depth]).toEqual(['b', 'B', 3]);
-    });
-
-    it('revives under the root when no parent is submitted', async () => {
-      const store = tree();
-      seed(store, [org('x', 'b', 3, { status: 'inactive' })]);
-      const r = await store.revive('x', undefined, rules());
-      expect(r.ok && [r.value.parentId, r.value.depth]).toEqual(['root', 1]);
-    });
-
-    it('revives under a valid new parent when the stored parent is no longer active', async () => {
-      const store = tree();
-      seed(store, [
-        org('p', 'root', 1, { status: 'inactive' }),
-        org('x', 'p', 2, { status: 'inactive' }),
-      ]);
-      const r = await store.revive('x', 'a', rules());
-      expect(r.ok && [r.value.parentId, r.value.depth]).toEqual(['a', 2]);
-    });
-
-    it("takes the new parent's default known_as, else aggregator", async () => {
-      const store = tree();
-      seed(store, [
-        org('a', 'root', 1, { knownAsValues: [BLOCK, { ...TALUK, default: true }] }),
-        org('x', 'c', 2, { status: 'inactive', knownAs: 'block' }),
-        org('y', 'c', 2, { status: 'inactive', knownAs: 'block' }),
-      ]);
-      const underA = await store.revive('x', 'a', rules());
-      expect(underA.ok && underA.value.knownAs).toBe('taluk');
-      const underB = await store.revive('y', 'b', rules());
-      expect(underB.ok && [underB.value.depth, underB.value.knownAs]).toEqual([3, 'aggregator']);
-    });
-
-    it.each([
-      ['CHILD_LIMIT', rules({ maxChildren: 1 }), 'c'],
-      ['TOTAL_LIMIT', rules({ maxTotalOrgs: 4 }), 'c'],
-      ['DEPTH_LIMIT', rules({ maxDepth: 2 }), 'b'],
-      ['INVALID_PARENT', rules(), 'd0'],
-    ] as const)('refuses with %s and leaves the org rejected', async (expected, r, parentId) => {
-      const store = tree();
-      seed(store, [org('y', 'c', 2), org('x', 'a', 2, { status: 'inactive' })]);
-      expect(code(await store.revive('x', parentId, r))).toBe(expected);
-      const found = await store.findById('x');
-      expect(found.ok && [found.value?.status, found.value?.parentId]).toEqual(['inactive', 'a']);
-    });
-
-    it('refuses with NOT_MOVABLE when the rejected org has child orgs', async () => {
-      const store = tree();
-      seed(store, [org('x', 'c', 2, { status: 'inactive' }), org('z', 'x', 3)]);
-      expect(code(await store.revive('x', 'a', rules()))).toBe('NOT_MOVABLE');
-    });
-
-    it('answers NOT_FOUND for an unknown or not rejected org', async () => {
-      const store = tree();
-      expect(code(await store.revive('missing', undefined, rules()))).toBe('NOT_FOUND');
-      expect(code(await store.revive('a', undefined, rules()))).toBe('NOT_FOUND');
     });
   });
 

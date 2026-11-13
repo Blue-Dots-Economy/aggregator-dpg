@@ -1,14 +1,17 @@
 /**
  * In-memory registration-invites store for unit tests (`@aggregator-dpg/api`).
  *
- * Behaves like the Postgres store: one pending invite per org and email,
+ * Behaves like the Postgres store: one pending invite per org, role and email,
  * atomic consume and revoke, refresh only while pending. Other modules use
  * `RegistrationInvitesStoreFake` from `./testing`.
  */
 
+import { randomUUID } from 'node:crypto';
 import {
   RegistrationInvitesStoreBase,
   type CreateInviteInput,
+  type InviteRole,
+  type ListOpenInvitesInput,
   type InviteStoreResult,
   type RefreshInviteInput,
   type RegistrationInvite,
@@ -16,12 +19,12 @@ import {
 
 export class InMemoryRegistrationInvitesStore extends RegistrationInvitesStoreBase {
   protected store = new Map<string, RegistrationInvite>();
-  private seq = 0;
 
   async create(input: CreateInviteInput): Promise<InviteStoreResult<RegistrationInvite>> {
     for (const inv of this.store.values()) {
       if (
         inv.parentOrgId === input.parentOrgId &&
+        inv.role === (input.role ?? 'coordinator') &&
         inv.email === input.email &&
         inv.status === 'pending'
       ) {
@@ -31,7 +34,7 @@ export class InMemoryRegistrationInvitesStore extends RegistrationInvitesStoreBa
         };
       }
     }
-    const jti = `invite-${++this.seq}`;
+    const jti = randomUUID();
     const row: RegistrationInvite = {
       jti,
       role: input.role ?? 'coordinator',
@@ -54,14 +57,40 @@ export class InMemoryRegistrationInvitesStore extends RegistrationInvitesStoreBa
 
   async findPendingByOrgAndEmail(
     parentOrgId: string,
+    role: InviteRole,
     email: string,
   ): Promise<InviteStoreResult<RegistrationInvite | null>> {
     for (const inv of this.store.values()) {
-      if (inv.parentOrgId === parentOrgId && inv.email === email && inv.status === 'pending') {
+      if (
+        inv.parentOrgId === parentOrgId &&
+        inv.role === role &&
+        inv.email === email &&
+        inv.status === 'pending'
+      ) {
         return { ok: true, value: { ...inv } };
       }
     }
     return { ok: true, value: null };
+  }
+
+  async listOpen(input: ListOpenInvitesInput): Promise<InviteStoreResult<RegistrationInvite[]>> {
+    const after = input.after;
+    const rows = [...this.store.values()]
+      .filter(
+        (inv) =>
+          inv.parentOrgId === input.orgId &&
+          inv.role === input.role &&
+          (inv.status === 'pending' || inv.status === 'expired'),
+      )
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.jti < b.jti ? 1 : -1))
+      .filter(
+        (inv) =>
+          !after ||
+          inv.createdAt.getTime() < after.createdAt.getTime() ||
+          (inv.createdAt.getTime() === after.createdAt.getTime() && inv.jti < after.jti),
+      )
+      .slice(0, input.limit);
+    return { ok: true, value: rows.map((r) => ({ ...r })) };
   }
 
   async refresh(

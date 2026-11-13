@@ -183,57 +183,6 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
     }
   }
 
-  async revive(
-    id: string,
-    parentId: string | undefined,
-    rules: TreeRules,
-  ): Promise<OrgStoreResult<Organisation>> {
-    const start = Date.now();
-    try {
-      const revived = await getDb().transaction(async (tx) => {
-        await lockTree(tx);
-        const [org] = await tx
-          .select({ status: organisations.status })
-          .from(organisations)
-          .where(scoped(and(eq(organisations.id, id), eq(organisations.status, 'inactive'))))
-          .limit(1);
-        if (!org) return null;
-        const [child] = await tx
-          .select({ id: organisations.id })
-          .from(organisations)
-          .where(eq(organisations.parentId, id))
-          .limit(1);
-        if (child) throw new TreeRefusalError('NOT_MOVABLE');
-        const parent = await resolveParent(tx, parentId);
-        const refused = newChildRefusal(
-          parent.depth,
-          await countLive(tx, parent.id),
-          await countLive(tx),
-          rules,
-        );
-        if (refused) throw new TreeRefusalError(refused);
-        const depth = parent.depth + 1;
-        await tx
-          .update(organisations)
-          .set({
-            parentId: parent.id,
-            depth,
-            knownAs: defaultKnownAsKey(await listOf(tx, parent.id)),
-            status: 'pending',
-            rejectedAt: null,
-            updatedAt: new Date(),
-          })
-          .where(scoped(eq(organisations.id, id)));
-        return this.readIn(tx, id);
-      });
-      if (!revived) return errResult('NOT_FOUND', id);
-      return { ok: true, value: revived };
-    } catch (e) {
-      if (e instanceof TreeRefusalError) return refusal('orgStore.revive', e, start);
-      return mapDbError('orgStore.revive', e);
-    }
-  }
-
   async move(
     id: string,
     change: { parentId: string },
@@ -643,11 +592,17 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
   }
 
   async approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
-    return this.casFromPending(id, 'active', updatedBy);
-  }
-
-  async reject(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
-    return this.casFromPending(id, 'inactive', updatedBy);
+    try {
+      const [row] = await getDb()
+        .update(organisations)
+        .set({ status: 'active', updatedAt: new Date(), updatedBy })
+        .where(scoped(and(eq(organisations.id, id), eq(organisations.status, 'pending'))))
+        .returning({ id: organisations.id });
+      if (!row) return { ok: true, value: null };
+    } catch (e) {
+      return mapDbError('orgStore.approve', e);
+    }
+    return this.findOne(eq(organisations.id, id));
   }
 
   async listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<Organisation[]>> {
@@ -783,30 +738,6 @@ export class PostgresOrganisationStore extends OrganisationStoreBase {
       if (e === ABORT) return { ok: true, value: 'aborted' };
       return mapDbError('orgStore.deleteIfPending', e);
     }
-  }
-
-  private async casFromPending(
-    id: string,
-    next: 'active' | 'inactive',
-    updatedBy: string,
-  ): Promise<OrgStoreResult<Organisation | null>> {
-    try {
-      const [row] = await getDb()
-        .update(organisations)
-        // Stamp the write-once rejected_at on reject only.
-        .set({
-          status: next,
-          updatedAt: new Date(),
-          updatedBy,
-          ...(next === 'inactive' ? { rejectedAt: new Date() } : {}),
-        })
-        .where(scoped(and(eq(organisations.id, id), eq(organisations.status, 'pending'))))
-        .returning({ id: organisations.id });
-      if (!row) return { ok: true, value: null };
-    } catch (e) {
-      return mapDbError('orgStore.casFromPending', e);
-    }
-    return this.findOne(eq(organisations.id, id));
   }
 
   /**

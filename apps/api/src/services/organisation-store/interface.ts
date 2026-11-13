@@ -225,24 +225,6 @@ export abstract class OrganisationStoreBase {
    */
   abstract create(input: CreateOrgInput, rules: TreeRules): Promise<OrgStoreResult<Organisation>>;
   /**
-   * Sets a rejected org back to `pending` under the parent of the new registration.
-   *
-   * Checks the parent and the limits as {@link create} does, with the org counted as new.
-   * Sets `depth` from the parent. Sets `known_as` to the parent's default entry, else
-   * `aggregator`, as for a new org.
-   *
-   * @param id - The rejected org's id.
-   * @param parentId - The new parent; the root when absent.
-   * @param rules - Tree limits.
-   * @returns The revived org; `NOT_FOUND` when the org is not rejected, `NOT_MOVABLE` when it has
-   *   child orgs, `INVALID_PARENT`, `DEPTH_LIMIT`, `CHILD_LIMIT` or `TOTAL_LIMIT` when refused.
-   */
-  abstract revive(
-    id: string,
-    parentId: string | undefined,
-    rules: TreeRules,
-  ): Promise<OrgStoreResult<Organisation>>;
-  /**
    * Moves an org and every org below it under a new parent.
    *
    * Recomputes `depth` for the moved orgs. Moving to the current parent changes nothing.
@@ -428,19 +410,10 @@ export abstract class OrganisationStoreBase {
    * Moves the org from pending to active with an atomic compare-and-set.
    *
    * @param id - The org id.
-   * @param updatedBy - The decider, written in the same statement (`'admin'`
-   *   for an emailed link, else the admin's user id).
-   * @returns The updated row, or `null` when the row was not pending (another decision won).
+   * @param updatedBy - Written to `updated_by` in the same statement.
+   * @returns The updated row, or `null` when the row was no longer pending.
    */
   abstract approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>>;
-  /**
-   * Moves the org from pending to inactive (rejected) with an atomic compare-and-set.
-   *
-   * @param id - The org id.
-   * @param updatedBy - The decider (see {@link approve}).
-   * @returns The updated row, or `null` when the row was not pending.
-   */
-  abstract reject(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>>;
   /**
    * Lists the aggregator orgs (Default included) an admin account owns.
    *

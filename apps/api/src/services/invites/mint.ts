@@ -1,11 +1,14 @@
 /**
- * Coordinator-invite minting (`@aggregator-dpg/api`).
+ * Invite minting for coordinators and child organisations (`@aggregator-dpg/api`).
  *
- * Shared by `POST /admin/v1/invites` and `POST /v1/user/create`. Per
- * recipient: validate, de-duplicate, then mint or refresh a 14-day invite and
- * mail it. If the address already has an account:
+ * Shared by `POST /admin/v1/invites`, `POST /v1/user/create`,
+ * `POST /v1/user/invite` and `POST /v1/org/invite`. Per recipient: validate,
+ * de-duplicate, then mint or refresh a 14-day invite and mail it. If the
+ * address already has an account:
  *
- *   - a coordinator of this org: nothing is mailed; reported as `existing`;
+ *   - a coordinator of this org, on a coordinator invite, or the owner of an
+ *     org directly under this one, on an org invite: nothing is mailed;
+ *     reported as `existing` with its status;
  *   - any other account: a "you already have an account" mail is sent and an
  *     invite row is still kept, so the counts look the same as for a fresh
  *     address and cannot be used to probe other orgs' members.
@@ -18,9 +21,16 @@ import { isEmailAddress } from '@aggregator-dpg/shared-primitives/phone';
 import { config } from '../../config.js';
 import { getUserStore } from '../user-store/index.js';
 import { getOrganisationStore } from '../organisation-store/index.js';
-import type { getRegistrationInvitesStore } from '../registration-invites-store/index.js';
+import type {
+  getRegistrationInvitesStore,
+  InviteRole,
+} from '../registration-invites-store/index.js';
 import { mintInviteToken } from '../invite-token.js';
-import { renderCoordinatorInvite, renderInviteExistingAccount } from '../email-templates/index.js';
+import {
+  renderCoordinatorInvite,
+  renderInviteExistingAccount,
+  renderOrgInvite,
+} from '../email-templates/index.js';
 
 /** One invite recipient. */
 export interface InviteRecipient {
@@ -41,6 +51,8 @@ export interface MintSummary {
 export interface MintBatchDeps {
   invites: ReturnType<typeof getRegistrationInvitesStore>;
   mailer: MailerAdapter;
+  /** `coordinator` invites into `orgId`; `org_owner` invites a child org of `orgId`. */
+  role: InviteRole;
   orgId: string;
   orgName: string;
   /** The inviting org's contact (owner email) — sender identity in the email. */
@@ -52,9 +64,15 @@ export interface MintBatchDeps {
   log: FastifyBaseLogger;
 }
 
-/** Builds the coordinator registration URL carrying an invite token. */
-function inviteUrl(token: string): string {
-  return `${config.PUBLIC_PORTAL_URL}/register/coordinator?invite=${encodeURIComponent(token)}`;
+/** Registration page for each invite role. */
+const REGISTER_PATH: Readonly<Record<InviteRole, string>> = {
+  coordinator: '/register/coordinator',
+  org_owner: '/register/owner',
+};
+
+/** Builds the registration URL carrying an invite token. */
+function inviteUrl(token: string, role: InviteRole): string {
+  return `${config.PUBLIC_PORTAL_URL}${REGISTER_PATH[role]}?invite=${encodeURIComponent(token)}`;
 }
 
 /** Formats an absolute expiry date for the invite email (e.g. "15 Sep 2026"). */
@@ -73,27 +91,26 @@ interface ResolvedInvite {
 }
 
 /**
- * Resolves the invite row for one (org, email): refreshes a pending invite or
+ * Resolves the invite row for one (org, role, email): refreshes a pending invite or
  * creates one (refreshing on a unique-key race). Returns the `jti` and whether
  * it was a refresh, or `null` on a store error.
  */
 async function resolveInviteJti(
-  invites: MintBatchDeps['invites'],
-  orgId: string,
+  ctx: BatchContext,
   email: string,
   expiresAt: Date,
-  createdBy: string,
 ): Promise<ResolvedInvite | null> {
-  const existing = await invites.findPendingByOrgAndEmail(orgId, email);
+  const { invites, orgId, role, createdBy } = ctx;
+  const existing = await invites.findPendingByOrgAndEmail(orgId, role, email);
   if (!existing.ok) return null;
   if (existing.value) {
     const refreshed = await invites.refresh(existing.value.jti, { expiresAt, createdBy });
     return refreshed.ok ? { jti: refreshed.value.jti, refreshed: true } : null;
   }
-  const created = await invites.create({ parentOrgId: orgId, email, expiresAt, createdBy });
+  const created = await invites.create({ parentOrgId: orgId, role, email, expiresAt, createdBy });
   if (created.ok) return { jti: created.value.jti, refreshed: false };
   if (created.error.code === 'DUPLICATE_PENDING') {
-    const again = await invites.findPendingByOrgAndEmail(orgId, email);
+    const again = await invites.findPendingByOrgAndEmail(orgId, role, email);
     if (again.ok && again.value) {
       const refreshed = await invites.refresh(again.value.jti, { expiresAt, createdBy });
       return refreshed.ok ? { jti: refreshed.value.jti, refreshed: true } : null;
@@ -105,19 +122,19 @@ async function resolveInviteJti(
 /** Who already holds an address, as far as inviting is concerned. */
 type AccountMatch =
   | { kind: 'none' }
-  | { kind: 'own_coordinator'; status: AggregatorStatus }
+  | { kind: 'own_member'; status: AggregatorStatus }
   | { kind: 'other_account' }
   | { kind: 'error' };
 
 /**
  * Looks the address up among coordinators, org owners and the root / Default owners.
  */
-async function accountFor(email: string, orgId: string): Promise<AccountMatch> {
+async function accountFor(email: string, orgId: string, role: InviteRole): Promise<AccountMatch> {
   const coordinator = await getUserStore().findByContactEmail(email);
   if (!coordinator.ok) return { kind: 'error' };
   if (coordinator.value) {
-    return coordinator.value.parentOrgId === orgId
-      ? { kind: 'own_coordinator', status: coordinator.value.status }
+    return role === 'coordinator' && coordinator.value.parentOrgId === orgId
+      ? { kind: 'own_member', status: coordinator.value.status }
       : { kind: 'other_account' };
   }
   const orgStore = getOrganisationStore();
@@ -127,6 +144,9 @@ async function accountFor(email: string, orgId: string): Promise<AccountMatch> {
     orgStore.findDefault(),
   ]);
   if (!owner.ok || !root.ok || !def.ok) return { kind: 'error' };
+  if (role === 'org_owner' && owner.value?.parentId === orgId) {
+    return { kind: 'own_member', status: owner.value.status };
+  }
   if (owner.value || root.value?.ownerEmail === email || def.value?.ownerEmail === email) {
     return { kind: 'other_account' };
   }
@@ -146,7 +166,7 @@ type SendOutcome = 'sent' | 'resent' | 'store_error';
  */
 async function inviteExistingAccount(ctx: BatchContext, email: string): Promise<SendOutcome> {
   const expiresAt = new Date(Date.now() + ctx.ttlSec * 1000);
-  const kept = await resolveInviteJti(ctx.invites, ctx.orgId, email, expiresAt, ctx.createdBy);
+  const kept = await resolveInviteJti(ctx, email, expiresAt);
   if (!kept) return 'store_error';
   const mail = renderInviteExistingAccount({
     orgName: ctx.orgName,
@@ -175,16 +195,22 @@ async function inviteNewAddress(
   recipientName: string | undefined,
 ): Promise<SendOutcome> {
   const expiresAt = new Date(Date.now() + ctx.ttlSec * 1000);
-  const resolved = await resolveInviteJti(ctx.invites, ctx.orgId, email, expiresAt, ctx.createdBy);
+  const resolved = await resolveInviteJti(ctx, email, expiresAt);
   if (!resolved) return 'store_error';
-  const { token } = await mintInviteToken({ jti: resolved.jti, org: ctx.orgId, email });
-  const mail = renderCoordinatorInvite({
+  const { token } = await mintInviteToken({
+    jti: resolved.jti,
+    role: ctx.role,
+    org: ctx.orgId,
+    email,
+  });
+  const vars = {
     orgName: ctx.orgName,
     inviterEmail: ctx.inviterEmail,
-    inviteUrl: inviteUrl(token),
+    inviteUrl: inviteUrl(token, ctx.role),
     expiresOn: formatExpiryDate(expiresAt),
     ...(recipientName ? { recipientName } : {}),
-  });
+  };
+  const mail = ctx.role === 'org_owner' ? renderOrgInvite(vars) : renderCoordinatorInvite(vars);
   const send = await ctx.mailer.send({
     to: email,
     subject: mail.subject,
@@ -195,10 +221,11 @@ async function inviteNewAddress(
     ctx.log.warn(
       {
         status: 'failure',
-        sub_operation: 'mailer.send.coordinatorInvite',
+        sub_operation: 'mailer.send.invite',
+        role: ctx.role,
         code: send.error.code,
       },
-      'coordinator-invite email delivery failed (invite minted)',
+      'invite email delivery failed (invite minted)',
     );
   }
   return resolved.refreshed ? 'resent' : 'sent';
@@ -237,10 +264,10 @@ export async function mintInviteBatch(deps: MintBatchDeps): Promise<MintSummary>
     }
     seen.add(email);
 
-    const account = await accountFor(email, ctx.orgId); // NOSONAR typescript:S9382 — sequential by design
+    const account = await accountFor(email, ctx.orgId, ctx.role); // NOSONAR typescript:S9382 — sequential by design
     if (account.kind === 'error') {
       summary.invalid.push({ email: recipient.email, reason: 'store_error' });
-    } else if (account.kind === 'own_coordinator') {
+    } else if (account.kind === 'own_member') {
       summary.existing.push({ email: recipient.email, status: account.status });
     } else if (account.kind === 'other_account') {
       tally(summary, recipient.email, await inviteExistingAccount(ctx, email)); // NOSONAR typescript:S9382 — sequential by design

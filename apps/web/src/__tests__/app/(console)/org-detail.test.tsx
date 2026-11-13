@@ -49,11 +49,8 @@ vi.mock('@/components/console/RolesPanel', () => ({ RolesPanel: () => null }));
 vi.mock('@/components/console/OwnerAccessRepair', () => ({
   OwnerAccessRepair: () => <div data-testid="owner-access-repair" />,
 }));
-vi.mock('@/components/console/CopyButton', () => ({ CopyButton: () => null }));
-vi.mock('@/components/console/OrgsTable', () => ({
-  OrgsTable: ({ orgs }: { orgs: Array<{ id: string }> }) => (
-    <div data-testid="org-decision" data-ids={orgs.map((o) => o.id).join(',')} />
-  ),
+vi.mock('@/components/console/CopyButton', () => ({
+  CopyButton: () => <button type="button">copy-email</button>,
 }));
 vi.mock('@/components/console/KnownAsValuesEditor', () => ({
   KnownAsValuesEditor: () => <div data-testid="known-as-values-editor" />,
@@ -200,13 +197,13 @@ describe('console org detail — "known as" picker', () => {
     expect(vi.mocked(consoleRead).mock.calls.map(([path]) => path)).not.toContain('/v1/org/search');
   });
 
-  it('lets the parent owner decide a pending child on its page', async () => {
+  it('shows a pending child to the parent owner with no review section', async () => {
     mockPage(org({ depth: 2, status: 'pending' }), 'parent-owner', {
       viewerOrgId: 'parent',
       parent: PARENT,
     });
     await show();
-    expect(screen.getByTestId('org-decision')).toHaveAttribute('data-ids', ORG_ID);
+    expect(screen.queryByText(/review_heading/)).toBeNull();
   });
 
   it('shows no child-organisations tile on the Default organisation', async () => {
@@ -220,7 +217,7 @@ describe('console org detail — "known as" picker', () => {
     await show();
     expect(screen.getByText('console.org.view_coordinators')).toBeInTheDocument();
     expect(screen.getByText('console.org.tile.coordinators')).toBeInTheDocument();
-    expect(screen.queryByTestId('org-decision')).toBeNull();
+    expect(screen.getByText('console.org_home.tile.pending.label')).toBeInTheDocument();
   });
 
   it('keeps the value in the form for a viewer that does not pick it', async () => {
@@ -256,6 +253,30 @@ describe('console org detail — repair owner access', () => {
     mockPage(org({ depth: 2 }), 'parent-owner', { viewerOrgId: 'parent', parent: PARENT });
     await show();
     expect(screen.getByTestId('owner-access-repair')).toBeInTheDocument();
+  });
+
+  it("offers to copy the owner's email to the org's own owner", async () => {
+    mockPage(org());
+    await show();
+    expect(screen.getByRole('button', { name: 'copy-email' })).toBeInTheDocument();
+  });
+
+  it("hides the copy button from the parent's owner of an active child, whose email is masked", async () => {
+    mockPage(org({ depth: 2, status: 'active' }), 'parent-owner', {
+      viewerOrgId: 'parent',
+      parent: PARENT,
+    });
+    await show();
+    expect(screen.queryByRole('button', { name: 'copy-email' })).toBeNull();
+  });
+
+  it("lets the parent's owner copy the email of a child still to verify, which is not masked", async () => {
+    mockPage(org({ depth: 2, status: 'pending' }), 'parent-owner', {
+      viewerOrgId: 'parent',
+      parent: PARENT,
+    });
+    await show();
+    expect(screen.getByRole('button', { name: 'copy-email' })).toBeInTheDocument();
   });
 
   it("does not offer repair to the org's own owner", async () => {

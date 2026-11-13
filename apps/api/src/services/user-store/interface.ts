@@ -7,9 +7,10 @@
  * Name, email and phone live in the `contact` table, referenced by
  * `contactId`; `contact`, `contactPhone` and `contactEmail` are composed from it.
  *
- * `url`, `locations`, `contact.company` and `contact.gstNumber` are read from
- * the coordinator's org, falling back per field to `legacy_org_details`. This
- * store never writes them; the org's owner edits them.
+ * `url`, `contact.company` and `contact.gstNumber` are read from the
+ * coordinator's org, falling back per field to `legacy_org_details`. This
+ * store never writes them; the org's owner edits them. `locations` is the
+ * coordinator's own address (`users.locations`), written once at registration.
  *
  * Consent lives only in the `consent_record` ledger. `create` writes it through
  * `recordConsent` inside its transaction; reads take the newest registration row.
@@ -59,7 +60,10 @@ export interface Coordinator {
   contactPhone: string;
   /** The contact's email, lowercased. */
   contactEmail: string;
-  /** From the org, else the coordinator's own value. */
+  /**
+   * The coordinator's own address (`users.locations`), else the one a
+   * Default-org coordinator kept in `legacy_org_details`. Never the org's.
+   */
   locations: BecknLocation[];
   /**
    * The newest registration consent from the ledger (`given_at` = its `accepted_at`).
@@ -135,6 +139,8 @@ export interface CreateCoordinatorInput {
   orgId: string;
   /** The coordinator's own org-detail values. Set only for Default-org registrations. */
   legacyOrgDetails?: LegacyOrgDetails | null;
+  /** The coordinator's own address (`users.locations`). Defaults to `[]`. */
+  locations?: BecknLocation[];
   /** The invite consumed by this registration (`registration_invites.jti`). */
   inviteId?: string | null;
   /**
@@ -286,19 +292,6 @@ export abstract class UserStoreBase {
     updatedBy: string,
   ): Promise<StoreResult<Coordinator>>;
   abstract deleteById(id: string): Promise<StoreResult<void>>;
-  /**
-   * Atomic compare-and-set `pending` to `inactive`, stamping a write-once `rejected_at`.
-   *
-   * Only the winner gets the row, so only it sends the rejection email.
-   *
-   * @param id - Coordinator id.
-   * @param updatedBy - The deciding actor (an admin user id, or `'admin'` for a signed link).
-   * @returns The rejected row, or `null` when it was not pending.
-   */
-  abstract rejectFromPending(
-    id: string,
-    updatedBy: string,
-  ): Promise<StoreResult<Coordinator | null>>;
   /**
    * Deletes a coordinator only while it is still `pending` and older than `cutoff`.
    *

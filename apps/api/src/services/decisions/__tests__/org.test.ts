@@ -1,17 +1,6 @@
-/**
- * Unit tests for the organisation decision service and owner-access grant
- * (user & org Phase 5).
- *
- * Covers `decideOrg`'s approve / reject happy paths, already-decided and
- * not-found outcomes, the compare-and-set-lost and database-failure branches,
- * mail-failure soft-fails, and every `grantOwnerAccess` result (no login,
- * fully granted, and a partial grant when a step fails), using the in-memory
- * org store, the Keycloak fake and the fake mailer (fakes over mocks).
- */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyBaseLogger } from 'fastify';
 import pino from 'pino';
-import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import {
   OrganisationStoreFake,
   buildOrganisation,
@@ -19,23 +8,21 @@ import {
   _setOrganisationStore,
 } from '../../organisation-store/index.js';
 import { IdpAdminFake, _setIdpAdmin } from '../../idp-admin/index.js';
-import { decideOrg, grantOwnerAccess, type OrgDecisionInput } from '../org.js';
+import { approveOrg, grantOwnerAccess } from '../org.js';
 
 const log = pino({ level: 'silent' }) as unknown as FastifyBaseLogger;
 const ORG_ID = '33333333-3333-4333-8333-333333333333';
-const ADMIN = '00000000-0000-4000-8000-0000000000a1';
+const INVITER = 'invite:00000000-0000-4000-8000-0000000000a1';
 
-describe('decideOrg', () => {
+describe('approveOrg', () => {
   let store: OrganisationStoreFake;
   let idp: IdpAdminFake;
-  let mailer: FakeMailer;
   let ownerSub: string;
   let groupId: string;
 
   beforeEach(async () => {
     store = new OrganisationStoreFake();
     idp = new IdpAdminFake();
-    mailer = new FakeMailer();
     const u = await idp.createUser({ email: 'owner@org.test', enabled: false });
     if (!u.ok) throw new Error('seed kc user');
     ownerSub = u.value.id;
@@ -44,13 +31,11 @@ describe('decideOrg', () => {
     groupId = g.value.id;
     _setOrganisationStore(store);
     _setIdpAdmin(idp);
-    _setMailer(mailer);
   });
 
   afterEach(() => {
     _setOrganisationStore(null);
     _setIdpAdmin(null);
-    _setMailer(null);
   });
 
   const seedPending = (over = {}) =>
@@ -66,85 +51,48 @@ describe('decideOrg', () => {
       }),
     ]);
 
-  const decide = (over: Partial<OrgDecisionInput> = {}): ReturnType<typeof decideOrg> =>
-    decideOrg({ orgId: ORG_ID, decision: 'approve', decidedBy: ADMIN, log, ...over });
+  const approve = () => approveOrg({ orgId: ORG_ID, decidedBy: INVITER, log });
 
-  it('approves: grants owner access, mails the owner, reports granted', async () => {
+  it('approves: grants owner access and reports granted', async () => {
     seedPending();
-    const out = await decide({ decision: 'approve' });
-    expect(out).toMatchObject({ kind: 'decided', decision: 'approve', notified: true });
-    if (out.kind === 'decided') expect(out.ownerAccess.status).toBe('granted');
+    const out = await approve();
+    expect(out).toMatchObject({ kind: 'approved', ownerAccess: { status: 'granted' } });
     const kc = await idp.findById(ownerSub);
     expect(kc.ok && kc.value?.enabled).toBe(true);
-    expect(mailer.outbox).toHaveLength(1);
-  });
-
-  it('rejects: mails the owner, reports no owner access', async () => {
-    seedPending();
-    const out = await decide({ decision: 'reject', reason: 'incomplete' });
-    expect(out).toMatchObject({ kind: 'decided', decision: 'reject', notified: true });
-    if (out.kind === 'decided') expect(out.ownerAccess.status).toBe('no_login');
-    expect(mailer.outbox).toHaveLength(1);
-  });
-
-  it('soft-fails a failed approval email but still reports decided', async () => {
-    seedPending();
-    mailer.failOnce({ code: 'TRANSPORT_FAILED', message: 'down' });
-    const out = await decide({ decision: 'approve' });
-    expect(out).toMatchObject({ kind: 'decided', notified: false });
-  });
-
-  it('soft-fails a failed rejection email', async () => {
-    seedPending();
-    mailer.failOnce({ code: 'TRANSPORT_FAILED', message: 'down' });
-    const out = await decide({ decision: 'reject' });
-    expect(out).toMatchObject({ kind: 'decided', decision: 'reject', notified: false });
   });
 
   it('returns not_found for an unknown org', async () => {
-    expect(await decide()).toEqual({ kind: 'not_found' });
+    expect(await approve()).toEqual({ kind: 'not_found' });
   });
 
   it('returns not_found for the Default org (never decidable)', async () => {
     store.seed([buildDefaultOrg({ id: ORG_ID })]);
-    expect(await decide()).toEqual({ kind: 'not_found' });
+    expect(await approve()).toEqual({ kind: 'not_found' });
   });
 
   it('returns already_decided when the org is no longer pending', async () => {
-    seedPending({ status: 'active', updatedBy: ADMIN });
-    const out = await decide();
-    expect(out).toMatchObject({ kind: 'already_decided', status: 'active', decidedBy: 'console' });
-  });
-
-  it('dates an already-rejected org with no rejected_at from updated_at', async () => {
-    seedPending({ status: 'inactive', rejectedAt: null, updatedBy: ADMIN });
-    const out = await decide();
-    expect(out).toMatchObject({ kind: 'already_decided', status: 'inactive' });
-    if (out.kind === 'already_decided') expect(out.decidedAt).toBeInstanceOf(Date);
+    seedPending({ status: 'active' });
+    expect(await approve()).toEqual({ kind: 'already_decided', status: 'active' });
   });
 
   it('reports unavailable when the initial read fails', async () => {
     store.findById = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'x' } });
-    expect(await decide()).toEqual({ kind: 'unavailable', dependency: 'db' });
+    expect(await approve()).toEqual({ kind: 'unavailable', dependency: 'db' });
   });
 
   it('reports unavailable when the compare-and-set itself errors', async () => {
     seedPending();
     store.approve = async () => ({ ok: false, error: { code: 'DB_UNAVAILABLE', message: 'x' } });
-    expect(await decide({ decision: 'approve' })).toEqual({
-      kind: 'unavailable',
-      dependency: 'db',
-    });
+    expect(await approve()).toEqual({ kind: 'unavailable', dependency: 'db' });
   });
 
-  it('answers already_decided when the approve CAS loses to a concurrent decision', async () => {
+  it('answers already_decided when the approve CAS loses', async () => {
     seedPending();
     store.approve = async () => {
-      await store.reject(ORG_ID, 'admin');
+      await store.update(ORG_ID, { status: 'inactive' });
       return { ok: true, value: null };
     };
-    const out = await decide({ decision: 'approve' });
-    expect(out).toMatchObject({ kind: 'already_decided', status: 'inactive', decidedBy: 'link' });
+    expect(await approve()).toEqual({ kind: 'already_decided', status: 'inactive' });
   });
 
   it('reports unavailable when the re-read after a lost CAS fails', async () => {
@@ -157,8 +105,8 @@ describe('decideOrg', () => {
         ? realFind(id)
         : { ok: false, error: { code: 'DB_UNAVAILABLE' as const, message: 'x' } };
     };
-    store.reject = async () => ({ ok: true, value: null });
-    expect(await decide({ decision: 'reject' })).toEqual({ kind: 'unavailable', dependency: 'db' });
+    store.approve = async () => ({ ok: true, value: null });
+    expect(await approve()).toEqual({ kind: 'unavailable', dependency: 'db' });
   });
 
   it('returns not_found when the row is gone after a lost CAS', async () => {
@@ -169,8 +117,8 @@ describe('decideOrg', () => {
       reads += 1;
       return reads === 1 ? realFind(id) : { ok: true, value: null };
     };
-    store.reject = async () => ({ ok: true, value: null });
-    expect(await decide({ decision: 'reject' })).toEqual({ kind: 'not_found' });
+    store.approve = async () => ({ ok: true, value: null });
+    expect(await approve()).toEqual({ kind: 'not_found' });
   });
 });
 

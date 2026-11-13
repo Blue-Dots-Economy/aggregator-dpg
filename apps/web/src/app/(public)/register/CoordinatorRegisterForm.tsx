@@ -1,38 +1,27 @@
 'use client';
 
 import { useMemo, useState, type JSX } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import type { RJSFSchema, UiSchema } from '@rjsf/utils';
 import { useTranslations } from 'next-intl';
 import { RjsfThemedForm } from '../../../components/forms/RjsfThemed';
 import { useFieldErrors } from '@/components/forms/useFieldErrors';
-import { FieldMessage, errorAriaProps, messageWhen } from '@/components/forms/useHandFieldErrors';
 import type { ResolvedPlace } from '../../../components/forms/custom-widgets/LocationAutocompleteWidget';
 import { ConsentGate } from '../../../components/consent/ConsentGate';
 import { toConsentDocs } from '../../../components/consent/consent-docs';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../../components/ui/Select';
-import { useAggregatorConfig, DEFAULT_AGGREGATOR_CONFIG } from '../../../hooks/useAggregatorConfig';
 import { withPhoneWidget } from '../../../lib/phone-ui-schema';
-import { jsonFetch } from '../../../services/http';
 import {
-  OrgListResponseSchema,
+  inviteSignInUrl,
   stampConsent,
   stripConsentBlock,
   stripFormChrome,
   submitRegistration,
+  withReadonlyField,
   withResolvedCoordinates,
 } from './registration-shared';
 import {
   RegistrationErrorBanner,
   showsErrorBanner,
   RegistrationSubmitButton,
-  RegistrationSuccessPanel,
   sharedRegistrationFormProps,
   useConsentGateSubmit,
   useRegistrationError,
@@ -41,32 +30,20 @@ import {
 import type { ConsentDocContent } from '../../../components/consent/consent-types';
 
 export interface CoordinatorRegisterFormProps {
-  /** Coordinator registration JSON Schema. */
   schema: RJSFSchema;
-  /** Coordinator registration UI schema. */
   uiSchema: Record<string, unknown>;
-  /**
-   * Terms/Privacy content for the coordinator audience, shown by
-   * {@link ConsentGate} at submit. Omit when loading failed; submit then shows an error.
-   */
+  /** Terms/Privacy content for the coordinator audience; omit when loading failed. */
   consentContent?: ConsentDocContent;
-  /**
-   * Invite token. When set, the org is fixed to the inviting org, the email is
-   * prefilled, and the submission sends `invite` instead of `org_id`. The
-   * server validates everything; these props only shape the UI.
-   */
-  inviteToken?: string;
-  /** The inviting org's display name (invite mode); fills the hidden `name`. */
-  lockedOrgName?: string;
-  /** The invite's email (invite mode); prefilled. */
-  lockedEmail?: string;
+  /** The invite token from the link; sent with the registration. */
+  inviteToken: string;
+  /** The inviting org, which the coordinator joins. */
+  lockedOrgName: string;
+  /** The invited email; the field is locked to it. */
+  lockedEmail: string;
 }
 
-/** Slug of the fixed Default org. */
-const DEFAULT_ORG_SLUG = 'default';
-
 /**
- * Removes schema properties marked `"x-org-detail": true` (url, locations).
+ * Removes schema properties marked `"x-org-detail": true` (e.g. url).
  *
  * These belong to the org, so a coordinator of a real org does not see or submit them.
  *
@@ -88,21 +65,30 @@ function withoutOrgDetails(schema: RJSFSchema): RJSFSchema {
   };
 }
 
-/** The new coordinator's id from a successful registration body, or ''. */
-function registeredId(body: Record<string, unknown>): string {
-  const id = body['aggregator_id'];
-  return typeof id === 'string' ? id : '';
+/**
+ * Reports whether the schema asks for the coordinator's own address: it has a
+ * `locations` property that is not marked `x-org-detail`.
+ *
+ * @param schema - The coordinator form schema.
+ * @returns `true` when the form shows the location field.
+ */
+function asksOwnLocation(schema: RJSFSchema): boolean {
+  const loc = (schema.properties as Record<string, Record<string, unknown>> | undefined)?.[
+    'locations'
+  ];
+  return loc !== undefined && loc['x-org-detail'] !== true;
 }
 
 /**
- * Renders the coordinator registration form with a required organisation selector.
+ * Renders the coordinator registration form for an invite.
  *
- * Picking a real org uses its name and hides the org-detail fields. Picking the
- * Default org shows the full form, where the coordinator enters their own
- * organisation name, url, and locations. The Default org is preselected when it
- * is the only one.
+ * The org is fixed by the invite, so its name and url are not asked for, and
+ * the email is locked to the invited address. The coordinator's own address
+ * (`locations`) is asked for when the schema does not mark it `x-org-detail`. After the consent gate
+ * it posts to `/api/invite/user/accept` and then goes to sign-in with the
+ * invited email pre-filled.
  *
- * @param props - Schema/UI schema, consent content and the invite context.
+ * @param props - Schema/UI schema, consent content and the invite.
  * @returns The coordinator registration content block.
  */
 export function CoordinatorRegisterForm({
@@ -114,24 +100,17 @@ export function CoordinatorRegisterForm({
   lockedEmail,
 }: CoordinatorRegisterFormProps): JSX.Element {
   const t = useTranslations('register');
-  const { data: cfg = DEFAULT_AGGREGATOR_CONFIG } = useAggregatorConfig();
-  const brand = cfg.brand.short_name;
-  // Invite mode: org is fixed by the invite, so no selector / no org list.
-  const inviteMode = Boolean(inviteToken);
-
   const { state, setState, errorRef } = useRegistrationFormState();
   const [formData, setFormData] = useState<Record<string, unknown>>(() => ({
-    // `[0,0]` means "not resolved yet" (`geo` is required). The real coordinate
-    // is added at submit.
-    locations: [{ geo: { type: 'Point', coordinates: [0, 0] }, address: {} }],
-    // Prefill the invite email.
-    ...(lockedEmail ? { contact: { email: lockedEmail } } : {}),
-    // An invite fixes the org, so the hidden `name` is its name from the start.
-    ...(inviteMode && lockedOrgName ? { name: lockedOrgName } : {}),
+    name: lockedOrgName,
+    contact: { email: lockedEmail },
+    // One empty entry, so the address field shows at once instead of an
+    // "Add location" button. `[0,0]` means "not resolved yet" (`geo` is
+    // required); the picked coordinate is added at submit.
+    ...(asksOwnLocation(schema)
+      ? { locations: [{ geo: { type: 'Point', coordinates: [0, 0] }, address: {} }] }
+      : {}),
   }));
-  // Selected org. Empty until picked.
-  const [pickedOrgId, setPickedOrgId] = useState<string>('');
-  // Coordinate from the address widget; RJSF does not write it into `formData`.
   const [resolvedPlace, setResolvedPlace] = useState<ResolvedPlace | null>(null);
   const consentDocs = useMemo(() => toConsentDocs(consentContent), [consentContent]);
   const { gateOpen, setGateOpen, pendingRef, handleSubmit } = useConsentGateSubmit(
@@ -139,116 +118,46 @@ export function CoordinatorRegisterForm({
     setState,
   );
 
-  // The active-org list (not needed in invite mode: the org is fixed).
-  const orgsQuery = useQuery({
-    queryKey: ['active-orgs'],
-    queryFn: () => jsonFetch('/api/orgs', OrgListResponseSchema),
-    enabled: !inviteMode,
-    staleTime: 30_000,
-  });
-  const orgs = orgsQuery.data?.orgs ?? [];
-  // The API lists the Default org only when it is the only active org; it is preselected then.
-  const onlyOrg = orgs.length === 1 ? orgs[0] : undefined;
-  const orgId =
-    pickedOrgId || (!inviteMode && onlyOrg?.slug === DEFAULT_ORG_SLUG ? onlyOrg.id : '');
-  const selectedOrg = orgs.find((o) => o.id === orgId);
-  // A real org supplies the name and details; Default org coordinators enter their own.
-  const inheritsFromOrg =
-    inviteMode || (selectedOrg !== undefined && selectedOrg.slug !== DEFAULT_ORG_SLUG);
-  const selectedOrgName = inviteMode ? (lockedOrgName ?? '') : (selectedOrg?.display_name ?? '');
-
-  /**
-   * Takes the picked org. A real org's name fills the hidden `name`; on
-   * switching to the Default org, a name copied from an org is cleared.
-   */
-  function pickOrg(id: string) {
-    setPickedOrgId(id);
-    const org = orgs.find((o) => o.id === id);
-    if (org !== undefined && org.slug !== DEFAULT_ORG_SLUG) {
-      const name = org.display_name || undefined;
-      setFormData((prev) => (prev['name'] === name ? prev : { ...prev, name }));
-    } else {
-      setFormData((prev) =>
-        orgs.some((o) => o.display_name === prev['name']) ? { ...prev, name: undefined } : prev,
-      );
-    }
-  }
-
-  const formSchema = useMemo(() => {
-    const base = stripConsentBlock(stripFormChrome(schema));
-    return inheritsFromOrg ? withoutOrgDetails(base) : base;
-  }, [schema, inheritsFromOrg]);
+  const formSchema = useMemo(
+    () => withoutOrgDetails(stripConsentBlock(stripFormChrome(schema))),
+    [schema],
+  );
   const fieldErrors = useFieldErrors(formSchema);
   const registrationError = useRegistrationError(fieldErrors, {
     email: 'contact.email',
     phone: 'contact.phone',
   });
-  const orgMissing = !inviteMode && !orgId;
-  const orgError = messageWhen(fieldErrors.attempted && orgMissing, t('org_selector_required'));
-
-  /** Opens the consent gate once an organisation is picked. */
-  const submitWithOrg: typeof handleSubmit = (e) => {
-    if (orgMissing) return;
-    handleSubmit(e);
-  };
-
   const agreeLabel = `${t('consent.accept_prefix')}${t('consent.privacy_link')}${t('consent.and')}${t('consent.terms_link')}.`;
-
-  // For a real org, hide the `name` field; the name comes from the org.
   const formUiSchema = useMemo<Record<string, unknown>>(() => {
-    const withPhone = withPhoneWidget(uiSchema, formSchema as Record<string, unknown>);
-    if (!inheritsFromOrg) return withPhone;
-    // The invite email stays editable; the owner sees any mismatch at approval.
+    const locked = withReadonlyField(
+      withPhoneWidget(uiSchema, formSchema as Record<string, unknown>),
+      ['contact', 'email'],
+    );
     return {
-      ...withPhone,
-      name: {
-        ...(withPhone['name'] as Record<string, unknown> | undefined),
-        'ui:widget': 'hidden',
-      },
+      ...locked,
+      name: { ...(locked['name'] as Record<string, unknown> | undefined), 'ui:widget': 'hidden' },
     };
-  }, [uiSchema, formSchema, inheritsFromOrg]);
+  }, [uiSchema, formSchema]);
 
-  /** Runs after the gate is accepted: stamps consent and posts. */
+  /** Runs after the gate is accepted: stamps consent, posts, then goes to sign-in. */
   const submitWithConsent = async (): Promise<void> => {
     setGateOpen(false);
     setState({ status: 'submitting' });
     const payload: Record<string, unknown> = withResolvedCoordinates(
-      {
-        ...pendingRef.current,
-        consent: stampConsent({ value: true }),
-      },
+      { ...pendingRef.current, consent: stampConsent({ value: true }) },
       resolvedPlace,
     );
-    // Invite mode sends `invite` (the org comes from the token); otherwise
-    // `org_id` from the dropdown. For a real org, url and locations are not sent.
-    if (inviteMode) {
-      payload['invite'] = inviteToken;
-    } else if (orgId) {
-      payload['org_id'] = orgId;
-    }
-    if (inheritsFromOrg) {
-      payload['name'] = selectedOrgName;
-      delete payload['url'];
-      delete payload['locations'];
-    }
-    const result = await submitRegistration('/api/aggregator/register', payload);
-    if (result.ok) {
-      setState({ status: 'done', refId: registeredId(result.body) });
+    payload['invite'] = inviteToken;
+    payload['name'] = lockedOrgName;
+    delete payload['url'];
+    const result = await submitRegistration('/api/invite/user/accept', payload);
+    if (!result.ok) {
+      setState(registrationError(result.error));
       return;
     }
-    setState(registrationError(result.error));
+    setState({ status: 'signing_in' });
+    window.location.assign(inviteSignInUrl(result.body, '/dashboard'));
   };
-
-  if (state.status === 'done') {
-    return (
-      <RegistrationSuccessPanel
-        heading={t('success_heading')}
-        refLabel={t('success_ref_id')}
-        refId={state.refId}
-        message={t('success_approval', { brand })}
-      />
-    );
-  }
 
   return (
     <div className="mt-7">
@@ -256,59 +165,9 @@ export function CoordinatorRegisterForm({
         <RegistrationErrorBanner title={state.title} detail={state.detail} errorRef={errorRef} />
       ) : null}
 
-      {inviteMode ? (
-        <output className="mb-5 block text-[13.5px] text-ink-500">
-          Registering as a coordinator under{' '}
-          <span className="font-semibold text-ink-800">{selectedOrgName}</span>.
-        </output>
-      ) : null}
-      {!inviteMode ? (
-        <div className="form-group mb-4">
-          <label className="bd-label" htmlFor="coordinator-org">
-            {t('org_selector_label')}
-            <span className="text-rose-500"> *</span>
-          </label>
-          {orgsQuery.isError ? (
-            <div className="text-[13px] text-red-600 flex items-center gap-2">
-              {t('org_selector_error')}
-              <button
-                type="button"
-                onClick={() => orgsQuery.refetch()}
-                className="text-primary-600 font-semibold hover:underline"
-              >
-                {t('org_selector_retry')}
-              </button>
-            </div>
-          ) : (
-            <Select
-              {...(orgId ? { value: orgId } : {})}
-              onValueChange={pickOrg}
-              disabled={orgsQuery.isLoading}
-            >
-              <SelectTrigger
-                id="coordinator-org"
-                aria-required
-                className="aria-invalid:border-rose-400"
-                {...errorAriaProps('coordinator-org__error', orgError)}
-              >
-                <SelectValue
-                  placeholder={
-                    orgsQuery.isLoading ? t('org_selector_loading') : t('org_selector_placeholder')
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {orgs.map((o) => (
-                  <SelectItem key={o.id} value={o.id}>
-                    {o.display_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          <FieldMessage id="coordinator-org__error" message={orgError} />
-        </div>
-      ) : null}
+      <output className="mb-5 block text-[13.5px] text-ink-500">
+        {t('invite_coordinator_under', { org: lockedOrgName })}
+      </output>
 
       <RjsfThemedForm
         schema={formSchema}
@@ -316,7 +175,7 @@ export function CoordinatorRegisterForm({
         {...sharedRegistrationFormProps({
           formData,
           setFormData,
-          handleSubmit: submitWithOrg,
+          handleSubmit,
           fieldErrors,
           consentContent,
           onLocationResolved: setResolvedPlace,
@@ -327,7 +186,7 @@ export function CoordinatorRegisterForm({
         })}
       >
         <RegistrationSubmitButton
-          submitting={state.status === 'submitting'}
+          submitting={state.status === 'submitting' || state.status === 'signing_in'}
           onAttempt={fieldErrors.markAttempted}
           label={t('submit')}
           submittingLabel={t('submitting')}

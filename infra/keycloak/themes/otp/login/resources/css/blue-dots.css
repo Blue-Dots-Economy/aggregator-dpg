@@ -756,6 +756,13 @@ button {
   to { transform: rotate(360deg); }
 }
 
+.bd-otp-sent {
+  font-size: 14px;
+  color: var(--bd-ink-500);
+  margin: 0 0 14px;
+  line-height: 1.45;
+}
+
 /* OTP — six individual digit boxes */
 .bd-otp-grid {
   display: grid;

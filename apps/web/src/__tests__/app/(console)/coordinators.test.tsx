@@ -224,13 +224,11 @@ describe('console coordinators page — filters', () => {
   });
 
   it('marks the status filter in use among the counts', async () => {
-    show(await renderWith({ status: 'inactive', org_id: ORG_M }));
-    const rejected = screen.getByRole('link', { name: /console\.org_home\.tile\.inactive\.label/ });
-    expect(rejected).toHaveAttribute(
-      'href',
-      `/console/coordinators?org_id=${ORG_M}&status=inactive`,
-    );
-    expect(rejected.className).toContain('border-rose-500');
+    show(await renderWith({ status: 'pending', org_id: ORG_M }));
+    const invited = screen.getByRole('link', { name: /console\.org_home\.tile\.pending\.label/ });
+    expect(invited).toHaveAttribute('href', `/console/coordinators?org_id=${ORG_M}&status=pending`);
+    expect(invited.className).toContain('border-amber-500');
+    expect(screen.queryByRole('link', { name: /tile\.inactive/ })).toBeNull();
   });
 
   it('lists organisations in tree order with their path and label', async () => {

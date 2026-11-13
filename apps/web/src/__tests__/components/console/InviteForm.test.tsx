@@ -249,7 +249,7 @@ describe('<InviteForm />', () => {
     expect(help).toHaveTextContent('You send the invite');
     expect(help).toHaveTextContent('They open the link and fill in the registration form.');
     expect(help).toHaveTextContent(
-      `Review them under ${term('Users')}. Once approved, they can sign in.`,
+      `They sign in with the code we email them and are added to ${term('Users')}. No approval is needed.`,
     );
     expect(help).toHaveTextContent('Up to 5 emails per send.');
   });
@@ -416,5 +416,61 @@ describe('<InviteForm />', () => {
       messages.console.invite.error.org_unavailable,
     );
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('<InviteForm target org />', () => {
+  const original = global.fetch;
+  afterEach(() => {
+    global.fetch = original;
+  });
+
+  function renderOrgForm() {
+    return render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <InviteForm
+          orgs={[{ id: 'parent-1', name: 'Parent Org' }]}
+          coordinatorsHref="/console/orgs"
+          target={{ kind: 'org', roleLabel: 'Lead Partner' }}
+        />
+      </NextIntlClientProvider>,
+    );
+  }
+
+  it('shows both permissions ticked and locked, and the role from the instance', () => {
+    renderOrgForm();
+    for (const box of screen.getAllByRole('checkbox')) {
+      expect(box).toBeChecked();
+      expect(box).toBeDisabled();
+    }
+    expect(screen.getByLabelText('Role')).toHaveValue('Lead Partner');
+    expect(screen.getByText('Role: Lead Partner')).toBeInTheDocument();
+    expect(screen.getByText(`Onboard ${term('Orgs')}`)).toBeInTheDocument();
+  });
+
+  it('sends the invites to the org invite route under the parent', async () => {
+    global.fetch = respond({ sent: 1, resent: 0, invalid: [], existing: [] }, 200) as never;
+    renderOrgForm();
+    typeAddresses('child@x.org');
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(screen.getByText('1 invite sent')).toBeInTheDocument());
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/console/org/invite',
+      expect.objectContaining({
+        body: JSON.stringify({ parent_id: 'parent-1', recipients: [{ email: 'child@x.org' }] }),
+      }),
+    );
+  });
+
+  it('says when the parent cannot take more organisations', async () => {
+    global.fetch = respond({ error: { code: 'ORG_DEPTH_LIMIT' } }, 409) as never;
+    renderOrgForm();
+    typeAddresses('child@x.org');
+    fireEvent.click(sendButton());
+    await waitFor(() =>
+      expect(
+        screen.getByText(`This ${term('org')} cannot take more ${term('orgs')} under it.`),
+      ).toBeInTheDocument(),
+    );
   });
 });

@@ -90,7 +90,7 @@ function index(): Map<string, string> {
 /**
  * Looks up one copy fragment.
  *
- * @param key - Fully-qualified key, e.g. `applicant_approved.subject`.
+ * @param key - Fully-qualified key, e.g. `coordinator_invite.subject`.
  * @returns The fragment, or the key itself when absent.
  */
 export function getMessage(key: string): string {

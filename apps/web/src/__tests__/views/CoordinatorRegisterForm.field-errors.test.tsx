@@ -1,5 +1,5 @@
 /**
- * View test: <CoordinatorRegisterForm /> with the REAL RJSF form and the
+ * View test: <CoordinatorRegisterForm /> for an invite, with the REAL RJSF form and the
  * repository's default coordinator schema, checking the form standard:
  * Submit is never disabled by a bad field, a click shows each field's message
  * with the schema's example, a wrong value shows when the field is left, and
@@ -52,9 +52,6 @@ function renderForm(noType = false) {
   ui['ui:order'] = (ui['ui:order'] as string[]).filter((k) => k !== 'locations');
   delete ui['locations'];
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  client.setQueryData(['active-orgs'], {
-    orgs: [{ id: 'd', slug: 'default', display_name: 'Default' }],
-  });
   render(
     <QueryClientProvider client={client}>
       <NextIntlClientProvider locale="en" messages={messages}>
@@ -62,6 +59,9 @@ function renderForm(noType = false) {
           schema={schema as unknown as RJSFSchema}
           uiSchema={ui}
           consentContent={CONSENT}
+          inviteToken="invite-token"
+          lockedOrgName="Enable India"
+          lockedEmail="a@enable.org"
         />
       </NextIntlClientProvider>
     </QueryClientProvider>,
@@ -71,13 +71,10 @@ function renderForm(noType = false) {
 const submit = () => screen.getByRole('button', { name: messages.register.submit });
 const phone = () => screen.getByLabelText(/^Phone/);
 
+/** Fills the fields an invitee types; the org name and email come from the invite. */
 function fillValid() {
-  fireEvent.change(screen.getByLabelText(/Organisation Name/), {
-    target: { value: 'Enable India' },
-  });
   fireEvent.change(screen.getByLabelText(/Contact Name/), { target: { value: 'Rajesh Kumar' } });
   fireEvent.change(phone(), { target: { value: '9876543210' } });
-  fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'a@enable.org' } });
 }
 
 const originalFetch = globalThis.fetch;
@@ -89,13 +86,11 @@ afterEach(() => {
 describe('<CoordinatorRegisterForm /> field errors', () => {
   it('keeps Submit enabled on an empty form', async () => {
     renderForm();
-    await screen.findByText('Default');
     expect(submit()).toBeEnabled();
   });
 
   it('on Submit, says each empty field is required under its box, with no example', async () => {
     renderForm();
-    await screen.findByText('Default');
     fireEvent.click(submit());
     const msg = await screen.findByText(PHONE_REQUIRED);
     expect(msg.closest('#root_contact_phone__error')).not.toBeNull();
@@ -109,40 +104,13 @@ describe('<CoordinatorRegisterForm /> field errors', () => {
 
   it('shows "Invalid entry" under the box for a wrong value, with no example', async () => {
     renderForm();
-    await screen.findByText('Default');
     fireEvent.change(phone(), { target: { value: '12345' } });
     fireEvent.click(submit());
     expect(await screen.findByText(PHONE_INVALID)).toBeInTheDocument();
   });
 
-  it('shows the organisation message under the picker', async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(['active-orgs'], {
-      orgs: [
-        { id: 'a', slug: 'a', display_name: 'Org A' },
-        { id: 'b', slug: 'b', display_name: 'Org B' },
-      ],
-    });
-    render(
-      <QueryClientProvider client={client}>
-        <NextIntlClientProvider locale="en" messages={messages}>
-          <CoordinatorRegisterForm
-            schema={{ type: 'object', properties: {} }}
-            uiSchema={{}}
-            consentContent={CONSENT}
-          />
-        </NextIntlClientProvider>
-      </QueryClientProvider>,
-    );
-    fireEvent.click(submit());
-    const msg = await screen.findByText(messages.register.org_selector_required);
-    expect(msg).toHaveAttribute('id', 'coordinator-org__error');
-    expect(msg.closest('.sr-only')).toBeNull();
-  });
-
   it('marks the empty Aggregator Type picker invalid after Submit', async () => {
     renderForm();
-    await screen.findByText('Default');
     fireEvent.click(submit());
     const type = screen.getByRole('button', { name: /Aggregator Type/ });
     await waitFor(() => expect(type).toHaveAttribute('aria-invalid', 'true'));
@@ -152,7 +120,6 @@ describe('<CoordinatorRegisterForm /> field errors', () => {
 
   it('shows a wrong value when the field is left, without flagging untouched fields', async () => {
     renderForm();
-    await screen.findByText('Default');
     fireEvent.change(phone(), { target: { value: '12345' } });
     fireEvent.blur(phone());
     expect(await screen.findByText(PHONE_INVALID)).toBeInTheDocument();
@@ -162,7 +129,6 @@ describe('<CoordinatorRegisterForm /> field errors', () => {
 
   it('clears a field message once it is fixed after a Submit', async () => {
     renderForm();
-    await screen.findByText('Default');
     fireEvent.click(submit());
     await waitFor(() => expect(phone()).toHaveAttribute('aria-invalid', 'true'));
     fireEvent.change(phone(), { target: { value: '9876543210' } });
@@ -188,7 +154,6 @@ describe('<CoordinatorRegisterForm /> field errors', () => {
         ),
     ) as unknown as typeof fetch;
     renderForm(true);
-    await screen.findByText('Default');
     fillValid();
     fireEvent.click(submit());
     await waitFor(() => expect(gate).toHaveBeenCalled());
@@ -211,7 +176,6 @@ describe('<CoordinatorRegisterForm /> field errors', () => {
         ),
     ) as unknown as typeof fetch;
     renderForm(true);
-    await screen.findByText('Default');
     fillValid();
     fireEvent.click(submit());
     await waitFor(() => expect(gate).toHaveBeenCalled());

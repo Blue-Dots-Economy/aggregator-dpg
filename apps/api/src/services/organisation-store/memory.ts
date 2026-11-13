@@ -137,41 +137,6 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     return { ok: true, value: this.view(row) };
   }
 
-  revive(
-    id: string,
-    parentId: string | undefined,
-    rules: TreeRules,
-  ): Promise<OrgStoreResult<Organisation>> {
-    return this.withTreeLock(() => {
-      const org = this.byId.get(id);
-      if (org?.status !== 'inactive') return Promise.resolve(err('NOT_FOUND', id));
-      if (this.treeSnapshot().children.has(id)) {
-        return Promise.resolve(err('NOT_MOVABLE', 'a rejected org with child orgs'));
-      }
-      const parent = this.resolveParent(parentId);
-      if (parentId !== undefined && !parent) {
-        return Promise.resolve(
-          err('INVALID_PARENT', 'parent is not the root or an active organisation'),
-        );
-      }
-      const depth = (parent?.depth ?? 0) + 1;
-      const refused = this.limitRefusal(parent?.id ?? null, depth - 1, rules);
-      if (refused) return Promise.resolve(err(refused, 'organisation tree limit reached'));
-      const next: Organisation = {
-        ...org,
-        parentId: parent?.id ?? null,
-        parentName: parent?.displayName ?? null,
-        depth,
-        knownAs: defaultKnownAsKey(this.listOf(parent?.id ?? null)),
-        status: 'pending',
-        rejectedAt: null,
-        updatedAt: new Date(),
-      };
-      this.byId.set(id, next);
-      return Promise.resolve({ ok: true, value: this.view(next) });
-    });
-  }
-
   move(
     id: string,
     change: { parentId: string },
@@ -459,12 +424,18 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
     return Promise.resolve({ ok: true, value: stale });
   }
 
-  async approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
-    return this.casFromPending(id, 'active', updatedBy);
-  }
-
-  async reject(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
-    return this.casFromPending(id, 'inactive', updatedBy);
+  approve(id: string, updatedBy: string): Promise<OrgStoreResult<Organisation | null>> {
+    const existing = this.byId.get(id);
+    if (!existing) return Promise.resolve(err('NOT_FOUND', id));
+    if (existing.status !== 'pending') return Promise.resolve({ ok: true, value: null });
+    const updated: Organisation = {
+      ...existing,
+      status: 'active',
+      updatedAt: new Date(),
+      updatedBy,
+    };
+    this.byId.set(id, updated);
+    return Promise.resolve({ ok: true, value: this.view(updated) });
   }
 
   listOwnedBy(ownerUserId: string): Promise<OrgStoreResult<Organisation[]>> {
@@ -635,26 +606,6 @@ export class InMemoryOrganisationStore extends OrganisationStoreBase {
   private descendantIdsOf(id: string): Set<string> {
     const below = subtree(this.treeSnapshot(), id, DESCENDANT_LEVEL_CAP).slice(1);
     return new Set(below.map((n) => n.id));
-  }
-
-  private casFromPending(
-    id: string,
-    next: Organisation['status'],
-    updatedBy: string,
-  ): Promise<OrgStoreResult<Organisation | null>> {
-    const existing = this.byId.get(id);
-    if (!existing) return Promise.resolve(err('NOT_FOUND', id));
-    if (existing.status !== 'pending') return Promise.resolve({ ok: true, value: null });
-    const updated: Organisation = {
-      ...existing,
-      status: next,
-      updatedAt: new Date(),
-      updatedBy,
-      // Stamp the write-once rejected_at on reject only.
-      ...(next === 'inactive' ? { rejectedAt: new Date() } : {}),
-    };
-    this.byId.set(id, updated);
-    return Promise.resolve({ ok: true, value: this.view(updated) });
   }
 }
 

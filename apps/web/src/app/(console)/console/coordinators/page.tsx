@@ -21,7 +21,7 @@ import { RoleBadges } from '@/components/console/RoleBadges';
 import { networkDomains, servedDomains } from '@/lib/console-domains.server';
 import { DomainChips } from '@/components/console/DomainChips';
 import { initialsOf } from '@/lib/initials';
-import { Clock, Eye, UserCheck, Users, UserX } from 'lucide-react';
+import { Clock, Eye, UserCheck, Users } from 'lucide-react';
 import { CountTile, type TileTone } from '@/components/console/CountTile';
 import { CoordinatorFilters } from '@/components/console/CoordinatorFilters';
 import { readReachableOrgs } from '@/lib/console-hierarchy.server';
@@ -35,14 +35,14 @@ import {
   UserSearchResponseSchema,
 } from '@aggregator-dpg/shared-primitives/user-org';
 
-const STATUSES = ['pending', 'active', 'inactive', 'retired'] as const;
+const STATUSES = ['active', 'pending'] as const;
 const UUID_RE = /^[0-9a-f-]{36}$/i;
 
 /** Coordinators read per status to count it; more show as "N+". */
 const COUNT_LIMIT = 100;
 
 /** The status filters shown as counts above the list. */
-const COUNTED = ['all', 'active', 'pending', 'inactive'] as const;
+const COUNTED = ['all', 'active', 'pending'] as const;
 type Counted = (typeof COUNTED)[number];
 
 /** One active filter, shown as a removable chip. */
@@ -164,7 +164,7 @@ export default async function ConsoleCoordinatorsPage({
     <>
       <Topbar title={t('coordinators.heading')} subtitle={t('coordinators.subtitle')} />
       <div className="flex flex-col gap-6">
-        <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-3">
           {COUNTED.map((f) => {
             const c = counts[f];
             const rest = omit(keep, 'status');
@@ -295,25 +295,16 @@ export default async function ConsoleCoordinatorsPage({
                         </td>
                       ) : null}
                       <td className="whitespace-nowrap">
-                        {u.status === 'pending' ? (
-                          <Link
-                            href={`/console/coordinators/${u.id}`}
-                            className="rounded-lg px-2.5 py-1.5 text-[13px] font-semibold text-(--bd-primary-600) hover:bg-(--bd-primary-50)"
-                          >
-                            {t('org_home.review')}
-                          </Link>
-                        ) : (
-                          <Link
-                            href={`/console/coordinators/${u.id}`}
-                            aria-label={t('org_home.view_named', {
-                              name: u.contact.name ?? u.contact.email,
-                            })}
-                            title={t('org_home.view')}
-                            className="inline-grid h-8 w-8 place-items-center rounded-lg text-ink-500 hover:bg-(--bd-primary-50) hover:text-(--bd-primary-600)"
-                          >
-                            <Eye size={17} />
-                          </Link>
-                        )}
+                        <Link
+                          href={`/console/coordinators/${u.id}`}
+                          aria-label={t('org_home.view_named', {
+                            name: u.contact.name ?? u.contact.email,
+                          })}
+                          title={t('org_home.view')}
+                          className="inline-grid h-8 w-8 place-items-center rounded-lg text-ink-500 hover:bg-(--bd-primary-50) hover:text-(--bd-primary-600)"
+                        >
+                          <Eye size={17} />
+                        </Link>
                       </td>
                     </tr>
                   ))}
@@ -371,7 +362,6 @@ const COUNT_TILE: Record<Counted, { icon: typeof Users; tone: TileTone }> = {
   all: { icon: Users, tone: 'primary' },
   active: { icon: UserCheck, tone: 'green' },
   pending: { icon: Clock, tone: 'amber' },
-  inactive: { icon: UserX, tone: 'rose' },
 };
 
 /**
@@ -389,7 +379,7 @@ async function countCoordinators(
   orgId: string | undefined,
   serves: string | undefined,
 ): Promise<Record<Counted, { n: number; more: boolean }>> {
-  const read = async (status?: 'active' | 'pending' | 'inactive') => {
+  const read = async (status?: 'active' | 'pending') => {
     const r = await consoleRead('/v1/user/search', UserSearchResponseSchema, {
       filter: {
         ...(status ? { status } : {}),
@@ -402,11 +392,10 @@ async function countCoordinators(
   };
   const scope = orgId ? orgs.filter((o) => o.id === orgId) : orgs;
   const exact = (n: number) => ({ n, more: false });
-  const [active, inactive, all, pending] = await Promise.all([
+  const [active, all, pending] = await Promise.all([
     read('active'),
-    read('inactive'),
     serves ? read() : exact(scope.reduce((n, o) => n + o.coordinator_count, 0)),
     serves ? read('pending') : exact(scope.reduce((n, o) => n + o.pending_count, 0)),
   ]);
-  return { all, active, pending, inactive };
+  return { all, active, pending };
 }

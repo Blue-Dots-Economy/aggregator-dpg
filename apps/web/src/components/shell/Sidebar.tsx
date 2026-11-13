@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -21,6 +21,12 @@ import {
 import { cn } from '../../lib/cn';
 import { initialsOf } from '../../lib/initials';
 
+/** The icon of a group heading, drawn like a link's icon. */
+function SectionIcon({ name }: Readonly<{ name: IconName }>) {
+  const Ic = I[name];
+  return <Ic size={18} stroke={1.7} />;
+}
+
 /** One sidebar link. */
 export interface NavItem {
   to: string;
@@ -31,6 +37,10 @@ export interface NavItem {
   exact?: boolean;
   /** Path whose subtree marks the link active, when it differs from `to`. */
   match?: string;
+  /** Heading of the group the link sits in; consecutive links with the same heading share it. */
+  section?: string;
+  /** Icon of the group heading, on the group's first link. */
+  sectionIcon?: IconName;
 }
 
 /** The account card at the foot of the sidebar. */
@@ -122,6 +132,8 @@ function BrandMark({
 interface SidebarPanelProps {
   brand: ReactNode;
   nav: NavItem[];
+  /** Show the "Overview" label above the links. */
+  overviewLabel: boolean;
   account: SidebarAccount;
   pathname: string | null;
   /** Rendered beside the brand, such as the drawer's close button on mobile. */
@@ -138,6 +150,7 @@ interface SidebarPanelProps {
 function SidebarPanel({
   brand,
   nav,
+  overviewLabel,
   account,
   pathname,
   headerAction,
@@ -150,6 +163,14 @@ function SidebarPanel({
   const initials = initialsOf(account.title.split('@')[0] ?? account.title);
   // The title (an email when there is no name) already shows in a detail row.
   const titleRepeated = account.details?.some((d) => d.value === account.title) ?? false;
+
+  const [closedSections, setClosedSections] = useState<ReadonlySet<string>>(new Set());
+  const toggleSection = (section: string) =>
+    setClosedSections((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(section)) next.add(section);
+      return next;
+    });
 
   const [detailsOpen, setDetailsOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
@@ -180,40 +201,64 @@ function SidebarPanel({
       </div>
 
       <div className="px-3">
-        <div className="px-3 pt-3 pb-2 text-[10.5px] uppercase tracking-[0.12em] font-semibold text-(--bd-fg-muted) opacity-60">
-          {t('overview')}
-        </div>
+        {overviewLabel ? (
+          <div className="px-3 pt-3 pb-2 text-[10.5px] uppercase tracking-[0.12em] font-semibold text-(--bd-fg-muted) opacity-60">
+            {t('overview')}
+          </div>
+        ) : null}
         <nav className="flex flex-col gap-0.5">
-          {nav.map((n) => {
+          {nav.map((n, i) => {
             const Ic = I[n.icon];
             const isActive = isNavActive(n, pathname);
+            const opensSection = n.section !== undefined && n.section !== nav[i - 1]?.section;
+            const sectionOpen = n.section === undefined || !closedSections.has(n.section);
             return (
-              <Link
-                key={n.to}
-                href={n.to}
-                {...(onNavigate ? { onClick: onNavigate } : {})}
-                className={cn(
-                  'group flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium transition-all',
-                  isActive
-                    ? 'nav-active'
-                    : 'text-(--bd-fg-muted) hover:bg-(--bd-border-soft) hover:text-(--bd-fg)',
-                )}
-              >
-                <Ic size={18} stroke={isActive ? 2 : 1.7} />
-                <span>{n.label}</span>
-                {n.badge !== undefined && (
-                  <span
+              <Fragment key={n.to}>
+                {opensSection && n.section !== undefined ? (
+                  <button
+                    type="button"
+                    aria-expanded={sectionOpen}
+                    onClick={() => toggleSection(n.section ?? '')}
+                    className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[14px] font-medium text-(--bd-fg-muted) transition-all hover:bg-(--bd-border-soft) hover:text-(--bd-fg)"
+                  >
+                    {n.sectionIcon ? <SectionIcon name={n.sectionIcon} /> : null}
+                    <span>{n.section}</span>
+                    <I.chevD
+                      size={16}
+                      className={cn('ml-auto transition-transform', !sectionOpen && '-rotate-90')}
+                    />
+                  </button>
+                ) : null}
+                {sectionOpen ? (
+                  <Link
+                    href={n.to}
+                    {...(onNavigate ? { onClick: onNavigate } : {})}
                     className={cn(
-                      'ml-auto text-[11px] font-semibold px-1.5 py-0.5 rounded-md',
+                      'group flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-[14px] font-medium transition-all',
+                      n.section !== undefined &&
+                        "relative ml-5 before:absolute before:inset-y-0 before:-left-2 before:w-px before:bg-(--bd-border) before:content-['']",
                       isActive
-                        ? 'bg-(--bd-card) text-primary-600'
-                        : 'bg-(--bd-border-soft) text-(--bd-fg-muted)',
+                        ? 'nav-active'
+                        : 'text-(--bd-fg-muted) hover:bg-(--bd-border-soft) hover:text-(--bd-fg)',
                     )}
                   >
-                    {n.badge}
-                  </span>
-                )}
-              </Link>
+                    <Ic size={18} stroke={isActive ? 2 : 1.7} />
+                    <span>{n.label}</span>
+                    {n.badge !== undefined && (
+                      <span
+                        className={cn(
+                          'ml-auto text-[11px] font-semibold px-1.5 py-0.5 rounded-md',
+                          isActive
+                            ? 'bg-(--bd-card) text-primary-600'
+                            : 'bg-(--bd-border-soft) text-(--bd-fg-muted)',
+                        )}
+                      >
+                        {n.badge}
+                      </span>
+                    )}
+                  </Link>
+                ) : null}
+              </Fragment>
             );
           })}
         </nav>
@@ -348,6 +393,8 @@ function SidebarPanel({
 /** What {@link AppSidebar} shows. */
 export interface AppSidebarProps {
   nav: NavItem[];
+  /** Show the "Overview" label above the links; defaults to true. */
+  overviewLabel?: boolean;
   /** Under the brand name when the brand has no logo, e.g. "Aggregator Portal". */
   portalLabel: string;
   account: SidebarAccount;
@@ -365,7 +412,7 @@ export interface AppSidebarProps {
  *
  * @param props - The links, the label under the brand and the account card.
  */
-export function AppSidebar({ nav, portalLabel, account }: AppSidebarProps) {
+export function AppSidebar({ nav, overviewLabel = true, portalLabel, account }: AppSidebarProps) {
   const t = useTranslations('nav');
   const pathname = usePathname();
   // `mode` picks the dark-theme logo variant; the toggle lives in Topbar.
@@ -456,6 +503,7 @@ export function AppSidebar({ nav, portalLabel, account }: AppSidebarProps) {
         <SidebarPanel
           brand={<BrandMark cfg={cfg} mode={mode} portalLabel={portalLabel} />}
           nav={nav}
+          overviewLabel={overviewLabel}
           account={account}
           pathname={pathname}
           onOpenSupport={openSupport}
@@ -481,6 +529,7 @@ export function AppSidebar({ nav, portalLabel, account }: AppSidebarProps) {
             <SidebarPanel
               brand={<BrandMark cfg={cfg} mode={mode} portalLabel={portalLabel} />}
               nav={nav}
+              overviewLabel={overviewLabel}
               account={account}
               pathname={pathname}
               onNavigate={closeMenu}
