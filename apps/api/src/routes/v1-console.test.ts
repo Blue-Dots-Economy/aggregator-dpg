@@ -35,7 +35,6 @@ import {
   RegistrationInvitesStoreFake,
   _setRegistrationInvitesStore,
 } from '../services/registration-invites-store/index.js';
-import { _setInviteIpRateChecker } from '../services/invite-mint-rate.js';
 import { err } from '@aggregator-dpg/shared-primitives/result';
 import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 
@@ -236,7 +235,6 @@ describe('console routes /v1/user, /v1/org', () => {
     _setSignalStackWriter(new SignalStackWriterFake());
     _setRegistrationInvitesStore(new RegistrationInvitesStoreFake());
     _setConsoleWriteRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
-    _setInviteIpRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
     _setAccessTokenVerifier(async (token) => {
       const claims = TOKENS[token];
       if (!claims) throw new Error('invalid token');
@@ -256,7 +254,6 @@ describe('console routes /v1/user, /v1/org', () => {
     _setSignalStackWriter(null);
     _setRegistrationInvitesStore(null);
     _setConsoleWriteRateChecker(null);
-    _setInviteIpRateChecker(null);
     _setAccessTokenVerifier(null);
     config.RBAC_CUSTOM_ROLES_ENABLED = savedCustomRoles;
   });
@@ -548,49 +545,6 @@ describe('console routes /v1/user, /v1/org', () => {
     });
   });
 
-  describe('POST /v1/user/decision/:id', () => {
-    it('lets the owner approve its coordinator, then answers ALREADY_DECIDED', async () => {
-      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({ id: C1, status: 'active' });
-      const row = await coordinators.findById(C1);
-      expect(row.ok && row.value?.status).toBe('active');
-      expect(row.ok && row.value?.updatedBy).toBe(OWNER_A);
-
-      const again = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'reject' });
-      expect(again.statusCode).toBe(409);
-      const err = (again.json() as { error: { code: string; fields: Record<string, unknown> } })
-        .error;
-      expect(err.code).toBe('ALREADY_DECIDED');
-      expect(err.fields).toMatchObject({ status: 'active', decided_by: 'console' });
-    });
-
-    it("answers 404 for another org's coordinator", async () => {
-      const res = await post(`/v1/user/decision/${C2}`, 'a', { decision: 'approve' });
-      expect(res.statusCode).toBe(404);
-      const row = await coordinators.findById(C2);
-      expect(row.ok && row.value?.status).toBe('pending');
-    });
-
-    it("does not let the network admin decide another org's coordinator (404)", async () => {
-      const res = await post(`/v1/user/decision/${C2}`, 'na', {
-        decision: 'reject',
-        reason: 'incomplete',
-      });
-      expect(res.statusCode).toBe(404);
-      const row = await coordinators.findById(C2);
-      expect(row.ok && row.value?.status).toBe('pending');
-      expect(mailer.outbox.find((m) => m.to === 'b@b.org')).toBeUndefined();
-    });
-
-    it('answers 429 when the console write budget is spent', async () => {
-      _setConsoleWriteRateChecker(async () => ({ allowed: false, retryAfterSeconds: 30 }));
-      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
-      expect(res.statusCode).toBe(429);
-      expect(res.headers['retry-after']).toBe('30');
-    });
-  });
-
   describe('PATCH /v1/user/metadata/update/:id', () => {
     it('sets the served domains', async () => {
       const res = await patch(`/v1/user/metadata/update/${C3}`, 'a', { serves: ['seeker'] });
@@ -609,9 +563,9 @@ describe('console routes /v1/user, /v1/org', () => {
     });
   });
 
-  describe('POST /v1/user/create (invite)', () => {
+  describe('POST /v1/user/invite (Default org)', () => {
     it('invites into the owner’s org', async () => {
-      const res = await post('/v1/user/create', 'a', {
+      const res = await post('/v1/user/invite', 'a', {
         org_id: ORG_A,
         recipients: [{ email: 'new@x.org' }],
       });
@@ -620,7 +574,7 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('answers 404 for an org out of reach', async () => {
-      const res = await post('/v1/user/create', 'a', {
+      const res = await post('/v1/user/invite', 'a', {
         org_id: ORG_B,
         recipients: [{ email: 'new@x.org' }],
       });
@@ -628,7 +582,7 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('refuses the Default org, even for the network admin (R8)', async () => {
-      const res = await post('/v1/user/create', 'na', {
+      const res = await post('/v1/user/invite', 'na', {
         org_id: DEFAULT,
         recipients: [{ email: 'new@x.org' }],
       });
@@ -1710,10 +1664,8 @@ describe('console routes /v1/user, /v1/org', () => {
       expect((res.json() as Users).users).toEqual([]);
     });
 
-    it("neither reads nor decides a child org's coordinator (404)", async () => {
+    it("does not read a child org's coordinator (404)", async () => {
       expect((await get(`/v1/user/read/${C2}`, 'a')).statusCode).toBe(404);
-      const decide = await post(`/v1/user/decision/${C2}`, 'a', { decision: 'approve' });
-      expect(decide.statusCode).toBe(404);
     });
 
     it('sees nothing of a sibling org', async () => {
@@ -1724,12 +1676,9 @@ describe('console routes /v1/user, /v1/org', () => {
     });
   });
 
-  describe('POST /v1/org/decision/:id and access repair', () => {
-    it("is the parent's owner's only, for decisions and repair", async () => {
+  describe('POST /v1/org/access/repair/:id', () => {
+    it("is the parent's owner's only, for repair", async () => {
       // Pending Org and Alpha sit under the network, so only the network admin acts on them.
-      expect(
-        (await post(`/v1/org/decision/${ORG_P}`, 'a', { decision: 'approve' })).statusCode,
-      ).toBe(404);
       expect((await post(`/v1/org/access/repair/${ORG_A}`, 'a', {})).statusCode).toBe(404);
     });
 
@@ -1753,66 +1702,11 @@ describe('console routes /v1/user, /v1/org', () => {
       expect(active.owner.contact.email).not.toBe('p@p.org');
     });
 
-    it("lets a parent org's owner decide its direct child, and nobody else", async () => {
-      await setOrg(ORG_P, { parentId: ORG_A, parentName: 'Alpha', depth: 2 });
-      // The network admin does not see an org two levels down.
-      expect(
-        (await post(`/v1/org/decision/${ORG_P}`, 'na', { decision: 'approve' })).statusCode,
-      ).toBe(404);
-      expect(
-        (await post(`/v1/org/decision/${ORG_P}`, 'b', { decision: 'approve' })).statusCode,
-      ).toBe(404);
-      const res = await post(`/v1/org/decision/${ORG_P}`, 'a', { decision: 'approve' });
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({ id: ORG_P, status: 'active' });
-    });
-
-    it('refuses a rejection without a reason (400) and leaves the org pending', async () => {
-      const res = await post(`/v1/org/decision/${ORG_P}`, 'na', { decision: 'reject' });
-      expect(res.statusCode).toBe(400);
-      const row = await orgs.findById(ORG_P);
-      expect(row.ok && row.value?.status).toBe('pending');
-    });
-
-    it('approves a pending org, then answers ALREADY_DECIDED', async () => {
-      const res = await post(`/v1/org/decision/${ORG_P}`, 'na', { decision: 'approve' });
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({ id: ORG_P, status: 'active', owner_access: 'no_login' });
-      const again = await post(`/v1/org/decision/${ORG_P}`, 'na', {
-        decision: 'reject',
-        reason: 'duplicate',
-      });
-      expect(again.statusCode).toBe(409);
-      expect(
-        (again.json() as { error: { fields: { decided_by: string } } }).error.fields.decided_by,
-      ).toBe('console');
-    });
-
     it("repairs an active org's owner access", async () => {
       await idp.createUser({ email: 'a@a.org', enabled: false, attributes: {} });
       const res = await post(`/v1/org/access/repair/${ORG_A}`, 'na', {});
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ id: ORG_A });
-    });
-
-    it('rejects a pending org (inactive, owner_access none) and notes the reason', async () => {
-      const res = await post(`/v1/org/decision/${ORG_P}`, 'na', {
-        decision: 'reject',
-        reason: 'duplicate',
-      });
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({ id: ORG_P, status: 'inactive', owner_access: 'none' });
-    });
-
-    it('answers 404 when the org to decide does not exist', async () => {
-      const res = await post(`/v1/org/decision/${ORG_X}`, 'na', { decision: 'approve' });
-      expect(res.statusCode).toBe(404);
-    });
-
-    it('answers 503 when the decision store is unavailable', async () => {
-      orgs.findById = async () => storeErr();
-      const res = await post(`/v1/org/decision/${ORG_P}`, 'na', { decision: 'approve' });
-      expect(res.statusCode).toBe(503);
     });
 
     it('refuses access repair on a non-active org (409)', async () => {
@@ -1842,7 +1736,7 @@ describe('console routes /v1/user, /v1/org', () => {
     });
 
     it('404 when inviting into an org that does not exist (loadOrg)', async () => {
-      const res = await post('/v1/user/create', 'na', {
+      const res = await post('/v1/user/invite', 'na', {
         org_id: ORG_X,
         recipients: [{ email: 'new@x.org' }],
       });
@@ -1851,7 +1745,7 @@ describe('console routes /v1/user, /v1/org', () => {
 
     it('503 when loading the invite org fails (loadOrg)', async () => {
       orgs.findById = async () => storeErr();
-      const res = await post('/v1/user/create', 'na', {
+      const res = await post('/v1/user/invite', 'na', {
         org_id: DEFAULT,
         recipients: [{ email: 'new@x.org' }],
       });
@@ -1946,7 +1840,7 @@ describe('console routes /v1/user, /v1/org', () => {
   describe('v1-user: too-many-recipients', () => {
     it('400 when a request carries more than the per-request recipient cap', async () => {
       const recipients = Array.from({ length: 11 }, (_, i) => ({ email: `r${i}@x.org` }));
-      const res = await post('/v1/user/create', 'a', { org_id: ORG_A, recipients });
+      const res = await post('/v1/user/invite', 'a', { org_id: ORG_A, recipients });
       expect(res.statusCode).toBe(400);
     });
   });
@@ -1998,81 +1892,7 @@ describe('console routes /v1/user, /v1/org', () => {
     });
   });
 
-  describe('v1-user: decision-failure outcomes (console-shared throwDecisionFailure)', () => {
-    it('409 TARGET_ORG_INACTIVE when the coordinator org is no longer active', async () => {
-      // The owner still holds Alpha when the request starts; it is no longer active by the decision.
-      const active = await orgs.findById(ORG_A);
-      if (!active.ok || !active.value) throw new Error('seed');
-      vi.spyOn(orgs, 'listOwnedBy').mockResolvedValue({ ok: true, value: [active.value] });
-      orgs.seed([
-        buildOrganisation({
-          id: ORG_A,
-          slug: 'org-a',
-          displayName: 'Alpha',
-          status: 'pending',
-          ownerUserId: OWNER_A,
-          ownerEmail: 'a@a.org',
-          ownerKcSub: 'sub-a',
-        }),
-      ]);
-      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
-      expect(res.statusCode).toBe(409);
-      expect((res.json() as { error: { code: string } }).error.code).toBe('TARGET_ORG_INACTIVE');
-    });
-
-    it('502 SIGNALSTACK_PUSH_FAILED when the approval push fails', async () => {
-      const ss = new SignalStackWriterFake();
-      ss.upsertAggregator = async () => err(new UpstreamError('down', { code: 'SS_DOWN' }));
-      _setSignalStackWriter(ss);
-      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
-      expect(res.statusCode).toBe(502);
-    });
-
-    it('503 IDP_UNAVAILABLE when enabling the Keycloak user fails on approval', async () => {
-      idp.enableUser = async () => ({
-        ok: false,
-        error: { code: 'IDP_UNAVAILABLE', message: 'kc down' },
-      });
-      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
-      expect(res.statusCode).toBe(503);
-    });
-
-    it('503 DB_UNAVAILABLE when the approval compare-and-set fails', async () => {
-      coordinators.approveFromPending = async () => storeErr();
-      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
-      expect(res.statusCode).toBe(503);
-    });
-
-    it('404 NOT_FOUND when the identity record is missing at decision time', async () => {
-      idp.findByAttribute = async () => ({ ok: true, value: null });
-      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
-      expect(res.statusCode).toBe(404);
-    });
-  });
-
   describe('console-shared notice and wire mapping edges', () => {
-    it('still succeeds when the owner-notice email fails to send', async () => {
-      mailer.send = async () => ({
-        ok: false,
-        error: { code: 'TRANSPORT_FAILED', message: 'smtp down' },
-      });
-      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'reject', reason: 'x' });
-      expect(res.statusCode).toBe(200);
-    });
-
-    it('skips the owner notice when the network admin acts in an org it owns', async () => {
-      coordinators.seed([coordinator(C7, DEFAULT, 'pending', 7)]);
-      await idp.createUser({
-        email: 'c7@x.org',
-        enabled: false,
-        attributes: { [KC_ATTR.AGGREGATOR_ID]: C7 },
-      });
-      const res = await post(`/v1/user/decision/${C7}`, 'na', { decision: 'reject' });
-      expect(res.statusCode).toBe(200);
-      // The Default org's owner is the network admin; no self-notice is sent.
-      expect(mailer.outbox.find((m) => m.to === 'na@net.org')).toBeUndefined();
-    });
-
     it('maps a rejected coordinator with a sparse contact onto the wire', async () => {
       coordinators.seed([
         {
@@ -2200,40 +2020,11 @@ describe('console routes /v1/user, /v1/org', () => {
     const permissionOf = (res: { json(): unknown }) =>
       (res.json() as { error: { fields?: { permission?: string } } }).error.fields?.permission;
 
-    it('lets an aggregator owner approve its coordinator (org.manage)', async () => {
-      const res = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'approve' });
-      expect(res.statusCode).toBe(200);
-    });
-
     // Route permission, decided at the edge: policy/rbac/edge_test.rego (test_real_table_*).
 
     it('lets the network admin repair access', async () => {
       await idp.createUser({ email: 'a@a.org', enabled: false, attributes: {} });
       expect((await post(`/v1/org/access/repair/${ORG_A}`, 'na', {})).statusCode).toBe(200);
-    });
-
-    it('lets an owner decide its child org with orgs.onboard in the parent', async () => {
-      await setOrg(ORG_P, { parentId: ORG_A, parentName: 'Alpha', depth: 2 });
-      const res = await post(`/v1/org/decision/${ORG_P}`, 'a', { decision: 'approve' });
-      expect(res.statusCode).toBe(200);
-    });
-
-    it('refuses the decision when the parent org does not grant orgs.onboard', async () => {
-      await setOrg(ORG_P, { parentId: ORG_A, parentName: 'Alpha', depth: 2 });
-      _setRbacRuntime({
-        ...(await testRbacRuntime('enforce')),
-        roles: indexRoles(
-          (await shippedRoles()).map((r) =>
-            r.key === 'org_admin'
-              ? { ...r, permissions: r.permissions.filter((c) => c !== 'orgs.onboard') }
-              : r,
-          ),
-        ),
-      });
-      const res = await post(`/v1/org/decision/${ORG_P}`, 'a', { decision: 'approve' });
-      expect([403, 404]).toContain(res.statusCode);
-      const row = await orgs.findById(ORG_P);
-      expect(row.ok && row.value?.status).toBe('pending');
     });
 
     it('lets a signed-in coordinator read itself', async () => {
@@ -2484,19 +2275,6 @@ describe('console routes /v1/user, /v1/org', () => {
         expect(res.statusCode).toBe(404);
       });
 
-      it('revokes a coordinator’s additional roles when it is rejected', async () => {
-        expect((await assign('a', C1, { role_key: 'data_export', org_id: ORG_A })).statusCode).toBe(
-          200,
-        );
-        const decided = await post(`/v1/user/decision/${C1}`, 'a', { decision: 'reject' });
-        expect(decided.statusCode).toBe(200);
-        const store = getRoleStore() as InMemoryRoleStore;
-        expect(store.assignments.filter((r) => r.userId === C1 && r.revokedAt === null)).toEqual(
-          [],
-        );
-        expect(store.audit.map((e) => e.event)).toContain('role.revoke_on_leave');
-      });
-
       // #873: the coordinator list shows who holds which additional role.
       const rolesById = async (who: keyof typeof TOKENS) => {
         const res = await post('/v1/user/search', who, {});
@@ -2566,32 +2344,6 @@ describe('console routes /v1/user, /v1/org', () => {
           .sort((x, y) => x.localeCompare(y));
       };
       const C9 = '00000000-0000-4000-8000-0000000000c9';
-
-      it('lets the network admin view and change only its own org’s coordinators', async () => {
-        coordinators.seed([coordinator(C9, DEFAULT, 'pending', 9)]);
-        await idp.createUser({
-          email: 'c9@x.org',
-          enabled: false,
-          attributes: { [KC_ATTR.AGGREGATOR_ID]: C9 },
-        });
-        expect(await searchIds('na')).toEqual([C9]);
-        expect((await get(`/v1/user/read/${C3}`, 'na')).statusCode).toBe(404);
-        // Its own (Default) org: the network admin still decides.
-        expect(
-          (await post(`/v1/user/decision/${C9}`, 'na', { decision: 'reject' })).statusCode,
-        ).toBe(200);
-        expect(
-          (await post(`/v1/user/decision/${C1}`, 'na', { decision: 'approve' })).statusCode,
-        ).toBe(404);
-        expect(
-          (await patch(`/v1/user/metadata/update/${C3}`, 'na', { serves: [] })).statusCode,
-        ).toBe(404);
-        const invite = await post('/v1/user/create', 'na', {
-          org_id: ORG_A,
-          recipients: [{ email: 'new@x.org' }],
-        });
-        expect(invite.statusCode).toBe(404);
-      });
 
       it('limits an owner’s view to its own coordinators', async () => {
         coordinators.seed([coordinator(C9, DEFAULT, 'pending', 9)]);

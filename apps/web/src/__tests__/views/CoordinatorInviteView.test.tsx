@@ -69,7 +69,10 @@ describe('<CoordinatorInviteView />', () => {
   ] as const)('explains a %s invite and offers sign-in, without the form', (reason, text) => {
     renderView({ ok: false, reason });
     expect(screen.getByText(new RegExp(text.replace(/[.()]/g, '\\$&')))).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login');
+    // The shell's "Already registered? Sign in" link and the message's own link.
+    for (const link of screen.getAllByRole('link', { name: 'Sign in' })) {
+      expect(link).toHaveAttribute('href', '/login');
+    }
     expect(screen.queryByTestId('coordinator-form')).not.toBeInTheDocument();
   });
 });

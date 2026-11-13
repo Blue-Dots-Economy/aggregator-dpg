@@ -4,24 +4,29 @@ import { useTranslations } from 'next-intl';
 import { RegisterPageShell } from './RegisterPageShell';
 import type { InviteReadFailure } from '../../../lib/invite-read.server';
 
-/** Copy key for each reason an invite cannot be used. */
-const MESSAGE_KEY: Readonly<Record<InviteReadFailure, string>> = {
+/** Why a registration page shows no form: the invite cannot be used, there is no invite, or an old grant link. */
+export type RegistrationBlock = InviteReadFailure | 'invite_only' | 'grant_retired';
+
+/** Copy key for each reason. */
+const MESSAGE_KEY: Readonly<Record<RegistrationBlock, string>> = {
   invalid: 'invite_invalid',
   expired: 'invite_expired',
   used: 'invite_used',
   org_inactive: 'invite_org_inactive',
   unavailable: 'invite_unavailable',
+  invite_only: 'invite_only',
+  grant_retired: 'grant_retired',
 };
 
 /**
- * Explains why an invite link cannot be used, with a sign-in link.
+ * Explains why there is no registration form here, with a sign-in link.
  *
- * @param props.reason - Why the invite read failed.
+ * @param props.reason - Why the page shows no form.
  * @returns The invite page body for an unusable link.
  */
 export function InviteUnavailable({
   reason,
-}: Readonly<{ reason: InviteReadFailure }>): JSX.Element {
+}: Readonly<{ reason: RegistrationBlock }>): JSX.Element {
   const t = useTranslations('register');
   return (
     <RegisterPageShell heading={t('invite_heading_invalid')}>

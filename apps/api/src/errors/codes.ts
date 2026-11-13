@@ -346,37 +346,6 @@ export const ERR = {
     hint: 'mailer.send returned non-ok. Check SMTP config + provider response.',
   },
 
-  // ── Approval flow ───────────────────────────────────────────────────────
-  APPROVAL_TOKEN_INVALID: {
-    code: 'APPROVAL_TOKEN_INVALID',
-    status: 400,
-    title: 'Invalid approval link',
-    detail: 'This approval link is malformed or has been tampered with.',
-    hint: 'JWT verification failed. Check signing key rotation.',
-  },
-  APPROVAL_TOKEN_EXPIRED: {
-    code: 'APPROVAL_TOKEN_EXPIRED',
-    status: 410,
-    title: 'Approval link expired',
-    detail: 'This approval link has expired. Ask the applicant to resubmit.',
-    hint: 'JWT exp in past. TTL is 1h.',
-  },
-  APPROVAL_TOKEN_USED: {
-    code: 'APPROVAL_TOKEN_USED',
-    status: 409,
-    title: 'Already processed',
-    detail: 'This registration has already been approved or rejected.',
-    hint: 'Decision row exists. Single-use token replayed.',
-  },
-
-  ALREADY_DECIDED: {
-    code: 'ALREADY_DECIDED',
-    status: 409,
-    title: 'Already decided',
-    detail: 'This registration has already been approved or rejected.',
-    hint: 'Decision compare-and-set lost (decided by an emailed link or another console session). `fields` carries status, decided_at, decided_by.',
-  },
-
   // ── Generic resource ────────────────────────────────────────────────────
   NOT_FOUND: {
     code: 'NOT_FOUND',
@@ -397,7 +366,7 @@ export const ERR = {
     status: 409,
     title: 'Already an organisation owner',
     detail:
-      'This email or phone already belongs to an organisation owner. Request coordinator access from your organisation instead of registering again.',
+      'This email or phone already belongs to an organisation owner. Ask your organisation to invite you as a user instead of registering again.',
     hint: "Coordinator submit matched an org owner's email (the owner's admin account contact; spec A4). Owner→coordinator graduation is deferred.",
   },
   ORG_SLUG_TAKEN: {
@@ -445,20 +414,11 @@ export const ERR = {
     detail: 'An organisation cannot be moved under itself or an organisation below it.',
     hint: 'Store PARENT_CYCLE: the requested parent is the org or one of its descendants.',
   },
-  REGISTRATION_COOLING: {
-    code: 'REGISTRATION_COOLING',
-    status: 409,
-    title: 'Please try again later',
-    detail:
-      'A recent registration with these details was declined. You can register again after the cooling period.',
-    hint: 'A rejected record for this email/phone/owner_email exists and now - rejected_at < REGISTRATION_COOLING_MINUTES. See response.error.fields.retry_after for the ISO timestamp.',
-  },
   TARGET_ORG_INACTIVE: {
     code: 'TARGET_ORG_INACTIVE',
     status: 409,
     title: 'Organisation unavailable',
-    detail:
-      'The selected organisation is not accepting coordinators. Contact the organisation owner.',
+    detail: 'The selected organisation is not accepting users. Contact the organisation owner.',
     hint: 'Coordinator submit/approval against an org whose status != active (spec §6.2 re-validate).',
   },
 
@@ -467,7 +427,7 @@ export const ERR = {
     status: 409,
     title: 'Organisation details are read-only here',
     detail:
-      "url, locations, company and GST number belong to the coordinator's organisation and cannot be changed from the coordinator profile.",
+      "url, locations, company and GST number belong to the user's organisation and cannot be changed from the user profile.",
     hint: 'Profile PATCH carried an org-detail field (migration 0028); the org owner edits them. `fields.fields` lists the offending keys.',
   },
 
@@ -513,20 +473,6 @@ export const ERR = {
     title: 'Nothing to activate',
     detail: 'This account was not created from an invitation, or it has already been decided.',
     hint: 'Keycloak decision_made is not "invited", or the coordinator / org row is not pending.',
-  },
-  GRANT_INVALID: {
-    code: 'GRANT_INVALID',
-    status: 400,
-    title: 'Invalid link',
-    detail: 'This invite-management link is not valid. Use the link from your approval email.',
-    hint: 'grant-token signature/audience/sub verify failed (aggregator-grant).',
-  },
-  GRANT_EXPIRED: {
-    code: 'GRANT_EXPIRED',
-    status: 410,
-    title: 'Link expired',
-    detail: 'This invite-management link has expired. Request a fresh link to continue.',
-    hint: 'grant-token exp elapsed (GRANT_TOKEN_TTL_SECONDS). Recovery re-mails a fresh grant to the registered owner (§6).',
   },
 
   // ── Bulk uploads ────────────────────────────────────────────────────────

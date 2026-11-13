@@ -40,7 +40,10 @@ beforeEach(() => {
   redirect.mockClear();
   notFound.mockClear();
   loadOrgSchema.mockReset().mockResolvedValue({ schema: orgSchema, uiSchema: {} });
-  readInvite.mockReset();
+  readInvite.mockReset().mockResolvedValue({
+    ok: true,
+    invite: { email: 'ravi@enable.org', expires_at: 'x', org: { id: 'p1', name: 'Parent Org' } },
+  });
   loadConsentContent.mockReset().mockResolvedValue({
     aggregator: { terms: {}, privacy: {} },
     org: { terms: { version: 1, title: 'T', content: 'T' }, privacy: {} },
@@ -66,15 +69,20 @@ describe('OwnerRegisterPage (server component)', () => {
 
   it('404s when the org schema is missing', async () => {
     loadOrgSchema.mockResolvedValue(null);
-    expect(await runAndCatch()).toBe('NOT_FOUND');
+    expect(await runAndCatch({ invite: 'tok' })).toBe('NOT_FOUND');
     expect(notFound).toHaveBeenCalled();
   });
 
-  it('renders OwnerRegisterView with the org schema + org consent on the happy path', async () => {
+  it('says onboarding is by invitation only without an invite, reading nothing', async () => {
     const el = await OwnerRegisterPage({ searchParams: Promise.resolve({}) });
-    expect(el.props.schema).toBe(orgSchema);
-    expect(el.props.invite).toBeUndefined();
+    expect(el.props).toEqual({ reason: 'invite_only' });
     expect(readInvite).not.toHaveBeenCalled();
+    expect(loadOrgSchema).not.toHaveBeenCalled();
+  });
+
+  it('renders OwnerRegisterView with the org schema + org consent on the happy path', async () => {
+    const el = await OwnerRegisterPage({ searchParams: Promise.resolve({ invite: 'tok' }) });
+    expect(el.props.schema).toBe(orgSchema);
     expect(el.props.uiSchema).toEqual({});
     expect(el.props.orgConsentContent).toEqual({
       terms: { version: 1, title: 'T', content: 'T' },

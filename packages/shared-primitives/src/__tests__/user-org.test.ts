@@ -5,7 +5,6 @@ import {
   PersonContactSchema,
   CursorSchema,
   PageLimitSchema,
-  DecisionReasonSchema,
   UserSchema,
   MeOrgSchema,
   MeResponseSchema,
@@ -13,16 +12,12 @@ import {
   UserSearchResponseSchema,
   UserInviteRequestSchema,
   UserInviteResponseSchema,
-  DecisionRequestSchema,
-  DecisionResponseSchema,
-  OrgDecisionRequestSchema,
   UserMetadataUpdateRequestSchema,
   OrgSchema,
   OrgReadResponseSchema,
   OrgSearchRequestSchema,
   OrgSearchResponseSchema,
   OrgMetadataUpdateRequestSchema,
-  OrgDecisionResponseSchema,
   OrgHierarchyResponseSchema,
   OrgParentUpdateRequestSchema,
   OrgParentOptionsResponseSchema,
@@ -67,9 +62,6 @@ describe('user-org wire schemas', () => {
     expect(PageLimitSchema.safeParse(0).success).toBe(false);
     expect(PageLimitSchema.safeParse(101).success).toBe(false);
     expect(PageLimitSchema.parse(100)).toBe(100);
-    expect(DecisionReasonSchema.parse('  spam  ')).toBe('spam');
-    expect(DecisionReasonSchema.safeParse('   ').success).toBe(false);
-    expect(DecisionReasonSchema.safeParse('x'.repeat(501)).success).toBe(false);
   });
 
   it('parses a coordinator User and the me response', () => {
@@ -140,20 +132,7 @@ describe('user-org wire schemas', () => {
     ).toBeTruthy();
   });
 
-  it('validates decisions and the metadata updates', () => {
-    expect(DecisionRequestSchema.parse({ decision: 'approve' })).toBeTruthy();
-    expect(DecisionRequestSchema.parse({ decision: 'reject', reason: 'dup' })).toBeTruthy();
-    expect(DecisionRequestSchema.safeParse({ decision: 'maybe' }).success).toBe(false);
-    expect(OrgDecisionRequestSchema.parse({ decision: 'approve' })).toBeTruthy();
-    expect(OrgDecisionRequestSchema.parse({ decision: 'reject', reason: 'dup' })).toBeTruthy();
-    expect(OrgDecisionRequestSchema.safeParse({ decision: 'reject' }).success).toBe(false);
-    expect(OrgDecisionRequestSchema.safeParse({ decision: 'reject', reason: '  ' }).success).toBe(
-      false,
-    );
-    expect(
-      DecisionResponseSchema.parse({ id: 'u1', status: 'active', notified: true }),
-    ).toBeTruthy();
-
+  it('validates the metadata updates', () => {
     expect(UserMetadataUpdateRequestSchema.parse({ serves: ['agri', 'edu'] })).toBeTruthy();
     expect(UserMetadataUpdateRequestSchema.parse({ serves: [] })).toBeTruthy();
     expect(UserMetadataUpdateRequestSchema.safeParse({ serves: Array(51).fill('x') }).success).toBe(
@@ -393,15 +372,7 @@ describe('user-org wire schemas', () => {
     }
   });
 
-  it('parses the org decision and owner-access responses', () => {
-    expect(
-      OrgDecisionResponseSchema.parse({
-        id: 'o1',
-        status: 'active',
-        notified: true,
-        owner_access: 'granted',
-      }),
-    ).toBeTruthy();
+  it('parses the owner-access response', () => {
     expect(
       OwnerAccessResponseSchema.parse({
         id: 'o1',

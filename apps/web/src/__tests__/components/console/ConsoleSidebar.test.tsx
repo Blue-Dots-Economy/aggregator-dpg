@@ -63,6 +63,18 @@ describe('<ConsoleSidebar />', () => {
     expect(within(aside()).getByText('nav.portal_label')).toBeInTheDocument();
   });
 
+  it('folds My Blue Dots away and opens it again from its heading', () => {
+    render(<ConsoleSidebar teamHref="/console" showProfile account={account} />);
+    const group = within(aside()).getByRole('button', { name: 'nav.my_blue_dots' });
+    expect(group).toHaveAttribute('aria-expanded', 'true');
+    expect(within(aside()).queryByText('overview')).toBeNull();
+    fireEvent.click(group);
+    expect(group).toHaveAttribute('aria-expanded', 'false');
+    expect(within(aside()).queryByRole('link', { name: 'nav.my_team' })).toBeNull();
+    fireEvent.click(group);
+    expect(within(aside()).getByRole('link', { name: 'nav.my_team' })).toBeInTheDocument();
+  });
+
   it('gives the network admin no My Team and no Profile, and never roles and permissions', () => {
     render(<ConsoleSidebar teamHref={null} showProfile={false} account={account} />);
     expect(links()).toEqual([
@@ -71,6 +83,7 @@ describe('<ConsoleSidebar />', () => {
     ]);
     expect(within(aside()).queryByText('nav.my_blue_dots')).toBeNull();
     expect(within(aside()).queryByText('nav.access')).toBeNull();
+    expect(within(aside()).queryByText('overview')).toBeNull();
   });
 
   it('marks My Team active only on /console itself when it is the home page', () => {

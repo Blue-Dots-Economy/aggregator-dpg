@@ -42,53 +42,17 @@
   },
   "register": {
     "heading_tagline": "Tell us about your [[org]].",
-    "success_heading": "Application received",
-    "success_ref_id": "Reference ID:",
-    "success_approval": "The {brand} team will review your application. Once approved, sign in via {brand} SSO using the email or mobile you registered.",
     "submit": "Register as [[user]]",
     "submitting": "Submitting…",
     "validation_error_title": "Please fix the highlighted fields",
     "page_title": "[[User]] Registration",
     "org_page_title": "[[Org]] Registration",
-    "owner_invite": {
-      "page_title": "Invite [[users]]",
-      "heading": "Invite your [[users]]",
-      "email_label": "[[User]] email {n}",
-      "name_label": "[[User]] name {n} (optional)",
-      "remove_label": "Remove [[user]] {n}"
-    },
-    "tab_coordinator": "Register as [[User]]",
-    "tab_org": "Register [[Org]]",
-    "org_selector_label": "[[Org]]",
-    "org_selector_placeholder": "Select your [[org]]",
-    "org_selector_loading": "Loading [[orgs]]…",
-    "org_selector_error": "Couldn't load [[orgs]].",
-    "org_selector_retry": "Retry",
-    "coordinator_no_orgs": "No [[orgs]] are live yet. An [[org]] must be registered and approved before [[users]] can join.",
     "org_submit": "Submit [[org]]",
-    "parent_selector_label": "Parent [[org]]",
-    "parent_selector_placeholder": "Select the [[org]] yours belongs under",
-    "parent_selector_error": "Couldn't load [[orgs]].",
-    "parent_selector_required": "Select a parent [[org]].",
-    "parent_child_hint": "Your [[org]] will be known as {name}.",
     "name_symbols": "Please remove these symbols from the name: {symbols}",
-    "org_selector_required": "Select your [[org]].",
-    "parent_top_level": "Top level",
-    "parent_search_placeholder": "Type to search [[orgs]]",
-    "parent_no_match": "No [[orgs]] match.",
-    "closed_title": "Registrations are closed",
-    "closed_detail": "This network is not accepting new [[orgs]] right now. Please check back later.",
     "org_error_depth_limit": "[[Orgs]] can't be registered under the selected parent [[org]]. Choose another one.",
     "org_error_child_limit": "The selected parent [[org]] is full. Choose another one.",
     "org_error_total_limit": "Registrations are closed. This network is not accepting new [[orgs]] right now.",
     "org_error_conflict": "Your registration changed while it was being processed. Please try again.",
-    "org_error_parent": "The selected parent [[org]] can't take new [[orgs]]. Choose another one.",
-    "org_success_heading": "[[Org]] submitted",
-    "org_success_slug": "[[Org]] reference:",
-    "org_success_review": "Our team will review your [[org]]. You'll be notified once it's approved, after which [[users]] can register under it.",
-    "org_exists_heading": "[[Org]] already registered",
-    "org_exists_link_sent": "This [[org]] is already approved and live, so there's nothing more to do. We've emailed the [[user]] invitation link to the owner address on file — check that inbox, including spam.",
-    "org_exists_mail_failed": "This [[org]] is already approved and live, so there's nothing more to do. We couldn't email the [[user]] invitation link just now — please try again shortly, or contact support.",
     "consent": {
       "accept_prefix": "I have read and accept the ",
       "terms_link": "Terms of Service",
@@ -108,7 +72,10 @@
     "invite_org_inactive": "This invitation can't be used right now. Contact the person who invited you.",
     "invite_unavailable": "We couldn't load your invitation. Please try again in a moment.",
     "invite_sign_in": "Sign in",
-    "invite_org_under": "Your [[org]] will be registered under {parent}."
+    "invite_org_under": "Your [[org]] will be registered under {parent}.",
+    "invite_coordinator_under": "Registering as a [[user]] of {org}.",
+    "invite_only": "Onboarding is by invitation only. Use the link in your invitation email, or sign in if you already have an account.",
+    "grant_retired": "This link no longer works. Sign in to invite people from your console."
   },
   "dashboard": {
     "buckets": {
@@ -582,9 +549,6 @@
     "welcome_sub": "Sign in to your account to continue.",
     "existing_title": "Existing user — Sign in",
     "existing_sub": "Continue with email or mobile via {brand} SSO",
-    "register_title": "Become a member",
-    "register_sub": "Register your [[org]] with {brand}",
-    "review_notice": "New registrations are reviewed by the {brand} team.",
     "session_expired": "Your session expired. Sign in again to continue.",
     "console_not_provisioned": "Your sign-in isn't linked to an account here yet. Contact the network administrator.",
     "console_no_org": "Your account doesn't manage an active [[org]], so there is nothing to show yet.",
@@ -735,9 +699,6 @@
       "tile": {
         "coordinators": "[[Users]]",
         "coordinators_sub": "In this [[org]]",
-        "pending": "Pending review",
-        "pending_sub": "Waiting for the owner",
-        "pending_none": "Nothing to review",
         "children_sub": "Directly below",
         "level": "Level",
         "level_sub": "Steps below the network"
@@ -782,49 +743,35 @@
       "heading": "Onboarded [[Orgs]]",
       "status_filter": "Status",
       "all": "All",
-      "approve": "Approve",
-      "reject": "Reject",
-      "reject_reason": "Reason (required, sent to the applicant)",
-      "reject_confirm": "Reject organisation",
       "repair": "Re-grant owner access",
       "repaired": "Owner access: {status}",
       "empty": "No [[orgs]] match.",
       "subtitle": "The [[orgs]] directly under the network, and the ones you have invited.",
       "col_name": "[[Org]]",
-      "col_known_as": "Known as",
       "col_joined": "Joined",
       "col_status": "Status",
       "col_counts": "[[Users]]",
-      "col_actions": "Actions",
       "hierarchy": "Hierarchy settings",
       "col_parent": "Parent [[org]]",
       "subtitle_owner": "The [[orgs]] directly under yours, and the ones you have invited.",
       "hierarchy_description": "Choose what [[orgs]] directly under {name} are called.",
       "known_as_current": "Known as",
-      "yours": "Your [[org]]",
-      "manage": "Manage [[org]]",
       "tile": {
         "all": {
-          "label": "All [[orgs]]",
-          "sub": "Directly under the network, Default not counted"
+          "label": "[[Orgs]]",
+          "sub": "Invited by you"
         },
         "active": {
           "label": "Active",
-          "sub": "Approved and running"
+          "sub": "Can sign in"
         },
         "pending": {
           "label": "Invited",
           "sub": "Yet to verify with a code",
           "none": "Everyone has verified"
-        },
-        "inactive": {
-          "label": "Rejected",
-          "sub": "Not approved"
         }
       },
       "search": "Search [[orgs]]",
-      "col_view": "Action",
-      "review_heading": "Waiting for your review ({count})",
       "error": {
         "network": "We couldn't reach the server. Check your internet connection and try again.",
         "signed_out": "You've been signed out. Sign in again, then try once more.",
@@ -835,14 +782,9 @@
         "generic": "That didn't work. Please try again."
       },
       "network_note": "The network · you're the network admin",
-      "clear_filter": "Clear filter",
-      "empty_pending": "No [[orgs]] waiting for review.",
-      "review_hint": "When an [[org]] registers under yours, its request appears here for you to approve or reject.",
-      "open": "Open",
       "invite": "Invite [[orgs]]",
-      "col_role": "Role",
-      "col_onboard_participants": "Onboard Seekers & Providers",
-      "col_onboard_orgs": "Onboard [[Orgs]]"
+      "list_heading": "[[Orgs]]",
+      "filter_label": "Show [[orgs]]"
     },
     "coordinators": {
       "heading": "[[Users]]",
@@ -868,11 +810,6 @@
       "clear_all": "Clear filters"
     },
     "coordinator": {
-      "approve": "Approve",
-      "reject": "Reject",
-      "reason": "Reason (optional, sent to the applicant)",
-      "already": "Already decided elsewhere — now {status}.",
-      "decided": "Decision saved.",
       "domains": "Domains served",
       "domains_sub": "Which records this [[user]] can work with.",
       "domains_empty": "Pick at least one domain.",
@@ -885,24 +822,18 @@
       "copy_email": "Copy email",
       "copy_phone": "Copy phone",
       "copied": "Copied",
-      "decision_title": "Waiting for your review",
-      "decision_body": "{name} registered on {date}. Approve to let them sign in, or reject the registration.",
-      "reject_confirm": "Reject registration",
       "cancel": "Cancel",
-      "approved_note": "Approved. They can now sign in.",
-      "rejected_note": "Registration rejected.",
       "registered": "Registered {date}",
       "error": {
         "network": "We couldn't reach the server. Check your internet connection and try again.",
         "signed_out": "You've been signed out. Sign in again, then try once more.",
         "forbidden": "You don't have permission to manage this [[user]].",
         "not_found": "We couldn't find this [[user]]'s account. Refresh the page and try again.",
-        "org_inactive": "This [[org]] isn't active, so its registrations can't be decided right now.",
+        "org_inactive": "This [[org]] isn't active, so changes can't be saved right now.",
         "rate_limited": "Too many changes in a short time. Wait a minute and try again.",
         "server": "Something went wrong on our side. Try again in a few minutes.",
         "generic": "That didn't work. Please try again."
-      },
-      "save_domains_first": "Save or discard your domain changes before deciding."
+      }
     },
     "invite": {
       "heading": "Invite [[users]]",
@@ -1162,7 +1093,7 @@
       "tile": {
         "all": {
           "label": "[[Users]]",
-          "sub": "Across your [[org]]"
+          "sub": "Invited by you"
         },
         "active": {
           "label": "Active",
@@ -1172,10 +1103,6 @@
           "label": "Invited",
           "sub": "Yet to verify with a code",
           "none": "Everyone has verified"
-        },
-        "inactive": {
-          "label": "Rejected",
-          "sub": "Not approved"
         }
       },
       "tile_show": "View list",
@@ -1184,17 +1111,13 @@
       "search": "Search name or email",
       "filter_label": "Show [[users]]",
       "filter_all": "All",
-      "filter_pending": "Pending",
-      "col_coordinator": "[[User]]",
-      "col_organisation": "[[Org]]",
+      "col_name": "[[User]]",
       "col_status": "Status",
       "col_domains": "Domains",
       "col_action": "Action",
       "view": "View",
       "view_named": "View {name}",
-      "review": "Review",
       "empty": "No [[users]] match.",
-      "empty_pending": "No [[users]] waiting for review.",
       "partial": "Showing the newest {count}. <link>See all [[users]]</link>"
     },
     "page_error": {
@@ -1209,15 +1132,13 @@
       "home": "Go to the console"
     },
     "open_invites": {
-      "heading": "Invites not used yet",
-      "col_email": "Email",
-      "col_status": "Status",
-      "col_sent": "Sent",
-      "col_expires": "Expires",
-      "status_pending": "Invited",
-      "status_expired": "Expired, send again",
-      "empty": "Nobody is waiting on an invite.",
-      "more": "Showing the newest {count}."
+      "sent_on": "Invite sent {date}",
+      "expired_on": "Invite expired {date}",
+      "resend": "Resend",
+      "resend_named": "Resend the invite to {email}",
+      "resent": "Sent",
+      "resend_failed": "Couldn't resend. Try again.",
+      "more": "Showing the newest {count} invites."
     },
     "dashboard": {
       "heading": "Dashboard",

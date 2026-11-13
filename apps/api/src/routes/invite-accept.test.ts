@@ -15,7 +15,6 @@ import {
 } from '../services/registration-invites-store/index.js';
 import { IdpAdminFake, _setIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
-import { _resetTokenKey } from '../services/approval-token.js';
 import { mintInviteToken, _resetInviteTokenKey } from '../services/invite-token.js';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
 import { _setSubmitRateChecker } from '../services/submit-rate.js';
@@ -96,7 +95,6 @@ describe('invite read and accept routes', () => {
     (res.json() as { error: { code: string } }).error.code;
 
   beforeEach(async () => {
-    _resetTokenKey();
     _resetInviteTokenKey();
     _resetJwks();
     _setSubmitRateChecker(async () => ({ allowed: true, retryAfterSeconds: 0 }));
@@ -284,6 +282,141 @@ describe('invite read and accept routes', () => {
       ).toBe(201);
       const again = await accept('/v1/user/invite/accept', { ...coordinatorBody, invite: token });
       expect(again.statusCode).toBe(409);
+    });
+
+    it('registers once when the same link is accepted several times at once', async () => {
+      const token = await inviteToken('coordinator');
+      const rs = await Promise.all(
+        [1, 2, 3, 4, 5].map((n) =>
+          accept('/v1/user/invite/accept', {
+            ...coordinatorBody,
+            contact: { ...coordinatorBody.contact, phone: `+91987654321${n}` },
+            invite: token,
+          }),
+        ),
+      );
+      expect(rs.filter((r) => r.statusCode === 201)).toHaveLength(1);
+      for (const r of rs.filter((x) => x.statusCode !== 201)) {
+        expect(r.statusCode).toBe(409);
+        expect(errorCode(r)).toBe('INVITE_ALREADY_USED');
+      }
+      const stored = await userStore.findByContactEmail(COORD_EMAIL);
+      expect(stored.ok && stored.value?.status).toBe('pending');
+      expect(await inviteStatus('inv-coordinator')).toBe('consumed');
+    });
+
+    it('refuses an org owner as a coordinator with 409 OWNER_ALREADY_REGISTERED', async () => {
+      orgStore.seed([
+        buildOrganisation({
+          id: '00000000-0000-4000-8000-0000000000d2',
+          parentId: ROOT,
+          slug: 'owned',
+          status: 'active',
+          ownerEmail: COORD_EMAIL,
+        }),
+      ]);
+      const token = await inviteToken('coordinator');
+      const res = await accept('/v1/user/invite/accept', { ...coordinatorBody, invite: token });
+      expect(res.statusCode).toBe(409);
+      expect(errorCode(res)).toBe('OWNER_ALREADY_REGISTERED');
+      expect(await inviteStatus('inv-coordinator')).toBe('pending');
+    });
+
+    it("refuses the org's url with 409 ORG_DETAILS_READ_ONLY", async () => {
+      const token = await inviteToken('coordinator');
+      const res = await accept('/v1/user/invite/accept', {
+        ...coordinatorBody,
+        url: 'https://trrain.org',
+        invite: token,
+      });
+      expect(res.statusCode).toBe(409);
+      expect(errorCode(res)).toBe('ORG_DETAILS_READ_ONLY');
+    });
+
+    describe("the coordinator's own address (users.locations, 0037)", () => {
+      const picked = {
+        geo: { type: 'Point', coordinates: [77.5946, 12.9716] },
+        address: { streetAddress: 'Bengaluru, Karnataka, India' },
+      };
+
+      const storedLocations = async (res: { json: () => unknown }) => {
+        const id = (res.json() as { aggregator_id: string }).aggregator_id;
+        const row = await userStore.findById(id);
+        return row.ok ? row.value?.locations : undefined;
+      };
+
+      it('stores the picked address and its [lng, lat]', async () => {
+        const token = await inviteToken('coordinator');
+        const res = await accept('/v1/user/invite/accept', {
+          ...coordinatorBody,
+          locations: [picked],
+          invite: token,
+        });
+        expect(res.statusCode).toBe(201);
+        expect(await storedLocations(res)).toEqual([picked]);
+      });
+
+      it('keeps a typed address with the [0,0] placeholder when no place was picked', async () => {
+        const typed = {
+          geo: { type: 'Point', coordinates: [0, 0] },
+          address: { streetAddress: 'Near the bus stand' },
+        };
+        const token = await inviteToken('coordinator');
+        const res = await accept('/v1/user/invite/accept', {
+          ...coordinatorBody,
+          locations: [typed],
+          invite: token,
+        });
+        expect(res.statusCode).toBe(201);
+        expect(await storedLocations(res)).toEqual([typed]);
+      });
+
+      it('stores nothing for an empty location', async () => {
+        const token = await inviteToken('coordinator');
+        const res = await accept('/v1/user/invite/accept', {
+          ...coordinatorBody,
+          locations: [{ geo: { type: 'Point', coordinates: [0, 0] }, address: {} }],
+          invite: token,
+        });
+        expect(res.statusCode).toBe(201);
+        expect(await storedLocations(res)).toEqual([]);
+      });
+
+      it.each([
+        ['latitude out of range', { type: 'Point', coordinates: [77.59, 91] }],
+        ['a non-point geometry', { type: 'Polygon', coordinates: [[77.59, 12.97]] }],
+        ['non-numeric coordinates', { type: 'Point', coordinates: ['77.59', '12.97'] }],
+      ])('refuses %s with 400 SCHEMA_VALIDATION and keeps the invite', async (_label, geo) => {
+        const token = await inviteToken('coordinator');
+        const res = await accept('/v1/user/invite/accept', {
+          ...coordinatorBody,
+          locations: [{ geo, address: { streetAddress: 'Bengaluru' } }],
+          invite: token,
+        });
+        expect(res.statusCode).toBe(400);
+        expect(errorCode(res)).toBe('SCHEMA_VALIDATION');
+        expect(await inviteStatus('inv-coordinator')).toBe('pending');
+      });
+    });
+
+    it.each([
+      ['expired', { status: 'expired' as const }, 410],
+      ['already used', { status: 'consumed' as const }, 409],
+      ['revoked', { status: 'revoked' as const }, 400],
+    ])('refuses an %s invite', async (_label, overrides, status) => {
+      const token = await inviteToken('coordinator', overrides);
+      const res = await accept('/v1/user/invite/accept', { ...coordinatorBody, invite: token });
+      expect(res.statusCode).toBe(status);
+    });
+
+    it('refuses a tampered token with 400 INVITE_INVALID', async () => {
+      const token = await inviteToken('coordinator');
+      const res = await accept('/v1/user/invite/accept', {
+        ...coordinatorBody,
+        invite: `${token.slice(0, -2)}xx`,
+      });
+      expect(res.statusCode).toBe(400);
+      expect(errorCode(res)).toBe('INVITE_INVALID');
     });
 
     it('gives the invite back when Keycloak is down', async () => {

@@ -149,9 +149,6 @@ export const CursorSchema = z.string().min(1).max(512);
 /** Page size of a search, 1..100. */
 export const PageLimitSchema = z.number().int().min(1).max(100);
 
-/** A free-text decision reason, mailed to the applicant; never logged. */
-export const DecisionReasonSchema = z.string().trim().min(1).max(500);
-
 // ─── Users ──────────────────────────────────────────────────────────────────
 
 /** A coordinator as the console shows it. */
@@ -238,7 +235,7 @@ export const InviteRecipientsSchema = z
   .min(1)
   .max(100);
 
-/** `POST /v1/user/invite` and `POST /v1/user/create`: invite coordinators into an org. */
+/** `POST /v1/user/invite`: invite users into an org. */
 export const UserInviteRequestSchema = z
   .object({ org_id: z.string().uuid(), recipients: InviteRecipientsSchema })
   .strict();
@@ -267,7 +264,7 @@ export const UserInviteResponseSchema = z.object({
   sent: z.number().int(),
   resent: z.number().int(),
   invalid: z.array(z.object({ email: z.string(), reason: z.string() })),
-  /** Addresses already coordinators of this org (nothing mailed). */
+  /** Addresses already in this org, or owning an org directly under it (nothing mailed). */
   existing: z.array(z.object({ email: z.string(), status: z.string() })),
 });
 export type UserInviteResponse = z.infer<typeof UserInviteResponseSchema>;
@@ -318,30 +315,6 @@ export type ActivateResponse = z.infer<typeof ActivateResponseSchema>;
 /** `POST /v1/org/invite`; `existing` is always empty. */
 export const OrgInviteResponseSchema = UserInviteResponseSchema;
 export type OrgInviteResponse = z.infer<typeof OrgInviteResponseSchema>;
-
-/** `POST /v1/user/decision/:id` and `POST /v1/org/decision/:id`. */
-export const DecisionRequestSchema = z
-  .object({
-    decision: z.enum(['approve', 'reject']),
-    reason: DecisionReasonSchema.optional(),
-  })
-  .strict();
-export type DecisionRequest = z.infer<typeof DecisionRequestSchema>;
-
-/** `POST /v1/org/decision/:id`: a rejection must give a reason. */
-export const OrgDecisionRequestSchema = DecisionRequestSchema.refine(
-  (d) => d.decision !== 'reject' || d.reason !== undefined,
-  { message: 'Give a reason when rejecting an organisation.', path: ['reason'] },
-);
-export type OrgDecisionRequest = z.infer<typeof OrgDecisionRequestSchema>;
-
-export const DecisionResponseSchema = z.object({
-  id: z.string(),
-  status: UserOrgStatusSchema,
-  /** The applicant / owner was emailed. */
-  notified: z.boolean(),
-});
-export type DecisionResponse = z.infer<typeof DecisionResponseSchema>;
 
 /** `PATCH /v1/user/metadata/update/:id`. */
 export const UserMetadataUpdateRequestSchema = z
@@ -554,12 +527,6 @@ export const OrgKnownAsUpdateResponseSchema = OrgSchema.extend({
   reset_count: z.number().int().nonnegative().optional(),
 });
 export type OrgKnownAsUpdateResponse = z.infer<typeof OrgKnownAsUpdateResponseSchema>;
-
-/** `POST /v1/org/decision/:id` response: adds what owner access achieved. */
-export const OrgDecisionResponseSchema = DecisionResponseSchema.extend({
-  owner_access: z.enum(['granted', 'partial', 'no_login', 'none']),
-});
-export type OrgDecisionResponse = z.infer<typeof OrgDecisionResponseSchema>;
 
 /** `POST /v1/org/access/repair/:id` response. */
 export const OwnerAccessResponseSchema = z.object({

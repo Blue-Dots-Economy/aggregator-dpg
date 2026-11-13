@@ -8,7 +8,6 @@
  *                                       values it defines for its children (the org's owner)
  *   PATCH /v1/org/parent/update/:id     move an org and the orgs below it (network admin)
  *   GET   /v1/org/parent/options/:id    candidate parents for a move (network admin)
- *   POST  /v1/org/decision/:id          approve / reject a pending org (its parent's owner)
  *   POST  /v1/org/access/repair/:id     re-apply the owner's sign-in access (its parent's owner)
  *   GET   /v1/org/hierarchy             the network, its "known as" values and the tree limits (network admin)
  *   POST  /v1/org/invite                invite orgs to register under an org the actor owns
@@ -23,8 +22,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
-  OrgDecisionRequestSchema,
-  OrgDecisionResponseSchema,
   OrgHierarchyQuerySchema,
   OrgHierarchyResponseSchema,
   OrgInviteRequestSchema,
@@ -79,7 +76,7 @@ import { permissionsByOrg } from '../services/authz/guard.js';
 import { getRbacRuntime } from '../services/authz/runtime.js';
 import { reachesOrg } from '../services/authz/scope.js';
 import { isOnlyViewed, viewableOrgIds } from '../services/authz/view-scope.js';
-import { decideOrg, grantOwnerAccess } from '../services/decisions/org.js';
+import { grantOwnerAccess } from '../services/decisions/org.js';
 import { validateOrgUpdate } from '../services/org-schema-validator.js';
 import {
   decodeOrgCursor,
@@ -827,65 +824,6 @@ export function registerV1OrgRoutes(app: FastifyInstance): void {
       const body = req.body as z.infer<typeof OrgInviteSearchRequestSchema>;
       const parent = await invitingParent(req, actor, body.parent_id);
       return reply.status(200).send(await searchOpenInvites(parent.id, 'org_owner', body));
-    },
-  );
-
-  app.post(
-    '/v1/org/decision/:id',
-    {
-      config: { rbac: { capability: 'orgs.onboard' } },
-      schema: {
-        tags: ['console'],
-        summary: "Approve or reject a pending organisation (its parent's owner)",
-        description:
-          "Only the owner of the organisation's parent decides: the network admin for a top-level organisation, else the owner of the parent organisation. Anyone else gets 404. A rejection must give a reason (400 SCHEMA_VALIDATION otherwise). The same compare-and-set service as the emailed review link. Approval enables the owner's sign-in (owner_access reports how far it got; repair re-runs it).",
-        params: IdParamsSchema,
-        body: OrgDecisionRequestSchema,
-        response: {
-          200: OrgDecisionResponseSchema,
-          ...errorResponses(400, 401, 403, 404, 409, 429, 503),
-        },
-      },
-    },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof OrgDecisionRequestSchema>;
-      const found = await getOrganisationStore().findById(id);
-      if (!found.ok) dbDown('orgStore.findById', found.error.message);
-      if (!found.value || !(await decidesFor(req, actor, found.value))) {
-        throw httpError('NOT_FOUND');
-      }
-      await guardWriteRate(actor, reply);
-
-      const outcome = await decideOrg({
-        orgId: id,
-        decision: body.decision,
-        ...(body.reason ? { reason: body.reason } : {}),
-        decidedBy: actor.userId,
-        log: req.log.child({ actor_id: actor.userId }),
-      });
-      switch (outcome.kind) {
-        case 'decided':
-          return reply.status(200).send({
-            id,
-            status: outcome.decision === 'approve' ? 'active' : 'inactive',
-            notified: outcome.notified,
-            owner_access: outcome.decision === 'approve' ? outcome.ownerAccess.status : 'none',
-          });
-        case 'already_decided':
-          throw httpError('ALREADY_DECIDED', {
-            fields: {
-              status: outcome.status,
-              decided_at: outcome.decidedAt.toISOString(),
-              decided_by: outcome.decidedBy,
-            },
-          });
-        case 'not_found':
-          throw httpError('NOT_FOUND');
-        case 'unavailable':
-          throw httpError('DB_UNAVAILABLE');
-      }
     },
   );
 

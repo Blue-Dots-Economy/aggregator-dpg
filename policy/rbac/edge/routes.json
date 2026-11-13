@@ -7,20 +7,6 @@
   "routes": [
     {
       "method": "GET",
-      "path": "/admin/v1/aggregator-registrations/read/:id",
-      "access": {
-        "access": "link_token"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/admin/v1/orgs/read/:id",
-      "access": {
-        "access": "link_token"
-      }
-    },
-    {
-      "method": "GET",
       "path": "/health/live",
       "access": {
         "access": "public"
@@ -206,20 +192,6 @@
     },
     {
       "method": "GET",
-      "path": "/v1/orgs",
-      "access": {
-        "access": "service"
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/v1/orgs/parents",
-      "access": {
-        "access": "service"
-      }
-    },
-    {
-      "method": "GET",
       "path": "/v1/participant-consent",
       "access": {
         "access": "public"
@@ -349,51 +321,9 @@
     },
     {
       "method": "POST",
-      "path": "/admin/v1/aggregator-registrations/decision/:id",
-      "access": {
-        "access": "link_token"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/admin/v1/aggregator-registrations/renew/:id",
-      "access": {
-        "access": "link_token"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/admin/v1/invites",
-      "access": {
-        "access": "link_token"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/admin/v1/orgs/decision/:id",
-      "access": {
-        "access": "link_token"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/admin/v1/orgs/renew/:id",
-      "access": {
-        "access": "link_token"
-      }
-    },
-    {
-      "method": "POST",
       "path": "/public/v1/aggregators/:orgSlug/registrations/:slug",
       "access": {
         "access": "public"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/v1/aggregator-registrations/create",
-      "access": {
-        "access": "service"
       }
     },
     {
@@ -468,13 +398,6 @@
     },
     {
       "method": "POST",
-      "path": "/v1/org/decision/:id",
-      "access": {
-        "capability": "orgs.onboard"
-      }
-    },
-    {
-      "method": "POST",
       "path": "/v1/org/invite",
       "access": {
         "capability": "orgs.onboard"
@@ -506,13 +429,6 @@
     },
     {
       "method": "POST",
-      "path": "/v1/orgs/create",
-      "access": {
-        "access": "service"
-      }
-    },
-    {
-      "method": "POST",
       "path": "/v1/roles/create",
       "access": {
         "capability": "network.administer",
@@ -539,20 +455,6 @@
       "path": "/v1/user/activate",
       "access": {
         "access": "public"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/v1/user/create",
-      "access": {
-        "capability": "org.manage"
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/v1/user/decision/:id",
-      "access": {
-        "capability": "org.manage"
       }
     },
     {

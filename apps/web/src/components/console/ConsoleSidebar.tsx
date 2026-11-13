@@ -2,7 +2,7 @@
 
 /**
  * The organisation console's sidebar, in the same shell as the coordinator
- * portal's ({@link AppSidebar}): Dashboard, My Team under My Blue Dots,
+ * portal's ({@link AppSidebar}): Dashboard, My Team inside the My Blue Dots group,
  * Onboarded Organisations and Profile. My Team needs `org.manage` in an owned
  * organisation (the API also checks it), so the network admin has none; Profile
  * is the caller's own organisation. "My account" opens from the account card
@@ -44,6 +44,7 @@ export function ConsoleSidebar({
             icon: 'users' as const,
             exact: teamHref === '/console',
             section: t('nav.my_blue_dots'),
+            sectionIcon: 'globe' as const,
           },
         ]
       : []),
@@ -52,5 +53,12 @@ export function ConsoleSidebar({
       ? [{ to: CONSOLE_PROFILE_HREF, label: t('nav.profile'), icon: 'user' as const }]
       : []),
   ];
-  return <AppSidebar nav={nav} portalLabel={t('nav.portal_label')} account={account} />;
+  return (
+    <AppSidebar
+      nav={nav}
+      overviewLabel={false}
+      portalLabel={t('nav.portal_label')}
+      account={account}
+    />
+  );
 }

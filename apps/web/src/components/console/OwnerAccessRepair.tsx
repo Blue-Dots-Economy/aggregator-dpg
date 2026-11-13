@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * Re-grants an active organisation's owner sign-in access (user & org Phase
- * 5, `POST /v1/org/access/repair/:id`), from the organisation's page. For the
- * network admin only; the page decides whether to render it.
+ * Re-grants an active organisation's owner sign-in access
+ * (`POST /v1/org/access/repair/:id`), from the organisation's page. For the
+ * owner of the organisation's parent; the page decides whether to render it.
  */
 
 import { useState } from 'react';

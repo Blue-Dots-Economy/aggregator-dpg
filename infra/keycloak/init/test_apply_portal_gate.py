@@ -39,19 +39,21 @@ def flat(tree):
     return out, lambda e: configs.get(e.get("authenticationConfig"), {})
 
 
-def entitled(name, role_negate="true", with_role=True):
+def entitled(name, role_negate="true", with_role=True, with_invited=True):
     conds = [(ATTR, ATTR, "REQUIRED", gate.NO_AGG_ID, [])]
     if with_role:
         conds.append((ROLE, ROLE, "REQUIRED", {"condUserRole": "org_owner", "negate": role_negate}, []))
+    if with_invited:
+        conds.append((ATTR, ATTR, "REQUIRED", gate.NOT_INVITED, []))
     return (name, None, "CONDITIONAL", None,
             conds + [(DENY, DENY, "REQUIRED", {"denyErrorMessage": "x"}, [])])
 
 
-def approved(name, has=True):
+def approved(name, has=True, decision=gate.NOT_APPROVED):
     conds = []
     if has:
         conds.append((ATTR, ATTR, "REQUIRED", gate.HAS_AGG_ID, []))
-    conds.append((ATTR, ATTR, "REQUIRED", gate.NOT_APPROVED, []))
+    conds.append((ATTR, ATTR, "REQUIRED", decision, []))
     return (name, None, "CONDITIONAL", None,
             conds + [(DENY, DENY, "REQUIRED", {"denyErrorMessage": "x"}, [])])
 
@@ -118,6 +120,23 @@ class VerifyTree(unittest.TestCase):
         t = tree(
             [entitled("aggregator-portal-gate-otp-entitled"),
              approved("aggregator-portal-gate-otp-approved", has=False)],
+            [entitled("aggregator-portal-gate-sso-entitled"), approved("aggregator-portal-gate-sso-approved")])
+        with self.assertRaises(AssertionError):
+            self.verify(t)
+
+    def test_rejects_an_entitlement_gate_that_would_deny_invitees(self):
+        t = tree(
+            [entitled("aggregator-portal-gate-otp-entitled", with_invited=False),
+             approved("aggregator-portal-gate-otp-approved")],
+            [entitled("aggregator-portal-gate-sso-entitled"), approved("aggregator-portal-gate-sso-approved")])
+        with self.assertRaises(AssertionError):
+            self.verify(t)
+
+    def test_rejects_an_approval_gate_that_would_deny_invited_coordinators(self):
+        only_approved = dict(gate.NOT_APPROVED, attribute_expected_value="approved", regex="false")
+        t = tree(
+            [entitled("aggregator-portal-gate-otp-entitled"),
+             approved("aggregator-portal-gate-otp-approved", decision=only_approved)],
             [entitled("aggregator-portal-gate-sso-entitled"), approved("aggregator-portal-gate-sso-approved")])
         with self.assertRaises(AssertionError):
             self.verify(t)

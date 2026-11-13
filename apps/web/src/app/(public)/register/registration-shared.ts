@@ -13,16 +13,6 @@ import type { RJSFSchema } from '@rjsf/utils';
 export type SubmitState =
   | { status: 'idle' }
   | { status: 'submitting' }
-  /**
-   * Submitted successfully. `outcome` separates a new pending registration
-   * from an already-approved org whose invite link was re-sent.
-   */
-  | {
-      status: 'done';
-      refId: string;
-      outcome?: 'pending' | 'already_registered';
-      mailSent?: boolean;
-    }
   | { status: 'error'; title: string; detail: string; code: string; requestId: string }
   /** An invite was accepted; the browser is on its way to sign in. */
   | { status: 'signing_in' };
@@ -188,7 +178,7 @@ export type SubmitResult =
 /**
  * POSTs a registration payload to a BFF endpoint and normalises the outcome.
  *
- * @param endpoint - BFF route, e.g. `/api/aggregator/register`.
+ * @param endpoint - BFF route, e.g. `/api/invite/user/accept`.
  * @param payload - JSON body to send.
  * @returns A discriminated success/error result (never throws).
  */

@@ -1,8 +1,7 @@
 /**
  * Server Component test: `(console)/console` home. An owner of one
- * organisation gets the organisation view with its coordinators, and no child
- * organisations; an owner of several keeps the organisation cards. An owner's
- * own orgs are read by id.
+ * organisation gets one list of its users, the invited ones included, and no
+ * child organisations; an owner of several is sent to the organisations page.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -28,11 +27,14 @@ vi.mock('next-intl/server', () => ({
     async () => (key: string, values?: Record<string, unknown>) =>
       values ? `console.${key} ${JSON.stringify(values)}` : `console.${key}`,
   ),
+  getFormatter: vi.fn(async () => ({ dateTime: () => '13 Nov 2026' })),
 }));
+vi.mock('@/lib/console-invites.server', () => ({ readOpenInvites: vi.fn(async () => null) }));
 vi.mock('next/navigation', () => ({
   redirect: vi.fn((to: string) => {
     throw new Error(`redirect:${to}`);
   }),
+  useRouter: () => ({ refresh: vi.fn() }),
 }));
 vi.mock('@/components/shell/Topbar', () => ({
   Topbar: ({ title }: { title: string }) => <h1>{title}</h1>,
@@ -42,6 +44,7 @@ import ConsoleHomePage from '@/app/(console)/console/page';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
 import { readReachableOrgs } from '@/lib/console-hierarchy.server';
+import { readOpenInvites } from '@/lib/console-invites.server';
 
 type Row = OrgSearchResponse['orgs'][number];
 
@@ -104,6 +107,13 @@ const users: UserSearchResponse = {
       serves: [],
       contact: { name: null, email: 'cp@edge.test', phone: null },
     },
+    {
+      id: 'c3',
+      name: 'Edge Org A',
+      status: 'inactive',
+      serves: [],
+      contact: { name: 'Old Reject', email: 'rej@edge.test', phone: null },
+    },
   ],
   next_cursor: null,
 } as unknown as UserSearchResponse;
@@ -138,12 +148,29 @@ const show = async () =>
 describe('console home — owner', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('shows an owner of one organisation that organisation and its coordinators', async () => {
+  it('lists the joined, the registered and the invited users of the one organisation together', async () => {
     vi.mocked(getConsoleActor).mockResolvedValue({
       ok: true,
       me: me([meOrg('org-1', 'Edge Org A')]),
     });
     mockReads([row('org-1', 'Edge Org A')]);
+    vi.mocked(readOpenInvites).mockResolvedValue({
+      invites: [
+        {
+          email: 'new@edge.test',
+          status: 'pending',
+          created_at: '2026-11-13T06:00:00Z',
+          expires_at: '2026-11-20T06:00:00Z',
+        },
+        {
+          email: 'late@edge.test',
+          status: 'expired',
+          created_at: '2026-10-01T06:00:00Z',
+          expires_at: '2026-10-15T06:00:00Z',
+        },
+      ],
+      next_cursor: null,
+    });
     await show();
     expect(screen.getByRole('heading', { name: 'console.org_home.heading' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /console\.org_home\.invite/ })).toHaveAttribute(
@@ -151,7 +178,17 @@ describe('console home — owner', () => {
       '/console/invite',
     );
     expect(screen.getByText('Coord One')).toBeInTheDocument();
-    expect(screen.getByText('cp@edge.test')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'cp@edge.test' })).toHaveAttribute(
+      'href',
+      '/console/coordinators/c2',
+    );
+    expect(screen.getByText('new@edge.test')).toBeInTheDocument();
+    expect(screen.getByText('console.sent_on {"date":"13 Nov 2026"}')).toBeInTheDocument();
+    expect(screen.queryByText('Old Reject')).toBeNull();
+    expect(screen.getAllByRole('row')).toHaveLength(5);
+    expect(screen.getByRole('button', { name: /^Invited\s*3/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Users\s*4/ })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Resend/ }).length).toBeGreaterThan(0);
     expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', {
       filter: { org_id: 'org-1' },
       limit: 100,

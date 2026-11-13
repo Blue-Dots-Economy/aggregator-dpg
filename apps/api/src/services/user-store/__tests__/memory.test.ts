@@ -152,19 +152,10 @@ describe('InMemoryUserStore — consent hook and serves (0029)', () => {
 });
 
 describe('InMemoryUserStore CAS, list, search and counts', () => {
-  it('approveFromPending / rejectFromPending return null for an already-decided row', async () => {
+  it('approveFromPending returns null for an already-decided row', async () => {
     const store = new UserStoreFake();
     store.seed([buildCoordinator({ id: 'a1', status: 'active' })]);
     expect(await store.approveFromPending('a1', 't')).toEqual({ ok: true, value: null });
-    expect(await store.rejectFromPending('a1', 't')).toEqual({ ok: true, value: null });
-  });
-
-  it('rejectFromPending stamps inactive + rejected_at for a pending row', async () => {
-    const store = new UserStoreFake();
-    store.seed([buildCoordinator({ id: 'p1', status: 'pending' })]);
-    const r = await store.rejectFromPending('p1', 't');
-    expect(r.ok && r.value?.status).toBe('inactive');
-    expect(r.ok && r.value?.rejectedAt).toBeInstanceOf(Date);
   });
 
   it('list filters by status and updatedBefore, honouring offset and limit', async () => {

@@ -214,20 +214,7 @@ export function note(html: string): string {
   return `<p style="margin:0;font-size:12px;color:#7c84a6;line-height:1.55;">\n  ${html}\n</p>`;
 }
 
-/** Warning callout — used for a rejection reason. */
-export function callout(html: string): string {
-  return (
-    `<div style="margin:18px 0 0;padding:14px;background:#fef2f2;border:1px solid #fecaca;` +
-    `border-radius:10px;font-size:13.5px;color:#7f1d1d;line-height:1.55;">${html}</div>`
-  );
-}
-
 /** Wraps a CTA button in its own row. */
 export function ctaRow(buttonHtml: string): string {
   return `<div style="margin:0 0 18px;">\n  ${buttonHtml}\n</div>`;
-}
-
-/** Smaller closing paragraph — used for the rejection appeal line. */
-export function paraSmall(html: string): string {
-  return `<p style="margin:18px 0 0;font-size:13.5px;color:${BRAND_INK_500};line-height:1.55;">\n  ${html}\n</p>`;
 }

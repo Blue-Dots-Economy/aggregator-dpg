@@ -30,6 +30,8 @@ const BOOT_SAFE_AFTER_UPGRADE = [
   // Adds orgs.onboard to the built-in Org Admin role; idempotent.
   '0035_org_admin_onboard',
   '0036_invite_role',
+  // Adds `users.locations` (default `[]`); idempotent.
+  '0037_user_locations',
 ];
 
 const journal: JournalEntry[] = [

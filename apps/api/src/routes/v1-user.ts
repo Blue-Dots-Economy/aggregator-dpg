@@ -4,11 +4,9 @@
  *   GET   /v1/user/read/me               the signed-in actor (web routing)
  *   GET   /v1/user/read/:id              one coordinator within reach
  *   POST  /v1/user/search                coordinators within reach, keyset paged
- *   POST  /v1/user/create                invite coordinators into an org
- *   POST  /v1/user/invite                invite coordinators into an org (replaces create)
+ *   POST  /v1/user/invite                invite coordinators into an org
  *   POST  /v1/user/invite/search         unused coordinator invites of an org
  *   POST  /v1/user/activate              activate the caller's invited account after an email sign-in
- *   POST  /v1/user/decision/:id          approve / reject a pending coordinator
  *   PATCH /v1/user/metadata/update/:id   change a coordinator's domains
  *
  * Every handler calls `requireActor` first. Only `read/me` admits a
@@ -20,8 +18,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
-  DecisionRequestSchema,
-  DecisionResponseSchema,
   MeResponseSchema,
   UserInviteRequestSchema,
   UserInviteResponseSchema,
@@ -54,7 +50,6 @@ import {
   manageableOrgIds,
   type ScopePurpose,
 } from '../services/authz/manage-scope.js';
-import { decideCoordinator } from '../services/decisions/coordinator.js';
 import { mintInviteBatch } from '../services/invites/mint.js';
 import { searchOpenInvites } from './invite-shared.js';
 import { activateInvitedAccount } from '../services/invites/activate.js';
@@ -68,7 +63,6 @@ import {
   guardWriteRate,
   notifyOwnerOfAdminAction,
   ownerContact,
-  throwDecisionFailure,
   toWireUser,
 } from './console-shared.js';
 import {
@@ -412,29 +406,29 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
     // The invite mail names the org's owner as the inviter, so tell the owner
     // when the network admin sent it.
     if (summary.sent + summary.resent > 0) {
-      await notifyOwnerOfAdminAction(actor, org, 'invited coordinators', req.log);
+      await notifyOwnerOfAdminAction(actor, org, 'invited users', req.log);
     }
     return reply.status(200).send(summary);
   };
 
-  const inviteRouteOptions = {
-    config: { rbac: { capability: 'org.manage' } },
-    schema: {
-      tags: ['console'],
-      summary: 'Invite coordinators into an organisation',
-      description:
-        'Mints and mails a 14-day invite per address (the invitee registers and consents themselves). The Default org takes no invites. An address already registered in this org is reported under `existing`; any other existing account is mailed a sign-in note and counted as sent.',
-      body: UserInviteRequestSchema,
-      response: {
-        200: UserInviteResponseSchema,
-        ...errorResponses(400, 401, 403, 404, 409, 503),
+  app.post(
+    '/v1/user/invite',
+    {
+      config: { rbac: { capability: 'org.manage' } },
+      schema: {
+        tags: ['console'],
+        summary: 'Invite coordinators into an organisation',
+        description:
+          'Mints and mails a 14-day invite per address (the invitee registers and consents themselves). The Default org takes no invites. An address already registered in this org is reported under `existing`; any other existing account is mailed a sign-in note and counted as sent.',
+        body: UserInviteRequestSchema,
+        response: {
+          200: UserInviteResponseSchema,
+          ...errorResponses(400, 401, 403, 404, 409, 503),
+        },
       },
     },
-  } as const;
-
-  app.post('/v1/user/create', inviteRouteOptions, inviteCoordinators);
-
-  app.post('/v1/user/invite', inviteRouteOptions, inviteCoordinators);
+    inviteCoordinators,
+  );
 
   app.post(
     '/v1/user/invite/search',
@@ -507,59 +501,6 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
           if (outcome.dependency === 'signalstack') throw httpError('SIGNALSTACK_PUSH_FAILED');
           throw httpError('DB_UNAVAILABLE');
       }
-    },
-  );
-
-  app.post(
-    '/v1/user/decision/:id',
-    {
-      config: { rbac: { capability: 'org.manage' } },
-      schema: {
-        tags: ['console'],
-        summary: 'Approve or reject a pending coordinator',
-        description:
-          'The same compare-and-set decision service as the emailed review link. A decision already made answers 409 ALREADY_DECIDED with status, decided_at and decided_by.',
-        params: IdParamsSchema,
-        body: DecisionRequestSchema,
-        response: {
-          200: DecisionResponseSchema,
-          ...errorResponses(400, 401, 403, 404, 409, 429, 502, 503),
-        },
-      },
-    },
-    async (req: FastifyRequest, reply: FastifyReply) => {
-      const { actor } = await requireActor(req);
-      const { id } = req.params as IdParams;
-      const body = req.body as z.infer<typeof DecisionRequestSchema>;
-      const row = await coordinatorInReach(req, actor, id);
-      await guardWriteRate(actor, reply);
-
-      const outcome = await decideCoordinator({
-        aggregatorId: row.id,
-        decision: body.decision,
-        ...(body.reason ? { reason: body.reason } : {}),
-        decidedBy: actor.userId,
-        requestId: req.id,
-        log: req.log.child({ actor_id: actor.userId }),
-      });
-      if (outcome.kind !== 'decided') throwDecisionFailure(outcome);
-
-      if (row.parentOrgId) {
-        const org = await getOrganisationStore().findById(row.parentOrgId);
-        if (org.ok && org.value) {
-          await notifyOwnerOfAdminAction(
-            actor,
-            org.value,
-            body.decision === 'approve' ? 'approved a coordinator' : 'rejected a coordinator',
-            req.log,
-          );
-        }
-      }
-      return reply.status(200).send({
-        id: row.id,
-        status: body.decision === 'approve' ? 'active' : 'inactive',
-        notified: outcome.notified,
-      });
     },
   );
 
@@ -640,12 +581,7 @@ export function registerV1UserRoutes(app: FastifyInstance): void {
       if (row.parentOrgId) {
         const org = await getOrganisationStore().findById(row.parentOrgId);
         if (org.ok && org.value) {
-          await notifyOwnerOfAdminAction(
-            actor,
-            org.value,
-            "changed a coordinator's domains",
-            req.log,
-          );
+          await notifyOwnerOfAdminAction(actor, org.value, "changed a user's domains", req.log);
         }
       }
       return reply.status(200).send(

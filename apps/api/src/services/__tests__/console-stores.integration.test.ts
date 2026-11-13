@@ -226,16 +226,6 @@ suite('console store methods (Postgres)', () => {
     });
   });
 
-  describe('reject compare-and-set', () => {
-    it('wins once and stamps rejected_at; the second call loses', async () => {
-      const first = await coordinators.rejectFromPending(ids.c3, 'admin-y');
-      expect(first.ok && first.value?.status).toBe('inactive');
-      expect(first.ok && first.value?.rejectedAt).toBeInstanceOf(Date);
-      const second = await coordinators.rejectFromPending(ids.c3, 'admin-y');
-      expect(second.ok && second.value).toBeNull();
-    });
-  });
-
   describe('deleteIfPending (stale prune)', () => {
     const future = () => new Date(Date.now() + 60_000);
 

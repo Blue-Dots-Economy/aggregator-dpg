@@ -1,104 +1,38 @@
 /**
- * Coordinator registration decision (`@aggregator-dpg/api`).
+ * Coordinator approval (`@aggregator-dpg/api`).
  *
- * The one place a pending coordinator is approved or rejected, used by the
- * emailed review link (`routes/aggregator-approvals.ts`) and the console
- * (`POST /v1/user/decision/:id`). Callers check who may decide first.
- *
- * Reject is a compare-and-set from `pending`, then side effects. Approve
- * provisions Signals and Keycloak before its compare-and-set; if that loses
- * to a concurrent reject, the Keycloak user is disabled and stamped `rejected`
- * again. Only the winner mails the applicant.
+ * The one place a pending coordinator becomes active, run by invite
+ * activation. Approve provisions Signals and Keycloak before its
+ * compare-and-set; if that loses, the Keycloak user is disabled and stamped
+ * `rejected` again.
  */
 
 import type { FastifyBaseLogger } from 'fastify';
-import { getMailer } from '@aggregator-dpg/mailer';
 import type { AggregatorStatus } from '@aggregator-dpg/shared-primitives/aggregator';
-import { config } from '../../config.js';
 import { getUserStore, type Coordinator } from '../user-store/index.js';
 import { getOrganisationStore } from '../organisation-store/index.js';
 import { getIdpAdmin, KC_ATTR, type IdpUser } from '../idp-admin/index.js';
 import { getSignalStackWriter } from '../signalstack.js';
 import { getNetworkConfig } from '../network-config.js';
-import { renderApplicantApproved, renderApplicantRejected } from '../email-templates/index.js';
 import { recordLoginIdentity } from '../identity-store/record.js';
-import { revokeRolesOnLeave } from '../authz/roles.js';
 import { requestTokenRolesSync } from '../authz/token-roles.js';
 
-/** What the decider asks for. */
-export type Decision = 'approve' | 'reject';
-
-/** `updated_by` value of a decision taken through a signed email link. */
-export const LINK_DECIDER = 'admin';
-
-/** The result of a decision, for an HTML page or a JSON response. */
-export type DecisionOutcome =
-  | { kind: 'decided'; decision: Decision; notified: boolean }
-  | {
-      kind: 'already_decided';
-      status: AggregatorStatus;
-      decidedAt: Date;
-      /** How it was decided, when the row still says (see {@link deciderOf}). */
-      decidedBy: 'link' | 'console' | null;
-    }
+/** The result of an approval. */
+export type ApprovalOutcome =
+  | { kind: 'approved' }
+  | { kind: 'already_decided'; status: AggregatorStatus }
   | { kind: 'not_found' }
-  /** The coordinator's org is no longer active (approve only). */
+  /** The coordinator's org is no longer active. */
   | { kind: 'org_inactive' }
   | { kind: 'unavailable'; dependency: 'signalstack' | 'idp' | 'db' };
 
-/** Inputs of {@link decideCoordinator}. */
-export interface CoordinatorDecisionInput {
+/** Inputs of {@link approveCoordinator}. */
+export interface CoordinatorApprovalInput {
   aggregatorId: string;
-  decision: Decision;
-  /** Shown to the applicant on reject; never logged or stored. */
-  reason?: string;
-  /** The deciding admin's user id, {@link LINK_DECIDER} for an emailed link, or `invite:<inviter id>`. */
+  /** Written to `updated_by`: `invite:<inviter id>`. */
   decidedBy: string;
-  /** Defaults to `true`; `false` skips the applicant's mail, for an invitee who is already signed in. */
-  notify?: boolean;
-  /** What a failed approval leaves in Keycloak: `rejected` (default), or `invited` so the invitee can retry. */
-  undoAs?: 'rejected' | 'invited';
   requestId?: string;
   log: FastifyBaseLogger;
-}
-
-/** The decision a stored status records, or `null` while pending. */
-export function priorDecision(status: AggregatorStatus): 'approved' | 'rejected' | null {
-  switch (status) {
-    case 'active':
-    case 'retired':
-      return 'approved';
-    case 'inactive':
-      return 'rejected';
-    default:
-      return null;
-  }
-}
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * Returns how a row was decided, read from its `updated_by`.
- *
- * {@link LINK_DECIDER} is an emailed link and an admin's user id is the
- * console. Anything else (such as a later write) gives `null`.
- *
- * @param updatedBy - The row's `updated_by`.
- * @returns `link`, `console`, or `null` when unknown.
- */
-export function deciderOf(updatedBy: string | null): 'link' | 'console' | null {
-  if (updatedBy === LINK_DECIDER) return 'link';
-  return updatedBy && UUID_RE.test(updatedBy) ? 'console' : null;
-}
-
-/** The `already_decided` outcome of a decided row. */
-function alreadyDecided(row: Coordinator): DecisionOutcome {
-  return {
-    kind: 'already_decided',
-    status: row.status,
-    decidedAt: row.status === 'inactive' ? (row.rejectedAt ?? row.updatedAt) : row.updatedAt,
-    decidedBy: deciderOf(row.updatedBy),
-  };
 }
 
 /**
@@ -108,7 +42,7 @@ function alreadyDecided(row: Coordinator): DecisionOutcome {
  * @param aggregatorId - Coordinator id.
  * @returns The row and the user, or why they are unavailable.
  */
-export async function loadCoordinatorAndUser(
+async function loadCoordinatorAndUser(
   aggregatorId: string,
 ): Promise<
   | { ok: true; aggregator: Coordinator; kcUser: IdpUser }
@@ -124,22 +58,17 @@ export async function loadCoordinatorAndUser(
   return { ok: true, aggregator: stored.value, kcUser: kc.value };
 }
 
-/** Display name preference: the contact's name, the Keycloak names, the email. */
-function applicantName(aggregator: Coordinator, kcUser: IdpUser): string {
-  if (aggregator.contact.name) return aggregator.contact.name;
-  const parts = [kcUser.firstName, kcUser.lastName].filter((p): p is string => Boolean(p));
-  return parts.length > 0 ? parts.join(' ') : kcUser.email;
-}
-
 /**
- * Approves or rejects a pending coordinator.
+ * Approves a pending coordinator.
  *
- * @param input - The coordinator, the decision and who takes it.
+ * @param input - The coordinator and who approves it.
  * @returns The outcome; never throws.
  */
-export async function decideCoordinator(input: CoordinatorDecisionInput): Promise<DecisionOutcome> {
+export async function approveCoordinator(
+  input: CoordinatorApprovalInput,
+): Promise<ApprovalOutcome> {
   const log = input.log.child({
-    operation: 'coordinator-decision',
+    operation: 'coordinator-approval',
     aggregator_id: input.aggregatorId,
   });
   const lookup = await loadCoordinatorAndUser(input.aggregatorId);
@@ -148,18 +77,18 @@ export async function decideCoordinator(input: CoordinatorDecisionInput): Promis
       return { kind: 'not_found' };
     return { kind: 'unavailable', dependency: lookup.reason === 'db' ? 'db' : 'idp' };
   }
-  if (priorDecision(lookup.aggregator.status)) return alreadyDecided(lookup.aggregator);
-  return input.decision === 'approve'
-    ? approve(input, lookup.aggregator, lookup.kcUser, log)
-    : reject(input, lookup.aggregator, lookup.kcUser, log);
+  if (lookup.aggregator.status !== 'pending') {
+    return { kind: 'already_decided', status: lookup.aggregator.status };
+  }
+  return approve(input, lookup.aggregator, lookup.kcUser, log);
 }
 
 async function approve( // NOSONAR typescript:S3776 — inherently branchy decision flow; splitting would obscure it
-  input: CoordinatorDecisionInput,
+  input: CoordinatorApprovalInput,
   aggregator: Coordinator,
   kcUser: IdpUser,
   log: FastifyBaseLogger,
-): Promise<DecisionOutcome> {
+): Promise<ApprovalOutcome> {
   const store = getUserStore();
   const idp = getIdpAdmin();
 
@@ -230,7 +159,7 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
     const now = await store.findById(aggregator.id);
     const current = now.ok ? now.value : null;
     if (current?.status !== 'active') {
-      if (input.undoAs === 'invited' && current?.status !== 'inactive') {
+      if (current?.status !== 'inactive') {
         await restoreInvited(kcUser.id, log);
       } else {
         await compensate(kcUser.id, log);
@@ -249,7 +178,7 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
       return { kind: 'unavailable', dependency: 'db' };
     }
     if (!current) return { kind: 'not_found' };
-    return alreadyDecided(current);
+    return { kind: 'already_decided', status: current.status };
   }
   // RBAC edge: the coordinator now holds its base role; refresh its token claim.
   requestTokenRolesSync([aggregator.id], 'coordinator_approved');
@@ -263,26 +192,8 @@ async function approve( // NOSONAR typescript:S3776 — inherently branchy decis
       });
   }
 
-  if (input.notify === false) {
-    log.info({ status: 'success', decision: 'approve', decided_by: input.decidedBy });
-    return { kind: 'decided', decision: 'approve', notified: false };
-  }
-  const mail = renderApplicantApproved({
-    contactName: applicantName(aggregator, kcUser),
-    association: aggregator.name,
-    identifier: aggregator.contact.email,
-    signInUrl: `${config.PUBLIC_PORTAL_URL}/login`,
-  });
-  const sent = await getMailer().send({
-    to: aggregator.contact.email,
-    subject: mail.subject,
-    html: mail.html,
-    text: mail.text,
-  });
-  if (!sent.ok)
-    log.error({ status: 'failure', sub_operation: 'mailer.send.approved', code: sent.error.code });
-  log.info({ status: 'success', decision: 'approve', decided_by: input.decidedBy });
-  return { kind: 'decided', decision: 'approve', notified: sent.ok };
+  log.info({ status: 'success', decided_by: input.decidedBy });
+  return { kind: 'approved' };
 }
 
 /** Stamps `invited` again after an invitee's failed activation, leaving the user enabled to retry. */
@@ -312,55 +223,4 @@ async function compensate(kcUserId: string, log: FastifyBaseLogger): Promise<voi
       stamp: back.ok ? 'ok' : back.error.code,
     });
   }
-}
-
-async function reject(
-  input: CoordinatorDecisionInput,
-  aggregator: Coordinator,
-  kcUser: IdpUser,
-  log: FastifyBaseLogger,
-): Promise<DecisionOutcome> {
-  const store = getUserStore();
-  // Compare-and-set first; only the winner continues.
-  const cas = await store.rejectFromPending(aggregator.id, input.decidedBy);
-  if (!cas.ok) {
-    log.error({
-      status: 'failure',
-      sub_operation: 'store.rejectFromPending',
-      code: cas.error.code,
-    });
-    return { kind: 'unavailable', dependency: 'db' };
-  }
-  if (cas.value === null) {
-    const now = await store.findById(aggregator.id);
-    if (!now.ok) return { kind: 'unavailable', dependency: 'db' };
-    if (!now.value) return { kind: 'not_found' };
-    return alreadyDecided(now.value);
-  }
-  // A rejected coordinator loses its additional roles in the org.
-  if (aggregator.parentOrgId) {
-    await revokeRolesOnLeave(aggregator.id, aggregator.parentOrgId, 'coordinator_rejected');
-  }
-  requestTokenRolesSync([aggregator.id], 'coordinator_rejected');
-  const stamp = await getIdpAdmin().setUserDecision(kcUser.id, 'rejected');
-  if (!stamp.ok) {
-    log.warn({ status: 'failure', sub_operation: 'idp.setUserDecision', code: stamp.error.code });
-  }
-  const mail = renderApplicantRejected({
-    contactName: applicantName(aggregator, kcUser),
-    association: aggregator.name,
-    entityLabel: 'coordinator',
-    ...(input.reason ? { reason: input.reason } : {}),
-  });
-  const sent = await getMailer().send({
-    to: aggregator.contact.email,
-    subject: mail.subject,
-    html: mail.html,
-    text: mail.text,
-  });
-  if (!sent.ok)
-    log.error({ status: 'failure', sub_operation: 'mailer.send.rejected', code: sent.error.code });
-  // Never log the reason; it is free text.
-  log.info({ status: 'success', decision: 'reject', decided_by: input.decidedBy });
-  return { kind: 'decided', decision: 'reject', notified: sent.ok };
 }
