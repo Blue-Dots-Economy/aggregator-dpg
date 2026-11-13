@@ -174,6 +174,10 @@ export function CoordinatorActions({
   }
 
   async function saveServes() {
+    if (empty) {
+      document.querySelector<HTMLInputElement>('#coordinator-domains input')?.focus();
+      return;
+    }
     if (removed.length > 0 && !confirmingRemoval) {
       setConfirmingRemoval(true);
       return;
@@ -228,7 +232,10 @@ export function CoordinatorActions({
             {editable ? (
               <>
                 <fieldset
+                  id="coordinator-domains"
                   aria-label={t('coordinator.domains')}
+                  aria-invalid={(dirty && empty) || undefined}
+                  aria-describedby="coordinator-domains__error"
                   className="m-0 min-w-0 border-0 p-0 grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2.5"
                 >
                   {domains.map((d) => {
@@ -271,6 +278,7 @@ export function CoordinatorActions({
                 {dirty ? (
                   <div className="flex flex-wrap items-center gap-2.5 rounded-[12px] border border-(--bd-border-soft) bg-(--bd-bg) px-3 py-2.5">
                     <span
+                      id="coordinator-domains__error"
                       className={cn(
                         'mr-auto text-[13px]',
                         empty ? 'text-rose-700' : 'text-ink-500',
@@ -291,7 +299,7 @@ export function CoordinatorActions({
                         {t('coordinator.discard')}
                       </Button>
                     )}
-                    <Button disabled={busy || empty} onClick={() => void saveServes()}>
+                    <Button disabled={busy} onClick={() => void saveServes()}>
                       {confirmingRemoval
                         ? t('coordinator.remove_domains_confirm')
                         : t('coordinator.save_domains')}

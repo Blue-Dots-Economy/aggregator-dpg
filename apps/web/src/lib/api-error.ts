@@ -21,6 +21,7 @@ const ErrorFieldsSchema = z.object({
   detail: optionalText,
   message: optionalText,
   requestId: optionalText,
+  /** Per-field detail (e.g. a `400`'s `issues`), read by forms that map errors to fields. */
   fields: z.record(z.unknown()).optional().catch(undefined),
 });
 
@@ -52,6 +53,7 @@ export interface ApiError {
   code?: string;
   detail?: string;
   message?: string;
+  fields?: Record<string, unknown>;
 }
 
 /**
@@ -69,11 +71,12 @@ export async function readApiError(res: Response): Promise<ApiError | null> {
   }
   const parsed = ApiErrorBodySchema.safeParse(body);
   if (!parsed.success) return null;
-  const { code, detail, message } = parsed.data;
+  const { code, detail, message, fields } = parsed.data;
   return {
     ...(code !== undefined ? { code } : {}),
     ...(detail !== undefined ? { detail } : {}),
     ...(message !== undefined ? { message } : {}),
+    ...(fields !== undefined ? { fields } : {}),
   };
 }
 

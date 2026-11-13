@@ -136,12 +136,15 @@ describe('<ProfileFormView />', () => {
     expect(screen.getByText('https://acme.example')).toBeInTheDocument();
   });
 
-  it('gates the submit button on at least one entered new value, then shows the pending banner', () => {
+  it('asks for at least one new value on an empty submit, then shows the pending banner', () => {
     useProfileRaw.mockReturnValue({ data: apiResponse, isLoading: false, isError: false });
     renderView();
     fireEvent.click(screen.getByText(messages.profile.view.btn_request_update));
     const submitBtn = screen.getByText(messages.profile.view.btn_submit_request);
-    expect(submitBtn).toBeDisabled();
+    expect(submitBtn).toBeEnabled();
+    fireEvent.click(submitBtn);
+    expect(screen.getByText(messages.profile.view.update_request_none)).toBeInTheDocument();
+    expect(screen.queryByText(messages.profile.view.update_request_pending)).toBeNull();
 
     const inputs = screen.getAllByPlaceholderText(messages.profile.view.new_value_placeholder);
     fireEvent.change(inputs[0]!, { target: { value: 'New Org Name' } });

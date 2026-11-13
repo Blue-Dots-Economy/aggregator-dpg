@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 import { ResponseShapeError } from '@/lib/response-shape-error';
-import { jsonFetch } from './http';
+import { HttpError, jsonFetch } from './http';
 
 /** Submitted, passed, failed and skipped counts. */
 const OutcomeCountsSchema = z.object({
@@ -200,6 +200,20 @@ export class BulkUploadStartUnreadError extends Error {
   }
 }
 
+/**
+ * The error for a failed presigned PUT. Storage answers 413 for a file over its
+ * limit and 403 for an expired or mismatched link; both need a fresh upload, not a wait.
+ *
+ * @param status - The storage response status.
+ */
+function storageUploadError(status: number): HttpError {
+  if (status === 413) return new HttpError(413, { code: 'STORAGE_UPLOAD_TOO_LARGE' });
+  if (status === 400 || status === 403) {
+    return new HttpError(status, { code: 'STORAGE_UPLOAD_LINK_EXPIRED' });
+  }
+  return new HttpError(503, { code: 'STORAGE_UPLOAD_FAILED' });
+}
+
 export const onboardingService = {
   async listLinks(
     opts: {
@@ -312,7 +326,7 @@ export const onboardingService = {
    * @throws {BulkUploadEmptyError} If the file is empty.
    * @throws {BulkUploadTooLargeError} If the file is larger than the limit.
    * @throws {BulkUploadStartUnreadError} If `/start` accepted the upload and its status could not be read.
-   * @throws {Error} If the storage upload or an API call fails.
+   * @throws {HttpError} If the storage upload or an API call fails.
    */
   async uploadCsv(
     file: File,
@@ -361,6 +375,17 @@ export const onboardingService = {
 
 /** Sends the file as the api's upload instructions say, or to `upload_url` on older api builds. */
 async function uploadFile(file: File, created: BulkUploadCreateResponse): Promise<void> {
+  let res: Response;
+  try {
+    res = await sendFile(file, created);
+  } catch {
+    throw new HttpError(0);
+  }
+  if (!res.ok) throw storageUploadError(res.status);
+}
+
+/** Sends the file with the method the api's upload reply names. */
+async function sendFile(file: File, created: BulkUploadCreateResponse): Promise<Response> {
   const { upload } = created;
   let res: Response;
   if (!upload) {
@@ -377,7 +402,7 @@ async function uploadFile(file: File, created: BulkUploadCreateResponse): Promis
   } else {
     res = await fetch(upload.url, { method: 'PUT', body: file, headers: upload.headers });
   }
-  if (!res.ok) throw new Error(`File upload failed (${res.status})`);
+  return res;
 }
 
 /**

@@ -44,6 +44,11 @@ export interface FormRuntimeConfig {
    * it directly.
    */
   referenceBaseUrl?: string;
+  /**
+   * Countries a phone field offers, `IN:+91,GB:+44` (first is the default).
+   * Absent means India only. Parsed by `parsePhoneCountries`.
+   */
+  phoneCountries?: string;
 }
 
 /** Region used when `COLLEGE_DATASET` is unset. Must match the Helm chart default. */
@@ -85,11 +90,13 @@ export function getFormRuntimeConfig(): FormRuntimeConfig {
   const photonUrl = cleaned(process.env.PHOTON_URL);
   const geoCountry = countryCode(process.env.GEO_COUNTRY);
   const referenceBaseUrl = cleaned(process.env.REFERENCE_BASE_URL);
+  const phoneCountries = cleaned(process.env.PHONE_COUNTRIES);
   return {
     ...(googleMapsApiKey ? { googleMapsApiKey } : {}),
     ...(photonUrl ? { photonUrl } : {}),
     ...(geoCountry ? { geoCountry } : {}),
     ...(referenceBaseUrl ? { referenceBaseUrl } : {}),
+    ...(phoneCountries ? { phoneCountries } : {}),
     collegeDataset: cleaned(process.env.COLLEGE_DATASET) ?? DEFAULT_COLLEGE_DATASET,
   };
 }

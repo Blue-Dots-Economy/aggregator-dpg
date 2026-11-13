@@ -4,9 +4,10 @@ import Form from '@rjsf/core';
 import type { FormProps } from '@rjsf/core';
 import { customizeValidator } from '@rjsf/validator-ajv8';
 import Ajv2020 from 'ajv/dist/2020';
-import { enumOptionsIndexForValue, enumOptionsValueForIndex } from '@rjsf/utils';
+import { enumOptionsIndexForValue, enumOptionsValueForIndex, errorId } from '@rjsf/utils';
 import type {
   EnumOptionsType,
+  FieldErrorProps,
   RegistryWidgetsType,
   WidgetProps,
   FieldTemplateProps,
@@ -39,6 +40,9 @@ import { LocationAutocompleteWidget } from './custom-widgets/LocationAutocomplet
 import { MultiLocationAutocompleteWidget } from './custom-widgets/MultiLocationAutocompleteWidget';
 import { ReferenceAutocompleteWidget } from './custom-widgets/ReferenceAutocompleteWidget';
 import { PhoneWidget } from './custom-widgets/PhoneWidget';
+import { errorAria } from './error-aria';
+import { acceptsListedPhone, isPhoneFieldName } from '@/lib/phone';
+import { usePhoneCountries } from '@/lib/FormRuntimeConfigProvider';
 
 function TextWidget(props: WidgetProps) {
   const {
@@ -53,7 +57,18 @@ function TextWidget(props: WidgetProps) {
     options,
     placeholder,
     type,
+    rawErrors,
+    name,
+    schema,
   } = props;
+  const countries = usePhoneCountries();
+  if (
+    schema.type === 'string' &&
+    isPhoneFieldName(name) &&
+    acceptsListedPhone(schema.pattern, countries)
+  ) {
+    return <PhoneWidget {...props} />;
+  }
   const inputType = (options['inputType'] as string | undefined) ?? type ?? 'text';
   return (
     <input
@@ -64,6 +79,7 @@ function TextWidget(props: WidgetProps) {
       required={required}
       disabled={disabled || readonly}
       placeholder={placeholder}
+      {...errorAria(id, rawErrors)}
       onChange={(e: ChangeEvent<HTMLInputElement>) =>
         onChange(e.target.value === '' ? options['emptyValue'] : e.target.value)
       }
@@ -74,7 +90,18 @@ function TextWidget(props: WidgetProps) {
 }
 
 function TextareaWidget(props: WidgetProps) {
-  const { id, value, required, disabled, readonly, onChange, placeholder, options } = props;
+  const {
+    id,
+    value,
+    required,
+    disabled,
+    readonly,
+    onChange,
+    onBlur,
+    placeholder,
+    options,
+    rawErrors,
+  } = props;
   return (
     <textarea
       id={id}
@@ -83,13 +110,26 @@ function TextareaWidget(props: WidgetProps) {
       required={required}
       disabled={disabled || readonly}
       placeholder={placeholder}
+      {...errorAria(id, rawErrors)}
       onChange={(e) => onChange(e.target.value === '' ? options['emptyValue'] : e.target.value)}
+      onBlur={(e) => onBlur(id, e.target.value)}
     />
   );
 }
 
 function SelectWidget(props: WidgetProps) {
-  const { id, value, required, disabled, readonly, onChange, options, placeholder } = props;
+  const {
+    id,
+    value,
+    required,
+    disabled,
+    readonly,
+    onChange,
+    onBlur,
+    options,
+    placeholder,
+    rawErrors,
+  } = props;
   const t = useTranslations('form');
   const enumOptions = (options['enumOptions'] as EnumOptionsType[] | undefined) ?? [];
   // Options are addressed by index, since Radix values are strings only. This
@@ -112,6 +152,8 @@ function SelectWidget(props: WidgetProps) {
         <SelectTrigger
           id={id}
           {...(required ? { 'aria-required': true } : {})}
+          {...errorAria(id, rawErrors)}
+          onBlur={() => onBlur(id, value)}
           // Pads the value span (the only direct <span> child) to make room for
           // the overlaid clear button. The button cannot nest in the trigger,
           // which is itself a <button>. Padding the trigger would move the chevron.
@@ -146,7 +188,7 @@ function SelectWidget(props: WidgetProps) {
 }
 
 function DateWidget(props: WidgetProps) {
-  const { id, value, required, disabled, readonly, onChange } = props;
+  const { id, value, required, disabled, readonly, onChange, onBlur, rawErrors } = props;
   return (
     <input
       id={id}
@@ -155,7 +197,9 @@ function DateWidget(props: WidgetProps) {
       value={value ?? ''}
       required={required}
       disabled={disabled || readonly}
+      {...errorAria(id, rawErrors)}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={(e) => onBlur(id, e.target.value)}
     />
   );
 }
@@ -167,7 +211,8 @@ function DateWidget(props: WidgetProps) {
  * Updates the array on each keystroke and normalises the text on blur.
  */
 function CommaSeparatedArrayWidget(props: WidgetProps) {
-  const { id, value, required, disabled, readonly, onChange, placeholder } = props;
+  const { id, value, required, disabled, readonly, onChange, onBlur, placeholder, rawErrors } =
+    props;
   const t = useTranslations('form');
   const arrayValue: unknown[] = Array.isArray(value) ? value.filter(Boolean) : [];
   const valueKey = arrayValue.join('|');
@@ -189,6 +234,7 @@ function CommaSeparatedArrayWidget(props: WidgetProps) {
       required={required}
       disabled={disabled || readonly}
       placeholder={placeholder ?? t('comma_separated')}
+      {...errorAria(id, rawErrors)}
       onChange={(e: ChangeEvent<HTMLInputElement>) => {
         setText(e.target.value);
         const arr = e.target.value
@@ -204,20 +250,23 @@ function CommaSeparatedArrayWidget(props: WidgetProps) {
           .map((s) => s.trim())
           .filter((s) => s.length > 0);
         const canonical = arr.join(', ');
+        // The value was already sent while typing; only the text is tidied.
         setText(canonical);
         setSyncedKey(arr.join('|'));
-        onChange(arr.length > 0 ? arr : undefined);
+        onBlur(id, arr);
       }}
     />
   );
 }
 
 function CheckboxWidget(props: WidgetProps) {
-  const { id, value, required, disabled, readonly, onChange, label } = props;
+  const { id, value, required, disabled, readonly, onChange, onBlur, label, rawErrors } = props;
   return (
     <label className="flex items-start gap-3 py-2 cursor-pointer">
       <input
         id={id}
+        {...errorAria(id, rawErrors)}
+        onBlur={() => onBlur(id, Boolean(value))}
         type="checkbox"
         className="w-[18px] h-[18px] rounded-[5px] mt-0.5 accent-(--bd-primary)"
         checked={Boolean(value)}
@@ -227,6 +276,26 @@ function CheckboxWidget(props: WidgetProps) {
       />
       <span className="text-[13.5px] text-ink-700 leading-relaxed">{label}</span>
     </label>
+  );
+}
+
+/**
+ * Red messages under a field. Repeated messages are shown once, since server
+ * errors can reach a field both as `extraErrors` and through live validation.
+ */
+function FieldErrorTemplate({ errors, fieldPathId }: FieldErrorProps) {
+  const unique = [...new Set((errors ?? []).filter(Boolean))];
+  if (unique.length === 0) return null;
+  return (
+    <div>
+      <ul id={errorId(fieldPathId)} className="error-detail bs-callout bs-callout-info">
+        {unique.map((e, i) => (
+          <li key={typeof e === 'string' ? e : (e.key ?? `error-${i}`)} className="text-danger">
+            {e}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -253,8 +322,10 @@ function FieldTemplate(props: FieldTemplateProps) {
     schema.type === 'array' && typeof customWidget === 'string' && customWidget !== 'hidden';
   const isContainer = (schema.type === 'object' || schema.type === 'array') && !arrayAsLeaf;
   const hasError = Array.isArray(rawErrors) && rawErrors.length > 0;
-  // Red border on any `.bd-input` inside an invalid field.
-  const errorWrap = hasError ? '[&_.bd-input]:border-rose-400 [&_.bd-input]:ring-rose-100' : '';
+  // Red border on any `.bd-input` or dropdown inside an invalid field.
+  const errorWrap = hasError
+    ? '[&_.bd-input]:border-rose-400 [&_.bd-input]:ring-rose-100 [&_[aria-invalid=true]]:border-rose-400'
+    : '';
   if (isCheckbox) {
     return (
       <div className={`form-group ${errorWrap}`}>
@@ -540,7 +611,8 @@ function TitleField(_props: TitleFieldProps) {
  * Picked values show as removable chips. Writes `string[]`, or `undefined` when empty.
  */
 function CheckboxesWidget(props: WidgetProps) {
-  const { id, value, required, disabled, readonly, onChange, options, placeholder } = props;
+  const { id, value, required, disabled, readonly, onChange, options, placeholder, rawErrors } =
+    props;
   const t = useTranslations('form');
   const enumOptions =
     (options['enumOptions'] as Array<{ value: string; label: string }> | undefined) ?? [];
@@ -556,6 +628,7 @@ function CheckboxesWidget(props: WidgetProps) {
       placeholder={placeholder ?? t('select_options')}
       disabled={Boolean(disabled || readonly)}
       required={Boolean(required)}
+      {...(rawErrors?.length ? { errorId: errorId(id) } : {})}
     />
   );
 }
@@ -597,6 +670,8 @@ export interface RjsfThemedFormProps<T extends GenericObjectType = GenericObject
    * `true` once every visible required field is valid. Hidden fields never block.
    */
   onValidityChange?: (valid: boolean) => void;
+  /** Runs before RJSF validates any submit, from a button click or the Enter key. */
+  onSubmitAttempt?: () => void;
 }
 
 export function RjsfThemedForm<T extends GenericObjectType = GenericObjectType>({
@@ -611,6 +686,7 @@ export function RjsfThemedForm<T extends GenericObjectType = GenericObjectType>(
   formData,
   onChange,
   onValidityChange,
+  onSubmitAttempt,
   ...props
 }: RjsfThemedFormProps<T>) {
   // Uses Ajv's 2020 build because the schemas declare draft 2020-12.
@@ -652,7 +728,7 @@ export function RjsfThemedForm<T extends GenericObjectType = GenericObjectType>(
   }, [isValid]);
 
   return (
-    <div className={className}>
+    <div className={className} onSubmitCapture={onSubmitAttempt}>
       <Form<T>
         showErrorList={showErrorList}
         liveValidate={liveValidate}
@@ -672,6 +748,7 @@ export function RjsfThemedForm<T extends GenericObjectType = GenericObjectType>(
         widgets={widgets}
         templates={{
           FieldTemplate,
+          FieldErrorTemplate,
           ObjectFieldTemplate,
           ArrayFieldTemplate,
           ArrayFieldItemTemplate,

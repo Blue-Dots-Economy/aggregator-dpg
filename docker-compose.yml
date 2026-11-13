@@ -342,6 +342,7 @@ services:
       REFERENCE_BASE_URL: ${REFERENCE_BASE_URL:-}
       PHOTON_URL: ${PHOTON_URL:-}
       GEO_COUNTRY: ${GEO_COUNTRY:-}
+      PHONE_COUNTRIES: ${PHONE_COUNTRIES:-}
       # ─── OIDC (Authorization Code + PKCE) ────────────────────────────
       # OIDC_ISSUER must resolve identically from the browser AND the web
       # container. With nginx as the sole ingress, both reach Keycloak via

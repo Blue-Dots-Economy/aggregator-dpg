@@ -3,7 +3,7 @@
  *
  * Steps:
  *   1. Read row errors from `bu:{id}:errors` and write errors.csv to object storage
- *      (original header columns + error_category + error_reason).
+ *      (original header columns + error_category + error_reason + what_to_do).
  *   2. Mark the upload completed and insert the onboarding rollup row.
  *   3. Delete the `bu:{id}:*` Redis keys after the DB writes succeed.
  *
@@ -21,12 +21,20 @@ import { schema, getDb } from '../db.js';
 import { getRedis } from '../services/redis.js';
 import { logger } from '../logger.js';
 import { CSV_FIELD_DELIMITER } from './bulk-file-stream.js';
+import {
+  FIX_ADVICE_COLUMN,
+  SURPLUS_CELLS_ADVICE,
+  adviceForRejection,
+  joinAdvice,
+} from './bulk-fix-advice.js';
 
 /** One row's error entry in `bu:{id}:errors`, as written by the row processor. */
 const ErrorRecordSchema = z.object({
   row_index: z.number(),
   reasons: z.array(z.string()).optional(),
   error_category: z.string().nullable().optional(),
+  /** Absent on rows committed by an older worker; then a category default is used. */
+  advice: z.array(z.string()).optional(),
 });
 
 type ErrorRecord = z.infer<typeof ErrorRecordSchema>;
@@ -105,7 +113,7 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
   let errorsKey: string | null = null;
   if (failed > 0) {
     const headerCols = await readHeaderCols(redis, `${ns}:meta`);
-    const csvHeader = [...headerCols, 'error_category', 'error_reason'];
+    const csvHeader = [...headerCols, 'error_category', 'error_reason', FIX_ADVICE_COLUMN];
     // Fetch stored cells for the failed rows only.
     const indices = errors.map((e) => String(e.row_index));
     const rawRows: (string | null)[] =
@@ -113,11 +121,16 @@ export async function finaliseBulk(job: BulkFinaliseJob): Promise<FinaliseOutcom
     const csvRows: string[][] = errors.map((e, i) => {
       const { cells, surplus } = fitToHeader(readStoredRow(rawRows[i] ?? ''), headerCols.length);
       const reasons = [...(e.reasons ?? [])];
-      if (surplus > 0) reasons.push(surplusNote(headerCols.length + surplus, headerCols.length));
+      const advice = e.advice ?? adviceForRejection(e.error_category ?? '', undefined, undefined);
+      if (surplus > 0) {
+        reasons.push(surplusNote(headerCols.length + surplus, headerCols.length));
+        advice.push(SURPLUS_CELLS_ADVICE);
+      }
       return [
         ...cells.map(sanitiseCsvCell),
         sanitiseCsvCell(e.error_category ?? ''),
         sanitiseCsvCell(reasons.join('; ')),
+        sanitiseCsvCell(joinAdvice(advice)),
       ];
     });
     const csvBody = Papa.unparse({ fields: csvHeader, data: csvRows });

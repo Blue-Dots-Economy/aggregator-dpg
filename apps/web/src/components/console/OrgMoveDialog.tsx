@@ -23,6 +23,8 @@ import { Button } from '../ui/Button';
 import { Label } from '../ui/Label';
 import { errorKey, getConsole, RESPONSE_SHAPE_CODE, sendConsole } from '../../lib/console-client';
 import { SelectField } from '@/components/ui/SelectField';
+import { useFieldErrorCopy } from '../forms/useFieldErrors';
+import { FieldMessage, useHandFieldErrors } from '../forms/useHandFieldErrors';
 
 type ParentOption = OrgParentOptionsResponse['options'][number];
 
@@ -117,7 +119,10 @@ function MoveDialog({
   }, [orgId, t]);
 
   const parent = data?.options.find((o) => o.id === parentId);
-  const ready = parent !== undefined;
+  const copy = useFieldErrorCopy();
+  const fe = useHandFieldErrors<'parent'>('move', {
+    parent: parent ? null : { kind: 'required', message: copy.required(t('org.move_parent')) },
+  });
 
   const optionText = (o: ParentOption) => {
     const label = o.known_as_name ? `${o.name} (${o.known_as_name})` : o.name;
@@ -128,7 +133,7 @@ function MoveDialog({
 
   async function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!ready) return;
+    if (!fe.validate()) return;
     setBusy(true);
     const r = await sendConsole(`/api/console/org/parent/${orgId}`, 'PATCH', OrgSchema, {
       parent_id: parentId,
@@ -157,13 +162,13 @@ function MoveDialog({
       <h3 className="mb-3 font-display text-[15px] font-bold text-ink-900">
         {t('org.move_title', { name: orgName })}
       </h3>
-      <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
+      <form noValidate onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-4">
         {data ? (
           <>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="move-parent">{t('org.move_parent')}</Label>
               <SelectField
-                id="move-parent"
+                {...fe.controlProps('parent')}
                 value={parentId}
                 aria-required
                 placeholder={t('org.move_parent_placeholder')}
@@ -177,6 +182,7 @@ function MoveDialog({
                   disabled: !o.ok,
                 }))}
               />
+              <FieldMessage id={fe.errorId('parent')} message={fe.message('parent')} />
             </div>
             <p className="text-[12px] text-ink-500">{t('org.move_hint_known_as')}</p>
             <p className="text-[13px] text-ink-600">
@@ -197,7 +203,7 @@ function MoveDialog({
           >
             {t('org.move_cancel')}
           </Button>
-          <Button type="submit" disabled={busy || !ready}>
+          <Button type="submit" disabled={busy || !data}>
             {t('org.move_submit')}
           </Button>
         </div>

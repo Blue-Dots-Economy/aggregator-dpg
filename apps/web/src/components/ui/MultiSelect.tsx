@@ -25,6 +25,8 @@ export interface MultiSelectProps {
   disabled?: boolean;
   required?: boolean;
   className?: string;
+  /** Error-list id; when set the trigger is marked invalid. */
+  errorId?: string;
 }
 
 /**
@@ -44,6 +46,7 @@ export function MultiSelect({
   disabled,
   required: _required,
   className,
+  errorId,
 }: MultiSelectProps) {
   const [open, setOpen] = React.useState(false);
   const selectedSet = React.useMemo(() => new Set(value), [value]);
@@ -61,10 +64,12 @@ export function MultiSelect({
           id={id}
           disabled={disabled}
           aria-haspopup="listbox"
+          {...(errorId ? { 'aria-invalid': true, 'aria-describedby': errorId } : {})}
           className={cn(
             'flex min-h-[42px] w-full flex-wrap items-center gap-1.5 rounded-[10px] border border-(--bd-border) bg-(--bd-bg) px-3 py-2 text-left text-[14px] text-(--bd-fg) transition-colors',
             'hover:bg-(--bd-border-soft) focus:outline-hidden focus-visible:border-(--bd-primary) focus-visible:bg-(--bd-card) focus-visible:ring-4 focus-visible:ring-(--bd-primary-50)',
             'disabled:cursor-not-allowed disabled:opacity-50',
+            errorId && 'border-rose-400',
             className,
           )}
         >

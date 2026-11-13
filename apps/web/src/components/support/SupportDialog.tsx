@@ -3,8 +3,8 @@
  * Contact-support modal.
  *
  * Collects a support request: Name, Email, Phone (prefilled from the session
- * and editable), Type, Details, and a required consent checkbox. Submit needs
- * Details, at least one contact channel, and consent. Posts to
+ * and editable), Type, Details, and a required consent checkbox. A Submit
+ * with a missing or wrong field shows the message under that field. Posts to
  * `POST /api/support`. Shows success, unavailable (503), or error inline.
  * Closes on the close button, overlay click, or ESC.
  *
@@ -15,8 +15,14 @@ import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { I } from '../../icons';
 import { Button } from '../ui/Button';
+import { isEmailAddress } from '@aggregator-dpg/shared-primitives/phone';
 import { useAuth } from '../../lib/auth-context';
-import { readApiError } from '../../lib/api-error';
+import { z } from 'zod';
+import { readApiError, type ApiError } from '@/lib/api-error';
+import { FieldMessage, useHandFieldErrors, type HandFieldError } from '../forms/useHandFieldErrors';
+import { PhoneInput } from '../forms/PhoneInput';
+import { isAcceptedPhone } from '@/lib/phone';
+import { useFieldErrorCopy } from '../forms/useFieldErrors';
 import {
   encodeAttachments,
   formatBytes,
@@ -39,20 +45,52 @@ export interface SupportDialogProps {
 }
 
 type Status =
-  | 'idle'
-  | 'sending'
-  | 'success'
-  | 'unavailable'
-  | 'error'
-  | 'invalid'
-  | 'rate_limited'
-  | 'attachment_rejected';
+  'idle' | 'sending' | 'success' | 'unavailable' | 'error' | 'rate_limited' | 'attachment_rejected';
 const SUPPORT_TYPES = ['complaint', 'support_request'] as const;
 type SupportType = (typeof SUPPORT_TYPES)[number];
 
 /** Narrows a picked value to a request type the API accepts. */
 function isSupportType(value: string): value is SupportType {
   return SUPPORT_TYPES.some((type) => type === value);
+}
+
+type SupportField = 'name' | 'email' | 'phone' | 'details' | 'consent';
+const SUPPORT_FIELDS: ReadonlySet<string> = new Set<SupportField>([
+  'name',
+  'email',
+  'phone',
+  'details',
+  'consent',
+]);
+
+function isSupportField(key: unknown): key is SupportField {
+  return typeof key === 'string' && SUPPORT_FIELDS.has(key);
+}
+
+/** A `400 SCHEMA_VALIDATION`'s issues, as far as they name a field. */
+const IssuesSchema = z.object({
+  issues: z
+    .array(
+      z.object({
+        instancePath: z.string().optional().catch(undefined),
+        path: z
+          .array(z.union([z.string(), z.number()]))
+          .optional()
+          .catch(undefined),
+      }),
+    )
+    .catch([]),
+});
+
+/** Form fields named by a `400 SCHEMA_VALIDATION`'s issues. */
+function rejectedFields(error: ApiError | null): SupportField[] {
+  const parsed = IssuesSchema.safeParse(error?.fields ?? {});
+  const out = new Set<SupportField>();
+  for (const issue of parsed.success ? parsed.data.issues : []) {
+    const first = issue.path?.[0] ?? (issue.instancePath ?? '').split('/').find(Boolean);
+    if (isSupportField(first)) out.add(first);
+  }
+  return [...out];
 }
 
 /** What the dialog should show after a submit response. */
@@ -62,6 +100,8 @@ interface SubmitOutcome {
   attachmentError?: string;
   /** Set to carry the API's own rejection detail (it names the file). */
   serverDetail?: string | null;
+  /** Fields the API rejected. */
+  rejected?: SupportField[];
 }
 
 /**
@@ -93,6 +133,8 @@ async function resolveSubmitOutcome(
   if (error?.code?.startsWith('ATTACHMENT_')) {
     return { status: 'attachment_rejected', serverDetail: error.detail ?? null };
   }
+  const rejected = rejectedFields(error);
+  if (rejected.length > 0) return { status: 'idle', rejected };
   return { status: 'error' };
 }
 
@@ -143,6 +185,7 @@ function SupportForm({
   onOpenChange,
 }: Readonly<Pick<SupportDialogProps, 'onOpenChange'>>): JSX.Element {
   const t = useTranslations('support');
+  const tForm = useTranslations('form');
   const { user } = useAuth();
   const [name, setName] = useState(user?.name ?? '');
   const [email, setEmail] = useState(user?.email ?? '');
@@ -158,6 +201,7 @@ function SupportForm({
   const [serverDetail, setServerDetail] = useState<string | null>(null);
   // Attachment limits come from the API. If the read fails, defaults stay.
   const config = useSupportConfig();
+  const copy = useFieldErrorCopy();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Dismiss on ESC.
@@ -170,7 +214,38 @@ function SupportForm({
   }, [onOpenChange]);
 
   const hasContact = email.trim() !== '' || phone.trim() !== '';
-  const canSubmit = details.trim() !== '' && hasContact && consent;
+  const req = (ok: boolean, label: string): HandFieldError | null =>
+    ok ? null : { kind: 'required', message: copy.required(label) };
+  /** Email error: a contact is needed, and a typed email must look like one. */
+  const emailFieldError = (): HandFieldError | null => {
+    if (!hasContact) return { kind: 'required', message: t('error_contact_required') };
+    const typed = email.trim();
+    if (typed && !isEmailAddress(typed.toLowerCase())) {
+      return { kind: 'invalid', message: copy.invalid(t('error_email_invalid')) };
+    }
+    return null;
+  };
+  const fieldErrors: Partial<Record<SupportField, HandFieldError | null>> = {
+    name: req(name.trim() !== '', t('label_name')),
+    email: emailFieldError(),
+    phone:
+      phone.trim() && !isAcceptedPhone(phone.trim())
+        ? { kind: 'invalid', message: copy.invalid(t('error_phone_invalid')) }
+        : null,
+    details: req(details.trim() !== '', t('label_details')),
+    consent: req(consent, t('consent_short')),
+  };
+  const fe = useHandFieldErrors<SupportField>('support', fieldErrors);
+  const fieldLabel: Record<SupportField, string> = {
+    name: t('label_name'),
+    email: t('label_email'),
+    phone: t('label_phone'),
+    details: t('label_details'),
+    consent: t('consent_short'),
+  };
+  /** Props for a control, clearing its server message once edited. */
+  const ctl = (key: SupportField) => fe.controlProps(key);
+  const edited = (key: SupportField) => fe.clearServer(key);
 
   const attachedBytes = attachments.reduce((sum, file) => sum + file.size, 0);
 
@@ -196,10 +271,7 @@ function SupportForm({
 
   const submit = async (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!canSubmit) {
-      setStatus('invalid');
-      return;
-    }
+    if (!fe.validate()) return;
     setStatus('sending');
     setServerDetail(null);
     try {
@@ -221,6 +293,16 @@ function SupportForm({
       const outcome = await resolveSubmitOutcome(res, t, config);
       if (outcome.attachmentError !== undefined) setAttachmentError(outcome.attachmentError);
       if (outcome.serverDetail !== undefined) setServerDetail(outcome.serverDetail);
+      if (outcome.rejected) {
+        fe.setServerErrors(
+          Object.fromEntries(
+            outcome.rejected.map((k) => [
+              k,
+              copy.invalid(tForm('error_value_rejected', { label: fieldLabel[k] })),
+            ]),
+          ),
+        );
+      }
       setStatus(outcome.status);
     } catch {
       setStatus('error');
@@ -263,47 +345,57 @@ function SupportForm({
         {status === 'success' ? (
           <p className="text-[14px] text-emerald-600">{t('success')}</p>
         ) : (
-          <form onSubmit={submit} className="space-y-3">
+          <form onSubmit={submit} noValidate className="space-y-3">
             <div>
               <label htmlFor="support-name" className="block text-[13px] font-medium mb-1">
                 {t('label_name')}
               </label>
               <input
-                id="support-name"
+                {...ctl('name')}
                 value={name}
                 maxLength={200}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  edited('name');
+                }}
                 placeholder={t('placeholder_name')}
                 className={inputClass}
               />
+              <FieldMessage id={fe.errorId('name')} message={fe.message('name')} />
             </div>
             <div>
               <label htmlFor="support-email" className="block text-[13px] font-medium mb-1">
                 {t('label_email')}
               </label>
               <input
-                id="support-email"
+                {...ctl('email')}
                 type="email"
                 value={email}
                 maxLength={320}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  edited('email');
+                }}
                 placeholder={t('placeholder_email')}
                 className={inputClass}
               />
+              <FieldMessage id={fe.errorId('email')} message={fe.message('email')} />
             </div>
             <div>
               <label htmlFor="support-phone" className="block text-[13px] font-medium mb-1">
                 {t('label_phone')}
               </label>
-              <input
-                id="support-phone"
-                type="tel"
+              <PhoneInput
+                id={ctl('phone').id}
                 value={phone}
-                maxLength={20}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder={t('placeholder_phone')}
-                className={inputClass}
+                onChange={(next) => {
+                  setPhone(next ?? '');
+                  edited('phone');
+                }}
+                onBlur={ctl('phone').onBlur}
+                inputProps={ctl('phone')}
               />
+              <FieldMessage id={fe.errorId('phone')} message={fe.message('phone')} />
             </div>
             <div>
               <label htmlFor="support-type" className="block text-[13px] font-medium mb-1">
@@ -326,15 +418,19 @@ function SupportForm({
                 {t('label_details')}
               </label>
               <textarea
-                id="support-details"
+                {...ctl('details')}
                 value={details}
                 required
                 maxLength={5000}
                 rows={5}
-                onChange={(e) => setDetails(e.target.value)}
+                onChange={(e) => {
+                  setDetails(e.target.value);
+                  edited('details');
+                }}
                 placeholder={t('placeholder_details')}
                 className={inputClass}
               />
+              <FieldMessage id={fe.errorId('details')} message={fe.message('details')} />
             </div>
             <div>
               <label htmlFor="support-attachments" className="block text-[13px] font-medium mb-1">
@@ -398,22 +494,26 @@ function SupportForm({
                 </ul>
               )}
               {attachmentError && (
-                <p className="mt-1 text-[13px] text-rose-600">{attachmentError}</p>
+                <p className="mt-1 text-[11.5px] text-red-500">{attachmentError}</p>
               )}
             </div>
-            <label className="flex items-start gap-2 text-[13px] text-(--bd-fg)">
-              <input
-                type="checkbox"
-                checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
-                className="mt-0.5"
-                aria-label={t('consent_label')}
-              />
-              <span>{t('consent_label')}</span>
-            </label>
-            {status === 'invalid' && (
-              <p className="text-[13px] text-rose-600">{t('validation_incomplete')}</p>
-            )}
+            <div>
+              <label className="flex items-start gap-2 text-[13px] text-(--bd-fg)">
+                <input
+                  type="checkbox"
+                  {...ctl('consent')}
+                  checked={consent}
+                  onChange={(e) => {
+                    setConsent(e.target.checked);
+                    edited('consent');
+                  }}
+                  className="mt-0.5"
+                  aria-label={t('consent_label')}
+                />
+                <span>{t('consent_label')}</span>
+              </label>
+              <FieldMessage id={fe.errorId('consent')} message={fe.message('consent')} />
+            </div>
             {status === 'unavailable' && (
               <p className="text-[13px] text-amber-600">{t('unavailable')}</p>
             )}
@@ -427,7 +527,7 @@ function SupportForm({
             <Button
               kind="primary"
               type="submit"
-              disabled={status === 'sending' || !canSubmit}
+              disabled={status === 'sending'}
               className="w-full justify-center py-2.5 text-[14px] font-semibold"
             >
               {status === 'sending' ? t('sending') : t('submit')}

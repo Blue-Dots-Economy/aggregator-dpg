@@ -3,8 +3,8 @@
 /**
  * Invites coordinators to an organisation. Addresses are typed or pasted into
  * a chip box, up to the per-send cap; each valid address can carry an optional
- * name for the email greeting. Invalid addresses block sending until they are
- * fixed or removed; reloading or closing the page with unsent emails asks
+ * name for the email greeting. Sending with no address or an invalid one shows
+ * the problem under the box and sends nothing; reloading or closing the page with unsent emails asks
  * first. After sending, one line says how many invites went out and
  * why the rest did not. A side card explains the steps and the per-send limit.
  */
@@ -33,6 +33,8 @@ import { RESPONSE_SHAPE_CODE, sendConsole, type ConsoleError } from '../../lib/c
 import { DEFAULT_MAX_INVITES } from '../../lib/invite-limit';
 import { useLeaveWarning } from '../../hooks/useLeaveWarning';
 import { SelectField } from '@/components/ui/SelectField';
+import { FieldMessage, messageWhen } from '../forms/useHandFieldErrors';
+import { useFieldErrorCopy } from '../forms/useFieldErrors';
 
 interface Recipient {
   email: string;
@@ -170,6 +172,8 @@ export function InviteForm({
   const [result, setResult] = useState<{ sent: number; notSent: NotSent[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [attempted, setAttempted] = useState(false);
+  const copy = useFieldErrorCopy();
 
   const valid = recipients.filter((r) => r.valid);
   const invalidCount = recipients.length - valid.length;
@@ -236,9 +240,16 @@ export function InviteForm({
       : { list: recipients, skipped: 0 };
     const all = withHeldName(next.list);
     setDraft('');
+    setAttempted(true);
+    if (!orgId) {
+      update(all, next.skipped);
+      setError(t('invite.error.org_unavailable'));
+      return;
+    }
     // Nothing valid, or an invalid address still in the list: show the list and its message.
     if (!all.some((r) => r.valid) || all.some((r) => !r.valid)) {
       update(all, next.skipped);
+      requestAnimationFrame(() => document.getElementById('invite-emails')?.focus());
       return;
     }
     setBusy(true);
@@ -253,9 +264,11 @@ export function InviteForm({
     if (r.ok) {
       setResult({ sent: r.data.sent + r.data.resent, notSent: notSentOf(r.data) });
       update([]);
+      setAttempted(false);
     } else if (r.error.code === RESPONSE_SHAPE_CODE) {
       // The invites may have been sent: clear the list so a second click does not resend them.
       update([]);
+      setAttempted(false);
       setResult(null);
       setError(t(failureKey(r)));
       router.refresh();
@@ -269,6 +282,13 @@ export function InviteForm({
   let footNote: string | null = null;
   if (recipients.length === 0 && !draft.trim()) footNote = t('invite.note_empty');
   else if (invalidCount) footNote = t('invite.note_fix');
+
+  const nothingToSend = valid.length === 0 && invalidCount === 0 && !draft.trim();
+  const requiredError = messageWhen(
+    attempted && nothingToSend,
+    copy.required(t('invite.recipients')),
+  );
+  const fieldInvalid = invalidCount > 0 || requiredError !== null;
 
   let sendLabel = t('invite.send');
   if (busy) sendLabel = t('invite.sending');
@@ -335,7 +355,8 @@ export function InviteForm({
                 onPaste={onPaste}
                 onBlur={() => draft.trim() && add(draft)}
                 placeholder={placeholder}
-                aria-describedby="invite-emails-hint"
+                aria-describedby="invite-emails-hint invite-emails__error"
+                aria-invalid={fieldInvalid || undefined}
                 className="h-8 min-w-[12rem] flex-1 bg-transparent px-1 text-[15px] text-ink-900 outline-none placeholder:text-ink-400"
               />
             </div>
@@ -349,6 +370,7 @@ export function InviteForm({
             {invalidCount ? (
               <InvalidBanner count={invalidCount} onRemove={() => update(valid)} />
             ) : null}
+            <FieldMessage id="invite-emails__error" message={requiredError} />
 
             {valid.length ? <NamesList people={valid} onName={setName} onRemove={remove} /> : null}
 
@@ -378,9 +400,7 @@ export function InviteForm({
               ) : null}
               <Button
                 type="submit"
-                disabled={
-                  busy || !orgId || invalidCount > 0 || (valid.length === 0 && !draft.trim())
-                }
+                disabled={busy}
                 icon={<I.send size={15} />}
                 className="w-full justify-center sm:w-auto"
               >
@@ -513,7 +533,10 @@ function LimitNote({ skipped, max }: Readonly<{ skipped: number; max: number }>)
 function InvalidBanner({ count, onRemove }: Readonly<{ count: number; onRemove: () => void }>) {
   const t = useTranslations('console');
   return (
-    <div className="flex items-start gap-2.5 rounded-[10px] bg-rose-50 px-3 py-2.5 text-[13px] text-rose-700">
+    <div
+      id="invite-emails__error"
+      className="flex items-start gap-2.5 rounded-[10px] bg-rose-50 px-3 py-2.5 text-[13px] text-rose-700"
+    >
       <I.alert size={16} className="mt-0.5 shrink-0" />
       <span>{t('invite.invalid_count', { count })}</span>
       <button

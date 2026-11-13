@@ -456,7 +456,7 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     expect(screen.queryByTestId('lookup-owned-elsewhere')).toBeNull();
   });
 
-  it('shows a server error banner (title/detail/code) on a non-409 failure response', async () => {
+  it('shows one readable banner, never the server title/detail/code, on a non-field failure', async () => {
     globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
       const url = input.toString();
       if (url.includes('/lookup')) {
@@ -474,9 +474,11 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
     renderView();
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Rejected');
-    expect(screen.getByText('Bad payload')).toBeInTheDocument();
-    expect(screen.getByText(/Code: BAD_INPUT/)).toBeInTheDocument();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(messages.profile.public_reg.error_submission_title);
+    expect(alert).toHaveTextContent(messages.form.request_error.invalid);
+    expect(screen.queryByText('Bad payload')).toBeNull();
+    expect(screen.queryByText(/BAD_INPUT/)).toBeNull();
   });
 
   it('shows a network-error banner when the /submit fetch throws', async () => {
@@ -488,16 +490,33 @@ describe('<PublicRegistrationView /> — remaining branches', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         );
       }
-      throw new Error('network down');
+      throw new TypeError('Failed to fetch');
     }) as unknown as typeof fetch;
 
     renderView();
     fireEvent.submit(screen.getByTestId('rjsf-shim'));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      messages.profile.public_reg.error_network_title,
-    );
-    expect(screen.getByText('network down')).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(messages.form.request_error.network);
+    expect(screen.queryByText('Failed to fetch')).toBeNull();
+  });
+
+  it('says something went wrong, not "network", for a failure that is not the network', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      const url = input.toString();
+      if (url.includes('/lookup')) {
+        return new Response(
+          JSON.stringify({ user_exists: false, owned_elsewhere: false, lifecycle_summary: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      throw new Error('a bug in the submit handling');
+    }) as unknown as typeof fetch;
+
+    renderView();
+    fireEvent.submit(screen.getByTestId('rjsf-shim'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(messages.form.request_error.generic);
   });
 
   it('"Register another" resets the done screen back to the form', async () => {
@@ -754,7 +773,7 @@ describe('<PublicRegistrationView /> — response bodies are checked', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       messages.profile.public_reg.error_submission_title,
     );
-    expect(screen.getByText('Server returned HTTP 409.')).toBeInTheDocument();
+    expect(screen.getByText(messages.form.request_error.conflict)).toBeInTheDocument();
   });
 
   it('shows the done panel with the reference of a skipped 409', async () => {

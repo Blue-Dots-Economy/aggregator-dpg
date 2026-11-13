@@ -14,7 +14,27 @@
     "clear_selection": "Clear selection",
     "location_search_placeholder": "Start typing an address…",
     "location_add": "+ Add another location",
-    "location_remove": "Remove {label}"
+    "location_remove": "Remove {label}",
+    "error_required": "{label} is required.",
+    "error_invalid": "Invalid entry. {message}",
+    "request_error": {
+      "network": "We couldn't reach the server. Check your connection and try again.",
+      "signed_out": "Your session has ended. Please sign in again.",
+      "forbidden": "You don't have permission to do this.",
+      "not_found": "We couldn't find this. It may have been removed.",
+      "conflict": "This has changed since you opened it. Refresh the page and try again.",
+      "rate_limited": "Too many attempts. Please wait a minute and try again.",
+      "too_large": "This is too large to send. Make it smaller and try again.",
+      "invalid": "Some details were not accepted. Check your entries and try again.",
+      "server": "Something went wrong on our side. Please try again in a moment.",
+      "generic": "Something went wrong. Please try again."
+    },
+    "error_value_rejected": "{label} was not accepted. Check it and try again.",
+    "phone_code_label": "Country code",
+    "invalid_value": "Please enter a valid {label}.",
+    "too_short": "{label} must be at least {limit} characters.",
+    "too_long": "{label} must be at most {limit} characters.",
+    "request_reference": "Reference: {id}"
   },
   "status_pill": {
     "active": "Active",
@@ -48,7 +68,6 @@
     "success_approval": "The {brand} team will review your application. Once approved, sign in via {brand} SSO using the email or mobile you registered.",
     "submit": "Register as [[user]]",
     "submitting": "Submitting…",
-    "validation_error_title": "Please fix the highlighted fields",
     "page_title": "[[User]] Registration",
     "org_page_title": "[[Org]] Registration",
     "owner_invite": {
@@ -62,6 +81,13 @@
         "unreadable": "Your request was received, but the reply could not be read. Some invites may have been sent; sending again re-sends them.",
         "rate_limited": "Too many invites just now. Please try again shortly.",
         "generic": "Could not send invites. Please try again."
+      },
+      "error_email_invalid": "Please enter a valid email address.",
+      "error_org_inactive": "Your [[org]] is not active, so invites can't be sent.",
+      "reason": {
+        "invalid_email": "not a valid email address",
+        "duplicate_in_batch": "listed more than once",
+        "store_error": "could not be saved, please try again"
       }
     },
     "tab_coordinator": "Register as [[User]]",
@@ -79,7 +105,7 @@
     "parent_selector_required": "Select a parent [[org]].",
     "parent_child_hint": "Your [[org]] will be known as {name}.",
     "name_symbols": "Please remove these symbols from the name: {symbols}",
-    "org_selector_required": "Select your [[org]].",
+    "org_selector_required": "[[Org]] is required.",
     "parent_top_level": "Top level",
     "parent_search_placeholder": "Type to search [[orgs]]",
     "parent_no_match": "No [[orgs]] match.",
@@ -107,7 +133,14 @@
       "modal_close": "Close",
       "load_failed_title": "Terms unavailable",
       "load_failed_detail": "We could not load the Terms of Service and Privacy Policy, so your consent cannot be recorded. Please reload the page and try again."
-    }
+    },
+    "error_email_exists": "An account with this email already exists. Sign in instead.",
+    "error_phone_exists": "An account with this phone number already exists.",
+    "error_phone_invalid": "Please enter a valid phone number.",
+    "error_org_name_taken": "An [[org]] with this name already exists.",
+    "error_cooling": "A registration with these details was declined recently. Please try again later.",
+    "error_org_inactive": "The selected [[org]] is not accepting registrations.",
+    "error_invite_used": "This invitation has already been used."
   },
   "dashboard": {
     "buckets": {
@@ -350,14 +383,47 @@
         "signing": "Signing…",
         "load_failed": "Couldn't load recent uploads. Refresh the page to try again.",
         "errors_unavailable": "This errors report is no longer available.",
-        "errors_download_failed": "Couldn't download the errors report. Try again."
+        "errors_download_failed": "Couldn't download the errors report. Try again.",
+        "reason": {
+          "header_missing": "Columns missing from the file: {columns}. Use the column headings from the template.",
+          "header_unknown": "Columns not in the template: {columns}. Remove them or use the template.",
+          "header_mismatch": "The column headings do not match the template.",
+          "row_cap_exceeded": "The file has too many rows. Split it into smaller files.",
+          "row_size_exceeded": "A row in the file is too long. Check for very long values.",
+          "encoding_unsupported": "The file is not saved as UTF-8. Save it as \"CSV UTF-8\" and upload it again.",
+          "empty_csv": "The file has no data rows.",
+          "schema_unavailable": "The upload form could not be loaded. Please try again later.",
+          "system_error": "Something went wrong while reading the file. Please upload it again.",
+          "upload_abandoned": "The file never finished uploading. Please upload it again.",
+          "processing_stuck": "Processing took too long and was stopped. Please upload the file again."
+        },
+        "status": {
+          "pending": "Pending",
+          "uploaded": "Uploaded",
+          "file_validating": "Checking file",
+          "file_failed": "File rejected",
+          "row_processing": "Processing rows",
+          "finalising": "Finishing",
+          "completed": "Completed",
+          "failed": "Failed"
+        }
       },
+      "file_label": "CSV file",
+      "attestation_label": "Confirmation",
+      "error_excel": "This is an Excel file. Open it and use File → Save As (or Export) → CSV, then upload the .csv.",
+      "error_not_csv": "Only .csv files are accepted.",
+      "error_not_ready": "The file has not finished uploading. Please try again.",
+      "duplicate_notice": "This CSV was already uploaded earlier — showing the existing run.",
       "start_unconfirmed": "Your file was received, but we couldn't confirm that processing started. Check Recent uploads under Bulk Upload on the Onboarding page before uploading it again.",
       "too_large": "This file is larger than {maxMb} MB. Upload a smaller file.",
       "empty": "This file is empty. Upload a CSV with at least one row.",
       "rate_limited": "You have reached the upload limit. Try again later.",
       "reply_unreadable": "The server's reply couldn't be read. Try again in a few minutes.",
-      "upload_failed": "Couldn't upload the file. Try again."
+      "upload_failed": "Couldn't upload the file. Try again.",
+      "error_empty": "The file is empty. Add the participants' rows and upload it again.",
+      "error_too_large": "The file is too large. Split it into smaller files and upload them one by one.",
+      "error_link_expired": "The upload link expired before the file was sent. Upload the file again.",
+      "error_storage": "The file couldn't be stored right now. Please try again in a few minutes."
     },
     "create_link": {
       "title": "Share a registration link",
@@ -382,15 +448,8 @@
       "qr_placeholder": "Create a link to start. QR appears once the draft is made live.",
       "error_required": "State, District, and Event are required.",
       "link_created": "Registration link created",
-      "blockers": {
-        "heading": "To create the link:",
-        "state": "Enter the State.",
-        "district": "Enter the District.",
-        "lever_event": "Enter the Event.",
-        "domain": "Profile type is not set.",
-        "registration_mode": "Select a form type."
-      },
-      "save_failed": "Couldn't save the link. Try again."
+      "save_failed": "Couldn't save the link. Try again.",
+      "error_duplicate_slug": "A link with this district and event already exists. Change the event name and try again."
     },
     "your_links": {
       "title": "Your Registration Links",
@@ -491,7 +550,8 @@
       "consent_marketing": "Marketing communication from partner orgs",
       "consent_retention": "Data retention per Blue Dots policy v2.3",
       "consent_last_reviewed": "Last consent reviewed",
-      "consent_next_review": "Next review due {date}."
+      "consent_next_review": "Next review due {date}.",
+      "update_request_none": "Enter at least one new value."
     },
     "edit": {
       "heading": "Edit Profile",
@@ -534,12 +594,7 @@
       "consent_profile_modal_agree": "I agree to continue",
       "u18_notice": "As you are under 18, your account will be created without terms acceptance. Please sign in to the Signalstack app to review and accept the terms — a parent or guardian can help.",
       "privacy_note": "Your details are shared only with the aggregator who issued this link.",
-      "validation_error_title": "Form validation failed",
-      "validation_required": "Please fill all required fields.",
-      "error_network_title": "Network error",
-      "error_network_detail": "Could not reach the server.",
       "error_submission_title": "Submission failed",
-      "error_server_detail": "Server returned HTTP {status}.",
       "lookup": {
         "owned_elsewhere_title": "Contact already registered",
         "owned_elsewhere_body": "This email or mobile is already registered with another [[org]]. Please use a different contact or sign in through that [[org]].",
@@ -562,19 +617,18 @@
         "consent_accept_prefix": "I have read and accept the ",
         "consent_docs_link": "Terms of Service and Privacy Policy",
         "submit_label": "Submit",
-        "blockers": {
-          "heading": "To submit:",
-          "name": "Enter your name.",
-          "phone_required": "Enter your mobile number.",
+        "errors": {
           "phone_invalid": "Enter a valid mobile number (at least 10 digits).",
           "email_invalid": "Enter a valid email address.",
-          "contact_required": "Enter a mobile number or email.",
-          "year_of_birth": "Enter a valid year of birth.",
-          "consent_terms": "Accept the terms.",
-          "consent_privacy": "Accept the privacy policy.",
-          "consent_call": "Accept the call-on-my-behalf consent."
+          "contact_required": "A mobile number or email is required.",
+          "consent_call": "Call consent"
         }
-      }
+      },
+      "error_phone_invalid": "Please enter a valid phone number.",
+      "error_link_not_live": "This registration link is no longer accepting registrations.",
+      "error_u18": "As you are under 18, please finish registering in the Signalstack app.",
+      "error_consent_required": "Please accept the terms and privacy policy to continue.",
+      "error_profile_limit": "This phone or email already has the maximum number of profiles."
     }
   },
   "registration_mode": {
@@ -636,7 +690,6 @@
     "cancel": "Cancel",
     "sending": "Sending…",
     "consent_label": "I am ok with sharing my name, phone or email id so that the team can connect and help in resolving the issue.",
-    "validation_incomplete": "Please add details, at least one contact (email or phone), and tick consent.",
     "success": "Message sent. Our team will get back to you.",
     "unavailable": "Support isn't available right now. Please try again later.",
     "error": "Couldn't send your message. Please try again in a moment.",
@@ -648,7 +701,11 @@
     "attachment_too_many": "You can attach at most {count} files.",
     "attachment_too_large": "Attachments must total no more than {size}.",
     "attachment_bad_type": "{name} isn't an accepted file type. Attach an image, video or audio file.",
-    "rate_limited": "You've sent several messages recently. Please try again later."
+    "rate_limited": "You've sent several messages recently. Please try again later.",
+    "error_contact_required": "Email or phone is required, so the team can reach you.",
+    "error_email_invalid": "Please enter a valid email address.",
+    "consent_short": "Consent",
+    "error_phone_invalid": "Please enter a valid phone number."
   },
   "consent_gate": {
     "eyebrow": "Before you continue",
@@ -709,7 +766,6 @@
       "description_hint": "Plain text, up to 1,000 characters.",
       "no_description": "No description.",
       "description_placeholder": "What does this [[org]] do, and who does it serve?",
-      "fix_fields": "Please fix the highlighted fields.",
       "owner": "Owner",
       "view_coordinators": "View [[users]]",
       "child_count": "Child [[orgs]]",
@@ -1074,7 +1130,9 @@
       "assigned_by": "Assigned by holders of",
       "max_days": "Longest validity (days, empty = none)",
       "permissions": "Permissions",
-      "not_enforced": "not in use yet"
+      "not_enforced": "not in use yet",
+      "error_key": "Use lowercase letters, numbers and underscores, starting with a letter.",
+      "error_max_days": "Enter a whole number above 0."
     },
     "access": {
       "title": "Roles and permissions",
