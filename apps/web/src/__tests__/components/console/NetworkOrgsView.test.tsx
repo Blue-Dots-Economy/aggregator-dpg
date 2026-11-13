@@ -2,13 +2,14 @@
  * `NetworkOrgsView`: the network summary, the
  * status filters, and the organisations as a list with search.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import messages from '@/i18n/messages/en.json';
 import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
 import { countOrgs } from '@/lib/org-filters';
+import { WAITING_TO_VERIFY_ID } from '@/lib/waiting-to-verify';
 
 type Row = OrgSearchResponse['orgs'][number];
 
@@ -39,8 +40,9 @@ const org = (id: string, name: string, over: Partial<Row> = {}): Row => ({
 const orgs = [
   org('a', 'Edge Org A', { coordinator_count: 54, pending_count: 8, child_count: 1 }),
   org('b', 'Edge Org B', { parent_id: 'a', parent_name: 'Edge Org A', depth: 2 }),
-  org('c', 'Cotton Co', { status: 'pending', known_as_name: 'Cluster' }),
+  org('c', 'Cotton Co', { known_as_name: 'Cluster' }),
   org('d', 'Dropped Org', { status: 'inactive' }),
+  org('e', 'Waiting Org', { status: 'pending' }),
 ];
 
 function renderView(props: Partial<Parameters<typeof NetworkOrgsView>[0]> = {}) {
@@ -65,13 +67,13 @@ const defaultOrg = org('def', 'Default', { is_default: true, coordinator_count: 
 
 describe('countOrgs', () => {
   it('counts every organisation and each status', () => {
-    expect(countOrgs(orgs)).toEqual({ all: 4, active: 2, pending: 1, inactive: 1 });
+    expect(countOrgs(orgs)).toEqual({ all: 5, active: 3, pending: 1, inactive: 1 });
   });
 
   it('leaves the Default organisation out, as the organisation limit does', () => {
     expect(countOrgs([...orgs, defaultOrg])).toEqual({
-      all: 4,
-      active: 2,
+      all: 5,
+      active: 3,
       pending: 1,
       inactive: 1,
     });
@@ -89,7 +91,7 @@ describe('NetworkOrgsView', () => {
     expect(orgLinks().map((a) => a.textContent)).toEqual(
       expect.arrayContaining([expect.stringContaining('Default')]),
     );
-    fireEvent.click(filter(/^Active\s*2/));
+    fireEvent.click(filter(/^Active\s*3/));
     expect(orgLinks().some((a) => a.textContent?.includes('Default'))).toBe(false);
   });
 
@@ -99,7 +101,7 @@ describe('NetworkOrgsView', () => {
     expect(screen.queryByRole('progressbar')).toBeNull();
   });
 
-  it('lists each organisation with its status, opening its page, and no counts', () => {
+  it('lists each joined organisation with its status, opening its page, and no counts', () => {
     renderView();
     expect(orgLinks().map((a) => a.getAttribute('href'))).toEqual([
       '/console/orgs/a',
@@ -107,6 +109,7 @@ describe('NetworkOrgsView', () => {
       '/console/orgs/c',
       '/console/orgs/d',
     ]);
+    expect(screen.queryByRole('link', { name: /Waiting Org/ })).toBeNull();
     expect(screen.getByRole('link', { name: /Cotton Co/ })).toHaveTextContent('Cluster');
     expect(screen.getByText(messages.console.orgs.col_joined)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Cotton Co/ })).toHaveTextContent('Jan 1, 2026');
@@ -127,9 +130,9 @@ describe('NetworkOrgsView', () => {
 
   it('filters by status from the summary and clears the filter from its chip', () => {
     renderView();
-    fireEvent.click(filter(/Invited\s*1/));
+    fireEvent.click(filter(/^Rejected\s*1/));
     expect(orgLinks()).toHaveLength(1);
-    expect(screen.getByRole('link', { name: /Cotton Co/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Dropped Org/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: messages.console.orgs.clear_filter }));
     expect(orgLinks()).toHaveLength(4);
   });
@@ -145,8 +148,23 @@ describe('NetworkOrgsView', () => {
     expect(screen.getByText(messages.console.orgs.empty)).toBeInTheDocument();
   });
 
-  it('says when nothing is waiting for review', () => {
-    renderView({ initialFilter: 'pending', orgs: orgs.filter((o) => o.status !== 'pending') });
-    expect(screen.getByText(messages.console.orgs.empty_pending)).toBeInTheDocument();
+  it('scrolls to the waiting list from its tile instead of filtering', () => {
+    const target = document.createElement('div');
+    target.id = WAITING_TO_VERIFY_ID;
+    target.scrollIntoView = vi.fn();
+    document.body.appendChild(target);
+    renderView();
+
+    fireEvent.click(filter(/^Waiting to verify\s*1/));
+
+    expect(target.scrollIntoView).toHaveBeenCalled();
+    expect(orgLinks()).toHaveLength(4);
+    target.remove();
+  });
+
+  it('opens on every joined organisation when asked for the waiting ones', () => {
+    renderView({ initialFilter: 'pending' });
+    expect(orgLinks()).toHaveLength(4);
+    expect(filter(/^All organisations/)).toHaveAttribute('aria-pressed', 'true');
   });
 });

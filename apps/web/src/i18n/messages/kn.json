@@ -776,7 +776,7 @@
           "sub": "ಅನುಮೋದಿತ ಮತ್ತು ಚಾಲನೆಯಲ್ಲಿದೆ"
         },
         "pending": {
-          "label": "ಆಹ್ವಾನಿತ",
+          "label": "ಪರಿಶೀಲನೆಗಾಗಿ ಕಾಯುತ್ತಿದೆ",
           "sub": "ಕೋಡ್ ಮೂಲಕ ಪರಿಶೀಲನೆ ಬಾಕಿ",
           "none": "ಎಲ್ಲರೂ ಪರಿಶೀಲಿಸಿದ್ದಾರೆ"
         },
@@ -799,7 +799,6 @@
       },
       "network_note": "ನೆಟ್‌ವರ್ಕ್ · ನೀವು ನೆಟ್‌ವರ್ಕ್ ನಿರ್ವಾಹಕರು",
       "clear_filter": "ಫಿಲ್ಟರ್ ತೆರವುಗೊಳಿಸಿ",
-      "empty_pending": "ಪರಿಶೀಲನೆಗಾಗಿ ಯಾವುದೇ [[org]] ಕಾಯುತ್ತಿಲ್ಲ.",
       "open": "ತೆರೆಯಿರಿ",
       "invite": "Invite [[orgs]]",
       "col_role": "Role",
@@ -966,7 +965,7 @@
       "read_only": "Contact details can't be changed here yet."
     },
     "status": {
-      "pending": "Invited",
+      "pending": "Waiting to verify",
       "active": "Active",
       "inactive": "Rejected",
       "retired": "Retired"
@@ -1123,7 +1122,7 @@
           "sub": "ಸೈನ್ ಇನ್ ಮಾಡಬಹುದು"
         },
         "pending": {
-          "label": "ಆಹ್ವಾನಿತ",
+          "label": "ಪರಿಶೀಲನೆಗಾಗಿ ಕಾಯುತ್ತಿದೆ",
           "sub": "ಕೋಡ್ ಮೂಲಕ ಪರಿಶೀಲನೆ ಬಾಕಿ",
           "none": "ಎಲ್ಲರೂ ಪರಿಶೀಲಿಸಿದ್ದಾರೆ"
         },
@@ -1138,7 +1137,6 @@
       "search": "ಹೆಸರು ಅಥವಾ ಇಮೇಲ್ ಹುಡುಕಿ",
       "filter_label": "[[user]]ರನ್ನು ತೋರಿಸಿ",
       "filter_all": "ಎಲ್ಲಾ",
-      "filter_pending": "ಬಾಕಿ",
       "col_coordinator": "[[user]]",
       "col_organisation": "[[org]]",
       "col_status": "ಸ್ಥಿತಿ",
@@ -1148,7 +1146,6 @@
       "view_named": "{name} ನೋಡಿ",
       "review": "ಪರಿಶೀಲಿಸಿ",
       "empty": "ಯಾವುದೇ [[user]]ರು ಹೊಂದಿಕೆಯಾಗುತ್ತಿಲ್ಲ.",
-      "empty_pending": "ಪರಿಶೀಲನೆಗಾಗಿ ಯಾವುದೇ [[user]]ರು ಕಾಯುತ್ತಿಲ್ಲ.",
       "partial": "ಹೊಸ {count} ತೋರಿಸಲಾಗುತ್ತಿದೆ. <link>ಎಲ್ಲಾ [[user]]ರನ್ನು ನೋಡಿ</link>"
     },
     "page_error": {
@@ -1173,7 +1170,7 @@
       "empty": "Nobody is waiting on an invite.",
       "more": "Showing the newest {count}."
     },
-    "registered_orgs": {
+    "waiting_to_verify": {
       "heading": "Registered, waiting to verify ({count})",
       "status": "Waiting to verify",
       "registered": "Registered"

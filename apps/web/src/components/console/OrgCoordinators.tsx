@@ -2,7 +2,9 @@
 
 /**
  * The coordinators part of the owner's "Your organisation" page: count tiles
- * that filter the list, a name/email search, a status switch, and the table.
+ * that filter the list, a name/email search, a status switch, and the table of
+ * coordinators who have joined. Those still waiting to verify are listed in
+ * their own section, which the "waiting to verify" tile scrolls to.
  *
  * Filtering and search run in the browser over the rows the page loaded.
  */
@@ -13,6 +15,7 @@ import { useTranslations } from 'next-intl';
 import { Clock, Eye, UserCheck, Users, UserX, type LucideIcon } from 'lucide-react';
 import { I } from '../../icons';
 import { cn } from '../../lib/cn';
+import { scrollToWaitingToVerify } from '../../lib/waiting-to-verify';
 import { initialsOf } from '../../lib/initials';
 import { CountTile, type TileTone } from './CountTile';
 import { DomainChips } from './DomainChips';
@@ -32,10 +35,13 @@ export interface OrgCoordinatorRow {
   domains: Array<{ id: string; label: string }>;
 }
 
-/** The list filters, matching the count tiles. */
+/** The count tiles; `pending` scrolls to the waiting section instead of filtering. */
 type Filter = 'all' | 'active' | 'pending' | 'inactive';
 
-const FILTERS: readonly Filter[] = ['all', 'active', 'pending', 'inactive'];
+const TILES: readonly Filter[] = ['all', 'active', 'pending', 'inactive'];
+
+/** The list filters: the joined coordinators' statuses. */
+const LIST_FILTERS: readonly Filter[] = ['all', 'active', 'inactive'];
 
 /** The icon and colour of each count tile. */
 const TILE: Record<Filter, { icon: LucideIcon; tone: TileTone }> = {
@@ -83,7 +89,7 @@ export function OrgCoordinators({
   rows: OrgCoordinatorRow[];
   /** Every coordinator of the organisation, from the API. */
   total: number;
-  /** Coordinators waiting for review, from the API. */
+  /** Coordinators waiting to verify, from the API. */
   pending: number;
   /** `false` when the organisation has more coordinators than `rows`. */
   complete: boolean;
@@ -97,26 +103,23 @@ export function OrgCoordinators({
 
   /** Tile count: exact from the API, or counted from the loaded rows. */
   function countOf(f: Filter): string {
-    if (f === 'all') return String(total);
+    if (f === 'all') return String(total - pending);
     if (f === 'pending') return String(pending);
     const n = rows.filter((r) => r.status === f).length;
     return complete ? String(n) : `${n}+`;
   }
 
   function label(f: Filter): string {
-    if (f === 'all') return t('filter_all');
-    if (f === 'pending') return t('filter_pending');
-    return tStatus(f);
+    return f === 'all' ? t('filter_all') : tStatus(f);
   }
 
   const q = query.trim().toLowerCase();
   const visible = rows.filter((r) => (filter === 'all' || r.status === filter) && matches(r, q));
-  const emptyText = filter === 'pending' && !q ? t('empty_pending') : t('empty');
 
   return (
     <>
       <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
-        {FILTERS.map((f) => (
+        {TILES.map((f) => (
           <CountTile
             key={f}
             icon={<TileIcon f={f} />}
@@ -128,7 +131,7 @@ export function OrgCoordinators({
             selected={filter === f}
             showLabel={t('tile_show')}
             showingLabel={t('tile_showing')}
-            onClick={() => setFilter(f)}
+            onClick={() => (f === 'pending' ? scrollToWaitingToVerify() : setFilter(f))}
           />
         ))}
       </div>
@@ -157,7 +160,7 @@ export function OrgCoordinators({
               aria-label={t('filter_label')}
               className="m-0 min-w-0 border-0 flex gap-0.5 overflow-x-auto rounded-[10px] bg-(--bd-border-soft) p-[3px]"
             >
-              {FILTERS.map((f) => (
+              {LIST_FILTERS.map((f) => (
                 <button
                   key={f}
                   type="button"
@@ -176,7 +179,7 @@ export function OrgCoordinators({
         </header>
 
         {visible.length === 0 ? (
-          <p className="px-[18px] py-10 text-center text-ink-500">{emptyText}</p>
+          <p className="px-[18px] py-10 text-center text-ink-500">{t('empty')}</p>
         ) : (
           <div className="scroll-x max-h-[min(560px,65vh)] overflow-auto overscroll-contain">
             <table className="bd-table">
@@ -221,23 +224,14 @@ export function OrgCoordinators({
                       <DomainChips domains={r.domains} />
                     </td>
                     <td className="whitespace-nowrap">
-                      {r.status === 'pending' ? (
-                        <Link
-                          href={`/console/coordinators/${r.id}`}
-                          className="rounded-lg px-2.5 py-1.5 text-[13px] font-semibold text-(--bd-primary-600) hover:bg-(--bd-primary-50)"
-                        >
-                          {t('review')}
-                        </Link>
-                      ) : (
-                        <Link
-                          href={`/console/coordinators/${r.id}`}
-                          aria-label={t('view_named', { name: r.name })}
-                          title={t('view')}
-                          className="inline-grid h-8 w-8 place-items-center rounded-lg text-ink-500 hover:bg-(--bd-primary-50) hover:text-(--bd-primary-600)"
-                        >
-                          <Eye size={17} />
-                        </Link>
-                      )}
+                      <Link
+                        href={`/console/coordinators/${r.id}`}
+                        aria-label={t('view_named', { name: r.name })}
+                        title={t('view')}
+                        className="inline-grid h-8 w-8 place-items-center rounded-lg text-ink-500 hover:bg-(--bd-primary-50) hover:text-(--bd-primary-600)"
+                      >
+                        <Eye size={17} />
+                      </Link>
                     </td>
                   </tr>
                 ))}

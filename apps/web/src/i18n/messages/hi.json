@@ -776,7 +776,7 @@
           "sub": "स्वीकृत और चालू"
         },
         "pending": {
-          "label": "आमंत्रित",
+          "label": "सत्यापन की प्रतीक्षा",
           "sub": "कोड से सत्यापन बाकी",
           "none": "सभी ने सत्यापन कर लिया है"
         },
@@ -799,7 +799,6 @@
       },
       "network_note": "नेटवर्क · आप नेटवर्क व्यवस्थापक हैं",
       "clear_filter": "फ़िल्टर हटाएँ",
-      "empty_pending": "कोई [[org]] समीक्षा की प्रतीक्षा में नहीं है।",
       "open": "खोलें",
       "invite": "Invite [[orgs]]",
       "col_role": "Role",
@@ -966,7 +965,7 @@
       "read_only": "Contact details can't be changed here yet."
     },
     "status": {
-      "pending": "Invited",
+      "pending": "Waiting to verify",
       "active": "Active",
       "inactive": "Rejected",
       "retired": "Retired"
@@ -1123,7 +1122,7 @@
           "sub": "साइन इन कर सकते हैं"
         },
         "pending": {
-          "label": "आमंत्रित",
+          "label": "सत्यापन की प्रतीक्षा",
           "sub": "कोड से सत्यापन बाकी",
           "none": "सभी ने सत्यापन कर लिया है"
         },
@@ -1138,7 +1137,6 @@
       "search": "नाम या ईमेल खोजें",
       "filter_label": "[[user]] दिखाएँ",
       "filter_all": "सभी",
-      "filter_pending": "बाकी",
       "col_coordinator": "[[user]]",
       "col_organisation": "[[org]]",
       "col_status": "स्थिति",
@@ -1148,7 +1146,6 @@
       "view_named": "{name} देखें",
       "review": "समीक्षा करें",
       "empty": "कोई [[user]] मेल नहीं खाता।",
-      "empty_pending": "कोई [[user]] समीक्षा की प्रतीक्षा में नहीं है।",
       "partial": "नवीनतम {count} दिखाए जा रहे हैं। <link>सभी [[user]] देखें</link>"
     },
     "page_error": {
@@ -1173,7 +1170,7 @@
       "empty": "Nobody is waiting on an invite.",
       "more": "Showing the newest {count}."
     },
-    "registered_orgs": {
+    "waiting_to_verify": {
       "heading": "Registered, waiting to verify ({count})",
       "status": "Waiting to verify",
       "registered": "Registered"

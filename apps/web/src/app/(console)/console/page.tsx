@@ -21,6 +21,7 @@ import { buttonClass } from '@/components/ui/button-class';
 import { ConsoleStatusPill } from '@/components/console/ConsoleUi';
 import { OrgCoordinators, type OrgCoordinatorRow } from '@/components/console/OrgCoordinators';
 import { OpenInvites } from '@/components/console/OpenInvites';
+import { WaitingToVerify } from '@/components/console/WaitingToVerify';
 import { readOpenInvites } from '@/lib/console-invites.server';
 import { I } from '@/icons';
 
@@ -59,7 +60,17 @@ async function renderOrgHome(org: OrgRow, showInvite: boolean) {
     networkDomains(),
     readOpenInvites('user', org.id),
   ]);
-  const rows: OrgCoordinatorRow[] = page.users.map((u) => ({
+  const joined = page.users.filter((u) => u.status !== 'pending');
+  const waiting = page.users
+    .filter((u) => u.status === 'pending')
+    .map((u) => ({
+      id: u.id,
+      name: u.contact.name ?? u.contact.email,
+      detail: u.contact.name ? u.contact.email : null,
+      href: `/console/coordinators/${u.id}`,
+      registeredAt: u.created_at,
+    }));
+  const rows: OrgCoordinatorRow[] = joined.map((u) => ({
     id: u.id,
     name: u.contact.name ?? u.contact.email,
     email: u.contact.name ? u.contact.email : null,
@@ -99,6 +110,7 @@ async function renderOrgHome(org: OrgRow, showInvite: boolean) {
           complete={page.next_cursor === null}
           allHref={`/console/coordinators?org_id=${org.id}`}
         />
+        <WaitingToVerify rows={waiting} />
         {invites ? <OpenInvites page={invites} /> : null}
       </div>
     </>

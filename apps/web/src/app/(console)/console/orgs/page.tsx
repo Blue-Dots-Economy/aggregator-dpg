@@ -34,7 +34,7 @@ import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
 import { ORG_FILTERS, type OrgFilter } from '@/lib/org-filters';
 import { ConsoleSection } from '@/components/console/ConsoleUi';
 import { OpenInvites } from '@/components/console/OpenInvites';
-import { RegisteredOrgs } from '@/components/console/RegisteredOrgs';
+import { WaitingToVerify, type WaitingRow } from '@/components/console/WaitingToVerify';
 import { readOpenInvites } from '@/lib/console-invites.server';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
@@ -84,6 +84,7 @@ export default async function ConsoleOrgsPage({
           initialFilter={initialFilter}
           roleLabel={features.invite_role_label ?? t('invite.org.role_default')}
         />
+        <WaitingToVerify rows={waitingOrgs(network.orgs, hierarchy.network.id)} />
         {invites ? <OpenInvites page={invites} /> : null}
         <HierarchySettings
           orgId={hierarchy.network.id}
@@ -152,9 +153,7 @@ async function OwnerOrgs({
                 more={false}
               />
             </ConsoleSection>
-            <RegisteredOrgs
-              orgs={orgs.filter((o) => o.status === 'pending' && o.parent_id === root.id)}
-            />
+            <WaitingToVerify rows={waitingOrgs(orgs, root.id)} />
             {invitesById.get(root.id) ? <OpenInvites page={invitesById.get(root.id)!} /> : null}
             {valuesById.get(root.id) ? (
               <HierarchySettings
@@ -187,6 +186,23 @@ async function knownAsValuesToEdit(
     `/v1/org/read/${encodeURIComponent(root.id)}?fields=known_as_values`,
   );
   return read.org.known_as_values ?? null;
+}
+
+/**
+ * The organisations directly under `parentId` that registered but have not verified yet.
+ *
+ * @param orgs - The organisations the viewer can see.
+ * @param parentId - The organisation they registered under.
+ */
+function waitingOrgs(orgs: readonly OrgRow[], parentId: string): WaitingRow[] {
+  return orgs
+    .filter((o) => o.status === 'pending' && o.parent_id === parentId)
+    .map((o) => ({
+      id: o.id,
+      name: o.name,
+      href: `/console/orgs/${o.id}`,
+      registeredAt: o.created_at,
+    }));
 }
 
 /** The link to the Invite organisations page. */

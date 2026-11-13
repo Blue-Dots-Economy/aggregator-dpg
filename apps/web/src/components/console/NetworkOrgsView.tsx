@@ -2,9 +2,10 @@
 
 /**
  * The network admin's organisations: a summary of the network with status
- * filters, then the organisations directly
- * under the network as a list. Search and the status filter run in the browser
- * over the loaded organisations.
+ * filters, then the organisations directly under the network that have joined
+ * as a list. Those still waiting to verify are listed in their own section,
+ * which the "waiting to verify" tile scrolls to. Search and the status filter
+ * run in the browser over the loaded organisations.
  */
 
 import Link from 'next/link';
@@ -24,6 +25,7 @@ import type { OrgSearchResponse } from '@aggregator-dpg/shared-primitives/user-o
 import { I } from '../../icons';
 import { cn } from '../../lib/cn';
 import { ORG_FILTERS, countOrgs, matchesFilter, type OrgFilter } from '../../lib/org-filters';
+import { scrollToWaitingToVerify } from '../../lib/waiting-to-verify';
 import { ConsoleStatusPill } from './ConsoleUi';
 import { CountTile, type TileTone } from './CountTile';
 
@@ -62,12 +64,15 @@ export function NetworkOrgsView({
   roleLabel: string;
 }>) {
   const t = useTranslations('console');
-  const [filter, setFilter] = useState<OrgFilter>(initialFilter);
+  const [filter, setFilter] = useState<OrgFilter>(
+    initialFilter === 'pending' ? 'all' : initialFilter,
+  );
   const [query, setQuery] = useState('');
 
   const counts = countOrgs(orgs);
   const q = query.trim().toLowerCase();
-  const keep = (o: OrgRow) => matchesFilter(o, filter) && matchesQuery(o, q);
+  const keep = (o: OrgRow) =>
+    o.status !== 'pending' && matchesFilter(o, filter) && matchesQuery(o, q);
   // Default goes last: it holds sign-ups that came in without an organisation.
   const rows = orgs.filter(keep).sort((a, b) => Number(a.is_default) - Number(b.is_default));
   const filterLabel = (f: OrgFilter) => t(`orgs.tile.${f}.label`);
@@ -91,7 +96,7 @@ export function NetworkOrgsView({
       <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
         {ORG_FILTERS.map((f) => {
           const { icon: Icon, tone } = FILTER_TILE[f];
-          const n = counts[f];
+          const n = f === 'all' ? counts.all - counts.pending : counts[f];
           return (
             <CountTile
               key={f}
@@ -106,7 +111,7 @@ export function NetworkOrgsView({
               selected={filter === f}
               showLabel={t('org_home.tile_show')}
               showingLabel={t('org_home.tile_showing')}
-              onClick={() => setFilter(f)}
+              onClick={() => (f === 'pending' ? scrollToWaitingToVerify() : setFilter(f))}
             />
           );
         })}
@@ -172,9 +177,7 @@ export function NetworkOrgsView({
 
         <div className="max-h-[min(640px,70vh)] overflow-auto overscroll-contain">
           {rows.length === 0 ? (
-            <p className="px-[18px] py-10 text-center text-ink-500">
-              {filter === 'pending' && !q ? t('orgs.empty_pending') : t('orgs.empty')}
-            </p>
+            <p className="px-[18px] py-10 text-center text-ink-500">{t('orgs.empty')}</p>
           ) : (
             rows.map((org) => <OrgRowLink key={org.id} org={org} roleLabel={roleLabel} />)
           )}

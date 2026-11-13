@@ -34,6 +34,11 @@ vi.mock('next/navigation', () => ({
     throw new Error(`redirect:${to}`);
   }),
 }));
+vi.mock('@/components/console/WaitingToVerify', () => ({
+  WaitingToVerify: ({ rows }: { rows: Array<{ id: string; detail?: string | null }> }) => (
+    <div data-testid="waiting">{rows.map((r) => `${r.id}:${r.detail ?? ''}`).join(',')}</div>
+  ),
+}));
 vi.mock('@/components/shell/Topbar', () => ({
   Topbar: ({ title }: { title: string }) => <h1>{title}</h1>,
 }));
@@ -151,7 +156,8 @@ describe('console home — owner', () => {
       '/console/invite',
     );
     expect(screen.getByText('Coord One')).toBeInTheDocument();
-    expect(screen.getByText('cp@edge.test')).toBeInTheDocument();
+    expect(screen.getByTestId('waiting')).toHaveTextContent(/^c2:$/);
+    expect(screen.queryByRole('link', { name: 'cp@edge.test' })).toBeNull();
     expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', {
       filter: { org_id: 'org-1' },
       limit: 100,

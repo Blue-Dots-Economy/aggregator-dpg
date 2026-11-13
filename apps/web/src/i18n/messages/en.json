@@ -776,7 +776,7 @@
           "sub": "Approved and running"
         },
         "pending": {
-          "label": "Invited",
+          "label": "Waiting to verify",
           "sub": "Yet to verify with a code",
           "none": "Everyone has verified"
         },
@@ -799,7 +799,6 @@
       },
       "network_note": "The network · you're the network admin",
       "clear_filter": "Clear filter",
-      "empty_pending": "No [[orgs]] waiting for review.",
       "open": "Open",
       "invite": "Invite [[orgs]]",
       "col_role": "Role",
@@ -966,7 +965,7 @@
       "read_only": "Contact details can't be changed here yet."
     },
     "status": {
-      "pending": "Invited",
+      "pending": "Waiting to verify",
       "active": "Active",
       "inactive": "Rejected",
       "retired": "Retired"
@@ -1123,7 +1122,7 @@
           "sub": "Can sign in"
         },
         "pending": {
-          "label": "Invited",
+          "label": "Waiting to verify",
           "sub": "Yet to verify with a code",
           "none": "Everyone has verified"
         },
@@ -1138,7 +1137,6 @@
       "search": "Search name or email",
       "filter_label": "Show [[users]]",
       "filter_all": "All",
-      "filter_pending": "Pending",
       "col_coordinator": "[[User]]",
       "col_organisation": "[[Org]]",
       "col_status": "Status",
@@ -1148,7 +1146,6 @@
       "view_named": "View {name}",
       "review": "Review",
       "empty": "No [[users]] match.",
-      "empty_pending": "No [[users]] waiting for review.",
       "partial": "Showing the newest {count}. <link>See all [[users]]</link>"
     },
     "page_error": {
@@ -1173,7 +1170,7 @@
       "empty": "Nobody is waiting on an invite.",
       "more": "Showing the newest {count}."
     },
-    "registered_orgs": {
+    "waiting_to_verify": {
       "heading": "Registered, waiting to verify ({count})",
       "status": "Waiting to verify",
       "registered": "Registered"

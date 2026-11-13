@@ -46,9 +46,9 @@ vi.mock('@/components/console/ChildOrgsTree', () => ({
     <div data-testid="tree">{orgs.map((o) => o.id).join(',')}</div>
   ),
 }));
-vi.mock('@/components/console/RegisteredOrgs', () => ({
-  RegisteredOrgs: ({ orgs }: { orgs: Array<{ id: string }> }) => (
-    <div data-testid="registered">{orgs.map((o) => o.id).join(',')}</div>
+vi.mock('@/components/console/WaitingToVerify', () => ({
+  WaitingToVerify: ({ rows }: { rows: Array<{ id: string }> }) => (
+    <div data-testid="waiting">{rows.map((r) => r.id).join(',')}</div>
   ),
 }));
 vi.mock('@/components/console/HierarchySettings', () => ({
@@ -62,7 +62,7 @@ vi.mock('@/components/console/HierarchySettings', () => ({
 import ConsoleOrgsPage from '@/app/(console)/console/orgs/page';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
-import { readReachableOrgs } from '@/lib/console-hierarchy.server';
+import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
 
 const NETWORK_ADMIN: MeResponse = {
   kind: 'admin',
@@ -93,6 +93,18 @@ describe('console orgs page — hierarchy settings', () => {
     render(await ConsoleOrgsPage({ searchParams: Promise.resolve({}) }));
     expect(consoleRead).toHaveBeenCalledWith('/v1/org/hierarchy?fields=known_as_values');
     expect(screen.getByTestId('hierarchy-settings')).toHaveTextContent('State');
+  });
+
+  it('lists the organisations under the network that have not verified apart', async () => {
+    vi.mocked(readNetworkOrgs).mockResolvedValueOnce({
+      orgs: [
+        { id: 'x', name: 'Joined', parent_id: 'root', status: 'active' },
+        { id: 'y', name: 'Waiting', parent_id: 'root', status: 'pending' },
+      ],
+      more: false,
+    } as never);
+    render(await ConsoleOrgsPage({ searchParams: Promise.resolve({}) }));
+    expect(screen.getByTestId('waiting')).toHaveTextContent(/^y$/);
   });
 });
 
@@ -173,7 +185,7 @@ describe('console orgs page — owner view', () => {
     ] as never);
     await showOwner();
     expect(screen.getByTestId('tree')).toHaveTextContent(/^b$/);
-    expect(screen.getByTestId('registered')).toHaveTextContent(/^c$/);
+    expect(screen.getByTestId('waiting')).toHaveTextContent(/^c$/);
   });
 
   it('hides the editor from a member and on a pending organisation, without reading the values', async () => {
