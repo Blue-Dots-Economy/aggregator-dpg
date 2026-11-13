@@ -549,9 +549,6 @@
     "welcome_sub": "ಮುಂದುವರಿಸಲು ನಿಮ್ಮ ಖಾತೆಗೆ ಸೈನ್ ಇನ್ ಮಾಡಿ.",
     "existing_title": "ಅಸ್ತಿತ್ವದಲ್ಲಿರುವ ಬಳಕೆದಾರ — ಸೈನ್ ಇನ್",
     "existing_sub": "{brand} SSO ಮೂಲಕ ಇಮೇಲ್ ಅಥವಾ ಮೊಬೈಲ್‌ನಿಂದ ಮುಂದುವರಿಯಿರಿ",
-    "register_title": "ಸದಸ್ಯರಾಗಿ",
-    "register_sub": "{brand} ಜೊತೆ ನಿಮ್ಮ [[org]]ಯನ್ನು ನೋಂದಾಯಿಸಿ",
-    "review_notice": "ಹೊಸ ನೋಂದಣಿಗಳನ್ನು {brand} ತಂಡದಿಂದ ಪರಿಶೀಲಿಸಲಾಗುತ್ತದೆ.",
     "session_expired": "ನಿಮ್ಮ ಸೆಷನ್ ಅವಧಿ ಮುಗಿದಿದೆ. ಮುಂದುವರಿಯಲು ಮತ್ತೆ ಸೈನ್ ಇನ್ ಮಾಡಿ.",
     "console_not_provisioned": "Your sign-in isn't linked to an account here yet. Contact the network administrator.",
     "console_no_org": "Your account doesn't manage an active [[org]], so there is nothing to show yet.",
@@ -702,9 +699,6 @@
       "tile": {
         "coordinators": "[[user]]ರು",
         "coordinators_sub": "ಈ [[org]]ಯಲ್ಲಿ",
-        "pending": "ಪರಿಶೀಲನೆ ಬಾಕಿ",
-        "pending_sub": "ಮಾಲೀಕರಿಗಾಗಿ ಕಾಯುತ್ತಿದೆ",
-        "pending_none": "ಪರಿಶೀಲಿಸಲು ಏನೂ ಇಲ್ಲ",
         "children_sub": "ನೇರವಾಗಿ ಕೆಳಗೆ",
         "level": "ಹಂತ",
         "level_sub": "ನೆಟ್‌ವರ್ಕ್‌ನಿಂದ ಕೆಳಗಿನ ಹಂತಗಳು"
@@ -754,40 +748,30 @@
       "empty": "No [[orgs]] match.",
       "subtitle": "The [[orgs]] directly under the network, and the ones you have invited.",
       "col_name": "[[Org]]",
-      "col_known_as": "Known as",
       "col_joined": "Joined",
       "col_status": "Status",
       "col_counts": "[[Users]]",
-      "col_actions": "Actions",
       "hierarchy": "Hierarchy settings",
       "col_parent": "Parent [[org]]",
       "subtitle_owner": "The [[orgs]] directly under yours, and the ones you have invited.",
       "hierarchy_description": "Choose what [[orgs]] directly under {name} are called.",
       "known_as_current": "Known as",
-      "yours": "Your [[org]]",
-      "manage": "Manage [[org]]",
       "tile": {
         "all": {
           "label": "ಎಲ್ಲಾ [[org]]ಗಳು",
-          "sub": "ನೇರವಾಗಿ ನೆಟ್‌ವರ್ಕ್‌ನ ಅಡಿಯಲ್ಲಿ, ಡೀಫಾಲ್ಟ್ ಎಣಿಸಿಲ್ಲ"
+          "sub": "ನೀವು ಆಹ್ವಾನಿಸಿದವರು"
         },
         "active": {
           "label": "ಸಕ್ರಿಯ",
-          "sub": "ಅನುಮೋದಿತ ಮತ್ತು ಚಾಲನೆಯಲ್ಲಿದೆ"
+          "sub": "ಸೈನ್ ಇನ್ ಮಾಡಬಹುದು"
         },
         "pending": {
-          "label": "ಪರಿಶೀಲನೆಗಾಗಿ ಕಾಯುತ್ತಿದೆ",
+          "label": "ಆಹ್ವಾನಿಸಲಾಗಿದೆ",
           "sub": "ಕೋಡ್ ಮೂಲಕ ಪರಿಶೀಲನೆ ಬಾಕಿ",
           "none": "ಎಲ್ಲರೂ ಪರಿಶೀಲಿಸಿದ್ದಾರೆ"
-        },
-        "inactive": {
-          "label": "ತಿರಸ್ಕರಿಸಲಾಗಿದೆ",
-          "sub": "ಅನುಮೋದಿಸಲಾಗಿಲ್ಲ"
         }
       },
       "search": "[[org]]ಗಳನ್ನು ಹುಡುಕಿ",
-      "col_view": "ಕ್ರಿಯೆ",
-      "review_heading": "ನಿಮ್ಮ ಪರಿಶೀಲನೆಗಾಗಿ ಕಾಯುತ್ತಿದೆ ({count})",
       "error": {
         "network": "ಸರ್ವರ್ ತಲುಪಲು ಆಗಲಿಲ್ಲ. ನಿಮ್ಮ ಇಂಟರ್ನೆಟ್ ಸಂಪರ್ಕ ಪರಿಶೀಲಿಸಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
         "signed_out": "ನೀವು ಸೈನ್ ಔಟ್ ಆಗಿದ್ದೀರಿ. ಮತ್ತೆ ಸೈನ್ ಇನ್ ಮಾಡಿ, ನಂತರ ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.",
@@ -798,9 +782,9 @@
         "generic": "ಅದು ಆಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
       },
       "network_note": "ನೆಟ್‌ವರ್ಕ್ · ನೀವು ನೆಟ್‌ವರ್ಕ್ ನಿರ್ವಾಹಕರು",
-      "clear_filter": "ಫಿಲ್ಟರ್ ತೆರವುಗೊಳಿಸಿ",
-      "open": "ತೆರೆಯಿರಿ",
-      "invite": "Invite [[orgs]]"
+      "invite": "Invite [[orgs]]",
+      "list_heading": "[[Orgs]]",
+      "filter_label": "[[orgs]] ತೋರಿಸಿ"
     },
     "coordinators": {
       "heading": "[[Users]]",
@@ -826,8 +810,6 @@
       "clear_all": "Clear filters"
     },
     "coordinator": {
-      "reason": "ಕಾರಣ (ಐಚ್ಛಿಕ, ಅರ್ಜಿದಾರರಿಗೆ ಕಳುಹಿಸಲಾಗುತ್ತದೆ)",
-      "already": "ಬೇರೆಡೆ ಈಗಾಗಲೇ ನಿರ್ಧರಿಸಲಾಗಿದೆ — ಈಗ {status}.",
       "domains": "ಸೇವೆ ನೀಡುವ ಡೊಮೇನ್‌ಗಳು",
       "domains_sub": "ಈ [[user]]ರು ಯಾವ ದಾಖಲೆಗಳೊಂದಿಗೆ ಕೆಲಸ ಮಾಡಬಹುದು.",
       "domains_empty": "ಕನಿಷ್ಠ ಒಂದು ಡೊಮೇನ್ ಆರಿಸಿ.",
@@ -847,12 +829,11 @@
         "signed_out": "ನೀವು ಸೈನ್ ಔಟ್ ಆಗಿದ್ದೀರಿ. ಮತ್ತೆ ಸೈನ್ ಇನ್ ಮಾಡಿ, ನಂತರ ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.",
         "forbidden": "ಈ [[user]]ರನ್ನು ನಿರ್ವಹಿಸಲು ನಿಮಗೆ ಅನುಮತಿ ಇಲ್ಲ.",
         "not_found": "ಈ [[user]]ರ ಖಾತೆ ಸಿಗಲಿಲ್ಲ. ಪುಟವನ್ನು ರಿಫ್ರೆಶ್ ಮಾಡಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
-        "org_inactive": "ಈ [[org]] ಸಕ್ರಿಯವಾಗಿಲ್ಲ, ಆದ್ದರಿಂದ ಈಗ ಅದರ ನೋಂದಣಿಗಳ ಬಗ್ಗೆ ನಿರ್ಧರಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.",
+        "org_inactive": "ಈ [[org]] ಸಕ್ರಿಯವಾಗಿಲ್ಲ, ಆದ್ದರಿಂದ ಈಗ ಬದಲಾವಣೆಗಳನ್ನು ಉಳಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.",
         "rate_limited": "ಕಡಿಮೆ ಸಮಯದಲ್ಲಿ ಹೆಚ್ಚು ಬದಲಾವಣೆಗಳು. ಒಂದು ನಿಮಿಷ ಕಾಯಿರಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
         "server": "ನಮ್ಮ ಕಡೆಯಿಂದ ಏನೋ ತಪ್ಪಾಗಿದೆ. ಕೆಲವು ನಿಮಿಷಗಳ ನಂತರ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
         "generic": "ಅದು ಆಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ."
-      },
-      "save_domains_first": "ನಿರ್ಧರಿಸುವ ಮೊದಲು ಡೊಮೇನ್ ಬದಲಾವಣೆಗಳನ್ನು ಉಳಿಸಿ ಅಥವಾ ರದ್ದುಮಾಡಿ."
+      }
     },
     "invite": {
       "heading": "[[user]]ರನ್ನು ಆಹ್ವಾನಿಸಿ",
@@ -962,7 +943,7 @@
       "read_only": "Contact details can't be changed here yet."
     },
     "status": {
-      "pending": "Waiting to verify",
+      "pending": "ಆಹ್ವಾನಿಸಲಾಗಿದೆ",
       "active": "Active",
       "inactive": "Rejected",
       "retired": "Retired"
@@ -1112,20 +1093,16 @@
       "tile": {
         "all": {
           "label": "[[user]]ರು",
-          "sub": "ನಿಮ್ಮ [[org]]ಯಾದ್ಯಂತ"
+          "sub": "ನೀವು ಆಹ್ವಾನಿಸಿದವರು"
         },
         "active": {
           "label": "ಸಕ್ರಿಯ",
           "sub": "ಸೈನ್ ಇನ್ ಮಾಡಬಹುದು"
         },
         "pending": {
-          "label": "ಪರಿಶೀಲನೆಗಾಗಿ ಕಾಯುತ್ತಿದೆ",
+          "label": "ಆಹ್ವಾನಿಸಲಾಗಿದೆ",
           "sub": "ಕೋಡ್ ಮೂಲಕ ಪರಿಶೀಲನೆ ಬಾಕಿ",
           "none": "ಎಲ್ಲರೂ ಪರಿಶೀಲಿಸಿದ್ದಾರೆ"
-        },
-        "inactive": {
-          "label": "ತಿರಸ್ಕರಿಸಲಾಗಿದೆ",
-          "sub": "ಅನುಮೋದಿಸಲಾಗಿಲ್ಲ"
         }
       },
       "tile_show": "ಪಟ್ಟಿ ನೋಡಿ",
@@ -1134,14 +1111,12 @@
       "search": "ಹೆಸರು ಅಥವಾ ಇಮೇಲ್ ಹುಡುಕಿ",
       "filter_label": "[[user]]ರನ್ನು ತೋರಿಸಿ",
       "filter_all": "ಎಲ್ಲಾ",
-      "col_coordinator": "[[user]]",
-      "col_organisation": "[[org]]",
+      "col_name": "[[user]]",
       "col_status": "ಸ್ಥಿತಿ",
       "col_domains": "ಡೊಮೇನ್‌ಗಳು",
       "col_action": "ಕ್ರಿಯೆ",
       "view": "ನೋಡಿ",
       "view_named": "{name} ನೋಡಿ",
-      "review": "ಪರಿಶೀಲಿಸಿ",
       "empty": "ಯಾವುದೇ [[user]]ರು ಹೊಂದಿಕೆಯಾಗುತ್ತಿಲ್ಲ.",
       "partial": "ಹೊಸ {count} ತೋರಿಸಲಾಗುತ್ತಿದೆ. <link>ಎಲ್ಲಾ [[user]]ರನ್ನು ನೋಡಿ</link>"
     },
@@ -1157,20 +1132,8 @@
       "home": "ಕನ್ಸೋಲ್‌ಗೆ ಹೋಗಿ"
     },
     "open_invites": {
-      "heading": "Invites not used yet",
-      "col_email": "Email",
-      "col_status": "Status",
-      "col_sent": "Sent",
-      "col_expires": "Expires",
-      "status_pending": "Invited",
-      "status_expired": "Expired, send again",
-      "empty": "Nobody is waiting on an invite.",
-      "more": "Showing the newest {count}."
-    },
-    "waiting_to_verify": {
-      "heading": "Registered, waiting to verify ({count})",
-      "status": "Waiting to verify",
-      "registered": "Registered"
+      "sent_on": "ಆಹ್ವಾನ ಕಳುಹಿಸಲಾಗಿದೆ {date}",
+      "expired_on": "ಆಹ್ವಾನದ ಅವಧಿ {date} ರಂದು ಮುಗಿದಿದೆ, ಮತ್ತೆ ಕಳುಹಿಸಿ"
     },
     "dashboard": {
       "heading": "Dashboard",

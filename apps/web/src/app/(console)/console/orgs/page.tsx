@@ -1,21 +1,18 @@
 /**
- * Organisations page.
+ * Onboarded organisations page.
  *
- * An org owner sees the organisations directly under its own awaiting its
- * decision (approved or rejected in place), then each of its organisations
- * with the ones directly under it and, closed by default, its hierarchy
- * settings.
+ * An org owner sees, for each organisation it owns at the top of its tree, the
+ * organisations under it and the invites nobody has used yet in one list, and,
+ * closed by default, the "known as" values it defines for them.
  *
- * The network admin sees the organisations directly under the network: those
- * awaiting approval, status tiles, a searchable list (each name opens the
- * organisation's page) and, closed by default, the hierarchy settings.
- * `?status=` opens the list with a filter.
+ * The network admin sees the same for the organisations directly under the
+ * network. `?status=` opens the list with a filter.
  */
 
 import { Fragment } from 'react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
+import { getFormatter, getTranslations } from 'next-intl/server';
 import type {
   KnownAsValues,
   OrgHierarchyResponse,
@@ -28,25 +25,26 @@ import { consoleRead } from '@/lib/console-api.server';
 import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
 import { orgsBelow, topmostOwned } from '@/lib/console-org-options';
 import { HierarchySettings } from '@/components/console/HierarchySettings';
-import { ChildOrgsTree } from '@/components/console/ChildOrgsTree';
-import { NetworkOrgsView } from '@/components/console/NetworkOrgsView';
-import { ORG_FILTERS, type OrgFilter } from '@/lib/org-filters';
-import { ConsoleSection } from '@/components/console/ConsoleUi';
-import { OpenInvites } from '@/components/console/OpenInvites';
-import { WaitingToVerify, type WaitingRow } from '@/components/console/WaitingToVerify';
+import { ConsoleOrgCard } from '@/components/console/ConsoleOrgCard';
+import { MemberList, type MemberFilter, type MemberRow } from '@/components/console/MemberList';
 import { readOpenInvites } from '@/lib/console-invites.server';
+import { inviteRows, memberCounts } from '@/lib/console-members.server';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
 import { I } from '@/icons';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
 
+const FILTERS: readonly MemberFilter[] = ['all', 'active', 'pending'];
+
+type Translate = Awaited<ReturnType<typeof getTranslations<'console'>>>;
+
 export default async function ConsoleOrgsPage({
   searchParams,
 }: Readonly<{ searchParams: Promise<{ status?: string }> }>) {
   const t = await getTranslations('console');
   const params = await searchParams;
-  const initialFilter: OrgFilter = ORG_FILTERS.find((f) => f === params.status) ?? 'all';
+  const initialFilter = FILTERS.find((f) => f === params.status) ?? 'all';
   const actor = await getConsoleActor();
   if (!actor.ok) return null;
   const me = actor.me;
@@ -57,6 +55,7 @@ export default async function ConsoleOrgsPage({
         ownedIds={me.orgs.map((o) => o.id)}
         ownerIds={me.orgs.filter((o) => o.role === 'owner').map((o) => o.id)}
         canInviteOrgs={canInviteOrgs}
+        initialFilter={initialFilter}
       />
     );
   }
@@ -69,20 +68,14 @@ export default async function ConsoleOrgsPage({
   ]);
   return (
     <>
-      <Topbar
-        title={t('orgs.heading')}
-        subtitle={t('orgs.subtitle')}
-        right={canInviteOrgs ? inviteOrgsLink(t) : null}
-      />
-      <div className="flex flex-col gap-6">
-        <NetworkOrgsView
-          rootName={hierarchy.network.name}
-          orgs={network.orgs}
-          more={network.more}
-          initialFilter={initialFilter}
+      <Topbar title={t('orgs.heading')} subtitle={t('orgs.subtitle')} />
+      <div className="flex flex-col gap-4">
+        <ConsoleOrgCard
+          name={hierarchy.network.name}
+          note={t('orgs.network_note')}
+          action={canInviteOrgs ? inviteOrgsLink(t) : null}
         />
-        <WaitingToVerify rows={waitingOrgs(network.orgs, hierarchy.network.id)} />
-        {invites ? <OpenInvites page={invites} /> : null}
+        {await orgList(network.orgs, invites, !network.more, initialFilter)}
         <HierarchySettings
           orgId={hierarchy.network.id}
           orgName={hierarchy.network.name}
@@ -94,9 +87,9 @@ export default async function ConsoleOrgsPage({
 }
 
 /**
- * An owner's view: one section per topmost owned organisation with the
- * organisations under it, those registered and waiting to verify, its unused
- * invites and the "known as" values it defines for them.
+ * An owner's view: for each topmost owned organisation, its card, the
+ * organisations under it with the invites not used yet, and the "known as"
+ * values it defines for them.
  *
  * @param ownedIds - The organisations the viewer belongs to.
  * @param ownerIds - Those it owns, the only ones whose values it can edit.
@@ -106,58 +99,45 @@ async function OwnerOrgs({
   ownedIds,
   ownerIds,
   canInviteOrgs,
-}: Readonly<{ ownedIds: string[]; ownerIds: string[]; canInviteOrgs: boolean }>) {
+  initialFilter,
+}: Readonly<{
+  ownedIds: string[];
+  ownerIds: string[];
+  canInviteOrgs: boolean;
+  initialFilter: MemberFilter;
+}>) {
   const t = await getTranslations('console');
   const orgs = await readReachableOrgs();
   const roots = topmostOwned(ownedIds, orgs);
   if (roots.length === 0) redirect('/console');
-  const valuesById = new Map(
-    await Promise.all(
-      roots.map(async (root) => [root.id, await knownAsValuesToEdit(root, ownerIds)] as const),
+  const [values, lists] = await Promise.all([
+    Promise.all(roots.map((root) => knownAsValuesToEdit(root, ownerIds))),
+    Promise.all(
+      roots.map(async (root) =>
+        orgList(
+          orgsBelow(root.id, orgs),
+          await readOpenInvites('org', root.id),
+          true,
+          initialFilter,
+        ),
+      ),
     ),
-  );
-  const invitesById = new Map(
-    await Promise.all(
-      roots.map(async (root) => [root.id, await readOpenInvites('org', root.id)] as const),
-    ),
-  );
+  ]);
   return (
     <>
-      <Topbar
-        title={t('orgs.heading')}
-        subtitle={t('orgs.subtitle_owner')}
-        right={canInviteOrgs ? inviteOrgsLink(t) : null}
-      />
-      <div className="flex flex-col gap-6">
-        {roots.map((root) => (
+      <Topbar title={t('orgs.heading')} subtitle={t('orgs.subtitle_owner')} />
+      <div className="flex flex-col gap-4">
+        {roots.map((root, i) => (
           <Fragment key={root.id}>
-            <ConsoleSection
-              title={root.name}
-              action={
-                <Link className={buttonClass('soft')} href={`/console/orgs/${root.id}`}>
-                  {t('orgs.manage')}
-                  <I.arrowR size={15} />
-                </Link>
-              }
-            >
-              <ChildOrgsTree
-                rootId={root.id}
-                rootName={root.name}
-                rootKnownAs={root.known_as_name ?? root.known_as}
-                rootTag={t('orgs.yours')}
-                orgs={orgsBelow(root.id, orgs).filter((o) => o.status !== 'pending')}
-                linkRows
-                more={false}
-              />
-            </ConsoleSection>
-            <WaitingToVerify rows={waitingOrgs(orgs, root.id)} />
-            {invitesById.get(root.id) ? <OpenInvites page={invitesById.get(root.id)!} /> : null}
-            {valuesById.get(root.id) ? (
-              <HierarchySettings
-                orgId={root.id}
-                orgName={root.name}
-                values={valuesById.get(root.id) ?? []}
-              />
+            <ConsoleOrgCard
+              name={root.name}
+              status={root.status}
+              note={t('org_home.owner_note')}
+              action={canInviteOrgs ? inviteOrgsLink(t) : null}
+            />
+            {lists[i]}
+            {values[i] ? (
+              <HierarchySettings orgId={root.id} orgName={root.name} values={values[i]} />
             ) : null}
           </Fragment>
         ))}
@@ -165,6 +145,56 @@ async function OwnerOrgs({
     </>
   );
 }
+
+/**
+ * The organisations and the invites not used yet, in one list.
+ *
+ * @param orgs - The organisations to list.
+ * @param invites - The open invites, or `null` when they could not be read.
+ * @param complete - Whether `orgs` holds every organisation.
+ * @param initialFilter - The filter the list opens on.
+ */
+async function orgList(
+  orgs: readonly OrgRow[],
+  invites: OrgInvites,
+  complete: boolean,
+  initialFilter: MemberFilter,
+) {
+  const t = await getTranslations('console');
+  const format = await getFormatter();
+  const joined: MemberRow[] = [...orgs]
+    .sort((a, b) => Number(a.is_default) - Number(b.is_default))
+    .map((o) => ({
+      id: o.id,
+      name: o.name,
+      detail: o.is_default ? null : (o.known_as_name ?? o.known_as ?? null),
+      status: o.status,
+      href: `/console/orgs/${o.id}`,
+      cells: [
+        format.dateTime(new Date(o.created_at), {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        }),
+      ],
+    }));
+  const rows = [...joined, ...(await inviteRows(invites, 1))];
+  const allInvites = invites !== null && !invites.next_cursor;
+  const defaultIds = new Set(orgs.filter((o) => o.is_default).map((o) => o.id));
+  const counted = rows.filter((r) => !defaultIds.has(r.id));
+  return (
+    <MemberList
+      kind="orgs"
+      rows={rows}
+      counts={memberCounts(counted, {}, complete && allInvites)}
+      columns={[t('orgs.col_joined')]}
+      footer={complete ? null : t('org.children_more')}
+      initialFilter={initialFilter}
+    />
+  );
+}
+
+type OrgInvites = Awaited<ReturnType<typeof readOpenInvites>>;
 
 /**
  * The "known as" values an owned organisation defines for its children, when
@@ -185,27 +215,13 @@ async function knownAsValuesToEdit(
   return read.org.known_as_values ?? null;
 }
 
-/**
- * The organisations directly under `parentId` that registered but have not verified yet.
- *
- * @param orgs - The organisations the viewer can see.
- * @param parentId - The organisation they registered under.
- */
-function waitingOrgs(orgs: readonly OrgRow[], parentId: string): WaitingRow[] {
-  return orgs
-    .filter((o) => o.status === 'pending' && o.parent_id === parentId)
-    .map((o) => ({
-      id: o.id,
-      name: o.name,
-      href: `/console/orgs/${o.id}`,
-      registeredAt: o.created_at,
-    }));
-}
-
 /** The link to the Invite organisations page. */
-function inviteOrgsLink(t: Awaited<ReturnType<typeof getTranslations<'console'>>>) {
+function inviteOrgsLink(t: Translate) {
   return (
-    <Link className={buttonClass('primary')} href="/console/orgs/invite">
+    <Link
+      className={`${buttonClass('primary')} w-full justify-center sm:w-auto`}
+      href="/console/orgs/invite"
+    >
       <I.mail size={16} />
       {t('orgs.invite')}
     </Link>

@@ -549,9 +549,6 @@
     "welcome_sub": "जारी रखने के लिए अपने खाते में साइन इन करें।",
     "existing_title": "मौजूदा उपयोगकर्ता — साइन इन करें",
     "existing_sub": "{brand} SSO के ज़रिए ईमेल या मोबाइल से जारी रखें",
-    "register_title": "सदस्य बनें",
-    "register_sub": "{brand} के साथ अपना [[org]] पंजीकृत करें",
-    "review_notice": "नए पंजीकरणों की समीक्षा {brand} टीम द्वारा की जाती है।",
     "session_expired": "आपका सत्र समाप्त हो गया। जारी रखने के लिए फिर से साइन इन करें।",
     "console_not_provisioned": "Your sign-in isn't linked to an account here yet. Contact the network administrator.",
     "console_no_org": "Your account doesn't manage an active [[org]], so there is nothing to show yet.",
@@ -702,9 +699,6 @@
       "tile": {
         "coordinators": "[[user]]",
         "coordinators_sub": "इस [[org]] में",
-        "pending": "समीक्षा बाकी",
-        "pending_sub": "स्वामी की प्रतीक्षा में",
-        "pending_none": "समीक्षा के लिए कुछ नहीं",
         "children_sub": "सीधे नीचे",
         "level": "स्तर",
         "level_sub": "नेटवर्क से नीचे के चरण"
@@ -754,40 +748,30 @@
       "empty": "No [[orgs]] match.",
       "subtitle": "The [[orgs]] directly under the network, and the ones you have invited.",
       "col_name": "[[Org]]",
-      "col_known_as": "Known as",
       "col_joined": "Joined",
       "col_status": "Status",
       "col_counts": "[[Users]]",
-      "col_actions": "Actions",
       "hierarchy": "Hierarchy settings",
       "col_parent": "Parent [[org]]",
       "subtitle_owner": "The [[orgs]] directly under yours, and the ones you have invited.",
       "hierarchy_description": "Choose what [[orgs]] directly under {name} are called.",
       "known_as_current": "Known as",
-      "yours": "Your [[org]]",
-      "manage": "Manage [[org]]",
       "tile": {
         "all": {
           "label": "सभी [[org]]",
-          "sub": "सीधे नेटवर्क के अंतर्गत, डिफ़ॉल्ट शामिल नहीं"
+          "sub": "आपके द्वारा आमंत्रित"
         },
         "active": {
           "label": "सक्रिय",
-          "sub": "स्वीकृत और चालू"
+          "sub": "साइन इन कर सकते हैं"
         },
         "pending": {
-          "label": "सत्यापन की प्रतीक्षा",
+          "label": "आमंत्रित",
           "sub": "कोड से सत्यापन बाकी",
           "none": "सभी ने सत्यापन कर लिया है"
-        },
-        "inactive": {
-          "label": "अस्वीकृत",
-          "sub": "स्वीकृत नहीं"
         }
       },
       "search": "[[org]] खोजें",
-      "col_view": "कार्रवाई",
-      "review_heading": "आपकी समीक्षा की प्रतीक्षा में ({count})",
       "error": {
         "network": "सर्वर से संपर्क नहीं हो सका। अपना इंटरनेट कनेक्शन जाँचें और फिर से प्रयास करें।",
         "signed_out": "आप साइन आउट हो गए हैं। फिर से साइन इन करें, फिर दोबारा प्रयास करें।",
@@ -798,9 +782,9 @@
         "generic": "यह नहीं हो सका। कृपया फिर से प्रयास करें।"
       },
       "network_note": "नेटवर्क · आप नेटवर्क व्यवस्थापक हैं",
-      "clear_filter": "फ़िल्टर हटाएँ",
-      "open": "खोलें",
-      "invite": "Invite [[orgs]]"
+      "invite": "Invite [[orgs]]",
+      "list_heading": "[[Orgs]]",
+      "filter_label": "[[orgs]] दिखाएँ"
     },
     "coordinators": {
       "heading": "[[Users]]",
@@ -826,8 +810,6 @@
       "clear_all": "Clear filters"
     },
     "coordinator": {
-      "reason": "कारण (वैकल्पिक, आवेदक को भेजा जाएगा)",
-      "already": "कहीं और पहले ही निर्णय हो चुका है — अब {status}।",
       "domains": "सेवा वाले डोमेन",
       "domains_sub": "यह [[user]] किन रिकॉर्ड पर काम कर सकता है।",
       "domains_empty": "कम से कम एक डोमेन चुनें।",
@@ -847,12 +829,11 @@
         "signed_out": "आप साइन आउट हो गए हैं। फिर से साइन इन करें, फिर दोबारा प्रयास करें।",
         "forbidden": "आपको इस [[user]] को प्रबंधित करने की अनुमति नहीं है।",
         "not_found": "इस [[user]] का खाता नहीं मिला। पेज रीफ़्रेश करें और फिर से प्रयास करें।",
-        "org_inactive": "यह [[org]] सक्रिय नहीं है, इसलिए अभी इसके पंजीकरण पर निर्णय नहीं लिया जा सकता।",
+        "org_inactive": "यह [[org]] सक्रिय नहीं है, इसलिए अभी बदलाव सहेजे नहीं जा सकते।",
         "rate_limited": "कम समय में बहुत सारे बदलाव हुए। एक मिनट रुकें और फिर से प्रयास करें।",
         "server": "हमारी ओर से कुछ गड़बड़ हुई। कुछ मिनट बाद फिर से प्रयास करें।",
         "generic": "यह नहीं हो सका। कृपया फिर से प्रयास करें।"
-      },
-      "save_domains_first": "निर्णय लेने से पहले डोमेन बदलाव सहेजें या रद्द करें।"
+      }
     },
     "invite": {
       "heading": "[[users_obl]] को आमंत्रित करें",
@@ -962,7 +943,7 @@
       "read_only": "Contact details can't be changed here yet."
     },
     "status": {
-      "pending": "Waiting to verify",
+      "pending": "आमंत्रित",
       "active": "Active",
       "inactive": "Rejected",
       "retired": "Retired"
@@ -1112,20 +1093,16 @@
       "tile": {
         "all": {
           "label": "[[user]]",
-          "sub": "आपके पूरे [[org]] में"
+          "sub": "आपके द्वारा आमंत्रित"
         },
         "active": {
           "label": "सक्रिय",
           "sub": "साइन इन कर सकते हैं"
         },
         "pending": {
-          "label": "सत्यापन की प्रतीक्षा",
+          "label": "आमंत्रित",
           "sub": "कोड से सत्यापन बाकी",
           "none": "सभी ने सत्यापन कर लिया है"
-        },
-        "inactive": {
-          "label": "अस्वीकृत",
-          "sub": "स्वीकृत नहीं"
         }
       },
       "tile_show": "सूची देखें",
@@ -1134,14 +1111,12 @@
       "search": "नाम या ईमेल खोजें",
       "filter_label": "[[user]] दिखाएँ",
       "filter_all": "सभी",
-      "col_coordinator": "[[user]]",
-      "col_organisation": "[[org]]",
+      "col_name": "[[user]]",
       "col_status": "स्थिति",
       "col_domains": "डोमेन",
       "col_action": "कार्रवाई",
       "view": "देखें",
       "view_named": "{name} देखें",
-      "review": "समीक्षा करें",
       "empty": "कोई [[user]] मेल नहीं खाता।",
       "partial": "नवीनतम {count} दिखाए जा रहे हैं। <link>सभी [[user]] देखें</link>"
     },
@@ -1157,20 +1132,8 @@
       "home": "कंसोल पर जाएँ"
     },
     "open_invites": {
-      "heading": "Invites not used yet",
-      "col_email": "Email",
-      "col_status": "Status",
-      "col_sent": "Sent",
-      "col_expires": "Expires",
-      "status_pending": "Invited",
-      "status_expired": "Expired, send again",
-      "empty": "Nobody is waiting on an invite.",
-      "more": "Showing the newest {count}."
-    },
-    "waiting_to_verify": {
-      "heading": "Registered, waiting to verify ({count})",
-      "status": "Waiting to verify",
-      "registered": "Registered"
+      "sent_on": "निमंत्रण भेजा गया {date}",
+      "expired_on": "निमंत्रण की अवधि {date} को समाप्त हुई, फिर से भेजें"
     },
     "dashboard": {
       "heading": "Dashboard",

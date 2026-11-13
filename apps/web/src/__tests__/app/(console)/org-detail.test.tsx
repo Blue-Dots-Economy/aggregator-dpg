@@ -50,11 +50,6 @@ vi.mock('@/components/console/OwnerAccessRepair', () => ({
   OwnerAccessRepair: () => <div data-testid="owner-access-repair" />,
 }));
 vi.mock('@/components/console/CopyButton', () => ({ CopyButton: () => null }));
-vi.mock('@/components/console/OrgsTable', () => ({
-  OrgsTable: ({ orgs }: { orgs: Array<{ id: string }> }) => (
-    <div data-testid="org-decision" data-ids={orgs.map((o) => o.id).join(',')} />
-  ),
-}));
 vi.mock('@/components/console/KnownAsValuesEditor', () => ({
   KnownAsValuesEditor: () => <div data-testid="known-as-values-editor" />,
 }));
@@ -200,13 +195,13 @@ describe('console org detail — "known as" picker', () => {
     expect(vi.mocked(consoleRead).mock.calls.map(([path]) => path)).not.toContain('/v1/org/search');
   });
 
-  it('lets the parent owner decide a pending child on its page', async () => {
+  it('shows a pending child to the parent owner with no review section', async () => {
     mockPage(org({ depth: 2, status: 'pending' }), 'parent-owner', {
       viewerOrgId: 'parent',
       parent: PARENT,
     });
     await show();
-    expect(screen.getByTestId('org-decision')).toHaveAttribute('data-ids', ORG_ID);
+    expect(screen.queryByText(/review_heading/)).toBeNull();
   });
 
   it('shows no child-organisations tile on the Default organisation', async () => {
@@ -220,7 +215,7 @@ describe('console org detail — "known as" picker', () => {
     await show();
     expect(screen.getByText('console.org.view_coordinators')).toBeInTheDocument();
     expect(screen.getByText('console.org.tile.coordinators')).toBeInTheDocument();
-    expect(screen.queryByTestId('org-decision')).toBeNull();
+    expect(screen.getByText('console.org_home.tile.pending.label')).toBeInTheDocument();
   });
 
   it('keeps the value in the form for a viewer that does not pick it', async () => {

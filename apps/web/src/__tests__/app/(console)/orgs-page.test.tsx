@@ -1,7 +1,7 @@
 /**
- * Server Component test: `(console)/console/orgs` for the network admin. The
- * page reads the hierarchy with `fields=known_as_values`, so the hierarchy
- * settings get the network's "known as" values.
+ * Server Component test: `(console)/console/orgs`. Each list holds the
+ * organisations and the unused invites together under a card with the Invite
+ * button; the network admin's hierarchy settings get the network's values.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -19,37 +19,34 @@ vi.mock('@/lib/console-hierarchy.server', () => ({
 }));
 vi.mock('next-intl/server', () => ({
   getTranslations: vi.fn(async () => (key: string) => `console.${key}`),
+  getFormatter: vi.fn(async () => ({ dateTime: () => '13 Nov 2026' })),
+}));
+vi.mock('@/lib/console-invites.server', () => ({ readOpenInvites: vi.fn(async () => null) }));
+vi.mock('@/components/console/ConsoleOrgCard', () => ({
+  ConsoleOrgCard: ({ name, action }: { name: string; action?: React.ReactNode }) => (
+    <div data-testid="org-card">
+      {name}
+      {action}
+    </div>
+  ),
+}));
+vi.mock('@/components/console/MemberList', () => ({
+  MemberList: ({
+    rows,
+    counts,
+    initialFilter,
+  }: {
+    rows: Array<{ id: string; status: string; detail: string | null }>;
+    counts: Record<string, string>;
+    initialFilter?: string;
+  }) => (
+    <div data-testid="list" data-filter={initialFilter} data-counts={JSON.stringify(counts)}>
+      {rows.map((r) => `${r.id}:${r.status}:${r.detail ?? ''}`).join(',')}
+    </div>
+  ),
 }));
 vi.mock('@/components/shell/Topbar', () => ({
   Topbar: ({ title }: { title: React.ReactNode }) => <h1>{title}</h1>,
-}));
-vi.mock('@/components/console/ConsoleUi', () => ({
-  ConsoleCollapsible: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  ConsoleSection: ({
-    action,
-    children,
-  }: {
-    action?: React.ReactNode;
-    children: React.ReactNode;
-  }) => (
-    <div>
-      {action}
-      {children}
-    </div>
-  ),
-  EmptyState: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
-}));
-vi.mock('@/components/console/OrgsTable', () => ({ OrgsTable: () => null }));
-vi.mock('@/components/console/NetworkOrgsView', () => ({ NetworkOrgsView: () => null }));
-vi.mock('@/components/console/ChildOrgsTree', () => ({
-  ChildOrgsTree: ({ orgs }: { orgs: Array<{ id: string }> }) => (
-    <div data-testid="tree">{orgs.map((o) => o.id).join(',')}</div>
-  ),
-}));
-vi.mock('@/components/console/WaitingToVerify', () => ({
-  WaitingToVerify: ({ rows }: { rows: Array<{ id: string }> }) => (
-    <div data-testid="waiting">{rows.map((r) => r.id).join(',')}</div>
-  ),
 }));
 vi.mock('@/components/console/HierarchySettings', () => ({
   HierarchySettings: ({ orgId, values }: { orgId: string; values: KnownAsValues }) => (
@@ -63,6 +60,7 @@ import ConsoleOrgsPage from '@/app/(console)/console/orgs/page';
 import { getConsoleActor } from '@/lib/console-actor';
 import { consoleRead } from '@/lib/console-api.server';
 import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
+import { readOpenInvites } from '@/lib/console-invites.server';
 
 const NETWORK_ADMIN: MeResponse = {
   kind: 'admin',
@@ -95,16 +93,45 @@ describe('console orgs page — hierarchy settings', () => {
     expect(screen.getByTestId('hierarchy-settings')).toHaveTextContent('State');
   });
 
-  it('lists the organisations under the network that have not verified apart', async () => {
+  it('lists joined, registered and invited organisations in one list, Default not counted', async () => {
     vi.mocked(readNetworkOrgs).mockResolvedValueOnce({
       orgs: [
-        { id: 'x', name: 'Joined', parent_id: 'root', status: 'active' },
-        { id: 'y', name: 'Waiting', parent_id: 'root', status: 'pending' },
+        { id: 'd', name: 'Default', parent_id: 'root', status: 'active', is_default: true },
+        {
+          id: 'x',
+          name: 'Joined',
+          parent_id: 'root',
+          status: 'active',
+          is_default: false,
+          known_as: 'state',
+        },
+        { id: 'y', name: 'Waiting', parent_id: 'root', status: 'pending', is_default: false },
       ],
       more: false,
     } as never);
-    render(await ConsoleOrgsPage({ searchParams: Promise.resolve({}) }));
-    expect(screen.getByTestId('waiting')).toHaveTextContent(/^y$/);
+    vi.mocked(readOpenInvites).mockResolvedValueOnce({
+      invites: [
+        {
+          email: 'new@org.test',
+          status: 'pending',
+          created_at: '2026-11-13T06:00:00Z',
+          expires_at: '2026-11-20T06:00:00Z',
+        },
+      ],
+      next_cursor: null,
+    });
+    render(await ConsoleOrgsPage({ searchParams: Promise.resolve({ status: 'pending' }) }));
+    const list = screen.getByTestId('list');
+    expect(list).toHaveTextContent(
+      'x:active:state,y:pending:,d:active:,invite:new@org.test:pending:console.sent_on',
+    );
+    expect(JSON.parse(list.dataset.counts ?? '')).toEqual({ all: '3', active: '1', pending: '2' });
+    expect(list).toHaveAttribute('data-filter', 'pending');
+    expect(screen.getByTestId('org-card')).toHaveTextContent('The Network');
+    expect(screen.getByRole('link', { name: /console\.orgs\.invite/ })).toHaveAttribute(
+      'href',
+      '/console/orgs/invite',
+    );
   });
 });
 
@@ -155,12 +182,14 @@ describe('console orgs page — owner view', () => {
 
   beforeEach(() => vi.clearAllMocks());
 
-  it("links each owned organisation's section to its page", async () => {
+  it('puts the Invite organisations button on the card of each owned organisation', async () => {
     mockOwner();
     await showOwner();
-    expect(screen.getByRole('link', { name: 'console.orgs.manage' })).toHaveAttribute(
+    expect(screen.getByTestId('org-card')).toHaveTextContent('Org A');
+    expect(screen.queryByRole('link', { name: 'console.orgs.manage' })).toBeNull();
+    expect(screen.getByRole('link', { name: /console\.orgs\.invite/ })).toHaveAttribute(
       'href',
-      '/console/orgs/a',
+      '/console/orgs/invite',
     );
   });
 
@@ -176,7 +205,7 @@ describe('console orgs page — owner view', () => {
     expect(screen.queryByTestId('hierarchy-settings')).toBeNull();
   });
 
-  it('keeps a registered organisation that has not verified out of the tree and lists it apart', async () => {
+  it('lists the organisations under the owned one, those still to verify included', async () => {
     mockOwner();
     vi.mocked(readReachableOrgs).mockResolvedValue([
       { id: 'a', name: 'Org A', parent_id: 'root', status: 'active', depth: 1 },
@@ -184,8 +213,7 @@ describe('console orgs page — owner view', () => {
       { id: 'c', name: 'Org C', parent_id: 'a', status: 'pending', depth: 2 },
     ] as never);
     await showOwner();
-    expect(screen.getByTestId('tree')).toHaveTextContent(/^b$/);
-    expect(screen.getByTestId('waiting')).toHaveTextContent(/^c$/);
+    expect(screen.getByTestId('list')).toHaveTextContent(/^b:active:,c:pending:$/);
   });
 
   it('hides the editor from a member and on a pending organisation, without reading the values', async () => {

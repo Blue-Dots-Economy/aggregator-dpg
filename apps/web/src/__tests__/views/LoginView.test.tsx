@@ -57,7 +57,7 @@ describe('<LoginView />', () => {
     expect(screen.getByText(messages.auth.welcome_heading)).toBeInTheDocument();
     expect(screen.getByText(messages.auth.existing_title)).toBeInTheDocument();
     // Registration is not linked from the login homepage anymore (#619).
-    expect(screen.queryByText(messages.auth.register_title)).toBeNull();
+    expect(screen.queryByRole('link', { name: /register/i })).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
     // Invite-only recovery line (#701) points a mis-linked coordinator at their org.
     expect(screen.getByText(/contact your organisation administrator/i)).toBeInTheDocument();

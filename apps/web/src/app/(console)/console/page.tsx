@@ -1,7 +1,7 @@
 /**
- * Console home page: the coordinators of an owner of one organisation. Child
- * organisations awaiting a decision are on the organisations page. Everyone
- * else is sent to the organisations page.
+ * Console home page: the users of an owner of one organisation, those who
+ * joined and those still invited, in one list. Everyone else is sent to the
+ * organisations page.
  */
 
 import Link from 'next/link';
@@ -18,11 +18,11 @@ import { canInvite, CONSOLE_HOME_HREF, coordinatorsHref } from '@/lib/capabiliti
 import { networkDomains, servedDomains } from '@/lib/console-domains.server';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
-import { ConsoleStatusPill } from '@/components/console/ConsoleUi';
-import { OrgCoordinators, type OrgCoordinatorRow } from '@/components/console/OrgCoordinators';
-import { OpenInvites } from '@/components/console/OpenInvites';
-import { WaitingToVerify } from '@/components/console/WaitingToVerify';
+import { ConsoleOrgCard } from '@/components/console/ConsoleOrgCard';
+import { DomainChips } from '@/components/console/DomainChips';
+import { MemberList, type MemberRow } from '@/components/console/MemberList';
 import { readOpenInvites } from '@/lib/console-invites.server';
+import { inviteRows, memberCounts } from '@/lib/console-members.server';
 import { I } from '@/icons';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
@@ -49,7 +49,7 @@ export default async function ConsoleHomePage() {
   return renderOrgHome(homeOrg, canInvite(me));
 }
 
-/** The owner's single organisation with its coordinators. */
+/** The owner's single organisation with its users and the invites not used yet. */
 async function renderOrgHome(org: OrgRow, showInvite: boolean) {
   const t = await getTranslations('console');
   const [page, domains, invites] = await Promise.all([
@@ -60,58 +60,65 @@ async function renderOrgHome(org: OrgRow, showInvite: boolean) {
     networkDomains(),
     readOpenInvites('user', org.id),
   ]);
-  const joined = page.users.filter((u) => u.status !== 'pending');
-  const waiting = page.users
-    .filter((u) => u.status === 'pending')
-    .map((u) => ({
-      id: u.id,
-      name: u.contact.name ?? u.contact.email,
-      detail: u.contact.name ? u.contact.email : null,
-      href: `/console/coordinators/${u.id}`,
-      registeredAt: u.created_at,
-    }));
-  const rows: OrgCoordinatorRow[] = joined.map((u) => ({
+  const users: MemberRow[] = page.users.map((u) => ({
     id: u.id,
     name: u.contact.name ?? u.contact.email,
-    email: u.contact.name ? u.contact.email : null,
-    organisation: u.name,
+    detail: u.contact.name ? u.contact.email : null,
     status: u.status,
-    domains: servedDomains(u.serves, domains),
+    href: `/console/coordinators/${u.id}`,
+    cells: [<DomainChips key="domains" domains={servedDomains(u.serves, domains)} />],
   }));
+  const rows = [...users, ...(await inviteRows(invites, 1))];
+  const openInvites = invites && !invites.next_cursor ? invites.invites.length : null;
+  const complete = page.next_cursor === null;
+  const counts = memberCounts(
+    rows,
+    openInvites === null
+      ? {}
+      : { all: org.coordinator_count + openInvites, pending: org.pending_count + openInvites },
+    complete && openInvites !== null,
+  );
   return (
     <>
       <Topbar title={t('org_home.heading')} subtitle={t('org_home.subtitle')} />
       <div className="flex flex-col gap-4">
-        <div className="bd-card bd-shadow flex flex-wrap items-center gap-3.5 px-5 py-4">
-          <span className="grid h-10 w-10 flex-none place-items-center rounded-[11px] bg-(--bd-primary-50) text-(--bd-primary)">
-            <I.briefcase size={20} />
-          </span>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2.5 font-display text-[17px] font-extrabold text-ink-900">
-              <span className="truncate">{org.name}</span>
-              <ConsoleStatusPill status={org.status} />
-            </div>
-            <div className="text-[12.5px] text-ink-500">{t('org_home.owner_note')}</div>
-          </div>
-          {showInvite ? (
-            <Link
-              className={`${buttonClass('primary')} w-full justify-center sm:ml-auto sm:w-auto`}
-              href="/console/invite"
-            >
-              <I.mail size={16} />
-              {t('org_home.invite')}
-            </Link>
-          ) : null}
-        </div>
-        <OrgCoordinators
-          rows={rows}
-          total={org.coordinator_count}
-          pending={org.pending_count}
-          complete={page.next_cursor === null}
-          allHref={`/console/coordinators?org_id=${org.id}`}
+        <ConsoleOrgCard
+          name={org.name}
+          status={org.status}
+          note={t('org_home.owner_note')}
+          action={
+            showInvite ? (
+              <Link
+                className={`${buttonClass('primary')} w-full justify-center sm:w-auto`}
+                href="/console/invite"
+              >
+                <I.mail size={16} />
+                {t('org_home.invite')}
+              </Link>
+            ) : null
+          }
         />
-        <WaitingToVerify rows={waiting} />
-        {invites ? <OpenInvites page={invites} /> : null}
+        <MemberList
+          kind="users"
+          rows={rows}
+          counts={counts}
+          columns={[t('org_home.col_domains')]}
+          footer={
+            complete
+              ? null
+              : t.rich('org_home.partial', {
+                  count: page.users.length,
+                  link: (chunks) => (
+                    <Link
+                      href={`/console/coordinators?org_id=${org.id}`}
+                      className="font-semibold text-(--bd-primary-600) hover:underline"
+                    >
+                      {chunks}
+                    </Link>
+                  ),
+                })
+          }
+        />
       </div>
     </>
   );
