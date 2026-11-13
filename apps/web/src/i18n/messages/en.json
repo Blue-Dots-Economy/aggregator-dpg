@@ -1133,7 +1133,12 @@
     },
     "open_invites": {
       "sent_on": "Invite sent {date}",
-      "expired_on": "Invite expired {date}, send again"
+      "expired_on": "Invite expired {date}",
+      "resend": "Resend",
+      "resend_named": "Resend the invite to {email}",
+      "resent": "Sent",
+      "resend_failed": "Couldn't resend. Try again.",
+      "more": "Showing the newest {count} invites."
     },
     "dashboard": {
       "heading": "Dashboard",

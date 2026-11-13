@@ -40,9 +40,12 @@ export async function readNetworkOrgs(
  * Reads every organisation within the viewer's reach, up to the page cap:
  * the ones the viewer owns and the ones directly under them.
  *
- * @returns The organisations, any status.
+ * @returns The organisations, any status, and whether more exist past the cap.
  */
-export async function readReachableOrgs(): Promise<OrgSearchResponse['orgs']> {
+export async function readReachableOrgsPage(): Promise<{
+  orgs: OrgSearchResponse['orgs'];
+  more: boolean;
+}> {
   const orgs: OrgSearchResponse['orgs'] = [];
   let cursor: string | null = null;
   for (let i = 0; i < MAX_PAGES; i++) {
@@ -52,7 +55,16 @@ export async function readReachableOrgs(): Promise<OrgSearchResponse['orgs']> {
     });
     orgs.push(...page.orgs);
     cursor = page.next_cursor;
-    if (!cursor) break;
+    if (!cursor) return { orgs, more: false };
   }
-  return orgs;
+  return { orgs, more: true };
+}
+
+/**
+ * Reads every organisation within the viewer's reach, up to the page cap.
+ *
+ * @returns The organisations, any status.
+ */
+export async function readReachableOrgs(): Promise<OrgSearchResponse['orgs']> {
+  return (await readReachableOrgsPage()).orgs;
 }

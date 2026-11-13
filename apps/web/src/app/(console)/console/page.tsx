@@ -22,7 +22,7 @@ import { ConsoleOrgCard } from '@/components/console/ConsoleOrgCard';
 import { DomainChips } from '@/components/console/DomainChips';
 import { MemberList, type MemberRow } from '@/components/console/MemberList';
 import { readOpenInvites } from '@/lib/console-invites.server';
-import { inviteRows, memberCounts } from '@/lib/console-members.server';
+import { inviteRows, isListed, memberCounts } from '@/lib/console-members.server';
 import { I } from '@/icons';
 
 type OrgRow = OrgSearchResponse['orgs'][number];
@@ -60,23 +60,23 @@ async function renderOrgHome(org: OrgRow, showInvite: boolean) {
     networkDomains(),
     readOpenInvites('user', org.id),
   ]);
-  const users: MemberRow[] = page.users.map((u) => ({
-    id: u.id,
-    name: u.contact.name ?? u.contact.email,
-    detail: u.contact.name ? u.contact.email : null,
-    status: u.status,
-    href: `/console/coordinators/${u.id}`,
-    cells: [<DomainChips key="domains" domains={servedDomains(u.serves, domains)} />],
-  }));
-  const rows = [...users, ...(await inviteRows(invites, 1))];
-  const openInvites = invites && !invites.next_cursor ? invites.invites.length : null;
+  const users: MemberRow[] = page.users
+    .filter((u) => isListed(u.status))
+    .map((u) => ({
+      id: u.id,
+      name: u.contact.name ?? u.contact.email,
+      detail: u.contact.name ? u.contact.email : null,
+      status: u.status,
+      href: `/console/coordinators/${u.id}`,
+      cells: [<DomainChips key="domains" domains={servedDomains(u.serves, domains)} />],
+    }));
+  const rows = [...users, ...(await inviteRows(invites, 1, { kind: 'user', orgId: org.id }))];
+  const allInvites = invites !== null && !invites.next_cursor;
   const complete = page.next_cursor === null;
   const counts = memberCounts(
     rows,
-    openInvites === null
-      ? {}
-      : { all: org.coordinator_count + openInvites, pending: org.pending_count + openInvites },
-    complete && openInvites !== null,
+    allInvites ? { pending: org.pending_count + invites.invites.length } : {},
+    complete && allInvites,
   );
   return (
     <>
@@ -105,7 +105,7 @@ async function renderOrgHome(org: OrgRow, showInvite: boolean) {
           columns={[t('org_home.col_domains')]}
           footer={
             complete
-              ? null
+              ? invitesNote(invites, t)
               : t.rich('org_home.partial', {
                   count: page.users.length,
                   link: (chunks) => (
@@ -122,4 +122,12 @@ async function renderOrgHome(org: OrgRow, showInvite: boolean) {
       </div>
     </>
   );
+}
+
+/** A note when only the newest invites were loaded, so the "+" on the counts is explained. */
+function invitesNote(
+  invites: Awaited<ReturnType<typeof readOpenInvites>>,
+  t: Awaited<ReturnType<typeof getTranslations<'console'>>>,
+) {
+  return invites?.next_cursor ? t('open_invites.more', { count: invites.invites.length }) : null;
 }

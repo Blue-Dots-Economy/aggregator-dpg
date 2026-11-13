@@ -13,10 +13,14 @@ import type {
 
 vi.mock('@/lib/console-actor', () => ({ getConsoleActor: vi.fn() }));
 vi.mock('@/lib/console-api.server', () => ({ consoleRead: vi.fn() }));
-vi.mock('@/lib/console-hierarchy.server', () => ({
-  readNetworkOrgs: vi.fn(async () => ({ orgs: [], more: false })),
-  readReachableOrgs: vi.fn(async () => []),
-}));
+vi.mock('@/lib/console-hierarchy.server', () => {
+  const readReachableOrgs = vi.fn(async () => []);
+  return {
+    readNetworkOrgs: vi.fn(async () => ({ orgs: [], more: false })),
+    readReachableOrgs,
+    readReachableOrgsPage: vi.fn(async () => ({ orgs: await readReachableOrgs(), more: false })),
+  };
+});
 vi.mock('next-intl/server', () => ({
   getTranslations: vi.fn(async () => (key: string) => `console.${key}`),
   getFormatter: vi.fn(async () => ({ dateTime: () => '13 Nov 2026' })),
@@ -116,6 +120,7 @@ describe('console orgs page — hierarchy settings', () => {
           known_as: 'state',
         },
         { id: 'y', name: 'Waiting', parent_id: 'root', status: 'pending', is_default: false },
+        { id: 'z', name: 'Rejected', parent_id: 'root', status: 'inactive', is_default: false },
       ],
       more: false,
     } as never);

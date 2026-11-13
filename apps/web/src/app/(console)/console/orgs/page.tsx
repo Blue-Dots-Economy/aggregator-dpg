@@ -22,13 +22,13 @@ import type {
 import { getConsoleActor } from '@/lib/console-actor';
 import { canOnboardOrgsUnder } from '@/lib/capabilities';
 import { consoleRead } from '@/lib/console-api.server';
-import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
+import { readNetworkOrgs, readReachableOrgsPage } from '@/lib/console-hierarchy.server';
 import { orgsBelow, topmostOwned } from '@/lib/console-org-options';
 import { HierarchySettings } from '@/components/console/HierarchySettings';
 import { ConsoleOrgCard } from '@/components/console/ConsoleOrgCard';
 import { MemberList, type MemberFilter, type MemberRow } from '@/components/console/MemberList';
 import { readOpenInvites } from '@/lib/console-invites.server';
-import { inviteRows, memberCounts } from '@/lib/console-members.server';
+import { inviteRows, isListed, memberCounts } from '@/lib/console-members.server';
 import { Topbar } from '@/components/shell/Topbar';
 import { buttonClass } from '@/components/ui/button-class';
 import { I } from '@/icons';
@@ -75,7 +75,13 @@ export default async function ConsoleOrgsPage({
           note={t('orgs.network_note')}
           action={canInviteOrgs ? inviteOrgsLink(t) : null}
         />
-        {await orgList(network.orgs, invites, !network.more, initialFilter)}
+        {await orgList(
+          network.orgs,
+          invites,
+          { kind: 'org', orgId: hierarchy.network.id },
+          !network.more,
+          initialFilter,
+        )}
         <HierarchySettings
           orgId={hierarchy.network.id}
           orgName={hierarchy.network.name}
@@ -107,7 +113,7 @@ async function OwnerOrgs({
   initialFilter: MemberFilter;
 }>) {
   const t = await getTranslations('console');
-  const orgs = await readReachableOrgs();
+  const { orgs, more } = await readReachableOrgsPage();
   const roots = topmostOwned(ownedIds, orgs);
   if (roots.length === 0) redirect('/console');
   const [values, lists] = await Promise.all([
@@ -117,7 +123,8 @@ async function OwnerOrgs({
         orgList(
           orgsBelow(root.id, orgs),
           await readOpenInvites('org', root.id),
-          true,
+          { kind: 'org', orgId: root.id },
+          !more,
           initialFilter,
         ),
       ),
@@ -151,18 +158,21 @@ async function OwnerOrgs({
  *
  * @param orgs - The organisations to list.
  * @param invites - The open invites, or `null` when they could not be read.
+ * @param resend - Where an expired invite is sent again from.
  * @param complete - Whether `orgs` holds every organisation.
  * @param initialFilter - The filter the list opens on.
  */
 async function orgList(
   orgs: readonly OrgRow[],
   invites: OrgInvites,
+  resend: { kind: 'org'; orgId: string },
   complete: boolean,
   initialFilter: MemberFilter,
 ) {
   const t = await getTranslations('console');
   const format = await getFormatter();
-  const joined: MemberRow[] = [...orgs]
+  const joined: MemberRow[] = orgs
+    .filter((o) => isListed(o.status))
     .sort((a, b) => Number(a.is_default) - Number(b.is_default))
     .map((o) => ({
       id: o.id,
@@ -180,7 +190,7 @@ async function orgList(
             }),
       ],
     }));
-  const rows = [...joined, ...(await inviteRows(invites, 1))];
+  const rows = [...joined, ...(await inviteRows(invites, 1, resend))];
   const allInvites = invites !== null && !invites.next_cursor;
   const defaultIds = new Set(orgs.filter((o) => o.is_default).map((o) => o.id));
   const counted = rows.filter((r) => !defaultIds.has(r.id));
@@ -190,7 +200,13 @@ async function orgList(
       rows={rows}
       counts={memberCounts(counted, {}, complete && allInvites)}
       columns={[t('orgs.col_joined')]}
-      footer={complete ? null : t('org.children_more')}
+      footer={
+        complete
+          ? invites?.next_cursor
+            ? t('open_invites.more', { count: invites.invites.length })
+            : null
+          : t('org.children_more')
+      }
       initialFilter={initialFilter}
     />
   );

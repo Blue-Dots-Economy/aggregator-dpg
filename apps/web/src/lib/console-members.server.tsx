@@ -7,6 +7,12 @@ import 'server-only';
 import { getFormatter, getTranslations } from 'next-intl/server';
 import type { InviteSearchResponse } from '@aggregator-dpg/shared-primitives/user-org';
 import type { MemberFilter, MemberRow } from '@/components/console/MemberList';
+import { ResendInviteButton } from '@/components/console/ResendInviteButton';
+
+/** The statuses the console lists show: joined, or still to verify. Rejected and retired are left out. */
+export function isListed(status: string): boolean {
+  return status === 'active' || status === 'pending';
+}
 
 /**
  * Turns unused invites into "invited" rows that name the address and when the
@@ -14,10 +20,12 @@ import type { MemberFilter, MemberRow } from '@/components/console/MemberList';
  *
  * @param page - The open invites, or `null` when they could not be read.
  * @param columns - How many extra cells the list shows; invites leave them empty.
+ * @param resend - Where an expired invite is sent again from.
  */
 export async function inviteRows(
   page: InviteSearchResponse | null,
   columns: number,
+  resend: { kind: 'user' | 'org'; orgId: string },
 ): Promise<MemberRow[]> {
   if (!page) return [];
   const t = await getTranslations('console.open_invites');
@@ -34,6 +42,13 @@ export async function inviteRows(
     status: 'pending',
     href: null,
     cells: Array.from({ length: columns }, () => '—'),
+    ...(invite.status === 'expired'
+      ? {
+          action: (
+            <ResendInviteButton kind={resend.kind} orgId={resend.orgId} email={invite.email} />
+          ),
+        }
+      : {}),
   }));
 }
 

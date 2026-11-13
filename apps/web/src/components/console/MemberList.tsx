@@ -38,6 +38,8 @@ export interface MemberRow {
   href: string | null;
   /** One cell per entry of `columns`. */
   cells: ReactNode[];
+  /** Shown in the action column instead of the view link, such as a resend button. */
+  action?: ReactNode;
 }
 
 /** The tiles and the list filters: everyone, those who joined, those still invited. */
@@ -205,6 +207,7 @@ export function MemberList({
                           {r.detail ? (
                             <div className="truncate text-[12.5px] text-ink-500">{r.detail}</div>
                           ) : null}
+                          {r.action ? <div className="sm:hidden">{r.action}</div> : null}
                         </div>
                       </div>
                     </td>
@@ -226,7 +229,9 @@ export function MemberList({
                         >
                           <Eye size={17} />
                         </Link>
-                      ) : null}
+                      ) : (
+                        (r.action ?? null)
+                      )}
                     </td>
                   </tr>
                 ))}

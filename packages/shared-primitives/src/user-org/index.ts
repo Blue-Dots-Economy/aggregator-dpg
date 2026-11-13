@@ -235,7 +235,7 @@ export const InviteRecipientsSchema = z
   .min(1)
   .max(100);
 
-/** `POST /v1/user/invite` and `POST /v1/user/create`: invite coordinators into an org. */
+/** `POST /v1/user/invite`: invite users into an org. */
 export const UserInviteRequestSchema = z
   .object({ org_id: z.string().uuid(), recipients: InviteRecipientsSchema })
   .strict();

@@ -34,6 +34,7 @@ vi.mock('next/navigation', () => ({
   redirect: vi.fn((to: string) => {
     throw new Error(`redirect:${to}`);
   }),
+  useRouter: () => ({ refresh: vi.fn() }),
 }));
 vi.mock('@/components/shell/Topbar', () => ({
   Topbar: ({ title }: { title: string }) => <h1>{title}</h1>,
@@ -106,6 +107,13 @@ const users: UserSearchResponse = {
       serves: [],
       contact: { name: null, email: 'cp@edge.test', phone: null },
     },
+    {
+      id: 'c3',
+      name: 'Edge Org A',
+      status: 'inactive',
+      serves: [],
+      contact: { name: 'Old Reject', email: 'rej@edge.test', phone: null },
+    },
   ],
   next_cursor: null,
 } as unknown as UserSearchResponse;
@@ -154,6 +162,12 @@ describe('console home — owner', () => {
           created_at: '2026-11-13T06:00:00Z',
           expires_at: '2026-11-20T06:00:00Z',
         },
+        {
+          email: 'late@edge.test',
+          status: 'expired',
+          created_at: '2026-10-01T06:00:00Z',
+          expires_at: '2026-10-15T06:00:00Z',
+        },
       ],
       next_cursor: null,
     });
@@ -170,9 +184,11 @@ describe('console home — owner', () => {
     );
     expect(screen.getByText('new@edge.test')).toBeInTheDocument();
     expect(screen.getByText('console.sent_on {"date":"13 Nov 2026"}')).toBeInTheDocument();
-    expect(screen.getAllByRole('row')).toHaveLength(4);
-    expect(screen.getByRole('button', { name: /^Invited\s*2/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Users\s*3/ })).toBeInTheDocument();
+    expect(screen.queryByText('Old Reject')).toBeNull();
+    expect(screen.getAllByRole('row')).toHaveLength(5);
+    expect(screen.getByRole('button', { name: /^Invited\s*3/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Users\s*4/ })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Resend/ }).length).toBeGreaterThan(0);
     expect(consoleRead).toHaveBeenCalledWith('/v1/user/search', {
       filter: { org_id: 'org-1' },
       limit: 100,
