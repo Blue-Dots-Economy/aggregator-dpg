@@ -351,8 +351,8 @@ async function selfRegistrationOrg(
 /**
  * Checks a public submit's invite and claims it before anything is created.
  *
- * @throws {HttpError} INVITE_INVALID, INVITE_EXPIRED, INVITE_ALREADY_USED, TARGET_ORG_INACTIVE,
- *   OWNER_ALREADY_REGISTERED or DB_UNAVAILABLE.
+ * @throws {HttpError} INVITE_INVALID, INVITE_EXPIRED, INVITE_EMAIL_MISMATCH, INVITE_ALREADY_USED,
+ *   TARGET_ORG_INACTIVE, OWNER_ALREADY_REGISTERED or DB_UNAVAILABLE.
  */
 async function invitedOrg(
   token: string,
@@ -364,6 +364,9 @@ async function invitedOrg(
     throw httpError(verified.error.code === 'EXPIRED' ? 'INVITE_EXPIRED' : 'INVITE_INVALID');
   }
   if (verified.role !== 'coordinator') throw httpError('INVITE_INVALID');
+  if (email.trim().toLowerCase() !== verified.email.trim().toLowerCase()) {
+    throw httpError('INVITE_EMAIL_MISMATCH');
+  }
   const org = await getOrganisationStore().findById(verified.org);
   if (!org.ok) {
     throw httpError('DB_UNAVAILABLE', {
