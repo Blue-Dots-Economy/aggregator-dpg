@@ -124,6 +124,14 @@ describe('<LoginView />', () => {
     );
   });
 
+  it.each(['invite_email_not_verified', 'invite_activation_failed'] as const)(
+    'explains the %s invite sign-in failure',
+    (code) => {
+      renderView({ error: code });
+      expect(screen.getByRole('alert')).toHaveTextContent(messages.auth.errors[code]);
+    },
+  );
+
   it('falls back to the generic unknown-error message for an unrecognised code', () => {
     renderView({ error: 'some_totally_unknown_code' });
     expect(screen.getByRole('alert')).toHaveTextContent(messages.auth.errors.unknown);
