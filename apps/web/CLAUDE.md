@@ -53,7 +53,7 @@ Both `/register/coordinator` and `/profile` call `loadRegistrationSchema()`, whi
 
 ## Consent content has no API round-trip
 
-The invite registration pages (`register/coordinator`, `register/owner`) load consent **server-side** via `@aggregator-dpg/config-loader/fs`'s `loadConsentConfig(network, brand)`, extracts each audience's `current_version` doc, and passes typed `ConsentDocContent` as props through `RegisterView` → forms → `ConsentModal`/`MarkdownContent`. Failure degrades to `null` (forms fall back to plain-text labels) rather than throwing — this resolves once per server render, no client-side caching/loading state to reason about.
+The invite registration pages (`register/coordinator`, `register/owner`) load consent **server-side** via `@aggregator-dpg/config-loader/fs`'s `loadConsentConfig(network, brand)`, extracts each audience's `current_version` doc, and passes typed `ConsentDocContent` as props through the invite views (`CoordinatorInviteView`, `OwnerRegisterView`) → forms → `ConsentModal`/`MarkdownContent`. Failure degrades to `null` (forms fall back to plain-text labels) rather than throwing — this resolves once per server render, no client-side caching/loading state to reason about.
 
 ## This app mostly doesn't follow the packages' abstract-class pattern
 

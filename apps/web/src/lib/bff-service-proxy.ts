@@ -38,7 +38,7 @@ function jsonError(status: number, body: BffErrorEnvelope, reqId: string): NextR
 
 /** Options describing the upstream call to proxy. */
 export interface ServiceProxyOptions {
-  /** Upstream path under `API_BASE_URL`, e.g. `/v1/orgs/create`. */
+  /** Upstream path under `API_BASE_URL`, e.g. `/v1/org/invite/accept`. */
   path: string;
   /** HTTP method. */
   method: 'GET' | 'POST';
