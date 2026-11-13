@@ -168,7 +168,7 @@ export class IdpAdminFake extends IdpAdminAdapter {
 
   async setUserDecision(
     userId: string,
-    decision: 'pending' | 'approved' | 'rejected',
+    decision: 'pending' | 'approved' | 'rejected' | 'invited',
   ): Promise<IdpResult<void>> {
     return this.setAttributes(userId, { [KC_ATTR.DECISION_MADE]: decision });
   }

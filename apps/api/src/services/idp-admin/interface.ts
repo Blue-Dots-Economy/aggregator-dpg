@@ -79,7 +79,7 @@ export abstract class IdpAdminAdapter {
    */
   abstract setUserDecision(
     userId: string,
-    decision: 'pending' | 'approved' | 'rejected',
+    decision: 'pending' | 'approved' | 'rejected' | 'invited',
   ): Promise<IdpResult<void>>;
 
   /**

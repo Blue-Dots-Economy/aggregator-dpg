@@ -10,6 +10,10 @@ import {
 import { IdpAdminFake, _setIdpAdmin, KC_ATTR } from '../services/idp-admin/index.js';
 import { FakeMailer, _setMailer } from '@aggregator-dpg/mailer';
 import { _setAccessTokenVerifier, _resetJwks } from '../services/auth/access-token.js';
+import { _setSignalStackWriter } from '../services/signalstack.js';
+import { SignalStackWriterFake } from '@aggregator-dpg/signalstack-writer/testing';
+import { err } from '@aggregator-dpg/shared-primitives/result';
+import { UpstreamError } from '@aggregator-dpg/shared-primitives/errors';
 
 const ROOT = '00000000-0000-4000-8000-000000000001';
 const PARENT = '00000000-0000-4000-8000-0000000000c1';
@@ -63,6 +67,7 @@ describe('POST /v1/user/activate', () => {
     idp = new IdpAdminFake();
     mailer = new FakeMailer();
     subjects = {};
+    _setSignalStackWriter(null);
     _setUserStore(users);
     _setOrganisationStore(orgs);
     _setIdpAdmin(idp);
@@ -105,6 +110,7 @@ describe('POST /v1/user/activate', () => {
 
   afterAll(async () => {
     await app?.close();
+    _setSignalStackWriter(null);
     _setUserStore(null);
     _setOrganisationStore(null);
     _setIdpAdmin(null);
@@ -206,6 +212,58 @@ describe('POST /v1/user/activate', () => {
       expect(errorCode(res)).toBe('DB_UNAVAILABLE');
     });
 
+    it('stays invited and pending when Signals fails, so the next sign-in activates it', async () => {
+      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      class FailingWriter extends SignalStackWriterFake {
+        override async upsertAggregator() {
+          return err(new UpstreamError('down', { code: 'SIGNALSTACK_UNAVAILABLE' }));
+        }
+      }
+      _setSignalStackWriter(new FailingWriter());
+      const res = await activate('coord');
+      expect(res.statusCode).toBe(502);
+      const row = await users.findById(COORD);
+      expect(row.ok && row.value?.status).toBe('pending');
+      const kc = await idp.findById(subjects.coord);
+      expect(kc.ok && kc.value?.attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['invited']);
+      expect(kc.ok && kc.value?.enabled).toBe(true);
+      expect(mailer.outbox).toHaveLength(0);
+
+      _setSignalStackWriter(null);
+      const retry = await activate('coord');
+      expect(retry.json()).toMatchObject({ activated: true });
+    });
+
+    it('goes back to invited, still enabled, when the pending to active step fails', async () => {
+      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      const approve = users.approveFromPending.bind(users);
+      users.approveFromPending = async () => {
+        users.approveFromPending = approve;
+        return { ok: false, error: { code: 'DB_UNAVAILABLE', message: 'x' } };
+      };
+      const res = await activate('coord');
+      expect(res.statusCode).toBe(503);
+      const kc = await idp.findById(subjects.coord);
+      expect(kc.ok && kc.value?.attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['invited']);
+      expect(kc.ok && kc.value?.enabled).toBe(true);
+
+      const retry = await activate('coord');
+      expect(retry.json()).toMatchObject({ activated: true });
+      const row = await users.findById(COORD);
+      expect(row.ok && row.value?.status).toBe('active');
+    });
+
+    it('activates once when two sign-ins activate at the same time', async () => {
+      subjects.coord = await login(COORD_EMAIL, { verified: true, aggregatorId: COORD });
+      const [a, b] = await Promise.all([activate('coord'), activate('coord')]);
+      expect([a.statusCode, b.statusCode]).toEqual([200, 200]);
+      const activated = [a, b].map((r) => (r.json() as { activated: boolean }).activated);
+      expect(activated.filter(Boolean)).toHaveLength(1);
+      expect(mailer.outbox).toHaveLength(1);
+      const row = await users.findById(COORD);
+      expect(row.ok && row.value?.status).toBe('active');
+    });
+
     it('refuses a self-registered pending coordinator with 403 NOT_INVITED', async () => {
       subjects.coord = await login(COORD_EMAIL, {
         verified: true,
@@ -256,6 +314,28 @@ describe('POST /v1/user/activate', () => {
       const res = await activate('owner');
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ account: 'org_owner', activated: true });
+    });
+
+    it('reports a failed owner-access grant and completes it on the next sign-in', async () => {
+      subjects.owner = await seedChild();
+      const assign = idp.assignRealmRole.bind(idp);
+      idp.assignRealmRole = async () => {
+        idp.assignRealmRole = assign;
+        return { ok: false, error: { code: 'BAD_REQUEST', message: 'x' } };
+      };
+      const res = await activate('owner');
+      expect(res.statusCode).toBe(503);
+      expect(errorCode(res)).toBe('IDP_UNAVAILABLE');
+      expect(mailer.outbox).toHaveLength(0);
+      const kc = await idp.findById(subjects.owner);
+      expect(kc.ok && kc.value?.attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['invited']);
+
+      const retry = await activate('owner');
+      expect(retry.statusCode).toBe(200);
+      const roles = await idp.listRealmRoles(subjects.owner);
+      expect(roles.ok && roles.value).toContain('org_owner');
+      const after = await idp.findById(subjects.owner);
+      expect(after.ok && after.value?.attributes?.[KC_ATTR.DECISION_MADE]).toEqual(['approved']);
     });
 
     it('answers 503 DB_UNAVAILABLE when the owned org cannot be read', async () => {

@@ -15,7 +15,7 @@ import { getIdpAdmin, KC_ATTR, type IdpUser } from '../idp-admin/index.js';
 import { getUserStore, type Coordinator } from '../user-store/index.js';
 import { getOrganisationStore, type Organisation } from '../organisation-store/index.js';
 import { decideCoordinator } from '../decisions/coordinator.js';
-import { decideOrg } from '../decisions/org.js';
+import { decideOrg, grantOwnerAccess, type OwnerAccessResult } from '../decisions/org.js';
 import { renderCoordinatorJoined, renderOrgJoined } from '../email-templates/index.js';
 import { config } from '../../config.js';
 
@@ -116,6 +116,7 @@ async function activateCoordinator(
     decision: 'approve',
     decidedBy: `invite:${org.ownerUserId}`,
     notify: false,
+    undoAs: 'invited',
     requestId,
     log,
   });
@@ -146,13 +147,50 @@ async function activateCoordinator(
   return { kind: 'activated', account: 'coordinator' };
 }
 
+/** The per-step results of an owner-access grant, for the log. */
+function stepsOf(access: OwnerAccessResult): Record<string, string> {
+  return { enable: access.enable, role: access.role, group: access.group };
+}
+
+/** Marks the owner approved so later sign-ins skip activation; soft-fails, a retry repeats it. */
+async function stampApproved(kc: IdpUser, log: FastifyBaseLogger): Promise<void> {
+  const stamp = await getIdpAdmin().setUserDecision(kc.id, 'approved');
+  if (!stamp.ok) {
+    log.warn({ status: 'failure', sub_operation: 'idp.setUserDecision', code: stamp.error.code });
+  }
+}
+
+/**
+ * Grants owner access again for an org already active whose owner is still marked invited,
+ * so an earlier partly failed grant is completed on the next sign-in.
+ */
+async function repairOwnerAccess(
+  org: Organisation,
+  kc: IdpUser,
+  log: FastifyBaseLogger,
+): Promise<ActivateOutcome> {
+  if (kc.attributes?.[KC_ATTR.DECISION_MADE]?.[0] !== INVITED) {
+    return { kind: 'already_active', account: 'org_owner' };
+  }
+  const access = await grantOwnerAccess(org, log);
+  if (access.status === 'partial') {
+    return refused(
+      log,
+      { kind: 'unavailable', dependency: 'idp' },
+      { sub_operation: 'grantOwnerAccess', org_id: org.id, ...stepsOf(access) },
+    );
+  }
+  await stampApproved(kc, log);
+  return { kind: 'already_active', account: 'org_owner' };
+}
+
 /** Activates an invited org and its owner. */
 async function activateOrg(
   org: Organisation,
   kc: IdpUser,
   log: FastifyBaseLogger,
 ): Promise<ActivateOutcome> {
-  if (org.status === 'active') return { kind: 'already_active', account: 'org_owner' };
+  if (org.status === 'active') return repairOwnerAccess(org, kc, log);
   if (org.status !== 'pending' || !org.parentId) return { kind: 'not_invited' };
   const check = invitedAndVerified(kc);
   if (check !== 'ok') return { kind: check };
@@ -179,10 +217,14 @@ async function activateOrg(
       : { kind: 'not_invited' };
   }
   if (outcome.kind !== 'decided') return outcome;
-  const stamp = await getIdpAdmin().setUserDecision(kc.id, 'approved');
-  if (!stamp.ok) {
-    log.warn({ status: 'failure', sub_operation: 'idp.setUserDecision', code: stamp.error.code });
+  if (outcome.ownerAccess.status === 'partial') {
+    return refused(
+      log,
+      { kind: 'unavailable', dependency: 'idp' },
+      { sub_operation: 'grantOwnerAccess', org_id: org.id, ...stepsOf(outcome.ownerAccess) },
+    );
   }
+  await stampApproved(kc, log);
   await mailInviter(
     parent.ownerEmail,
     renderOrgJoined({
