@@ -191,7 +191,7 @@ describe('coordinator-invite template', () => {
     // Sender identity — who invited them.
     expect(out.html).toContain('owner@jfc.org');
     // Role context + post-register expectation.
-    expect(out.html).toContain('as a coordinator');
+    expect(out.html).toContain('as a user');
     expect(out.html).toContain('reviews your request');
     // Absolute expiry, not a relative "in N days".
     expect(out.html).toContain('15 Sep 2026');
