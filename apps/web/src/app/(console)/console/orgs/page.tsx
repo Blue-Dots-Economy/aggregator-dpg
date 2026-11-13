@@ -24,7 +24,6 @@ import type {
 } from '@aggregator-dpg/shared-primitives/user-org';
 import { getConsoleActor } from '@/lib/console-actor';
 import { canOnboardOrgsUnder } from '@/lib/capabilities';
-import { getAggregatorFeatures } from '@/lib/features.server';
 import { consoleRead } from '@/lib/console-api.server';
 import { readNetworkOrgs, readReachableOrgs } from '@/lib/console-hierarchy.server';
 import { orgsBelow, topmostOwned } from '@/lib/console-org-options';
@@ -64,10 +63,9 @@ export default async function ConsoleOrgsPage({
   const hierarchy = await consoleRead<OrgHierarchyResponse>(
     '/v1/org/hierarchy?fields=known_as_values',
   );
-  const [network, invites, features] = await Promise.all([
+  const [network, invites] = await Promise.all([
     readNetworkOrgs(hierarchy.network.id),
     readOpenInvites('org', hierarchy.network.id),
-    getAggregatorFeatures(),
   ]);
   return (
     <>
@@ -82,7 +80,6 @@ export default async function ConsoleOrgsPage({
           orgs={network.orgs}
           more={network.more}
           initialFilter={initialFilter}
-          roleLabel={features.invite_role_label ?? t('invite.org.role_default')}
         />
         <WaitingToVerify rows={waitingOrgs(network.orgs, hierarchy.network.id)} />
         {invites ? <OpenInvites page={invites} /> : null}

@@ -800,10 +800,7 @@
       "network_note": "नेटवर्क · आप नेटवर्क व्यवस्थापक हैं",
       "clear_filter": "फ़िल्टर हटाएँ",
       "open": "खोलें",
-      "invite": "Invite [[orgs]]",
-      "col_role": "Role",
-      "col_onboard_participants": "Onboard Seekers & Providers",
-      "col_onboard_orgs": "Onboard [[Orgs]]"
+      "invite": "Invite [[orgs]]"
     },
     "coordinators": {
       "heading": "[[Users]]",

@@ -800,10 +800,7 @@
       "network_note": "ನೆಟ್‌ವರ್ಕ್ · ನೀವು ನೆಟ್‌ವರ್ಕ್ ನಿರ್ವಾಹಕರು",
       "clear_filter": "ಫಿಲ್ಟರ್ ತೆರವುಗೊಳಿಸಿ",
       "open": "ತೆರೆಯಿರಿ",
-      "invite": "Invite [[orgs]]",
-      "col_role": "Role",
-      "col_onboard_participants": "Onboard Seekers & Providers",
-      "col_onboard_orgs": "Onboard [[Orgs]]"
+      "invite": "Invite [[orgs]]"
     },
     "coordinators": {
       "heading": "[[Users]]",

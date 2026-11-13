@@ -800,10 +800,7 @@
       "network_note": "The network · you're the network admin",
       "clear_filter": "Clear filter",
       "open": "Open",
-      "invite": "Invite [[orgs]]",
-      "col_role": "Role",
-      "col_onboard_participants": "Onboard Seekers & Providers",
-      "col_onboard_orgs": "Onboard [[Orgs]]"
+      "invite": "Invite [[orgs]]"
     },
     "coordinators": {
       "heading": "[[Users]]",

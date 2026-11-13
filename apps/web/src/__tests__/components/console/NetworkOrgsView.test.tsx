@@ -48,13 +48,7 @@ const orgs = [
 function renderView(props: Partial<Parameters<typeof NetworkOrgsView>[0]> = {}) {
   return render(
     <NextIntlClientProvider locale="en" messages={messages}>
-      <NetworkOrgsView
-        rootName="Blue Dots"
-        orgs={orgs}
-        more={false}
-        roleLabel="Super Admin"
-        {...props}
-      />
+      <NetworkOrgsView rootName="Blue Dots" orgs={orgs} more={false} {...props} />
     </NextIntlClientProvider>,
   );
 }
