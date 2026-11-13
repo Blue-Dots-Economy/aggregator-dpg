@@ -346,37 +346,6 @@ export const ERR = {
     hint: 'mailer.send returned non-ok. Check SMTP config + provider response.',
   },
 
-  // ── Approval flow ───────────────────────────────────────────────────────
-  APPROVAL_TOKEN_INVALID: {
-    code: 'APPROVAL_TOKEN_INVALID',
-    status: 400,
-    title: 'Invalid approval link',
-    detail: 'This approval link is malformed or has been tampered with.',
-    hint: 'JWT verification failed. Check signing key rotation.',
-  },
-  APPROVAL_TOKEN_EXPIRED: {
-    code: 'APPROVAL_TOKEN_EXPIRED',
-    status: 410,
-    title: 'Approval link expired',
-    detail: 'This approval link has expired. Ask the applicant to resubmit.',
-    hint: 'JWT exp in past. TTL is 1h.',
-  },
-  APPROVAL_TOKEN_USED: {
-    code: 'APPROVAL_TOKEN_USED',
-    status: 409,
-    title: 'Already processed',
-    detail: 'This registration has already been approved or rejected.',
-    hint: 'Decision row exists. Single-use token replayed.',
-  },
-
-  ALREADY_DECIDED: {
-    code: 'ALREADY_DECIDED',
-    status: 409,
-    title: 'Already decided',
-    detail: 'This registration has already been approved or rejected.',
-    hint: 'Decision compare-and-set lost (decided by an emailed link or another console session). `fields` carries status, decided_at, decided_by.',
-  },
-
   // ── Generic resource ────────────────────────────────────────────────────
   NOT_FOUND: {
     code: 'NOT_FOUND',

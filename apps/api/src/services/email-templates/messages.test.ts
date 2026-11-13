@@ -114,7 +114,7 @@ describe('email case registry', () => {
 describe('message lookup', () => {
   it('falls back to the key itself when absent — visibly wrong beats blank', () => {
     _setEmailMessages(new Map());
-    expect(getMessage('applicant_approved.subject')).toBe('applicant_approved.subject');
+    expect(getMessage('no_such_case.subject')).toBe('no_such_case.subject');
   });
 
   it('assertMessagesComplete rejects an override that drops a declared token', () => {
@@ -124,13 +124,13 @@ describe('message lookup', () => {
     for (const caseId of EMAIL_CASE_IDS) {
       for (const key of caseKeys(caseId)) full.set(`${caseId}.${key}`, 'x');
     }
-    full.set('owner_grant_refreshed.intro', 'Link for {{notADeclaredToken}}');
+    full.set('invite_existing_account.intro', 'Link for {{notADeclaredToken}}');
     _setEmailMessages(full);
     expect(() => assertMessagesComplete()).toThrow(/undeclared token/);
   });
 
   it('assertMessagesComplete fails loudly on a hole', () => {
-    _setEmailMessages(new Map([['applicant_approved.subject', 'x']]));
+    _setEmailMessages(new Map([['coordinator_invite.subject', 'x']]));
     expect(() => assertMessagesComplete()).toThrow(/missing \d+ key/);
   });
 });
@@ -177,6 +177,6 @@ describe('override path precedence', () => {
     // Loaded from config/emails/messages.properties via CONFIG_ROOT, which the
     // vitest config points at the repo's own config/.
     expect(() => assertMessagesComplete()).not.toThrow();
-    expect(getMessage('applicant_approved.subject')).toContain('approved');
+    expect(getMessage('invite_existing_account.subject')).toContain('invited');
   });
 });
